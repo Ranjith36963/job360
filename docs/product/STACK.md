@@ -20,7 +20,7 @@
 | **Payments** | ❌ none | **Stripe** — the money switch | ~2–3% of sales |
 | **Plans / paywall** | ❌ none (design only) | **Free/Premium tiers + usage quota + pricing page** | free |
 | **Email** | Gmail SMTP + apprise | **Resend or AWS SES** — reliable transactional email | ~free at low volume |
-| **Notifications** | apprise multi-channel (email/Slack/Discord) | Deploy Redis + worker so they fire in prod | free |
+| **Notifications** | apprise (email + webhook) | Deploy Redis + worker so they fire in prod | free |
 | **Encryption / secrets** | Fernet (cryptography), env vars | Secrets manager + boot-time env validation | free |
 | **Logging** | File logs + correlation IDs + `audit.log` | Fill dark zones (workers, DB, auth, notifications) | free |
 | **Error monitoring** | ❌ none | **Sentry** | free tier |

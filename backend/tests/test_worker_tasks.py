@@ -111,7 +111,7 @@ def test_idempotency_key_is_deterministic():
     a = idempotency_key("u1", 1, "email")
     b = idempotency_key("u1", 1, "email")
     assert a == b
-    assert idempotency_key("u1", 1, "slack") != a
+    assert idempotency_key("u1", 1, "webhook") != a
     assert idempotency_key("u2", 1, "email") != a
 
 

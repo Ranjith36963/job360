@@ -12,7 +12,7 @@ register a fresh user, then walk the list top to bottom. Prove each with evidenc
 not fired (needs external service or sample data) · `GATED` = needs infra not present.
 
 **Standing gates (note in every report until resolved):**
-- **Real notification delivery (#40)** needs **Redis + the ARQ worker** running. Redis not
+- **Real notification delivery (#38)** needs **Redis + the ARQ worker** running. Redis not
   installed by default → mark GATED unless present (`redis-cli ping`).
 - **LinkedIn enrich (#12)** needs a sample LinkedIn PDF in `test-artifacts/`.
 - **GitHub enrich (#13)** hits **live GitHub** (rate-limited; needs a real handle).
@@ -67,33 +67,31 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 - [ ] 33. Kanban drag — mouse AND keyboard (a11y: Space pick up, arrows move, Enter drop, Esc cancel)
 
 ## G. Channels
-- [ ] 34. Providers status → `GET /providers` (slack/discord/telegram availability)
-- [ ] 35. Channel create / list / delete → CRUD + `DELETE /{channel_id}` (email + webhook work without OAuth)
-- [ ] 36. Test-send → `POST /{channel_id}/test`
-- [ ] 37. OAuth connect flows — Slack/Discord/Telegram (`/connect/*`, `/callback/*`, telegram poll) — CODE unless OAuth creds set
+- [ ] 34. Channel create / list / delete → CRUD + `DELETE /{channel_id}` (email + webhook work without OAuth)
+- [ ] 35. Test-send → `POST /{channel_id}/test`
 
 ## H. Notifications
-- [ ] 38. Notification rules — `POST/GET/PUT /settings/notification-rule`, rule row lands
-- [ ] 39. History + stats → `GET /api/notifications`, `/notifications/stats`
-- [ ] 40. **Actual delivery** (GATED: Redis + ARQ worker) — fire a real send through a configured channel and confirm the ledger row
+- [ ] 36. Notification rules — `POST/GET/PUT /settings/notification-rule`, rule row lands
+- [ ] 37. History + stats → `GET /api/notifications`, `/notifications/stats`
+- [ ] 38. **Actual delivery** (GATED: Redis + ARQ worker) — fire a real send through a configured channel and confirm the ledger row
 
 ## I. Account management
-- [ ] 41. Password change guard — wrong current password → 401 (rule #26), tested non-destructively
-- [ ] 42. Email change → `PATCH /users/me/email` (verify current password first)
-- [ ] 43. Account delete → `DELETE /users/me` soft-delete (sets `deleted_at`; restore after to keep the demo account)
+- [ ] 39. Password change guard — wrong current password → 401 (rule #26), tested non-destructively
+- [ ] 40. Email change → `PATCH /users/me/email` (verify current password first)
+- [ ] 41. Account delete → `DELETE /users/me` soft-delete (sets `deleted_at`; restore after to keep the demo account)
 
 ## J. Ops / admin
-- [ ] 44. Source health → `GET /runs/source-health` 200 (note: no role gate — any logged-in user)
-- [ ] 45. Recent runs → `GET /runs/recent` (feeds the `/admin/runs` UI)
+- [ ] 42. Source health → `GET /runs/source-health` 200 (note: no role gate — any logged-in user)
+- [ ] 43. Recent runs → `GET /runs/recent` (feeds the `/admin/runs` UI)
 
 ## K. Cross-cutting
-- [ ] 46. Every page renders with no console errors: `/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/dashboard`, `/jobs/[id]`, `/pipeline`, `/profile`, `/settings/channels`, `/settings/notifications`, `/settings/account`, `/notifications`
-- [ ] 47. Theme toggle works; spot-click every primary button on every page (no dead buttons)
+- [ ] 44. Every page renders with no console errors: `/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/dashboard`, `/jobs/[id]`, `/pipeline`, `/profile`, `/settings/channels`, `/settings/notifications`, `/settings/account`, `/notifications`
+- [ ] 45. Theme toggle works; spot-click every primary button on every page (no dead buttons)
 
 ---
 
 ## Report format
 Produce a table: `# | item | LIVE/CODE/GATED/FAIL | evidence`. End with:
-- counts (e.g. "42 LIVE, 3 CODE, 1 GATED, 1 FAIL")
+- counts (e.g. "40 LIVE, 3 CODE, 1 GATED, 1 FAIL")
 - the FIRST real FAIL with exact file:line + error (if any)
 - what's needed to close the gates (install Redis; add LinkedIn sample; set OAuth creds)

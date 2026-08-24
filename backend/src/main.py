@@ -750,7 +750,7 @@ async def run_search(
 ) -> dict[str, Any]:
     # SI1 — ``enqueue`` is the notification fan-out hook. The per-user feed-write
     # path historically wrote user_feed but NEVER triggered a notification, so no
-    # user ever got a job-match email/Slack/Discord (the whole score_threshold
+    # user ever got a job-match notification (the whole score_threshold
     # gate was dead). When a caller (the ARQ worker / an API path with Redis)
     # passes an ``enqueue(function_name, *args)`` callable, run_search enqueues
     # ``send_notification`` for above-threshold feed rows after writing them.

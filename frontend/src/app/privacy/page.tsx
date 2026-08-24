@@ -134,8 +134,8 @@ export default function PrivacyPage() {
             </li>
             <li>
               <span className="text-foreground">Consent</span> — sending
-              notifications to channels you connect (email, Slack, Discord,
-              Telegram). You can disconnect a channel at any time.
+              notifications to channels you connect (email or a webhook you
+              control). You can disconnect a channel at any time.
             </li>
             <li>
               <span className="text-foreground">Legitimate interest</span> —

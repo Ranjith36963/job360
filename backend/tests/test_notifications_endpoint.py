@@ -73,15 +73,15 @@ async def test_notifications_scoped_per_user(authenticated_async_context, fixtur
 
 @pytest.mark.asyncio
 async def test_notifications_filter_by_channel(authenticated_async_context, fixture_user_id):
-    """?channel=slack must filter out non-slack rows."""
+    """?channel=webhook must filter out non-webhook rows."""
     db = await api_deps.get_db()
     await _insert_ledger_row(db, user_id=fixture_user_id, job_id=1, channel="email")
-    await _insert_ledger_row(db, user_id=fixture_user_id, job_id=2, channel="slack")
+    await _insert_ledger_row(db, user_id=fixture_user_id, job_id=2, channel="webhook")
     async with authenticated_async_context() as client:
-        resp = await client.get("/api/notifications?channel=slack")
+        resp = await client.get("/api/notifications?channel=webhook")
     assert resp.status_code == 200
     body = resp.json()
-    assert all(e["channel"] == "slack" for e in body["notifications"])
+    assert all(e["channel"] == "webhook" for e in body["notifications"])
     assert body["total"] == 1
 
 

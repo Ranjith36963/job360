@@ -232,7 +232,7 @@ async def _seed_instant_rule_with_pending(path, quiet_start, quiet_end, *, pendi
             job_id = cur.lastrowid
             await db.execute(
                 "INSERT INTO user_notification_digests(user_id, channel, job_id) VALUES(?,?,?)",
-                ("alice", "slack", job_id),
+                ("alice", "email", job_id),
             )
         await db.commit()
 
@@ -305,7 +305,7 @@ async def test_send_bundle_dispatches(tick_db):
         job_id = cur.lastrowid
         await db.execute(
             "INSERT INTO user_notification_digests(user_id, channel, job_id) VALUES(?,?,?)",
-            ("alice", "slack", job_id),
+            ("alice", "email", job_id),
         )
         await db.commit()
 
@@ -315,7 +315,7 @@ async def test_send_bundle_dispatches(tick_db):
 
     async def fake_dispatch(db, *, user_id, title, body, force=False, **kw):
         dispatched.append({"user_id": user_id, "force": force})
-        return [ChannelSendResult(channel_id=1, channel_type="slack", ok=True)]
+        return [ChannelSendResult(channel_id=1, channel_type="email", ok=True)]
 
     async with pg.connect(tick_db) as db:
         ctx = {"db": db, "dispatcher": fake_dispatch}
@@ -329,7 +329,7 @@ async def test_send_bundle_dispatches(tick_db):
 # ── send_bundle ledger + failure handling (caught by live verification) ──────
 
 
-async def _seed_job_and_digest(path, channel="slack"):
+async def _seed_job_and_digest(path, channel="email"):
     async with pg.connect(path) as db:
         now_str = datetime.now(timezone.utc).isoformat()
         cur = await db.execute(
@@ -352,14 +352,14 @@ async def test_send_bundle_success_writes_ledger_and_drains(tick_db):
     from src.services.channels.dispatcher import ChannelSendResult
 
     async def ok_dispatch(db, *, user_id, title, body, force=False, **kw):
-        return [ChannelSendResult(channel_id=1, channel_type="slack", ok=True)]
+        return [ChannelSendResult(channel_id=1, channel_type="email", ok=True)]
 
     async with pg.connect(tick_db) as db:
         res = await send_bundle({"db": db, "dispatcher": ok_dispatch}, "alice")
         assert res["sent"] == 1
         # ledger row written as 'sent'
         led = await (await db.execute(
-            "SELECT status FROM notification_ledger WHERE user_id='alice' AND channel='slack' AND job_id=?",
+            "SELECT status FROM notification_ledger WHERE user_id='alice' AND channel='email' AND job_id=?",
             (job_id,))).fetchone()
         assert led is not None and led[0] == "sent"
         # queue drained
@@ -377,14 +377,14 @@ async def test_send_bundle_failure_keeps_rows_and_marks_failed(tick_db):
     from src.services.channels.dispatcher import ChannelSendResult
 
     async def bad_dispatch(db, *, user_id, title, body, force=False, **kw):
-        return [ChannelSendResult(channel_id=1, channel_type="slack", ok=False, error="boom")]
+        return [ChannelSendResult(channel_id=1, channel_type="email", ok=False, error="boom")]
 
     async with pg.connect(tick_db) as db:
         res = await send_bundle({"db": db, "dispatcher": bad_dispatch}, "alice")
         assert res["failed"] == 1 and res["sent"] == 0
         # ledger row 'failed', not 'sent'
         led = await (await db.execute(
-            "SELECT status FROM notification_ledger WHERE user_id='alice' AND channel='slack' AND job_id=?",
+            "SELECT status FROM notification_ledger WHERE user_id='alice' AND channel='email' AND job_id=?",
             (job_id,))).fetchone()
         assert led is not None and led[0] == "failed"
         # queue rows KEPT for retry (not drained, not lost)
@@ -403,18 +403,18 @@ async def test_send_bundle_dlq_after_max_retries(tick_db):
     async with pg.connect(tick_db) as db:
         await db.execute(
             "INSERT INTO notification_ledger(user_id, job_id, channel, status, retry_count) "
-            "VALUES('alice', ?, 'slack', 'failed', ?)",
+            "VALUES('alice', ?, 'email', 'failed', ?)",
             (job_id, MAX_BUNDLE_RETRIES),
         )
         await db.commit()
 
     async def bad_dispatch(db, *, user_id, title, body, force=False, **kw):
-        return [ChannelSendResult(channel_id=1, channel_type="slack", ok=False, error="boom")]
+        return [ChannelSendResult(channel_id=1, channel_type="email", ok=False, error="boom")]
 
     async with pg.connect(tick_db) as db:
         await send_bundle({"db": db, "dispatcher": bad_dispatch}, "alice")
         led = await (await db.execute(
-            "SELECT status FROM notification_ledger WHERE user_id='alice' AND channel='slack' AND job_id=?",
+            "SELECT status FROM notification_ledger WHERE user_id='alice' AND channel='email' AND job_id=?",
             (job_id,))).fetchone()
         assert led[0] == "dlq"
         # queue rows dropped (DLQ)

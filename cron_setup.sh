@@ -38,8 +38,6 @@ echo ""
 echo "Notification channels:"
 if [ -f "$ENV_FILE" ]; then
     grep -q "SMTP_EMAIL=." "$ENV_FILE" 2>/dev/null && echo "  ✓ Email configured" || echo "  ✗ Email not configured"
-    grep -q "SLACK_WEBHOOK_URL=." "$ENV_FILE" 2>/dev/null && echo "  ✓ Slack configured" || echo "  ✗ Slack not configured"
-    grep -q "DISCORD_WEBHOOK_URL=." "$ENV_FILE" 2>/dev/null && echo "  ✓ Discord configured" || echo "  ✗ Discord not configured"
 fi
 echo ""
 

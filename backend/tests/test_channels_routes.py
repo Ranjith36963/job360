@@ -1,13 +1,14 @@
 """Channel config route integration tests — proves tenant isolation at API layer.
 
-Existing tests updated for the new create_channel contract (Task 2):
-- ``slack`` / ``discord`` / ``telegram`` via POST "" now returns 400 (use Connect
-  flow). Tests that previously posted a raw slack:// or discord:// credential are
-  switched to ``webhook`` with an https URL — same behaviour being tested (create,
-  list, isolation, delete, test-send), different channel type.  This is NOT a
-  weakening: the old tests proved that POST "" accepted a credential and stored it;
-  they continue to prove exactly that, now for the only types POST "" still accepts.
-- ``test_test_send_*`` tests use ``webhook`` type (https URL → jsons://... stored).
+Delivery is ``email`` + ``webhook`` and nothing else (2026-08-24). ``slack`` /
+``discord`` / ``telegram`` are rejected by the ``ChannelIn.channel_type``
+pattern before the handler runs, so they return **422**, not 400 — there is no
+longer a Connect flow to redirect them to. Rationale and evidence:
+``docs/plans/2026-08-24-email-webhook-only-delivery.md``.
+
+Tests that once posted a raw ``slack://`` credential use ``webhook`` with an
+https URL. That is NOT a weakening: they proved POST "" accepts a credential and
+stores it, and they still prove exactly that — for a type that still exists.
 """
 import asyncio
 import socket
@@ -140,6 +141,59 @@ def test_create_and_list_channel(api):
     assert len(rows) == 1
     assert rows[0]["id"] == cid
     assert rows[0]["channel_type"] == "webhook"
+
+
+def test_list_channels_returns_connection_status_and_target_label(api):
+    """The two columns migration 0019 added must still be serialized.
+
+    Relocated from the deleted ``test_channels_oauth.py``. The original proved
+    this by driving the Discord OAuth callback; that route is gone, but the
+    columns are NOT — 0031 deliberately kept ``connection_status`` and
+    ``target_label`` on ``user_channels`` rather than churning a live table.
+    So the guard is re-expressed through the only path that still creates a
+    channel. Without it, a serializer that silently dropped both fields would
+    have lost its only test when the OAuth file was removed.
+    """
+    _register(api, "alice@example.com")
+    r = api.post(
+        "/api/settings/channels",
+        json={
+            "channel_type": "webhook",
+            "display_name": "My Webhook",
+            "credential": "https://hooks.example.com/notify",
+        },
+    )
+    assert r.status_code == 201, r.text
+
+    rows = api.get("/api/settings/channels").json()
+    assert len(rows) == 1
+    # 'connected' is the column default — a manually added channel is live the
+    # moment it is created; there is no handshake left to be pending on.
+    assert rows[0]["connection_status"] == "connected"
+    # NULL for a channel the user typed in themselves: the label only ever came
+    # from an OAuth provider naming its own destination (e.g. "#general").
+    assert rows[0]["target_label"] is None
+
+
+@pytest.mark.parametrize("dead_type", ["slack", "discord", "telegram"])
+def test_deleted_chat_channel_types_are_rejected(api, dead_type):
+    """The three removed channels must not be creatable by any route.
+
+    422, not 400: rejection happens in the ``ChannelIn`` pattern during request
+    validation, before the handler body runs. Asserting the status code pins
+    WHERE the refusal lives — if someone re-adds the type to the pattern and
+    lets the handler reject it instead, this test catches the drift.
+    """
+    _register(api, "alice@example.com")
+    r = api.post(
+        "/api/settings/channels",
+        json={
+            "channel_type": dead_type,
+            "display_name": f"My {dead_type}",
+            "credential": "https://hooks.example.com/notify",
+        },
+    )
+    assert r.status_code == 422, r.text
 
 
 # Previously used channel_type="slack". Same multi-user isolation test, now
@@ -454,8 +508,15 @@ def test_create_email_smtp_not_configured(api, monkeypatch):
     assert r.status_code == 503, r.text
 
 
-def test_create_chat_type_via_paste_rejected(api):
-    """POST "" with slack/discord/telegram → 400 'use the Connect flow'."""
+def test_chat_channel_types_no_longer_exist(api):
+    """slack/discord/telegram are GONE — the API must not know the words.
+
+    They used to be accepted-but-redirected (400 "use the Connect flow").
+    Delivery is now email + webhook only, so these are simply not valid
+    values of ``channel_type`` and Pydantic rejects them at the schema
+    boundary (422) before any handler runs. A 400 here would mean the
+    Connect-flow branch is still alive.
+    """
     _register(api, "alice@example.com")
     for ct in ("slack", "discord", "telegram"):
         r = api.post(
@@ -466,8 +527,46 @@ def test_create_chat_type_via_paste_rejected(api):
                 "credential": f"{ct}://a/b/c",
             },
         )
-        assert r.status_code == 400, f"expected 400 for {ct}, got {r.status_code}: {r.text}"
-        assert "Connect flow" in r.json()["detail"] or "connect" in r.json()["detail"].lower()
+        assert r.status_code == 422, f"expected 422 for {ct}, got {r.status_code}: {r.text}"
+
+
+def test_only_email_and_webhook_are_valid_channel_types(api):
+    """The positive half of the cut: the two survivors still work.
+
+    Guards the opposite failure — a regex tightened so far it locks the
+    user out of the product entirely.
+    """
+    _register(api, "survivors@example.com")
+    r = api.post(
+        "/api/settings/channels",
+        json={
+            "channel_type": "webhook",
+            "display_name": "Raw feed",
+            "credential": "https://example.com/hook",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["channel_type"] == "webhook"
+
+
+def test_chat_connect_routes_are_removed(api):
+    """The OAuth/deep-link endpoints must 404 — not 503, not 400.
+
+    503 would mean the route still exists and is merely unconfigured, which
+    is how these three spent their whole life in production. Gone means gone.
+    """
+    _register(api, "gone@example.com")
+    for path in (
+        "/api/settings/channels/connect/slack",
+        "/api/settings/channels/connect/discord",
+        "/api/settings/channels/connect/telegram",
+        "/api/settings/channels/connect/telegram/poll",
+        "/api/settings/channels/callback/slack",
+        "/api/settings/channels/callback/discord",
+        "/api/settings/channels/providers",
+    ):
+        r = api.get(path)
+        assert r.status_code == 404, f"{path} still answers {r.status_code}: {r.text[:120]}"
 
 
 # ===========================================================================

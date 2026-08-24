@@ -118,7 +118,7 @@ async def test_send_notification_dispatches_each_channel_and_marks_sent(db_ctx):
     async def fake_dispatcher(db, *, user_id, title, body, **_kw):
         return [
             ChannelSendResult(channel_id=1, channel_type="email", ok=True),
-            ChannelSendResult(channel_id=2, channel_type="slack", ok=True),
+            ChannelSendResult(channel_id=2, channel_type="webhook", ok=True),
         ]
 
     db_ctx["dispatcher"] = fake_dispatcher
@@ -129,7 +129,7 @@ async def test_send_notification_dispatches_each_channel_and_marks_sent(db_ctx):
     assert len(rows) == 2
     assert all(r["status"] == "sent" for r in rows)
     channels = {r["channel"] for r in rows}
-    assert channels == {"email", "slack"}
+    assert channels == {"email", "webhook"}
 
 
 @pytest.mark.asyncio
@@ -138,7 +138,7 @@ async def test_send_notification_marks_failed_with_error_message(db_ctx):
     async def fake_dispatcher(db, *, user_id, title, body, **_kw):
         return [
             ChannelSendResult(
-                channel_id=3, channel_type="discord",
+                channel_id=3, channel_type="webhook",
                 ok=False, error="apprise returned False",
             ),
         ]
@@ -158,9 +158,9 @@ async def test_send_notification_returns_mixed_counts(db_ctx):
     async def fake_dispatcher(db, *, user_id, title, body, **_kw):
         return [
             ChannelSendResult(channel_id=1, channel_type="email", ok=True),
-            ChannelSendResult(channel_id=2, channel_type="slack", ok=True),
+            ChannelSendResult(channel_id=2, channel_type="webhook", ok=True),
             ChannelSendResult(
-                channel_id=3, channel_type="telegram",
+                channel_id=3, channel_type="webhook",
                 ok=False, error="boom",
             ),
         ]
@@ -176,7 +176,7 @@ async def test_send_notification_is_idempotent_per_channel(db_ctx):
     async def fake_dispatcher(db, *, user_id, title, body, **_kw):
         return [
             ChannelSendResult(channel_id=1, channel_type="email", ok=True),
-            ChannelSendResult(channel_id=2, channel_type="slack", ok=True),
+            ChannelSendResult(channel_id=2, channel_type="webhook", ok=True),
         ]
 
     db_ctx["dispatcher"] = fake_dispatcher
@@ -186,7 +186,7 @@ async def test_send_notification_is_idempotent_per_channel(db_ctx):
     rows = await _ledger_rows(db_ctx["db"])
     # Still exactly 2 rows — UNIQUE(user_id, job_id, channel) held
     assert len(rows) == 2
-    assert {r["channel"] for r in rows} == {"email", "slack"}
+    assert {r["channel"] for r in rows} == {"email", "webhook"}
 
 
 @pytest.mark.asyncio

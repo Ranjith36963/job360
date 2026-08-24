@@ -77,33 +77,20 @@ SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 
-# Slack / Discord webhooks
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
-
-# Slack OAuth App credentials (one-click connect flow).
-# Register at https://api.slack.com/apps — set OAuth redirect URL to
-# {OAUTH_REDIRECT_BASE}/api/settings/channels/callback/slack
-# Leave blank (default) to disable the /connect/slack endpoint.
-SLACK_CLIENT_ID = os.getenv("SLACK_CLIENT_ID", "")
-SLACK_CLIENT_SECRET = os.getenv("SLACK_CLIENT_SECRET", "")
-# Public-facing base URL of this deployment (no trailing slash).
-# Used to build the OAuth redirect_uri sent to Slack and Discord.
-OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "")
-
-# Discord OAuth App credentials (one-click connect flow).
-# Register at https://discord.com/developers/applications — add the
-# incoming-webhook scope and set the redirect URL to
-# {OAUTH_REDIRECT_BASE}/api/settings/channels/callback/discord
-# Leave blank (default) to disable the /connect/discord endpoint.
-DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
-DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
-
-# Telegram Bot credentials (deep-link + poll connect flow).
-# Create a bot via @BotFather on Telegram to obtain both values.
-# Leave blank (default) to disable the /connect/telegram endpoint.
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")
+# NOTE (2026-08-24) — the per-user Slack / Discord / Telegram delivery channels
+# were removed. Nine settings lived here for them: SLACK_WEBHOOK_URL,
+# DISCORD_WEBHOOK_URL (which had ZERO consumers anywhere in the codebase — dead
+# on arrival), SLACK_CLIENT_ID/SECRET, DISCORD_CLIENT_ID/SECRET,
+# TELEGRAM_BOT_TOKEN/USERNAME, and OAUTH_REDIRECT_BASE, which existed solely to
+# build the Slack and Discord OAuth redirect URIs.
+#
+# Delivery is email + webhook only. See
+# docs/plans/2026-08-24-email-webhook-only-delivery.md
+#
+# Do NOT confuse these with the CI/harness alerting secrets of the same family
+# (SLACK_BOT_TOKEN, and the repo-level SLACK_WEBHOOK_URL used by
+# .github/actions/slack). Those page the owner when a build breaks, are
+# configured as GitHub repo secrets rather than app settings, and are untouched.
 
 # Search
 # MIN_MATCH_SCORE is the *display* floor — the default "good enough to show"

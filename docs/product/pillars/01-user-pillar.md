@@ -10,7 +10,7 @@
 
 In one sentence:
 
-> *Job360 lets a user create an account, describe themselves (CV + LinkedIn + GitHub + preferences), automatically receive a personalised stream of UK jobs ranked 0–100, take action on them (like, apply, dismiss), track their applications through a pipeline, and get notified via email/Slack/Discord/Telegram/webhook with per-channel quiet-hours and digest schedules.*
+> *Job360 lets a user create an account, describe themselves (CV + LinkedIn + GitHub + preferences), automatically receive a personalised stream of UK jobs ranked 0–100, take action on them (like, apply, dismiss), track their applications through a pipeline, and get notified via email or webhook with per-channel quiet-hours and digest schedules.*
 
 The user pillar is implemented as **four concentric rings**, each one assuming the previous:
 
@@ -328,11 +328,8 @@ Only the survivors get the full `JobScorer` treatment (Pillar 2).
 
 ### 4.4 Channels — `backend/src/services/channels/`
 
-- **`user_channels` table** (`backend/migrations/0005_user_channels.up.sql`) — per-user channel config. Credentials are encrypted with **Fernet** using `CHANNEL_ENCRYPTION_KEY`. Five `channel_type` values map to Apprise URL schemes:
+- **`user_channels` table** (`backend/migrations/0005_user_channels.up.sql`) — per-user channel config. Credentials are encrypted with **Fernet** using `CHANNEL_ENCRYPTION_KEY`. Two `channel_type` values map to Apprise URL schemes:
   - `email` → `mailtos://user:pass@smtp.gmail.com?to=dest`
-  - `slack` → `slack://tokenA/tokenB/tokenC`
-  - `discord` → `discord://webhook_id/webhook_token`
-  - `telegram` → `tgram://bot_token/chat_id`
   - `webhook` → `json://host/path`
 - **`backend/src/services/channels/crypto.py`** — `encrypt(plaintext) → bytes` / `decrypt(ciphertext) → str`. Fails closed if `CHANNEL_ENCRYPTION_KEY` is unset.
 - **`backend/src/services/channels/dispatcher.py`** — thin wrapper around Apprise. Imports `apprise` *lazily inside the function* (CLAUDE.md rule #11 — Apprise pulls ~30 MB of deps; library code must not pay that cost on import). Tests monkeypatch `apprise.Apprise`. The dispatcher runs each notification through four gates before sending: (1) `enabled=0` skip, (2) `match_score < score_threshold` skip, (3) `notify_mode='digest'` route to the digest queue, (4) inside quiet-hours window (evaluated with stdlib `zoneinfo` against `users.timezone`) route to digest or drop.
@@ -351,7 +348,7 @@ notification_rules(id, user_id FK, channel, score_threshold=60, notify_mode='ins
 UNIQUE(user_id, channel)
 ```
 
-Lets the user say *"email me only for score ≥ 75; Slack for everything but only between 09:00 and 18:00; Discord as a daily 08:00 digest."* The `users.timezone` column (added in the same migration, default `'UTC'`) is what quiet-hours and digest times are evaluated against.
+Lets the user say *"email me only for score ≥ 75, but only between 09:00 and 18:00; webhook as a daily 08:00 digest."* The `users.timezone` column (added in the same migration, default `'UTC'`) is what quiet-hours and digest times are evaluated against.
 
 - API: `backend/src/api/routes/notification_rules.py` — `GET`, `POST` (upsert by user+channel), `PATCH`, `DELETE`. Every endpoint filters by `user_id = current_user.id`.
 
@@ -554,7 +551,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Per-user job actions (like/apply/dismiss) | ✅ | `routes/actions.py` |
 | Pipeline (5 stages, history, reminders) | ✅ | `routes/pipeline.py` + migration `0014` (history, interview dates, notes log) |
 | `user_channels` table + Fernet crypto | ✅ | migration `0005`, `crypto.py` |
-| 5 channel types (email/slack/discord/telegram/webhook) via Apprise | ✅ | `dispatcher.py`, lazy import |
+| 2 channel types (email/webhook) via Apprise | ✅ | `dispatcher.py`, lazy import |
 | Channel CRUD + test-send endpoint | ✅ | `routes/channels.py`, two-layer ownership check |
 | `notification_rules` per channel (threshold, mode, quiet hours, digest time) | ✅ | migration `0012` |
 | Notification rule CRUD endpoints | ✅ | `routes/notification_rules.py` |

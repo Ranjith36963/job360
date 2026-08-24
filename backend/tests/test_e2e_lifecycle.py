@@ -12,7 +12,7 @@ malformed CV) and 4xx-reason logging. Offline + deterministic (root rule #4): th
 LLM and the source-fetching search are mocked, so this runs in the gate every time.
 
 What it does NOT cover (needs infra, documented for honesty):
-  - real notification DELIVERY (needs Redis + SMTP/Slack creds) — the dispatch
+  - real notification DELIVERY (needs Redis + SMTP creds) — the dispatch
     *logic* is covered by test_dispatch_logging / test_worker_logging.
   - the browser UI — that's the Playwright suite (frontend/tests/e2e).
 """

@@ -87,8 +87,8 @@ def _assert_webhook_url_safe(channel_type: str, apprise_url: str) -> None:
     create time — this catches a host that was public when the channel was
     created but has since been re-pointed to a private IP (DNS rebinding).
 
-    No-op for non-webhook channels (slack/discord/telegram/email use their own
-    provider URLs, not user-supplied hosts). Raises ``ValueError`` when unsafe.
+    No-op for ``email`` — its Apprise URL points at our own provider, not at a
+    user-supplied host. Raises ``ValueError`` when unsafe.
     """
     if channel_type != "webhook":
         return
@@ -104,18 +104,17 @@ def _assert_webhook_url_safe(channel_type: str, apprise_url: str) -> None:
 def format_payload(channel_type: str, title: str, body: str) -> tuple[str, str]:
     """Return (title, body) formatted for ``channel_type``.
 
-    Stub — Phase 6 ships a single plain-text shape. Blueprint §1 calls for
-    Slack Block Kit / Discord embed / Telegram MarkdownV2 richness; the
-    design keeps the channel-specific templating in one place so the
-    upgrade is a local change.
+    Today this is pass-through for both live channels. It is kept as a seam,
+    not as dead code: it is the ONE place per-channel templating belongs, so
+    the HTML email upgrade lands here instead of being sprayed through the
+    worker.
+
+    The Slack ``*bold*`` / Discord ``**bold**`` / Telegram MarkdownV2 branches
+    were deleted with those channels on 2026-08-24. `webhook` must stay raw —
+    it carries JSON to a user's own tooling, and markup would corrupt it.
+
+    Guard: ``tests/test_channels_dispatcher.py::test_format_payload_does_not_resurrect_chat_markup``
     """
-    if channel_type == "slack":
-        return title, f"*{title}*\n{body}"
-    if channel_type == "discord":
-        return title, f"**{title}**\n{body}"
-    if channel_type == "telegram":
-        return title, f"*{title}*\n{body}"
-    # email, webhook, default
     return title, body
 
 

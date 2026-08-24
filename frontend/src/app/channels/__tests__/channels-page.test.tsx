@@ -16,16 +16,6 @@ import userEvent from "@testing-library/user-event";
 import ChannelsSettingsPage from "../page";
 
 // ---------------------------------------------------------------------------
-// Mock next/navigation
-// ---------------------------------------------------------------------------
-const mockRouterReplace = vi.fn();
-
-vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(),
-  useRouter: () => ({ replace: mockRouterReplace }),
-}));
-
-// ---------------------------------------------------------------------------
 // Mock sonner toast
 // ---------------------------------------------------------------------------
 const mockToastSuccess = vi.fn();
@@ -41,34 +31,22 @@ vi.mock("sonner", () => ({
 // ---------------------------------------------------------------------------
 // Mock api functions
 // ---------------------------------------------------------------------------
-const mockGetProviders = vi.fn();
 const mockListChannels = vi.fn();
 const mockCreateChannel = vi.fn();
 const mockDeleteChannel = vi.fn();
 const mockTestChannel = vi.fn();
-const mockConnectTelegram = vi.fn();
-const mockPollTelegram = vi.fn();
 
 vi.mock("@/lib/api", () => ({
-  getProviders: (...args: unknown[]) => mockGetProviders(...args),
   listChannels: (...args: unknown[]) => mockListChannels(...args),
   createChannel: (...args: unknown[]) => mockCreateChannel(...args),
   deleteChannel: (...args: unknown[]) => mockDeleteChannel(...args),
   testChannel: (...args: unknown[]) => mockTestChannel(...args),
-  connectTelegram: (...args: unknown[]) => mockConnectTelegram(...args),
-  pollTelegram: (...args: unknown[]) => mockPollTelegram(...args),
 }));
-
-// ---------------------------------------------------------------------------
-// Mock window.open / window.location
-// ---------------------------------------------------------------------------
-const mockWindowOpen = vi.fn();
 
 // ---------------------------------------------------------------------------
 // Default data
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PROVIDERS = { slack: true, discord: true, telegram: true };
 const EMPTY_CHANNELS: unknown[] = [];
 
 function makeChannel(overrides = {}) {
@@ -84,7 +62,6 @@ function makeChannel(overrides = {}) {
 }
 
 function setupDefaultMocks() {
-  mockGetProviders.mockResolvedValue(DEFAULT_PROVIDERS);
   mockListChannels.mockResolvedValue(EMPTY_CHANNELS);
   mockCreateChannel.mockResolvedValue(makeChannel());
   mockDeleteChannel.mockResolvedValue(undefined);
@@ -96,7 +73,7 @@ async function renderPage() {
   await act(async () => {
     container = render(<ChannelsSettingsPage />);
   });
-  // Wait for providers + channels to load
+  // Wait for channels to load
   await waitFor(() => {
     expect(screen.queryByText(/Loading…/i)).not.toBeInTheDocument();
   });
@@ -104,75 +81,43 @@ async function renderPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Channel offering — only email + webhook, email primary
 // ---------------------------------------------------------------------------
 
-describe("ChannelsSettingsPage — providers gating", () => {
+describe("ChannelsSettingsPage — channel offering", () => {
   beforeEach(() => {
     setupDefaultMocks();
-    vi.stubGlobal("open", mockWindowOpen);
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-    mockGetProviders.mockReset();
     mockListChannels.mockReset();
-    mockConnectTelegram.mockReset();
-    mockPollTelegram.mockReset();
+    mockCreateChannel.mockReset();
+    mockDeleteChannel.mockReset();
+    mockTestChannel.mockReset();
     mockToastSuccess.mockReset();
     mockToastError.mockReset();
-    mockRouterReplace.mockReset();
-    mockWindowOpen.mockReset();
   });
 
-  it("renders all three Connect buttons when all providers are true", async () => {
+  it("offers exactly two channel types: email and webhook", async () => {
     await renderPage();
-    expect(screen.getByRole("button", { name: /connect slack/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /connect discord/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /connect telegram/i })).toBeInTheDocument();
+
+    // The two add-channel cards (CardTitle renders as plain text, not a
+    // semantic heading element, so match on exact text instead of role).
+    expect(screen.getByText(/^email$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^webhook$/i)).toBeInTheDocument();
+
+    // Nothing referencing the removed chat channels remains on the page.
+    expect(screen.queryByText(/slack/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/discord/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/telegram/i)).not.toBeInTheDocument();
   });
 
-  it("renders Slack disabled when providers.slack is false", async () => {
-    mockGetProviders.mockResolvedValue({
-      slack: false,
-      discord: true,
-      telegram: true,
-    });
+  it("presents email as the primary, recommended option", async () => {
     await renderPage();
-    const slackBtn = screen.getByRole("button", { name: /connect slack/i });
-    expect(slackBtn).toBeDisabled();
-    // Enabled ones should not be disabled
-    expect(screen.getByRole("button", { name: /connect discord/i })).not.toBeDisabled();
-  });
 
-  it("renders Discord disabled when providers.discord is false", async () => {
-    mockGetProviders.mockResolvedValue({
-      slack: true,
-      discord: false,
-      telegram: true,
-    });
-    await renderPage();
-    const discordBtn = screen.getByRole("button", { name: /connect discord/i });
-    expect(discordBtn).toBeDisabled();
-  });
-
-  it("renders all three buttons (disabled) + a helper note when all providers are false", async () => {
-    mockGetProviders.mockResolvedValue({
-      slack: false,
-      discord: false,
-      telegram: false,
-    });
-    await renderPage();
-    // All three Connect buttons still render so the section looks intentional
-    // and consistent with Email/Webhook — but they are DISABLED until the
-    // server has the keys (they auto-enable once added).
-    expect(screen.getByRole("button", { name: /connect slack/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /connect discord/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /connect telegram/i })).toBeDisabled();
-    // A helper note explains why and points the user to email/webhook.
-    expect(
-      screen.getByText(/need API keys configured on the server/i)
-    ).toBeInTheDocument();
+    // Email is called out as "Recommended"; webhook is called out as "Advanced".
+    expect(screen.getByText(/recommended/i)).toBeInTheDocument();
+    expect(screen.getByText(/advanced/i)).toBeInTheDocument();
   });
 });
 
@@ -186,7 +131,6 @@ describe("ChannelsSettingsPage — email add form", () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    mockGetProviders.mockReset();
     mockListChannels.mockReset();
     mockCreateChannel.mockReset();
     mockToastSuccess.mockReset();
@@ -253,13 +197,12 @@ describe("ChannelsSettingsPage — webhook add form", () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    mockGetProviders.mockReset();
     mockListChannels.mockReset();
     mockCreateChannel.mockReset();
     mockToastSuccess.mockReset();
   });
 
-  it("calls createChannel with channel_type webhook on valid URL", async () => {
+  it("calls createChannel with channel_type webhook on a valid https URL", async () => {
     const user = userEvent.setup();
     await renderPage();
 
@@ -277,7 +220,25 @@ describe("ChannelsSettingsPage — webhook add form", () => {
     });
   });
 
-  it("blocks submit with inline error when URL does not start with http", async () => {
+  it("calls createChannel with channel_type webhook on a valid http URL", async () => {
+    const user = userEvent.setup();
+    await renderPage();
+
+    const webhookInput = screen.getByLabelText(/webhook url/i);
+    await user.type(webhookInput, "http://internal-host/hook");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(mockCreateChannel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel_type: "webhook",
+          credential: "http://internal-host/hook",
+        })
+      );
+    });
+  });
+
+  it("blocks submit with inline error when URL does not start with http(s)", async () => {
     const user = userEvent.setup();
     await renderPage();
 
@@ -293,124 +254,6 @@ describe("ChannelsSettingsPage — webhook add form", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Telegram polling
-// ---------------------------------------------------------------------------
-
-describe("ChannelsSettingsPage — Telegram connect + poll", () => {
-  beforeEach(() => {
-    setupDefaultMocks();
-    vi.stubGlobal("open", mockWindowOpen);
-    mockConnectTelegram.mockResolvedValue({
-      deep_link: "https://t.me/bot?start=abc",
-      state: "abc123",
-    });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-    mockGetProviders.mockReset();
-    mockListChannels.mockReset();
-    mockConnectTelegram.mockReset();
-    mockPollTelegram.mockReset();
-    mockToastSuccess.mockReset();
-    mockWindowOpen.mockReset();
-  });
-
-  it("calls connectTelegram then window.open on button click", async () => {
-    const user = userEvent.setup();
-    // Poll never resolves connected so interval stays running
-    mockPollTelegram.mockResolvedValue({ connected: false, target_label: null });
-
-    await act(async () => {
-      render(<ChannelsSettingsPage />);
-    });
-    await waitFor(() =>
-      expect(screen.queryByText(/Loading…/i)).not.toBeInTheDocument()
-    );
-
-    await user.click(screen.getByRole("button", { name: /connect telegram/i }));
-
-    await waitFor(() => {
-      expect(mockConnectTelegram).toHaveBeenCalledTimes(1);
-      expect(mockWindowOpen).toHaveBeenCalledWith(
-        "https://t.me/bot?start=abc",
-        "_blank"
-      );
-    });
-  }, 10000);
-
-  it("shows waiting state after clicking Connect Telegram", async () => {
-    const user = userEvent.setup();
-    mockPollTelegram.mockResolvedValue({ connected: false, target_label: null });
-
-    await act(async () => {
-      render(<ChannelsSettingsPage />);
-    });
-    await waitFor(() =>
-      expect(screen.queryByText(/Loading…/i)).not.toBeInTheDocument()
-    );
-
-    await user.click(screen.getByRole("button", { name: /connect telegram/i }));
-
-    // Waiting message should appear immediately after click
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", {
-          name: /waiting for you to tap start in telegram/i,
-        })
-      ).toBeInTheDocument();
-    });
-  }, 10000);
-
-  it("fires success toast when poll eventually returns connected", async () => {
-    // Approach: replace setInterval globally so we control when the poll fires.
-    // The mock setInterval captures the callback, we invoke it manually,
-    // then wait for the async poll promise chain to settle.
-    const realSetInterval = window.setInterval.bind(window);
-    const realClearInterval = window.clearInterval.bind(window);
-
-    let capturedCallback: (() => void) | null = null;
-    let fakeTimerId: ReturnType<typeof setInterval>;
-
-    const setIntervalSpy = vi
-      .spyOn(window, "setInterval")
-      .mockImplementation((fn: TimerHandler, .../* _delay, _args */rest: unknown[]) => {
-        void rest;
-        capturedCallback = fn as () => void;
-        // Use real timer so clearInterval(fakeTimerId) works
-        fakeTimerId = realSetInterval(() => {/* noop */}, 999999);
-        return fakeTimerId;
-      });
-
-    mockPollTelegram.mockResolvedValue({ connected: true, target_label: "@jobs" });
-
-    const user = userEvent.setup();
-    await act(async () => {
-      render(<ChannelsSettingsPage />);
-    });
-    await waitFor(() =>
-      expect(screen.queryByText(/Loading…/i)).not.toBeInTheDocument()
-    );
-
-    await user.click(screen.getByRole("button", { name: /connect telegram/i }));
-
-    // Manually fire the poll callback and flush the resulting async chain
-    await act(async () => {
-      if (capturedCallback) await capturedCallback();
-    });
-
-    await waitFor(() => {
-      expect(mockToastSuccess).toHaveBeenCalledWith("Telegram connected!");
-    });
-
-    // Cleanup
-    realClearInterval(fakeTimerId!);
-    setIntervalSpy.mockRestore();
-  }, 15000);
-});
-
-// ---------------------------------------------------------------------------
 // Channel list — target_label rendering
 // ---------------------------------------------------------------------------
 
@@ -420,7 +263,6 @@ describe("ChannelsSettingsPage — channel list", () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    mockGetProviders.mockReset();
     mockListChannels.mockReset();
   });
 
@@ -428,17 +270,19 @@ describe("ChannelsSettingsPage — channel list", () => {
     mockListChannels.mockResolvedValue([
       makeChannel({
         id: 42,
-        channel_type: "slack",
-        display_name: "Slack Jobs",
-        target_label: "#jobs",
+        channel_type: "webhook",
+        display_name: "My Webhook",
+        target_label: "https://example.com/hook",
       }),
     ]);
 
     await renderPage();
 
-    expect(screen.getByText("Slack Jobs")).toBeInTheDocument();
+    expect(screen.getByText("My Webhook")).toBeInTheDocument();
     // target_label is inside a <span> within the type div — use a regex or partial match
-    expect(screen.getByText((content) => content.includes("#jobs"))).toBeInTheDocument();
+    expect(
+      screen.getByText((content) => content.includes("https://example.com/hook"))
+    ).toBeInTheDocument();
   });
 
   it("does not render target_label span when null", async () => {
@@ -446,10 +290,14 @@ describe("ChannelsSettingsPage — channel list", () => {
       makeChannel({ id: 7, channel_type: "email", display_name: "My Email", target_label: null }),
     ]);
 
-    await renderPage();
+    const { container } = await renderPage();
 
     expect(screen.getByText("My Email")).toBeInTheDocument();
-    // No span with a label value should appear
-    expect(screen.queryByText((content) => content.includes("—"))).not.toBeInTheDocument();
+    // The target_label span (class "normal-case") is only rendered when
+    // target_label is set. Scoped to the DOM (not a global text search) so
+    // this doesn't false-positive on unrelated em-dashes elsewhere on the
+    // page (e.g. the webhook card's "advanced — not officially supported"
+    // copy).
+    expect(container.querySelector(".normal-case")).not.toBeInTheDocument();
   });
 });

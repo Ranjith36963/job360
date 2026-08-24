@@ -122,7 +122,7 @@ The pipeline tracker is a Kanban-style board with stages: Applied → Outreach �
 
 ### 4.6 Push Notifications
 
-The user configures their preferred delivery endpoints: email, Slack, Telegram, Discord, or any combination. On each scheduled search run, the platform pushes new results to the user's chosen endpoints. The push contains the same information as the dashboard — scored listings, time-bucketed, with match scores and key details.
+The user configures their delivery endpoint: email (the product) and/or a raw-JSON webhook. On each scheduled search run, the platform pushes new results there. The push carries the SAME information as the dashboard — the same score, the same judge verdict and reason, the same salary — built from one shared definition (`backend/src/services/delivery/decision_card.py`) so the email and the screen cannot drift. (Slack/Telegram/Discord were removed 2026-08-24; see FR-6.1.)
 
 The push notification is the primary differentiator. The user does not need to open the dashboard to discover new matches. Job360 finds jobs for the user and delivers them proactively.
 
@@ -204,9 +204,22 @@ The user can trigger a manual search at any time in addition to the scheduled ru
 
 ### FR-6: Push Notifications
 
-**FR-6.1:** The platform supports push delivery to email (SMTP), Slack (webhook), Discord (webhook), and Telegram (bot API). Additional channels may be added in future.
+**FR-6.1 (revised 2026-08-24):** The platform delivers on **two** channels and no others:
 
-**FR-6.2:** Each user configures their own delivery endpoints. A user may have multiple endpoints active simultaneously (for example, email and Slack).
+| Channel | Status |
+|---|---|
+| **email** | The product. Designed, supported, measured. Sent via Resend (Railway blocks outbound SMTP ports). |
+| **webhook** | An unsupported raw-JSON escape hatch for a technical user's own tooling. No design, no promises. |
+
+Slack, Discord and Telegram were **removed**. The original FR-6.1 listed them as
+requirements; that requirement was met and then measured, and the measurement said
+production held zero connected channels of any type and the delivery ledger had never
+recorded a single send. "Additional channels may be added in future" is explicitly
+withdrawn as a goal: breadth of channels is addition, and this product needs the
+compounding kind. Evidence: `docs/plans/2026-08-24-email-webhook-only-delivery.md`.
+
+**FR-6.2:** Each user configures their own delivery endpoints, and may have more than one
+active at once (for example, email plus a webhook).
 
 **FR-6.3:** Push notifications are triggered by scheduled search runs and contain only genuinely new matches (listings not previously seen by the user).
 
