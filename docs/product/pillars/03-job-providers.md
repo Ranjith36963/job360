@@ -58,8 +58,11 @@ In `BaseJobSource.__init__`:
 ```python
 async def fetch_jobs(self) -> list[Job]:
     jobs = []
-    for slug in GREENHOUSE_COMPANIES:        # ~80 slugs
-        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+    for slug in self._companies:             # GREENHOUSE_COMPANIES by default — 82 slugs
+        # `?content=true` is LOAD-BEARING, not decoration: without it the board
+        # list endpoint returns no `content` field at all, which is why 996 prod
+        # rows carried an empty description until 2026-08-05 (greenhouse.py:31-36).
+        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
         data = await self._get_json(url)     # all retry/rate-limit machinery
         if not data:
             continue
@@ -71,7 +74,7 @@ async def fetch_jobs(self) -> list[Job]:
 
 Each `_get_json(url)` call goes through `_request()`:
 
-1. `await self._rate_limiter.acquire()` — at most 2 concurrent requests across all 80 companies; 1.5 s minimum delay between acquisitions.
+1. `await self._rate_limiter.acquire()` — at most 2 concurrent requests across all 82 companies; 1.5 s minimum delay between acquisitions.
 2. `aiohttp.GET(url, timeout=30)`.
 3. Response handling:
    - `200` → `response.json()`, return.
@@ -90,6 +93,7 @@ For one healthy company (say `acme-corp`), this returns ~6 postings in JSON like
      "location": {"name": "London, UK"},
      "absolute_url": "https://boards.greenhouse.io/acme-corp/jobs/12345",
      "content": "&lt;p&gt;We're hiring...&lt;/p&gt;",
+     "first_published": "2026-05-20T11:30:00Z",
      "updated_at": "2026-05-28T09:00:00Z"},
     ...
   ]
@@ -101,6 +105,15 @@ For one healthy company (say `acme-corp`), this returns ~6 postings in JSON like
 For each upstream posting, the source builds a canonical `Job`:
 
 ```python
+# The date contract, established BEFORE the Job is built (greenhouse.py:64-68).
+# posted_at comes from `first_published`, NOT `updated_at` — the latter tracks
+# edits (a salary tweak) and would bump a stale posting back into the "just
+# posted" bucket. normalize_posted_at() returns the confidence alongside it, so
+# an unparseable value is reported low rather than fabricated as "high".
+raw_updated_at = posting.get("updated_at")          # audit only, never recency
+raw_published = posting.get("first_published")
+posted_at, confidence = normalize_posted_at(raw_published)
+
 job = Job(
     title=posting["title"],
     company="acme-corp",  # or via COMPANY_NAME_OVERRIDES → "Acme Corp"
@@ -109,8 +122,9 @@ job = Job(
     location=posting.get("location", {}).get("name", ""),
     description=_strip_html(posting["content"]),  # raw HTML → text
     date_found=now_iso(),
-    posted_at=posting.get("updated_at"),           # high-confidence date
-    date_confidence="high",
+    posted_at=posted_at,
+    date_confidence=confidence,                    # derived, never hardcoded
+    date_posted_raw=raw_updated_at,
 )
 ```
 
@@ -120,7 +134,10 @@ Two things the `Job.__post_init__` does automatically:
 
 ### T+0 — Return + scheduler post-processing
 
-`await GreenhouseSource.fetch_jobs()` returns a `list[Job]` of ~500 entries across 80 companies.
+`await GreenhouseSource.fetch_jobs()` returns a `list[Job]` gathered across 82 companies.
+Volume is an upstream fact, not a constant, so it is quoted only as a dated measurement:
+**996 greenhouse rows in prod** as of 2026-08-05 (`backend/src/sources/ats/greenhouse.py:34`),
+and `first_published` verified across **928 live jobs** (`greenhouse.py:57-58`).
 
 Back in `TieredScheduler.tick()`:
 

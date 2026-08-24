@@ -212,9 +212,9 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 |------------------|------|-------|
 | **HTML scrapers** (5) | High | LinkedIn, Climatebase, 80000Hours, BCS Jobs, AIJobs AI all use regex parsing on HTML. Any layout change breaks them silently (returns 0 jobs, no error). |
 | **python-jobspy** (Indeed/Glassdoor) | Medium | Not in backend/pyproject.toml. Optional dependency. If Indeed/Glassdoor change their site, python-jobspy breaks. |
-| **Workday ATS** | Medium | Complex dict-format config (tenant/wd/site). Workday API endpoints change occasionally. 15 companies = 15 potential breakpoints. |
+| **Workday ATS** | Medium | Complex dict-format config (tenant/wd/site). Workday API endpoints change occasionally. 20 companies = 20 potential breakpoints. |
 | **SuccessFactors** | Medium | Parses sitemap.xml files. Only 3 companies. MBDA already removed (DNS failure). |
-| **Personio** | Medium | Uses XML job feed API. 10 companies. Personio may restrict access. |
+| **Personio** | Medium | Uses XML job feed API. 26 companies. Personio may restrict access. |
 | **LinkedIn guest API** | High | Unofficial, can break or get rate-limited at any time. |
 | **HackerNews sources** | Low | Algolia API is stable, but "Who is Hiring" thread format could change. |
 | **CV parser** | Medium | Regex-based section detection. Works for ~80% of CVs. Non-standard formats may miss skills. |

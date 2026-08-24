@@ -87,7 +87,7 @@ UserPreferences(
 
 ### Stage 1 — Fetch
 
-`TieredScheduler.tick()` saw `greenhouse.category="ats"` (60s tier) was due. Breaker `CLOSED` → dispatched. `GreenhouseSource.fetch_jobs()` iterated 80 company slugs, found this one among ~500 results, returned the `Job` above. `breaker.record_success()`.
+`TieredScheduler.tick()` saw `greenhouse.category="ats"` (60s tier) was due. Breaker `CLOSED` → dispatched. `GreenhouseSource.fetch_jobs()` iterated 82 company slugs, found this one among the results, returned the `Job` above. `breaker.record_success()`.
 
 ### Stage 2 — Prefilter (3 gates)
 
