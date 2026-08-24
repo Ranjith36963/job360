@@ -32,7 +32,7 @@ CLAUDE.md rule #29).
 
 ```bash
 # Canonical pre-commit test run — defer to the runtime collected count, not a doc figure
-python -m pytest -q -p no:randomly   # ~1,333 passing, 3 skipped (~2.5 min) — test_main.py included
+python -m pytest -q -p no:randomly   # ~3,295 selected of 3,297 collected (2 `live` deselected) — test_main.py included
 
 python -m pytest tests/test_scorer.py::test_name -v   # single test
 python -m ruff check .                                # lint (CI gate)

@@ -99,6 +99,7 @@ flowchart TD
 - `api` — start the FastAPI backend server (consumed by the Next.js frontend)
 - `status` — show last run stats from database
 - `sources` — list all 41 registry sources (40 live instances)
+- `rescore-backfill` — enqueue the resumable re-score drainer for stale `user_feed` rows, with `--batch-size`, `--max-users`, `--throttle`
 
 ### Frontend (Next.js + FastAPI)
 - Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
@@ -117,36 +118,36 @@ flowchart TD
 - **Logging** — rotating file handler (5MB max, 3 backups) + console output
 - **Dry-run mode** — fetch and score without writing to DB or sending notifications
 - **Auto-purge** — jobs older than 30 days are automatically deleted on each run
-- **Split requirements** — prod deps in `backend/pyproject.toml`, dev/test in `requirements-dev.txt`
+- **Split requirements** — prod deps in `backend/pyproject.toml` `[project.dependencies]`, dev/test in the same file's `[project.optional-dependencies] dev` extra (`pip install -e ".[dev]"`). There is no `requirements*.txt` in the repo
 - **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
 
-### Testing (~1,409 collected offline, 2 live deselected — defer to the runtime collected count; run `pytest --collect-only -q | tail -1` for the live count)
+### Testing (3,297 collected, 3,295 selected offline, 2 live deselected — defer to the runtime collected count; run `pytest --collect-only -q | tail -1` for the live count)
 
-> Per-file counts below are from the post-Step-3 baseline; actual counts are higher (Pillar-2/-3 + Step-0..3 + matcher batch each added tests). Run `cd backend && python -m pytest --collect-only -q -p no:randomly --ignore=tests/test_main.py 2>nul` for live per-file counts.
+> Per-file counts below were measured with `cd backend && python -m pytest tests/<file>.py --collect-only -q -p no:randomly | tail -1`. `test_main.py` **is** in the canonical run — do not add `--ignore=tests/test_main.py` (root CLAUDE.md rule).
 
-| Test file | Approx. count | What it covers |
+| Test file | Collected count | What it covers |
 |-----------|-------|----------------|
-| `test_sources.py` | 55+ | All 41 sources with mocked HTTP |
-| `test_profile.py` | 55+ | CV parser, preferences, keyword generator, JobScorer |
-| `test_linkedin_github.py` | 58+ | LinkedIn PDF parsing (section-split + LLM), GitHub API enrichment |
-| `test_scorer.py` | 53+ | Scoring algorithm, penalties, recency tiers, edge cases |
-| `test_time_buckets.py` | 33+ | Time bucket grouping logic |
-| `test_models.py` | 21+ | Job dataclass, normalisation, company cleaning |
-| `test_notifications.py` | 19+ | Email, Slack, Discord sending |
-| `test_deduplicator.py` | 29+ | Cross-source dedup (incl. marketing-suffix B-4 tests) |
-| `test_main.py` | 12 | Orchestrator (excluded from canonical run — hits live Indeed) |
-| `test_cli.py` | 11+ | CLI commands + SOURCE_REGISTRY assertions |
-| `test_database.py` | 9+ | Postgres operations, migrations, source history |
-| `test_api.py` | 9+ | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) |
-| `test_llm_provider.py` | 8+ | Multi-provider LLM client for CV parsing |
-| `test_notification_base.py` | 7+ | ABC, format_salary, channel discovery |
-| `test_setup.py` | 6 | setup.sh validation |
-| `test_reports.py` | 6+ | Markdown + HTML report generation |
-| `test_rate_limiter.py` | 5+ | Async rate limiter |
+| `test_profile.py` | 112 | CV parser, preferences, keyword generator, JobScorer |
+| `test_sources.py` | 110 | All 41 sources with mocked HTTP |
+| `test_scorer.py` | 92 | Scoring algorithm, penalties, recency tiers, edge cases |
+| `test_linkedin_github.py` | 64 | LinkedIn PDF parsing (section-split + LLM), GitHub API enrichment |
+| `test_deduplicator.py` | 35 | Cross-source dedup (incl. marketing-suffix B-4 tests) |
+| `test_time_buckets.py` | 33 | Time bucket grouping logic |
+| `test_api.py` | 27 | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) |
+| `test_models.py` | 25 | Job dataclass, normalisation, company cleaning |
+| `test_main.py` | 18 | Orchestrator (IS in the canonical run — carries no `live` marker) |
+| `test_llm_provider.py` | 18 | Multi-provider LLM client for CV parsing |
+| `test_database.py` | 16 | Postgres operations, migrations, source history |
+| `test_channels_dispatcher.py` | 15 | Apprise dispatch, quiet hours, digest queueing |
+| `test_cli.py` | 11 | CLI commands + SOURCE_REGISTRY assertions |
+| `test_notification_rules.py` | 11 | One-rulebook-per-user rules + routes |
+| `test_reports.py` | 6 | Markdown + HTML report generation |
+| `test_cli_view.py` | 6 | Rich terminal table viewer |
+| `test_rate_limiter.py` | 5 | Async rate limiter |
 | `test_cron.py` | 5 | cron_setup.sh validation |
-| `test_cli_view.py` | 5+ | Rich terminal table viewer |
-| `test_csv_export.py` | 4+ | CSV export format |
-| (Pillar-2/-3 + Step-0..3 + matcher batch additions) | ~900+ | auth, feed, prefilter, channels, dispatcher, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, notification rules, application history, llm_matcher |
+| `test_setup.py` | 4 | setup.sh validation |
+| `test_csv_export.py` | 4 | CSV export format |
+| (the other ~197 `test_*.py` files) | balance of 3,297 | auth, feed, prefilter, channels, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, application history, llm_matcher, uk_gate, visa_signal, shelf registry, harness guards |
 
 ## Quick Start
 
@@ -358,10 +359,10 @@ job360/
 │   ├── migrations/              # 31 forward+reverse SQL migration pairs (0000 → 0030) + runner.py
 │   └── src/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (41), _build_sources()
-│       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile
+│       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile, rescore-backfill
 │       ├── models.py            # Job dataclass + normalized_key()
 │       ├── api/                 # FastAPI app + 13 route modules (72 endpoints)
-│       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
+│       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)
 │       │   ├── keywords.py      # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] since 3ba1342
