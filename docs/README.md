@@ -34,9 +34,7 @@ Start here to find the right doc fast.
 
 | Doc | What it is |
 |---|---|
-| [`STACK.md`](product/STACK.md) | Tech stack layer-by-layer: what we have vs what to add (Postgres, Docker, Stripe, etc.) + costs. |
 | [`llm_prod.md`](harness/llm_prod.md) | Production LLM provider choice (researched 2026-07-08): why the 429s, provider comparison, GDPR split, recommended chain. TL;DR: Gemini 2.5 Flash single / +DeepSeek for cheap batch. |
-| [`STACK_checklist.md`](product/STACK_checklist.md) | Code-audited checklist: 27 built ✅ (with file proof) vs 21 to build ❌. |
 | [`UPGRADE_PLAN.md`](harness/UPGRADE_PLAN.md) | Phase 1–3 execution plan (Postgres → deploy → monitoring): TDD + multi-agent, money + keys per phase. |
 | [`../CLAUDE.md`](../CLAUDE.md) | Load-bearing architecture doc: data flow, module map, **28 hard rules**, scoring, env vars. |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Deep technical reference: directory tree, DB schema, data-flow diagrams, dependencies. |
@@ -111,7 +109,6 @@ Background research that `IMPLEMENTATION_LOG.md` bridges to the shipped code (ke
 
 ## 🛠️ Known debt
 
-- [`mypy_backlog.md`](harness/mypy_backlog.md) — catalogued mypy strict-mode errors + chip-away order.
 
 ## 🗄️ Archive (`_archive/`)
 
