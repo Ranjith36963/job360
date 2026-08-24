@@ -24,7 +24,7 @@ Async Redis-backed task queue Job360 uses for the notification worker. Worker co
 
 ### ATS (Applicant Tracking System)
 
-A job board hosted by a specific company on a SaaS platform (Greenhouse, Lever, Workable, Ashby, …). Job360 polls a *known list of company slugs* on each platform rather than searching — see `companies.py` (~256 slugs across 11 platforms).
+A job board hosted by a specific company on a SaaS platform (Greenhouse, Lever, Workable, Ashby, …). Job360 polls a *known list of company slugs* on each platform rather than searching — see `backend/src/core/companies.py` (302 slugs across 11 platforms).
 **Code:** `backend/src/sources/ats/` · **Pillar 3**
 
 ### Batch (Batch 1, Batch 2, Batch 3, …)
@@ -58,7 +58,7 @@ The vector database storing job embeddings on disk at `backend/data/chroma/`. Wr
 
 ### Conditional fetch
 
-HTTP technique using `If-None-Match` / `If-Modified-Since` headers so a repeat call to an unchanged feed returns 304 with no body. Job360 has machinery for it (`_get_json_conditional`, `ConditionalCache` 256-entry FIFO) but only one source opts in today (`nhs_jobs_xml`).
+HTTP technique using `If-None-Match` / `If-Modified-Since` headers so a repeat call to an unchanged feed returns 304 with no body. Job360 has machinery for it (`_get_json_conditional`, `ConditionalCache` 256-entry FIFO) but **no source opts in today** — the only callers of `_get_json_conditional` / `_get_text_conditional` are `backend/tests/test_conditional_fetch.py`. Rule #14 keeps it opt-in.
 **Code:** `backend/src/services/conditional_cache.py` · **Pillar 3**
 
 ### Cross-encoder rerank
@@ -68,7 +68,7 @@ Second-pass reranker (`cross-encoder/ms-marco-MiniLM-L-6-v2`) that takes the top
 
 ### CV parsing
 
-Turning a CV PDF/DOCX into structured `CVData`. PDF text extraction via `pdfplumber`, DOCX via `python-docx`, then **LLM-only** structuring (Gemini → Groq → Cerebras fallback) — the regex `KNOWN_SKILLS` approach was removed in commit `804725c`.
+Turning a CV PDF/DOCX into structured `CVData`. PDF text extraction via `pdfplumber`, DOCX via `python-docx`, then **LLM-only** structuring (OpenAI → Gemini → Groq → Cerebras fallback) — the regex `KNOWN_SKILLS` approach was removed in commit `804725c`.
 **Code:** `backend/src/services/profile/cv_parser.py` · **Pillar 1**
 
 ### DEFAULT_TENANT_ID
@@ -129,18 +129,18 @@ Deterministic SHA1 of `{user_id}:{job_id}:{channel}`. The `notification_ledger.U
 
 ### Job (the dataclass)
 
-The canonical posting shape every source must produce: ~27 fields including `title`, `company`, `apply_url`, score columns, lifecycle columns. `normalized_key()` is its dedup tuple.
+The canonical posting shape every source must produce: 31 fields including `title`, `company`, `apply_url`, score columns, lifecycle columns. `normalized_key()` is its dedup tuple.
 **Code:** `backend/src/models.py` · **Pillar 3**
 
 ### JobEnrichment
 
-LLM-extracted structured shape with 18 strict-typed fields, 8 enums, nested `SalaryBand`. One row per `job_id` in the `job_enrichment` table — **shared catalog** (no `user_id`).
+LLM-extracted structured shape with 16 strict-typed fields, 7 enums, nested `SalaryBand`. One row per `job_id` in the `job_enrichment` table — **shared catalog** (no `user_id`).
 **Code:** `backend/src/services/job_enrichment_schema.py`, migration `0008` · **Pillar 2**
 
 ### JobScorer
 
-The Pillar-2 scoring class. Two call signatures: `JobScorer(config)` (legacy 4-component) vs `JobScorer(config, user_preferences, enrichment_lookup)` (9-field `ScoreBreakdown` with Batch-2.9 multi-dim). The two kwargs are **co-required** (rule #20).
-**Code:** `backend/src/services/skill_matcher.py:416-542` · **Pillar 2**
+The Pillar-2 scoring class. Two call signatures: `JobScorer(config)` (legacy 4-component) vs `JobScorer(config, user_preferences, ...)` (9-field `ScoreBreakdown` with Batch-2.9 multi-dim). The multi-dim path is gated on `user_preferences` **alone** (rule #20) — `enrichment_lookup` is optional, and a missing one gives every dim its documented NEUTRAL half, never a zero (rule #29).
+**Code:** `backend/src/services/skill_matcher.py:440-643` · **Pillar 2**
 
 ### Ledger (notification_ledger)
 
@@ -149,17 +149,17 @@ Per-(user, job, channel) row tracking notification status: `queued` / `sent` / `
 
 ### LLM provider chain
 
-Job360's CV-parsing / enrichment fallback: Gemini (`gemini-2.0-flash`, best JSON) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`llama3.1-8b`, fastest). All-fail → `RuntimeError`. `llm_extract_validated()` adds a self-correction retry loop (max 2× with appended Pydantic errors).
+Job360's CV-parsing / enrichment chain, tried in this order: **OpenAI** (`gpt-4o-mini`, the PRIMARY — paid quota, deterministic) → Gemini (`gemini-3.7-flash`) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`gpt-oss-120b`). Every model id is env-overridable (`OPENAI_MODEL` / `GEMINI_MODEL` / `GROQ_MODEL` / `CEREBRAS_MODEL`). All-fail raises `LLMRateLimited` or `LLMAllProvidersFailed` (both subclass `LLMError(RuntimeError)`); no key at all raises `LLMKeyMissing`. `llm_extract_validated()` adds a self-correction retry loop (max 2× with appended Pydantic errors).
 **Code:** `backend/src/services/profile/llm_provider.py` · **Pillars 1 + 2**
 
 ### normalized_key
 
 `(normalized_company, normalized_title)` tuple — strips legal suffixes (Ltd/Inc/PLC/…), region suffixes (UK/US/EMEA/…), lowercases. The DB UNIQUE constraint on `jobs` + the dedup Layer-1 key. **Never change without checking both** (rule #1).
-**Code:** `backend/src/models.py:83-87` · **Pillar 3**
+**Code:** `backend/src/models.py:106-127` · **Pillar 3**
 
 ### Pillar
 
-Job360's three architectural divisions: **Pillar 1 (User)**, **Pillar 2 (Engine)**, **Pillar 3 (Providers)**. See each doc under `docs/pillars/`.
+Job360's three architectural divisions: **Pillar 1 (User)**, **Pillar 2 (Engine)**, **Pillar 3 (Providers)**. See each doc under `docs/product/pillars/`.
 
 ### Prefilter
 
@@ -173,13 +173,13 @@ Composite of `CVData` (from CV/LinkedIn/GitHub) + `UserPreferences` (form fields
 
 ### Rate limiter
 
-Per-source `asyncio.Semaphore(concurrent) + sleep(delay)` pair. Configured by `RATE_LIMITS` dict in `settings.py` (46 entries, one per registry key). *In-request* concurrency; separate from the *between-runs* scheduler cadence.
+Per-source `asyncio.Semaphore(concurrent) + sleep(delay)` pair. Configured by `RATE_LIMITS` dict in `settings.py` (41 entries, one per registry key). *In-request* concurrency; separate from the *between-runs* scheduler cadence.
 **Code:** `backend/src/utils/rate_limiter.py` · **Pillar 3**
 
 ### Recency scoring
 
 Job-freshness component (0–10 pts) driven by the 5-column date model (`posted_at`, `date_found`, `date_confidence`, `date_posted_raw`). Fabricated/negative dates score 0; low-confidence falls to 60% of band. Anti-staleness signal.
-**Code:** `backend/src/services/skill_matcher.py:313-330` · **Pillar 2**
+**Code:** `backend/src/services/skill_matcher.py:284-318` · **Pillar 2**
 
 ### RRF (Reciprocal Rank Fusion)
 
@@ -198,7 +198,7 @@ A single end-to-end pass of the pipeline. Tagged with a `run_uuid` correlation i
 ### ScoreBreakdown
 
 9-field frozen dataclass returned by `JobScorer.score()`: title, skill, location, recency (classic 4) + seniority, salary, visa, workplace (Batch-2.9 multi-dim) + the clamped `match_score` total.
-**Code:** `backend/src/services/scoring_dimensions.py:40-65` · **Pillar 2**
+**Code:** `backend/src/services/scoring_dimensions.py:49-73` · **Pillar 2**
 
 ### SearchConfig
 
@@ -217,8 +217,8 @@ The auth artefact set after login: cookie value is `<session_id>.<hmac>` signed 
 
 ### SOURCE_REGISTRY
 
-The 47-key dict in `main.py` mapping source-name to class. Builds 46 instances (indeed+glassdoor share `JobSpySource`). The *test* assertion `len(SOURCE_REGISTRY) == 47` in `test_cli.py` is one of five load-bearing surfaces (rule #13).
-**Code:** `backend/src/main.py:106-159` · **Pillar 3**
+The 41-key dict in `main.py` mapping source-name to class. Builds 40 instances (indeed+glassdoor share `JobSpySource`). The *test* assertion `len(SOURCE_REGISTRY) == 41` in `test_cli.py` is one of five load-bearing surfaces (rule #13).
+**Code:** `backend/src/main.py:110-154` · **Pillar 3**
 
 ### Stale (vs Confirmed Expired)
 

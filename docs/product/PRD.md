@@ -94,7 +94,7 @@ The user arrives at the Job360 website and creates an account. Authentication me
 
 After sign-up, the user enters the profile builder. This is a guided flow, not a blank form.
 
-**Step 1 — Upload CV.** The user uploads their CV as a PDF or DOCX. The system extracts text and sends it through an LLM parsing pipeline (Gemini → Groq → Cerebras fallback chain) to extract skills, job titles, companies, education, certifications, summary, and experience text. The parsed result is displayed to the user for review.
+**Step 1 — Upload CV.** The user uploads their CV as a PDF or DOCX. The system extracts text and sends it through an LLM parsing pipeline (OpenAI → Gemini → Groq → Cerebras fallback chain) to extract skills, job titles, companies, education, certifications, summary, and experience text. The parsed result is displayed to the user for review.
 
 **Step 2 — Optional enrichment.** The user may optionally upload a LinkedIn data export (ZIP) or connect their GitHub username. LinkedIn enrichment adds positions, skills, and industry context. GitHub enrichment infers technical skills from repository languages and topics.
 
@@ -102,7 +102,7 @@ After sign-up, the user enters the profile builder. This is a guided flow, not a
 
 **Step 4 — Save preferences (click 1).** The user clicks "Save Preferences" to confirm their profile. This is a deliberate action — the system does not auto-save on every keystroke, because saving triggers profile recomputation.
 
-**Step 5 — Trigger first search (click 2).** After saving, the user clicks "Search" to trigger their first pipeline run. This is a separate, deliberate action. The two-click pattern (save, then search) exists because each search consumes compute resources (47 source fetches, LLM calls, scoring), and auto-triggering on every profile edit would waste resources on incomplete configurations.
+**Step 5 — Trigger first search (click 2).** After saving, the user clicks "Search" to trigger their first pipeline run. This is a separate, deliberate action. The two-click pattern (save, then search) exists because each search consumes compute resources (41 source fetches, LLM calls, scoring), and auto-triggering on every profile edit would waste resources on incomplete configurations.
 
 **Why two clicks, not one:** Every time a user changes a single word in their preferences, if search ran automatically, the platform would burn compute on an unfinished configuration. The user must explicitly signal "I am satisfied with my profile" (save) and "run the search now" (search) as two separate intents.
 
@@ -150,7 +150,7 @@ The user can trigger a manual search at any time in addition to the scheduled ru
 
 **FR-2.1:** The system accepts CV uploads in PDF and DOCX formats. CV text extraction must handle standard document layouts. Scanned/image-only PDFs are out of scope for v1 but should fail gracefully with a clear error message.
 
-**FR-2.2:** CV parsing uses LLM-based extraction with a fallback chain (currently Gemini → Groq → Cerebras). The system must never crash if all LLM providers are unavailable — it must fall back to manual-only preferences entry.
+**FR-2.2:** CV parsing uses LLM-based extraction with a fallback chain (currently OpenAI `gpt-4o-mini` → Gemini → Groq → Cerebras). The system must never crash if all LLM providers are unavailable — it must fall back to manual-only preferences entry.
 
 **FR-2.3:** LinkedIn data export parsing accepts the standard LinkedIn ZIP format and extracts positions, skills, education, certifications, and industry.
 
@@ -256,7 +256,7 @@ The user can trigger a manual search at any time in addition to the scheduled ru
 
 ### NFR-1: Performance
 
-**NFR-1.1:** A single user's search pipeline must complete within 5 minutes (47 sources, 120s per-source timeout, parallel execution).
+**NFR-1.1:** A single user's search pipeline must complete within 5 minutes (41 sources, 120s per-source timeout, parallel execution).
 
 **NFR-1.2:** Dashboard page load must be under 3 seconds for up to 500 job listings.
 
@@ -306,7 +306,7 @@ This section maps the current codebase state (from `CurrentStatus.md`) against t
 |---|---|---|---|
 | FR-1.1: Multi-user isolation | Single `user_profile.json` file, single SQLite DB | Must redesign for multi-tenant storage | **Critical** |
 | FR-2.1: CV ingestion | PDF/DOCX extraction works (pdfplumber + python-docx) | No OCR for scanned PDFs (acceptable for v1) | Low |
-| FR-2.2: LLM parsing | Gemini → Groq → Cerebras fallback chain functional | Hard crash if all 3 keys missing; needs graceful fallback to manual-only | Medium |
+| FR-2.2: LLM parsing | OpenAI → Gemini → Groq → Cerebras fallback chain functional | Hard crash if all 3 keys missing; needs graceful fallback to manual-only | Medium |
 | FR-2.3: LinkedIn enrichment | ZIP parsing works for standard format | No handling of LinkedIn format changes | Medium |
 | FR-2.4: GitHub enrichment | 32 language + 50 topic mappings | Limited coverage; public repos only | Low |
 | FR-2.5: Preference override | Manual preferences override auto-extracted values | No conflict resolution (CV says "junior", prefs say "senior") | Medium |
@@ -317,12 +317,12 @@ This section maps the current codebase state (from `CurrentStatus.md`) against t
 
 | Requirement | Current State | Gap | Severity |
 |---|---|---|---|
-| FR-3.1: Parallel fan-out | asyncio.gather with 47 sources, failure isolation | Working. No changes needed for v1 architecture. | None |
+| FR-3.1: Parallel fan-out | asyncio.gather with 41 sources, failure isolation | Working. No changes needed for v1 architecture. | None |
 | FR-3.2: Normalisation | Job dataclass with HTML unescape, company cleaning, salary bounds | No currency detection, binary visa flag loses nuance | Medium |
 | FR-3.3: Scoring accuracy | 4-dimension scoring (title 40, skill 40, location 10, recency 10) | Title matching is substring-based (crude). Skill matching is regex-only (no synonyms, no semantic similarity). | **High** |
 | FR-3.4: Date accuracy | 14/47 sources hardcode `now()`. 3 more use wrong date field. | Recency scoring is broken for 36% of sources. Must fix to `None` + fallback logic. | **Critical** |
 | FR-3.5: Deduplication | Works within a run. DB unique key is narrower than dedup key (documented). | Cross-run reappearance of seniority variants is a known tradeoff. Acceptable for v1. | Low |
-| FR-3.7: Source routing | All 47 sources run for every user regardless of domain | Non-tech users drowned in tech-only results. Must implement domain-aware routing. | **Critical** |
+| FR-3.7: Source routing | All 41 sources run for every user regardless of domain | Non-tech users drowned in tech-only results. Must implement domain-aware routing. | **Critical** |
 | Not in FRs: LLM enrichment | Not implemented. LLM used only for CV parsing. | HiringCafe extracts 17+ fields per listing via GPT-4o-mini. Job360 has zero JD enrichment. | **High** |
 | Not in FRs: Semantic matching | Not implemented. No embeddings, no ChromaDB, no cross-encoder. | Skill matching misses synonyms ("ML" vs "Machine Learning"). | **High** |
 | Not in FRs: Ghost detection | Not implemented. No disappearance tracking. | Filled/expired jobs stay in DB until 30-day purge. | Medium |
@@ -332,7 +332,7 @@ This section maps the current codebase state (from `CurrentStatus.md`) against t
 
 | Requirement | Current State | Gap | Severity |
 |---|---|---|---|
-| FR-4.1: Free sources only | All 47 sources are free | **Done.** | None |
+| FR-4.1: Free sources only | All 41 sources are free | **Done.** | None |
 | FR-4.2: ATS company coverage | Approximately 104 company slugs across 10 ATS platforms | Feashliaa repo has 4,000+. Target: 500+. | **High** |
 | FR-4.3: UK general aggregators | Reed, Adzuna, FindAJob (3 sources) | Critically insufficient for non-tech domains. Need more UK-wide boards. | **Critical** |
 | FR-4.4: Remove non-job sources | YC Companies (career links), Nomis (statistics) still active | Should be removed or reclassified | Low |

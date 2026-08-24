@@ -58,7 +58,7 @@ Alice uploads her CV PDF. Frontend `POST /api/profile` with multipart `cv=<file>
 2. Save uploaded file to a temp dir.
 3. `cv_parser.parse_cv_async(temp_path)`:
    - `extract_text_from_pdf()` via `pdfplumber`.
-   - `llm_extract_validated(prompt, CVSchema, max_retries=2)` — Gemini first; on Pydantic `ValidationError`, errors are appended to the prompt and the call retries; falls through to Groq, then Cerebras.
+   - `llm_extract_validated(prompt, CVSchema, max_retries=2)` — **OpenAI (`gpt-4o-mini`) first**, then Gemini; on Pydantic `ValidationError`, errors are appended to the prompt and the call retries; falls through to Groq, then Cerebras.
    - Returns `CVData` (skills, titles, companies, education, …).
 4. `preferences.merge_cv_and_preferences(cv_data, prefs)` → composite skills/titles list with user prefs taking priority.
 5. `UserProfile(cv_data, preferences)` saved via `storage.save_profile(profile, user_id, source_action="upload")` — UPSERTs `user_profiles` (tip) **and** INSERTs `user_profile_versions` (immutable snapshot, retention 10).
@@ -73,7 +73,7 @@ When the worker tick runs (or CLI `python -m src.cli run` is invoked) — Pillar
 
 1. Loads Alice's `UserProfile` via `storage.load_profile(alice.id)`.
 2. Generates `SearchConfig` from it (Pillar 2 §3.1) — the bridge from Pillar 1 to Pillar 2.
-3. Instantiates `JobScorer(search_config, user_preferences=alice.prefs, enrichment_lookup=lookup)` — both kwargs, per rule #20.
+3. Instantiates `JobScorer(search_config, user_preferences=alice.prefs, enrichment_lookup=lookup)`. `user_preferences` is what turns the Batch-2.9 dims on (rule #20); the lookup is optional and only decides whether they read real data or their neutral halves.
 4. Domain-filters sources via `classify_user_domain(alice.profile)` → say `{"tech"}` → keeps tech + general sources, drops healthcare/academia/education/climate-only sources.
 5. Fetches → prefilters → scores → dedups → stores.
 
@@ -191,7 +191,7 @@ The **shared `jobs` catalog never gets a `user_id`** (rule #10). Every per-user 
 
 ## 3. Ring 2 — Profile (CV + LinkedIn + GitHub + Preferences)
 
-The profile is what turns Job360 from "show me all 47 sources' raw output" into "show me the jobs *I* care about." Every downstream piece of the pillar — what's in the feed, what gets scored highly, what gets notified — depends on a populated profile.
+The profile is what turns Job360 from "show me all 41 sources' raw output" into "show me the jobs *I* care about." Every downstream piece of the pillar — what's in the feed, what gets scored highly, what gets notified — depends on a populated profile.
 
 ### 3.1 What the user experiences
 
@@ -221,7 +221,7 @@ Writes to `DEFAULT_TENANT_ID` (the placeholder user). Used by single-tenant inst
 
 1. **Extract text** with `pdfplumber` (with font-size clustering for layout-aware section splitting — see `layout.segment_sections_from_words`) or `python-docx`.
 2. **Call an LLM** via `llm_extract_validated(prompt, CVSchema)` (`backend/src/services/profile/llm_provider.py`). The schema is enforced with Pydantic; on validation failure the prompt is re-sent up to 2× with the validation error appended so the model can self-correct.
-3. **Provider fallback chain**: Gemini → Groq → Cerebras. Whichever has a working API key wins. If all three fail, `RuntimeError` is raised — the system never silently degrades to regex parsing (the old `KNOWN_SKILLS` / `KNOWN_TITLE_PATTERNS` approach was deliberately removed in commits 804725c and 3ba1342).
+3. **Provider fallback chain** (`llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. Whichever has a working API key wins. If all three fail, `RuntimeError` is raised — the system never silently degrades to regex parsing (the old `KNOWN_SKILLS` / `KNOWN_TITLE_PATTERNS` approach was deliberately removed in commits 804725c and 3ba1342).
 4. **ESCO normalisation code exists but has never run in production.** `_maybe_normalise_skills_via_esco()` (`cv_parser.py:804`) is a real no-op today: it needs both `SEMANTIC_ENABLED=true` AND a prebuilt embedding index at `backend/data/esco/`, and that directory has never been committed or generated (verified: `ls backend/data/esco` → does not exist). Root `CLAUDE.md` rule #28 states this as FACT (verified 2026-08-11): "no ontology is consulted... ESCO is inert scaffolding, never built or shipped." Reviving it means shipping the index artefacts, not flipping a flag.
 
 #### LinkedIn PDF — `backend/src/services/profile/linkedin_parser.py`
@@ -532,7 +532,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | --- | --- | --- |
 | CV upload (PDF/DOCX) | ✅ | `cv_parser.py` with `pdfplumber` + `python-docx` |
 | LLM-only skill/title extraction | ✅ | regex `KNOWN_SKILLS` removed in 3ba1342 |
-| LLM provider fallback (Gemini → Groq → Cerebras) | ✅ | `llm_provider.py` |
+| LLM provider fallback (OpenAI → Gemini → Groq → Cerebras) | ✅ | `llm_provider.py:329-334` |
 | LinkedIn "Save to PDF" import | ✅ | `linkedin_parser.py`, 2-of-3 detection heuristic |
 | GitHub enrichment with temporal weighting | ✅ | `github_enricher.py` — 3× weight for repos pushed in last year |
 | Dependency-file framework inference | ✅ | 7 file types parsed (package.json, requirements.txt, …) |
@@ -663,7 +663,7 @@ frontend/
 For completeness — these belong in the other two pillars and you won't find them here:
 
 - **How a job actually gets scored** — that's `JobScorer` in `src/services/skill_matcher.py` and the 8-dimension scoring stack. → see `02-search-and-match-engine.md` (next document).
-- **Where the 47 sources come from** — that's `src/sources/**`, `SOURCE_REGISTRY`, the tiered scheduler, circuit breakers. → see `03-job-providers.md`.
+- **Where the 41 sources come from** — that's `src/sources/**`, `SOURCE_REGISTRY`, the tiered scheduler, circuit breakers. → see `03-job-providers.md`.
 - **The shared `jobs` catalog table itself** — Pillar 3 (providers) writes it, Pillar 1 (this doc) reads it via `user_feed`.
 
 ---
