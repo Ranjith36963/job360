@@ -71,7 +71,15 @@ FINDWORK_API_KEY = _secret("FINDWORK_API_KEY")
 DFE_APPRENTICESHIPS_API_KEY = _secret("DFE_APPRENTICESHIPS_API_KEY")
 
 # GitHub (optional — for higher rate limits on profile enrichment)
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+# Accepts either name. Measured 2026-08-24 across all four environments: the
+# developer's .env defines GITHUB_TOKEN, while BOTH Railway services define
+# GITHUB_PERSONAL_ACCESS_TOKEN — so `os.getenv("GITHUB_TOKEN")` found nothing in
+# production and GitHub profile enrichment ran unauthenticated at 60 requests/hour
+# instead of 5,000, silently, because an absent token is a supported state.
+#
+# Reading both is the fix that cannot drift: renaming one side would leave the
+# other environment broken until someone noticed, and nobody noticed this one.
+GITHUB_TOKEN = _secret("GITHUB_TOKEN") or _secret("GITHUB_PERSONAL_ACCESS_TOKEN")
 
 # LLM providers for CV analysis.
 # OpenAI (paid) is the PRIMARY — reliable quota, deterministic (temp 0), structured
