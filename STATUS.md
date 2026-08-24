@@ -19,7 +19,10 @@
 > that are not there. Treat every path and commit below as UNVERIFIED unless you have just
 > checked it.
 
-> **In flight (branch `feat/two-pass-profile-extraction`, 2026-06-17):** two-pass
+> **SHIPPED** (verified 2026-08-24: `backend/src/services/profile/two_pass.py:572`
+> `run_two_pass_extraction`). The branch `feat/two-pass-profile-extraction` no
+> longer exists — it merged. This block described it as "in flight" for two
+> months after the work landed. Two-pass
 > profile extraction. Every input (CV / LinkedIn / GitHub / preferences) now gets a
 > deterministic pass **and** an LLM enhance pass, merged into one `CVData`. New
 > `CVData` fields (`linkedin_raw_text`, `github_repos_brief`, `github_llm_skills`,
@@ -48,7 +51,7 @@
 **Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 218 `test_*.py` modules
 **Job sources:** 41 entries in `SOURCE_REGISTRY`; 40 live instances since `indeed` + `glassdoor` share `JobSpySource`; gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 dropped jobtensor, comeet, aijobs_global; the 2026-08-10 rotation dropped 6 more dead upstreams — aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
 **Latest merged head:** `225040e` on `origin/main` — docs audit + cleanup (2026-06-21); all worktree/feature branches merged and deleted.
-**Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
+**Sentinel:** removed 2026-08-24. `.claude/step-3-verified.txt` does not exist and no code reads it — `docs/harness/step_3_plan.md:120` still describes a halt-on-sentinel flow that has nothing to halt on. A pointer to a file that was never written is worse than no pointer: it reads as proof that a check ran.
 
 ---
 

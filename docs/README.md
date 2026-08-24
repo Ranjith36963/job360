@@ -1,7 +1,16 @@
 # Job360 — Documentation Index
 
-The map of everything under `docs/` (plus the load-bearing docs at the repo root).
-Start here to find the right doc fast.
+A curated map of the docs worth reading under `docs/` (plus the load-bearing
+docs at the repo root). Start here to find the right doc fast.
+
+> **NOT a complete listing.** Measured 2026-08-24: 105 `*.md` files are tracked
+> under `docs/`, and this index links 49 of them. The other 56 are mostly
+> `_archive/` and dated `harness/` records, which are deliberately left out —
+> but the gap means "not in this index" does NOT mean "does not exist". Use
+> `git ls-files "docs/*.md"` when you need the real list.
+>
+> This file used to call itself "the map of everything", which is the kind of
+> claim that stops people looking further.
 
 > **Regenerated 2026-06-21** after a docs audit (dead/stale files removed, drift fixed).
 > **Legend:** 🟢 current ground truth · 📘 stable reference · 🗄️ historical (append-only / not kept current)
@@ -34,9 +43,7 @@ Start here to find the right doc fast.
 
 | Doc | What it is |
 |---|---|
-| [`STACK.md`](product/STACK.md) | Tech stack layer-by-layer: what we have vs what to add (Postgres, Docker, Stripe, etc.) + costs. |
 | [`llm_prod.md`](harness/llm_prod.md) | Production LLM provider choice (researched 2026-07-08): why the 429s, provider comparison, GDPR split, recommended chain. TL;DR: Gemini 2.5 Flash single / +DeepSeek for cheap batch. |
-| [`STACK_checklist.md`](product/STACK_checklist.md) | Code-audited checklist: 27 built ✅ (with file proof) vs 21 to build ❌. |
 | [`UPGRADE_PLAN.md`](harness/UPGRADE_PLAN.md) | Phase 1–3 execution plan (Postgres → deploy → monitoring): TDD + multi-agent, money + keys per phase. |
 | [`../CLAUDE.md`](../CLAUDE.md) | Load-bearing architecture doc: data flow, module map, **28 hard rules**, scoring, env vars. |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Deep technical reference: directory tree, DB schema, data-flow diagrams, dependencies. |
@@ -111,7 +118,6 @@ Background research that `IMPLEMENTATION_LOG.md` bridges to the shipped code (ke
 
 ## 🛠️ Known debt
 
-- [`mypy_backlog.md`](harness/mypy_backlog.md) — catalogued mypy strict-mode errors + chip-away order.
 
 ## 🗄️ Archive (`_archive/`)
 

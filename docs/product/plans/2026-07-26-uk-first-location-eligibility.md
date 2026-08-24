@@ -1,6 +1,22 @@
 # UK-first feed — location eligibility plan (5-lens review, 2026-07-26)
 
-**Status: DESIGNED, NOT BUILT. Awaiting owner approval of build order (F3/F4 = scoring, owner's domain).**
+> ## ⚠️ SUPERSEDED — 2026-08-24. Do NOT build from this document.
+>
+> The problem this plan solves was solved a **different way** and is shipped.
+> The live implementation is `backend/src/services/uk_gate.py` (`check_uk`), a
+> single chokepoint called once per job before storage, matching against the
+> compiled gazetteer in `backend/src/data/uk_gazetteer/`. See root `CLAUDE.md`
+> rule #30 and `docs/product/product_design_rules.md`.
+>
+> **Verified 2026-08-24: the two modules this plan tells you to create do not
+> exist and never will** — there is no `backend/src/core/markets.py` and no
+> `backend/src/services/location/resolver.py`. A reader following the build
+> order below would write new code for a problem that already has an owner.
+>
+> Kept as the record of the 5-lens review and the reasoning behind the design
+> that was chosen instead. Read it as history, not as instructions.
+
+**Original status line (2026-07-26): DESIGNED, NOT BUILT. Awaiting owner approval of build order (F3/F4 = scoring, owner's domain).**
 Produced by a 5-agent review (data / code / product / design / adversarial) against live prod + real code.
 Full lens transcripts: session e40bad3c workflow `wf_eeddf972-ef0` (journal.jsonl per-agent).
 

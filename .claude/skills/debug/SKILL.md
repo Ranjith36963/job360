@@ -31,9 +31,14 @@ from src.services.profile.storage import load_profile
 from src.services.profile.keyword_generator import generate_search_config
 from src.services.skill_matcher import JobScorer
 
-profile = load_profile()
+import sys
+user_id = sys.argv[1] if len(sys.argv) > 1 else ''
+if not user_id:
+    print('ERROR: pass a user_id — load_profile(user_id) is per-user since multi-tenant.')
+    exit(1)
+profile = load_profile(user_id)
 if not profile:
-    print('ERROR: No profile loaded. Run setup-profile first.')
+    print(f'ERROR: no profile for {user_id}. Run setup-profile first.')
     exit(1)
 
 config = generate_search_config(profile)

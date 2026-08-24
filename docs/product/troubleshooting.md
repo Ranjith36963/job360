@@ -30,19 +30,31 @@ npm run dev -- -p 3001
 
 ---
 
-## 2. SQLite "database is locked"
+## 2. Postgres connection / schema errors in tests
 
-**Symptom:** `sqlite3.OperationalError: database is locked` during test runs or the pipeline.
+**Symptom:** `psycopg.OperationalError: connection refused`, or a test reading rows
+it never wrote.
 
-**Cause:** WAL mode is on in `repositories/database.py`, but parallel pytest workers (`-n auto` via pytest-xdist) or parallel DB-touching test files can still conflict when they open the same DB file simultaneously.
+**Cause:** the suite runs against a REAL Postgres (docker-compose.dev.yml, port
+5433) with a schema per test. Either the container is not up, or a fixture was
+imported across modules — a double import breaks per-test schema isolation, so
+one test writes to schema A while another reads schema B.
 
-**Fix:** Run tests single-threaded and deterministically.
+**Fix:**
 
 ```bash
-python -m pytest tests/ -v -p no:randomly
+make redis-up            # from the repo root; brings up the dev containers
+cd backend && python -m pytest -q -p no:randomly
 ```
 
-Avoid running `test_database.py` concurrently with any other file that opens `backend/data/jobs.db`. Use per-test tmp DB paths where possible.
+Never import a test fixture from another test module. Register fixtures in
+`conftest.py` instead — cross-module fixture imports are what break schema
+isolation, and the symptom looks like unrelated tests failing.
+
+> **This section used to document SQLite "database is locked" and WAL mode.**
+> The database has been Postgres via psycopg3 since 2026-07-02; `pg.py` is an
+> aiosqlite-SHAPED shim, not SQLite. That failure mode cannot occur, so the old
+> advice sent people to fix a lock that does not exist. Corrected 2026-08-24.
 
 ---
 
