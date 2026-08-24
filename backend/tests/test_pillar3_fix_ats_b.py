@@ -5,9 +5,12 @@ produced this file). This test file covers ONLY the new behaviour; it does
 not duplicate the existing happy-path parsing tests in test_sources.py.
 
 Workable:
-    - "published" (ISO date) is the real posted-date field. The old code
+    - "published_on" (ISO date) is the real posted-date field. The old code
       hardcoded posted_at=None, date_confidence="fabricated" ("fabricated"
       is not a valid date_confidence value).
+      Updated 2026-08-24: the list call is now the widget endpoint, where
+      "published" and a "location" dict are both 0% present -- the real names
+      are "published_on" and flat "city"/"country".
 
 Recruitee:
     - "salary" is a NESTED object ({min, max, period, currency}), not the
@@ -52,16 +55,25 @@ def _run(coro):
 # Workable - date fix
 # ---------------------------------------------------------------------------
 
-def test_workable_uses_published_field_for_posted_at():
+def test_workable_uses_published_on_field_for_posted_at():
+    """The real posted-date field is `published_on`, NOT `published`.
+
+    Re-measured against the live widget endpoint 2026-08-24 (huggingface board,
+    7 postings): `published` is 0% present, `published_on` is 100%. The list
+    source is the widget endpoint, and location is flat `city`/`country` — a
+    `location` dict is 0% present too, and an empty location gets the job
+    dropped by _is_uk_or_remote before any date assertion could run.
+    """
     async def _test():
         session = aiohttp.ClientSession()
         try:
             with aioresponses() as m:
-                m.post(re.compile(r"https://apply\.workable\.com/.*"), payload={"results": [{
-                    "shortcode": "XYZ789", "title": "Data Scientist",
-                    "location": {"city": "London", "country": "UK"},
-                    "published": "2026-07-01T09:00:00.000Z",
-                }]})
+                m.get(re.compile(r"https://apply\.workable\.com/api/v1/widget/.*"),
+                      payload={"jobs": [{
+                          "shortcode": "XYZ789", "title": "Data Scientist",
+                          "city": "London", "country": "UK",
+                          "published_on": "2026-07-01T09:00:00.000Z",
+                      }]})
                 source = WorkableSource(session, companies=["testco"])
                 jobs = await source.fetch_jobs()
                 assert len(jobs) == 1
@@ -82,10 +94,11 @@ def test_workable_never_emits_fabricated_confidence():
         session = aiohttp.ClientSession()
         try:
             with aioresponses() as m:
-                m.post(re.compile(r"https://apply\.workable\.com/.*"), payload={"results": [{
-                    "shortcode": "NODATE1", "title": "Backend Engineer",
-                    "location": {"city": "London", "country": "UK"},
-                }]})
+                m.get(re.compile(r"https://apply\.workable\.com/api/v1/widget/.*"),
+                      payload={"jobs": [{
+                          "shortcode": "NODATE1", "title": "Backend Engineer",
+                          "city": "London", "country": "UK",
+                      }]})
                 source = WorkableSource(session, companies=["testco"])
                 jobs = await source.fetch_jobs()
                 assert len(jobs) == 1

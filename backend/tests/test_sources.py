@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from urllib.parse import urlparse
 
 import aiohttp
 from aioresponses import aioresponses
@@ -2595,10 +2596,16 @@ def test_google_jobs_maps_schedule_type_and_forces_english():
                 assert jobs, "no jobs returned"
                 assert jobs[0].employment_type == "Full-time"
 
+                # Match the HOST, not a substring of the whole URL. `"serpapi.com"
+                # in url` is true for anything that merely CONTAINS the string
+                # (evil-serpapi.com, or a path/query that happens to mention it),
+                # so it is the wrong shape for deciding "was this call to SerpApi".
+                # Flagged by CodeQL py/incomplete-url-substring-sanitization.
                 sent = [
                     call.kwargs.get("params", {})
                     for key, calls in m.requests.items()
-                    if "serpapi.com" in str(key[1])
+                    if (urlparse(str(key[1])).hostname or "").lower()
+                    in ("serpapi.com", "www.serpapi.com")
                     for call in calls
                 ]
                 assert sent, "GoogleJobs was never called"

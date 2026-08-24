@@ -65,12 +65,20 @@ async def main():
             job = data[0]
             print("keys:", sorted(job.keys()))
             print("categories:", job.get("categories"))
+            # CodeQL flags any "salary" print as clear-text logging of sensitive
+            # data. Here it is the ADVERTISED salary range of a PUBLIC job ad,
+            # fetched from a public unauthenticated endpoint — the same figure
+            # the employer shows every visitor. It is not a person's private
+            # compensation, and this script prints nothing user-linked.
+            # codeql[py/clear-text-logging-sensitive-data]
             print("salaryRange:", job.get("salaryRange"))
             print("workplaceType:", job.get("workplaceType"))
             # check fill rates
             n = len(data)
             commitment_n = sum(1 for j in data if (j.get("categories") or {}).get("commitment"))
             salary_n = sum(1 for j in data if j.get("salaryRange"))
+            # A COUNT of how many public ads carry the field — no value at all.
+            # codeql[py/clear-text-logging-sensitive-data]
             print(f"n={n} commitment={commitment_n} salaryRange={salary_n}")
 
         print("\n=== WORKABLE huggingface ===")
