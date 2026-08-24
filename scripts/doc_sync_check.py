@@ -758,6 +758,17 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # "0000 → NNNN" phrasing, so both stale numbers slid past for weeks.
         ("migrations-schema", migration_file_count(),
          r"(\d+)-migration forward-compat schema"),
+        # The same COUNT, stated two other ways in the directory trees. Found by
+        # CodeRabbit on PR #394: both lines end "(0000 → 0030)", so
+        # `migration-head` matched them and they LOOKED guarded -- but that guard
+        # reads the HEAD, not the count beside it. Adding migration 0031 would
+        # correctly force the head to 0031 while "31 forward/reverse SQL
+        # migrations" quietly stayed 31. A guard on the same line is not a guard
+        # on the same fact.
+        ("migrations-schema", migration_file_count(),
+         r"(\d+) forward/reverse SQL migrations"),
+        ("migrations-schema", migration_file_count(),
+         r"(\d+) forward\+reverse SQL migration pairs"),
         # Sixth batch, 2026-08-24, at CodeRabbit's request on PR #394.
         # CONFIGURED (302 slugs / 11 lists) was guarded; ACTIVE (10 boards
         # polling 297) was not, though the docs state both. A rotation that
