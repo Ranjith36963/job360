@@ -286,8 +286,9 @@ timezone-aware quiet hours, and digest mode.
 > ⚠️ **The `NotificationChannel` ABC is GONE — do not write against it.** It used to live at
 > `backend/src/services/notifications/base.py`. That file, the auto-discovery helpers
 > (`get_all_channels()` / `get_configured_channels()`) and the per-channel classes were all
-> REMOVED. The only modules left under `backend/src/services/notifications/` are
-> `__init__.py` and `report_generator.py`.
+> REMOVED. What is left under `backend/src/services/notifications/` is `__init__.py`,
+> `report_generator.py` and `defaults.py` (the signup rulebook seeder + the one source of
+> truth for `NOTIFY_SCORE_THRESHOLD`) — no channel classes, no discovery.
 
 Channels are **per-user rows in the database**, not env-var-configured classes. The
 dispatcher's public surface:
@@ -399,7 +400,7 @@ job360/
 │       │   └── other/       (4 classes / 5 keys)
 │       ├── workers/             # ARQ tasks + WorkerSettings
 │       └── utils/
-├── backend/tests/               # ~1,409 collected offline (2 live deselected) across 60+ files (defer to runtime count)
+├── backend/tests/               # 3,297 collected / 3,295 selected (2 live deselected) across 217 test_*.py files (defer to runtime count)
 ├── frontend/                    # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
 │   └── src/
 │       ├── app/                 # App Router pages
@@ -423,7 +424,7 @@ python -m pytest backend/tests/test_scorer.py -v
 python -m pytest backend/tests/ -v -s
 ```
 
-The full suite passes (~1,409 collected offline, 2 live deselected — defer to the runtime count). Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
+The full suite passes (3,297 collected / 3,295 selected, 2 live deselected — defer to the runtime count). Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for `setup.sh` and `cron_setup.sh`).
 
 ## Output
 

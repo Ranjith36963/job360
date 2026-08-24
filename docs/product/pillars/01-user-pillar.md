@@ -106,8 +106,8 @@ On the channels page:
 
 Then a rule:
 
-- `POST /api/settings/notification-rules {channel:"email", score_threshold:80, notify_mode:"instant", quiet_hours_start:"22:00", quiet_hours_end:"07:00"}`
-- UPSERT by `UNIQUE(user_id, channel)`. Stored in `notification_rules`.
+- `PUT /api/settings/notification-rule {score_threshold:80, notify_mode:"instant", quiet_hours_start:"22:00", quiet_hours_end:"07:00"}`
+- UPSERT by `UNIQUE(user_id)`. Stored in `notification_rules`. **One rulebook per user, not one per channel** (CLAUDE.md rule #23) — the rule governs every channel Alice has connected, so there is no `channel` field in the body.
 
 ### T+2h — A fresh job posts, Alice gets notified
 
@@ -119,7 +119,7 @@ Worker fetches a new job, scores it 87 for Alice. `score_and_ingest`:
 `send_notification` worker task:
 
 1. Loads Alice's enabled channels → finds the email channel.
-2. Consults `notification_rules` for `(alice.id, 'email')`: enabled, threshold ≤ 87 ✓.
+2. Consults Alice's single `notification_rules` row (looked up by `user_id` alone): enabled, threshold ≤ 87 ✓.
 3. Current time in Alice's `users.timezone` → outside quiet hours (22:00–07:00) ✓.
 4. Idempotency check on `notification_ledger UNIQUE(user_id, job_id, channel)` — no row → proceed.
 5. `crypto.decrypt()` the channel credential.
@@ -336,25 +336,30 @@ Only the survivors get the full `JobScorer` treatment (Pillar 2).
   - `telegram` → `tgram://bot_token/chat_id`
   - `webhook` → `json://host/path`
 - **`backend/src/services/channels/crypto.py`** — `encrypt(plaintext) → bytes` / `decrypt(ciphertext) → str`. Fails closed if `CHANNEL_ENCRYPTION_KEY` is unset.
-- **`backend/src/services/channels/dispatcher.py`** — thin wrapper around Apprise. Imports `apprise` *lazily inside the function* (CLAUDE.md rule #11 — Apprise pulls ~30 MB of deps; library code must not pay that cost on import). Tests monkeypatch `apprise.Apprise`. The dispatcher runs each notification through four gates before sending: (1) `enabled=0` skip, (2) `match_score < score_threshold` skip, (3) `notify_mode='digest'` route to the digest queue, (4) inside quiet-hours window (evaluated with stdlib `zoneinfo` against `users.timezone`) route to digest or drop.
-- **Dual systems coexist.** The pre-Batch-2 single-tenant notification code in `src/services/notifications/{email_notify,slack_notify,discord_notify}.py` is still active — it reads env vars (`SMTP_EMAIL`, `SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`) and is used by the **CLI batch run** at end-of-run to send a single per-source summary. The new per-user `src/services/channels/dispatcher.py` is only invoked by ARQ worker tasks under an authenticated `user_id`. They never collide because they read different config surfaces.
+- **`backend/src/services/channels/dispatcher.py`** — thin wrapper around Apprise. Imports `apprise` *lazily inside the function* (CLAUDE.md rule #11 — Apprise pulls ~30 MB of deps; library code must not pay that cost on import). Tests monkeypatch `apprise.Apprise`. The dispatcher runs each notification through gates before sending: (1) `enabled=0` skip, (2) `match_score < score_threshold` skip, (3+4) `notify_mode` is a **bundling** mode (`daily` / `every_n_hours`) **or** the moment falls inside the quiet-hours window (evaluated with stdlib `zoneinfo` against `users.timezone`) → queue for the digest instead of sending now (`dispatcher.py:317`). `force=True` bypasses gate 3+4 and is how `send_bundle` delivers already-queued rows.
+- **There is only ONE delivery path.** The pre-Batch-2 single-tenant notification code (`src/services/notifications/{base,email_notify,slack_notify,discord_notify}.py`, env-var webhooks) was **deleted** — see the removal note in `ARCHITECTURE.md` / `README.md`. Everything user-facing goes through the per-user `src/services/channels/dispatcher.py`, invoked by ARQ worker tasks under an authenticated `user_id`. The CLI batch run no longer sends its own summary: it writes a markdown report via `services/notifications/report_generator.generate_markdown_report` (`main.py:49`) and enqueues the ordinary per-user `send_notification` task for above-threshold feed rows (`main.py:481` `_enqueue_notifications`).
 - **API** — `backend/src/api/routes/channels.py`:
   - `GET /api/settings/channels` — list caller's channels
   - `POST /api/settings/channels` — create (encrypts credential server-side)
   - `DELETE /api/settings/channels/{id}` — delete (two-layer ownership check: SELECT in route + dispatcher re-checks `user_id`)
   - `POST /api/settings/channels/{id}/test` — send a "test" message, return ok/error
 
-### 4.5 Notification rules — `backend/migrations/0012_notification_rules.up.sql`
+### 4.5 Notification rules — `backend/migrations/0020_notification_rule_single.up.sql`
+
+Migration `0012` created this table **per channel**. Migration `0020` collapsed it to **one row per user** — the `channel` column and `digest_send_time` are gone, and `notify_mode` gained two bundling modes:
 
 ```sql
-notification_rules(id, user_id FK, channel, score_threshold=60, notify_mode='instant'|'digest',
-                   quiet_hours_start, quiet_hours_end, digest_send_time='08:00', enabled)
-UNIQUE(user_id, channel)
+notification_rules(id, user_id FK, score_threshold=60,
+                   notify_mode='instant'|'daily'|'every_n_hours',
+                   interval_hours=6, daily_send_time='08:00',
+                   quiet_hours_start, quiet_hours_end, last_sent_at, enabled)
+UNIQUE(user_id)
 ```
 
-Lets the user say *"email me only for score ≥ 75; Slack for everything but only between 09:00 and 18:00; Discord as a daily 08:00 digest."* The `users.timezone` column (added in the same migration, default `'UTC'`) is what quiet-hours and digest times are evaluated against.
+One rulebook governs **all** of a user's channels at once (CLAUDE.md rule #23), so the user says *"notify me for score ≥ 75, bundled daily at 08:00, nothing between 22:00 and 07:00"* — not one policy per channel. The `users.timezone` column (added by `0012`, default `'UTC'`) is what quiet hours and `daily_send_time` are evaluated against.
 
-- API: `backend/src/api/routes/notification_rules.py` — `GET`, `POST` (upsert by user+channel), `PATCH`, `DELETE`. Every endpoint filters by `user_id = current_user.id`.
+- API: `backend/src/api/routes/notification_rules.py` — exactly two endpoints, `GET /api/settings/notification-rule` (returns `null` when unset) and `PUT /api/settings/notification-rule` (upsert, merging unsupplied fields). Both gate on `Depends(require_user)` and key off `user.id`; neither accepts a `user_id` from the request (rule #12).
+- A rulebook is **seeded at signup** (`services/notifications/defaults.py`, master switch `NOTIFY_SEED_DEFAULTS`) — before that, nothing in the product ever created a row, so no user could be alerted at all.
 
 ### 4.6 Notification ledger — `backend/migrations/0004_notification_ledger.up.sql`
 
@@ -369,7 +374,7 @@ This is the **idempotency table**: the UNIQUE constraint *guarantees* a (user, j
 
 ### 4.7 Digest queue — `backend/migrations/0013_user_notification_digests.up.sql`
 
-When `notify_mode='digest'`, individual job matches are queued in `user_notification_digests` rather than sent immediately. A scheduled worker drains the queue at `digest_send_time` in the user's timezone, batches all queued items into one message, and writes the result to the ledger.
+When `notify_mode` is a bundling mode (`daily` / `every_n_hours`) — or when an `instant` match lands inside quiet hours — the match is queued in `user_notification_digests` rather than sent immediately. The `notification_tick` ARQ cron runs **every 5 minutes** (`workers/settings.py:233`), asks `_bundle_due()` per enabled rule (using `daily_send_time` / `interval_hours` in the user's timezone), and enqueues `send_bundle` when due. `send_bundle` batches the queued rows into one Apprise call per channel with `force=True`, marks them `sent`, and writes the ledger — flipping a channel's ledger row to `dlq` after `MAX_BUNDLE_RETRIES` failures. `notification_tick` also flushes an `instant` user's queue once quiet hours end, which nothing else would drain.
 
 ### 4.8 Worker layer — `backend/src/workers/tasks.py`
 
@@ -377,7 +382,8 @@ Pure async functions (no `arq` import at module top level, per CLAUDE.md rule #1
 
 - `score_and_ingest(ctx, job_id, users_override=None)` — Pillar 2's `JobScorer` runs here; on success it `upsert_feed_row()`s into every user whose profile matches, then enqueues `send_notification` for any feed row above each user's threshold. The `users_override` kwarg lets the test suite scope to a single user without seeding others.
 - `send_notification(ctx, user_id, job_id, urgency='instant')` — dispatches to all of the user's enabled channels via `dispatcher.dispatch()`; one ledger row written per channel.
-- `send_daily_digest(ctx, user_id, channel)` — drains queued rows from `user_notification_digests`, batches into one Apprise call, marks rows `sent=1`.
+- `send_bundle(ctx, user_id)` (`tasks.py:971`) — drains queued rows from `user_notification_digests` across **all** the user's channels, batches into one Apprise call per channel, marks rows `sent`. There is no `send_daily_digest`; the per-channel task of that name was removed with the one-rule-per-user collapse.
+- `notification_tick(ctx)` (`tasks.py:1243`) — the 5-minute cron that decides which users are due and enqueues `send_bundle`.
 - `nightly_ghost_sweep(ctx)` — re-evaluates every non-expired job via `evaluate_job_state()`; transitions confirmed-dead postings to `staleness_state='confirmed_expired'` and `cascade_stale()`s them across every user's feed.
 - `enrich_job_task(ctx, job_id)` — idempotent LLM enrichment (skips if a `job_enrichment` row exists). One enrichment per job, not per user — shared catalog (CLAUDE.md rule #10 / #17).
 - `idempotency_key(user_id, job_id, channel)` — deterministic SHA1 ledger key.
@@ -557,12 +563,12 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | `user_channels` table + Fernet crypto | ✅ | migration `0005`, `crypto.py` |
 | 5 channel types (email/slack/discord/telegram/webhook) via Apprise | ✅ | `dispatcher.py`, lazy import |
 | Channel CRUD + test-send endpoint | ✅ | `routes/channels.py`, two-layer ownership check |
-| `notification_rules` per channel (threshold, mode, quiet hours, digest time) | ✅ | migration `0012` |
-| Notification rule CRUD endpoints | ✅ | `routes/notification_rules.py` |
+| `notification_rules` — ONE row per user (threshold, mode, quiet hours, daily send time, interval) | ✅ | migration `0012`, collapsed to `UNIQUE(user_id)` by `0020` |
+| Notification rule endpoints (`GET` / `PUT` on `/api/settings/notification-rule`) | ✅ | `routes/notification_rules.py` |
 | `notification_ledger` idempotency table | ✅ | migration `0004` — `UNIQUE(user_id, job_id, channel)` |
 | Ledger pagination + filters + per-channel stats | ✅ | `routes/notifications.py` |
 | Digest queue (`user_notification_digests`) | ✅ | migration `0013` |
-| ARQ + Redis worker for production | 🟡 | `tasks.py` are async-pure; worker config (`workers/settings.py`) is wired but production deployment is install-dependent |
+| ARQ + Redis worker for production | ✅ | `tasks.py` are async-pure; `workers/settings.py` is wired and `backend/railway.worker.json` deploys it as its own Railway service (`arq src.workers.settings.WorkerSettings`) |
 | Per-user timezone | ✅ | `users.timezone` column added in `0012`, default `'UTC'` |
 | Notification dry-run / preview before save | ❌ | only post-save `/test` endpoint exists |
 | Push notifications (FCM/APN) | ❌ | not in the channel list |
@@ -579,7 +585,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Profile editor (CV, LinkedIn, GitHub, prefs, version history) | ✅ | `app/profile/page.tsx` |
 | Pipeline Kanban with drag-and-drop | ✅ | `KanbanBoard` |
 | Channel management UI | ✅ | `listChannels` / `createChannel` / `testChannel` wired |
-| Notification rules UI | ✅ | `notification_rules.ts` API client functions exist |
+| Notification rules UI | ✅ | `getNotificationRule` / `saveNotificationRule` in `frontend/src/lib/api.ts` (there is no separate `notification_rules.ts`) |
 | Notification ledger UI page | ✅ | API ready (`getNotificationLedger`) — frontend route is wired (Step 2 S4) |
 | Theme toggle (dark/light) | ✅ | in `Navbar.tsx` |
 | Mobile responsive | ✅ | Tailwind v4 + mobile Navbar menu |
@@ -600,9 +606,10 @@ backend/
 │   ├── 0005_user_channels.up.sql              — Fernet-encrypted channels
 │   ├── 0006_user_profiles.up.sql              — multi-tenant profile storage
 │   ├── 0007_user_profile_versions.up.sql      — 10-version history
-│   ├── 0012_notification_rules.up.sql         — per-channel preferences + users.timezone
+│   ├── 0012_notification_rules.up.sql         — notification preferences + users.timezone
 │   ├── 0013_user_notification_digests.up.sql  — digest queue
-│   └── 0014_application_history.up.sql        — pipeline stage history + interview dates
+│   ├── 0014_application_history.up.sql        — pipeline stage history + interview dates
+│   └── 0020_notification_rule_single.up.sql   — collapse to ONE rule row per user
 ├── src/
 │   ├── api/
 │   │   ├── auth_deps.py                       — require_user / optional_user / CurrentUser
@@ -614,7 +621,7 @@ backend/
 │   │       ├── actions.py                     — like / apply / not_interested
 │   │       ├── pipeline.py                    — 5-stage Kanban API
 │   │       ├── channels.py                    — channel CRUD + test
-│   │       ├── notification_rules.py          — per-channel rule CRUD
+│   │       ├── notification_rules.py          — single per-user rule (GET / PUT)
 │   │       └── notifications.py               — ledger pagination + stats
 │   ├── core/
 │   │   └── tenancy.py                         — DEFAULT_TENANT_ID
@@ -630,14 +637,14 @@ backend/
 │   │   └── profile/
 │   │       ├── models.py                      — CVData / UserPreferences / UserProfile / SearchConfig
 │   │       ├── cv_parser.py                   — pdfplumber/python-docx → LLM
-│   │       ├── llm_provider.py                — Gemini/Groq/Cerebras
+│   │       ├── llm_provider.py                — OpenAI (PRIMARY) → Gemini → Groq → Cerebras
 │   │       ├── linkedin_parser.py             — LinkedIn PDF parsing
 │   │       ├── github_enricher.py             — GitHub API + temporal weighting
 │   │       ├── preferences.py                 — form validation + merging
-│   │       ├── storage.py                     — SQLite + legacy JSON hydration
+│   │       ├── storage.py                     — Postgres (sync `pgsync`) + legacy JSON hydration
 │   │       └── keyword_generator.py           — profile → SearchConfig
 │   └── workers/
-│       └── tasks.py                           — score_and_ingest, mark_ledger_sent/failed
+│       └── tasks.py                           — score_and_ingest, send_notification, notification_tick, send_bundle, mark_ledger_sent/failed
 └── tests/                                     — auth (4 files), profile (3 files), feed/channels/notifications (8+ files)
 frontend/
 ├── src/
