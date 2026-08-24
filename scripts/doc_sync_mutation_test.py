@@ -82,7 +82,18 @@ CASES: list[tuple[str, str, str, str]] = [
     # (3,297 collected at :124, ~1,409 at :402) while every check stayed green.
     # Breaking ONE doc's number is therefore a real mutation: it creates the
     # disagreement.
-    ("ARCHITECTURE.md",
+    # Points at CONTRIBUTING.md, not ARCHITECTURE.md, and the move is the
+    # lesson. #393 deleted the collected count from every doc that stated it as
+    # fact -- correctly: a number no guard can check against the code rots
+    # silently, so the fix is NO number, not a better one. That left this drill
+    # mutating a claim that no longer existed, and the drill SAID SO rather
+    # than passing quietly.
+    #
+    # CONTRIBUTING.md keeps it twice on purpose, as the merge-gate ratchet
+    # floor -- a policy threshold, not a claim about current state. Two sites
+    # is exactly what this guard needs: it fires on DISAGREEMENT, so mutating
+    # one of the pair is the only mutation that can make it red.
+    ("CONTRIBUTING.md",
      r"([\d,]{3,}) collected", "9,999 collected", "suite-baseline"),
     ("backend/CLAUDE.md",
      r"(SQLite|Postgres) via psycopg3", "SQLite table via psycopg3", "stale-phrase"),
