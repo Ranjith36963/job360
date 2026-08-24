@@ -90,6 +90,7 @@ For one healthy company (say `acme-corp`), this returns ~6 postings in JSON like
      "location": {"name": "London, UK"},
      "absolute_url": "https://boards.greenhouse.io/acme-corp/jobs/12345",
      "content": "&lt;p&gt;We're hiring...&lt;/p&gt;",
+     "first_published": "2026-05-20T11:30:00Z",
      "updated_at": "2026-05-28T09:00:00Z"},
     ...
   ]
@@ -109,8 +110,13 @@ job = Job(
     location=posting.get("location", {}).get("name", ""),
     description=_strip_html(posting["content"]),  # raw HTML → text
     date_found=now_iso(),
-    posted_at=posting.get("updated_at"),           # high-confidence date
-    date_confidence="high",
+    # posted_at comes from `first_published`, NOT `updated_at` — the latter
+    # tracks edits (a salary tweak) and would bump a stale posting back into
+    # the "just posted" bucket. normalize_posted_at() decides the confidence,
+    # so an unparseable value is reported low rather than fabricated.
+    posted_at=posted_at,                           # normalize_posted_at(first_published)[0]
+    date_confidence=confidence,                    # ...[1] — derived, never hardcoded
+    date_posted_raw=raw_updated_at,                # updated_at kept for audit
 )
 ```
 
