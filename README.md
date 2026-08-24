@@ -121,9 +121,18 @@ flowchart TD
 - **Split requirements** — prod deps in `backend/pyproject.toml` `[project.dependencies]`, dev/test in the same file's `[project.optional-dependencies] dev` extra (`pip install -e ".[dev]"`). There is no `requirements*.txt` in the repo
 - **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
 
-### Testing (3,297 collected, 3,295 selected offline, 2 live deselected — defer to the runtime collected count; run `pytest --collect-only -q | tail -1` for the live count)
+### Testing (217 `test_*.py` files; 2 `live` tests deselected offline)
 
-> Per-file counts below were measured with `cd backend && python -m pytest tests/<file>.py --collect-only -q -p no:randomly | tail -1`. `test_main.py` **is** in the canonical run — do not add `--ignore=tests/test_main.py` (root CLAUDE.md rule).
+> **The collected-test count is not written down anywhere on purpose.** Measure it:
+> `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`.
+> `scripts/doc_sync_check.py` deliberately does not guard it (it needs Postgres, and
+> parametrization makes any cheap check flaky), so any total committed to a doc is
+> unguarded and silently rots — this table has carried a wrong one before.
+>
+> Per-file counts below are a **snapshot taken 2026-08-24**, not a live invariant; re-measure
+> with `python -m pytest tests/<file>.py --collect-only -q -p no:randomly | tail -1`.
+> `test_main.py` **is** in the canonical run — do not add `--ignore=tests/test_main.py`
+> (root CLAUDE.md rule).
 
 | Test file | Collected count | What it covers |
 |-----------|-------|----------------|
@@ -147,7 +156,7 @@ flowchart TD
 | `test_cron.py` | 5 | cron_setup.sh validation |
 | `test_setup.py` | 4 | setup.sh validation |
 | `test_csv_export.py` | 4 | CSV export format |
-| (the other ~197 `test_*.py` files) | balance of 3,297 | auth, feed, prefilter, channels, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, application history, llm_matcher, uk_gate, visa_signal, shelf registry, harness guards |
+| (the other ~197 `test_*.py` files) | measure it | auth, feed, prefilter, channels, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, application history, llm_matcher, uk_gate, visa_signal, shelf registry, harness guards |
 
 ## Quick Start
 
@@ -384,8 +393,8 @@ job360/
 │       │   ├── circuit_breaker.py
 │       │   ├── feed.py
 │       │   ├── auth/
-│       │   ├── channels/        # Apprise dispatcher
-│       │   ├── notifications/   # email, slack, discord, report_generator
+│       │   ├── channels/        # dispatcher (Apprise), crypto, email_url, ssrf_guard
+│       │   ├── notifications/   # defaults (signup rulebook seeder), report_generator
 │       │   └── profile/         # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │       ├── repositories/        # (renamed from storage/)
 │       │   ├── database.py
@@ -400,7 +409,7 @@ job360/
 │       │   └── other/       (4 classes / 5 keys)
 │       ├── workers/             # ARQ tasks + WorkerSettings
 │       └── utils/
-├── backend/tests/               # 3,297 collected / 3,295 selected (2 live deselected) across 217 test_*.py files (defer to runtime count)
+├── backend/tests/               # 217 test_*.py files (collected-test count: measure it, never quote it)
 ├── frontend/                    # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
 │   └── src/
 │       ├── app/                 # App Router pages
@@ -424,7 +433,7 @@ python -m pytest backend/tests/test_scorer.py -v
 python -m pytest backend/tests/ -v -s
 ```
 
-The full suite passes (3,297 collected / 3,295 selected, 2 live deselected — defer to the runtime count). Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for `setup.sh` and `cron_setup.sh`).
+The suite runs against a real Postgres and 2 `live`-marked tests are deselected offline. **Measure the collected count, never quote one** — `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`; `scripts/doc_sync_check.py` deliberately does not guard it (needs Postgres, and parametrization makes any cheap check flaky), so any number written here is unguarded and rots. Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for `setup.sh` and `cron_setup.sh`).
 
 ## Output
 

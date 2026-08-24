@@ -44,7 +44,7 @@
 > delivery to live Slack/Telegram/Gmail (needs provider credentials).
 
 **Last updated:** 2026-08-24 (doc truth check; the phase narratives below are older — see `docs/harness/IMPLEMENTATION_LOG.md` for the current history)
-**Total tests:** defer to the runtime collected count (3,297 collected / 3,295 selected, 2 live deselected; 0 failing, 3 skipped on Windows)
+**Total tests:** measure it, never quote it — `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1` (2 `live` tests deselected offline; 3 skip on Windows)
 **Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 217 `test_*.py` modules
 **Job sources:** 41 entries in `SOURCE_REGISTRY`; 40 live instances since `indeed` + `glassdoor` share `JobSpySource`; gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 dropped jobtensor, comeet, aijobs_global; the 2026-08-10 rotation dropped 6 more dead upstreams — aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
 **Latest merged head:** `225040e` on `origin/main` — docs audit + cleanup (2026-06-21); all worktree/feature branches merged and deleted.
@@ -202,7 +202,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Email, Slack, Discord, Telegram, webhook — all via the Apprise dispatcher, per-user channels (Batch 2). The old built-in channel classes are REMOVED.
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- Tests: defer to the runtime collected count (3,297 collected / 3,295 selected, 2 live deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_setup.sh` tests), 0 failing
+- Tests: 217 `test_*.py` modules; measure the collected count, never quote it (2 `live` deselected offline); 3 skip on Windows (bash-only `setup.sh` / `cron_setup.sh` tests)
 
 ---
 
@@ -246,8 +246,8 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 > per-file counts roughly a third of the real ones. Two copies of a number is one copy too
 > many — README's is the measured one.
 
-**Current green baseline:** 3,297 collected / 3,295 selected (2 `live` deselected), 0 failing,
-3 skipped on Windows. Measure it, never quote it:
+**Current green baseline:** 217 `test_*.py` modules, 2 `live` tests deselected offline, 3 skipped
+on Windows. The collected count is deliberately not recorded here — measure it, never quote it:
 `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`.
 
 Broad coverage beyond the top-20 files: migrations, auth, feed, prefilter, channels, crypto,
