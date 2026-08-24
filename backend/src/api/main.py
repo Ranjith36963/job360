@@ -44,6 +44,7 @@ from src.api.routes import (
 from src.core.settings import LOG_LEVEL, validate_required_env
 from src.repositories import pg, pool
 from src.utils.logger import setup_audit_logger, setup_logging
+from src.utils.loop_guard import start_loop_watchdog
 
 
 def _is_prod_env() -> bool:
@@ -120,7 +121,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # time), so opening it would just tie up connections it never serves.
     if not pg.TEST_MODE:
         await pool.get_pool()
-    yield
+    # Loop-lag watchdog — the catch-all backstop behind @cpu_bound. The
+    # decorator only guards code someone remembered to decorate; this samples
+    # the loop's OWN responsiveness and reports any real stall (>0.5 s) to the
+    # log and Sentry, whatever caused it. Three separate loop-freeze bugs have
+    # shipped to prod (PR #123 search, the CV-upload stall, the catalog
+    # backfill) and each was diagnosed only after users complained. Gated on
+    # LOOP_WATCHDOG_ENABLED (default on); forced OFF under pytest, where the
+    # instant-asyncio.sleep fixture would turn the sampler into a busy-spin.
+    watchdog = start_loop_watchdog()
+    try:
+        yield
+    finally:
+        if watchdog is not None:
+            watchdog.cancel()
     await close_db()
     # Idempotent — a no-op if the pool was never opened (e.g. TEST_MODE).
     await pool.close_pool()

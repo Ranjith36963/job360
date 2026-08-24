@@ -102,6 +102,7 @@ from src.sources.scrapers.climatebase import ClimatebaseSource
 from src.sources.scrapers.eightykhours import EightyKHoursSource
 from src.sources.scrapers.linkedin import LinkedInSource
 from src.utils.logger import set_run_uuid, setup_logging
+from src.utils.loop_guard import cpu_bound
 from src.utils.telemetry import source_timer
 
 logger = logging.getLogger("job360.main")
@@ -678,6 +679,7 @@ async def _embed_backfill_budget(db: Any, conn: Any, budget: int) -> int:
     return embedded
 
 
+@cpu_bound
 def _score_dedup_and_filter(all_jobs: list[Job], scorer: JobScorer) -> list[Job]:
     """Score every job, extract deadlines, dedup, and score-filter — the whole
     SYNCHRONOUS, CPU-heavy stage of the pipeline in one place.

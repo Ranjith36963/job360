@@ -12,9 +12,10 @@ Both helpers are lazy-import-first (CLAUDE.md rule #16).
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, cast
+from typing import Any, NamedTuple, Optional, cast
 
 from src.repositories.db_retry import with_write_retry
+from src.utils.loop_guard import cpu_bound
 
 logger = logging.getLogger("job360.services.rescore")
 
@@ -62,6 +63,88 @@ def score_catalog_row(scorer: Any, row: dict[str, Any]) -> Any:
     # causing enrichment dims to always score 0).
     job.id = row.get("id")
     return scorer.score(job)
+
+
+class ScoredBatch(NamedTuple):
+    """One off-loop scoring pass: the kept rows, plus the title-strong lane.
+
+    Two lists rather than two passes. The gem-rescue lane (Phase 5) needs rows
+    that scored badly overall but whose TITLE is a strong match, so it cannot be
+    recovered from ``scored`` — those rows were dropped by ``min_score``. Both
+    are collected in the same single loop, inside the worker thread, so the
+    rescue lane costs no extra scan and never runs on the event loop.
+
+    ``title_strong`` is empty unless the caller passes ``title_rescue_min``.
+    """
+
+    scored: list[tuple[int, Any, dict[str, Any]]]
+    title_strong: list[tuple[int, Any, dict[str, Any]]]
+
+
+@cpu_bound
+def _score_catalog_rows(
+    scorer: Any,
+    rows: list[dict[str, Any]],
+    *,
+    min_score: int,
+    keep_ids: Optional[set[Any]] = None,
+    log_prefix: str = "rescore",
+    title_rescue_min: Optional[int] = None,
+) -> ScoredBatch:
+    """Score a whole batch of catalog rows — the CPU-heavy Phase 1, off-loop.
+
+    Pure computation: no awaits, no DB, no I/O. Everything DB-touching (loading
+    rows, action sets, preference signals, feed writes) stays in the async caller
+    — this function only turns rows into ``(match_score, job_id, row)`` tuples.
+
+    That split is the whole point. Both callers hand this to
+    ``asyncio.to_thread``, exactly like ``main.py`` :895 does for
+    ``_score_dedup_and_filter`` (PR #123). Called inline it froze the single
+    FastAPI event loop for the entire catalog scan — every other user's request
+    and the ``/api/search/{id}/status`` poll included. ``@cpu_bound`` makes that
+    mistake raise instead of quietly shipping again.
+
+    Args:
+        scorer: a prepared ``JobScorer`` (see ``_build_user_scorer``).
+        rows: catalog rows from ``JobDatabase.get_catalog_jobs_for_rescore``.
+        min_score: keep a row when its match score is >= this.
+        keep_ids: job ids to keep regardless of score (e.g. rows already in the
+            user's feed, which must be re-stamped under the new profile version).
+        log_prefix: label for the per-row warning, so backfill and re-score stay
+            distinguishable in the logs.
+        title_rescue_min: when set, also collect rows whose ``title_score`` is
+            at least this, into ``ScoredBatch.title_strong``. Left ``None`` the
+            lane is not built and behaviour is exactly as before.
+
+    Returns:
+        A ``ScoredBatch``: ``(match_score, job_id, row)`` tuples in catalog
+        order, plus the title-strong lane.
+    """
+    scored: list[tuple[int, Any, dict[str, Any]]] = []
+    title_strong: list[tuple[int, Any, dict[str, Any]]] = []
+    for row in rows:
+        jid = row.get("id")
+        if jid is None:
+            continue
+        # Per-row guard (FIX 3): one malformed catalog row must never abort the
+        # whole scan (mirrors run_search's per-job guard).
+        try:
+            breakdown = score_catalog_row(scorer, row)
+            ms = int(breakdown.match_score or 0)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("%s: skipping job %s: %s", log_prefix, jid, exc)
+            continue
+        # Collected BEFORE the min_score gate on purpose: the gem-rescue lane
+        # exists to recover title-perfect jobs that the overall score sank
+        # (thin or missing description text), so it must see the dropped rows.
+        if (
+            title_rescue_min is not None
+            and int(getattr(breakdown, "title_score", 0) or 0) >= title_rescue_min
+        ):
+            title_strong.append((ms, jid, row))
+        if ms >= min_score or (keep_ids is not None and jid in keep_ids):
+            scored.append((ms, jid, row))
+    return ScoredBatch(scored, title_strong)
 
 
 async def _build_user_scorer(db: Any, profile: Any) -> Any:
@@ -245,32 +328,30 @@ async def backfill_feed_from_catalog(
 
     cap = int(getattr(_settings, "FEED_CANDIDATE_CAP", 0) or 0)
 
-    # Phase 1 — score the whole catalog (unchanged cost: this loop always
-    # scored every row; it just also WROTE every row that beat the floor).
-    # `title_strong` feeds the gem-rescue lane (Phase 5): iteration-1 audit
+    # Phase 1 — score the whole catalog in a WORKER THREAD. This runs on every
+    # per-user search and is pure CPU (regex scoring across skill-synonym
+    # aliases, up to 50,000 rows) with zero awaits, so inline it froze the one
+    # event loop for the entire scan — the same failure PR #123 fixed in
+    # run_search. Scores and ordering are unchanged.
+    #
+    # `title_strong` feeds the gem-rescue lane (Phase 5): the iteration-1 audit
     # found 17 buried gems, ALL title-perfect jobs sunk by thin/no description
-    # text ("Senior Data Engineer", desc=0c, kw=26).
-    scored: list[tuple[int, Any, dict[str, Any]]] = []
-    title_strong: list[tuple[int, Any, dict[str, Any]]] = []
+    # text ("Senior Data Engineer", desc=0c, kw=26). It is built in the SAME
+    # worker-thread pass, so the rescue lane costs no second scan.
+    import asyncio as _asyncio  # noqa: PLC0415
+
     from src.services.llm_matcher import TITLE_RESCUE_MIN  # noqa: PLC0415
 
-    for row in rows:
-        jid = row.get("id")
-        if jid is None:
-            continue
-        # Per-row guard: one malformed catalog row must never abort the backfill
-        # (mirrors run_search's per-job guard).
-        try:
-            breakdown = score_catalog_row(scorer, row)
-            ms = int(breakdown.match_score or 0)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("catalog backfill: skipping job %s: %s", jid, exc)
-            continue
-        if int(getattr(breakdown, "title_score", 0) or 0) >= TITLE_RESCUE_MIN:
-            title_strong.append((ms, jid, row))
-        if ms < MIN_STORE_SCORE:
-            continue
-        scored.append((ms, jid, row))
+    _batch = await _asyncio.to_thread(
+        _score_catalog_rows,
+        scorer,
+        rows,
+        min_score=MIN_STORE_SCORE,
+        log_prefix="catalog backfill",
+        title_rescue_min=TITLE_RESCUE_MIN,
+    )
+    scored: list[tuple[int, Any, dict[str, Any]]] = _batch.scored
+    title_strong: list[tuple[int, Any, dict[str, Any]]] = _batch.title_strong
 
     # The user-feedback loop: explicit actions steer the shelf.
     protected_ids, rejected_ids = await _load_action_sets(db, user_id)
@@ -607,23 +688,21 @@ async def rescore_user_feed(
 
             cap = int(getattr(_settings, "FEED_CANDIDATE_CAP", 0) or 0)
 
-            # Phase 1 — score every catalog row (FIX 3 per-row guard kept:
-            # one bad row must not abort the whole re-score).
-            scored_rows: list[tuple[int, Any, dict[str, Any]]] = []
-            for row in rows:
-                jid = row.get("id")
-                if jid is None:
-                    continue
-                try:
-                    breakdown = score_catalog_row(scorer, row)
-                    ms = int(breakdown.match_score or 0)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("rescore: skipping job %s: %s", jid, exc)
-                    continue
-                # Legacy write condition: a positive score, or an existing feed
-                # row that must be re-stamped under the new profile version.
-                if ms > 0 or jid in existing_feed_ids:
-                    scored_rows.append((ms, jid, row))
+            # Phase 1 — score every catalog row in a WORKER THREAD (FIX 3
+            # per-row guard kept inside the helper). Fired on every profile save
+            # via api/routes/profile.py:89; inline it froze the event loop for
+            # the whole scan. Write condition is unchanged: a positive score
+            # (ms >= 1), or an existing feed row that must be re-stamped under
+            # the new profile version.
+            scored_rows: list[tuple[int, Any, dict[str, Any]]] = (
+                await _asyncio.to_thread(
+                    _score_catalog_rows,
+                    scorer,
+                    rows,
+                    min_score=1,
+                    keep_ids=existing_feed_ids,
+                )
+            ).scored
 
             # The user-feedback loop: rejected jobs never re-enter selection
             # (and never reach the paid judge); liked/applied are protected.

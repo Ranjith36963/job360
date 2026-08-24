@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from src.services.profile.models import CVData
+from src.utils.loop_guard import cpu_bound
 
 logger = logging.getLogger("job360.profile.cv_parser")
 
@@ -249,6 +250,7 @@ def extract_text_from_docx(file_path: str) -> str:
         return ""
 
 
+@cpu_bound
 def extract_text(file_path: str) -> str:
     """Extract text from PDF or DOCX based on file extension."""
     path = Path(file_path)
@@ -730,7 +732,10 @@ async def parse_cv_async(file_path: str) -> CVData:
     fallback for callers that pass pre-fetched dicts OR when strict
     validation fails after all retries (review fix #3).
     """
-    raw_text = extract_text(file_path)
+    # pdfplumber/python-docx are synchronous and CPU-bound; a 2-page PDF was
+    # measured stalling the loop 2,399 ms (tests/test_upload_does_not_block_loop.py).
+    # The upload ROUTE already used to_thread — this async parser did not.
+    raw_text = await asyncio.to_thread(extract_text, file_path)
     if not raw_text:
         raise RuntimeError(
             f"Failed to extract text from {file_path}. "
