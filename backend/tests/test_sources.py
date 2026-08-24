@@ -5272,21 +5272,25 @@ _WORKABLE_REQS_HTML = (
 
 
 def test_workable_fetches_description_from_the_detail_endpoint():
-    """The LIST endpoint has neither `shortDescription` nor `description` —
-    verified live against 5 company slugs on 2026-08-19. The adapter used to
-    read `shortDescription` off it anyway and store "". The mock reproduces
-    that exactly: list WITHOUT any text, detail WITH it.
+    """The DETAIL endpoint's richer prose must reach the Job.
+
+    The list source is now `GET /api/v1/widget/accounts/{slug}?details=true`,
+    not the old `POST /api/v2/.../jobs`. Field names below are the ones the live
+    widget response actually uses (measured 2026-08-24 on the huggingface board,
+    7 postings): flat `city`/`country` (NOT a `location` dict) and
+    `published_on` (NOT `published`) — both of the old names are 0% present.
     """
     async def _test():
         session = aiohttp.ClientSession()
         try:
             with aioresponses() as m:
-                m.post(re.compile(r"https://apply\.workable\.com/api/v2/accounts/[^/]+/jobs$"),
-                       payload={"results": [{
-                           "shortcode": "5B62764A74", "title": "Platform Engineer",
-                           "location": {"city": "London", "country": "UK"},
-                           "published": "2026-08-18",
-                       }]})
+                m.get(re.compile(r"https://apply\.workable\.com/api/v1/widget/accounts/[^/?]+"),
+                      payload={"jobs": [{
+                          "shortcode": "5B62764A74", "title": "Platform Engineer",
+                          "city": "London", "country": "UK",
+                          "published_on": "2026-08-18",
+                          "description": "<p>Short list blurb.</p>",
+                      }]})
                 m.get(re.compile(r"https://apply\.workable\.com/api/v2/accounts/suade/jobs/5B62764A74"),
                       payload={"description": _WORKABLE_DETAIL_HTML,
                                "requirements": _WORKABLE_REQS_HTML,
@@ -5306,22 +5310,31 @@ def test_workable_fetches_description_from_the_detail_endpoint():
     _run(_test())
 
 
-def test_workable_detail_failure_degrades_to_empty_never_drops_the_job():
-    """A correctness fix must not turn a thin row into a lost row."""
+def test_workable_detail_failure_degrades_to_the_list_text_never_drops_the_job():
+    """A correctness fix must not turn a thin row into a lost row.
+
+    Behaviour CHANGED here, deliberately: a failed detail fetch used to leave an
+    EMPTY description. The widget list response carries a real description on
+    100% of rows (measured live 2026-08-24), so that text is now the floor. The
+    job is still never dropped — it just no longer falls all the way to "".
+    """
     async def _test():
         session = aiohttp.ClientSession()
         try:
             with aioresponses() as m:
-                m.post(re.compile(r"https://apply\.workable\.com/api/v2/accounts/[^/]+/jobs$"),
-                       payload={"results": [{
-                           "shortcode": "ZZZ", "title": "Platform Engineer",
-                           "location": {"city": "London", "country": "UK"},
-                       }]})
+                m.get(re.compile(r"https://apply\.workable\.com/api/v1/widget/accounts/[^/?]+"),
+                      payload={"jobs": [{
+                          "shortcode": "ZZZ", "title": "Platform Engineer",
+                          "city": "London", "country": "UK",
+                          "description": "<p>List blurb survives a dead detail call.</p>",
+                      }]})
                 m.get(re.compile(r"https://apply\.workable\.com/api/v2/accounts/suade/jobs/ZZZ"),
                       status=404, repeat=True)
                 source = WorkableSource(session, companies=["suade"])
                 jobs = await source.fetch_jobs()
-            assert len(jobs) == 1 and jobs[0].description == ""
+            assert len(jobs) == 1, "a failed detail fetch must never drop the job"
+            assert "List blurb survives" in jobs[0].description
+            assert "<p>" not in jobs[0].description, "HTML must be stripped"
         finally:
             await session.close()
     _run(_test())
@@ -5336,11 +5349,12 @@ def test_workable_detail_budget_caps_the_extra_requests(monkeypatch):
         session = aiohttp.ClientSession()
         try:
             results = [{"shortcode": f"SC{i}", "title": "ML Engineer",
-                        "location": {"city": "London", "country": "UK"}} for i in range(4)]
+                        "city": "London", "country": "UK",
+                        "description": "<p>List blurb.</p>"} for i in range(4)]
             detail_calls = []
             with aioresponses() as m:
-                m.post(re.compile(r"https://apply\.workable\.com/api/v2/accounts/[^/]+/jobs$"),
-                       payload={"results": results}, repeat=True)
+                m.get(re.compile(r"https://apply\.workable\.com/api/v1/widget/accounts/[^/?]+"),
+                      payload={"jobs": results}, repeat=True)
 
                 def _cb(url, **kw):
                     from aioresponses import CallbackResult
