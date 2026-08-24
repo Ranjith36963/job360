@@ -98,8 +98,11 @@ def _score_catalog_rows(
     — this function only turns rows into ``(match_score, job_id, row)`` tuples.
 
     That split is the whole point. Both callers hand this to
-    ``asyncio.to_thread``, exactly like ``main.py`` :895 does for
-    ``_score_dedup_and_filter`` (PR #123). Called inline it froze the single
+    ``asyncio.to_thread``, exactly like ``main.py`` does for
+    ``_score_dedup_and_filter`` (PR #123). Named by SYMBOL, not by line: the
+    ``:895`` that stood here pointed at nothing after main.py moved, and a
+    reference that silently goes stale is worse than none — it sends a reader to
+    the wrong code with full confidence. Called inline it froze the single
     FastAPI event loop for the entire catalog scan — every other user's request
     and the ``/api/search/{id}/status`` poll included. ``@cpu_bound`` makes that
     mistake raise instead of quietly shipping again.

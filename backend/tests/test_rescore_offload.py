@@ -313,6 +313,14 @@ async def test_enrichment_lookup_parses_off_loop(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+# `real_sleep` because this case measures WALL-CLOCK time: it calls
+# `time.sleep()` and asserts on a `time.perf_counter()` delta. `conftest.py`
+# mocks `asyncio.sleep` to instant so the suite does not spend ~37 minutes in
+# retry backoff, and any test whose verdict depends on real elapsed time has to
+# opt out of that. Without the marker this asserts a duration in a world where
+# duration has been redefined — green or red for reasons unrelated to the code.
+# (CodeRabbit, PR #386; the convention is documented in backend/CLAUDE.md.)
+@pytest.mark.real_sleep
 @pytest.mark.asyncio
 async def test_backfill_keeps_loop_responsive_under_load(full_db, monkeypatch):
     """While the catalog is scored, the status poll must still get answered.

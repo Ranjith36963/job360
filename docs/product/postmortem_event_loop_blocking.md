@@ -21,7 +21,7 @@ So the review question "do the tests pass?" was the wrong question. They pass on
 PR #123 fixed one call site (`_score_dedup_and_filter` in `main.py`) and left behind:
 
 - a `to_thread` call at that one spot,
-- a test pinned to that one spot (`test_main.py:274`),
+- a test pinned to that one spot (`test_main.py`, the `to_thread` assertion),
 - and a comment.
 
 That is a **point guard**. It protects the two lines that already broke and nothing else. `rescore.py` was new code — the guard never saw it. Comments and site-specific tests fail as guards for one simple reason: **the natural way to write the line is the blocking way.** `for row in rows: score(row)` looks completely normal. Nothing red-flags it. A rule that depends on the author remembering to opt in loses every time, because forgetting IS the bug. A test file for upload blocking even wrote this down in its own docstring: "it will keep coming back — the natural way to write the line is the blocking way." We wrote the warning and then did it again.

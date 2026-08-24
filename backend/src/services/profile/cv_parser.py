@@ -745,7 +745,15 @@ async def parse_cv_async(file_path: str) -> CVData:
 
     # PDF-only font-size section hint (needs the file). The LLM extraction
     # itself works purely off text — see ``llm_cv_fields_from_text``.
-    section_hint = _build_section_hint(file_path)
+    #
+    # OFFLOADED FOR THE SAME REASON AS `extract_text` THREE LINES UP, and it was
+    # missed the first time round: `_build_section_hint` opens the PDF again and
+    # pushes every page through `extract_sections_from_pdf`. Leaving it on the
+    # loop meant a CV upload could still stall unrelated requests — the exact
+    # defect this change exists to remove, surviving in the very next statement
+    # after the fix. Offloading one of two blocking calls in a function leaves
+    # the function blocking. (CodeRabbit, PR #386.)
+    section_hint = await asyncio.to_thread(_build_section_hint, file_path)
     return await llm_cv_fields_from_text(raw_text, section_hint=section_hint)
 
 
