@@ -441,7 +441,11 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         ("registry", registry, r"from a (\d+)-key `?SOURCE_REGISTRY"),
         ("registry", registry, r"The (\d+)-key dict in `?main\.py`?"),
         ("unique-classes", unique_classes, r"[Bb]uilds (\d+) instances"),
-        ("unique-classes", unique_classes, r"SOURCE_INSTANCE_COUNT = (\d+)"),
+        # Deliberately NOT matching `SOURCE_INSTANCE_COUNT = N`. That is a
+        # verbatim code quote, and docs legitimately cite it -- including dated
+        # decision notes that are correct at the time of writing. Guarding it
+        # fires on every honest citation, and a permanent false alarm is how a
+        # loop dies. The prose form above covers the claim that matters.
     ]
 
     # String-valued facts. Kept separate because the numeric loop below does
