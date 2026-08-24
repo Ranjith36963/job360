@@ -25,6 +25,13 @@ from pathlib import Path
 
 ROOT = Path(os.environ["JOB360_ROOT"]) if os.environ.get("JOB360_ROOT") else Path(__file__).resolve().parents[1]
 
+# The drift report and these findings quote doc text full of arrows and
+# em-dashes. A Windows console defaults to cp1252 and this script died mid-report
+# on a single "→" -- a guard that crashes has not failed safe, it has stopped
+# answering, which is the very thing this file exists to prevent.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # (doc, regex with ONE capture group, replacement that lies, fact name in the report)
 CASES: list[tuple[str, str, str, str]] = [
     ("CLAUDE.md", r"SOURCE_REGISTRY`? has (\d+) entries", "SOURCE_REGISTRY` has 999 entries", "registry"),
@@ -35,6 +42,54 @@ CASES: list[tuple[str, str, str, str]] = [
     ("frontend/CLAUDE.md", r"Next\.js (\d+\.\d+\.\d+)", "Next.js 1.2.3", "nextjs-version"),
     ("frontend/CLAUDE.md", r"React (\d+\.\d+\.\d+)", "React 4.5.6", "react-version"),
 ]
+
+
+def unwatched_claims() -> list[str]:
+    """Find docs that state a guarded fact but are NOT in LIVING_DOCS.
+
+    The other half of this drill, and the one the registry specifically asks
+    for: "a doc it is not watching". The checker has shipped blind exactly this
+    way before -- frontend/CLAUDE.md carried a stale "The 28 hard rules" while
+    being absent from LIVING_DOCS, so the one file with the wrong number was
+    the one file the guard could not see.
+
+    Planting a lie only proves the docs on the LIST are scanned. It says
+    nothing about a doc that should be on the list and isn't. This does.
+    """
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import doc_sync_check as dsc  # noqa: PLC0415
+
+    watched = {w.replace("\\", "/") for w in dsc.LIVING_DOCS}
+    patterns = [p for _, _, p in dsc.build_checks()[0]]
+
+    # graphify-out/ holds dated, machine-generated graph snapshots. They are
+    # frozen records of what the repo looked like on a day, so a "stale" number
+    # in one is correct, not drift. Archives are excluded for the same reason.
+    # graphify-out/ holds dated machine-generated graph snapshots; docs/harness/
+    # fable/ and reviews/ hold dated audit and review records. All three are
+    # FROZEN accounts of what was true on a day. A "stale" number in a dated
+    # record is correct — rewriting it would falsify the record. Only LIVING
+    # docs owe agreement with today's code.
+    skip_dirs = (
+        "node_modules", ".git", "_archive", "archive",
+        "graphify-out", "fable", "reviews",
+    )
+
+    findings: list[str] = []
+    for path in ROOT.rglob("*.md"):
+        parts = path.parts
+        if any(skip in parts for skip in skip_dirs):
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        if rel in watched:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for pat in patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                findings.append(f"{rel} claims /{pat}/ -> {m.group(0)!r} but is not in LIVING_DOCS")
+                break
+    return findings
 
 
 def main() -> int:
@@ -61,15 +116,26 @@ def main() -> int:
             proc = subprocess.run(
                 [sys.executable, str(ROOT / "scripts" / "doc_sync_check.py")],
                 capture_output=True,
-                text=True,
+                # Explicit utf-8, never text=True: that decodes with the
+                # machine's locale (cp1252 on Windows), and the drift report
+                # is full of em-dashes. Caught by scripts/encoding_guard.py --
+                # this file's first draft printed "MUTATION TEST FAILED <?>".
+                encoding="utf-8",
+                errors="replace",
                 cwd=str(ROOT),
             )
-            if fact in proc.stdout:
+            if fact in (proc.stdout or ""):
                 print(f"PASS  {fact:16s} went RED when {rel} lied")
             else:
                 failures.append(f"{fact}: stayed GREEN on a broken {rel} — the guard is blind")
         finally:
             path.write_bytes(original)
+
+    # Second half of the drill: docs that make a guarded claim while sitting
+    # outside LIVING_DOCS. Planting a lie proves the LISTED docs are scanned;
+    # this proves nothing that matters is missing from the list.
+    for finding in unwatched_claims():
+        failures.append(f"unwatched-claim: {finding}")
 
     print()
     if failures:

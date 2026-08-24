@@ -1,3 +1,4 @@
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 # Contributing to Job360
 
 Thanks for helping improve Job360. This guide covers the conventions you need to
@@ -77,14 +78,14 @@ redeploy the previous SUCCESS build, then fix forward on a branch.
 
 ## Test-before-merge gate
 
-**Invariant baseline: ~1,409 collected (2 live deselected), 0 failing.**
+**Invariant baseline: 3,297 collected / 3,295 selected (2 `live` deselected), 0 failing.**
 
 A PR is mergeable only when:
 
 - `cd backend && python -m pytest -q -p no:randomly` reports **0 failing** and
-  **>= ~1,409 collected**. (The suite expands with every new source / feature;
-  the floor only moves up — Step-0 baseline was 600; Step-3 close-out at
-  ~1,409.)
+  **>= 3,297 collected**. (The suite expands with every new source / feature;
+  the floor only moves up — Step-0 baseline was 600, Step-3 close-out ~1,409,
+  and it stands at 3,297 as of 2026-08-24. Measure it, never quote it.)
 - `pre-commit run --all-files` is clean.
 - CI is green on the PR branch.
 - At least one reviewer has approved (or owner self-approval on
@@ -123,7 +124,7 @@ either live `scripts/` directory.
 ## Architecture + rules
 
 Read [`CLAUDE.md`](CLAUDE.md) at repo root before your first non-trivial change.
-It documents the 26 hard rules (no `user_id` on `jobs`, no lazy-breaking heavy
+It documents the 31 hard rules (no `user_id` on `jobs`, no lazy-breaking heavy
 imports, mandatory five-surface updates when adding sources, timezone-aware
 quiet-hours dispatch, account-mgmt session invalidation, etc.) plus the
 scoring algorithm and data-flow.

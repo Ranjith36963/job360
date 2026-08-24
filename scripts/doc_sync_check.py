@@ -48,6 +48,18 @@ LIVING_DOCS = [
     # a guard blind to the exact bug it was written for.
     "frontend/CLAUDE.md",
     "frontend/README.md",
+    # Added 2026-08-24 by the coverage half of doc_sync_mutation_test.py, which
+    # asks the question this list could never ask itself: which docs state a
+    # guarded fact while sitting OUTSIDE it? All three were lying.
+    #   CONTRIBUTING.md         "the 26 hard rules"        (31)
+    #   backend/README.md       "list all 47 sources"      (41)
+    #   .../03-job-providers.md "SOURCE_REGISTRY (47"      (41), in ten places
+    # The last one is the worst: root CLAUDE.md calls docs/product/pillars/ the
+    # AUTHORITATIVE code-verified architecture reference, and it carried the
+    # pre-2026-08-17 source counts that started this whole audit.
+    "CONTRIBUTING.md",
+    "backend/README.md",
+    "docs/product/pillars/03-job-providers.md",
 ]
 
 # Prose lies that numbers can't catch. Each = (forbidden phrase, why).
@@ -321,7 +333,14 @@ def budget_only() -> int:
     return 1
 
 
-def main() -> int:
+def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str]]]:
+    """Return (numeric checks, text checks).
+
+    Extracted from main() 2026-08-24 so scripts/doc_sync_mutation_test.py can
+    read the real patterns instead of keeping its own copy. A drill with a
+    duplicated pattern list stops testing this checker the moment the two
+    drift apart — which is the exact failure mode this whole file exists for.
+    """
     registry, unique_classes = registry_counts()
     mig_head = migration_head()
 
@@ -371,6 +390,13 @@ def main() -> int:
         ("nextjs-version", next_ver, r"Next\.js (\d+\.\d+\.\d+)"),
         ("react-version", react_ver, r"React (\d+\.\d+\.\d+)"),
     ]
+    return checks, text_checks
+
+
+def main() -> int:
+    checks, text_checks = build_checks()
+    registry, unique_classes = registry_counts()
+    mig_head = migration_head()
 
     drift: list[tuple[str, str, str, str, str]] = []  # file, line, fact, doc-says, code-says
     matches_per_fact: dict[str, int] = {}
