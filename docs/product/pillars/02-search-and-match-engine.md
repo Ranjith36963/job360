@@ -29,7 +29,7 @@ The pipeline is a **6-stage straight line**, with the scheduler + circuit breake
                   │
 6. STORE         insert into shared catalog `jobs`
                   │
-                  └─→ [opt-in] encode embedding → ChromaDB
+                  └─→ [opt-in] encode embedding → job_embeddings.embedding (pgvector)
 ```
 
 ### The one fact that changes everything (2026-04-09)
@@ -170,7 +170,9 @@ Survives unchanged.
 - New row → returns `True`; the 9 dim columns and `staleness_state='active'` and `first_seen_at=now()` are persisted.
 - Cross-run duplicate → returns `False`; `last_seen_at` is bumped instead.
 
-If `SEMANTIC_ENABLED=true`: `encode_job(job, enrichment)` runs (lazy-imports `sentence_transformers`, splits long description 300/50, max-pools), `VectorIndex.upsert(job_id, vector)` writes to ChromaDB at `data/chroma/`, audit row in `job_embeddings(job_id, model_version, embedding_updated_at)`.
+If `SEMANTIC_ENABLED=true`: `encode_job(job, enrichment)` runs (lazy-imports `sentence_transformers`, splits long description 300/50, max-pools), then `PgVectorIndex().upsert(job_id, vector)` writes the vector AND its audit stamp into the same `job_embeddings` row in one statement — `model_version` is taken from `embeddings.MODEL_NAME` inside the method and `embedding_updated_at` is set to `now()` (`backend/src/main.py:1295-1298`, `services/pg_vector_index.py:99-123`).
+
+> **The store is Postgres, not ChromaDB.** Migration `0027` moved the vector into `job_embeddings.embedding` (`vector` type, pgvector) on 2026-08-07, because the Chroma store sat on the BACKEND container's local disk while the only scheduled pipeline runs on the WORKER — so the scheduled run could never ADD one. Coverage froze: the catalog grew 7,761 → 8,184 overnight while the embedding count stayed at exactly 284. `services/vector_index.py` (the Chroma wrapper) still exists and still builds a `chromadb.PersistentClient` when called (`vector_index.py:39-45`) — but **no production call site constructs it**. Its only remaining callers are two scripts (`backend/scripts/build_job_embeddings.py:73`, `backend/scripts/eval_v2_pool.py:125`) and two tests (`test_embeddings.py:22`, `test_vector_index_path.py:18`).
 
 `db.log_run(stats, run_uuid, per_source_errors={...}, per_source_duration={greenhouse: 12.4}, total_duration=68.2)` writes the run row (migration `0010`).
 
@@ -283,7 +285,7 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
 | **1. Exact normalised key** | — | always on | Group by `(normalized_company, _normalize_title(title))`. `_normalize_title` is *wider* than the DB's `normalized_key()` — strips seniority prefixes, trailing job codes, parentheticals, marketing suffixes. (Per-run dedup is allowed to be more aggressive than cross-run DB uniqueness.) |
 | **2. RapidFuzz fuzzy** | `rapidfuzz` | on | `token_set_ratio(title_a, title_b) ≥ 80` AND `ratio(company_a, company_b) ≥ 85` AND normalised location matches. Skipped silently if `rapidfuzz` not installed. |
 | **3. TF-IDF cosine** | `scikit-learn` | on | Document = `company + title + description[:200]`. Cosine ≥ 0.85 clusters merge via union-find. |
-| **4. Embedding repost** | `sentence_transformers` + `chromadb` | **opt-in** | Within same company, cosine ≥ 0.92 → dedup. Requires an `embedding_lookup: dict[job_id, vector]` to be passed in. Preserves earliest `first_seen_at`. |
+| **4. Embedding repost** | none of its own — `deduplicator.py` imports only `re` / `rapidfuzz` / `sklearn`; the vectors are handed in | **opt-in** | Within same company, cosine ≥ 0.92 → dedup. Requires an `embedding_lookup: dict[job_id, vector]` to be passed in. Preserves earliest `first_seen_at`. |
 
 **Tie-break ranking** (used in every layer):
 1. `match_score` (primary)
@@ -304,7 +306,7 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
 ### Stage 6 — Store + (opt-in) embed
 
 - `db.insert_job(job)` does `INSERT OR IGNORE` on `(normalized_company, normalized_title)` UNIQUE — returns `True` for new rows, `False` for cross-run duplicates already in the catalog. **Never touch `normalized_key()`** without checking the dedup chain (CLAUDE.md rule #1).
-- If `SEMANTIC_ENABLED=true`, lazy-import `embeddings` + `vector_index`, encode each newly-inserted job via `encode_job(job, enrichment)` and `VectorIndex.upsert(job_id, vector)`.
+- If `SEMANTIC_ENABLED=true`, lazy-import `embeddings` + `pg_vector_index`, encode each newly-inserted job via `encode_job(job, enrichment)` and `PgVectorIndex().upsert(job_id, vector)` (`main.py:1292-1298`). This write path reads `SEMANTIC_ENABLED` **alone** — `ENGINE3_ENABLED` does not open it.
 - `db.log_run(stats, run_uuid, per_source_errors, per_source_duration, total_duration)` writes the `run_log` row.
 - Finally: CSV export → Markdown report → channel notifications (the *old* per-source notification system from `services/notifications/`; the per-user `channels/dispatcher` runs only under the ARQ worker, not the CLI).
 
@@ -448,7 +450,7 @@ Engine-relevant tables and columns:
 | `jobs` | `(normalized_company, normalized_title) UNIQUE` | Shared catalog (no `user_id`). Score columns (`match_score`, `role`, `skill`, `seniority_score`, …), date columns (`posted_at`, `date_found`, `date_confidence`, `date_posted_raw`), lifecycle (`first_seen_at`, `last_seen_at`, `last_updated_at`, `staleness_state`). |
 | `run_log` | `(timestamp, run_uuid)` | Per-run stats: `total_found`, `new_jobs`, `sources_queried`, `per_source` (JSON), `per_source_errors`, `per_source_duration`, `total_duration` (migration `0010`). |
 | `job_enrichment` | `job_id PK FK → jobs(id)` | 18 enrichment fields + `enriched_at` (migration `0008`). Shared catalog (rule #17). |
-| `job_embeddings` | `job_id PK FK → jobs(id)` | Audit only: `model_version`, `embedding_updated_at`. Actual vectors in ChromaDB at `backend/data/chroma/` (migration `0009`). |
+| `job_embeddings` | `job_id PK FK → jobs(id)` | `model_version`, `embedding_updated_at` **and the vector itself** — `embedding` is a pgvector `vector` column added by migration `0027` (table created by `0009`). It is no longer audit-only, and there is no separate vector store. |
 
 `_migrate()` in `database.py:162-342` is **forward-compat-only** — applies `ALTER TABLE ADD COLUMN` for missing columns so an older DB on disk auto-upgrades. The migration runner in `backend/migrations/runner.py` is the new system (Batch 2+) and applies the numbered `.up.sql` / `.down.sql` files.
 
@@ -476,17 +478,17 @@ When on:
   - Model: `sentence-transformers/all-MiniLM-L6-v2` (384-dim, lazy-loaded).
   - Base text: `title | requirements_summary | required_skills_joined`.
   - Long descriptions (>300 words) are chunked 300/50 and max-pooled (the "asymmetric short-query-long-document" pattern).
-- Vector is `VectorIndex.upsert(job_id, vector)` into ChromaDB at `backend/data/chroma/`.
+- Vector is `PgVectorIndex.upsert(job_id, vector)` into `job_embeddings.embedding` in Postgres (pgvector, migration `0027`).
 - API queries can pass `?mode=hybrid` to invoke `retrieve_for_user()` which:
   1. Pulls keyword top-500 from SQL (`JobScorer.match_score` ranking).
-  2. Pulls semantic top-500 from ChromaDB (nearest-neighbour on the encoded profile).
+  2. Pulls semantic top-500 from `job_embeddings.embedding` (cosine distance `<=>`, exact scan — no ANN index yet, see `0027`).
   3. Fuses via **Reciprocal Rank Fusion** with `k=60`: `score(item) = Σ 1 / (k + rank_i + 1)` across all input lists.
   4. Optionally reranks the top-50 with the **cross-encoder** `cross-encoder/ms-marco-MiniLM-L-6-v2` (Batch 2.8).
 - ESCO skill normalisation in CV parsing also flips on (Pillar 1 Ring 2 §3.2).
 
 When off:
 - No `sentence_transformers` import at all (saves ~150 ms–2 s startup).
-- No ChromaDB queries; retrieval is keyword-only.
+- No vector queries; retrieval is keyword-only.
 - `is_hybrid_available(vector_index_count)` returns `False` → API defaults `mode=keyword`.
 
 ### 5.3 The lazy-import rule (CLAUDE.md #16)
@@ -518,7 +520,7 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | `WORKPLACE_WEIGHT` | `6` | Workplace (remote/hybrid/onsite) dimension max | Raise to make workplace preference more decisive |
 | `ENRICHMENT_THRESHOLD` | `60` | Jobs need to score this high to be sent to the LLM enrichment pipeline | Raise to save LLM cost; lower to enrich more aggressively |
 | `ENRICHMENT_ENABLED` | `false` | Master switch for LLM enrichment + multi-dim activation | Flip on after setting LLM keys — see rule #18 |
-| `SEMANTIC_ENABLED` | `false` | Master switch for embeddings + ChromaDB + hybrid retrieval + ESCO | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
+| `SEMANTIC_ENABLED` | `false` | Writes embeddings into the pgvector store (`main.py:1292,1348` read this name ALONE). Hybrid retrieval is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), so `ENGINE3_ENABLED` alone queries an index nothing fills. It does **not** switch ESCO on: that also needs `is_available()` (`cv_parser.py:821,830`) and the index artefacts have never been built | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
 | `TARGET_SALARY_MIN` / `_MAX` | `40000` / `120000` | Salary-range *tiebreaker* (not scoring) for sort order on the dashboard | Display preference only |
 | `GEMINI_API_KEY` | (unset) | First-choice LLM provider | Unset → falls to Groq |
 | `GROQ_API_KEY` | (unset) | Second-choice LLM | Unset → falls to Cerebras |
@@ -538,7 +540,7 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | Enrichment never runs | `ENRICHMENT_ENABLED=false` (default), or all 3 LLM providers unset, or score never crosses `ENRICHMENT_THRESHOLD` | `job_enrichment` table stays empty | Check the three preconditions in that order |
 | Enrichment runs but every row is `category="other"` etc | LLM returning generic enum values; the validation loop converged on weak output | `SELECT category, COUNT(*) FROM job_enrichment GROUP BY category` shows skewed dist | Prompt-engineering territory — see `job_enrichment.py` system prompt; try forcing Gemini-only by unsetting the others |
 | Cross-encoder rerank takes too long | First call on each process initialises the model (~2 s download + load) | API request latency spike | Pre-warm via a startup hook, or accept the cold-start cost once per worker process |
-| ChromaDB query returns 0 even with `SEMANTIC_ENABLED=true` | Collection empty (`VectorIndex.count() == 0`) — embeddings never built | Hybrid retrieval falls back to keyword-only silently | Run a CLI pass with the flag on to populate. To force re-embed: `rm -rf data/chroma/` and re-run |
+| Vector query returns 0 even with `SEMANTIC_ENABLED=true` | No rows carry a vector (`PgVectorIndex().count() == 0`, i.e. `SELECT count(*) FROM job_embeddings WHERE embedding IS NOT NULL` is 0) — embeddings never built, **or** this Postgres has no pgvector so `0027` was a no-op and every method degrades to empty | Hybrid retrieval falls back to keyword-only silently | Run a CLI pass with the flag on to populate (`main._embed_backfill_budget`, `backend/src/main.py:548`, re-fills rows where `e.job_id IS NULL OR e.embedding IS NULL`). To force re-embed: `UPDATE job_embeddings SET embedding = NULL;` and re-run. **Deleting `data/chroma/` does nothing** — that store is not read any more |
 | `nightly_ghost_sweep` marks healthy jobs as `confirmed_expired` | Source returned 0 results for N consecutive runs (e.g. credentials lapsed silently) | Users start getting 410s on real apply links | Check the source's run_log entries; if the source has been failing, the sweep is doing the right thing — fix the source first |
 | Circuit breaker stays OPEN forever | Per-source `failure_threshold` (5) hit; cooldown is per-process | Source skipped on every tick | Breakers are in-memory only — **restart the process** (CLI/API/worker) to reset |
 | Same job re-scored to a different value across two runs | Profile changed between runs (user updated prefs/CV) — expected behaviour | `match_score` differs in `jobs` row between runs | Not a bug. To audit which version of the profile produced a score, cross-reference `user_profile_versions.created_at` with `run_log.timestamp` |
@@ -604,8 +606,8 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Surface | Status | Notes |
 | --- | --- | --- |
 | `encode_job()` 384-dim with 300/50 chunking | ✅ | `sentence-transformers/all-MiniLM-L6-v2`, lazy |
-| `VectorIndex` ChromaDB wrapper | ✅ | persistent at `backend/data/chroma/` |
-| `job_embeddings` audit table | ✅ | migration `0009` (vectors in ChromaDB, audit in SQLite) |
+| `PgVectorIndex` — the live vector store | ✅ | `job_embeddings.embedding`, pgvector, migration `0027`. The older `VectorIndex` ChromaDB wrapper still works when called — from two scripts and two tests — but no production call site builds it |
+| `job_embeddings` table | ✅ | migration `0009` (row) + `0027` (the `embedding` column). Vector and audit stamp share one row in Postgres — they cannot desync |
 | `reciprocal_rank_fusion(k=60)` | ✅ | pure function, deterministic tiebreaker |
 | `retrieve_for_user()` hybrid orchestrator | ✅ | injectable keyword_fn / semantic_fn for testability |
 | Cross-encoder rerank top-50 | ✅ | `cross-encoder/ms-marco-MiniLM-L-6-v2`, lazy |
@@ -665,7 +667,8 @@ backend/
 │   │   ├── job_enrichment.py                  — enrich_batch() + DB helpers (opt-in)
 │   │   ├── job_enrichment_schema.py           — 16-field Pydantic JobEnrichment
 │   │   ├── embeddings.py                      — encode_job() (opt-in, lazy)
-│   │   ├── vector_index.py                    — ChromaDB wrapper (opt-in, lazy)
+│   │   ├── pg_vector_index.py                 — THE vector store: job_embeddings.embedding (pgvector)
+│   │   ├── vector_index.py                    — legacy ChromaDB wrapper; scripts + tests only, no production caller
 │   │   ├── retrieval.py                       — RRF fusion + cross-encoder rerank (opt-in)
 │   │   ├── scheduler.py                       — TieredScheduler + TIER_INTERVALS_SECONDS
 │   │   ├── circuit_breaker.py                 — 5-fail/300s state machine + BreakerRegistry
@@ -676,11 +679,12 @@ backend/
 │   └── api/routes/jobs.py                     — exposes match_score + 9-field breakdown to API
 └── migrations/
     ├── 0008_job_enrichment.up.sql             — shared-catalog enrichment table
-    ├── 0009_job_embeddings.up.sql             — audit row (vectors live in ChromaDB)
+    ├── 0009_job_embeddings.up.sql             — the audit row (model_version, embedding_updated_at)
     ├── 0010_run_log_observability.up.sql      — per-source errors/durations, run_uuid
-    └── 0011_score_dimensions.up.sql           — 9 dim columns on jobs table
+    ├── 0011_score_dimensions.up.sql           — 9 dim columns on jobs table
+    └── 0027_job_embedding_vectors.up.sql      — adds job_embeddings.embedding (pgvector); tolerant no-op without the extension
 
-backend/data/chroma/                            — (gitignored) ChromaDB persistent collection
+backend/data/chroma/                            — (gitignored) LEGACY ChromaDB collection; the production pipeline and API never read it (two scripts still can)
 ```
 
 Test coverage (relevant files):
@@ -696,7 +700,8 @@ tests/
 ├── test_skill_normalizer.py                    — ESCO path (SEMANTIC_ENABLED)
 ├── test_job_enrichment.py                      — enrich_batch + DB helpers + mocked LLM
 ├── test_embeddings.py                          — encode_job + chunking + fake encoder factory
-├── test_vector_index.py                        — upsert/query/delete + fake ChromaDB client
+├── test_pg_vector_index.py                     — upsert/query/delete/count against job_embeddings.embedding
+├── test_vector_index_path.py                   — the legacy Chroma wrapper's persist path
 ├── test_retrieval.py                           — RRF + retrieve_for_user + rerank + fallback
 ├── test_retrieval_integration.py               — real scorer + semantics
 ├── test_deduplicator.py                        — all 4 layers + graceful degradation

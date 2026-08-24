@@ -51,9 +51,9 @@ The `jobs`, `job_enrichment`, and `job_embeddings` tables — *no* `user_id` col
 A user's configured notification destination — one row in `user_channels` with a Fernet-encrypted Apprise URL. Five types today: `email`, `slack`, `discord`, `telegram`, `webhook`.
 **Code:** `backend/src/services/channels/`, table `user_channels` (migration `0005`) · **Pillar 1**
 
-### ChromaDB
+### ChromaDB (legacy — superseded)
 
-The vector database storing job embeddings on disk at `backend/data/chroma/`. Wrapped by `VectorIndex`. Lazy-imported only when `SEMANTIC_ENABLED=true`.
+The on-disk vector database job embeddings USED to live in, at `backend/data/chroma/`, wrapped by `VectorIndex`. Migration `0027` moved the vectors into Postgres on 2026-08-07 and **no production call site constructs `VectorIndex` any more** — the class still builds a real Chroma client when called, and two `backend/scripts/` helpers plus two tests still import it, but the live store is `PgVectorIndex`. See **Vector store** below.
 **Code:** `backend/src/services/vector_index.py` · **Pillar 2**
 
 ### Conditional fetch
@@ -95,7 +95,7 @@ European Skills, Competences, Qualifications and Occupations — a multilingual 
 
 Two env-var booleans that gate Pillar-2's advanced features, both **default off** (rule #18):
 - `ENRICHMENT_ENABLED` — LLM enrichment + DB writes + multi-dim scoring activation
-- `SEMANTIC_ENABLED` — embeddings + ChromaDB + hybrid retrieval + ESCO
+- `SEMANTIC_ENABLED` — writes embeddings into the pgvector store. Hybrid retrieval reads `ENGINE3_ENABLED or SEMANTIC_ENABLED`; ESCO needs this flag AND index artefacts that were never built, so it stays a no-op either way
 
 ### Feed (user_feed)
 
@@ -119,7 +119,7 @@ Mechanism that finds jobs that have *quietly disappeared* from their source (job
 
 ### Hybrid retrieval
 
-Combination of keyword search (SQL `match_score` rank) + semantic search (ChromaDB k-NN) fused via RRF, optionally reranked by a cross-encoder. The `?mode=hybrid` query param invokes it. Opt-in via `SEMANTIC_ENABLED`.
+Combination of keyword search (SQL `match_score` rank) + semantic search (pgvector k-NN over `job_embeddings.embedding`) fused via RRF, optionally reranked by a cross-encoder. The `?mode=hybrid` query param invokes it. Opt-in via `SEMANTIC_ENABLED`.
 **Code:** `backend/src/services/retrieval.py:retrieve_for_user()` · **Pillar 2**
 
 ### Idempotency key
@@ -234,6 +234,11 @@ Where in the application funnel a user's `applications` row lives: `applied` →
 
 Polling-cadence bucket for sources. Today: `ats`=60s, `reed`=5min, `workday`=15min, `rss`=15min, `scrapers`=60min, `keyed_api`=60min, `free_json`=60min, `default`=60min. Source's `.category` attribute picks the tier; `NAME_TIER` dict has name-level overrides.
 **Code:** `backend/src/services/scheduler.py:TIER_INTERVALS_SECONDS` · **Pillar 2**
+
+### Vector store (PgVectorIndex)
+
+The live vector store: the `embedding` column on `job_embeddings`, a pgvector `vector` type added by migration `0027` (2026-08-07). The vector sits in the SAME row as its audit stamp, so "we recorded this job as embedded" and "we actually have its vector" cannot disagree. Cosine distance (`<=>`), exact scan, no ANN index yet. On a Postgres without the `vector` extension the migration is a tolerant no-op and every method degrades to empty rather than raising.
+**Code:** `backend/src/services/pg_vector_index.py` · **Pillar 2**
 
 ### Worker (ARQ tasks)
 
