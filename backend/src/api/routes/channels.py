@@ -7,11 +7,10 @@ cookie-resolved user.
 """
 from __future__ import annotations
 
-import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, cast
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -24,6 +23,8 @@ from src.core.settings import DB_PATH
 from src.repositories import pg
 from src.repositories.db_retry import open_db
 from src.services.channels import crypto, dispatcher
+from src.services.channels.email_url import EMAIL_RE as _EMAIL_RE
+from src.services.channels.email_url import build_email_apprise_url
 from src.services.channels.ssrf_guard import assert_public_http_url
 from src.utils.logger import get_audit_logger
 
@@ -34,13 +35,10 @@ _VALID_TYPES = {"email", "slack", "discord", "telegram", "webhook"}
 # Chat channel types that must use the Connect flow (not the paste path).
 _CONNECT_ONLY_TYPES = {"slack", "discord", "telegram"}
 
-# Simple email regex — intentionally lenient; catches obvious non-emails.
-# ReDoS-safe (CodeQL py/polynomial-redos): the original
-# ``^[^@\s]+@[^@\s]+\.[^@\s]+$`` let ``.`` match inside BOTH domain classes, so
-# the engine had O(n) ways to split the domain → quadratic backtracking on a
-# non-matching tail (8 000 chars took 3.4 s and pinned an API worker). Excluding
-# ``.`` from the label class makes the split unambiguous → linear.
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$")
+# _EMAIL_RE is imported from services/channels/email_url.py — ONE definition,
+# shared with the signup seeder, so the route and the seeder can never drift
+# apart on what counts as a valid address. The ReDoS-safety rationale
+# (CodeQL py/polynomial-redos) lives with the pattern.
 
 
 class ChannelIn(BaseModel):
@@ -120,8 +118,10 @@ async def create_channel(
     * ``slack``, ``discord``, ``telegram`` must use the Connect flow → 400.
     * ``webhook``: ``credential`` must be an http(s) URL; backend converts it
       to the Apprise ``json[s]://`` URL scheme.
-    * ``email``: ``credential`` must be a valid email address; backend builds
-      the ``mailtos://`` Apprise URL from the platform SMTP creds.
+    * ``email``: ``credential`` must be a valid email address; the backend
+      builds the Apprise URL from the platform's own mail credentials
+      (``resend://`` where a Resend key is configured, ``mailtos://`` only as
+      the local-SMTP fallback — see ``services/channels/email_url.py``).
     """
     ct_type = body.channel_type
 
@@ -164,20 +164,24 @@ async def create_channel(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="enter a valid email address",
             )
-        smtp_user = _settings.SMTP_EMAIL
-        smtp_pass = _settings.SMTP_PASSWORD
-        if not smtp_user or not smtp_pass:
+        # #318 — the URL shape moved to services/channels/email_url.py so this
+        # route and the signup seeder can never disagree about it.
+        #
+        # It also stopped being `mailtos://`. Railway blocks outbound SMTP
+        # ports (25/465/587) — that is why `auth/email_sender.py` was rewritten
+        # off smtplib onto Resend's HTTPS API in the first place. So every
+        # email channel created here was built on a transport this deployment
+        # cannot use: Apprise would have timed out, the dispatcher would have
+        # recorded ok=False, and the user would have seen silence. The builder
+        # now prefers `resend://` (HTTPS:443, already proven to deliver in
+        # prod) and keeps `mailtos://` only for local/self-hosted SMTP.
+        built = build_email_apprise_url(dest)
+        if built is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="email delivery is not configured",
             )
-        # Build Apprise mailtos:// URL.
-        # mailtos://{user}:{pass}@{smtp_domain}?to={dest}
-        smtp_domain = smtp_user.split("@", 1)[1] if "@" in smtp_user else smtp_user
-        apprise_url = (
-            f"mailtos://{quote(smtp_user, safe='')}:{quote(smtp_pass, safe='')}"
-            f"@{smtp_domain}?to={quote(dest, safe='')}"
-        )
+        apprise_url = built
         encrypted = crypto.encrypt(apprise_url)
 
     else:

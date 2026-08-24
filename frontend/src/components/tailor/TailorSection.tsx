@@ -13,7 +13,7 @@ interface TailorSectionProps {
  * Prominent "Tailor with AI" section for the job detail page — a wide card that
  * sits below the job description with TWO separate entry points (CV and cover
  * letter), each opening the editor focused on that document. Replaces the small
- * sidebar button (docs/peruser_cv_coverletter.md §3.5).
+ * sidebar button (docs/product/peruser_cv_coverletter.md §3.5).
  */
 export function TailorSection({ jobId }: TailorSectionProps) {
   const [open, setOpen] = useState(false);

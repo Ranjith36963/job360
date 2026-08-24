@@ -105,5 +105,6 @@ graphify-out/
 # Per-session CLAUDE.md drift proposals (Stop hook). Untracked by design: a tracked
 # target would leave an uncommitted change in every one of the parallel worktrees
 # and break the mandated clean-tree preflight. Collated into
-# docs/maintenance/claude-md-proposals.md by a designated session, via PR.
+# docs/harness/maintenance/claude-md-proposals.md by a designated session, via PR.
 docs/maintenance/inbox/
+.scratch/

@@ -223,6 +223,10 @@ class CVDetail(BaseModel):
     # one commit later on the shelves that replaced it.
     cv_experience_level: str = ""
     cv_right_to_work: str = ""
+    # Extracted AND used for matching (JobScorer reads it) since before this
+    # field existed here — audit finding 11 (2026-08-16): a shelf scored on
+    # but shown nowhere, the same "stored but not shown" gap as cv_positions.
+    cv_industries: list[str] = []
     # Aggregated highlights for the CV viewer — merges skills + titles +
     # companies + achievements + name/headline/location for in-text highlighting
     highlights: list[str] = []

@@ -8,7 +8,7 @@
 #
 # The dump holds user PII (emails, CVs), so it is encrypted with a passphrase
 # (BACKUP_PASSPHRASE secret) before it ever leaves the runner — R2 only ever sees
-# ciphertext. Restore: docs/RUNBOOK-backups.md.
+# ciphertext. Restore: docs/product/RUNBOOK-backups.md.
 name: db-backup
 on:
   schedule:

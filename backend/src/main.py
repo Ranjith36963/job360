@@ -793,7 +793,7 @@ async def run_search(
     # Load user profile for dynamic keywords.
     # When the HTTP API passes a logged-in `user_id`, score against THAT user's
     # profile; otherwise fall back to the single-tenant CLI path
-    # (DEFAULT_TENANT_ID). See docs/plans/batch-3.5.2-plan.md Deliverable E.
+    # (DEFAULT_TENANT_ID). See docs/product/plans/batch-3.5.2-plan.md Deliverable E.
     # Without this, the web "New Search" ran profile-less (E2E_TEST_REPORT #1).
     #
     # A caller may instead hand us a ready-made `search_config` — the shared

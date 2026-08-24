@@ -115,7 +115,14 @@ def last_run_iso(workflow: str) -> str | None:
     out = subprocess.run(
         ["gh", "run", "list", "--workflow", workflow, "--limit", "1",
          "--json", "createdAt"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        # A DETECTOR THAT HANGS REPORTS NOTHING, AND NOTHING READS AS FINE.
+        # Both sibling detectors already bound this (checker_scorecard.py uses
+        # timeout=120, chain_check.py uses timeout=60); this one and
+        # doc_clutter_check.sh did not, so a stalled `gh` made them look slow
+        # rather than broken. TimeoutExpired is deliberately NOT caught: the
+        # watchdog's whole job is to be noticed when it cannot answer.
+        timeout=60,
     )
     if out.returncode != 0:
         err = out.stderr.strip()

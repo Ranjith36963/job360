@@ -107,6 +107,98 @@ jobs:
         working-directory: backend
         run: python scripts/mypy_ratchet.py
 
+  # ─── The chain checks itself ───────────────────────────────────────────────
+  chain:
+    name: Chain wires (harness)
+    runs-on: ubuntu-latest
+    # Must exceed DRILL_TIMEOUT_S (240s) in scripts/drill_registry.py, or a hung
+    # drill is cancelled by the job before it can report DRILL TIMEOUT.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+
+      # Every NODE in detect -> triage -> repair -> verify -> PR has always been
+      # healthy. The WIRES between them kept breaking silently: two spellings of
+      # one bot name cost 17 dead days, a SIGPIPE killed the repair checker on
+      # any diff over 800 lines, and an output written only on the success path
+      # left the outage unannounced. Nothing watched the wires, because every
+      # individual workflow was green. This job watches the wires.
+      - name: Every wire connects
+        run: python scripts/chain_check.py --no-map
+
+      # And this is the part that matters: a checker nobody has watched fail is
+      # indistinguishable from a checker that cannot fail. The drill breaks three
+      # wires on purpose, by three different mechanisms, and demands the checker
+      # name each one — plus a negative control (a comment-only edit) that must
+      # stay quiet. If chain_check.py ever silently stops detecting, this fails.
+      - name: The checker can still fail
+        run: python scripts/chain_check.py --drill
+
+      # The registry is the most dangerous file in the harness: if it stops
+      # detecting, it certifies every other guard. So it is held to its own
+      # standard — five deliberate breaks plus a negative control.
+      #
+      # This runs FIRST, deliberately. A failed step skips the ones after it, so
+      # if the guard sweep below went first and failed, we would never learn
+      # whether the registry can still detect at all — which is the one answer
+      # you need when it is red.
+      - name: The registry can still fail
+        run: python scripts/drill_registry.py --drill
+
+      # Every guard CI runs must declare how to make itself fail. Ten guards here
+      # shipped unable to fire, across four consecutive rounds — each was
+      # correct-looking code in the wrong position, reporting success about a
+      # different question than the one that mattered. A fifth round would find
+      # guard eleven; this is the mechanism instead. Adding a guard to a workflow
+      # is what triggers the requirement, so one cannot slip in by being forgotten.
+      # The merge cage decides what reaches real users without the owner. It is
+      # held to the same standard as everything else it judges: broken on purpose
+      # six ways, plus a negative control. Network-free, so it runs here.
+      # One bug class, 43 copies, nothing stopping the 44th. Exactly the shape
+      # of the seven log-injection alerts sitting open right now: fixing the
+      # instances without adding the guard is how a class grows.
+      - name: No text decoded with the machine's locale
+        run: python scripts/encoding_guard.py
+
+      - name: That guard can still fail
+        run: python scripts/encoding_guard.py --drill
+
+      # The broom that sorts worktrees and local branches into SAFE / KEEP / ASK.
+      # Its danger is asymmetric: a wrong KEEP costs disk, a wrong SAFE costs the
+      # owner work he never saved.
+      #
+      # ONLY `--drill` MAY RUN HERE. The drill builds its own git repo in a temp
+      # dir, so it is portable and network-free. The CENSUS reads the owner's
+      # local disk, which a cloud runner cannot see -- pointing this step at the
+      # checkout would census one clean worktree, report all-green, and become
+      # another guard that cannot fire.
+      - name: The broom still refuses to sweep up unsaved work
+        run: python scripts/worktree_census.py --drill
+
+      - name: The ruleset checker can still fail
+        run: python scripts/ruleset_gate.py --drill
+      - name: Would the ruleset wedge the repo?
+        run: python scripts/ruleset_gate.py --check --scope ruleset
+      # WIRED FOR REAL, NOT IN A COMMENT. Both of these were referenced only
+      # from commented-out example lines, so `drill_registry.discover()` counted
+      # them as invoked and certified two guards that NOTHING RAN. #362 taught
+      # discover() to ignore comments, which turned them into STALE ENTRY --
+      # correctly. The fix is to invoke them, not to un-declare them.
+      - name: Every alert path still reaches a human
+        run: python scripts/check_alert_paths.py
+
+      - name: Every slack step passes a token, a title and a real channel
+        run: python scripts/check_workflow_slack_wiring.py
+
+      - name: The review-debt reader can still fail (and still refuses to gate)
+        run: python scripts/review_debt.py --drill
+      - name: Every guard declares its drill
+        run: python scripts/drill_registry.py --run-drills
+
   # ─── Frontend ──────────────────────────────────────────────────────────────
   frontend:
     name: Frontend (Node 20)
@@ -148,7 +240,7 @@ jobs:
   # and an issue per red PR would be noise (noise is how STATUS-DAILY.md died).
   notify:
     name: Report failure as an issue
-    needs: [backend, frontend]
+    needs: [backend, frontend, chain]
     if: >-
       always() && (github.event_name == 'schedule' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main'))

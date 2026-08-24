@@ -1,7 +1,7 @@
 @AGENTS.md
 
 # frontend/ — Claude Code pointer
-<!-- doc: LIVING | last-verified: 2026-08-11 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
 
 > **Thin pointer, not the source of truth.** The 31 hard rules, scoring/engine
 > guidance, DB schema, and phase history live in the **root [`../CLAUDE.md`](../CLAUDE.md)** —
@@ -16,7 +16,7 @@ of text — say what happened, what I did, what's next.
 
 ## What this is
 
-The Job360 web app: **Next.js 16.2.2 (App Router) + React 19.2.4 + Tailwind 4 +
+The Job360 web app: **Next.js 16.3.0 (App Router) + React 19.2.8 + Tailwind 4 +
 shadcn 4**. Talks to the FastAPI backend on `:8000`. State via **TanStack Query 5**;
 forms via **react-hook-form 7 + zod 4**; Kanban drag via **@dnd-kit**; charts via
 **recharts**; toasts via **sonner**. Auth is cookie-session — guarded in `src/middleware.ts`.
@@ -29,7 +29,7 @@ on an unfilled preference, and never write a default value the user didn't
 choose — a silently-written default is indistinguishable from a real choice
 and turns "don't care" into a fake constraint. The backend treats empty as
 "dimension off"; the UI must not manufacture emptiness away. Details:
-`../docs/product_design_rules.md` (root CLAUDE.md rule #29).
+`../docs/product/product_design_rules.md` (root CLAUDE.md rule #29).
 
 ## ⚠️ Next.js 16 — this is NOT the Next.js your training data knows (root rule #22)
 

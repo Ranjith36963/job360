@@ -1909,9 +1909,18 @@ class JobDatabase:
 
     async def save_user_notification_rule(self, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         """Upsert the single notification rule for user_id. Returns the full row."""
+        # #318 — these fallbacks used to be a hardcoded 60/'instant' while the
+        # dispatcher defaulted to 30 and the frontend to 60: three numbers for
+        # one concept, which is how the old unreachable-threshold bug hid for
+        # so long. All three now read the shared, env-driven defaults.
+        from src.services.notifications.defaults import (  # noqa: PLC0415
+            DEFAULT_NOTIFY_MODE,
+            DEFAULT_SCORE_THRESHOLD,
+        )
+
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        score_threshold = data.get("score_threshold", 60)
-        notify_mode = data.get("notify_mode", "instant")
+        score_threshold = data.get("score_threshold", DEFAULT_SCORE_THRESHOLD)
+        notify_mode = data.get("notify_mode", DEFAULT_NOTIFY_MODE)
         interval_hours = data.get("interval_hours", 6)
         daily_send_time = data.get("daily_send_time", "08:00")
         quiet_hours_start = data.get("quiet_hours_start")

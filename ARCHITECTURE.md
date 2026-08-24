@@ -1,32 +1,32 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-08-11 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
 
-> **Current state lives in `docs/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/pillars/` first.
+> **Current state lives in `docs/product/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/product/pillars/` first.
 
 ## System Overview
 
-Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **46 source instances** (47 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 18-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
+Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 16-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
 
 **Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (25) and `VISA_KEYWORDS` (8) remain — both domain-agnostic.
 
 ```
 User Input                    Pipeline (Pillar 2: 6 stages)          Output
 -----------                   -----------------------------          ------
-                          +-> Sources (46) -+                    +-> Email (Apprise per-user)
+                          +-> Sources (40) -+                    +-> Email (Apprise per-user)
 CLI / Frontend   --+      |  (async fetch)  |                    +-> Slack / Discord / Telegram
                    |      v   tiered cadence v                   +-> Webhook
 Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
   + LinkedIn PDF   |          (3 gates)   (9-dim)  (4 layer)|   +-> Markdown report
   + GitHub API     |                                        v   +-> Next.js dashboard (per-user)
 .env (API keys) ---+                              Enrich (opt-in, LLM)
-                                                  Store -> SQLite catalog (jobs table)
+                                                  Store -> Postgres catalog (jobs table)
                                                   Embed (opt-in) -> ChromaDB
 ```
 
 Two opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18):
 
 - `ENRICHMENT_ENABLED=true` → LLM enrichment + multi-dimensional scoring activates
-- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) activate. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/PILLAR1_EXTRACTION_AUDIT.md`)
+- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) activate. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
 
 ---
 
@@ -42,14 +42,14 @@ job360/
 │   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
 │   ├── migrations/                   # 31 forward/reverse SQL migrations (0000 → 0030) + runner.py
 │   ├── src/
-│   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (47 keys → 46 instances), _build_sources()
-│   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile
+│   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (41 keys → 40 instances), _build_sources()
+│   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile, rescore-backfill
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
 │   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 13 route modules (72 endpoints, all per-user routes gated)
-│   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
+│   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
-│   │   │   ├── settings.py           # Env vars, RATE_LIMITS (47 entries), thresholds, feature flags
+│   │   │   ├── settings.py           # Env vars, RATE_LIMITS (41 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
 │   │   │   ├── companies.py          # ATS company slugs (~264 across 11 platforms)
 │   │   │   ├── skill_synonyms.py     # 493-entry alias dict (k8s↔kubernetes, ...)
@@ -69,7 +69,7 @@ job360/
 │   │   │   ├── conditional_cache.py  # 256-entry FIFO for ETag/Last-Modified
 │   │   │   ├── llm_matcher.py        # Engine #4: LLM judge (MATCHER_ENABLED; MatchVerdict persisted onto user_feed)
 │   │   │   ├── job_enrichment.py     # enrich_batch() (opt-in)
-│   │   │   ├── job_enrichment_schema.py  # 18-field Pydantic JobEnrichment + 8 enums
+│   │   │   ├── job_enrichment_schema.py  # 16-field Pydantic JobEnrichment + 7 enums
 │   │   │   ├── embeddings.py         # encode_job() via sentence-transformers (opt-in, lazy)
 │   │   │   ├── vector_index.py       # ChromaDB wrapper (opt-in, lazy)
 │   │   │   ├── retrieval.py          # BM25 + RRF fusion + cross-encoder rerank (opt-in)
@@ -83,27 +83,27 @@ job360/
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
 │   │   │   ├── apis_keyed/   (8)     # reed, adzuna, jsearch, jooble, google_jobs, careerjet, findwork, gov_apprenticeships
-│   │   │   ├── apis_free/    (9)     # arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs, landingjobs, aijobs, hn_jobs, teaching_vacancies
-│   │   │   ├── ats/          (11)    # greenhouse, lever, workable, ashby, smartrecruiters, pinpoint, recruitee, workday, personio, successfactors, rippling
-│   │   │   ├── feeds/        (8)     # jobs_ac_uk, nhs_jobs, nhs_jobs_xml, workanywhere, weworkremotely, realworkfromanywhere, biospace, uni_jobs
+│   │   │   ├── apis_free/    (9)     # arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs, landingjobs, hn_jobs, teaching_vacancies
+│   │   │   ├── ats/          (10)    # greenhouse, lever, workable, ashby, smartrecruiters, pinpoint, recruitee, workday, personio, successfactors
+│   │   │   ├── feeds/        (4)     # nhs_jobs, weworkremotely, realworkfromanywhere, uni_jobs
 │   │   │   ├── scrapers/     (5)     # linkedin, climatebase, eightykhours, bcs_jobs, aijobs_ai
 │   │   │   └── other/        (4)     # indeed (JobSpySource → indeed+glassdoor), hackernews, themuse, nofluffjobs
 │   │   ├── workers/                  # ARQ tasks (lazy arq import; pure-async for tests)
-│   │   │   └── tasks.py              # score_and_ingest, send_notification, send_daily_digest, nightly_ghost_sweep, enrich_job_task
+│   │   │   └── tasks.py              # score_and_ingest, send_notification, send_bundle, notification_tick, nightly_ghost_sweep, refresh_catalog, enrichment_sweep, enrich_job_task, rescore_user_feed_task, rescore_backfill
 │   │   └── utils/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # 1,288 collected / 1,285 passing across 60+ files (defer to runtime count)
+│   └── tests/                        # 3,297 collected / 3,295 selected (2 `live` deselected) across 217 test_*.py files (defer to runtime count)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
 │   └── src/lib/{api.ts,types.ts,utils.ts}
 ├── docs/
-│   ├── pillars/                      # 3 pillar manuals + glossary + runbook (THE current architecture reference)
+│   ├── product/pillars/              # 3 pillar manuals + glossary + runbook (THE current architecture reference)
 │   └── ...                           # IMPLEMENTATION_LOG, plans/, research/, reviews/, step_*_plan.md
 ├── .env.example
-└── CLAUDE.md                         # Canonical AI agent instructions (24 hard rules)
+└── CLAUDE.md                         # Canonical AI agent instructions (31 hard rules)
 ```
 
 ---
@@ -126,24 +126,24 @@ else:
 
 ### 2. Source Instantiation (`main.py:_build_sources`)
 
-All 46 sources get `search_config` passed through:
+All 40 sources get `search_config` passed through:
 ```python
 ReedSource(session, api_key=REED_API_KEY, search_config=sc)
 ArbeitnowSource(session, search_config=sc)
 GreenhouseSource(session, search_config=sc)
-# ... etc for all 46
+# ... etc for all 40
 ```
 
 The `_build_sources()` function groups sources into labeled groups (A through K) and instantiates all of them. When `--source <name>` is passed, it filters to just the matching source. Special case: `--source glassdoor` maps to `JobSpySource` (same as `indeed`).
 
 ### 3. SOURCE_REGISTRY
 
-`SOURCE_REGISTRY` is a `dict[str, type]` mapping 47 source names to their classes. It serves two purposes:
+`SOURCE_REGISTRY` is a `dict[str, type]` mapping 41 source names to their classes. It serves two purposes:
 1. CLI `--source` validation — Click uses it for `click.Choice(sorted(SOURCE_REGISTRY.keys()))`
 2. `sources` command — lists all available source names
-3. Test assertion — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 47` and checks the exact set of keys
+3. Test assertion — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 41` and checks the exact set of keys
 
-Note: `"indeed"` and `"glassdoor"` both map to `JobSpySource`, so there are 47 registry entries but 46 unique classes.
+Note: `"indeed"` and `"glassdoor"` both map to `JobSpySource`, so there are 41 registry entries but 40 unique classes.
 
 ### 4. Keyword Resolution (`base.py` properties)
 
@@ -265,7 +265,7 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 | # | Engine | Service | Flag | Default |
 |---|--------|---------|------|---------|
 | 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
-| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:519-536`; data from the enrichment step `services/job_enrichment.py`) | `ENRICHMENT_ENABLED` | false |
+| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:582-617`; data from the enrichment step `services/job_enrichment.py`) | `ENRICHMENT_ENABLED` | false |
 | 3 | Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
 | 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
 
@@ -285,7 +285,7 @@ Every row written to `user_feed` now carries a `profile_version INTEGER` column 
 
 Two operating modes:
 
-- **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it fires `rescore_user_feed` as a FastAPI `BackgroundTask`. The rescore service (`src/services/rescore.py`) clears the user's LLM verdicts (`clear_user_verdicts` in `llm_matcher.py`) and re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. If `MATCHER_ENABLED` is on, the LLM re-judge also runs for the top candidates.
+- **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it enqueues `rescore_user_feed_task` on the ARQ worker queue (`src/api/routes/profile.py:163`) — a deploy that kills the web process no longer drops the re-score, and ARQ retries it. Only when the queue is unreachable does it fall back to an in-process `asyncio` task (`profile.py:179-184`). The rescore service (`src/services/rescore.py`) clears the user's LLM verdicts (`clear_user_verdicts` in `llm_matcher.py`) and re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. If `MATCHER_ENABLED` is on, the LLM re-judge also runs for the top candidates.
 - **Mode 2 — ordinary search / refresh.** Newly-fetched jobs get scored and stamped with the current profile version. Existing `user_feed` rows are left untouched — their scores and verdicts stay as-is (`skip_existing` lock in `match_batch`).
 
 **Invariant:** a job's score only changes when the PROFILE changes, never just because time passed. The `jobs` and `job_enrichment` shared catalog tables are not touched (rules #10/#17 still hold).
@@ -543,31 +543,33 @@ new sources `about_me_llm` (weight 2.0) and `github_llm` (1.5) feed
 
 ## Notification System
 
-### Auto-Discovery
+> ⚠️ **REMOVED — do not write against it.** The `NotificationChannel` ABC
+> (`src/services/notifications/base.py`), its auto-discovery helpers
+> (`get_all_channels()` / `get_configured_channels()`) and the per-channel classes
+> (`EmailChannel` / `SlackChannel` / `DiscordChannel`) no longer exist. The only modules
+> left under `src/services/notifications/` are `__init__.py` and `report_generator.py`.
+> Verified 2026-08-19 — `grep -rn "class NotificationChannel\|def get_all_channels" backend/src/`
+> returns nothing.
+
+### The Apprise dispatcher (the real path)
+
+All delivery goes through `src/services/channels/dispatcher.py`. Channels are **per-user rows
+in the database**, not env-var-configured classes, so one user's Slack webhook is independent
+of another's.
 
 ```python
-def get_all_channels():
-    return [EmailChannel(), SlackChannel(), DiscordChannel()]
-
-def get_configured_channels():
-    return [ch for ch in get_all_channels() if ch.is_configured()]
+async def load_user_channels(db, user_id) -> list[...]   # the user's configured channels
+async def dispatch(...) -> list[ChannelSendResult]       # deliver, honouring the user's rules
+async def test_send(db, channel_id, *, user_id=None)     # one-off "does this work?" send
 ```
 
-Each channel implements:
-- `is_configured() -> bool` — checks if required env vars are set
-- `send(jobs, stats, csv_path=None)` — sends the notification
+`dispatch()` applies the single `notification_rules` row per user (rule #23): score threshold,
+timezone-aware quiet hours (stdlib `zoneinfo`), and `notify_mode`
+(`instant` | `daily` | `every_n_hours`). Anything not sent inline is queued into
+`user_notification_digests` and drained by the `notification_tick` ARQ cron.
 
-### Channel Details
-
-```
-NotificationChannel (ABC)
-├── EmailChannel      — configured if SMTP_EMAIL + SMTP_PASSWORD + NOTIFY_EMAIL set
-│   Uses: Gmail SMTP (smtp.gmail.com:587), HTML template, CSV attachment
-├── SlackChannel      — configured if SLACK_WEBHOOK_URL set
-│   Uses: Block Kit message format, top 10 jobs, webhook POST
-└── DiscordChannel    — configured if DISCORD_WEBHOOK_URL set
-    Uses: Embed message format, top 10 jobs, webhook POST
-```
+Apprise itself is **lazy-imported** inside `_get_apprise_cls()` (rules #11/#16) — it is ~30 MB
+and must never be imported at module top level.
 
 ---
 
@@ -633,7 +635,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 
 **Auto-purge:** `purge_old_jobs(days=30)` deletes jobs where `first_seen` is older than 30 days. Runs at the start of every pipeline run.
 
-**first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a SQLite DEFAULT).
+**first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a database DEFAULT).
 
 ---
 
@@ -646,7 +648,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 > and must stay pointers-only. It replaced a shorter, staler table that listed only
 > the source API keys. Runtime source of truth is always `backend/src/core/settings.py`.
 
-- `.env` lives in the repo root (see `.env.example`). **39 of 47 sources work without any keys.**
+- `.env` lives in the repo root (see `.env.example`). **33 of 41 sources work without any keys.**
 - Data outputs go to `backend/data/` (gitignored): `exports/`, `reports/`, `logs/`, `user_profile.json`, `chroma/`.
 
 | Variable | Required | Used by |
@@ -655,20 +657,20 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | `GITHUB_TOKEN` | No | Higher GitHub API rate limit (5000/hr vs 60/hr) |
 | `SMTP_EMAIL` + `SMTP_PASSWORD` + `NOTIFY_EMAIL` / `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | No | Built-in notification channels |
 | `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker (default 40k–120k) |
-| `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py:24). Enforced by `validate_required_env()` |
-| `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py:56-63) |
+| `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py:25). Enforced by `validate_required_env()` |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py:60-71) |
 | `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
 | `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
 | `APP_ENV` / `RAILWAY_ENVIRONMENT` | No | Prod detection for HSTS + required-env validation (`APP_ENV=production` OR any `RAILWAY_ENVIRONMENT`) |
-| ~~`JOB360_ENV`~~ | **DEAD** | No longer read anywhere in `src/` (only a comment at auth.py:120 records that it once was). The session-cookie `Secure` flag now gates on the SAME signal as HSTS/Sentry/CORS — `middleware._is_production()` = `APP_ENV=production` OR `RAILWAY_ENVIRONMENT` set (auth.py:115-121). Railway injects `RAILWAY_ENVIRONMENT` automatically, so prod cookies ARE `Secure`. **This row previously said the opposite and cost a session real time chasing a non-existent hole — do not re-add `JOB360_ENV`.** |
+| ~~`JOB360_ENV`~~ | **DEAD** | No longer read anywhere in `src/` (only a comment at auth.py:130 records that it once was). The session-cookie `Secure` flag now gates on the SAME signal as HSTS/Sentry/CORS — `middleware._is_production()` = `APP_ENV=production` OR `RAILWAY_ENVIRONMENT` set (`_set_session_cookie`, auth.py:125-139; the gate itself is `middleware.py:34`). Railway injects `RAILWAY_ENVIRONMENT` automatically, so prod cookies ARE `Secure`. **This row previously said the opposite and cost a session real time chasing a non-existent hole — do not re-add `JOB360_ENV`.** |
 | `SENTRY_DSN` | No | Sentry error tracking; empty = disabled |
 | `TAILOR_FREE_PER_MONTH` | No (default `10`) | Free-tier cap on AI CV/cover-letter generations per user/month |
 | `PROFILE_EXTRACT_MAX_PER_HOUR` | No (default `12`) | Cost cap on profile re-extraction. EVERY profile change re-runs the full two-pass extraction (4+ paid LLM calls); five routes reach `_extract_save_trigger` and nothing bounded it. Over the limit returns HTTP 429. `0` disables. Uses the shared limiter, so `RATE_LIMIT_REDIS=true` makes the cap hold across replicas |
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS` | No (default `5` / `900`) | Brute-force login lockout (in-memory) |
 | `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user cap on concurrent `POST /search` (429 over cap) |
-| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:139) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
-| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:136) |
-| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py:135) — in practice the REAL selection lever, not the threshold |
+| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:155) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
+| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:152) |
+| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py:151) — in practice the REAL selection lever, not the threshold |
 | Slack/Discord/Telegram OAuth (`SLACK_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`, `TELEGRAM_BOT_TOKEN`/`_USERNAME`, `OAUTH_REDIRECT_BASE`) | No | One-click channel connect flows (skip endpoint when blank) |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
@@ -682,6 +684,13 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | `SOURCE_FETCH_TIMEOUT` | No (default `60`) | Per-source fetch ceiling in seconds |
 | `SOURCE_FETCH_TIMEOUT_ATS` | No (default `240`) | ATS category fetch ceiling in seconds |
 | `RUN_MIGRATIONS_ON_BOOT` | No (default `true`) | H6 — set `false` ONLY once a deploy release-phase step owns `python -m migrations.runner up`. Default keeps today's behaviour (migrations apply inside the FastAPI lifespan, `api/dependencies.py`). Existing mitigations: `runner.up()` takes a Postgres advisory lock so concurrent replicas serialise, and `backend/railway.json`'s healthcheck + `ON_FAILURE` restart keeps the old container serving if a migration fails |
+| `RESEND_API_KEY` | Recommended in prod | Resend HTTPS API key. Used for BOTH system email (magic links, `auth/email_sender.py`) and per-user email alert channels (`services/channels/email_url.py`). **Railway blocks outbound SMTP ports 25/465/587**, so `mailtos://` cannot deliver there — with this set, email channels are built as `resend://` over 443 instead. A key placed in `SMTP_PASSWORD` (recognised by its `re_` prefix) is honoured too. |
+| `SMTP_FROM` | No (falls back to `SMTP_EMAIL`, then `onboarding@resend.dev`) | From-address for system email and alert digests |
+| `NOTIFY_SCORE_THRESHOLD` | No (default `30`) | Score a job must clear to be worth notifying about. ONE source of truth, read by the dispatcher, the signup seeder and `save_user_notification_rule` (`services/notifications/defaults.py`) |
+| `NOTIFY_SEED_DEFAULTS` | No (default on; `0`/`false`/`no`/`off` disables) | Master switch for seeding a `notification_rules` row (and, once the address is verified, an account-email channel) at signup. Issue #318: before this, nothing in the product ever created a rule, so no user could ever be alerted |
+| `NOTIFY_DEFAULT_MODE` | No (default `daily`) | `notify_mode` given to a seeded rulebook. Keep it a BUNDLING mode — `instant` plus the nightly cron means one email per matching job (~280/tick) |
+| `NOTIFY_DEFAULT_SEND_TIME` / `NOTIFY_DEFAULT_INTERVAL_HOURS` | No (default `08:00` / `6`) | Seeded digest send time and every-N-hours interval |
+| `REFRESH_CATALOG_NOTIFY` | No (default `0` = off) | Lets the 04:00 `refresh_catalog` cron notify. OFF keeps today's behaviour (the nightly refill is silent, so new jobs reach a user only when they search). Only safe to enable while seeded users default to a bundling `NOTIFY_DEFAULT_MODE` — see `workers/tasks._refresh_catalog_notifies` |
 
 ### Constants (`settings.py`)
 
@@ -754,7 +763,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | uvicorn[standard] | >=0.30.0 | ASGI server for FastAPI |
 | python-multipart | >=0.0.9 | File upload support |
 | httpx | >=0.27.0 | Async HTTP client (used by API + LLM providers) |
-| openai | >=1.0.0 | **PRIMARY** CV-parsing LLM provider. Was undeclared for months — the import failed in prod and `llm_provider.py:154`'s broad `except` swallowed it as "provider failed", so OpenAI silently never ran |
+| openai | >=1.0.0 | **PRIMARY** CV-parsing LLM provider. Was undeclared for months — the import failed in prod and `llm_provider.py:343`'s broad `except` swallowed it as "provider failed", so OpenAI silently never ran |
 | google-generativeai / groq / cerebras-cloud-sdk | >=0.8.0 / >=0.11.0 / >=1.0.0 | Fallback LLM providers for CV parsing |
 | argon2-cffi / itsdangerous / cryptography / email-validator | >=23.1.0 / >=2.2.0 / >=42.0.0 / >=2.1.0 | Auth + signed sessions + Fernet channel-credential encryption (Batch 2) |
 | apprise | >=1.7.0 | Multi-channel notification dispatch (Batch 2; **lazy-imported**, rule #11) |

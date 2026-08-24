@@ -185,9 +185,15 @@ async def test_missing_readme_is_not_an_error(monkeypatch):
 async def test_pinned_repos_are_read_first(monkeypatch):
     """A user's PINNED repo is their curated highlight. Within the capped probe
     it must be read before the long tail — so its README lands even when the
-    README cap is small."""
+    README cap is small.
+
+    Finding 8 (Pillar-1 closeout audit) raised the AUTHENTICATED README cap to
+    MAX_REPOS (no more README_REPOS_AUTHED ceiling below it), so the way to
+    force a small cap here is now MAX_REPOS itself — which also caps the repo
+    list fetch (``per_page``), hence the dynamic URL below instead of a
+    hardcoded ``per_page=30``."""
     monkeypatch.setattr(github_enricher, "GITHUB_TOKEN", "tok")
-    monkeypatch.setattr(github_enricher, "README_REPOS_AUTHED", 1)  # only 1 README read
+    monkeypatch.setattr(github_enricher, "MAX_REPOS", 1)  # only 1 repo probed at all
     # 'showcase' is pushed OLDEST so it sorts last by default — pinning must
     # override that and pull it to the front.
     repos = [
@@ -198,7 +204,7 @@ async def test_pinned_repos_are_read_first(monkeypatch):
     ]
 
     async def fake_get_json(session, url):
-        if url.endswith("repos?per_page=30&sort=pushed"):
+        if url.endswith("repos?per_page=1&sort=pushed"):
             return repos
         if url.endswith("/repos/octocat/showcase/readme"):
             return _b64_readme("Kubernetes operator written in Go.")
@@ -219,8 +225,14 @@ async def test_pinned_repos_are_read_first(monkeypatch):
 
     showcase = next(b for b in result["repos_brief"] if b["name"] == "showcase")
     assert "Kubernetes" in showcase["readme_excerpt"], "pinned repo's README was not read first"
-    noise = next(b for b in result["repos_brief"] if b["name"] == "noise")
-    assert "readme_excerpt" not in noise, "README cap leaked past the pinned repo"
+    # With MAX_REPOS=1 the cap now governs the WHOLE probe (repo list, deps,
+    # README) not just a separate README sub-cap, so 'noise' is squeezed out
+    # of repos_brief entirely — the point being it's squeezed out in favour
+    # of the PINNED repo, not by arbitrary list order.
+    assert not any(b["name"] == "noise" for b in result["repos_brief"]), (
+        "cap did not respect pin order — the non-pinned repo should have "
+        "been dropped before the pinned one"
+    )
 
 
 @pytest.mark.asyncio
@@ -315,3 +327,95 @@ def test_enrich_does_not_wipe_prose_on_empty_reenrich():
     cv = github_enricher.enrich_cv_from_github(cv, {"bio": "", "profile_readme": ""})
     assert cv.github_bio == "keep me"
     assert cv.github_profile_readme == "keep me too"
+
+
+# ── Finding 8 (Pillar-1 closeout audit) — authenticated caps ───────────────
+#
+# README reads were capped at 15 and dep-manifest reads at 10, out of
+# MAX_REPOS=30, EVEN WHEN AUTHENTICATED (5000 req/hr — see the rate-limit
+# maths in github_enricher.py and the notes on this fix). Anyone with more
+# than ~15 public repos silently lost README prose and dependency proof for
+# their older work. The unauthenticated path (real 60/hour ceiling) must stay
+# exactly as conservative as before — that is the control.
+
+
+def _make_repos(n: int) -> list[dict]:
+    return [
+        {"name": f"repo{i}", "language": "Python", "description": "x", "fork": False,
+         "stargazers_count": 0, "topics": [], "pushed_at": None}
+        for i in range(n)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_authenticated_enricher_reads_more_repos_than_old_caps(monkeypatch):
+    """20 repos: more than the OLD caps (15 README / 10 deps), less than
+    MAX_REPOS (30). With a token, every one of them must be read."""
+    monkeypatch.setattr(github_enricher, "GITHUB_TOKEN", "tok")
+    n = 20
+    repos = _make_repos(n)
+
+    async def fake_get_json(session, url):
+        if url.endswith("repos?per_page=30&sort=pushed"):
+            return repos
+        if "/repos/octocat/repo" in url and url.endswith("/readme"):
+            return _b64_readme("some readme prose")
+        if "/languages" in url:
+            return {"Python": 1}
+        return None
+
+    dep_calls: list[str] = []
+
+    async def fake_dep_fetch(session, username, repo_name):
+        dep_calls.append(repo_name)
+        return []
+
+    with patch.object(github_enricher, "_get_json", side_effect=fake_get_json), \
+         patch.object(github_enricher, "_fetch_repo_frameworks", side_effect=fake_dep_fetch), \
+         patch.object(github_enricher, "_fetch_pinned", new=AsyncMock(return_value=[])), \
+         patch.object(github_enricher.aiohttp, "ClientSession", return_value=_make_async_session()):
+        result = await github_enricher.fetch_github_profile("octocat")
+
+    readmes_read = sum(1 for b in result["repos_brief"] if "readme_excerpt" in b)
+    assert readmes_read == n, (
+        f"authenticated README cap should reach all {n} repos (<= MAX_REPOS), "
+        f"only {readmes_read} were read"
+    )
+    assert len(dep_calls) == n, (
+        f"authenticated dep-manifest cap should reach all {n} repos, "
+        f"only {len(dep_calls)} were probed"
+    )
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_enricher_stays_conservative(monkeypatch):
+    """CONTROL for the fix above. Same 20 repos, NO token — the unauthenticated
+    path must be byte-for-byte unchanged (README_REPOS_UNAUTHED=4, dep cap=5),
+    because that path genuinely can exhaust the real 60/hour limit."""
+    monkeypatch.setattr(github_enricher, "GITHUB_TOKEN", "")
+    n = 20
+    repos = _make_repos(n)
+
+    async def fake_get_json(session, url):
+        if url.endswith("repos?per_page=30&sort=pushed"):
+            return repos
+        if "/repos/octocat/repo" in url and url.endswith("/readme"):
+            return _b64_readme("some readme prose")
+        if "/languages" in url:
+            return {"Python": 1}
+        return None
+
+    dep_calls: list[str] = []
+
+    async def fake_dep_fetch(session, username, repo_name):
+        dep_calls.append(repo_name)
+        return []
+
+    with patch.object(github_enricher, "_get_json", side_effect=fake_get_json), \
+         patch.object(github_enricher, "_fetch_repo_frameworks", side_effect=fake_dep_fetch), \
+         patch.object(github_enricher.aiohttp, "ClientSession", return_value=_make_async_session()):
+        result = await github_enricher.fetch_github_profile("octocat")
+
+    readmes_read = sum(1 for b in result["repos_brief"] if "readme_excerpt" in b)
+    assert readmes_read == github_enricher.README_REPOS_UNAUTHED == 4
+    assert len(dep_calls) == 5, "unauthenticated dep-manifest cap must stay at 5"

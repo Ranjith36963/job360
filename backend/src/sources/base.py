@@ -43,7 +43,7 @@ def _is_uk_or_remote(location: str) -> bool:
     `services/uk_gate.check_uk`, called in `main.py` before storage with the
     source name and the ad body in hand. This only avoids carrying obviously
     foreign rows through scoring and the O(n^2) dedup (see
-    docs/plans/2026-07-26-uk-first-location-eligibility.md, adversary catch #2).
+    docs/product/plans/2026-07-26-uk-first-location-eligibility.md, adversary catch #2).
 
     WHY IT ONLY EVER SEES A LOCATION, AND WHY THAT IS LOAD-BEARING
     -------------------------------------------------------------

@@ -1,11 +1,11 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-08-11 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
 
-Automated UK job search system supporting **any professional domain**. Aggregates jobs from **46 source instances** (47 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
+Automated UK job search system supporting **any professional domain**. Aggregates jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
 
 > **A profile is required.** Default keyword lists (`JOB_TITLES`, `PRIMARY_SKILLS`, …) were emptied on 2026-04-09 (commit `3ba1342`). Without a profile, the system has nothing to score against — `setup-profile` is now a mandatory first step, not optional.
 
-> **For current architecture detail**: see [`docs/pillars/`](./docs/pillars/) — three code-verified pillar manuals (User, Search & Match Engine, Job Providers) plus a glossary and runbook. The sections below in this README cover quick-start and CLI; the pillar docs are authoritative for system internals.
+> **For current architecture detail**: see [`docs/product/pillars/`](./docs/product/pillars/) — three code-verified pillar manuals (User, Search & Match Engine, Job Providers) plus a glossary and runbook. The sections below in this README cover quick-start and CLI; the pillar docs are authoritative for system internals.
 
 ### API docs (auto-generated)
 
@@ -18,7 +18,7 @@ flowchart TD
     CLI["CLI (Click)\njob360 run / view / api / status / sources / setup-profile"]
     Cron["Cron 4AM/4PM\nEurope/London"]
 
-    subgraph Sources["47 Job Sources (46 live instances)"]
+    subgraph Sources["41 Job Sources (40 live instances)"]
         direction LR
         KeyedAPIs["Keyed APIs (7)\nReed, Adzuna, JSearch, Jooble\nGoogle Jobs, Careerjet, Findwork"]
         FreeJSON["Free JSON APIs (9)\nArbeitnow, RemoteOK, Jobicy, Himalayas\nRemotive, DevITjobs, Landing.jobs\nAIJobs.net, HN Jobs"]
@@ -31,12 +31,12 @@ flowchart TD
     CLI -->|"--source / --dry-run / --no-email"| Orchestrator["Orchestrator\nsrc/main.py"]
     Cron -->|triggers| Orchestrator
     Sources -->|async fetch\nrate-limited + retries| Orchestrator
-    Orchestrator --> Scorer["Scorer\nTitle 40 + Skills 40\nLocation 10 + Recency 10\n− Negative penalty 30\n− Foreign location 15"]
+    Orchestrator --> Scorer["Scorer\nTitle 40 + Skills 40\nLocation 10 + Recency 10\n− Negative penalty 30"]
     Scorer --> OptEngines["Enrichment + Semantic +\nLLM Judge (opt-in flags)"]
     OptEngines --> Dedup[Deduplicator\nnormalized company+title]
-    Dedup --> DB[(SQLite\nSeen Jobs + Run Log)]
+    Dedup --> DB[(Postgres\nSeen Jobs + Run Log)]
 
-    DB --> Channels{NotificationChannel ABC}
+    DB --> Channels{Apprise dispatcher}
     Channels --> Email[Email\nHTML + CSV]
     Channels --> Slack[Slack\nBlock Kit]
     Channels --> Discord[Discord\nEmbeds]
@@ -49,9 +49,9 @@ flowchart TD
 
 ## Features
 
-### Job Sources (46 classes / 47 registry keys / 46 instances)
+### Job Sources (40 classes / 41 registry keys / 40 instances)
 
-> The reconciliation: 46 *class files* on disk → 47 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 46 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 47`).
+> The reconciliation: 40 *class files* on disk → 41 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 40 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 41`).
 
 - **8 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork, Gov Apprenticeships (DfE) — skip gracefully if no API key set
 - **9 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs — no auth required; Teaching Vacancies *(Batch 3)* is in `apis_free/` but runs on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier
@@ -62,7 +62,7 @@ flowchart TD
 
 **Dropped in Batch 3**: `yc_companies` (covered by HN Jobs + Ashby), `findajob` (duplicate of Adzuna), `nomis` (UK ONS *statistics*, not vacancy listings). **Dropped in M6 rotation (2026-06)**: `jobtensor` (pivoted to JS-only German app), `comeet` (token-gated API), `aijobs_global` (board abandoned Oct 2023). `gov_apprenticeships` was briefly dropped but **restored 2026-06-16** on the DfE Display Advert API v2 (`DFE_APPRENTICESHIPS_API_KEY`; `category="keyed_api"`).
 
-**Domain routing**: each source has a `.DOMAINS` set (`tech`, `healthcare`, `academia`, `education`, `climate`, or `general`). `classify_user_domain(profile)` filters sources to the user's domain set so a teacher doesn't get healthcare jobs and vice versa. See `docs/pillars/03-job-providers.md` §4.7.
+**Domain routing**: each source has a `.DOMAINS` set (`tech`, `healthcare`, `academia`, `education`, `climate`, or `general`). `classify_user_domain(profile)` filters sources to the user's domain set so a teacher doesn't get healthcare jobs and vice versa. See `docs/product/pillars/03-job-providers.md` §4.7.
 
 ### Profile System (any domain)
 - **CV parsing**: Upload PDF or DOCX, extracts skills, job titles, education, certifications
@@ -78,7 +78,7 @@ flowchart TD
 - **Location** (0-10 pts) — target UK location = 10, remote = 8
 - **Recency** (0-10 pts) — 0-1 days = 10, 1-3 days = 8, 3-5 days = 6, 5-7 days = 4, 7+ days = 0
 - **Negative keyword penalty** (-30 pts) — titles matching irrelevant roles (sales, nursing, etc.) are penalised
-- **Foreign location penalty** (-15 pts) — jobs with non-UK locations (US states, EU countries, etc.) are penalised
+- **No foreign-location penalty** — deleted 2026-08-12 (rule #30): a non-UK job is refused at the door (`services/uk_gate.check_uk`), never docked points
 - **Experience level detection** — parses Senior, Lead, Junior, Principal, etc. from title
 
 ### Data Quality
@@ -90,7 +90,7 @@ flowchart TD
 - **Email** — HTML digest with top jobs, scores, apply links, and CSV attachment via Gmail SMTP
 - **Slack** — rich Block Kit message with top 10 jobs via webhook
 - **Discord** — embed message with top 10 jobs via webhook
-- **NotificationChannel ABC** — add a new channel (e.g. Telegram) by implementing one class
+- **Apprise dispatcher** — per-user channels stored in the DB; add one as an Apprise URL, not a Python class
 
 ### CLI (Click)
 - `run` — full pipeline with `--source`, `--dry-run`, `--log-level`, `--db-path`, `--no-email` options
@@ -98,7 +98,8 @@ flowchart TD
 - `setup-profile` — interactive profile wizard with `--cv`, `--linkedin`, `--github` options
 - `api` — start the FastAPI backend server (consumed by the Next.js frontend)
 - `status` — show last run stats from database
-- `sources` — list all 47 registry sources (46 live instances)
+- `sources` — list all 41 registry sources (40 live instances)
+- `rescore-backfill` — enqueue the resumable re-score drainer for stale `user_feed` rows, with `--batch-size`, `--max-users`, `--throttle`
 
 ### Frontend (Next.js + FastAPI)
 - Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
@@ -109,7 +110,7 @@ flowchart TD
 
 ### Infrastructure
 - **Deduplication** — same job from different sources merged by normalised company+title
-- **Persistent tracking** — SQLite database prevents duplicate notifications across runs
+- **Persistent tracking** — Postgres database prevents duplicate notifications across runs
 - **Visa flagging** — automatically flags jobs mentioning visa/sponsorship keywords
 - **Async rate limiting** — per-source concurrency + delay (configurable in settings.py)
 - **Retry logic** — 3 attempts with exponential backoff (1s, 2s, 4s) + 30s timeout per request; per-source fetch ceiling 240s (ATS) / 60s (others) via `TieredScheduler.resolve_fetch_timeout()`
@@ -117,36 +118,36 @@ flowchart TD
 - **Logging** — rotating file handler (5MB max, 3 backups) + console output
 - **Dry-run mode** — fetch and score without writing to DB or sending notifications
 - **Auto-purge** — jobs older than 30 days are automatically deleted on each run
-- **Split requirements** — prod deps in `backend/pyproject.toml`, dev/test in `requirements-dev.txt`
+- **Split requirements** — prod deps in `backend/pyproject.toml` `[project.dependencies]`, dev/test in the same file's `[project.optional-dependencies] dev` extra (`pip install -e ".[dev]"`). There is no `requirements*.txt` in the repo
 - **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
 
-### Testing (~1,409 collected offline, 2 live deselected — defer to the runtime collected count; run `pytest --collect-only -q | tail -1` for the live count)
+### Testing (3,297 collected, 3,295 selected offline, 2 live deselected — defer to the runtime collected count; run `pytest --collect-only -q | tail -1` for the live count)
 
-> Per-file counts below are from the post-Step-3 baseline; actual counts are higher (Pillar-2/-3 + Step-0..3 + matcher batch each added tests). Run `cd backend && python -m pytest --collect-only -q -p no:randomly --ignore=tests/test_main.py 2>nul` for live per-file counts.
+> Per-file counts below were measured with `cd backend && python -m pytest tests/<file>.py --collect-only -q -p no:randomly | tail -1`. `test_main.py` **is** in the canonical run — do not add `--ignore=tests/test_main.py` (root CLAUDE.md rule).
 
-| Test file | Approx. count | What it covers |
+| Test file | Collected count | What it covers |
 |-----------|-------|----------------|
-| `test_sources.py` | 55+ | All 47 sources with mocked HTTP |
-| `test_profile.py` | 55+ | CV parser, preferences, keyword generator, JobScorer |
-| `test_linkedin_github.py` | 58+ | LinkedIn PDF parsing (section-split + LLM), GitHub API enrichment |
-| `test_scorer.py` | 53+ | Scoring algorithm, penalties, recency tiers, edge cases |
-| `test_time_buckets.py` | 33+ | Time bucket grouping logic |
-| `test_models.py` | 21+ | Job dataclass, normalisation, company cleaning |
-| `test_notifications.py` | 19+ | Email, Slack, Discord sending |
-| `test_deduplicator.py` | 29+ | Cross-source dedup (incl. marketing-suffix B-4 tests) |
-| `test_main.py` | 12 | Orchestrator (excluded from canonical run — hits live Indeed) |
-| `test_cli.py` | 11+ | CLI commands + SOURCE_REGISTRY assertions |
-| `test_database.py` | 9+ | SQLite operations, migrations, source history |
-| `test_api.py` | 9+ | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) |
-| `test_llm_provider.py` | 8+ | Multi-provider LLM client for CV parsing |
-| `test_notification_base.py` | 7+ | ABC, format_salary, channel discovery |
-| `test_setup.py` | 6 | setup.sh validation |
-| `test_reports.py` | 6+ | Markdown + HTML report generation |
-| `test_rate_limiter.py` | 5+ | Async rate limiter |
+| `test_profile.py` | 112 | CV parser, preferences, keyword generator, JobScorer |
+| `test_sources.py` | 110 | All 41 sources with mocked HTTP |
+| `test_scorer.py` | 92 | Scoring algorithm, penalties, recency tiers, edge cases |
+| `test_linkedin_github.py` | 64 | LinkedIn PDF parsing (section-split + LLM), GitHub API enrichment |
+| `test_deduplicator.py` | 35 | Cross-source dedup (incl. marketing-suffix B-4 tests) |
+| `test_time_buckets.py` | 33 | Time bucket grouping logic |
+| `test_api.py` | 27 | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) |
+| `test_models.py` | 25 | Job dataclass, normalisation, company cleaning |
+| `test_main.py` | 18 | Orchestrator (IS in the canonical run — carries no `live` marker) |
+| `test_llm_provider.py` | 18 | Multi-provider LLM client for CV parsing |
+| `test_database.py` | 16 | Postgres operations, migrations, source history |
+| `test_channels_dispatcher.py` | 15 | Apprise dispatch, quiet hours, digest queueing |
+| `test_cli.py` | 11 | CLI commands + SOURCE_REGISTRY assertions |
+| `test_notification_rules.py` | 11 | One-rulebook-per-user rules + routes |
+| `test_reports.py` | 6 | Markdown + HTML report generation |
+| `test_cli_view.py` | 6 | Rich terminal table viewer |
+| `test_rate_limiter.py` | 5 | Async rate limiter |
 | `test_cron.py` | 5 | cron_setup.sh validation |
-| `test_cli_view.py` | 5+ | Rich terminal table viewer |
-| `test_csv_export.py` | 4+ | CSV export format |
-| (Pillar-2/-3 + Step-0..3 + matcher batch additions) | ~900+ | auth, feed, prefilter, channels, dispatcher, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, notification rules, application history, llm_matcher |
+| `test_setup.py` | 4 | setup.sh validation |
+| `test_csv_export.py` | 4 | CSV export format |
+| (the other ~197 `test_*.py` files) | balance of 3,297 | auth, feed, prefilter, channels, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, application history, llm_matcher, uk_gate, visa_signal, shelf registry, harness guards |
 
 ## Quick Start
 
@@ -185,7 +186,7 @@ bash cron_setup.sh
 ## CLI Usage
 
 ```bash
-# Full pipeline — fetch from all 47 sources (46 live instances), score, deduplicate, notify
+# Full pipeline — fetch from all 41 sources (40 live instances), score, deduplicate, notify
 python -m src.cli run
 
 # Single source only
@@ -245,7 +246,7 @@ python -m src.cli sources
 | Slack | [Slack Webhooks](https://api.slack.com/messaging/webhooks) | `SLACK_WEBHOOK_URL` |
 | Discord | [Discord Webhooks](https://discord.com/developers/docs/resources/webhook) | `DISCORD_WEBHOOK_URL` |
 
-**Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs, Teaching Vacancies, LinkedIn, Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling, jobs.ac.uk, NHS Jobs, NHS Jobs XML, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, Climatebase, 80000Hours, BCS Jobs, AIJobs AI, Indeed/Glassdoor (if python-jobspy installed), HackerNews, TheMuse, NoFluffJobs, Gov Apprenticeships (DFE_APPRENTICESHIPS_API_KEY — key required) — **39 of 47 sources work without any API keys** (8 keyed). Dropped in Batch 3: yc_companies, findajob, nomis. Dropped in M6: jobtensor, comeet, aijobs_global.
+**Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, HN Jobs, Teaching Vacancies, LinkedIn, Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, NHS Jobs, WeWorkRemotely, RealWorkFromAnywhere, University Jobs, Climatebase, 80000Hours, BCS Jobs, AIJobs AI, Indeed/Glassdoor (if python-jobspy installed), HackerNews, TheMuse, NoFluffJobs, Gov Apprenticeships (DFE_APPRENTICESHIPS_API_KEY — key required) — **33 of 41 sources work without any API keys** (8 keyed). Dropped in Batch 3: yc_companies, findajob, nomis. Dropped in M6: jobtensor, comeet, aijobs_global. Dropped 2026-08-10 (dead upstreams): aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml.
 
 ## Scoring Algorithm
 
@@ -256,43 +257,52 @@ python -m src.cli sources
 | **Location** | 0-10 | Target UK location = 10pts. Remote = 8pts |
 | **Recency** | 0-10 | Posted 0-1 days ago = 10pts, 1-3 days = 8pts, 3-5 days = 6pts, 5-7 days = 4pts, 7+ days = 0pts |
 | **Negative keyword** | -30 | Titles matching irrelevant roles (sales engineer, recruiter, nurse, etc.) get a 30-point penalty |
-| **Foreign location** | -15 | Non-UK locations (US states, EU countries, etc.) get a 15-point penalty |
+
+There is **no foreign-location penalty**. It was deleted 2026-08-12 (rule #30): a non-UK job is refused at the door (`services/uk_gate.check_uk`), never docked points.
 
 **Total: 0-100** — minimum score threshold is 30 (configurable in `settings.py`)
 
-The scorer uses dynamic keywords from the user's profile (`SearchConfig`). Hard-coded default keyword lists in `core/keywords.py` are empty since 2026-04-09 — a profile is mandatory for the engine to produce meaningful scores. The 4-component formula above runs alongside the **Batch-2.9 multi-dimensional scoring** (seniority + salary + visa + workplace, each weighted via env vars `SENIORITY_WEIGHT`/`SALARY_WEIGHT`/`VISA_WEIGHT`/`WORKPLACE_WEIGHT`) when `ENRICHMENT_ENABLED=true` and the user has filled in preferences. Final 9-field `ScoreBreakdown` documented in `docs/pillars/02-search-and-match-engine.md`.
+The scorer uses dynamic keywords from the user's profile (`SearchConfig`). Hard-coded default keyword lists in `core/keywords.py` are empty since 2026-04-09 — a profile is mandatory for the engine to produce meaningful scores. The 4-component formula above runs alongside the **Batch-2.9 multi-dimensional scoring** (seniority + salary + visa + workplace, each weighted via env vars `SENIORITY_WEIGHT`/`SALARY_WEIGHT`/`VISA_WEIGHT`/`WORKPLACE_WEIGHT`) whenever the user has filled in preferences — the dims are gated on `user_preferences` alone, and a job the enrichment pipeline has not reached yet scores each dim at its NEUTRAL half rather than zero (rule #20/#29). Final 9-field `ScoreBreakdown` documented in `docs/product/pillars/02-search-and-match-engine.md`.
 
 ## Matching engines (keyword → dimensions → hybrid → LLM judge)
 
 Four engines, all opt-in except the keyword engine. **Engines 2–4 default OFF.**
 
-**Engine 1 — Keyword** (always on): `services/skill_matcher.py` `JobScorer`. Title 40 / Skill 40 / Location 10 / Recency 10 formula (0–100), gates MIN_TITLE_GATE/MIN_SKILL_GATE (default 0.15), penalties −30/−15.
+**Engine 1 — Keyword** (always on): `services/skill_matcher.py` `JobScorer`. Title 40 / Skill 40 / Location 10 / Recency 10 formula (0–100), gates MIN_TITLE_GATE/MIN_SKILL_GATE (default 0.15), single −30 negative-title penalty.
 
-**Engine 2 — Dimensions** (opt-in, `ENRICHMENT_ENABLED=true`): `services/scoring_dimensions.py`, wired into `JobScorer` at `skill_matcher.py:519-536`. Adds four dimension scorers on top of the keyword score — Salary 10 / Seniority 8 / Visa 6 / Workplace 6 (raw max 130, clamped to [0, 100]). Its data is supplied by the **enrichment** step (`services/job_enrichment.py`): jobs scoring >= `ENRICHMENT_THRESHOLD` (default 60) go to the Gemini→Groq→Cerebras LLM chain, stored in the shared `job_enrichment` table (18-field `JobEnrichment` schema, 8 enums, idempotent). The same `ENRICHMENT_ENABLED` flag gates both halves.
+**Engine 2 — Dimensions** (opt-in, `ENGINE2_ENABLED=true` / `ENRICHMENT_ENABLED=true`): `services/scoring_dimensions.py`, wired into `JobScorer` at `skill_matcher.py:582-617`. Adds four dimension scorers on top of the keyword score — Salary 10 / Seniority 8 / Visa 6 / Workplace 6 (raw max 130, clamped to [0, 100]). Its data is supplied by the **enrichment** step (`services/job_enrichment.py`): jobs scoring >= `ENRICHMENT_THRESHOLD` (default **10**, not 60 — `settings.py:152-155`) go to the OpenAI→Gemini→Groq→Cerebras LLM chain, stored in the shared `job_enrichment` table (16-field `JobEnrichment` schema, 7 enums, idempotent). Both halves are gated the same way — `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853`, `main.py:1137`, `services/rescore.py:85`), so either name switches Engine 2 on (rule #18).
 
 **Engine 3 — Hybrid retrieval** (opt-in, `SEMANTIC_ENABLED=true` / `ENGINE3_ENABLED=true`): `services/embeddings.py` encodes jobs via `all-MiniLM-L6-v2` (384-dim), stored in ChromaDB (`services/vector_index.py`). Query path (`services/retrieval.py` `retrieve_for_user`, wired live via `_hybrid_reorder_rows` in `api/routes/jobs.py`) fuses three rankings via RRF (k=60) — keyword `match_score`, **BM25** (`bm25_rank`), and vector ANN — then **cross-encoder reranks** the top survivors (`cross_encoder_rerank`, `ms-marco-MiniLM-L-6-v2`). Surfaced via `GET /api/jobs?mode=hybrid`. The BM25 leg is pure-Python, so it still applies even if the semantic leg or the reranker degrade.
 
-**Engine 4 — LLM judge** (opt-in, `MATCHER_ENABLED=true`): `services/llm_matcher.py`. Per-user `MatchVerdict{fit_score 0-100, verdict, reason}` persisted onto `user_feed` (migration 0017). Runs after the per-user feed write (`_run_matcher_stage`). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Dashboard shows AI-verdict badge. Measured: 18/18 jobs judged in 89.8 s (concurrency 3, Groq/Cerebras), judge spread 20–92 vs keyword 30–43, 10/10 fit accuracy on labeled sample.
+**Engine 4 — LLM judge** (opt-in, `ENGINE4_ENABLED=true` / `MATCHER_ENABLED=true`, gate at `main.py:352`): `services/llm_matcher.py`. Per-user `MatchVerdict{fit_score 0-100, verdict, reason}` persisted onto `user_feed` (migration 0017). Runs after the per-user feed write (`_run_matcher_stage`). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Dashboard shows AI-verdict badge. Measured: 18/18 jobs judged in 89.8 s (concurrency 3, Groq/Cerebras), judge spread 20–92 vs keyword 30–43, 10/10 fit accuracy on labeled sample.
 
 ## Notification Channels
 
-Notification delivery goes through the Apprise dispatcher (the `NotificationChannel` ABC that used to live at `backend/src/services/notifications/base.py` was REMOVED — do not write against it). For multi-channel per-user delivery (email/Slack/Discord/Telegram/webhook), the Apprise dispatcher at `backend/src/services/channels/dispatcher.py` handles per-user rules (score threshold, timezone-aware quiet hours, digest mode).
+Notification delivery goes through the **Apprise dispatcher** at
+`backend/src/services/channels/dispatcher.py`. It handles multi-channel per-user delivery
+(email/Slack/Discord/Telegram/webhook) and applies each user's rules: score threshold,
+timezone-aware quiet hours, and digest mode.
 
-```
-NotificationChannel (ABC)
-├── EmailChannel      — configured if SMTP_EMAIL + SMTP_PASSWORD + NOTIFY_EMAIL set
-├── SlackChannel      — configured if SLACK_WEBHOOK_URL set
-└── DiscordChannel    — configured if DISCORD_WEBHOOK_URL set
-```
+> ⚠️ **The `NotificationChannel` ABC is GONE — do not write against it.** It used to live at
+> `backend/src/services/notifications/base.py`. That file, the auto-discovery helpers
+> (`get_all_channels()` / `get_configured_channels()`) and the per-channel classes were all
+> REMOVED. The only modules left under `backend/src/services/notifications/` are
+> `__init__.py` and `report_generator.py`.
 
-`get_configured_channels()` returns only channels whose env vars are set. The orchestrator loops over them:
+Channels are **per-user rows in the database**, not env-var-configured classes. The
+dispatcher's public surface:
 
 ```python
-for channel in get_configured_channels():
-    await channel.send(new_jobs, stats)
+from src.services.channels import dispatcher
+
+channels = await dispatcher.load_user_channels(db, user_id)  # the user's configured channels
+await dispatcher.dispatch(...)                               # deliver, honouring the user's rules
+await dispatcher.test_send(db, channel_id)                   # one-off "does this work?" send
 ```
 
-**Adding a new channel** (e.g. Telegram): create `backend/src/services/notifications/telegram_notify.py`, implement `NotificationChannel`, and register it in `get_all_channels()`.
+**Adding a new channel** (e.g. Telegram): Apprise already speaks most services, so a channel is
+normally a new Apprise URL stored against the user — not a new Python class. Recipe:
+`.claude/skills/add-source/SKILL.md`.
 
 ## Adding a New Job Source
 
@@ -348,11 +358,11 @@ job360/
 │   ├── data/                    # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
 │   ├── migrations/              # 31 forward+reverse SQL migration pairs (0000 → 0030) + runner.py
 │   └── src/
-│       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (47), _build_sources()
-│       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile
+│       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (41), _build_sources()
+│       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile, rescore-backfill
 │       ├── models.py            # Job dataclass + normalized_key()
-│       ├── api/                 # FastAPI app + 13 route modules (46+ endpoints)
-│       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs
+│       ├── api/                 # FastAPI app + 13 route modules (72 endpoints)
+│       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)
 │       │   ├── keywords.py      # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] since 3ba1342
@@ -379,7 +389,7 @@ job360/
 │       ├── repositories/        # (renamed from storage/)
 │       │   ├── database.py
 │       │   └── csv_export.py
-│       ├── sources/             # 46 source files in 6 category subfolders; 47 SOURCE_REGISTRY keys
+│       ├── sources/             # 40 source files in 6 category subfolders; 41 SOURCE_REGISTRY keys
 │       │   ├── base.py
 │       │   ├── apis_keyed/  (8)
 │       │   ├── apis_free/   (9 free_json + 2 rss-tier)

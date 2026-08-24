@@ -1,8 +1,8 @@
 # CLAUDE.md
-<!-- doc: LIVING | last-verified: 2026-08-11 -->
+<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
 <!-- SIZE BUDGET: <= 2,000 words. This file is auto-loaded before every session,
      so it is POINTERS + CRITICAL GOTCHAS ONLY. Long-form history belongs in
-     docs/IMPLEMENTATION_LOG.md, reference tables in ARCHITECTURE.md, recipes in
+     docs/harness/IMPLEMENTATION_LOG.md, reference tables in ARCHITECTURE.md, recipes in
      .claude/skills/. If you are about to add a paragraph here, add it there and
      leave a one-line pointer. CI enforces this (doc_sync_check.py). -->
 
@@ -40,8 +40,8 @@ Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. **Every merge 
 - **Branch:** `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface on divergence — never silent rebase.
 - **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly`. **Never quote a test count from a doc — measure it** (`python -m pytest --collect-only -q | tail -1`); three docs once disagreed by 400–800 tests. Runs against a **real Postgres** (docker-compose.dev.yml, port 5433) via the `sqlite3`/`aiosqlite` shims in `tests/conftest.py`, schema-per-test. HTTP is mocked with `aioresponses`; the suite must run offline. `test_main.py` is in the canonical run — do **not** re-add `--ignore=tests/test_main.py`.
 - **Two deployables:** `backend/` (Python 3.9+, FastAPI, **Postgres via psycopg3**) and `frontend/` (Next.js 16, React 19). Runtime data in `backend/data/`. **Live on Railway at job360.uk** since 2026-07-02; five services: `backend`, `frontend`, `worker`, `Postgres`, `Redis`.
-- **What automation is actually running:** the **GitHub Actions harness** — 22 workflows in `.github/workflows/` (repair, triage, doc-sync, ci, ci-offline, codeql, security, uptime, live-e2e, journey, product-health, db-backup, pr-shepherd, dependabot-auto…). The old agent loop (worker/integrator/scout/health, `docs/maintenance/MISSIONS.md`) is **DORMANT — disabled 2026-06-21**. **Do not wait on it.**
-- **What surprises new sessions:** `SOURCE_REGISTRY` has 47 entries but 46 unique source classes (`indeed` + `glassdoor` both alias `JobSpySource`) — measure it, never quote it. Heavy deps must be lazy-imported (#11/#16). Next.js 16 made `params` async (#22). Adding a source touches **five** files (#8/#13). Migrations auto-apply on FastAPI boot via `lifespan` in `src/api/dependencies.py`.
+- **What automation is actually running:** the **GitHub Actions harness** — 27 workflows in `.github/workflows/` (repair, triage, doc-sync, ci, ci-offline, codeql, security, uptime, live-e2e, journey, product-health, db-backup, pr-shepherd…). The old agent loop (`docs/harness/maintenance/MISSIONS.md`) is **DORMANT — disabled 2026-06-21**. **Do not wait on it.**
+- **What surprises new sessions:** `SOURCE_REGISTRY` has 41 entries but 40 unique source classes (`indeed` + `glassdoor` both alias `JobSpySource`) — measure it, never quote it. Heavy deps must be lazy-imported (#11/#16). Next.js 16 made `params` async (#22). Adding a source touches **five** files (#8/#13). Migrations auto-apply on FastAPI boot via `lifespan` in `src/api/dependencies.py`.
 
 ## Hard Rules (load-bearing, numbered, do not violate)
 
@@ -53,8 +53,8 @@ An index, one line each. Where a test guards a rule, the test is named — that 
 10. **Never INSERT into `jobs` with `user_id`/`tenant_id`** — `jobs` is the shared catalog. Per-user state lives in `user_feed`, `user_actions`, `applications`.
 17. **`job_enrichment` + `job_embeddings` must NOT gain `user_id`** (same reason as #10). Per-user scoring happens at read time via `JobScorer(..., user_preferences=…, enrichment_lookup=…)`.
 
-### Catalog scope + filters (owner product rules — full text: `docs/product_design_rules.md`)
-30. **UK-only is a DOOR, not a penalty; never hand-enumerate an UNBOUNDED set.** ONE chokepoint refuses foreign jobs (`services/uk_gate.check_uk`, `main.py:1040`) — never per-source, never a scorer penalty. Foreign cities are unbounded so never typed; UK places are finite, so the gate matches DATA (`src/data/uk_gazetteer/`). Countries stay enumerated only because that set is CLOSED; the country override runs BEFORE gazetteer matching. **Dry-run any location rule over the live catalog first** — the naive version blocked 48%. No scorer penalty, no city list (both deleted 2026-08-12); `base._is_uk_or_remote` is a fetch SKIP asking `uk_gate.names_foreign_place`. Guards: `tests/test_uk_gate.py`, `test_scorer.py`. **Gap:** the dual-site escape admits "London, Ontario" (needs DATA).
+### Catalog scope + filters (owner product rules — full text: `docs/product/product_design_rules.md`)
+30. **UK-only is a DOOR, not a penalty; never hand-enumerate an UNBOUNDED set.** ONE chokepoint refuses foreign jobs (`services/uk_gate.check_uk`, `main.py:1082`) — never per-source, never a scorer penalty. Foreign cities are unbounded so never typed; UK places are finite, so the gate matches DATA (`src/data/uk_gazetteer/`). Countries stay enumerated only because that set is CLOSED; the country override runs BEFORE gazetteer matching. **Dry-run any location rule over the live catalog first** — the naive version blocked 48%. No scorer penalty, no city list (both deleted 2026-08-12); `base._is_uk_or_remote` is a fetch SKIP asking `uk_gate.names_foreign_place`. Guards: `tests/test_uk_gate.py`, `test_scorer.py`. **Gap:** the dual-site escape admits "London, Ontario" (needs DATA).
 31. **Visa is a SPOTLIGHT, not a wall.** Visa ON never shrinks the catalog: every job still shows, sponsors ranked up + badged. Three states via `services/visa_signal.detect_visa_status` (sponsors / no_sponsorship / unknown) because `jobs.visa_flag` conflates "says no" with "never mentioned". Refusal is tested BEFORE offer. Guard: `tests/test_visa_signal.py`.
 
 ### Sources (recipes: `.claude/skills/add-source/SKILL.md`)
@@ -76,12 +76,12 @@ An index, one line each. Where a test guards a rule, the test is named — that 
 29. **"Filled shelves work harder; empty shelves stay SILENT."** An empty preference (salary, locations, workplace, experience, about_me) means "don't care" — never a penalty, never a per-job zero, never a guess. Dim scorers return a CONSTANT; prefilters pass everything; the judge prompt omits unset prefs; the frontend never blocks on one. Guard: `tests/test_design_rules.py` — **covers only the dim scorers + prefilter; the judge prompt and frontend are UNGUARDED**, check by hand.
 9. **Scoring changes require running `test_scorer.py` AND `test_profile.py`.**
 18. **Pillar 2 engines default off — but the gate is `ENGINEx_ENABLED OR <legacy flag>`** (`core/settings.py:255-258`), so `ENGINE2_ENABLED=true` runs Engine 2 with `ENRICHMENT_ENABLED` false. E1 on; E2/E3/E4 off. With all off, behaviour must *exactly* match pre-Pillar-2 — no semantic queries, no LLM calls. Test BOTH names.
-19. **`JobScorer` default = 4 components MINUS 1 penalty** (Title 40 / Skill 40 / Location 10 / Recency 10, then **−30 negative title**; the −15 foreign penalty died 2026-08-12, #30). `SCORER_VERSION` = **4** — bump it whenever a score moves. The **4 extra dims** (8 total, not 7) activate on the two conditions in #20 (`:502-504`); the `engine1` kwarg gates the KEYWORD half only (`:475`), never the dims. Don't flip defaults silently.
-20. **Multi-dim scoring needs BOTH `user_preferences` AND `enrichment_lookup`** — pass both or neither; passing one gives silent zeros in the dim columns.
+19. **`JobScorer` default = 4 components MINUS 1 penalty** (Title 40 / Skill 40 / Location 10 / Recency 10, then **−30 negative title**; the −15 foreign penalty died 2026-08-12, #30). `SCORER_VERSION` = **7** — bump it whenever a score moves. The **4 extra dims** (8 total, not 7) activate on #20's ONE condition (`:587`); the `engine1` kwarg gates the KEYWORD half only (`:480-483`/`:560`), never the dims. Don't flip defaults silently.
+20. **Multi-dim scoring is gated on `user_preferences` ALONE** — a missing `enrichment_lookup` gives each dim its documented NEUTRAL half, never zeros (#29). Guard: `test_scorer.py::test_dims_neutral_not_zero_when_enrichment_missing`.
 27. **Multi-dim weights add 30 on top of the legacy 100 (raw max 130); the clamp to `[0, 100]` is load-bearing** — never remove it.
 
 ### Extraction must be data-driven
-28. **STRICT — ZERO hardcoded skill/keyword lists in profile extraction (`src/services/profile/`).** *(Owner rule, non-negotiable.)* **Banned:** any `*_SKILL_TERMS` / `*_TO_SKILL` / skill-keyword dict or denylist — hand-typed maps overfit one CV; prose→skill mapping belongs to the LLM. **FACT (verified 2026-08-11): no ontology is consulted.** Extraction is LLM + structural passes (CV headings, dependency manifests, GitHub language/topic stats). **ESCO is inert scaffolding, never built or shipped** — never cite it as running; reviving it means shipping artefacts, not flipping `SEMANTIC_ENABLED`. Absence chain + both call sites: `docs/PILLAR1_EXTRACTION_AUDIT.md`. **Carve-out: `core/skill_synonyms.py` is RETAINED** — scoring/search vocabulary, reads no CV input.
+28. **STRICT — ZERO hardcoded skill/keyword lists in profile extraction (`src/services/profile/`).** *(Owner rule, non-negotiable.)* **Banned:** any `*_SKILL_TERMS` / `*_TO_SKILL` / skill-keyword dict or denylist — hand-typed maps overfit one CV; prose→skill mapping belongs to the LLM. **FACT (verified 2026-08-11): no ontology is consulted.** Extraction is LLM + structural passes (CV headings, dependency manifests, GitHub language/topic stats). **ESCO is inert scaffolding, never built or shipped** — never cite it as running; reviving it means shipping artefacts, not flipping `SEMANTIC_ENABLED`. Absence chain + both call sites: `docs/product/PILLAR1_EXTRACTION_AUDIT.md`. **Carve-out: `core/skill_synonyms.py` is RETAINED** — scoring/search vocabulary, reads no CV input.
 
 ### Notifications
 23. **ONE `notification_rules` row per user** (`UNIQUE(user_id)`) governing ALL their channels. Dispatch converts UTC `now` to `users.timezone` via stdlib `zoneinfo` (**not `pytz`**) before comparing quiet hours — skipping it leaks notifications across BST/DST.
@@ -117,11 +117,11 @@ npm run dev | build | lint | type-check | test:unit | test:e2e
 Pipeline: **CLI (Click)** → **orchestrator `src/main.py`** (`run_search()`, `SOURCE_REGISTRY`, `_build_sources()`) → **sources** (`asyncio.gather`, tiered by `services/scheduler.py`, guarded by `circuit_breaker`) → **`services/skill_matcher.JobScorer`** → **4-layer `services/deduplicator.py`** → **Postgres** → **notifications + reports + CSV**.
 
 - **`src/repositories/pg.py` is the single DB door** — an `aiosqlite`-shaped async driver whose `translate()` rewrites legacy SQLite SQL to Postgres at runtime. It is **production-critical, not test-only** (guard: `tests/test_pg_translate.py`). Every module does `from src.repositories import pg as aiosqlite`.
-- **`docs/pillars/`** — the *authoritative* code-verified architecture reference (User / Search & Match Engine / Job Providers). Cross-check it first for any specific claim.
+- **`docs/product/pillars/`** — the *authoritative* code-verified architecture reference (User / Search & Match Engine / Job Providers). Cross-check it first for any specific claim.
 - **`ARCHITECTURE.md`** — system overview, full directory tree, DB schema, scoring detail, source-category list, dependency table, **and the canonical environment-variable table**.
 - **`docs/README.md`** — index of every plan/design/eval doc (batch-2 decisions, step plans, evaluation report, tailored-CV design).
-- **`docs/IMPLEMENTATION_LOG.md`** — append-only batch history **and the phase/batch summaries that used to live here** (read FIRST when picking up unfamiliar work).
-- **`docs/product_design_rules.md`** — owner product rules #29/#30/#31 in full.
+- **`docs/harness/IMPLEMENTATION_LOG.md`** — append-only batch history **and the phase/batch summaries that used to live here** (read FIRST when picking up unfamiliar work).
+- **`docs/product/product_design_rules.md`** — owner product rules #29/#30/#31 in full.
 - **`.claude/skills/add-source/SKILL.md`** — adding/removing a source (five surfaces) + adding a notification channel.
 - **`STATUS.md`** — current phase, carry-overs, fragile-source table. **`CONTRIBUTING.md`** — branch/commit/PR conventions. **`backend/README.md`** / **`frontend/README.md`** — install + run.
 - **Second brain:** older project memory lives at `D:\second-brain\wiki\projects\job360\`.

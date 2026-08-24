@@ -38,7 +38,7 @@ import ast
 import dataclasses
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 _BACKEND = Path(__file__).resolve().parents[3]
 _SRC = _BACKEND / "src"
@@ -92,6 +92,21 @@ _ROLES: dict[str, str] = {
     "jobs": "api",
     "tailor": "tailor",
     "snapshot": "api",
+    # tasks.py, not prefilter.py, is where the real read happens (Finding 10,
+    # 2026-08-16). `prefilter.py`'s three gate functions take a `FilterProfile`
+    # — a dataclass deliberately DECOUPLED from UserProfile (module docstring:
+    # "so the caller can assemble it from any source") — so `profile.skills`
+    # inside `skill_overlap_ok` never touches a real CVData no matter how the
+    # visitor is written. The actual translation FROM the stored preferences
+    # happens in `workers/tasks.py::_filter_profile_for`, which reads
+    # `prefs.preferred_locations` / `.work_arrangement` / `.experience_level`
+    # off the real `UserPreferences` to build the `FilterProfile` the gate
+    # then runs on. That function's own docstring is explicit that
+    # `skills` is the one field it deliberately leaves unset ("SKILLS ARE NOT
+    # WIRED" — measured: wiring it would silently drop 7 jobs in 10). So the
+    # honest reader set for the prefilter role is exactly these three shelves,
+    # attributed to the module that actually performs the read.
+    "tasks": "prefilter",
     # two_pass.py was in _WRITER_ROLES but MISSING here, so every READ performed
     # by the extraction orchestrator — the single most shelf-heavy module on the
     # user side — was invisible to readers(). Found 2026-08-15 while auditing a
@@ -159,6 +174,80 @@ def _is_profile_receiver(node: ast.AST) -> bool:
     return _receiver_name(node) in _PROFILE_RECEIVERS
 
 
+# The three dataclasses a receiver must resolve to in order to be trusted.
+_PROFILE_TYPE_NAMES = frozenset({"UserProfile", "CVData", "UserPreferences"})
+
+
+def _annotation_type_names(node: ast.AST | None) -> set[str]:
+    """Leaf type name(s) inside a parameter annotation expression.
+
+    Handles the shapes this codebase actually writes: a bare name
+    (``CVData``), a dotted name (``models.CVData``), a string forward-ref
+    (``"CVData"``), and wrappers (``Optional[X]``, ``X | None``) — walking
+    the whole subtree picks up the inner name regardless of nesting.
+    A subscripted generic whose slice names nothing (``list[str]``) yields
+    an empty set, which callers must treat as "unresolvable", not "foreign".
+    """
+    if node is None:
+        return set()
+    names: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name):
+            names.add(child.id)
+        elif isinstance(child, ast.Attribute):
+            names.add(child.attr)
+        elif isinstance(child, ast.Constant) and isinstance(child.value, str):
+            # CodeRabbit: this used to add the string WHOLE, so the docstring
+            # above was true of `models.CVData` and true of `"CVData"` and
+            # false of the two combined: `"models.CVData"` became one opaque
+            # name, matched nothing in _PROFILE_TYPE_NAMES, and the parameter
+            # read as FOREIGN — silently costing that function its shelf read.
+            # Re-parsing the forward reference makes the string case go through
+            # exactly the same walk as the unquoted one, so the two can no
+            # longer disagree.
+            names |= _forward_ref_names(child.value)
+    return names
+
+
+def _forward_ref_names(text: str) -> set[str]:
+    """Leaf names inside a string forward reference, or the string itself.
+
+    An unparseable annotation yields the raw text rather than nothing: an
+    empty set means "unresolvable" to the caller, and quietly widening a
+    typo into "we could not tell" is how a checker stops checking.
+    """
+    try:
+        parsed = ast.parse(text.strip(), mode="eval")
+    except SyntaxError:
+        return {text}
+    inner: set[str] = set()
+    for child in ast.walk(parsed.body):
+        if isinstance(child, ast.Name):
+            inner.add(child.id)
+        elif isinstance(child, ast.Attribute):
+            inner.add(child.attr)
+    return inner or {text}
+
+
+def _is_foreign_annotation(names: set[str]) -> bool:
+    """True when an annotation names a CONCRETE type that is NOT a profile
+    dataclass and is not one of this codebase's normal untyped escape
+    hatches (rule #16 lazy-import cycles make ``Any``/``Optional`` the usual
+    way a profile parameter stays duck-typed — that is not the bug).
+
+    An empty/unresolvable annotation (``list[str]``, no annotation at all)
+    is deliberately NOT foreign: this function only exists to catch a
+    parameter deliberately typed as something ELSE, like
+    ``skill_overlap_ok(profile: FilterProfile, ...)`` — ``FilterProfile`` is
+    a real, different dataclass that happens to share the bare name
+    ``profile`` with the profile receivers, and was being credited as if it
+    were ``UserProfile``.
+    """
+    if not names or names & _PROFILE_TYPE_NAMES:
+        return False
+    return not names <= {"Any", "Optional", "None"}
+
+
 def _string_constants(node: ast.AST) -> list[str]:
     """Every string literal inside a (possibly nested) tuple/list literal."""
     out: list[str] = []
@@ -177,7 +266,9 @@ def _loop_targets(target: ast.AST) -> set[str]:
     return names
 
 
-def _loop_field_literals(node: ast.For) -> list[str]:
+def _loop_field_literals(
+    node: ast.For, is_receiver: Callable[[ast.AST], bool] | None = None
+) -> list[str]:
     """For ``for ... in (<table>): ... getattr(cv, <var>)``, the field names only.
 
     POSITIONAL, not "every string in the table". A row often carries more than
@@ -194,6 +285,7 @@ def _loop_field_literals(node: ast.For) -> list[str]:
     position the getattr actually uses is what makes this instrument honest
     about its own output.
     """
+    receiver_check = is_receiver or _is_profile_receiver
     target = node.target
     if isinstance(target, ast.Name):
         order = [target.id]
@@ -209,7 +301,7 @@ def _loop_field_literals(node: ast.For) -> list[str]:
             and isinstance(child.func, ast.Name)
             and child.func.id == "getattr"
             and len(child.args) >= 2
-            and _is_profile_receiver(child.args[0])
+            and receiver_check(child.args[0])
             and isinstance(child.args[1], ast.Name)
             and child.args[1].id in order
         ):
@@ -238,18 +330,76 @@ class _ShelfVisitor(ast.NodeVisitor):
     Pass ``shelves=None`` to collect EVERY attribute name touched on a profile
     object rather than only the known ones — that is how phantom reads (a field
     that has never existed) are found.
+
+    TYPE-AWARE (Finding 10, 2026-08-16). A bare name in ``_PROFILE_RECEIVERS``
+    used to be trusted everywhere, so ANY function whose parameter happened to
+    be called ``profile`` — regardless of its actual type — was credited as
+    reading the real ``UserProfile``. ``prefilter.py`` proved this false:
+    ``skill_overlap_ok(profile: FilterProfile, ...)`` reads ``profile.skills``,
+    but ``FilterProfile`` is a decoupled dataclass — the read never touches a
+    real ``cv.skills``. That false credit made ``matching_tiers()`` claim the
+    prefilter narrows the feed on skill overlap, when the wiring that builds
+    ``FilterProfile`` (``workers/tasks.py::_filter_profile_for``) deliberately
+    leaves skills unset.
+
+    Fix: track each function's PARAMETER annotations on a scope stack. A name
+    that resolves (via ``_is_foreign_annotation``) to a concrete, non-profile
+    type loses its credit for the rest of that function body, however deep the
+    access is nested. A name that is NOT a parameter in the enclosing
+    scope — a local variable, a ``self.`` attribute, a module global — is
+    untouched by this check and keeps the original bare-name behaviour,
+    because those are the aliasing patterns (``prefs = self._user_preferences``,
+    ``cv = getattr(profile, "cv_data", None)``) most of this codebase's real,
+    correct reads are written as, and they carry no type annotation to read.
     """
 
     def __init__(self, shelves: frozenset[str] | None) -> None:
         self.shelves = shelves
         self.found: set[str] = set()
+        # Stack of {param_name: is_foreign}, innermost scope last. Only
+        # PARAMETERS are ever recorded here — see the class docstring for why
+        # locals and self-attributes are deliberately left alone.
+        self._scopes: list[dict[str, bool]] = []
 
     def _known(self, name: str) -> bool:
         return True if self.shelves is None else name in self.shelves
 
+    def _is_receiver(self, node: ast.AST) -> bool:
+        name = _receiver_name(node)
+        if name not in _PROFILE_RECEIVERS:
+            return False
+        for scope in reversed(self._scopes):
+            if name in scope:
+                return not scope[name]  # innermost binding wins; stop looking
+        return True
+
+    def _function_scope(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, bool]:
+        args = node.args
+        params = list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs)
+        if args.vararg:
+            params.append(args.vararg)
+        if args.kwarg:
+            params.append(args.kwarg)
+        return {
+            a.arg: _is_foreign_annotation(_annotation_type_names(a.annotation))
+            for a in params
+            if a.arg in _PROFILE_RECEIVERS
+        }
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self._scopes.append(self._function_scope(node))
+        self.generic_visit(node)
+        self._scopes.pop()
+
+    # The mixedCase is not ours to choose: ``ast.NodeVisitor`` dispatches by
+    # ``visit_<NodeClassName>``, so renaming these silently stops the visitor
+    # being called at all — a failure that looks like "the code reads nothing".
+    visit_FunctionDef = _visit_function  # noqa: N815
+    visit_AsyncFunctionDef = _visit_function  # noqa: N815
+
     # Shape 1 — cv.skills
     def visit_Attribute(self, node: ast.Attribute) -> None:
-        if self._known(node.attr) and _is_profile_receiver(node.value):
+        if self._known(node.attr) and self._is_receiver(node.value):
             self.found.add(node.attr)
         self.generic_visit(node)
 
@@ -259,7 +409,7 @@ class _ShelfVisitor(ast.NodeVisitor):
             isinstance(node.func, ast.Name)
             and node.func.id == "getattr"
             and len(node.args) >= 2
-            and _is_profile_receiver(node.args[0])
+            and self._is_receiver(node.args[0])
             and isinstance(node.args[1], ast.Constant)
             and isinstance(node.args[1].value, str)
             and self._known(node.args[1].value)
@@ -285,7 +435,8 @@ class _ShelfVisitor(ast.NodeVisitor):
 
     # Shape 3 — for f in ("skills", "linkedin_skills"): getattr(cv, f)
     def visit_For(self, node: ast.For) -> None:
-        self.found.update(s for s in _loop_field_literals(node) if self._known(s))
+        found = _loop_field_literals(node, is_receiver=self._is_receiver)
+        self.found.update(s for s in found if self._known(s))
         self.generic_visit(node)
 
 

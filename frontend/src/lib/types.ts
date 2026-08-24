@@ -41,7 +41,7 @@ export type TimelineEntry = Schemas["TimelineEntry"];
 
 // `doc_kind`/`status` are narrowed from `string` to literal unions — the
 // backend OpenAPI declares them as string but only these values are valid
-// (docs/peruser_cv_coverletter.md). Same pattern as `Channel` in api.ts.
+// (docs/product/peruser_cv_coverletter.md). Same pattern as `Channel` in api.ts.
 export type TailorDocKind = "cv" | "cover_letter";
 
 export type TailoredDocOut = Omit<Schemas["TailoredDocOut"], "doc_kind" | "status"> & {

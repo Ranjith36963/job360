@@ -153,7 +153,7 @@ Depends on cohorts A/B/C (observability wraps the real code paths).
 |---|---|---|---|
 | Agent-Telemetry | S1, S2, S3 | `backend/src/utils/logger.py` (add `_run_uuid_var: ContextVar`), `backend/src/utils/telemetry.py` (new), `backend/src/main.py` (set context + per-source timing), `backend/src/services/job_enrichment.py` + `embeddings.py` + `retrieval.py` (emit counters), `backend/tests/test_telemetry.py` | `/implement` + `superpowers:test-driven-development` |
 | Agent-Frontend | B6 (frontend mirror) | `frontend/src/lib/types.ts` (add 5 date + 13 enrichment fields), `frontend/src/lib/api.ts` (verify `mode` pass-through) | `/sync` |
-| Agent-Docs | — | `CLAUDE.md` (add 1 new rule: "multi-dim scoring requires both `user_preferences` + `enrichment_lookup`"), `docs/IMPLEMENTATION_LOG.md` (Step 1 entry with test delta + blocker closure table), `docs/step_1_plan.md` (executed-version annotations) | `/sync` |
+| Agent-Docs | — | `CLAUDE.md` (add 1 new rule: "multi-dim scoring requires both `user_preferences` + `enrichment_lookup`"), `docs/harness/IMPLEMENTATION_LOG.md` (Step 1 entry with test delta + blocker closure table), `docs/step_1_plan.md` (executed-version annotations) | `/sync` |
 
 **Gate before STEP-1-GREEN:** `make verify-step-1` green; sentinel written; dogfood smoke passes end-to-end.
 
@@ -380,7 +380,7 @@ git commit -m "chore(step-1): write sentinel at green commit"
 3. On a fresh Chrome window, load `http://localhost:3000/dashboard` — ScoreRadar renders non-zero slices across all 7 dimensions
 4. With `ENRICHMENT_ENABLED=true` + a Gemini key, `/jobs/:id` response includes `title_canonical`, `required_skills`, `salary` (structured), `seniority` (enum), `visa_sponsorship` fields for high-scored jobs
 5. `?mode=hybrid` + populated index on the backend → dashboard ordering visibly differs from `?mode=keyword` (fused ranking at work)
-6. `docs/IMPLEMENTATION_LOG.md` has a completed "Step 1 — Engine→API Seam" entry with test delta + blocker closure table
+6. `docs/harness/IMPLEMENTATION_LOG.md` has a completed "Step 1 — Engine→API Seam" entry with test delta + blocker closure table
 
 ---
 

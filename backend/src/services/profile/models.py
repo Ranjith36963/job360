@@ -269,6 +269,16 @@ class CVData:
     # GitHub already contributes ``github_repos_brief`` for people who push
     # code publicly; this is the same signal for the people who do not.
     cv_projects: list[dict[str, Any]] = field(default_factory=list)
+    # Education SUB-BULLETS: dissertation title, coursework, course project —
+    # asked for by the CV prompt, validated by ``EducationEntry.details`` in
+    # ``schemas.py``, and then dropped on the floor (Finding 7, Pillar-1
+    # closeout audit, 2026-08-16). ``education`` above stays ONE combined
+    # "degree — institution | dates" line per qualification (so the
+    # "Education: N" stat keeps counting qualifications, not lines); the
+    # per-degree detail bullets get their own shelf instead of being lost or
+    # inflating that count. For a recent graduate a dissertation title or
+    # named course project is often the strongest evidence they have.
+    cv_education_details: list[str] = field(default_factory=list)
     # Step-1.5 S1.5-D — ESCO normalisation map populated by
     # ``cv_parser._llm_result_to_cvdata`` when ``SEMANTIC_ENABLED=true`` and
     # the ESCO index is on disk. Maps the *canonical* skill label (which

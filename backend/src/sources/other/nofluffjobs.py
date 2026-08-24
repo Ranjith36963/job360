@@ -25,6 +25,28 @@ _API_URLS = [
     "https://nofluffjobs.com/api/search/posting",
 ]
 
+# Per-posting detail endpoint. Issue #334: the LIST payload carries NO body
+# text at all — a live probe over 1,000 postings (2026-08-19) found the longest
+# string on any list item was the 138-char `id`, and the only text-ish keys are
+# id/url/title/name/category. So there was nothing for `fetch_jobs` to read and
+# the adapter simply never set `description=`; all 40 nofluffjobs rows in prod
+# are empty. The prose lives at `requirements.description` on this endpoint
+# (2,117 chars on the probed posting); `details.description` exists but was
+# empty on every posting sampled, so it is deliberately NOT read.
+_DETAIL_URL = "https://nofluffjobs.com/api/posting/{posting_id}"
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# Detail-fetch budget per RUN, in the same shape as workday.py (40) /
+# smartrecruiters.py (60) / workable.py (60). Without one, a run that hit
+# _MAX_RESULTS would fire 200 extra requests at concurrent=2/delay=1.5
+# (RATE_LIMITS) — about 150s, which starts crowding the fetch timeout. Only
+# jobs that already survived the UK/remote filter are fetched, so this budget
+# is spent on rows we are actually keeping; prod holds 40 nofluffjobs rows
+# total, so 40 covers the real volume with room to spare. Anything past it is
+# picked up later by services/description_backfill.py.
+_MAX_DETAIL_FETCHES = 40
+
 
 def _plausible_gbp(val: Any) -> bool:
     """A loose sanity bound for a GBP annual salary figure -- used only when
@@ -186,28 +208,29 @@ class NoFluffJobsSource(BaseJobSource):
                 if isinstance(v, dict) and v.get("value")
             ]
 
-            # Job-understanding fix (2026-08-16): the list endpoint above has
-            # NO description field at all -- description was never passed to
-            # Job() here, which silently disabled visa and deadline
-            # extraction downstream (both read job.description). The real
-            # prose sits on a per-posting detail endpoint
-            # (/api/posting/{id} -> requirements.description, 100% hit in a
-            # spot-check) -- budgeted the same way as smartrecruiters/
-            # devitjobs so an uncapped pass cannot blow the fetch ceiling.
+            # Issue #334 — the list endpoint above has NO description field at
+            # all, so description was never passed to Job() here, which also
+            # silently disabled visa and deadline extraction downstream (both
+            # read job.description). The prose sits on the per-posting detail
+            # endpoint (see _DETAIL_URL -> requirements.description, 100% hit in
+            # a spot-check), budgeted the same way as smartrecruiters/devitjobs
+            # so an uncapped pass cannot blow the fetch ceiling. A failed detail
+            # fetch degrades to an empty description, never a dropped job.
+            #
+            # ONE fetch, three uses: the raw detail dict is fetched once and
+            # then read for description, skills and deadline. `expiresAt` (100%
+            # hit in spot-checks, ISO "2026-08-19T23:59:59") therefore rides the
+            # SAME response at zero extra HTTP cost. It only covers the
+            # detail_budget subset, not every posting; the rest stay honestly
+            # absent rather than spending a second budget on it (rule #29).
             description = ""
             deadline = None
             deadline_source = None
-            if detail_budget > 0 and posting_id:
+            if posting_id and detail_budget > 0:
                 detail_budget -= 1
                 detail = await self._fetch_posting_detail(str(posting_id))
                 description = self._extract_detail_description(detail)
-                # `expiresAt` (100% hit in spot-checks, ISO format
-                # "2026-08-19T23:59:59") rides the SAME detail response
-                # already being fetched for description -- zero extra HTTP
-                # cost. Only covers the detail_budget subset (40/run), not
-                # every posting; the rest stay honestly absent rather than
-                # spending a second detail-fetch budget on it.
-                raw_expires = detail.get("expiresAt") if isinstance(detail, dict) else None
+                raw_expires = detail.get("expiresAt")
                 expires_iso, expires_confidence = normalize_posted_at(raw_expires)
                 if expires_confidence == "high" and expires_iso:
                     deadline = expires_iso[:10]
@@ -243,18 +266,57 @@ class NoFluffJobsSource(BaseJobSource):
         return jobs
 
     async def _fetch_posting_detail(self, posting_id: str) -> dict:
-        """Fetch one posting raw detail JSON. Returns {} on any failure --
-        callers treat a missing detail as an absent description, never an
-        error."""
-        detail = await self._get_json(f"https://nofluffjobs.com/api/posting/{posting_id}")
+        """Fetch one posting's RAW detail JSON. Returns ``{}`` on any failure.
+
+        Split from ``_fetch_posting_text`` so the caller can read description,
+        skills AND ``expiresAt`` out of a single response instead of paying for
+        the same fetch twice. Callers treat a missing detail as absent data,
+        never an error.
+        """
+        if not posting_id:
+            return {}
+        detail = await self._get_json(_DETAIL_URL.format(posting_id=posting_id))
         return detail if isinstance(detail, dict) else {}
 
     @staticmethod
     def _extract_detail_description(detail: dict) -> str:
-        """The detail endpoint prose lives at requirements.description
-        (HTML) -- verified live 2026-08-16, 15/15 sampled postings hit."""
-        requirements = detail.get("requirements")
-        text = requirements.get("description") if isinstance(requirements, dict) else None
-        if not text:
+        """Body text from a raw detail response — prose plus the asked-for skills.
+
+        The prose lives at ``requirements.description`` (HTML) — verified live
+        2026-08-16, 15/15 sampled postings hit.
+
+        ``requirements.musts`` / ``.nices`` are appended because they are the
+        skills the ad actually asks for, and the 40-point skill component is the
+        whole reason an empty description matters. They are genuinely fetched ad
+        content, not padding — nothing here writes text the posting did not say.
+        """
+        block = detail.get("requirements")
+        if not isinstance(block, dict):
             return ""
-        return _HTML_TAG_RE.sub(" ", html.unescape(str(text)))[:5000].strip()
+        parts: list[str] = []
+        body = block.get("description")
+        if body:
+            parts.append(_HTML_TAG_RE.sub(" ", html.unescape(str(body))))
+        for key, label in (("musts", "Must have"), ("nices", "Nice to have")):
+            values = [
+                str(entry.get("value"))
+                for entry in (block.get(key) or [])
+                if isinstance(entry, dict) and entry.get("value")
+            ]
+            if values:
+                parts.append(f"{label}: {', '.join(values)}")
+        return " ".join(parts)[:5000].strip()
+
+    async def _fetch_posting_text(self, posting_id: str) -> str:
+        """Fetch one posting's body text from the per-posting detail endpoint.
+
+        Kept as its own method with this exact name because
+        ``src/services/description_backfill.py`` calls it directly to refill a
+        thin stored row — changing this signature or return type would break
+        that caller. Now a thin wrapper over ``_fetch_posting_detail`` +
+        ``_extract_detail_description`` so the backfill path and the fetch path
+        can never drift apart in what they consider "the text".
+        """
+        return self._extract_detail_description(
+            await self._fetch_posting_detail(posting_id)
+        )

@@ -368,3 +368,124 @@ class TestRemoteGluedToACountryName:
         term, so nothing else changes verdict."""
         assert check_uk("Shoreham-by-Sea", "reed").allowed
         assert check_uk("Home Park", "reed").allowed
+
+
+class TestHamletsNamedAfterAStateOrACountry:
+    """Issue #330. The gate was present, its data loaded, and it still said YES
+    to 190 foreign rows.
+
+    `ambiguous.txt` is computed by comparing UK place populations against
+    foreign ones — but the comparison only ever saw `cities500`, i.e. world
+    CITY primary names. The UK has hamlets literally called New York (pop 0),
+    California (pop 830) and Canada (pop 0), and none of those three names is a
+    cities500 primary name: GeoNames calls NYC "New York City", California is a
+    US STATE and Canada is a COUNTRY. So all three were TRUSTED, unambiguous UK
+    places, and "New York City, New York, United States" read as a two-site ad
+    that included the UK.
+
+    Measured in prod 2026-08-19: those three names carried 153 of the 190
+    admit-hits. `scripts/build_uk_gazetteer.py` now weights the country and
+    admin1 lists into the ambiguity computation, so the escape's long-standing
+    "unambiguous UK signal" requirement finally has the data to refuse them.
+
+    Every `loc` below is a VERBATIM location string from a live prod row.
+    """
+
+    @pytest.mark.parametrize("source,loc", [
+        ("recruitee", "New York City, New York, United States"),
+        ("greenhouse", "New York City"),
+        ("greenhouse", "New York City, New York"),
+        ("greenhouse", "San Francisco, California"),
+        ("greenhouse", "Remote - California"),
+        ("greenhouse", "Remote - New York"),
+        ("greenhouse", "Ottawa, Canada"),
+        ("greenhouse", "Vancouver, Canada"),
+        ("lever", "New York, NY"),
+        ("ashby", "New York, NY (HQ)"),
+        ("ashby", "New York"),
+        ("climatebase", "Canada"),
+        ("himalayas", "Canada"),
+        ("aijobs_ai", "Canada"),
+        ("themuse", "Flexible / Remote, New York, NY"),
+        ("hackernews", "New York, NY"),
+        ("pinpoint", "Ireland"),
+        ("recruitee", "Larnaca, Lefkosia, Cyprus"),
+    ])
+    def test_live_prod_violator_is_now_refused(self, source: str, loc: str) -> None:
+        assert not check_uk(loc, source).allowed, loc
+
+    @pytest.mark.parametrize("source,loc", [
+        # The towns a naive fix costs. Union-ing uk_places & foreign_admin
+        # straight into ambiguous.txt was dry-run over the live catalog and
+        # blocked 200 legitimate rows — 114 of them devitjobs "Manchester".
+        # Population weighting is what keeps these, and it is not optional.
+        ("devitjobs", "Manchester"),
+        ("reed", "Manchester"),
+        ("greenhouse", "Manchester"),
+        ("reed", "Southampton"),
+        ("greenhouse", "Southampton"),
+        ("greenhouse", "London"),
+        ("greenhouse", "Birmingham"),
+        ("greenhouse", "Canterbury"),
+        ("greenhouse", "Leeds"),
+        ("greenhouse", "Glasgow"),
+        ("greenhouse", "Manchester, Greater Manchester"),
+        ("greenhouse", "Manchester - Main Office"),
+    ])
+    def test_real_uk_town_still_passes(self, source: str, loc: str) -> None:
+        assert check_uk(loc, source).allowed, loc
+
+    def test_a_genuine_two_site_ad_that_includes_london_is_kept(self) -> None:
+        """The escape has always demanded "an UNAMBIGUOUS UK signal", but it
+        read that signal off the FIRST gazetteer hit in segment order. Once
+        `new york` became ambiguous, this real hackernews row — which names
+        London outright — was refused. Preferring an unambiguous hit is what
+        that sentence already promised.
+        """
+        v = check_uk("San Francisco, New York, London", "hackernews")
+        assert v.allowed and v.reason == "dual_site_includes_uk"
+
+    def test_uk_native_source_keeps_its_ambiguous_place(self) -> None:
+        """Step 4 already lets a UK-native source through an ambiguous name;
+        the dual-site escape did not, for no stated reason. The asymmetry cost
+        a real job: Adzuna's "New York, Lincoln" is New York, LINCOLNSHIRE —
+        the location field even names the county.
+        """
+        assert "adzuna" in UK_NATIVE_SOURCES
+        assert check_uk("New York, Lincoln", "adzuna").allowed
+
+    def test_the_three_names_are_marked_ambiguous_in_the_shipped_data(self) -> None:
+        """Value-presence, not schema-presence (rule #21): a 495-line
+        ambiguous.txt looked perfectly healthy for four days while these exact
+        three names were missing from it.
+        """
+        import src.services.uk_gate as gate
+
+        gate._gazetteer.cache_clear()
+        places, _foreign, ambiguous = gate._gazetteer()
+        for name in ("new york", "california", "canada"):
+            assert name in places, f"{name} should still be a known UK place"
+            assert name in ambiguous, (
+                f"'{name}' is a UK hamlet AND a US state/country — it must be "
+                "ambiguous or the dual-site escape trusts it (issue #330)"
+            )
+
+    def test_the_builder_check_command_guards_both_directions(self) -> None:
+        """`build_uk_gazetteer.py --check` is the artifact's own guard, and CI
+        must not be able to regenerate a regressed file quietly. Assert the
+        canary lists it enforces are the real ones, both ways, and that the
+        committed data passes them.
+        """
+        import importlib.util
+
+        import src.services.uk_gate as gate
+
+        script = gate._DATA.parent.parent.parent / "scripts" / "build_uk_gazetteer.py"
+        spec = importlib.util.spec_from_file_location("build_uk_gazetteer", script)
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        assert set(mod.AMBIGUOUS_CANARIES) >= {"new york", "california", "canada"}
+        assert set(mod.UNAMBIGUOUS_CANARIES) >= {"london", "manchester", "southampton"}
+        assert mod.check() == 0, "the committed gazetteer fails its own --check"

@@ -883,6 +883,17 @@ export interface paths {
         /**
          * Upload Linkedin
          * @description Enrich user profile with a LinkedIn 'Save to PDF' profile export.
+         *
+         *     FAILS LOUDLY (2026-08-16, audit finding 4). This used to compute `merged`
+         *     from `_looks_like_linkedin(text)` alone — a cheap PRE-extraction heuristic
+         *     (2 of 3 markers: URL / 3+ headings / page footer) — and return HTTP 200
+         *     with `merged=True` whenever that heuristic passed, regardless of what the
+         *     real extraction (deterministic + LLM) actually produced. A layout the
+         *     heuristic likes but the extractor cannot parse told the owner "LinkedIn
+         *     profile enriched" while storing nothing usable. `merged` is now computed
+         *     the SAME way `has_linkedin` is in `_build_profile_response`:
+         *     `bool(cv.linkedin_skills or cv.linkedin_positions)`, checked AFTER
+         *     extraction runs — and a merge that yields nothing is a 422, not a 200.
          */
         post: operations["upload_linkedin_api_profile_linkedin_post"];
         delete?: never;
@@ -1134,8 +1145,10 @@ export interface paths {
          *     * ``slack``, ``discord``, ``telegram`` must use the Connect flow → 400.
          *     * ``webhook``: ``credential`` must be an http(s) URL; backend converts it
          *       to the Apprise ``json[s]://`` URL scheme.
-         *     * ``email``: ``credential`` must be a valid email address; backend builds
-         *       the ``mailtos://`` Apprise URL from the platform SMTP creds.
+         *     * ``email``: ``credential`` must be a valid email address; the backend
+         *       builds the Apprise URL from the platform's own mail credentials
+         *       (``resend://`` where a Resend key is configured, ``mailtos://`` only as
+         *       the local-SMTP fallback — see ``services/channels/email_url.py``).
          */
         post: operations["create_channel_api_settings_channels_post"];
         delete?: never;
@@ -1561,6 +1574,11 @@ export interface components {
              * @default
              */
             cv_experience_level: string;
+            /**
+             * Cv Industries
+             * @default []
+             */
+            cv_industries: string[];
             /**
              * Cv Positions
              * @default []

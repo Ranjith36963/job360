@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import os
 import time
 from datetime import datetime, timezone
 from datetime import time as _time
@@ -348,7 +349,7 @@ async def send_notification(
     cur = await db.execute("SELECT title, company, apply_url FROM jobs WHERE id = ?", (job_id,))
     job_row = await cur.fetchone()
     if job_row is None:
-        return {"sent": 0, "failed": 0}
+        return {"sent": 0, "queued": 0, "failed": 0}
 
     title = f"{job_row['title']} @ {job_row['company']}"
     body = f"Job360 match: {job_row['title']}\n{job_row['apply_url']}"
@@ -362,15 +363,32 @@ async def send_notification(
 
         dispatcher_fn = real_dispatch
 
-    results = await dispatcher_fn(db, user_id=user_id, title=title, body=body)
+    # `job_id` and `match_score` are NOT optional decoration here. Without
+    # job_id, `dispatcher._queue_digest` returns immediately without writing a
+    # row -- so a `daily` rule produced NO digest AND no send, while the code
+    # below still counted it. (CodeRabbit, PR #352.)
+    results = await dispatcher_fn(
+        db, user_id=user_id, title=title, body=body,
+        job_id=job_id, match_score=job_row.get("match_score"),
+    )
 
     sent = 0
+    queued = 0
     failed = 0
     for result in results:
         channel_key = result.channel_type or f"channel:{result.channel_id}"
         # Ensure a ledger row exists (idempotent per UNIQUE constraint).
         await _record_ledger_if_new(db, user_id=user_id, job_id=job_id, channel=channel_key)
-        if result.ok:
+        # QUEUED IS NOT SENT. `dispatch()` returns ok=True for a digest it merely
+        # enqueued, so counting `ok` alone marked a notification delivered that
+        # no user will receive until the digest drains -- and then wrote
+        # `notified_at`, which suppresses it from ever being re-notified. A
+        # notification recorded as delivered but never delivered is worse than
+        # one that failed loudly: the failure is invisible in every table that
+        # would show it. (CodeRabbit, PR #352.)
+        if result.queued_digest:
+            queued += 1
+        elif result.ok:
             await mark_ledger_sent(db, user_id=user_id, job_id=job_id, channel=channel_key)
             sent += 1
         else:
@@ -383,7 +401,20 @@ async def send_notification(
             )
             failed += 1
 
-    return {"sent": sent, "failed": failed}
+    # #318 — make delivery OBSERVABLE. `user_feed.notified_at` was NULL on all
+    # 24,597 live rows because the only writers (`mark_notified`,
+    # `list_pending_notifications`) had no production callers at all — the
+    # re-notify dedup runs off `notification_ledger` instead, so the column was
+    # orphaned rather than load-bearing. Without this, fixing delivery would
+    # still leave the issue's headline symptom ("notified_at is NULL on every
+    # feed row") looking untouched.
+    if sent:
+        try:
+            await FeedService(db).mark_notified_for_jobs(user_id, [job_id])
+        except Exception as exc:  # noqa: BLE001 — telemetry never fails a send
+            _log.warning("mark_notified failed user=%s job=%s: %s", user_id, job_id, exc)
+
+    return {"sent": sent, "queued": queued, "failed": failed}
 
 
 @_logged_task
@@ -1042,6 +1073,12 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
         if st == "sent":
             for jid in uniq_jids:
                 await mark_ledger_sent(db, user_id=user_id, job_id=jid, channel=channel)
+            # #318 — same observability wiring as send_notification: stamp
+            # user_feed.notified_at for the jobs this bundle actually carried.
+            try:
+                await FeedService(db).mark_notified_for_jobs(user_id, uniq_jids)
+            except Exception as exc:  # noqa: BLE001 — telemetry never fails a send
+                _log.warning("mark_notified failed user=%s: %s", user_id, exc)
             await db.execute(
                 "UPDATE user_notification_digests SET sent=1, "
                 "sent_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') "
@@ -1333,6 +1370,252 @@ async def enrich_job_task(ctx: dict[str, Any], job_id: int) -> dict[str, bool | 
 # headroom for a bigger-than-usual day without being unbounded.
 MAX_REFRESH_INGEST_IDS = 1000
 
+# ---------- Issue #271 — durable re-scoring ----------------------------
+#
+# Until 2026-08-12 a profile save fired ``rescore_user_feed`` with
+# ``asyncio.create_task`` IN THE WEB PROCESS: no queue entry, no retry, no
+# completion record (``grep -c rescore src/workers/tasks.py`` was literally 0).
+# ``main`` auto-deploys on every merge, so a deploy alone killed anything in
+# flight. Measured in prod 2026-08-11: 9,708 ``user_feed`` rows on a
+# profile_version older than their user's current one, ALL pointing at jobs
+# still in the catalog (0 orphans) — reachable work that simply never ran.
+
+# Retry backoff for a failed re-score, in seconds: try 2 waits 30s, try 3 waits
+# 60s, and so on. ``WorkerSettings.max_tries = 5`` is the ceiling, so a
+# permanently-poisoned job gives up rather than looping on the single
+# (``max_jobs = 1``) worker slot forever.
+RESCORE_RETRY_DEFER_SECONDS = 30
+
+
+@_logged_task
+async def rescore_user_feed_task(ctx: dict[str, Any], user_id: str) -> dict[str, Any]:
+    """ARQ task: re-score ONE user's feed against their current profile.
+
+    Deliberately thin — the scoring logic stays in ``services/rescore.py`` so
+    the queued path and the in-process fallback can never diverge.
+
+    Uses its OWN database connection (``rescore_user_feed`` opens a
+    ``JobDatabase``), not ``ctx['db']``: the re-score is long and the worker
+    shares one psycopg connection across tasks, so borrowing it would risk the
+    "another operation in progress" hazard that ``max_jobs = 1`` exists to
+    avoid.
+
+    On failure it asks ARQ to retry with a backoff instead of swallowing the
+    error. That is the whole point of moving this onto the queue: a transient DB
+    blip used to strand a user's feed on an old profile_version forever, with
+    nobody to notice.
+    """
+    from src.services import rescore as _rescore  # noqa: PLC0415 — heavy (rule #16)
+
+    try:
+        result = await _rescore.rescore_user_feed(user_id)
+    except Exception as exc:
+        job_try = int(ctx.get("job_try") or 1)
+        _log.error(
+            "rescore_task_failed",
+            extra={
+                "event": "rescore_task_failed",
+                "user_id": user_id,
+                "job_try": job_try,
+                "error": str(exc),
+            },
+            exc_info=True,
+        )
+        try:
+            from arq.worker import Retry  # noqa: PLC0415
+        except Exception:  # noqa: BLE001 — arq absent in a minimal env
+            raise exc from None
+        raise Retry(defer=RESCORE_RETRY_DEFER_SECONDS * job_try) from exc
+
+    _log.info(
+        "rescore_task_done",
+        extra={
+            "event": "rescore_task_done",
+            "user_id": user_id,
+            "rescored": result.get("rescored"),
+            "version": result.get("version"),
+        },
+    )
+    return result
+
+
+# Backfill defaults. Small on purpose: this exists to drain a 9,708-row debt
+# without becoming the thing that takes production down.
+BACKFILL_BATCH_SIZE = 25
+BACKFILL_THROTTLE_SECONDS = 2.0
+
+
+async def _stale_feed_users(
+    db: pg.Connection, *, after: str, limit: int
+) -> list[dict[str, Any]]:
+    """Users whose ``user_feed`` rows are behind their current profile version.
+
+    Keyset pagination on ``user_id`` (``user_id > after``) rather than
+    OFFSET: the set shrinks underneath us as re-scores land, and OFFSET over a
+    shrinking set silently SKIPS rows. It also guarantees the backfill loop
+    terminates — a plain "re-query the stale set" loop would return the same
+    batch forever, because a user stays stale until their queued job actually
+    runs.
+
+    Returns dicts with ``user_id``, ``current_version`` and ``stale_rows``.
+    Returns ``[]`` if the profile-version table is missing (pre-migration DB)
+    rather than aborting the sweep.
+    """
+    try:
+        cur = await db.execute(
+            """
+            SELECT f.user_id AS user_id,
+                   MAX(v.current_version) AS current_version,
+                   COUNT(*) AS stale_rows
+              FROM user_feed f
+              JOIN (SELECT user_id, MAX(id) AS current_version
+                      FROM user_profile_versions
+                     GROUP BY user_id) v
+                ON v.user_id = f.user_id
+             WHERE COALESCE(f.profile_version, -1) <> v.current_version
+               AND f.user_id > ?
+             GROUP BY f.user_id
+             ORDER BY f.user_id
+             LIMIT ?
+            """,
+            (after, limit),
+        )
+        return [dict(r) for r in await cur.fetchall()]
+    except Exception as exc:  # noqa: BLE001 — missing table on a legacy DB
+        _log.warning(
+            "rescore_backfill_query_failed",
+            extra={"event": "rescore_backfill_query_failed", "error": str(exc)},
+            exc_info=True,
+        )
+        return []
+
+
+@_logged_task
+async def rescore_backfill(
+    ctx: dict[str, Any],
+    *,
+    batch_size: int = BACKFILL_BATCH_SIZE,
+    max_users: int = 0,
+    throttle_seconds: float = BACKFILL_THROTTLE_SECONDS,
+) -> dict[str, Any]:
+    """Drain the stale-feed debt: queue ONE re-score per affected user.
+
+    RUN IT DELIBERATELY. It is registered in ``WorkerSettings.functions`` so it
+    can be enqueued on purpose, and it is deliberately NOT on a cron — nothing
+    this expensive should fire on boot.
+
+    Four properties, each one a scar:
+
+    * **Batched + throttled.** It walks users ``batch_size`` at a time and
+      sleeps ``throttle_seconds`` between batches. Never one giant transaction.
+    * **Does not monopolise the event loop.** The sleep between batches is a
+      real ``await``, so anything else on the loop gets CPU while this runs.
+      Pinned by ``tests/test_rescore_on_the_queue.py`` with a competing
+      coroutine and a DB stub that yields nowhere else — delete the await and
+      that test fails. This repo's recorded lesson is exactly this: "a
+      correctness fix with an operational cost is still a regression".
+    * **The heavy work is not done here.** Scoring the whole catalog for one
+      user is a queued ``rescore_user_feed_task``, so each unit is bounded,
+      retried and observable on its own. This function only decides WHO is owed
+      a re-score.
+    * **Resumable, not restartable.** The job id is
+      ``rescore-backfill:<user>:<current_version>``; ARQ refuses a second job
+      with an id it already knows, so a run that dies half-way can simply be
+      re-run — users already re-scored have dropped out of the stale query, and
+      users already queued are deduped by id. A NEW profile change produces a
+      new version, hence a new id, and is still allowed through.
+
+    Args:
+        batch_size: users selected per DB round-trip.
+        max_users: hard ceiling for one run; 0 = no ceiling.
+        throttle_seconds: pause between batches.
+
+    Returns ``{"enqueued", "batches", "skipped_no_queue"}``.
+    """
+    import asyncio as _asyncio  # noqa: PLC0415
+
+    db: pg.Connection = ctx["db"]
+    db.row_factory = pg.Row
+    enqueue = ctx.get("enqueue")
+
+    enqueued = 0
+    batches = 0
+    skipped_no_queue = 0
+    after = ""
+
+    while True:
+        remaining = batch_size
+        if max_users:
+            remaining = min(batch_size, max_users - enqueued)
+            if remaining <= 0:
+                break
+
+        rows = await _stale_feed_users(db, after=after, limit=remaining)
+        if not rows:
+            break
+        batches += 1
+
+        for row in rows:
+            user_id = str(row["user_id"])
+            after = user_id
+            version = row["current_version"]
+            if enqueue is None:
+                skipped_no_queue += 1
+                continue
+            result = enqueue(
+                "rescore_user_feed_task",
+                user_id,
+                _job_id=f"rescore-backfill:{user_id}:{version}",
+            )
+            if hasattr(result, "__await__"):
+                await result
+            enqueued += 1
+
+        # THE YIELD. Everything above is synchronous once the batch is loaded,
+        # so this is what keeps the worker's other tasks (and its Redis
+        # heartbeat) alive while a long backfill drains.
+        await _asyncio.sleep(throttle_seconds)
+
+    _log.info(
+        "rescore_backfill_done",
+        extra={
+            "event": "rescore_backfill_done",
+            "enqueued": enqueued,
+            "batches": batches,
+            "skipped_no_queue": skipped_no_queue,
+        },
+    )
+    return {
+        "enqueued": enqueued,
+        "batches": batches,
+        "skipped_no_queue": skipped_no_queue,
+    }
+
+
+def _refresh_catalog_notifies() -> bool:
+    """True when the nightly catalog refill is allowed to notify. Default False.
+
+    #318 turned the old hardcoded ``suppress_notifications=True`` into this
+    switch. The default is unchanged — the nightly fan-out stays silent — but
+    the owner can now flip ``REFRESH_CATALOG_NOTIFY=1`` and restart the worker
+    instead of needing a code change to make a product decision.
+
+    Read at call time, not import time, so a restart is enough.
+
+    Safe to enable ONLY because new users are seeded onto ``notify_mode='daily'``
+    (``services/notifications/defaults.py``). In 'daily' mode dispatch() routes
+    matches into ``user_notification_digests`` and ``send_bundle`` mails ONE
+    bundle per user. Flipping this on while anyone sits on 'instant' is the
+    blast-radius scenario this function's docstring warns about: ~280 new jobs
+    per tick would become ~280 separate emails, per user, every night.
+    """
+    return os.getenv("REFRESH_CATALOG_NOTIFY", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
 
 async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
     """ARQ periodic task: refill the SHARED job catalog on a schedule, then
@@ -1386,25 +1669,30 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
     So this cron costs worker CPU (already running 24/7) plus keyed-API quota
     for the fetch, plus bounded local scoring — and no per-user judge spend.
 
-    NOTIFICATIONS — deliberately suppressed on this path
-    (``suppress_notifications=True``). `score_and_ingest` queues an instant
-    notification at score >= 80; wiring it into a nightly cron makes that
-    reachable for the very first time, for EVERY user, EVERY tick, all at
-    once — a materially different shape of risk than a user's own on-demand
-    search enqueuing their own single result. Measured live 2026-08-15:
-    today the blast radius is zero (`notification_rules` and `user_channels`
-    are both empty — no user has a channel configured yet — and only ONE
-    `user_feed` row has ever scored >= 80), but that is a fact about today's
-    data, not a property of this code, and it will stop being true the
-    moment someone adds a channel. Turning per-job instant pushes on for an
-    unattended 04:00 cron is a real product decision (bundle daily? cap per
-    tick? per-user opt-in?) that deserves its own review, not a side-effect
-    of fixing the empty-dashboard bug. Feed rows and scores are written
-    normally either way; the ledger row and the outbound send are BOTH
-    skipped (:219-220), which is the correct pairing — a ledger row with no
-    send would be treated as already-notified by the if-new dedup and would
-    permanently swallow that job's notification. Flipping this back to False
-    later stays a one-line, fully reversible change once that review happens.
+    NOTIFICATIONS — still suppressed by default, but now a SWITCH
+    (``suppress_notifications=not _refresh_catalog_notifies()``, env
+    ``REFRESH_CATALOG_NOTIFY``, default off). `score_and_ingest` queues an
+    instant notification at score >= 80; wiring it into a nightly cron makes
+    that reachable for EVERY user, EVERY tick, all at once — a materially
+    different shape of risk than a user's own on-demand search enqueuing their
+    own single result. Turning per-job pushes on for an unattended 04:00 cron
+    is a real product decision (bundle daily? cap per tick? per-user opt-in?)
+    that deserves its own review; making it an env var means that decision no
+    longer costs a code change and a deploy.
+
+    **The old "blast radius is zero" note is now STALE — do not rely on it.**
+    It said `notification_rules` and `user_channels` were both empty. That was
+    true on 2026-08-15 and was still true on 2026-08-19 (0 rows, 11 users),
+    but #318 now SEEDS both at signup, so from here on users really do have a
+    rulebook and a channel. What keeps the flip safe is no longer emptiness —
+    it is that seeded users default to ``notify_mode='daily'``, so dispatch()
+    bundles their matches into ``user_notification_digests`` and `send_bundle`
+    mails one digest instead of ~280 separate messages.
+
+    Feed rows and scores are written normally either way; the ledger row and
+    the outbound send are BOTH skipped (:219-220), which is the correct
+    pairing — a ledger row with no send would be treated as already-notified
+    by the if-new dedup and would permanently swallow that job's notification.
     ``no_notify=True`` on `run_search` itself is unchanged: the shared
     catalog refill still belongs to nobody.
 
@@ -1537,8 +1825,11 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
                     job_id,
                     enrichment_lookup_dict=enrichment_lookup_dict,
                     # See the NOTIFICATIONS section of this function's
-                    # docstring — deliberate, reversible, not a default.
-                    suppress_notifications=True,
+                    # docstring. Still suppressed by default, but it is now a
+                    # PARAMETER rather than a hardcode: the owner can turn the
+                    # nightly path on with an env var and a restart, instead of
+                    # needing a code change and a deploy to make the decision.
+                    suppress_notifications=not _refresh_catalog_notifies(),
                 )
                 scored_jobs += 1
                 ingested_rows += result.get("ingested", 0)

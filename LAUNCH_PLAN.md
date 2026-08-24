@@ -1,10 +1,10 @@
 # LAUNCH_PLAN.md — From verified app to live SaaS
 
-> Updated 2026-06-21: Phase −2/−1 build+verify items are shipped (see docs/CHECKLIST_KANBAN.md).
+> Updated 2026-06-21: Phase −2/−1 build+verify items are shipped (see docs/harness/CHECKLIST_KANBAN.md).
 
 > **What this is.** The ordered roadmap from *"the code is written"* (today) to *"the SaaS is operating, serving real users, generating revenue"* (target). Eight phases, with explicit dependencies and exit criteria per phase.
 >
-> **What this is NOT.** A status doc (see `STATUS.md` for what's already merged). A rule book (see `CLAUDE.md` for what you must not break). An architecture reference (see `docs/pillars/`). This document only answers *"what's next, in what order, and why"*.
+> **What this is NOT.** A status doc (see `STATUS.md` for what's already merged). A rule book (see `CLAUDE.md` for what you must not break). An architecture reference (see `docs/product/pillars/`). This document only answers *"what's next, in what order, and why"*.
 >
 > **When to read.** Before starting any work that could be a step toward launch — to make sure you're picking up the *right* next step. Also before any "should I work on X or Y" decision — the dependency graph below decides for you.
 >
@@ -54,7 +54,7 @@ Each box assumes the previous one has cleared its exit criterion. Skipping a pha
 | --- | --- | --- | --- |
 | A ✅ | **Password reset flow** — migration + token service + 2 routes + frontend page + email template | ~1 day | `migrations/0015_password_resets.up.sql`, `services/auth/tokens.py`, `services/auth/password_reset.py`, `services/auth/email_sender.py`, `api/routes/auth.py`, `frontend/src/app/(auth)/forgot-password/page.tsx`, `frontend/src/app/(auth)/reset-password/page.tsx`, `tests/test_password_reset.py` |
 | B ✅ | **Email verification on registration** — migration + verification service + 2 routes + register-time hook + frontend confirm page | ~1 day | `migrations/0016_email_verification.up.sql`, `services/auth/email_verification.py`, `api/routes/auth.py`, `frontend/src/app/(auth)/verify-email/page.tsx`, `tests/test_email_verification.py` |
-| C ✅ | **ARQ worker local-dev runner + docs** — docker-compose for Redis, Makefile target, README updates so a developer can spin up the worker in one command | ~half day | `docker-compose.dev.yml` or equivalent, `Makefile`, `backend/README.md`, `docs/pillars/runbook.md` (worker section) |
+| C ✅ | **ARQ worker local-dev runner + docs** — docker-compose for Redis, Makefile target, README updates so a developer can spin up the worker in one command | ~half day | `docker-compose.dev.yml` or equivalent, `Makefile`, `backend/README.md`, `docs/product/pillars/runbook.md` (worker section) |
 | D ✅ | **Per-source health admin page** — backend route reading existing `run_log.per_source_errors` + `per_source_duration` columns (from migration `0010`), frontend admin page | ~1 day | `api/routes/admin.py` or extend `runs.py`, `frontend/src/app/admin/sources/page.tsx`, `tests/test_admin_source_health.py` |
 
 ### Optional bundle (cheap to add while in this code)
@@ -264,7 +264,7 @@ Notifications fire end-to-end in production. Source health is observable, not si
 | 16 | Privacy notice live on `/privacy`, footer link, copy reviewed by lawyer (Phase 0 work landing) |
 | 17 | Terms of service live on `/terms`, lawyer-reviewed |
 | 18 | Soft launch: 10–30 invited users (friends, ex-colleagues, target persona testers) |
-| 19 | Triage anything that surfaces. The runbook (`docs/pillars/runbook.md`) failure-mode tables become real bug reports |
+| 19 | Triage anything that surfaces. The runbook (`docs/product/pillars/runbook.md`) failure-mode tables become real bug reports |
 
 ### Exit criterion ✋
 
@@ -387,4 +387,4 @@ You don't need permission for #1 through #5. They unblock the rest of the plan.
 
 ---
 
-*See also: `STATUS.md` (what's done), `CLAUDE.md` (the rules), `docs/pillars/` (the architecture reference), `docs/pillars/runbook.md` (operational answers during execution).*
+*See also: `STATUS.md` (what's done), `CLAUDE.md` (the rules), `docs/product/pillars/` (the architecture reference), `docs/product/pillars/runbook.md` (operational answers during execution).*

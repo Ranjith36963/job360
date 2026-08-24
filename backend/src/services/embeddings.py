@@ -216,6 +216,11 @@ def profile_to_embedding_text(profile: Any) -> str:
             if isinstance(v, str) and v.strip():
                 parts.append(v.strip())
         _add_all(getattr(cv, "education", []))
+        # Education sub-bullets — dissertation title, coursework, course
+        # projects. Often the only place a student or recent graduate names the
+        # technique they actually know, so leaving them out made the vector
+        # blind to exactly the candidates with the least other evidence.
+        _add_all(getattr(cv, "cv_education_details", []))
         _add_all(getattr(cv, "certifications", []))
         _add_all(getattr(cv, "achievements", []))
         # Roles actually held — title + company + what they did there.
