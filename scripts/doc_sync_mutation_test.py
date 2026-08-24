@@ -97,6 +97,13 @@ CASES: list[tuple[str, str, str, str]] = [
      r"([\d,]{3,}) collected", "9,999 collected", "suite-baseline"),
     ("backend/CLAUDE.md",
      r"(SQLite|Postgres) via psycopg3", "SQLite table via psycopg3", "stale-phrase"),
+    # Sixth batch, 2026-08-24. The nightly routine found runbook.md still
+    # telling operators to run `sqlite3 data/jobs.db` against a Postgres
+    # database -- five dead COMMANDS, not stale prose. The four SQLite entries
+    # in FORBIDDEN_PHRASES all pin sentences; none matched a shell command.
+    ("docs/product/pillars/runbook.md",
+     r"(railway) run -s Postgres psql", "sqlite3 data/jobs.db run -s Postgres psql",
+     "stale-phrase"),
     # Fifth batch, 2026-08-24. Two "N-thing schema" style guards promoted by the
     # nightly routine after ARCHITECTURE.md carried "25-migration forward-compat
     # schema" (real 31) and README.md's source-tree said `ats/ (12)` (real 10).
@@ -220,9 +227,31 @@ def structural_drills() -> list[str]:
     finally:
         dsc.source_subfolder_counts = real_counts
 
+    # 3. A NEW pillar doc must be caught the day it appears.
+    #
+    # This one cannot use a throwaway root: pillars_fully_watched() compares the
+    # real folder against the real LIVING_DOCS, and the bug it guards is a file
+    # existing that nobody listed. So a real file is created and removed under
+    # try/finally -- a drill that leaves litter in the authoritative folder
+    # would be worse than the bug.
+    probe = ROOT / "docs/product/pillars/_drill_probe.md"
+    try:
+        probe.write_text("# drill probe\n", encoding="utf-8")
+        missing = dsc.pillars_fully_watched()
+        if not any(p.endswith("_drill_probe.md") for p in missing):
+            failures.append(
+                "pillar-unwatched: a new file in docs/product/pillars/ was NOT reported "
+                "— the folder-coverage guard is blind"
+            )
+    finally:
+        probe.unlink(missing_ok=True)
+
+    if probe.exists():  # belt and braces: never leave litter behind
+        failures.append(f"pillar-unwatched: drill failed to clean up {probe}")
+
     if not failures:
         print("PASS  structural      missing subfolder (count + emitted guard), "
-              "gapped/malformed/duplicate migrations")
+              "gapped/malformed/duplicate migrations, unwatched pillar doc")
     return failures
 
 

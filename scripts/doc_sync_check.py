@@ -70,6 +70,19 @@ LIVING_DOCS = [
     "docs/product/pillars/01-user-pillar.md",
     "docs/product/pillars/02-search-and-match-engine.md",
     "docs/product/pillars/glossary.md",
+    # Added 2026-08-24 (third batch) after the nightly routine found
+    # runbook.md still telling operators to run `sqlite3 data/jobs.db` against a
+    # database that has been Postgres since 2026-07-02 -- five dead commands in
+    # the one file whose whole job is "I see a problem, what do I type".
+    #
+    # It survived every guard because it was one of TWO files in this folder
+    # with no doc-type header and no place on this list. Adding files here one
+    # at a time is what let that happen: four of six were watched, and the
+    # drift landed in one of the other two. pillars_fully_watched() below now
+    # asserts the whole folder is covered, so the list cannot fall behind the
+    # directory again.
+    "docs/product/pillars/README.md",
+    "docs/product/pillars/runbook.md",
 ]
 
 # Prose lies that numbers can't catch. Each = (forbidden phrase, why).
@@ -86,6 +99,12 @@ FORBIDDEN_PHRASES = [
     ("SQLite table", "the DB is Postgres via psycopg3 — pg.py is aiosqlite-SHAPED, not SQLite"),
     ("SQLite database", "the DB is Postgres via psycopg3 — pg.py is aiosqlite-SHAPED, not SQLite"),
     ("stored in SQLite", "the DB is Postgres via psycopg3 since 2026-07-02 (pg.py shim)"),
+    # Added 2026-08-24. The four entries above pin PROSE. runbook.md carried
+    # five `sqlite3 data/jobs.db` COMMANDS -- an operator following them gets an
+    # error, not a wrong sentence. A stale command is worse than a stale claim
+    # because it is meant to be executed.
+    ("sqlite3 data/", "the DB is Postgres — use `railway run -s Postgres psql` or psycopg3"),
+    ("sqlite3 backend/data/", "the DB is Postgres — use `railway run -s Postgres psql` or psycopg3"),
 ]
 
 # Header spec (DOC-MAINTENANCE.md): one HTML comment near the top of a doc,
@@ -460,6 +479,33 @@ def collected_baseline_claims() -> list[tuple[str, str, int]]:
                 except ValueError:
                     continue
     return out
+
+
+def pillars_fully_watched() -> list[str]:
+    """Every *.md under docs/product/pillars/ must be in LIVING_DOCS.
+
+    Root CLAUDE.md calls that folder the AUTHORITATIVE code-verified
+    architecture reference. A file sitting in it that nothing checks is a
+    contradiction in terms, and it has now happened twice: 03-job-providers.md
+    carried the pre-prune source counts for a week, and runbook.md told
+    operators to run `sqlite3 data/jobs.db` against a Postgres database.
+
+    Both times the fix was "add that file to the list", which fixes one file and
+    leaves the next one exposed -- four of six were watched when the second bug
+    landed in one of the other two. This asserts the WHOLE folder instead, so a
+    new pillar doc is guarded the day it appears rather than the day someone
+    remembers it.
+    """
+    folder = ROOT / "docs/product/pillars"
+    if not folder.exists():
+        return []
+    watched = {w.replace("\\", "/") for w in LIVING_DOCS}
+    missing = []
+    for p in sorted(folder.glob("*.md")):
+        rel = p.relative_to(ROOT).as_posix()
+        if rel not in watched:
+            missing.append(rel)
+    return missing
 
 
 def workflow_count() -> int:
@@ -991,6 +1037,13 @@ def main() -> int:
                 "frontend (user-facing copy)", str(line_no), "landing-source-count",
                 str(claimed), str(registry),
             ))
+
+    # The authoritative folder must be watched in full, not file by file.
+    for rel in pillars_fully_watched():
+        drift.append((
+            rel, "-", "pillar-unwatched", "not in LIVING_DOCS",
+            "docs/product/pillars/ is the AUTHORITATIVE reference — every file in it must be checked",
+        ))
 
     # Dead relative links anywhere in the doc tree (archive moves, renames).
     for doc, target in dead_links():
