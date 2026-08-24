@@ -326,7 +326,7 @@ This tuple is the DB's UNIQUE constraint and the deduplicator's Layer-1 key. **C
 
 ### 4.1 Keyed APIs — `apis_keyed/` (8)
 
-Pattern: accept `api_key` in `__init__`, return `[]` early with an info log if the key is empty (so the source skips gracefully on free installs).
+Pattern: accept `api_key` in `__init__`, return `[]` early if the key is empty (so the source skips gracefully on free installs). The log line is `WARNING` in seven of the eight — `gov_apprenticeships.py:62` is the only `INFO`.
 
 | Source | Upstream | Env var |
 | --- | --- | --- |
@@ -487,11 +487,11 @@ There are **no** separate `test_ats*.py` / `test_feed*.py` files — all source 
 
 ## Environment variables — every var the Providers pillar reads
 
-Almost all are the keyed-source API credentials. The 43 free sources need no env at all.
+Almost all are the keyed-source API credentials. The other **33** registry keys have no **required** environment variables — 41 keys minus the 8 keyed sources (README's "API Key Setup" states the same split). "Required" is the operative word: `EightyKHoursSource` is not a keyed source, yet the row below lets you override the public Algolia keys it ships with.
 
 | Var | Required by | Default | What changes when you flip it |
 | --- | --- | --- | --- |
-| `REED_API_KEY` | `ReedSource` | (unset) | Reed `return []` silently when unset; logged at INFO |
+| `REED_API_KEY` | `ReedSource` | (unset) | Reed returns `[]` when unset, logging `Reed: no API key, skipping` at **`WARNING`** (`reed.py:45`) — not silent, and not INFO |
 | `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | `AdzunaSource` | (unset) | Both must be set; either unset → return [] |
 | `JSEARCH_API_KEY` | `JSearchSource` | (unset) | RapidAPI key |
 | `JOOBLE_API_KEY` | `JoobleSource` | (unset) | |
