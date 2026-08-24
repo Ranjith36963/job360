@@ -267,7 +267,7 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 |---|--------|---------|------|---------|
 | 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
 | 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:582-617`; data from the enrichment step `services/job_enrichment.py`) | `ENRICHMENT_ENABLED` | false |
-| 3 | Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
+| 3 | Hybrid | `services/embeddings.py` + `pg_vector_index.py` + `retrieval.py` (`vector_index.py` is the legacy Chroma wrapper, no production caller) | reads: `ENGINE3_ENABLED` **or** `SEMANTIC_ENABLED`; embedding writes: `SEMANTIC_ENABLED` alone | false |
 | 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
 
 **Engine 4 — LLM judge detail:**

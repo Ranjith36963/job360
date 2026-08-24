@@ -502,7 +502,7 @@ Almost all are the keyed-source API credentials. The 43 free sources need no env
 | `EIGHTYKHOURS_ALGOLIA_APP_ID` / `EIGHTYKHOURS_ALGOLIA_API_KEY` | `EightyKHoursSource` | hard-coded public keys | Allow override of the (public) Algolia search keys 80,000 Hours embeds in their site |
 | (per-source rate-limit knobs) | All sources | from `RATE_LIMITS` dict in `settings.py` | Not env-configurable; edit code |
 
-> **All sources skip gracefully without their key**: the keyed-source pattern is `if not api_key: return []` with an `INFO` log line. The pipeline never errors — sources just don't contribute.
+> **All sources skip gracefully without their key**: the keyed-source pattern is `if not api_key: return []` with a **`WARNING`** log line — Adzuna, Careerjet, Findwork, GoogleJobs, Jooble, JSearch and Reed all use `logger.warning`; `gov_apprenticeships.py:62` is the lone `INFO`. The pipeline never errors — sources just don't contribute, and **the run still reports success**, so a missing key is only visible in the log.
 
 ---
 

@@ -442,8 +442,14 @@ tolerant: on a Postgres without pgvector it skips the column entirely, and then
 -- 0 rows here means pgvector is absent and 0027 was a no-op. Install the
 -- extension and re-run the migration before the UPDATE below; the DELETE
 -- underneath works either way.
-SELECT 1 FROM information_schema.columns
- WHERE table_name = 'job_embeddings' AND column_name = 'embedding';
+--
+-- to_regclass, not information_schema.table_name: the UPDATE below is
+-- UNQUALIFIED, so it hits whichever job_embeddings the current search_path
+-- resolves to. Matching on the bare table name can pass on a same-named table
+-- in another schema and still leave the UPDATE erroring.
+SELECT 1 FROM pg_attribute
+ WHERE attrelid = to_regclass('job_embeddings')
+   AND attname = 'embedding' AND NOT attisdropped;
 
 -- Force a re-embed of everything (the vector goes, the audit row stays):
 UPDATE job_embeddings SET embedding = NULL;

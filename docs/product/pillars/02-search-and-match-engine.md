@@ -172,7 +172,7 @@ Survives unchanged.
 
 If `SEMANTIC_ENABLED=true`: `encode_job(job, enrichment)` runs (lazy-imports `sentence_transformers`, splits long description 300/50, max-pools), then `PgVectorIndex().upsert(job_id, vector)` writes the vector AND its audit stamp into the same `job_embeddings` row in one statement — `model_version` is taken from `embeddings.MODEL_NAME` inside the method and `embedding_updated_at` is set to `now()` (`backend/src/main.py:1295-1298`, `services/pg_vector_index.py:99-123`).
 
-> **The store is Postgres, not ChromaDB.** Migration `0027` moved the vector into `job_embeddings.embedding` (`vector` type, pgvector) on 2026-08-07, because the Chroma store sat on the BACKEND container's local disk while the only scheduled pipeline runs on the WORKER — so nothing was ever embedded in prod (catalog 7,761 → 8,184 overnight, embeddings stuck at 284). `services/vector_index.py` (the Chroma wrapper) still exists and still builds a `chromadb.PersistentClient` when called (`vector_index.py:39-45`) — but **no production call site constructs it**. Its only remaining callers are two scripts (`backend/scripts/build_job_embeddings.py:73`, `backend/scripts/eval_v2_pool.py:125`) and two tests (`test_embeddings.py:22`, `test_vector_index_path.py:18`).
+> **The store is Postgres, not ChromaDB.** Migration `0027` moved the vector into `job_embeddings.embedding` (`vector` type, pgvector) on 2026-08-07, because the Chroma store sat on the BACKEND container's local disk while the only scheduled pipeline runs on the WORKER — so the scheduled run could never ADD one. Coverage froze: the catalog grew 7,761 → 8,184 overnight while the embedding count stayed at exactly 284. `services/vector_index.py` (the Chroma wrapper) still exists and still builds a `chromadb.PersistentClient` when called (`vector_index.py:39-45`) — but **no production call site constructs it**. Its only remaining callers are two scripts (`backend/scripts/build_job_embeddings.py:73`, `backend/scripts/eval_v2_pool.py:125`) and two tests (`test_embeddings.py:22`, `test_vector_index_path.py:18`).
 
 `db.log_run(stats, run_uuid, per_source_errors={...}, per_source_duration={greenhouse: 12.4}, total_duration=68.2)` writes the run row (migration `0010`).
 
@@ -306,7 +306,7 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
 ### Stage 6 — Store + (opt-in) embed
 
 - `db.insert_job(job)` does `INSERT OR IGNORE` on `(normalized_company, normalized_title)` UNIQUE — returns `True` for new rows, `False` for cross-run duplicates already in the catalog. **Never touch `normalized_key()`** without checking the dedup chain (CLAUDE.md rule #1).
-- If `SEMANTIC_ENABLED=true`, lazy-import `embeddings` + `vector_index`, encode each newly-inserted job via `encode_job(job, enrichment)` and `VectorIndex.upsert(job_id, vector)`.
+- If `SEMANTIC_ENABLED=true`, lazy-import `embeddings` + `pg_vector_index`, encode each newly-inserted job via `encode_job(job, enrichment)` and `PgVectorIndex().upsert(job_id, vector)` (`main.py:1292-1298`). This write path reads `SEMANTIC_ENABLED` **alone** — `ENGINE3_ENABLED` does not open it.
 - `db.log_run(stats, run_uuid, per_source_errors, per_source_duration, total_duration)` writes the `run_log` row.
 - Finally: CSV export → Markdown report → channel notifications (the *old* per-source notification system from `services/notifications/`; the per-user `channels/dispatcher` runs only under the ARQ worker, not the CLI).
 
