@@ -1,8 +1,28 @@
 # Runbook — Operational Answers
 
+<!-- doc: LIVING | last-verified: 2026-08-24 by the nightly doc-truth routine -->
+
 > **Audience.** Agents and operators answering "I see a problem — what do I do?" Each section below is a question phrased as a verb; the answer is a command, an SQL query, or a code pointer you can act on without first re-reading the pillar docs.
 >
-> Commands assume `cwd = backend/` and `source venv/bin/activate` unless noted. DB path defaults to `data/jobs.db`.
+> Commands assume `cwd = backend/` and `source venv/bin/activate` unless noted.
+>
+> **The database is Postgres, not a file.** It has been since 2026-07-02. There is no
+> `data/jobs.db` and no sqlite driver in the dependency set (`backend/pyproject.toml`
+> declares `psycopg[binary,pool]>=3.2`). Two ways in:
+>
+> ```bash
+> # Local dev — the docker-compose.dev.yml Postgres on port 5433.
+> # DATABASE_URL defaults to this (backend/src/core/settings.py:25).
+> psql postgresql://job360:job360dev@localhost:5433/job360
+>
+> # Production — see CLAUDE.md. Use DATABASE_PUBLIC_URL: plain
+> # DATABASE_URL only resolves from inside Railway.
+> railway run -s Postgres python <script>
+> ```
+>
+> Every `SQL` block below is meant for one of those two, not for a `sqlite3` shell.
+> `backend/src/repositories/pg.py` is an *aiosqlite-shaped* async driver over Postgres —
+> the shape is why so much of the code still reads like SQLite. The storage is not.
 
 ---
 
@@ -16,13 +36,14 @@ python -m src.cli status
 
 ### See the last 20 runs with per-source timing + errors
 
-```bash
-sqlite3 data/jobs.db \
-  "SELECT timestamp, run_uuid, total_found, new_jobs, total_duration, per_source_errors
-   FROM run_log ORDER BY timestamp DESC LIMIT 20;"
+```sql
+SELECT timestamp, run_uuid, total_found, new_jobs, total_duration, per_source_errors
+FROM run_log ORDER BY timestamp DESC LIMIT 20;
 ```
 
-Same data is exposed at `GET /api/runs` (auth-gated).
+Same data is exposed at `GET /api/runs/recent` (auth-gated), with
+`GET /api/runs/source-health` beside it — `backend/src/api/routes/runs.py:63,150`.
+There is no bare `GET /api/runs`.
 
 ### List configured sources
 
@@ -44,17 +65,19 @@ python -m src.cli view --visa-only
 ### Open the DB
 
 ```bash
-sqlite3 data/jobs.db
-.headers on
-.mode column
+psql postgresql://job360:job360dev@localhost:5433/job360   # local dev
+railway run -s Postgres psql "$DATABASE_PUBLIC_URL"        # production
 ```
 
 ### See what migrations have been applied
 
 ```bash
 python -m migrations.runner status
-# or:
-sqlite3 data/jobs.db "SELECT * FROM _schema_migrations ORDER BY version;"
+```
+
+```sql
+-- or straight from psql:
+SELECT * FROM _schema_migrations ORDER BY version;
 ```
 
 ### Apply pending migrations (idempotent, safe to re-run)
@@ -68,20 +91,26 @@ FastAPI boot auto-runs this — but the CLI doesn't. Run it manually before `pyt
 ### Roll a migration back (rare — destructive)
 
 ```bash
-python -m migrations.runner down              # rolls back the latest only
-python -m migrations.runner down data/jobs.db # explicit DB path
+python -m migrations.runner down   # rolls back the latest only
 ```
+
+The runner still accepts an optional second argument and still calls it `db_path`
+(`backend/migrations/runner.py:399`), but it is **not** a database file. It is passed
+to `pg.connect()`, where it selects a *schema* under test and is ignored in production
+(`backend/src/repositories/pg.py:732-737`). Migrations always run against `DATABASE_URL`.
 
 ### Show all tables
 
-```bash
-sqlite3 data/jobs.db ".tables"
+```sql
+\dt                      -- psql meta-command
+-- or portable:
+SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
 ```
 
 ### Inspect a specific table's schema
 
-```bash
-sqlite3 data/jobs.db ".schema user_feed"
+```sql
+\d user_feed             -- psql meta-command
 ```
 
 ---
@@ -287,8 +316,8 @@ python -m src.cli run --source greenhouse --dry-run --log-level DEBUG
    from src.services.circuit_breaker import default_registry
    print(default_registry().snapshot())
    ```
-3. If keyed (Reed/Adzuna/JSearch/Jooble/Google Jobs/Careerjet/Findwork), confirm the env var is set: `echo $REED_API_KEY`. Keyed sources `return []` silently when the key is empty.
-4. For an HTML scraper (LinkedIn/Workday/BCS/AIJobs/JobTensor), the upstream may have changed markup. Open the source file, find the regex, compare against a live response.
+3. If keyed, confirm the env var is set: `echo $REED_API_KEY`. Keyed sources `return []` silently when the key is empty. They are the contents of `apis_keyed/ (8)` under `backend/src/sources/`: Reed, Adzuna, JSearch, Jooble, Google Jobs, Careerjet, Findwork, **gov_apprenticeships**. Don't trust this list over the folder; `ls` it.
+4. For an HTML scraper, the upstream may have changed markup. Open the source file, find the regex, compare against a live response. The scrapers are `scrapers/ (5)` under `backend/src/sources/`, registry keys `linkedin`, `bcs_jobs`, `aijobs_ai`, `climatebase`, `eightykhours`. (**Not** JobTensor — dropped upstream-dead in the 2026-06 M6 rotation, `backend/src/main.py:158`. **Not** Workday either: that is a JSON ATS adapter in `sources/ats/`.)
 
 ### Force a circuit breaker back to CLOSED
 
@@ -320,13 +349,28 @@ FROM jobs WHERE id = <X>;
 
 ### Re-score everything against a new user profile
 
-CLI runs always re-score on each pass. The worker (`score_and_ingest`) re-scores when invoked per `(user, job)`. There's no "re-score all" admin command — re-run the full pipeline or call the worker function directly.
+CLI runs always re-score on each pass. The worker (`score_and_ingest`) re-scores when invoked per `(user, job)`. There **is** a "re-score all" admin command:
+
+```bash
+python -m src.cli rescore-backfill --batch-size 200 --max-users 50 --throttle 0.5
+```
+
+It does no work itself — it enqueues the resumable `rescore_backfill` ARQ task
+(`backend/src/cli.py:233`, `backend/src/workers/tasks.py:1494`) and returns. Watch the
+worker logs for `rescore_backfill_done`.
 
 ### A user updated their profile — when does it take effect?
 
-- **Dashboard reads** use whatever's in `user_feed` *now* — old scores until the next score run.
-- **Worker re-scoring** happens for each new job ingested; existing feed rows aren't recomputed automatically.
-- To force a refresh: `await db.purge_user_feed(user_id)` (if you add such a helper) or run a CLI pass with the new profile.
+Automatically, since migration `0018`. `POST /api/profile` compares the last two
+`user_profile_versions` snapshots; if the content actually changed it enqueues
+`rescore_user_feed_task` on the ARQ queue (`backend/src/api/routes/profile.py:163`),
+which clears the user's LLM verdicts and re-scores **every** job in their 30-day catalog
+view. Only when Redis is unreachable does it fall back to an in-process `asyncio` task
+that dies with the web process (`profile.py:179-184`).
+
+- **Dashboard reads** use whatever's in `user_feed` *now* — so a read landing before the worker drains still shows old scores.
+- **Ordinary searches** score only newly-fetched jobs; existing feed rows are left alone. A score changes when the PROFILE changes, never just because time passed. (Separately, `match_batch(..., skip_existing=True)` — `backend/src/services/llm_matcher.py:436,443` — stops the LLM re-judging a job it has already judged for this user. That guards verdicts, not keyword scores.)
+- To force it by hand: `rescore-backfill` above. There is no `db.purge_user_feed()` helper — that name does not exist in `backend/src/`.
 
 ---
 
@@ -473,7 +517,8 @@ arq src.workers.settings.WorkerSettings
 ### Required env
 
 - `REDIS_URL` (default `redis://localhost:6379`)
-- All the LLM keys you want active (`GEMINI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`)
+- `DATABASE_URL` — the Postgres DSN
+- All the LLM keys you want active. **`OPENAI_API_KEY` first**: OpenAI is the PRIMARY provider and heads the fallback chain (`backend/src/services/profile/llm_provider.py:329-334`). Then `GEMINI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`.
 - `CHANNEL_ENCRYPTION_KEY` (Fernet key) — fail-closed
 - `SESSION_SECRET` — fail-closed
 
@@ -494,11 +539,15 @@ arq src.workers.settings.WorkerSettings
 | `argon2.exceptions.InvalidHash` on login | DB password_hash got corrupted | Re-register the user; old hash is unrecoverable |
 | All 0-score jobs in `user_feed` | No user profile / empty `SearchConfig` | `setup-profile` or check `keywords.py` (empty defaults since 3ba1342) |
 | One source always fails | Likely auth/markup change | See §8 above; in worst case mark `enabled=False` (no such flag yet — comment out of `SOURCE_REGISTRY`) |
-| `ModuleNotFoundError: aiosqlite` | Backend deps not installed in this env | `pip install -e backend/` or `pip install -r backend/requirements.txt` |
+| `ModuleNotFoundError: psycopg` | Backend deps not installed in this env | `pip install -e backend/` or `pip install -r backend/requirements.txt`. Note: **`aiosqlite` is not a dependency** — every module does `from src.repositories import pg as aiosqlite`, so the name is a local alias for the Postgres shim, never an installed package |
 | Notification rule fires but no message arrives | Channel credential decrypted wrong, or Apprise URL malformed | `POST /api/settings/channels/{id}/test` to surface the error |
 | Pipeline shows "stalled" too aggressively | Default is 7-day threshold | Hard-coded in `pipeline.py` reminder logic — adjust there |
 | Hybrid retrieval returns 0 results | ChromaDB empty or `SEMANTIC_ENABLED=false` | Check `VectorIndex.count()`; if zero, re-ingest with the flag on |
 
 ---
 
-*Last updated 2026-05-28. HEAD `cb52eb7`. Commands tested against the layout on `claude/job-logistics-pillars-docs-H9zcw`.*
+*Originally written 2026-05-28 (HEAD `cb52eb7`), against the pre-Postgres SQLite layout.
+Re-verified against code 2026-08-24 by the nightly doc-truth routine: the DB access
+commands, the `/api/runs` paths, the keyed/scraper source lists, the re-score answers and
+the worker env list were all stale and are corrected above. This file is now a LIVING doc —
+if you change one of these facts, change it here too.*
