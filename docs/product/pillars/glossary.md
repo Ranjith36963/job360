@@ -1,3 +1,4 @@
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 # Glossary — Job360 Vocabulary
 
 A reference for terms used across the three pillar docs. Cross-cutting; not pillar-specific. When in doubt about a word, look here first.

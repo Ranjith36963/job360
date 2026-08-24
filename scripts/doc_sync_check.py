@@ -60,6 +60,16 @@ LIVING_DOCS = [
     "CONTRIBUTING.md",
     "backend/README.md",
     "docs/product/pillars/03-job-providers.md",
+    # Added 2026-08-24 (second batch). Root CLAUDE.md calls docs/product/pillars/
+    # the AUTHORITATIVE code-verified reference, yet only 03 was watched -- and
+    # only since this morning. The glossary is the densest concentration of
+    # countable facts in the repo (registry size, instance count, RATE_LIMITS,
+    # JobEnrichment shape, Job field count) and not one of them had ever been
+    # checked: it claimed 18 fields / 8 enums against 16 / 7, and ~256 ATS slugs
+    # against 302.
+    "docs/product/pillars/01-user-pillar.md",
+    "docs/product/pillars/02-search-and-match-engine.md",
+    "docs/product/pillars/glossary.md",
 ]
 
 # Prose lies that numbers can't catch. Each = (forbidden phrase, why).
@@ -120,6 +130,42 @@ def migration_head() -> int:
     if not nums:
         raise RuntimeError("no NNNN_*.sql migrations found")
     return max(nums)
+
+
+def rate_limit_count() -> int:
+    """Entries in RATE_LIMITS. Same AST-strict style as registry_counts().
+
+    Promoted from the nightly routine 2026-08-24 (second batch). Docs claimed
+    46 and 47 in three places while the dict held 41. It must equal the
+    registry key count -- every source needs a limit -- so a mismatch between
+    THIS and registry is itself a bug worth seeing.
+    """
+    tree = ast.parse((ROOT / "backend/src/core/settings.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        for t in targets:
+            if getattr(t, "id", None) == "RATE_LIMITS":
+                if not isinstance(node.value, ast.Dict):
+                    raise RuntimeError("RATE_LIMITS is not a plain dict literal")
+                return len(node.value.keys)
+    raise RuntimeError("RATE_LIMITS dict literal not found in backend/src/core/settings.py")
+
+
+def source_subclass_count() -> int:
+    """Files declaring `class X(BaseJobSource)`.
+
+    Should equal unique source classes. The docs said "all 49 subclasses" in
+    rule #2's neighbourhood while 40 existed -- an over-count that makes the
+    five-surface rule read as bigger than it is.
+    """
+    n = 0
+    for p in (ROOT / "backend/src/sources").rglob("*.py"):
+        n += len(re.findall(r"^class \w+\(BaseJobSource\)", p.read_text(encoding="utf-8"), re.M))
+    return n
 
 
 def workflow_count() -> int:
@@ -265,7 +311,14 @@ def dead_path_claims() -> list[tuple[str, str]]:
     """
     out: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
-    pat = re.compile(r"`((?:backend|frontend)/src/[A-Za-z0-9_./-]+)`")
+    # `docs/` added 2026-08-24. The pillar docs MOVED to docs/product/pillars/
+    # and four LIVING docs went on naming `docs/pillars/` as fact for weeks --
+    # including the line calling it the AUTHORITATIVE architecture reference.
+    # dead_links() could not see it (that only matches `](...md)` targets) and
+    # this function's prefix list stopped at backend/frontend. A doc pointing an
+    # agent at a directory that does not exist is exactly what this was written
+    # for; it just could not look where the damage was.
+    pat = re.compile(r"`((?:backend|frontend)/src/[A-Za-z0-9_./-]+|docs/[A-Za-z0-9_./-]+)`")
     # README.md is a HOW-TO. It is full of "create `backend/src/sources/
     # yoursource.py`" examples - instructions, not claims that a file exists.
     # Flagging those is a permanent false alarm, and a permanent alarm is how a
@@ -379,6 +432,16 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # here where they cost nothing and are caught on every push.
         ("workflows", workflow_count(), r"(\d+) workflows in"),
         ("test-files", test_file_count(), r"across (\d+) `?test_\*\.py`? files"),
+        # Second promotion batch, 2026-08-24, all found by the nightly routine
+        # in the pillar docs and glossary -- the densest concentration of
+        # countable facts in the repo, and until today none of them watched.
+        ("rate-limits", rate_limit_count(), r"`?RATE_LIMITS`?[^.\n]{0,40}?\((\d+) entries"),
+        ("rate-limits", rate_limit_count(), r"`?RATE_LIMITS`? dict in `?settings\.py`? \((\d+) entries"),
+        ("subclasses", source_subclass_count(), r"checking all (\d+) subclasses"),
+        ("registry", registry, r"from a (\d+)-key `?SOURCE_REGISTRY"),
+        ("registry", registry, r"The (\d+)-key dict in `?main\.py`?"),
+        ("unique-classes", unique_classes, r"[Bb]uilds (\d+) instances"),
+        ("unique-classes", unique_classes, r"SOURCE_INSTANCE_COUNT = (\d+)"),
     ]
 
     # String-valued facts. Kept separate because the numeric loop below does

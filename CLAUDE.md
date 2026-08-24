@@ -59,7 +59,7 @@ An index, one line each. Where a test guards a rule, the test is named — that 
 
 ### Sources (recipes: `.claude/skills/add-source/SKILL.md`)
 2. **Never change `BaseJobSource`** (constructor, properties, retry, `_get_json`/`_post_json`/`_get_text`) without checking every source file that inherits it.
-8 + 13. **Adding/removing a source = FIVE surfaces:** `SOURCE_REGISTRY`, `_build_sources()`, `RATE_LIMITS`, `tests/test_cli.py`, `tests/test_api.py`. Guards (hardcoded counts that must move together): `tests/test_cli.py:52`, `tests/test_api.py:43,56,158,163`.
+8 + 13. **Adding/removing a source = FIVE surfaces:** `SOURCE_REGISTRY`, `_build_sources()`, `RATE_LIMITS`, `tests/test_cli.py`, `tests/test_api.py`. Guards (hardcoded counts that must move together): `tests/test_cli.py:55`, `tests/test_api.py:43,58,160,165`.
 14. **Conditional fetch is opt-in** — only call `_get_json_conditional()` when the upstream really honours ETag/Last-Modified.
 15. **New sources MUST set `.category`** (`ats`/`rss`/`keyed_api`/`free_json`/`scrapers`/`other`) or a `NAME_TIER` override in `scheduler.py`; untagged falls to the 60-min tier. Folder ≠ tier (`teaching_vacancies` is in `apis_free/` but is `rss`).
 
@@ -75,7 +75,7 @@ An index, one line each. Where a test guards a rule, the test is named — that 
 ### Scoring + enrichment
 29. **"Filled shelves work harder; empty shelves stay SILENT."** An empty preference (salary, locations, workplace, experience, about_me) means "don't care" — never a penalty, never a per-job zero, never a guess. Dim scorers return a CONSTANT; prefilters pass everything; the judge prompt omits unset prefs; the frontend never blocks on one. Guard: `tests/test_design_rules.py` — **covers only the dim scorers + prefilter; the judge prompt and frontend are UNGUARDED**, check by hand.
 9. **Scoring changes require running `test_scorer.py` AND `test_profile.py`.**
-18. **Pillar 2 engines default off — but the gate is `ENGINEx_ENABLED OR <legacy flag>`** (`core/settings.py:255-258`), so `ENGINE2_ENABLED=true` runs Engine 2 with `ENRICHMENT_ENABLED` false. E1 on; E2/E3/E4 off. With all off, behaviour must *exactly* match pre-Pillar-2 — no semantic queries, no LLM calls. Test BOTH names.
+18. **Pillar 2 engines default off — but the gate is `ENGINEx_ENABLED OR <legacy flag>`** (`core/settings.py:262-265`), so `ENGINE2_ENABLED=true` runs Engine 2 with `ENRICHMENT_ENABLED` false. E1 on; E2/E3/E4 off. With all off, behaviour must *exactly* match pre-Pillar-2 — no semantic queries, no LLM calls. Test BOTH names.
 19. **`JobScorer` default = 4 components MINUS 1 penalty** (Title 40 / Skill 40 / Location 10 / Recency 10, then **−30 negative title**; the −15 foreign penalty died 2026-08-12, #30). `SCORER_VERSION` = **7** — bump it whenever a score moves. The **4 extra dims** (8 total, not 7) activate on #20's ONE condition (`:587`); the `engine1` kwarg gates the KEYWORD half only (`:480-483`/`:560`), never the dims. Don't flip defaults silently.
 20. **Multi-dim scoring is gated on `user_preferences` ALONE** — a missing `enrichment_lookup` gives each dim its documented NEUTRAL half, never zeros (#29). Guard: `test_scorer.py::test_dims_neutral_not_zero_when_enrichment_missing`.
 27. **Multi-dim weights add 30 on top of the legacy 100 (raw max 130); the clamp to `[0, 100]` is load-bearing** — never remove it.

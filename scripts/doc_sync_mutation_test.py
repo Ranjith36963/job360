@@ -41,6 +41,12 @@ CASES: list[tuple[str, str, str, str]] = [
     ("ARCHITECTURE.md", r"across (\d+) `?test_\*\.py`? files", "across 999 test_*.py files", "test-files"),
     ("frontend/CLAUDE.md", r"Next\.js (\d+\.\d+\.\d+)", "Next.js 1.2.3", "nextjs-version"),
     ("frontend/CLAUDE.md", r"React (\d+\.\d+\.\d+)", "React 4.5.6", "react-version"),
+    # Second promotion batch, 2026-08-24.
+    ("docs/product/pillars/03-job-providers.md",
+     r"checking all (\d+) subclasses", "checking all 999 subclasses", "subclasses"),
+    ("docs/product/pillars/glossary.md",
+     r"`RATE_LIMITS` dict in `settings\.py` \((\d+) entries",
+     "`RATE_LIMITS` dict in `settings.py` (999 entries", "rate-limits"),
 ]
 
 
