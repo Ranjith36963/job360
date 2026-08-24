@@ -172,10 +172,17 @@ FROM sessions WHERE id = '<session_id_before_the_dot>';
 
 Table `user_profiles` (current tip) + `user_profile_versions` (last-10 history).
 
+There is **no `version` column** — the row's `id` *is* the version. `current_profile_version_id()`
+is literally `SELECT MAX(id) FROM user_profile_versions WHERE user_id = ?`
+(`backend/src/services/profile/storage.py:260-271`), and that id is what `user_feed.profile_version`
+stores. Columns are `id, user_id, created_at, source_action, cv_data, preferences`
+(`backend/migrations/0007_user_profile_versions.up.sql:17-25`) plus `snapshot_id`
+(migration `0030`).
+
 ```sql
-SELECT user_id, version, source_action, created_at
+SELECT id AS version, user_id, source_action, created_at
 FROM user_profile_versions WHERE user_id = '<uuid>'
-ORDER BY version DESC;
+ORDER BY id DESC;
 ```
 
 ### Dump a user's current profile
