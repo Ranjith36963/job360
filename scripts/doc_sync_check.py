@@ -779,6 +779,19 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         ("ats-slugs-active", active_slugs, r"polling (\d+) company slugs"),
         ("ats-slugs-active", active_slugs, r"ATS Boards \(\d+, (\d+) slugs polled\)"),
         ("ats-slugs-active", active_slugs, r"ATS boards poll (\d+) company slugs"),
+        # A THIRD wording of the same two numbers, added to the companies.py
+        # tree comment in ARCHITECTURE.md:54 / README.md:379 while this PR was
+        # open: "297 polled across 10 ATS sources". Found by CodeRabbit.
+        #
+        # This is the failure mode the "claim not found in any doc" alarm cannot
+        # catch, and the reason it cannot is worth stating: that alarm is keyed
+        # on the FACT NAME, not the site. Both facts already had other matching
+        # claims elsewhere, so matches_per_fact stayed non-zero and the checker
+        # reported a clean run while two fresh, unwatched copies of the same
+        # numbers sat in the two most-read files in the repo. Every new phrasing
+        # of a guarded fact needs its own pattern.
+        ("ats-boards-active", active_boards, r"\d+ polled across (\d+) ATS sources"),
+        ("ats-slugs-active", active_slugs, r"(\d+) polled across \d+ ATS sources"),
     ]
 
     # Per-platform ATS slug counts. The TOTAL was guarded; the breakdown table
