@@ -47,3 +47,6 @@ next-env.d.ts
 
 # synthetic live-smoke output
 smoke-artifacts/
+
+# design-pass screenshots (tests/design/design-pass.mjs) — regenerate, never commit
+design-shots*/

@@ -123,7 +123,13 @@ export default function Home() {
       {/* ═══════════════════════════════════════════════════
           HERO SECTION
           ═══════════════════════════════════════════════════ */}
-      <section className="relative flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-center px-4 pt-16 sm:px-6">
+      {/* Vertical centring is right on a desktop viewport and wrong on a phone.
+          At 390x844 it left ~210px of empty background above the badge and
+          pushed "Get Started" down into the consent banner's ~200px, so the
+          landing page's only call to action was unreadable and untappable on a
+          first visit. Start the content near the top on small screens; keep the
+          centred composition from `sm` up, where there is room for it. */}
+      <section className="relative flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-start px-4 pt-8 sm:justify-center sm:px-6 sm:pt-16">
         <div className="mx-auto max-w-4xl text-center">
           {/* Pill badge */}
           <div className="animate-fade-in-up stagger-1 mb-8 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/[0.06] px-4 py-1.5 text-sm text-primary">

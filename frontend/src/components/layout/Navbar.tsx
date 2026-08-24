@@ -27,7 +27,18 @@ const NAV_LINKS = [
 export function Navbar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, logout } = useAuth();
+  const { user, loading, logout } = useAuth();
+
+  // NAV_LINKS all point at routes src/middleware.ts guards. Rendering them to a
+  // signed-out visitor offered four controls that only ever bounced to /login,
+  // while the header carried no way to actually sign in — on the landing page,
+  // which is the first thing a new visitor sees.
+  //
+  // `loading` is its own state on purpose: it starts true, so treating it as
+  // "signed out" would flash the marketing CTAs at every returning user before
+  // the session resolves. While unknown, the header shows the logo only.
+  const signedIn = Boolean(user);
+  const signedOut = !loading && !user;
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/30 bg-background/60 backdrop-blur-md">
@@ -44,7 +55,8 @@ export function Navbar() {
 
         {/* Desktop Nav */}
         <nav className="hidden md:flex items-center gap-1" aria-label="Main navigation">
-          {NAV_LINKS.map(({ href, label, icon: Icon }) => {
+          {signedIn &&
+            NAV_LINKS.map(({ href, label, icon: Icon }) => {
             const isActive = pathname === href || pathname.startsWith(href + "/");
             return (
               <Link
@@ -68,18 +80,44 @@ export function Navbar() {
             page ("Search Latest Jobs") — a nav link here only navigated and
             misled users into thinking it searched. */}
         <div className="hidden md:flex items-center gap-2">
-          <Link
-            href="/settings"
-            aria-current={pathname.startsWith("/settings") ? "page" : undefined}
-            aria-label="Settings"
-            className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-              pathname.startsWith("/settings")
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-            }`}
-          >
-            <Settings className="h-4 w-4" aria-hidden="true" />
-          </Link>
+          {signedIn && (
+            <Link
+              href="/settings"
+              aria-current={pathname.startsWith("/settings") ? "page" : undefined}
+              aria-label="Settings"
+              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+                pathname.startsWith("/settings")
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              }`}
+            >
+              <Settings className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          )}
+          {signedOut && (
+            <div className="flex items-center gap-2">
+              {/* Not shown on /login and /register themselves — the page it would
+                  send you to is the page you are already on. */}
+              {!pathname.startsWith("/login") && (
+                <Link
+                  href="/login"
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                >
+                  Log in
+                </Link>
+              )}
+              {/* A styled Link, not <Button asChild> — this repo's Button
+                  (src/components/ui/button.tsx) has no asChild prop. */}
+              {!pathname.startsWith("/register") && (
+                <Link
+                  href="/register"
+                  className="inline-flex h-9 items-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                >
+                  Get started
+                </Link>
+              )}
+            </div>
+          )}
           {user && (
             <div className="flex items-center gap-2 pl-2 border-l border-border/40">
               <span className="text-xs text-muted-foreground max-w-[140px] truncate">
@@ -113,7 +151,8 @@ export function Navbar() {
               Job<span className="text-primary">360</span>
             </SheetTitle>
             <nav className="flex flex-col gap-1" aria-label="Mobile navigation">
-              {NAV_LINKS.map(({ href, label, icon: Icon }) => {
+              {signedIn &&
+                NAV_LINKS.map(({ href, label, icon: Icon }) => {
                 const isActive = pathname === href;
                 return (
                   <Link
@@ -132,19 +171,40 @@ export function Navbar() {
                   </Link>
                 );
               })}
-              <Link
-                href="/settings"
-                onClick={() => setMobileOpen(false)}
-                aria-current={pathname.startsWith("/settings") ? "page" : undefined}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  pathname.startsWith("/settings")
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                }`}
-              >
-                <Settings className="h-4 w-4" aria-hidden="true" />
-                Settings
-              </Link>
+              {signedIn && (
+                <Link
+                  href="/settings"
+                  onClick={() => setMobileOpen(false)}
+                  aria-current={pathname.startsWith("/settings") ? "page" : undefined}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                    pathname.startsWith("/settings")
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  }`}
+                >
+                  <Settings className="h-4 w-4" aria-hidden="true" />
+                  Settings
+                </Link>
+              )}
+              {/* Without this the signed-out drawer opened completely empty. */}
+              {signedOut && (
+                <>
+                  <Link
+                    href="/register"
+                    onClick={() => setMobileOpen(false)}
+                    className="flex items-center gap-3 rounded-lg bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition-colors"
+                  >
+                    Get started
+                  </Link>
+                  <Link
+                    href="/login"
+                    onClick={() => setMobileOpen(false)}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                  >
+                    Log in
+                  </Link>
+                </>
+              )}
             </nav>
 
             {/* Mobile: user email + logout + theme toggle */}
