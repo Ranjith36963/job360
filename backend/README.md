@@ -82,10 +82,12 @@ Must pass from `backend/`:
 python -m pytest -q -p no:randomly
 ```
 
-Invariant: full suite passes, 0 failing. (Live count is **3,297 collected / 3,295 selected**
-(2 `live` deselected) across **217** `test_*.py` files — run
-`python -m pytest --collect-only -q -p no:randomly | tail -1` for the exact
-number, and defer to it rather than to any figure written down here.) The
+Invariant: full suite passes, 0 failing, across **218** `test_*.py` files (2 `live`
+deselected offline). The collected count is deliberately not written down — run
+`python -m pytest --collect-only -q -p no:randomly | tail -1` for it. Any total
+committed to a doc is unguarded (`scripts/doc_sync_check.py` declines to check it
+on purpose: it needs Postgres, and parametrization makes a cheap check flaky) and
+rots silently — this line carried a stale one. The
 `-p no:randomly` flag keeps the default order deterministic (pytest-randomly is
 installed but opt-in).
 

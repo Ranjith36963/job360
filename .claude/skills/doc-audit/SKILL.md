@@ -85,7 +85,7 @@ docs is a follow-up task the human prioritizes.
 
 ## Step 5: Health report + one PR
 
-Write/overwrite `docs/maintenance/DOC-HEALTH.md`:
+Write/overwrite `docs/harness/maintenance/DOC-HEALTH.md`:
 
 ```
 # Doc health — <date>

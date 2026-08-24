@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 
 > **Current state lives in `docs/product/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/product/pillars/` first.
 
@@ -51,7 +51,7 @@ job360/
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (41 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
-│   │   │   ├── companies.py          # ATS company slugs (~264 across 11 platforms)
+│   │   │   ├── companies.py          # ATS company slugs (297 polled across 10 ATS sources; RIPPLING_COMPANIES has slugs but no source class)
 │   │   │   ├── skill_synonyms.py     # 493-entry alias dict (k8s↔kubernetes, ...)
 │   │   │   ├── fx.py                 # 18-currency → GBP rates
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
@@ -74,11 +74,11 @@ job360/
 │   │   │   ├── vector_index.py       # ChromaDB wrapper (opt-in, lazy)
 │   │   │   ├── retrieval.py          # BM25 + RRF fusion + cross-encoder rerank (opt-in)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
-│   │   │   ├── channels/             # crypto (Fernet), dispatcher (Apprise lazy)
-│   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
+│   │   │   ├── channels/             # dispatcher (Apprise lazy), crypto (Fernet), email_url, ssrf_guard
+│   │   │   ├── notifications/        # defaults (signup rulebook seeder), report_generator
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + 25-migration forward-compat schema
+│   │   │   ├── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + 31-migration forward-compat schema (0000 → 0030)
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
@@ -94,7 +94,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # 3,297 collected / 3,295 selected (2 `live` deselected) across 217 test_*.py files (defer to runtime count)
+│   └── tests/                        # across 218 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -272,7 +272,7 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 **Engine 4 — LLM judge detail:**
 - Service: `backend/src/services/llm_matcher.py`. `MatchVerdict{fit_score: int 0-100, verdict: str, reason: str}`.
 - `match_batch()` runs with `asyncio.Semaphore(3)`, skips jobs already holding a verdict, per-job errors swallowed.
-- Uses `llm_provider.llm_extract_validated` (Gemini→Groq→Cerebras chain). Test isolation via `llm_extract_validated_fn` kwarg.
+- Uses `llm_provider.llm_extract_validated` (OpenAI (PRIMARY) → Gemini → Groq → Cerebras chain — `llm_provider.py:329-334`). Test isolation via `llm_extract_validated_fn` kwarg.
 - Results stored on `user_feed` (per-user state; rules #10/#17 keep shared catalog tables untouched). Migration 0017 adds `llm_fit_score`, `llm_verdict`, `llm_reason`, `llm_matched_at`.
 - `_run_matcher_stage` in `src/main.py` invokes `match_batch` after the per-user feed write.
 - Feed read path: `SELECT ... ORDER BY COALESCE(llm_fit_score, score) DESC`.
@@ -286,9 +286,9 @@ Every row written to `user_feed` now carries a `profile_version INTEGER` column 
 Two operating modes:
 
 - **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it enqueues `rescore_user_feed_task` on the ARQ worker queue (`src/api/routes/profile.py:163`) — a deploy that kills the web process no longer drops the re-score, and ARQ retries it. Only when the queue is unreachable does it fall back to an in-process `asyncio` task (`profile.py:179-184`). The rescore service (`src/services/rescore.py`) clears the user's LLM verdicts (`clear_user_verdicts` in `llm_matcher.py`) and re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. If `MATCHER_ENABLED` is on, the LLM re-judge also runs for the top candidates.
-- **Mode 2 — ordinary search / refresh.** Newly-fetched jobs get scored and stamped with the current profile version. Existing `user_feed` rows are left untouched — their scores and verdicts stay as-is (`skip_existing` lock in `match_batch`).
+- **Mode 2 — ordinary search / refresh.** Newly-fetched jobs get scored and stamped with the current profile version. Every authenticated search ALSO runs `backfill_feed_from_catalog(user_id, db)` (`src/main.py:1272-1278`), which scores the shared catalog for that user and upserts feed rows — so existing rows are re-visited, not skipped. Their **scores** still hold steady: `upsert_feed_row` freezes the score on an existing row when the incoming `profile_version` **and** `scorer_version` both match the stored ones, and overwrites it when either differs (`src/services/feed.py:288-303`). `bucket` and both version stamps are always rewritten. Verdicts are separately protected by the `skip_existing` lock in `match_batch` (`src/services/llm_matcher.py:436,443`).
 
-**Invariant:** a job's score only changes when the PROFILE changes, never just because time passed. The `jobs` and `job_enrichment` shared catalog tables are not touched (rules #10/#17 still hold).
+**Invariant:** a job's score only changes when the PROFILE changes or `SCORER_VERSION` is bumped — never just because time passed. That is enforced by the version-conditional freeze above, not by skipping the write. The `jobs` and `job_enrichment` shared catalog tables are not touched (rules #10/#17 still hold).
 
 ---
 
@@ -511,7 +511,7 @@ PDF/DOCX -> extract_text() -> raw text
   |
   +-> _find_sections() -> {skills, experience, education, certifications, summary}
   |
-  +-> LLM extraction via llm_provider.py (Gemini/Groq/Cerebras with free-tier fallback)
+  +-> LLM extraction via llm_provider.py (OpenAI PRIMARY, then Gemini/Groq/Cerebras free-tier fallback)
   |     Returns: skills[], job_titles[], education[], certifications[], summary
   |     The regex KNOWN_SKILLS / KNOWN_TITLE_PATTERNS approach was removed in commit 804725c
 ```
@@ -546,8 +546,9 @@ new sources `about_me_llm` (weight 2.0) and `github_llm` (1.5) feed
 > ⚠️ **REMOVED — do not write against it.** The `NotificationChannel` ABC
 > (`src/services/notifications/base.py`), its auto-discovery helpers
 > (`get_all_channels()` / `get_configured_channels()`) and the per-channel classes
-> (`EmailChannel` / `SlackChannel` / `DiscordChannel`) no longer exist. The only modules
-> left under `src/services/notifications/` are `__init__.py` and `report_generator.py`.
+> (`EmailChannel` / `SlackChannel` / `DiscordChannel`) no longer exist. What is left
+> under `src/services/notifications/` is `__init__.py`, `report_generator.py` and
+> `defaults.py` (signup rulebook seeder) — no channel classes, no discovery.
 > Verified 2026-08-19 — `grep -rn "class NotificationChannel\|def get_all_channels" backend/src/`
 > returns nothing.
 

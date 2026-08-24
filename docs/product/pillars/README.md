@@ -1,3 +1,4 @@
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 # Job360 — The Three Pillars
 
 Job360 is built as three architectural pillars. This folder documents each one from the code up — what it does, how it works, and where it stands today.

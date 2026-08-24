@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+// Catalog numbers shown to users live in one place; the copy said 47 for a
+// week after the registry dropped to 41. See src/lib/catalog.ts.
+import { SOURCE_COUNT, SCORING_DIMENSIONS } from "@/lib/catalog";
 import { Sora, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navbar } from "@/components/layout/Navbar";
@@ -34,17 +37,17 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Job360 — Your Career Command Center",
   description:
-    "47 sources. 8D scoring. One dashboard. Upload your CV and let Job360 find your perfect match.",
+    `${SOURCE_COUNT} sources. ${SCORING_DIMENSIONS}D scoring. One dashboard. Upload your CV and let Job360 find your perfect match.`,
   openGraph: {
     title: "Job360 — Your Career Command Center",
-    description: "47 sources. 8D scoring. One dashboard.",
+    description: `${SOURCE_COUNT} sources. ${SCORING_DIMENSIONS}D scoring. One dashboard.`,
     type: "website",
     siteName: "Job360",
   },
   twitter: {
     card: "summary_large_image",
     title: "Job360 — Your Career Command Center",
-    description: "47 sources. 8D scoring. One dashboard.",
+    description: `${SOURCE_COUNT} sources. ${SCORING_DIMENSIONS}D scoring. One dashboard.`,
   },
 };
 

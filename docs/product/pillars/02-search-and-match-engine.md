@@ -1,3 +1,4 @@
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 # Pillar 2 — The Search & Match Engine
 
 > **Audience.** Read this if you want to understand what happens *between* "a job posting exists on the internet" (Pillar 3 fetches it) and "a job appears on a user's dashboard ranked 87/100" (Pillar 1 shows it). The engine is the brain — it takes raw postings, filters out the irrelevant ones, scores the survivors against the user, deduplicates near-duplicate listings, enriches the high-scorers with LLM-extracted structured data, and writes everything to the shared `jobs` catalog.
@@ -669,9 +670,9 @@ backend/
 │   │   ├── scheduler.py                       — TieredScheduler + TIER_INTERVALS_SECONDS
 │   │   ├── circuit_breaker.py                 — 5-fail/300s state machine + BreakerRegistry
 │   │   ├── conditional_cache.py               — 256-entry FIFO for ETag/Last-Modified
-│   │   └── profile/llm_provider.py            — Gemini/Groq/Cerebras chain + llm_extract_validated
+│   │   └── profile/llm_provider.py            — OpenAI (PRIMARY) → Gemini → Groq → Cerebras chain + llm_extract_validated
 │   ├── workers/tasks.py                       — score_and_ingest (per-user worker path)
-│   ├── repositories/database.py               — JobDatabase + 14-migration forward-compat schema
+│   ├── repositories/database.py               — JobDatabase + 31-migration forward-compat schema
 │   └── api/routes/jobs.py                     — exposes match_score + 9-field breakdown to API
 └── migrations/
     ├── 0008_job_enrichment.up.sql             — shared-catalog enrichment table

@@ -1,5 +1,5 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 
 Automated UK job search system supporting **any professional domain**. Aggregates jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
 
@@ -20,10 +20,10 @@ flowchart TD
 
     subgraph Sources["41 Job Sources (40 live instances)"]
         direction LR
-        KeyedAPIs["Keyed APIs (7)\nReed, Adzuna, JSearch, Jooble\nGoogle Jobs, Careerjet, Findwork"]
-        FreeJSON["Free JSON APIs (9)\nArbeitnow, RemoteOK, Jobicy, Himalayas\nRemotive, DevITjobs, Landing.jobs\nAIJobs.net, HN Jobs"]
-        ATSBoards["ATS Boards (11, ~264 slugs)\nGreenhouse, Lever, Workable, Ashby\nSmartRecruiters, Pinpoint, Recruitee\nWorkday, Personio, SuccessFactors\nRippling"]
-        RSSFeeds["RSS/XML Feeds (9)\njobs.ac.uk, NHS Jobs, NHS Jobs XML\nWorkAnywhere, WeWorkRemotely\nRealWorkFromAnywhere, BioSpace\nUniversity Jobs, Teaching Vacancies"]
+        KeyedAPIs["Keyed APIs (8)\nReed, Adzuna, JSearch, Jooble\nGoogle Jobs, Careerjet, Findwork\nGov Apprenticeships"]
+        FreeJSON["Free JSON APIs (8)\nArbeitnow, RemoteOK, Jobicy, Himalayas\nRemotive, DevITjobs, Landing.jobs\nHN Jobs"]
+        ATSBoards["ATS Boards (10, 297 slugs polled)\nGreenhouse, Lever, Workable, Ashby\nSmartRecruiters, Pinpoint, Recruitee\nWorkday, Personio, SuccessFactors"]
+        RSSFeeds["RSS/XML Feeds (5)\nNHS Jobs, WeWorkRemotely\nRealWorkFromAnywhere\nUniversity Jobs, Teaching Vacancies"]
         HTMLScrapers["HTML Scrapers (5)\nLinkedIn, Climatebase\n80000Hours, BCS Jobs, AIJobs AI"]
         OtherSources["Other (4 classes / 5 keys)\nIndeed+Glassdoor (JobSpySource)\nHackerNews, TheMuse, NoFluffJobs"]
     end
@@ -54,9 +54,9 @@ flowchart TD
 > The reconciliation: 40 *class files* on disk → 41 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 40 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 41`).
 
 - **8 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork, Gov Apprenticeships (DfE) — skip gracefully if no API key set
-- **9 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, AIJobs.net, HN Jobs — no auth required; Teaching Vacancies *(Batch 3)* is in `apis_free/` but runs on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier
-- **11 ATS boards** over ~264 company slugs: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, Rippling *(Batch 3)* — see `backend/src/core/companies.py` for the per-platform slug lists
-- **9 RSS/XML feeds** (`category="rss"`): jobs.ac.uk, NHS Jobs (keyword search), NHS Jobs XML *(Batch 3, full vacancy feed with conditional fetch pilot)*, WorkAnywhere, WeWorkRemotely, RealWorkFromAnywhere, BioSpace, University Jobs, plus Teaching Vacancies *(lives in `apis_free/` but runs on the 15-min RSS tier)*
+- **8 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, HN Jobs — no auth required; Teaching Vacancies *(Batch 3)* is a 9th file in `apis_free/` but runs on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier, so it is counted under RSS/XML below
+- **10 ATS boards** polling 297 company slugs: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors — see `backend/src/core/companies.py`, which holds **302** slugs across 11 platform lists; `RIPPLING_COMPANIES` (5) has had no source class since the 2026-08-10 rotation, so 10 boards poll the other 297
+- **5 RSS/XML feeds** (`category="rss"`): NHS Jobs (keyword search), WeWorkRemotely, RealWorkFromAnywhere, University Jobs, plus Teaching Vacancies *(lives in `apis_free/` but runs on the 15-min RSS tier)*
 - **5 HTML scrapers**: LinkedIn (guest API), Climatebase, 80000Hours, BCS Jobs, AIJobs AI
 - **4 other**: Indeed/Glassdoor (via optional `python-jobspy`), HackerNews (Algolia), TheMuse, NoFluffJobs
 
@@ -103,7 +103,7 @@ flowchart TD
 
 ### Frontend (Next.js + FastAPI)
 - Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
-- Talks to FastAPI (`backend/src/api/`) over HTTP — 25 routes (health, jobs, actions, profile, search, pipeline)
+- Talks to FastAPI (`backend/src/api/`) over HTTP — 13 route modules, 72 endpoints (health, jobs, actions, profile, search, pipeline, tailor, channels, notifications, runs)
 - Job list with filters, score radar, time buckets
 - Profile setup: CV upload, LinkedIn profile PDF import, GitHub username, preferences form
 - Application pipeline Kanban board
@@ -121,9 +121,18 @@ flowchart TD
 - **Split requirements** — prod deps in `backend/pyproject.toml` `[project.dependencies]`, dev/test in the same file's `[project.optional-dependencies] dev` extra (`pip install -e ".[dev]"`). There is no `requirements*.txt` in the repo
 - **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
 
-### Testing (3,297 collected, 3,295 selected offline, 2 live deselected — defer to the runtime collected count; run `pytest --collect-only -q | tail -1` for the live count)
+### Testing (218 `test_*.py` files; 2 `live` tests deselected offline)
 
-> Per-file counts below were measured with `cd backend && python -m pytest tests/<file>.py --collect-only -q -p no:randomly | tail -1`. `test_main.py` **is** in the canonical run — do not add `--ignore=tests/test_main.py` (root CLAUDE.md rule).
+> **The collected-test count is not written down anywhere on purpose.** Measure it:
+> `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`.
+> `scripts/doc_sync_check.py` deliberately does not guard it (it needs Postgres, and
+> parametrization makes any cheap check flaky), so any total committed to a doc is
+> unguarded and silently rots — this table has carried a wrong one before.
+>
+> Per-file counts below are a **snapshot taken 2026-08-24**, not a live invariant; re-measure
+> with `python -m pytest tests/<file>.py --collect-only -q -p no:randomly | tail -1`.
+> `test_main.py` **is** in the canonical run — do not add `--ignore=tests/test_main.py`
+> (root CLAUDE.md rule).
 
 | Test file | Collected count | What it covers |
 |-----------|-------|----------------|
@@ -147,7 +156,7 @@ flowchart TD
 | `test_cron.py` | 5 | cron_setup.sh validation |
 | `test_setup.py` | 4 | setup.sh validation |
 | `test_csv_export.py` | 4 | CSV export format |
-| (the other ~197 `test_*.py` files) | balance of 3,297 | auth, feed, prefilter, channels, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, application history, llm_matcher, uk_gate, visa_signal, shelf registry, harness guards |
+| (the other 198 `test_*.py` files) | measure it | auth, feed, prefilter, channels, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, application history, llm_matcher, uk_gate, visa_signal, shelf registry, harness guards |
 
 ## Quick Start
 
@@ -286,8 +295,9 @@ timezone-aware quiet hours, and digest mode.
 > ⚠️ **The `NotificationChannel` ABC is GONE — do not write against it.** It used to live at
 > `backend/src/services/notifications/base.py`. That file, the auto-discovery helpers
 > (`get_all_channels()` / `get_configured_channels()`) and the per-channel classes were all
-> REMOVED. The only modules left under `backend/src/services/notifications/` are
-> `__init__.py` and `report_generator.py`.
+> REMOVED. What is left under `backend/src/services/notifications/` is `__init__.py`,
+> `report_generator.py` and `defaults.py` (the signup rulebook seeder + the one source of
+> truth for `NOTIFY_SCORE_THRESHOLD`) — no channel classes, no discovery.
 
 Channels are **per-user rows in the database**, not env-var-configured classes. The
 dispatcher's public surface:
@@ -327,7 +337,7 @@ What `keywords.py` still contains (domain-agnostic, applies to any profession):
 - **25 UK locations** + Remote/Hybrid (the `LOCATIONS` list)
 - **8 visa/sponsorship keywords** (the `VISA_KEYWORDS` list: "visa sponsorship", "tier 2", "skilled worker visa", etc.)
 
-**LLM-only CV parsing** is at `backend/src/services/profile/llm_provider.py` (multi-provider: Gemini→Groq→Cerebras free-tier fallback chain). The earlier 391-entry `KNOWN_SKILLS` regex set and all keyword defaults were removed in commits `804725c` and `3ba1342`.
+**LLM-only CV parsing** is at `backend/src/services/profile/llm_provider.py` (multi-provider: **OpenAI (PRIMARY, `gpt-4o-mini`)** → Gemini → Groq → Cerebras fallback chain — `llm_provider.py:329-334`). The earlier 391-entry `KNOWN_SKILLS` regex set and all keyword defaults were removed in commits `804725c` and `3ba1342`.
 
 ### ATS Companies (`backend/src/core/companies.py`)
 
@@ -335,18 +345,18 @@ Full slug lists are in `backend/src/core/companies.py`. Batch 3 expanded slugs s
 
 | Platform | Slugs | Notes |
 |----------|-------|-------|
-| Greenhouse | 80 | 25 original + 55 Batch 3 additions |
-| Lever | 35 | 12 original + 23 Batch 3 additions |
-| Workable | 25 | 8 original + 17 Batch 3 additions |
-| Ashby | 25 | 9 original + 16 Batch 3 additions |
-| SmartRecruiters | 15 | 6 original + 9 Batch 3 additions |
-| Pinpoint | 15 | 8 original + 7 Batch 3 additions |
-| Recruitee | 20 | 8 original + 12 Batch 3 additions |
-| Workday | 20 | 15 original + 5 Batch 3 additions (dict format: tenant/wd/site) |
-| Personio | 18 | 10 original + 8 Batch 3 additions |
+| Greenhouse | 82 | |
+| Lever | 35 | |
+| Workable | 21 | |
+| Ashby | 25 | |
+| SmartRecruiters | 15 | |
+| Pinpoint | 39 | |
+| Recruitee | 31 | |
+| Workday | 20 | dict format: tenant/wd/site |
+| Personio | 26 | |
 | SuccessFactors | 3 | BAE Systems, QinetiQ, Thales UK (sitemap format; MBDA removed: DNS failure) |
-| Rippling | 5 | Added Batch 3 |
-| **Total** | **~264** | |
+| Rippling | 5 | **not polled** — no source class since the 2026-08-10 rotation |
+| **Total** | **(302 slugs across 11 platforms)** | `RIPPLING_COMPANIES` has no source class, so 10 ATS boards poll 297 company slugs |
 
 ## Project Structure
 
@@ -366,7 +376,7 @@ job360/
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)
 │       │   ├── keywords.py      # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] since 3ba1342
-│       │   ├── companies.py     # ATS company slugs (~264 across 11 platforms)
+│       │   ├── companies.py     # ATS company slugs (297 polled across 10 ATS sources; RIPPLING_COMPANIES has slugs but no source class)
 │       │   ├── skill_synonyms.py
 │       │   ├── fx.py
 │       │   └── tenancy.py
@@ -383,8 +393,8 @@ job360/
 │       │   ├── circuit_breaker.py
 │       │   ├── feed.py
 │       │   ├── auth/
-│       │   ├── channels/        # Apprise dispatcher
-│       │   ├── notifications/   # email, slack, discord, report_generator
+│       │   ├── channels/        # dispatcher (Apprise), crypto, email_url, ssrf_guard
+│       │   ├── notifications/   # defaults (signup rulebook seeder), report_generator
 │       │   └── profile/         # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │       ├── repositories/        # (renamed from storage/)
 │       │   ├── database.py
@@ -392,14 +402,14 @@ job360/
 │       ├── sources/             # 40 source files in 6 category subfolders; 41 SOURCE_REGISTRY keys
 │       │   ├── base.py
 │       │   ├── apis_keyed/  (8)
-│       │   ├── apis_free/   (9 free_json + 2 rss-tier)
-│       │   ├── ats/         (12)
-│       │   ├── feeds/       (8)
-│       │   ├── scrapers/    (7)
-│       │   └── other/       (4 classes / 5 keys)
+│       │   ├── apis_free/   (9)   # 8 free_json + 1 rss (teaching_vacancies)
+│       │   ├── ats/         (10)
+│       │   ├── feeds/       (4)   # all rss-tier
+│       │   ├── scrapers/    (5)
+│       │   └── other/       (4 classes / 5 keys)   # indeed+glassdoor share JobSpySource
 │       ├── workers/             # ARQ tasks + WorkerSettings
 │       └── utils/
-├── backend/tests/               # ~1,409 collected offline (2 live deselected) across 60+ files (defer to runtime count)
+├── backend/tests/               # 218 test_*.py files (collected-test count: measure it, never quote it)
 ├── frontend/                    # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
 │   └── src/
 │       ├── app/                 # App Router pages
@@ -423,7 +433,7 @@ python -m pytest backend/tests/test_scorer.py -v
 python -m pytest backend/tests/ -v -s
 ```
 
-The full suite passes (~1,409 collected offline, 2 live deselected — defer to the runtime count). Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for setup.sh and cron_run.sh).
+The suite runs against a real Postgres and 2 `live`-marked tests are deselected offline. **Measure the collected count, never quote one** — `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`; `scripts/doc_sync_check.py` deliberately does not guard it (needs Postgres, and parametrization makes any cheap check flaky), so any number written here is unguarded and rots. Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for `setup.sh` and `cron_setup.sh`).
 
 ## Output
 

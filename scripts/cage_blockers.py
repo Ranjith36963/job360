@@ -419,8 +419,17 @@ BLOCKERS: list[Blocker] = [
         "file; the cage now only advises, and `--advise` writes a PR comment naming which "
         "file is the decision. Anthropic's own most autonomous shipped mode still ends at a "
         "pull request, and its auto-mode classifier names 'running production deploys' as a "
-        "blocked action. Merging here IS deploying.",
-        drill="`--merge` no longer exists: the cage cannot merge anything at all",
+        "blocked action. Merging here IS deploying. "
+        "AMENDED 2026-08-24, AND THE AMENDMENT IS NARROWER THAN IT LOOKS. The owner asked "
+        "for the lane back. `--merge` did NOT come back: what came back is `--queue`, which "
+        "asks GITHUB to merge when `main-production-gate` is satisfied. That distinction is "
+        "the whole safety argument — an immediate merge runs on this file's judgement alone, "
+        "while a queue request needs a second, independent authority that no agent wrote to "
+        "agree before anything ships, and the act itself is performed by that authority. It "
+        "also cannot be assumed into existence: `--auto` needs `allow_auto_merge` on the "
+        "repository, a switch only the owner can flip. The drill below is UNCHANGED in "
+        "substance and still asserts `--merge` is a usage error.",
+        drill="`--merge` still does not exist: nothing here merges on its own judgement",
         severity="too-permissive",
     ),
     Blocker(

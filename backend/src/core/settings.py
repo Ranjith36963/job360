@@ -344,10 +344,11 @@ REQUEST_TIMEOUT = 30
 USER_AGENT = "Job360/1.0 (UK Job Search Aggregator)"
 
 # Hard ceiling (seconds) on a single source's whole fetch_jobs() call. The
-# scheduler gathers all ~49 sources at once, so without this one slow/hanging
-# source (a blocked host, a JobSpy scrape, a stuck ATS slug loop) would freeze
-# the entire search — the "Refresh hangs" bug. A source that exceeds this is
-# cancelled and counted as a failure; every other source's results still land.
+# scheduler gathers every registered source at once, so without this one
+# slow/hanging source (a blocked host, a JobSpy scrape, a stuck ATS slug loop)
+# would freeze the entire search — the "Refresh hangs" bug. A source that
+# exceeds this is cancelled and counted as a failure; every other source's
+# results still land.
 # Generous enough for legit multi-request sources (REQUEST_TIMEOUT is per
 # request); since sources run concurrently, total search ~= this value.
 SOURCE_FETCH_TIMEOUT = int(os.getenv("SOURCE_FETCH_TIMEOUT", "60"))
