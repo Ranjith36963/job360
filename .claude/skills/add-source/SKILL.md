@@ -26,10 +26,10 @@ test suite fails on a hardcoded count:
 
 ```bash
 cd backend && python -c "from src.main import SOURCE_REGISTRY as R; print(len(R), len(set(R.values())))"
-grep -rn "== 47\|sources_total\|len(SOURCE_REGISTRY)" tests/test_cli.py tests/test_api.py
+grep -rn "== 41\|sources_total\|len(SOURCE_REGISTRY)" tests/test_cli.py tests/test_api.py
 ```
 
-At the time of writing that prints `47 46` — 47 registry keys but 46 unique
+At the time of writing that prints `41 40` — 41 registry keys but 40 unique
 classes, because `indeed` and `glassdoor` both alias `JobSpySource`. Test
 assertions treat the **registry key count** as authoritative.
 
@@ -63,7 +63,7 @@ assertions treat the **registry key count** as authoritative.
   slugs from `core/companies.py`.
 - **RSS/XML source:** `_get_text()` → parse with **defusedxml**, not plain
   `ElementTree.fromstring` — these feeds are untrusted input and M18 closed the
-  XXE hole. The in-repo pattern (see `src/sources/feeds/jobs_ac_uk.py:2-7`) is
+  XXE hole. The in-repo pattern (see `backend/src/sources/feeds/nhs_jobs.py:2-8`) is
   `import xml.etree.ElementTree as ET` for the types plus
   `from defusedxml.ElementTree import fromstring as _safe_fromstring  # type: ignore[import-untyped]`
   for the actual parse. Consider `_get_json_conditional` if upstream honours

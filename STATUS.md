@@ -43,7 +43,7 @@
 > Full detail in `docs/harness/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
 > delivery to live Slack/Telegram/Gmail (needs provider credentials).
 
-**Last updated:** 2026-06-20
+**Last updated:** 2026-08-24 (doc truth check; the phase narratives below are older — see `docs/harness/IMPLEMENTATION_LOG.md` for the current history)
 **Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
 **Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
 **Job sources:** 41 entries in `SOURCE_REGISTRY`; 40 live instances since `indeed` + `glassdoor` share `JobSpySource`; gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 dropped jobtensor, comeet, aijobs_global; the 2026-08-10 rotation dropped 6 more dead upstreams — aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
@@ -67,7 +67,7 @@
 | Keyword generator | `backend/src/services/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
 | JobScorer class | `backend/src/services/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
 | BaseJobSource properties | `backend/src/sources/base.py` | Done -- `self.relevance_keywords`, `self.job_titles`, `self.search_queries` |
-| 47 source file refactor | `backend/src/sources/*.py` | Done -- all use `self.*` properties instead of direct imports |
+| Source file refactor (every source) | `backend/src/sources/*.py` | Done -- **zero** direct `src.core.keywords` imports remain; the 12 sources that need keywords read them via the inherited `self.*` properties (the other 28 never reference them) |
 | Orchestrator wiring | `backend/src/main.py` | Done -- loads profile, creates scorer, passes config |
 | CLI setup-profile | `backend/src/cli.py` | Done -- interactive profile wizard |
 | Profile tests | `backend/tests/test_profile.py` | Done -- 56 tests covering all profile modules |
@@ -129,7 +129,7 @@
 | Schema migration | `backend/src/repositories/database.py` | Done -- `_migrate()` method uses PRAGMA table_info + ALTER TABLE for future columns |
 | Source health tracking | `backend/src/main.py`, `backend/src/repositories/database.py` | Done -- detects sources returning 0 that previously had jobs, warns in logs |
 | Rate limiter tests | `backend/tests/test_rate_limiter.py` | Done -- 5 tests: acquire/release, context manager, concurrency limit, delay, multi-concurrent |
-| Source category metadata | `backend/src/sources/base.py`, all 46 source files (47 registry entries) | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scraper/other) |
+| Source category metadata | `backend/src/sources/base.py`, every source file (40 classes / 41 registry entries today) | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scrapers/other) |
 | Integration tests | `backend/tests/test_main.py`, `backend/tests/test_database.py` | Done -- SOURCE_INSTANCE_COUNT validation, failed source tracking, migration, source history |
 
 ---
@@ -151,7 +151,7 @@ Four engines are available, stacked **keyword → dimensions → hybrid → LLM 
 | Engine | Service | Flag | Default |
 |--------|---------|------|---------|
 | #1 Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
-| #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace (`skill_matcher.py:519-536`); data from the **enrichment** LLM step (`services/job_enrichment.py`), which the same flag gates | `ENRICHMENT_ENABLED` | false |
+| #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace (`skill_matcher.py:582-617`). **The scorer enters the dim path on `user_preferences` alone** (`skill_matcher.py:587`), no flag involved; the flag gates only whether the **enrichment** LLM step (`services/job_enrichment.py`) has produced data for those dims to read (`main.py:853`, `main.py:1137`). Without it they score their neutral halves | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` (enrichment data only) | false |
 | #3 Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` (RRF fuse + cross-encoder rerank) | `SEMANTIC_ENABLED` | false |
 | #4 LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
 
@@ -188,12 +188,12 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 ## What Is Working Right Now
 
 - Full 41-source pipeline (40 live instances) runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed jobtensor/comeet/aijobs_global; gov_apprenticeships restored 2026-06-16; 2026-08-10 rotation removed 6 dead upstreams)
-- Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback: Gemini / Groq / Cerebras)
+- Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback, in order: **OpenAI `gpt-4o-mini` (PRIMARY)** / Gemini / Groq / Cerebras — `llm_provider.py:330-334`)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
-- Conditional-cache pilot (Batch 3.5.3): `nhs_jobs_xml` confirmed live ETag → 304; `backend/scripts/preflight_conditional_cache.py` for future candidates
-- All 7 keyed APIs skip gracefully when keys are empty
-- All ATS boards iterate over ~264 company slugs (11 platforms; comeet removed in M6 rotation)
+- Conditional-cache machinery (Batch 3.5.3) exists and is tested, but **no source uses it today** — the `nhs_jobs_xml` pilot went with that source in the 2026-08-10 rotation (only `nhs_jobs_xml` was retired — the separate `nhs_jobs` source is still registered, `main.py:142`). Only `backend/tests/test_conditional_fetch.py` calls the helpers; `backend/scripts/preflight_conditional_cache.py` remains for future candidates
+- All 8 keyed APIs skip gracefully when keys are empty
+- All ATS boards iterate over **297** company slugs actually polled — `core/companies.py` holds **302** across 11 platform lists, but `RIPPLING_COMPANIES` (5) has had no source class since the 2026-08-10 rotation, so 10 ATS sources poll the other 297 (comeet was removed in M6)
 - All RSS/XML feeds parse correctly with mocked data
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring activates as soon as `JobScorer(..., user_preferences=...)` is wired — `enrichment_lookup` is optional, and without it each dim scores its NEUTRAL half, not zero (8-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
