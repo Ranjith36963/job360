@@ -83,9 +83,9 @@ job360/
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
 │   │   │   ├── apis_keyed/   (8)     # reed, adzuna, jsearch, jooble, google_jobs, careerjet, findwork, gov_apprenticeships
-│   │   │   ├── apis_free/    (9)     # arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs, landingjobs, aijobs, hn_jobs, teaching_vacancies
-│   │   │   ├── ats/          (11)    # greenhouse, lever, workable, ashby, smartrecruiters, pinpoint, recruitee, workday, personio, successfactors, rippling
-│   │   │   ├── feeds/        (8)     # jobs_ac_uk, nhs_jobs, nhs_jobs_xml, workanywhere, weworkremotely, realworkfromanywhere, biospace, uni_jobs
+│   │   │   ├── apis_free/    (9)     # arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs, landingjobs, hn_jobs, teaching_vacancies
+│   │   │   ├── ats/          (10)    # greenhouse, lever, workable, ashby, smartrecruiters, pinpoint, recruitee, workday, personio, successfactors
+│   │   │   ├── feeds/        (4)     # nhs_jobs, weworkremotely, realworkfromanywhere, uni_jobs
 │   │   │   ├── scrapers/     (5)     # linkedin, climatebase, eightykhours, bcs_jobs, aijobs_ai
 │   │   │   └── other/        (4)     # indeed (JobSpySource → indeed+glassdoor), hackernews, themuse, nofluffjobs
 │   │   ├── workers/                  # ARQ tasks (lazy arq import; pure-async for tests)

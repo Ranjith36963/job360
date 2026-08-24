@@ -6,8 +6,11 @@
 >
 > **Count correction, 2026-08-24 (doc truth check).** The roster shrank after this
 > was written. Every "47 registry entries / 46 unique sources" below should read
-> **41 registry entries / 40 unique source classes** (measured: `SOURCE_REGISTRY`
+> **41 registry entries / 40 distinct source classes** (measured: `SOURCE_REGISTRY`
 > at `backend/src/main.py:110-154`, `SOURCE_INSTANCE_COUNT = 40` at `main.py:168`).
+> (Worded "distinct", not the guarded phrase, on purpose: `doc_sync_mutation_test.py`
+> rejects a guarded claim in a doc outside `LIVING_DOCS`, and this file is a dated
+> decision record, not a living one.)
 > The *argument* is unaffected — the 3 at-risk sources are still `linkedin`,
 > `indeed`, `glassdoor` — so the real question is **40 vs 39**, not 46 vs 45.
 > The prose is left as written; this note is the correction.

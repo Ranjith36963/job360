@@ -51,7 +51,7 @@ In `BaseJobSource.__init__`:
 - `self._session = shared_aiohttp_session`
 - `self._search_config = alice_search_config` (so `self.relevance_keywords` returns Alice's dynamic keywords)
 - `RATE_LIMITS["greenhouse"] = {"concurrent": 2, "delay": 1.5}` → `RateLimiter(concurrent=2, delay=1.5)`
-- `ConditionalCache()` instantiated (unused by Greenhouse today — only `nhs_jobs_xml` opts in)
+- `ConditionalCache()` instantiated (unused — see §2.4: no source opts in today)
 
 ### T+0 — `fetch_jobs()` runs
 
@@ -332,13 +332,13 @@ Arbeitnow (DE/EU tech), RemoteOK (skips metadata element 0), Jobicy (remote data
 
 Pattern: accept a `companies` slug list (default from `companies.py`), iterate each company's board API. See §5 for the catalog.
 
-Greenhouse, Lever (`createdAt` ms epoch), Workable (POST `/v2/accounts/{slug}/jobs`), Ashby (uses `publishedAt`), SmartRecruiters, Pinpoint (`{slug}.pinpointhq.com`), Recruitee (`{slug}.recruitee.com`), Workday (XML/HTML scrape, dict-config slugs), Personio (XML feed, 3 s inter-company delay), SuccessFactors (sitemap XML), **Rippling** (Batch 3, `ats.rippling.com/api/board/{slug}/jobs`). _(Comeet dropped in M6 rotation — upstream-dead.)_
+Greenhouse, Lever (`createdAt` ms epoch), Workable (POST `/v2/accounts/{slug}/jobs`), Ashby (uses `publishedAt`), SmartRecruiters, Pinpoint (`{slug}.pinpointhq.com`), Recruitee (`{slug}.recruitee.com`), Workday (XML/HTML scrape, dict-config slugs), Personio (XML feed, 3 s inter-company delay), SuccessFactors (sitemap XML). _(Comeet dropped in M6 rotation; **Rippling** dropped in the 2026-08-10 rotation — `RIPPLING_COMPANIES` survives in `companies.py` but no source class reads it.)_
 
-### 4.4 RSS/XML feeds — `feeds/` (8)
+### 4.4 RSS/XML feeds — `feeds/` (4)
 
 Pattern: `_get_text()` + `xml.etree.ElementTree`, extract `<item>` from `<channel>`.
 
-jobs.ac.uk `{academia}`, NHS Jobs (keyword-search XML) `{healthcare}`, **nhs_jobs_xml** (full vacancy feed, **conditional fetch pilot**) `{healthcare}` (Batch 3), WorkAnywhere (remote data/AI), WeWorkRemotely, RealWorkFromAnywhere, BioSpace `{healthcare}`, University Jobs (Cambridge + others) `{academia}`.
+NHS Jobs (keyword-search XML) `{healthcare}`, WeWorkRemotely, RealWorkFromAnywhere, University Jobs (Cambridge + others) `{academia}`. _(Dropped 2026-08-10 as dead upstreams: `jobs_ac_uk`, `nhs_jobs_xml`, `workanywhere`, `biospace`.)_ Note `teaching_vacancies` is `category = "rss"` but lives in `apis_free/` — folder ≠ tier (rule #15).
 
 ### 4.5 HTML scrapers — `scrapers/` (5)
 
@@ -354,9 +354,9 @@ Indeed/Glassdoor (`JobSpySource` wrapping `python-jobspy`, optional dep — skip
 
 `_build_sources()` calls `classify_user_domain(profile)` and keeps only sources whose `DOMAINS` overlap (or are `{"general"}`):
 
-- **tech**: devitjobs, landingjobs, aijobs, hn_jobs, climatebase, bcs_jobs, aijobs_ai, nofluffjobs
-- **healthcare**: nhs_jobs, nhs_jobs_xml, biospace
-- **academia**: jobs_ac_uk, uni_jobs
+- **tech**: devitjobs, landingjobs, hn_jobs, climatebase, bcs_jobs, aijobs_ai, nofluffjobs
+- **healthcare**: nhs_jobs
+- **academia**: uni_jobs
 - **education**: teaching_vacancies
 - **climate**: climatebase
 - **general** (every user): all keyed aggregators + RemoteOK, Jobicy, Himalayas, Remotive, Arbeitnow, LinkedIn, 80000hours, the remote feeds, Indeed, HackerNews, TheMuse
@@ -431,14 +431,14 @@ Batch 3 rotated the roster: **−3 dropped, +5 added**, net 48 → 50 registry k
 | `nomis` | other/ | ONS *statistics* endpoint — vacancy counts, not individual listings |
 | `yc_companies` | apis_free/ | Already covered by HN Jobs + Ashby ATS |
 
-### Added (verified present on disk)
+### Added in Batch 3 (struck-through rows have since been removed from disk)
 
 | Source | Folder | Upstream | Tier |
 | --- | --- | --- | --- |
 | `teaching_vacancies` | apis_free/ | gov.uk Teaching Vacancies API (schema.org JobPosting, `datePosted` → high confidence) | rss (15 min) |
 | `gov_apprenticeships` | apis_free/ | GOV.UK Find an Apprenticeship API (150 req/5 min) | rss (15 min) — **later dropped in M6** |
-| `nhs_jobs_xml` | feeds/ | NHS full `all_current_vacancies.xml` (**additive** — coexists with keyword-search `nhs_jobs`) | rss (15 min) |
-| `rippling` | ats/ | `ats.rippling.com/api/board/{slug}/jobs` | ats (60 s) |
+| ~~`nhs_jobs_xml`~~ | feeds/ | NHS full `all_current_vacancies.xml` | rss (15 min) — **dropped 2026-08-10**, upstream serves HTML not XML |
+| ~~`rippling`~~ | ats/ | `ats.rippling.com/api/board/{slug}/jobs` | ats (60 s) — **dropped 2026-08-10**, upstream dead |
 | `comeet` | ats/ | `comeet.co/careers-api/2.0/company/{slug}/positions` | ats (60 s) — **later dropped in M6** |
 
 ### The five load-bearing surfaces (CLAUDE.md rule #13)
@@ -567,12 +567,11 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 backend/src/sources/
 ├── base.py                         — BaseJobSource: retry, rate-limit, conditional fetch, _is_uk_or_remote
 ├── apis_keyed/   (8)               — reed, adzuna, jsearch, jooble, google_jobs, careerjet, findwork, gov_apprenticeships
-├── apis_free/    (10)              — arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs,
-│                                     landingjobs, aijobs, hn_jobs, teaching_vacancies*
-├── ats/          (11)              — greenhouse, lever, workable, ashby, smartrecruiters, pinpoint,
-│                                     recruitee, workday, personio, successfactors, rippling*
-├── feeds/        (8)               — jobs_ac_uk, nhs_jobs, nhs_jobs_xml*, workanywhere, weworkremotely,
-│                                     realworkfromanywhere, biospace, uni_jobs
+├── apis_free/    (9)               — arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs,
+│                                     landingjobs, hn_jobs, teaching_vacancies*
+├── ats/          (10)              — greenhouse, lever, workable, ashby, smartrecruiters, pinpoint,
+│                                     recruitee, workday, personio, successfactors
+├── feeds/        (4)               — nhs_jobs, weworkremotely, realworkfromanywhere, uni_jobs
 ├── scrapers/     (5)               — linkedin, climatebase, eightykhours, bcs_jobs, aijobs_ai
 └── other/        (4)               — indeed (JobSpySource → indeed+glassdoor), hackernews, themuse, nofluffjobs
                                        (* = added in Batch 3)

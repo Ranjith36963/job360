@@ -63,7 +63,7 @@ assertions treat the **registry key count** as authoritative.
   slugs from `core/companies.py`.
 - **RSS/XML source:** `_get_text()` → parse with **defusedxml**, not plain
   `ElementTree.fromstring` — these feeds are untrusted input and M18 closed the
-  XXE hole. The in-repo pattern (see `src/sources/feeds/jobs_ac_uk.py:2-7`) is
+  XXE hole. The in-repo pattern (see `src/sources/feeds/nhs_jobs.py:2-8`) is
   `import xml.etree.ElementTree as ET` for the types plus
   `from defusedxml.ElementTree import fromstring as _safe_fromstring  # type: ignore[import-untyped]`
   for the actual parse. Consider `_get_json_conditional` if upstream honours

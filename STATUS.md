@@ -188,12 +188,12 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 ## What Is Working Right Now
 
 - Full 41-source pipeline (40 live instances) runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed jobtensor/comeet/aijobs_global; gov_apprenticeships restored 2026-06-16; 2026-08-10 rotation removed 6 dead upstreams)
-- Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback: Gemini / Groq / Cerebras)
+- Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback, in order: **OpenAI `gpt-4o-mini` (PRIMARY)** / Gemini / Groq / Cerebras — `llm_provider.py:330-334`)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
-- Conditional-cache pilot (Batch 3.5.3): `nhs_jobs_xml` confirmed live ETag → 304; `backend/scripts/preflight_conditional_cache.py` for future candidates
-- All 7 keyed APIs skip gracefully when keys are empty
-- All ATS boards iterate over ~264 company slugs (11 platforms; comeet removed in M6 rotation)
+- Conditional-cache machinery (Batch 3.5.3) exists and is tested, but **no source uses it today** — the `nhs_jobs_xml` pilot went with that source in the 2026-08-10 rotation. Only `backend/tests/test_conditional_fetch.py` calls the helpers; `backend/scripts/preflight_conditional_cache.py` remains for future candidates
+- All 8 keyed APIs skip gracefully when keys are empty
+- All ATS boards iterate over 302 company slugs (11 platform lists in `core/companies.py`; comeet removed in M6, rippling in the 2026-08-10 rotation — its slug list survives with no source class)
 - All RSS/XML feeds parse correctly with mocked data
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring activates as soon as `JobScorer(..., user_preferences=...)` is wired — `enrichment_lookup` is optional, and without it each dim scores its NEUTRAL half, not zero (8-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
