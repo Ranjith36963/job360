@@ -93,8 +93,8 @@ European Skills, Competences, Qualifications and Occupations — a multilingual 
 
 ### Feature flags
 
-Two env-var booleans that gate Pillar-2's advanced features, both **default off** (rule #18):
-- `ENRICHMENT_ENABLED` — LLM enrichment + `job_enrichment` DB writes. Every call site reads `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853,1137`, `rescore.py:85`), so either name switches it on. It does **not** activate multi-dim scoring: that path is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20) — the flag only decides whether the dims have real data or their neutral halves
+Four env-var booleans gate Pillar-2's advanced features, all **default off** (rule #18) — the two legacy names below and their `ENGINE2_ENABLED` / `ENGINE3_ENABLED` equivalents:
+- `ENRICHMENT_ENABLED` — LLM enrichment + `job_enrichment` DB writes. All eight E2 call sites read `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853,1137`; `rescore.py:85,345,527`; `workers/tasks.py:237,876`; `api/routes/jobs.py:779`), so either name switches it on. It does **not** activate multi-dim scoring: that path is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20) — the flag only decides whether the dims have real data or their neutral halves
 - `SEMANTIC_ENABLED` — writes embeddings into the pgvector store. Hybrid retrieval reads `ENGINE3_ENABLED or SEMANTIC_ENABLED`; ESCO needs this flag AND index artefacts that were never built, so it stays a no-op either way
 
 ### Feed (user_feed)
