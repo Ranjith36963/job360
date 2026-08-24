@@ -212,7 +212,21 @@ def test_the_guard_catches_diff3_style_too(tmp_path):
 # and needs no cleanup at all. A guard that mis-reads a safe redirect as a
 # violation is the same defect as the conflict-marker pattern above it, which is
 # the whole reason this file exists. (CodeRabbit, PR #395.)
-_ROOT_REDIRECT = re.compile(r"(?<![>$\w])>\s*([A-Za-z0-9._/-]+\.(?:json|md|txt))")
+#
+# EVERY REDIRECT FORM THAT CREATES A FILE, not just `>`.
+#   >  file    truncate-create
+#   >> file    append — CREATES the file if absent, so it is just as dangerous
+#   2> file    stderr, and `2>>`, and any other single-digit fd
+# The previous version matched only bare `>` and would have passed while
+# `>> agent-issue.md` or `2> agent-error.txt` left a root file for the cage to
+# blame on the agent. A guard that knows one spelling of the thing it guards is
+# a guard with a door in it — same shape as the `dependabot*` allowlist and the
+# `--merge`-only wiring check. (CodeRabbit, PR #395.)
+#
+# The lookbehind stops `>>` being read twice (once for each `>`) and keeps
+# `->`-style text out. A redirect into a shell variable (`>> "$GITHUB_OUTPUT"`)
+# cannot match the filename class anyway.
+_ROOT_REDIRECT = re.compile(r"(?<![>&$\w])\d?>>?\s*([A-Za-z0-9._/-]+\.(?:json|md|txt))")
 # THE CONTINUATION ALTERNATIVE COMES FIRST, AND THAT ORDER IS THE WHOLE RULE.
 # Written the obvious way — `(?:[^\n]|\\\n)*` — the `[^\n]` branch consumes the
 # backslash, the newline then matches neither branch, and the match STOPS at the
