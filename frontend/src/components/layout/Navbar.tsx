@@ -120,7 +120,14 @@ export function Navbar() {
           )}
           {user && (
             <div className="flex items-center gap-2 pl-2 border-l border-border/40">
-              <span className="text-xs text-muted-foreground max-w-[140px] truncate">
+              {/* Hidden until `lg`. The desktop bar turns on at `md` (768px),
+                  but its contents do not fit there: logo + four nav links +
+                  the settings gear + a 140px email + logout measured 809px
+                  against a 768px viewport, so BOTH /profile and /dashboard
+                  scrolled sideways at tablet width. The email is the only
+                  part that is purely informational, so it is what yields;
+                  logout stays reachable at every size. */}
+              <span className="hidden max-w-[140px] truncate text-xs text-muted-foreground lg:inline">
                 {user.email}
               </span>
               <Button

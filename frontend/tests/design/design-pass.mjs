@@ -43,11 +43,14 @@ import { chromium } from "@playwright/test";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { ROUTES, VIEWPORTS, THEMES } from "./routes.mjs";
+import { installMocks } from "./mock-data.mjs";
 
 const BASE = (process.env.DESIGN_BASE_URL || "http://localhost:3100").replace(/\/$/, "");
 const API = (process.env.DESIGN_API_URL || "http://localhost:8100").replace(/\/$/, "");
 const OUT = process.env.DESIGN_OUT || "design-shots";
 const SESSION = process.env.DESIGN_SESSION || "";
+// DESIGN_MOCK=1 serves deterministic fixtures for the authed endpoints.
+const MOCK = process.env.DESIGN_MOCK === "1";
 
 const only = (process.env.DESIGN_ONLY || "").split(",").map((s) => s.trim()).filter(Boolean);
 const viewports = filterByName(VIEWPORTS, process.env.DESIGN_VIEWPORTS);
@@ -194,6 +197,7 @@ async function capture(route, viewport, theme) {
   }
 
   const page = await context.newPage();
+  if (MOCK) await installMocks(page);
   const consoleErrors = [];
   const failedRequests = [];
 

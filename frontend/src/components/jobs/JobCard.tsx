@@ -159,7 +159,12 @@ export function JobCard({ job, onAction }: JobCardProps) {
           router.push(`/jobs/${job.id}`);
         }
       }}
-      className="glass-card rounded-xl p-4 cursor-pointer flex flex-col gap-3"
+      // h-full: the cards sit in a 2/3-column grid, but each one is wrapped in a
+      // plain block div, so the CARD was never the grid item and never got the
+      // row's stretched height. Measured at 1440px, one row of three came out
+      // 189 / 231 / 191px tall — ragged bottoms and three different gaps before
+      // the next row. Filling the wrapper makes every card in a row equal.
+      className="glass-card flex h-full cursor-pointer flex-col gap-3 rounded-xl p-4"
       role="link"
       tabIndex={0}
       aria-label={`Job: ${job.title} at ${job.company}`}
@@ -427,8 +432,18 @@ export function JobCard({ job, onAction }: JobCardProps) {
         ))}
       </div>
 
-      {/* ---- Actions ---- */}
-      <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+      {/* ---- Actions ----
+          flex-wrap: this row holds Apply, Tailor my CV, Like, Skip, Details and
+          the source tag. With no wrapping it simply ran past the card, and the
+          card is overflow:hidden, so the overspill was CLIPPED AWAY rather than
+          scrolled — measured at 1440px, the Details button sat 79px and the
+          source label 116px beyond the padding box, i.e. both were invisible
+          and unclickable. Wrapping shows them instead of hiding them.
+
+          mt-auto: with h-full above, this pins the actions to the bottom of the
+          card so the button rows line up across a row of cards instead of
+          floating at whatever height the title happened to end. */}
+      <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border/50 pt-2">
         <Button
           size="sm"
           className="gap-1.5 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
