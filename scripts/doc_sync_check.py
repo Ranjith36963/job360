@@ -336,37 +336,85 @@ def test_file_count() -> int:
 
 
 def migration_file_count() -> int:
-    """Number of forward-migration files (NNNN_*.up.sql).
+    """Number of forward-migration files, as a VALIDATED ``0000..head`` sequence.
 
-    Distinct from ``migration_head()``: head is the highest NNNN, count is
-    how many actually exist. Both must exist (no gap in the sequence) for the
-    schema story a doc tells to be true, but only file count matches the
-    ``N-migration forward-compat schema`` prose docs write.
+    Distinct from ``migration_head()``: head is the highest NNNN, this is how
+    many actually exist. Promoted 2026-08-24 by the nightly routine, which found
+    ARCHITECTURE.md saying ``25-migration forward-compat schema`` and the
+    search-and-match-engine pillar saying ``14-migration`` while 31 forward
+    migrations existed. Six doc bumps (0025→0030) landed with the
+    migration-head guard staying green, because that guard only watches
+    ``0000 → NNNN`` phrasing, not the total.
 
-    Promoted 2026-08-24 by the nightly routine. ARCHITECTURE.md said
-    ``25-migration forward-compat schema`` and the search-and-match-engine
-    pillar said ``14-migration`` while 31 forward migrations existed. Six
-    doc bumps (0025→0030) landed with the migration-head guard staying
-    green, because that guard only watches ``0000 → NNNN`` phrasing —
-    not the total. Countable fact, cheap to hold here.
+    CodeRabbit, on the PR that added this: the first draft globbed every
+    ``*.up.sql`` and merely DOCUMENTED the ``NNNN_`` shape. Deleting
+    ``0020_....up.sql`` and adding ``notes.up.sql`` left both the count and the
+    head unchanged, so a schema with a hole in it stayed green -- a count that
+    does not measure the thing that breaks. The prefixes are now parsed and the
+    run is required to be contiguous ``0000..head`` with no duplicates; a
+    malformed or gapped set raises (exit 2), which is this file's contract:
+    fail LOUD, never silently green.
     """
-    return len(list((ROOT / "backend/migrations").glob("*.up.sql")))
+    seen: dict[int, str] = {}
+    for p in sorted((ROOT / "backend/migrations").glob("*.up.sql")):
+        m = re.match(r"(\d{4})_.+\.up\.sql$", p.name)
+        if not m:
+            raise RuntimeError(
+                f"migration {p.name} does not match NNNN_<name>.up.sql — "
+                "a file the runner cannot order is not a migration"
+            )
+        num = int(m.group(1))
+        if num in seen:
+            raise RuntimeError(
+                f"duplicate migration prefix {m.group(1)}: {seen[num]} and {p.name}"
+            )
+        seen[num] = p.name
+    if not seen:
+        raise RuntimeError("no NNNN_*.up.sql forward migrations found")
+    head = max(seen)
+    missing = sorted(set(range(head + 1)) - set(seen))
+    if missing:
+        raise RuntimeError(
+            "migration sequence has gaps at "
+            + ", ".join(f"{n:04d}" for n in missing)
+            + f" (head is {head:04d}) — the schema cannot be rebuilt from 0000"
+        )
+    return len(seen)
+
+
+# The source subfolders that MUST exist. Named explicitly rather than
+# discovered, so a deleted or renamed folder is drift instead of a guard that
+# quietly stops existing -- see source_subfolder_counts().
+EXPECTED_SOURCE_SUBFOLDERS = (
+    "apis_keyed", "apis_free", "ats", "feeds", "other", "scrapers",
+)
 
 
 def source_subfolder_counts() -> dict[str, int]:
     """{'apis_keyed': N, 'apis_free': N, 'ats': N, 'feeds': N, 'other': N, 'scrapers': N}
 
     File count per source subfolder, excluding ``__init__.py`` and ``base.py``.
-    Docs everywhere use a tree-diagram of ``apis_keyed/ (8)  apis_free/ (9) ...`` —
-    the numbers rot every rotation, and until today no guard watched them.
+    Docs everywhere use a tree diagram of ``apis_keyed/ (8)  apis_free/ (9) ...``
+    — the numbers rot every rotation, and until today no guard watched them.
 
     Promoted 2026-08-24 by the nightly routine. README.md said ``ats/ (12)``
     against 10, ``feeds/ (8)`` against 4, ``scrapers/ (7)`` against 5.
-    Countable, on-tree, and the same shape as ATS platform slugs -- exactly
-    the class of number this file is meant to own.
+
+    CodeRabbit, on the PR that added this: the first draft DISCOVERED the
+    folders by iterating the directory, so deleting ``ats/`` deleted the
+    ``subfolder-ats`` guard along with it and left ``ats/ (10)`` green forever
+    — a check that cannot be made to go red on demand. The expected set is now
+    named as a constant and a missing folder yields a count of 0, which the
+    docs' non-zero claim then contradicts loudly. A NEW folder is still
+    discovered (and, having no doc claim, trips the "claim not found in any
+    doc" alarm), so the set can grow without editing this file.
     """
     out: dict[str, int] = {}
     base = ROOT / "backend/src/sources"
+    # A missing folder scores 0 rather than vanishing: the guard must survive
+    # the deletion of the thing it guards.
+    for name in EXPECTED_SOURCE_SUBFOLDERS:
+        out[name] = 0
     if not base.is_dir():
         return out
     for d in base.iterdir():
