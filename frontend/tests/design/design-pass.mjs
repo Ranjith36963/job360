@@ -126,6 +126,7 @@ for (const route of plan) {
         ? "ERROR"
         : [
             shot.redirected ? `-> ${shot.finalPath}` : "",
+            shot.stillLoading ? "STILL LOADING after 30s" : "",
             shot.consoleErrors.length ? `${shot.consoleErrors.length} console` : "",
             shot.failedRequests.length ? `${shot.failedRequests.length} net` : "",
           ]
@@ -234,16 +235,39 @@ async function capture(route, viewport, theme) {
   };
 
   try {
+    // NOT "networkidle". The signed-in pages keep a TanStack Query refetch and a
+    // status poll running, so the network never goes quiet and every authed
+    // route timed out with zero images — the exact pages worth reviewing.
+    // "domcontentloaded" plus an explicit settle below is both faster and
+    // survives a page that is legitimately never idle.
     const res = await page.goto(`${BASE}${route.resolvedPath}`, {
-      waitUntil: "networkidle",
-      timeout: 45_000,
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
     });
     record.status = res?.status() ?? null;
+
+    // Wait for the SKELETONS to clear, and wait on the signal this app actually
+    // emits. An earlier version watched [aria-busy] — which nothing here sets —
+    // so it never waited at all, and /profile was photographed mid-load as 18
+    // grey blocks. That image reads exactly like a broken empty state, and it
+    // is simply a screenshot taken too early: the same page resolves to the CV
+    // uploader between 3s and 8s. A camera that fires early does not report a
+    // slow page, it invents a bug.
+    //
+    // shadcn's Skeleton is a div.animate-pulse, so counting those is the honest
+    // ready signal. Best-effort — a page with no skeletons proceeds immediately.
+    await page
+      .waitForFunction(() => document.querySelectorAll(".animate-pulse").length === 0, {
+        timeout: 30_000,
+      })
+      .catch(() => {
+        record.stillLoading = true;
+      });
 
     // Let entry animations and skeleton->content swaps settle. Screenshotting a
     // page mid-transition produces a half-faded image that reads as a design bug
     // and is not one.
-    await page.waitForTimeout(1200);
+    await page.waitForTimeout(2000);
 
     // `next dev` paints its own chrome — the issue-count badge and the Turbopack
     // logo — pinned over the bottom corners of the page. Neither exists in the
@@ -331,6 +355,7 @@ function contactSheet(report) {
         .map((s) => {
           const problems = [
             s.error ? `<li class="bad">load failed: ${esc(s.error)}</li>` : "",
+            s.stillLoading ? `<li class="bad">still showing skeletons after 30s — this shot is a loading state, not the page</li>` : "",
             s.authed === false ? `<li class="bad">NOT the authed page — landed on ${esc(s.finalPath)}</li>` : "",
             s.redirected && s.authed !== false ? `<li class="warn">redirected to ${esc(s.finalPath)}</li>` : "",
             ...(s.consoleErrors || []).map((e) => `<li class="warn">console: ${esc(e)}</li>`),
