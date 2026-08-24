@@ -74,11 +74,11 @@ job360/
 │   │   │   ├── vector_index.py       # ChromaDB wrapper (opt-in, lazy)
 │   │   │   ├── retrieval.py          # BM25 + RRF fusion + cross-encoder rerank (opt-in)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
-│   │   │   ├── channels/             # crypto (Fernet), dispatcher (Apprise lazy)
-│   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
+│   │   │   ├── channels/             # dispatcher (Apprise lazy), crypto (Fernet), email_url, ssrf_guard
+│   │   │   ├── notifications/        # defaults (signup rulebook seeder), report_generator
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + 25-migration forward-compat schema
+│   │   │   ├── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + 31-migration forward-compat schema (0000 → 0030)
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
