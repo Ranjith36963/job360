@@ -336,8 +336,8 @@ Only the survivors get the full `JobScorer` treatment (Pillar 2).
   - `telegram` → `tgram://bot_token/chat_id`
   - `webhook` → `json://host/path`
 - **`backend/src/services/channels/crypto.py`** — `encrypt(plaintext) → bytes` / `decrypt(ciphertext) → str`. Fails closed if `CHANNEL_ENCRYPTION_KEY` is unset.
-- **`backend/src/services/channels/dispatcher.py`** — thin wrapper around Apprise. Imports `apprise` *lazily inside the function* (CLAUDE.md rule #11 — Apprise pulls ~30 MB of deps; library code must not pay that cost on import). Tests monkeypatch `apprise.Apprise`. The dispatcher runs each notification through gates before sending: (1) `enabled=0` skip, (2) `match_score < score_threshold` skip, (3+4) `notify_mode` is a **bundling** mode (`daily` / `every_n_hours`) **or** the moment falls inside the quiet-hours window (evaluated with stdlib `zoneinfo` against `users.timezone`) → queue for the digest instead of sending now (`dispatcher.py:317`). `force=True` bypasses gate 3+4 and is how `send_bundle` delivers already-queued rows.
-- **There is only ONE delivery path.** The pre-Batch-2 single-tenant notification code (`src/services/notifications/{base,email_notify,slack_notify,discord_notify}.py`, env-var webhooks) was **deleted** — see the removal note in `ARCHITECTURE.md` / `README.md`. Everything user-facing goes through the per-user `src/services/channels/dispatcher.py`, invoked by ARQ worker tasks under an authenticated `user_id`. The CLI batch run no longer sends its own summary: it writes a markdown report via `services/notifications/report_generator.generate_markdown_report` (`main.py:49`) and enqueues the ordinary per-user `send_notification` task for above-threshold feed rows (`main.py:481` `_enqueue_notifications`).
+- **`backend/src/services/channels/dispatcher.py`** — thin wrapper around Apprise. Imports `apprise` *lazily inside the function* (CLAUDE.md rule #11 — Apprise pulls ~30 MB of deps; library code must not pay that cost on import). Tests monkeypatch `apprise.Apprise`. The dispatcher runs each notification through gates before sending: (1) `enabled=0` skip, (2) `match_score < score_threshold` skip, (3+4) `notify_mode` is a **bundling** mode (`daily` / `every_n_hours`) **or** the moment falls inside the quiet-hours window (evaluated with stdlib `zoneinfo` against `users.timezone`) → queue for the digest instead of sending now (`backend/src/services/channels/dispatcher.py:317`). `force=True` bypasses gate 3+4 and is how `send_bundle` delivers already-queued rows.
+- **There is only ONE delivery path.** The pre-Batch-2 single-tenant notification code (`backend/src/services/notifications/{base,email_notify,slack_notify,discord_notify}.py`, env-var webhooks) was **deleted** — see the removal note in `ARCHITECTURE.md` / `README.md`. Everything user-facing goes through the per-user `backend/src/services/channels/dispatcher.py`, invoked by ARQ worker tasks under an authenticated `user_id`. The CLI batch run no longer sends its own summary: it writes a markdown report via `generate_markdown_report()` from `backend/src/services/notifications/report_generator.py` (`backend/src/main.py:49`) and enqueues the ordinary per-user `send_notification` task for above-threshold feed rows (`backend/src/main.py:481` `_enqueue_notifications`).
 - **API** — `backend/src/api/routes/channels.py`:
   - `GET /api/settings/channels` — list caller's channels
   - `POST /api/settings/channels` — create (encrypts credential server-side)
@@ -675,9 +675,9 @@ For completeness — these belong in the other two pillars and you won't find th
 
 ---
 
-*Last updated 2026-08-24. Backend suite: 3,297 collected / 3,295 selected across 217 test files — measure it, never quote it
-collected, 2 deselected (measured `python -m pytest --collect-only -q`, this session —
-per root `CLAUDE.md`: "never quote a test count from a doc, measure it"). Pass/fail count
-NOT verified this session (no local Postgres reachable — the suite needs `docker-compose.dev.yml`
-up on port 5433); do not carry the old "600p/0f/3s" figure forward, it predates this update by
-~2.5 months and was already off by roughly 5x collected-test count alone.*
+*Last updated 2026-08-24. Backend suite: 218 `test_*.py` files (filesystem count, verified).
+The collected-test count and the pass/fail count were **NOT** verified in this session — no
+local Postgres was reachable (the suite needs `docker-compose.dev.yml` up on port 5433) — so
+neither is recorded here. Measure them, never quote them:
+`cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`. Do not carry the
+old "600p/0f/3s" figure forward either; it predates this update by ~2.5 months.*
