@@ -97,6 +97,18 @@ CASES: list[tuple[str, str, str, str]] = [
      r"([\d,]{3,}) collected", "9,999 collected", "suite-baseline"),
     ("backend/CLAUDE.md",
      r"(SQLite|Postgres) via psycopg3", "SQLite table via psycopg3", "stale-phrase"),
+    # Seventh batch, 2026-08-24. Skills are INSTRUCTIONS AGENTS EXECUTE, so a
+    # dead path there is worse than a wrong sentence: the scout skill told an
+    # agent to append its findings to `D:\dev\job360\docs\maintenance\MISSIONS.md`,
+    # a directory gone since the maintenance docs moved under docs/harness/.
+    # Every scout pass following that rule wrote nowhere. Four skills carried
+    # the same stale root, and scout/SKILL.md contradicted itself: line 9 had
+    # the correct path in prose, line 23 -- the operative rule -- had the dead one.
+    (".claude/skills/scout/SKILL.md",
+     r"docs\\(harness)\\maintenance\\MISSIONS\.md",
+     # Replacement goes through re.subn, so each literal backslash must be
+     # doubled here or `\n` / `\m` are read as escapes.
+     "docs\\\\nowhere\\\\maintenance\\\\MISSIONS.md", "skill-dead-path"),
     # Sixth batch, 2026-08-24. The nightly routine found runbook.md still
     # telling operators to run `sqlite3 data/jobs.db` against a Postgres
     # database -- five dead COMMANDS, not stale prose. The four SQLite entries

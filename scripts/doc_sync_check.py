@@ -481,6 +481,57 @@ def collected_baseline_claims() -> list[tuple[str, str, int]]:
     return out
 
 
+def skill_dead_paths() -> list[tuple[str, str, str]]:
+    """(skill file, line, dead path) for repo paths .claude/skills/ names that do not exist.
+
+    Added 2026-08-24. These files are INSTRUCTIONS AGENTS EXECUTE, not prose a
+    human reads and mentally corrects, so a wrong path here is worse than a
+    wrong sentence in a doc: the scout skill told an agent to append its
+    findings to `D:\\dev\\job360\\docs\\maintenance\\MISSIONS.md`, a directory that
+    has not existed since the maintenance docs moved under docs/harness/. Every
+    scout pass following that rule wrote nowhere.
+
+    scout/SKILL.md contradicted ITSELF -- line 9 cited the correct path in
+    prose, line 23 (the operative rule) cited the dead one. Four skills carried
+    the same stale root.
+
+    Deliberately narrow: only `docs/...`-shaped paths, in backticks, and the
+    Windows absolute form the skills actually use. Prose and example paths in
+    other shapes never match.
+    """
+    skills = ROOT / ".claude/skills"
+    if not skills.exists():
+        return []
+    pat = re.compile(
+        r"`(?:D:\\dev\\job360\\)?((?:docs)[\\/][A-Za-z0-9_./\\-]+\.md)`"
+    )
+    # THE TEST IS THE PARENT DIRECTORY, not the file.
+    #
+    # A skill's OUTPUT files do not exist until it first runs -- DOC-HEALTH.md
+    # and SCOUT-NOTES.md are created by the very skills that name them, and
+    # flagging those is a permanent false alarm.
+    #
+    # The first attempt excluded any line containing a write verb. That was
+    # worse than useless: scout/SKILL.md line 23 reads "Your only WRITABLE
+    # files ... MISSIONS.md ... and SCOUT-NOTES.md", so the verb filter skipped
+    # the whole line and took the read-target down with the write-target. The
+    # drill caught it -- pointing MISSIONS.md at a dead directory left the
+    # report green.
+    #
+    # A missing file whose FOLDER exists is a pending write. A path whose
+    # folder does not exist is a real bug: the write fails too. That is exactly
+    # the defect this guard was born for -- docs/maintenance/ no longer exists.
+    out: list[tuple[str, str, str]] = []
+    for p in sorted(skills.rglob("*.md")):
+        rel_skill = p.relative_to(ROOT).as_posix()
+        for i, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in pat.finditer(line):
+                claimed = m.group(1).replace("\\", "/")
+                if not (ROOT / claimed).parent.is_dir():
+                    out.append((rel_skill, str(i), claimed))
+    return out
+
+
 def pillars_fully_watched() -> list[str]:
     """Every *.md under docs/product/pillars/ must be in LIVING_DOCS.
 
@@ -1037,6 +1088,14 @@ def main() -> int:
                 "frontend (user-facing copy)", str(line_no), "landing-source-count",
                 str(claimed), str(registry),
             ))
+
+    # Skills are executed, not read. A dead path there sends an agent's whole
+    # output into a directory that does not exist.
+    for skill, line_no, claimed in skill_dead_paths():
+        drift.append((
+            skill, line_no, "skill-dead-path", claimed,
+            "path does not exist — skills are instructions agents ACT on",
+        ))
 
     # The authoritative folder must be watched in full, not file by file.
     for rel in pillars_fully_watched():
