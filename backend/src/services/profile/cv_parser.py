@@ -280,6 +280,7 @@ _SECTION_HINT_HEADINGS = (
 )
 
 
+@cpu_bound
 def _build_section_hint(file_path: str) -> str:
     """Batch 1.7b — pre-segment the PDF via font-size clustering and
     emit a compact hint block the LLM can use as structural guidance.
@@ -746,7 +747,7 @@ async def parse_cv_async(file_path: str) -> CVData:
     # PDF-only font-size section hint (needs the file). The LLM extraction
     # itself works purely off text — see ``llm_cv_fields_from_text``.
     #
-    # OFFLOADED FOR THE SAME REASON AS `extract_text` THREE LINES UP, and it was
+    # OFFLOADED FOR THE SAME REASON AS `extract_text` above, and it was
     # missed the first time round: `_build_section_hint` opens the PDF again and
     # pushes every page through `extract_sections_from_pdf`. Leaving it on the
     # loop meant a CV upload could still stall unrelated requests — the exact
