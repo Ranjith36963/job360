@@ -58,13 +58,28 @@ concurrency:
 
 jobs:
   triage:
-    # Only triage issues our own detectors opened, or ones explicitly marked for
-    # the harness. Triaging arbitrary public issues would burn tokens and widen
-    # the prompt-injection surface for no benefit. A manual dispatch is always
-    # allowed — someone with write access asked for it by hand.
+    # Only triage issues our own detectors opened, ones the OWNER opened, or
+    # ones explicitly marked for the harness. Triaging arbitrary public issues
+    # would burn tokens and widen the prompt-injection surface for no benefit.
+    # A manual dispatch is always allowed — someone with write access asked for
+    # it by hand.
+    #
+    # THE OWNER CLAUSE, ADDED 2026-08-24, AND WHY IT HAD TO BE HERE.
+    # The auto-authorisation step further down learned to trust the owner's own
+    # issues — and that branch could never be reached, because THIS condition
+    # never let the job start on one. An owner-opened issue is not
+    # `github-actions[bot]` and carries no `harness` label, so the wire was dead
+    # at the door while the logic behind the door looked correct. Exactly the
+    # failure this repo has now recorded three times: a condition that can never
+    # be true, going green forever, indistinguishable from a careful gate doing
+    # its job. Found by CodeRabbit on PR #380 before it ever ran.
+    #
+    # `repository_owner` is derived from the repository, never typed, so it
+    # cannot drift from reality on a rename or a fork.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.issue.user.login == 'github-actions[bot]' ||
+      github.event.issue.user.login == github.repository_owner ||
       contains(github.event.issue.labels.*.name, 'harness')
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -194,7 +209,7 @@ jobs:
           # No Bash: this repo is PUBLIC and this job holds a token. The agent
           # reads files and writes exactly one file; the workflow runs every
           # command. Same cage as repair.yml and doc-sync.yml.
-          claude_args: --allowedTools Edit,Write,Read,Glob,Grep --max-turns 40
+          claude_args: --model claude-opus-5 --allowedTools Edit,Write,Read,Glob,Grep --max-turns 40
 
       # ── ROUTE stage (dumb code): the model's verdict is a WORD, not an action.
       # Bash maps that word onto a whitelisted label. The agent can never apply
@@ -205,9 +220,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          # Derived from the repository, never typed. A hardcoded login would be
+          # a second place the owner's name lives, and the two would drift the
+          # first time anything is renamed or forked.
+          REPO_OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
           num="${{ steps.issue.outputs.num }}"
+          owner_authorised="no"
           if [ ! -s triage.md ]; then
             gh issue comment "$num" --body "Triage ran but produced no diagnosis — check the workflow run. (Silence would be worse than this comment.)"
             exit 0
@@ -263,22 +283,62 @@ jobs:
               # no model-generated and no attacker-supplied text.
               #   PRODUCT/ABSENCE/WATCHDOG/INVARIANT — bodies are our own SQL
               #     counts and fixed strings. They qualify.
+              #   SECURITY — added 2026-08-24. `security-watch.yml` builds these
+              #     bodies from the code-scanning API: a CodeQL rule id, a
+              #     severity, a path and a line, all about OUR OWN repository.
+              #     Same property as the SQL detectors — no third-party string
+              #     reaches the body, and the alert's code snippet is
+              #     deliberately left out. Before this, 8 open alerts had no
+              #     route to a fixer at all; the Security tab is not on anyone's
+              #     path to work.
               #   "Loop 2 RED:" was REMOVED 2026-08-03 — its body is `tail -40`
               #     of the LIVE pipeline log, i.e. text influenced by whatever an
               #     employer posts on a job board we scrape. Auto-authorising it
               #     would let third-party text start a WRITE-capable agent.
-              "PRODUCT: "*|"ABSENCE: "*|"WATCHDOG: "*|"INVARIANT: "*) auto="yes" ;;
+              "PRODUCT: "*|"ABSENCE: "*|"WATCHDOG: "*|"INVARIANT: "*|"SECURITY: "*) auto="yes" ;;
             esac
+          fi
+
+          # ── THE OWNER IS NOT A STRANGER ──────────────────────────────────
+          # The rule above exists because this repo is PUBLIC and issue text
+          # reaches an agent's prompt, so a stranger's words must never start a
+          # writer. That reasoning is exactly right, and it says nothing about
+          # the repo owner: he is the principal the whole cage serves, and he
+          # can already start any writer here by clicking one label. Making him
+          # relay a message to his own machine was never a security property —
+          # it was a missing wire, and he named it as such on 2026-08-24
+          # ("there should be no set of work that should be on my side").
+          #
+          # Still narrowed on the same two axes as the detector path:
+          #   * the author must be the OWNER, matched exactly — not a
+          #     collaborator, not a bot, not a login that merely contains it;
+          #   * triage must INDEPENDENTLY have judged it auto-fixable. His
+          #     opening an issue authorises a fix attempt; it does not overrule
+          #     the judgement about whether this is fixable by a machine.
+          # A `needs-human` verdict on an owner issue still stops here.
+          if [ "$label" = "triage:auto-fixable" ] && [ "$auto" = "no" ] && \
+             echo "$issue_author" | grep -qFx "${REPO_OWNER}"; then
+            auto="yes"
+            owner_authorised="yes"
           fi
 
           {
             cat triage.md
             echo
             echo "---"
-            if [ "$auto" = "yes" ]; then
+            if [ "$auto" = "yes" ] && [ "$owner_authorised" = "yes" ]; then
+              # TWO DIFFERENT AUTHORISATIONS, TWO DIFFERENT SENTENCES. Printing
+              # the detector wording over an owner-opened issue would be a false
+              # claim about WHY the writer was started — the same class of
+              # defect as an announcement that outruns the act.
+              echo "**Routing: \`$label\` — AUTO-AUTHORISED (owner's own issue).**"
+              echo
+              echo "> You opened this, and triage independently judged it auto-fixable, so \`agent:fix\` was applied and the repair loop is starting. You do not have to relay a message to your own machine."
+              echo "> A \`needs-human\` verdict on your issue would still have stopped here — opening it authorises an attempt, not a bypass of the judgement."
+            elif [ "$auto" = "yes" ]; then
               echo "**Routing: \`$label\` — AUTO-AUTHORISED.**"
               echo
-              echo "> This issue was raised by our own detector from read-only SQL (no human or public text is involved), and triage independently judged it auto-fixable. Both conditions held, so \`agent:fix\` was applied automatically and the repair loop is starting."
+              echo "> This issue was raised by our own detector from read-only SQL or the code-scanning API (no human or public text is involved), and triage independently judged it auto-fixable. Both conditions held, so \`agent:fix\` was applied automatically and the repair loop is starting."
               echo "> The merge still needs you. Only the message-passing was automated."
             elif [ "$label" = "triage:auto-fixable" ]; then
               echo "**Routing: \`$label\`.** If you agree, add the \`agent:fix\` label and the repair loop will open a PR."

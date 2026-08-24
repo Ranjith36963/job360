@@ -792,6 +792,100 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
     return reasons
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CAGE: TAGS — the lane's `requires:` list, proved against real check runs.
+#
+# WHY THIS EXISTS AS A SEPARATE CAGE FROM PROOF.
+# PROOF asks "did the REQUIRED_CHECKS run and pass?" — a fixed list, the same
+# for every PR. The policy asks a different question: the PRODUCT lane requires
+# `verify`, and the HARNESS lane does not. `verify-live.yml` is NOT in the
+# repo's ruleset (measured 2026-08-24: the ruleset names 11 contexts and none of
+# them is `verify`), so GitHub will happily report a product PR as CLEAN with
+# the app never once started. PROOF would agree with GitHub. This cage is the
+# only thing standing between "green" and "watched alive".
+#
+# THE SHAPE OF THE MISTAKE THIS AVOIDS: reading `requires:` and then trusting a
+# tag because the policy names it. A tag is a CLAIM; a check run is EVIDENCE.
+# Every tag here either maps to check runs that must really have succeeded, or
+# is proved by another cage in this same file. A tag that maps to neither is a
+# hard refusal — an unrecognised requirement is not a satisfied one.
+# ─────────────────────────────────────────────────────────────────────────────
+
+TAG_CHECKS: dict[str, tuple[str, ...]] = {
+    "ci": ("Backend (Python 3.12)", "Frontend (Node 20)", "offline-suite", "frontend-e2e"),
+    "security": ("gitleaks (secret scan)", "bandit (python static analysis)",
+                 "pip-audit (backend deps)", "npm audit (frontend deps)", "CodeQL"),
+    "verify": ("verify / backend", "verify / frontend"),
+    "drill": ("Chain wires (harness)",),
+}
+
+# Tags this file proves with its own cages rather than with a check run. Named
+# explicitly so an unknown tag cannot fall through to "nothing to check".
+TAGS_PROVED_BY_CAGE = {"review": "REVIEW", "ratchets": "RATCHET"}
+
+
+def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANCH) -> list[str]:
+    """Pure half of the TAGS cage, so a drill can feed it real shapes.
+
+    SKIPPED is not a pass here, for the same reason it is not a pass for a
+    required check: a job that skipped proved nothing, and the whole point of a
+    lane tag is that the evidence really exists.
+    """
+    reasons: list[str] = []
+    if not requires:
+        # A lane with an empty `requires` would auto-merge on nothing at all.
+        # lane.py's own drill already refuses that shape; this is the second
+        # door, because the two files can drift.
+        return ["this lane requires NO tags at all, so merging it would be merging on "
+                "nothing. FIX: give the lane a `requires:` list in "
+                ".github/merge-policy.yml (that is the owner's decision)."]
+    by_name = {r.get("name", ""): r for r in runs}
+    for tag in requires:
+        if tag in TAGS_PROVED_BY_CAGE:
+            continue  # the named cage's own verdict carries it
+        wanted = TAG_CHECKS.get(tag)
+        if wanted is None:
+            reasons.append(
+                f"the lane requires the tag `{tag}` and I do not know what evidence proves it, "
+                f"so I cannot say it is satisfied — and an unrecognised requirement is never a "
+                f"met one. FIX: add `{tag}` to TAG_CHECKS in scripts/merge_cage.py (naming the "
+                f"check runs that prove it) or to TAGS_PROVED_BY_CAGE.")
+            continue
+        for name in wanted:
+            # A check that only runs for main-targeted PRs cannot be demanded on
+            # another base; judge_check_runs already says so in its own words.
+            if base_ref != MAIN_BRANCH and name in MAIN_ONLY_CHECKS:
+                continue
+            run = by_name.get(name)
+            if run is None:
+                reasons.append(
+                    f"tag `{tag}` needs `{name}` and that check never ran on this PR. A tag "
+                    f"cannot be earned by absence. FIX: rebase onto main so the workflow "
+                    f"exists on this branch, wait for it, then re-judge.")
+            elif run.get("status") != "completed":
+                reasons.append(f"tag `{tag}` needs `{name}` and it has not finished "
+                               f"({run.get('status')}). FIX: wait for it, then re-judge.")
+            elif run.get("conclusion") != "success":
+                reasons.append(
+                    f"tag `{tag}` needs `{name}` and it concluded `{run.get('conclusion')}`. "
+                    f"Only `success` earns a tag — `skipped` and `neutral` prove nothing, which "
+                    f"is exactly what a lane tag is supposed to prove. FIX: make it run and go "
+                    f"green.")
+    return reasons
+
+
+def check_tags(pr: int, lane: dict, base_ref: str = MAIN_BRANCH) -> Verdict:
+    """Prove every tag the PR's own lane demands."""
+    sha = gh(["api", f"repos/{REPO}/pulls/{pr}", "-q", ".head.sha"])
+    data = json.loads(gh(["api", f"repos/{REPO}/commits/{sha}/check-runs?per_page={PER_PAGE}"]))
+    runs = data.get("check_runs", [])
+    requires = list(lane.get("requires") or [])
+    reasons = judge_tags(requires, runs, base_ref)
+    return Verdict("TAGS", "fail" if reasons else "pass", reasons,
+                   claim=f"every tag the `{lane.get('lane', '?')}` lane demands "
+                         f"({', '.join(requires) or 'none'}) really ran and really passed")
+
+
 def check_proof(pr: int, base_ref: str = MAIN_BRANCH) -> Verdict:
     """Did the checks really run, and really pass?
 
@@ -1102,7 +1196,8 @@ def check_ratchets(base_values: dict | None, expected_sha: str = "",
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def decide(pr: int, base_values: dict[str, int] | None = None) -> tuple[bool, list[Verdict], dict]:
+def decide(pr: int, base_values: dict[str, int] | None = None,
+           lane: dict | None = None) -> tuple[bool, list[Verdict], dict]:
     """ALLOW only if every cage PASSES. Any error, any doubt, REFUSES.
 
     Every `except` here is `except Exception`, not a hand-picked tuple. The old
@@ -1154,6 +1249,31 @@ def decide(pr: int, base_values: dict[str, int] | None = None) -> tuple[bool, li
                 f"the {name} cage could not run ({type(exc).__name__}: {exc}) — a cage that "
                 f"could not look is not a cage that approved. FIX: re-run once the GitHub API "
                 f"is reachable."]))
+
+    # THE LANE ITSELF IS A CAGE. Expressed as a verdict rather than a special
+    # exit code on purpose: every downstream reader — the printed reasons, the
+    # Slack line, --advise, --verdict-json, the exit code — already knows how to
+    # carry a Verdict, and a second channel is a second thing to keep honest.
+    if lane is not None and not lane.get("auto_merge"):
+        why = [w for w in (lane.get("why") or []) if w][:3]
+        detail = " ".join(why) if why else "no reason was recorded"
+        verdicts.append(Verdict("LANE", "fail", [
+            f"this PR is in the `{lane.get('lane', '?')}` lane, and that lane is "
+            f"`auto_merge: false` in .github/merge-policy.yml — a machine may not decide it. "
+            f"{detail} "
+            f"FIX: nothing an agent can do. Read the file named above and merge it yourself "
+            f"if you agree."]))
+
+    # THE LANE'S OWN REQUIREMENTS. Only asked when a lane verdict was supplied —
+    # `--advise` judges without one and must keep behaving exactly as it did.
+    if lane is not None:
+        try:
+            verdicts.append(check_tags(pr, lane, base_ref))
+        except Exception as exc:
+            verdicts.append(Verdict("TAGS", "fail", [
+                f"the TAGS cage could not run ({type(exc).__name__}: {exc}) — a cage that "
+                f"could not look is not a cage that approved. FIX: re-run once the GitHub "
+                f"API is reachable."]))
 
     try:
         verdicts.append(check_ratchets(base_values, meta.get("merge_sha", ""), measured_tree()))
@@ -1208,7 +1328,8 @@ def slack(channel: str, text: str) -> bool:
     return True
 
 
-def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -> str:
+def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict],
+                  merged: bool = False) -> str:
     """The message the owner actually reads.
 
     THE ALLOW SENTENCE IS BUILT FROM THE CAGES THAT PASSED, and from nothing else.
@@ -1223,20 +1344,22 @@ def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict]) -
     if allowed:
         claims = [v.claim for v in verdicts if v.status == "pass" and v.claim]
         checked = "; ".join(claims) if claims else "no cage reported anything"
-        # THIS CAGE CANNOT MERGE, SO IT MAY NOT SAY IT DID.
-        # There is no `--merge` flag on this lineage at all -- it advises and
-        # stops (see `--advise`; the merging is a separate, human act). This line
-        # said "Merged to production" for every allowed PR anyway, so on this
-        # branch the message was false 100% of the time, not merely on dry runs.
+        # THE ANNOUNCEMENT MAY NOT OUTRUN THE ACT.
+        # `merged` is True only when `request_auto_merge` returned 0 — never
+        # from the verdict, never from the presence of a flag. The old lineage
+        # printed "Merged to production" for every allowed PR on a branch with
+        # no merge capability at all, so that sentence was false 100% of the
+        # time; CodeRabbit raised the dry-run half of the same defect on PR
+        # #336. The cure is that the sentence is chosen by WHAT HAPPENED.
         #
-        # CodeRabbit raised the dry-run half of this on PR #336. It is ported here
-        # rather than merged, because #336's copy of merge_cage.py is being dropped
-        # -- and the defect is strictly worse in this copy.
-        #
-        # An announcement that outruns the act is the same failure as a guard that
-        # cannot go red: the owner reads a green sentence describing something that
-        # did not happen, and has no way to tell from the message itself.
-        return (f":white_check_mark: *Approved — PR #{pr}* (nothing has been merged)\n"
+        # And it still does not say "merged": queued is not landed. GitHub holds
+        # the PR until `main-production-gate` is satisfied, and it can sit there,
+        # or be dropped if a check goes red. Saying "merged" here would be the
+        # same defect one step further down the wire.
+        headline = (f":inbox_tray: *Queued for merge — PR #{pr}* "
+                    f"(GitHub will land it when the ruleset is satisfied)" if merged
+                    else f":white_check_mark: *Approved — PR #{pr}* (nothing has been merged)")
+        return (f"{headline}\n"
                 f"*What it does:* {plain}\n"
                 f"*Size:* {size}\n"
                 f"*What was actually checked:* {checked}.\n"
@@ -1335,6 +1458,15 @@ DECISION_PATH = [
     # every PR, so it is on the decision path even though `decide` does not call
     # it. An unread verdict is a verdict that did not happen.
     "advice_markdown", "advice_label",
+    # The lane's own `requires:` list. On the decision path because the PRODUCT
+    # lane's `verify` tag is the ONLY thing that makes a product change be
+    # watched alive before it is trusted, and `verify` is not in the repo's
+    # ruleset — so nothing else in GitHub or in this file would notice its
+    # absence.
+    "judge_tags", "check_tags",
+    # THE ARM. On the decision path because `--auto` is the whole reason the arm
+    # is allowed to exist — see the drill case that captures its real argv.
+    "request_auto_merge",
 ]
 
 
@@ -1681,6 +1813,18 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         v_rev = check_review(1)
         ok("check_review passes when every thread is resolved end to end",
            v_rev.status == "pass", f"{v_rev.status}: {v_rev.reasons}", ["check_review"])
+        # `done` is the REQUIRED_CHECKS list, which is not the same set as the
+        # tag checks — so a harness lane whose `ci` tag names jobs this fake
+        # GitHub never reports must REFUSE. That is the honest end-to-end
+        # answer: the wrapper really read the API and really judged what it got.
+        v_tags = check_tags(1, {"lane": "harness", "requires": ["ci", "review", "drill"]})
+        ok("check_tags reads the real API and refuses a tag whose checks are absent",
+           v_tags.status == "fail" and any("never ran" in r for r in v_tags.reasons),
+           f"{v_tags.status}: {v_tags.reasons}", ["check_tags"])
+        v_tags_ok = check_tags(1, {"lane": "harness", "requires": ["review"]})
+        ok("...and passes end to end for a lane whose tags another cage carries",
+           v_tags_ok.status == "pass", f"{v_tags_ok.status}: {v_tags_ok.reasons}",
+           ["check_tags"])
     finally:
         globals()["gh"] = saved_gh
 
@@ -1837,6 +1981,64 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        not judge_check_runs(_rs(_opt_skip), len(_opt_skip)),
        "an optional skip was mistaken for a required one", ["judge_check_runs"])
 
+    # ── THE TAGS CAGE ────────────────────────────────────────────────────────
+    # The PRODUCT lane requires `verify`, and `verify-live.yml` is NOT one of
+    # the 11 contexts in this repo's ruleset (measured 2026-08-24). So GitHub
+    # will report a product PR as CLEAN with the app never once started, and
+    # PROOF — which only knows REQUIRED_CHECKS — would agree with GitHub. Every
+    # case below is that hole, from a different angle.
+    T = ["judge_tags"]
+    _prod_req = ["ci", "review", "security", "verify", "ratchets"]
+    _full = _rs([(n, "success") for n in
+                 (*TAG_CHECKS["ci"], *TAG_CHECKS["security"], *TAG_CHECKS["verify"])])
+    ok("a product PR with every tag's checks green passes the TAGS cage",
+       not judge_tags(_prod_req, _full),
+       "the tags cage refused a PR whose every required check really passed", T)
+
+    _no_verify = [r for r in _full if not r["name"].startswith("verify")]
+    ok("THE HOLE: a product PR that never ran `verify` is refused",
+       any("verify" in r for r in judge_tags(_prod_req, _no_verify)),
+       "a product change merged without the app ever being started — the one "
+       "thing the product lane's speed is borrowed against", T)
+
+    _verify_skipped = [r for r in _full if not r["name"].startswith("verify")] + \
+        _rs([(n, "skipped") for n in TAG_CHECKS["verify"]])
+    ok("...and a `verify` that SKIPPED does not earn the tag either",
+       bool(judge_tags(_prod_req, _verify_skipped)),
+       "a skipped job was allowed to prove something — a skip proves nothing, "
+       "which is the entire point of a tag", T)
+
+    _verify_pending = [r for r in _full if not r["name"].startswith("verify")] + \
+        [{"name": TAG_CHECKS["verify"][0], "status": "in_progress", "conclusion": None}]
+    ok("...and a `verify` still RUNNING is waited for, not counted",
+       bool(judge_tags(_prod_req, _verify_pending)),
+       "a check that had not finished was counted as finished", T)
+
+    ok("the HARNESS lane does not demand `verify` it was never going to run",
+       not judge_tags(["ci", "review", "drill"],
+                      _rs([(n, "success") for n in
+                           (*TAG_CHECKS["ci"], *TAG_CHECKS["drill"])])),
+       "the harness lane was refused for a tag its own policy does not require — "
+       "a lane system that demands every tag from every lane is not a lane system", T)
+
+    ok("a tag nobody has defined evidence for is REFUSED, not assumed satisfied",
+       bool(judge_tags(["ci", "some-future-tag"], _full)),
+       "an unrecognised requirement passed by being unrecognised — the exact "
+       "shape of `not_checked` reading as a pass", T)
+
+    ok("a lane requiring NOTHING cannot merge on nothing",
+       bool(judge_tags([], _full)),
+       "an empty `requires:` list was treated as 'all requirements met'", T)
+
+    # `CodeQL` only fires for main-targeted PRs, so demanding it on another base
+    # is a refusal no author could ever clear — judge_check_runs already says
+    # so in its own words and this cage must not contradict it.
+    _no_codeql = [r for r in _full if r["name"] != "CodeQL"]
+    ok("a check that cannot exist on this base is not demanded twice",
+       not judge_tags(["security"], _no_codeql, base_ref="feat/something"),
+       "the TAGS cage refused a non-main PR for a check that only runs on main, "
+       "contradicting the PROOF cage about the same fact", T)
+
     # B19 — THE ANNOUNCEMENT MAY NOT OUTRUN THE ACT. This lineage has no
     #       `--merge` flag at all, so "Merged to production" was false on every
     #       single allowed PR, not merely on a dry run.
@@ -1991,6 +2193,25 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
            allowed_y, f"the cage refused a PR with nothing wrong with it: {blocks_of(v_y)}",
            ["decide", "check_proof", "check_review", "check_ratchets"])
 
+        # ── THE OWNER LANE STOPS THE MACHINE, ON THE SAME PERFECT PR ─────────
+        # Same fake GitHub, same flawless PR, same baseline — the ONLY thing
+        # that changes is the lane. If this ever goes green, `auto_merge: false`
+        # has stopped meaning anything, and the four owner-lane path lists in
+        # merge-policy.yml became decoration without a single test going red.
+        allowed_owner, v_owner, _ = decide(
+            1, {"drill": 3},
+            {"lane": "product_owner", "auto_merge": False,
+             "requires": ["ci", "review", "security", "verify", "ratchets"],
+             "why": ["`backend/migrations/0007.sql` is irreversible against live data."]})
+        ok("an owner lane refuses the machine even when NOTHING ELSE is wrong",
+           not allowed_owner and any("may not decide it" in b for b in blocks_of(v_owner)),
+           f"allowed={allowed_owner}: {blocks_of(v_owner)}", ["decide"])
+        ok("...and the refusal NAMES the file that made it the owner's call",
+           any("migrations" in b for b in blocks_of(v_owner)),
+           "the owner was told to decide something without being told what — a "
+           "refusal he cannot act on is how a gate gets switched off at 7am",
+           ["decide"])
+
         md_yes = advice_markdown(1, meta_y, allowed_y, v_y)
         ok("the advice for an allowed PR is labelled agent-safe and merges nothing",
            LABEL_SAFE in md_yes and MARKER in md_yes and "no cage reported anything" not in md_yes,
@@ -2024,11 +2245,17 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        not judge_check_runs(done, len(done), "main"),
        "base-awareness broke the ordinary main-targeted case", ["judge_check_runs"])
 
-    # B17 — the merge capability is GONE, not defaulted off. A default can be
-    # flipped by a repo variable nobody reviews; a deleted flag cannot. Asserted
-    # end to end through main(), not by grepping for the string — a self-test
-    # that greps stayed fully green here after the only authorisation call was
-    # deleted.
+    # B17 — THE IMMEDIATE-MERGE CAPABILITY IS STILL GONE, and stays gone.
+    # This case is unchanged by the 2026-08-24 wiring and that is the point.
+    # `--queue` was added; `--merge` was NOT brought back. The difference is not
+    # cosmetic:
+    #   `--merge`  would merge NOW, on this file's judgement alone.
+    #   `--queue`  asks GitHub to merge when `main-production-gate` is satisfied,
+    #              so the ruleset still has to agree and GitHub performs the act.
+    # If a future edit ever restores a straight merge, this case goes red, which
+    # is exactly what it is for. Asserted end to end through main(), never by
+    # grepping for the string — a self-test that greps stayed fully green here
+    # after the only authorisation call had been deleted.
     # argparse signals a usage error by RAISING (`_Parser.error` -> SystemExit),
     # so this must catch it. Asserting on a return value alone would have made
     # this case blow the drill up rather than report — a self-test that crashes
@@ -2037,10 +2264,70 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         rc_merge = main(["1", "--merge"])
     except SystemExit as exc:
         rc_merge = int(exc.code or 0)
-    ok("`--merge` no longer exists: the cage cannot merge anything at all",
+    ok("`--merge` still does not exist: nothing here merges on its own judgement",
        rc_merge == EXIT_USAGE,
-       f"exit {rc_merge} (expected {EXIT_USAGE}) — merge_cage still accepts a merge flag",
+       f"exit {rc_merge} (expected {EXIT_USAGE}) — an immediate-merge flag came back",
        ["decide"])
+
+    # ...AND `--queue` MAY NOT RUN BLIND. The lane is what decides whether a
+    # machine is allowed to touch this change at all, so queuing without it is
+    # the exact mistake the old lane-blind merge flag made — a migration and a
+    # README treated as the same risk. Refused at the flag, before any API call.
+    try:
+        rc_queue = main(["1", "--queue"])
+    except SystemExit as exc:
+        rc_queue = int(exc.code or 0)
+    ok("`--queue` without `--lane` is a usage error, not a lane-blind ship",
+       rc_queue == EXIT_USAGE,
+       f"exit {rc_queue} (expected {EXIT_USAGE}) — the cage would queue a PR without "
+       f"knowing which lane it is in",
+       ["decide"])
+
+    # ...AND AN UNREADABLE LANE FILE BREAKS THE CAGE RATHER THAN BEING GUESSED.
+    # `not_checked` reading as a pass is the hole this whole file exists to
+    # avoid; a lane verdict that failed to parse is the same shape.
+    try:
+        rc_bad = main(["1", "--queue", "--lane", "no/such/lane.json"])
+    except SystemExit as exc:
+        rc_bad = int(exc.code or 0)
+    ok("a lane verdict that cannot be read refuses instead of defaulting",
+       rc_bad == EXIT_CAGE_BROKE,
+       f"exit {rc_bad} (expected {EXIT_CAGE_BROKE}) — an unreadable lane was survivable",
+       ["decide"])
+
+    # ...AND `--auto` IS THE ENTIRE SAFETY ARGUMENT, SO IT GETS ITS OWN CASE.
+    # Everything written about `--queue` rests on GitHub holding the PR until
+    # `main-production-gate` is satisfied. Delete six characters from the
+    # command in request_auto_merge and it becomes an immediate merge on this
+    # file's judgement alone — B20 restored, silently, with every other case
+    # still green. Caught by CodeRabbit on PR #380: the case above guards the
+    # FLAG and nothing guarded the FLAG'S ARGUMENT. Asserted by capturing the
+    # real argv rather than by reading the source, because a self-test that
+    # greps its own file has already failed in this repo once.
+    _seen_argv: list[list[str]] = []
+
+    class _FakeProc:
+        returncode = 0
+        stdout = "queued"
+        stderr = ""
+
+    _saved_run = subprocess.run
+    try:
+        def _spy(cmd, *_a, **_k):  # noqa: ANN001, ANN202 - a drill stub
+            _seen_argv.append(list(cmd))
+            return _FakeProc()
+        subprocess.run = _spy  # type: ignore[assignment]
+        request_auto_merge(1)
+    finally:
+        subprocess.run = _saved_run  # type: ignore[assignment]
+    _argv = _seen_argv[0] if _seen_argv else []
+    ok("the queue request really passes `--auto`, so GitHub still holds the gate",
+       "--auto" in _argv,
+       f"the command was {_argv} — without `--auto` this is an immediate merge on this "
+       f"file's judgement alone, which is exactly the capability B20 deleted",
+       ["request_auto_merge"])
+    ok("...and it squashes, matching the one merge shape this repo already uses",
+       "--squash" in _argv, f"the command was {_argv}", ["request_auto_merge"])
 
     # ── COVERAGE + THE BLOCKER LOG ───────────────────────────────────────────
     missing = [f for f in DECISION_PATH if f not in touched]
@@ -2115,6 +2402,40 @@ def replay(limit: int) -> int:
     return EXIT_USAGE
 
 
+def request_auto_merge(pr: int) -> tuple[bool, str]:
+    """Hand the PR to GITHUB'S OWN auto-merge queue. Returns (ok, detail).
+
+    WHY `--auto` AND NOT A STRAIGHT MERGE. `gh pr merge --squash` would merge
+    right now, on this file's judgement alone. `--auto` asks GitHub to merge the
+    PR when the ruleset it enforces is satisfied — so TWO INDEPENDENT
+    AUTHORITIES have to agree before anything reaches production:
+
+        this cage        the lane, the review threads, the ratchets, the tags
+        GitHub           `main-production-gate`, its 11 required contexts
+
+    Neither can be talked round by the other, and the act itself is performed by
+    the one that is not written by an agent. If this file is ever wrong in the
+    permissive direction, the ruleset is still standing.
+
+    It also fails in the right direction on the way in: `--auto` needs
+    `allow_auto_merge` on the repository, which is a setting only the owner can
+    turn on. Until he does, this returns an error and the PR sits — a capability
+    the owner has not granted cannot be assumed by writing code that wants it.
+
+    This function re-decides NOTHING. Every judgement was made before it was
+    called; its one job is to make the request and report truthfully whether the
+    request was accepted, so the sentence the owner reads is chosen by what
+    happened rather than by what was intended.
+    """
+    proc = subprocess.run(
+        ["gh", "pr", "merge", str(pr), "--auto", "--squash", "--delete-branch"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+    )
+    if proc.returncode == 0:
+        return True, (proc.stdout or "queued").strip()[:300]
+    return False, (proc.stderr or proc.stdout or "no output").strip()[:300]
+
+
 class _Parser(argparse.ArgumentParser):
     """argparse exits 2 on a usage error, which the caller reads as 'could not
     reach Slack — stop the sweep'. A bad flag must not be reported as an outage."""
@@ -2142,6 +2463,12 @@ def main(argv: list[str] | None = None) -> int:
                          "ask 'which cage refused, and would it still refuse tomorrow?' was to "
                          "grep the English reasons — and a reader that greps prose is the same "
                          "instrument-shaped mistake as a self-test that greps its own source.")
+    ap.add_argument("--queue", action="store_true",
+                    help="hand the PR to GitHub's auto-merge queue if every cage allows it "
+                         "AND its lane says a machine may decide it. Requires --lane: queuing "
+                         "without knowing the lane is shipping without knowing who gets hurt.")
+    ap.add_argument("--lane", metavar="FILE",
+                    help="the lane verdict JSON written by `python scripts/lane.py --json`")
     ap.add_argument("--baseline", help="JSON of ratchet values measured on the PR's base")
     ap.add_argument("--measure", action="store_true", help="print current ratchet values as JSON")
     ap.add_argument("--tree", metavar="DIR",
@@ -2219,7 +2546,29 @@ def main(argv: list[str] | None = None) -> int:
                   f"`python scripts/merge_cage.py --measure`.")
             return EXIT_REFUSE
 
-        allowed, verdicts, meta = decide(args.pr, base)
+        # THE LANE, LOADED BEFORE ANYTHING IS JUDGED.
+        # `--queue` without `--lane` is a usage error, never a permissive
+        # default. This is the whole lesson of the lineage before this one: its
+        # merge flag knew nothing about lanes, so a migration and a README were
+        # the same risk to it. A flag that can reach production must not be able
+        # to run in ignorance of who it reaches.
+        lane_verdict: dict | None = None
+        if args.queue and not args.lane:
+            ap.error("--queue requires --lane FILE (the output of `python scripts/lane.py "
+                     "--json`). Queuing without the lane is shipping without knowing whether "
+                     "a machine is allowed to decide this change at all.")
+        if args.lane:
+            try:
+                lane_verdict = json.loads(Path(args.lane).read_text(encoding="utf-8"))
+                if not isinstance(lane_verdict, dict) or "lane" not in lane_verdict:
+                    raise ValueError("expected the JSON object written by scripts/lane.py")
+            except Exception as exc:
+                raise CageBroke(
+                    f"--lane {args.lane} is not a lane verdict I can read ({exc}). A cage that "
+                    f"cannot tell which lane a PR is in must not ship it. FIX: run "
+                    f"`python scripts/lane.py --json lane.json <changed files>` first.") from exc
+
+        allowed, verdicts, meta = decide(args.pr, base, lane_verdict)
         blocks = blocks_of(verdicts)
 
         print(f"merge_cage: PR #{args.pr} — {meta.get('files', '?')} files, "
@@ -2236,9 +2585,37 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  (cages that did NOT run: {', '.join(skipped)} — "
                       f"not checked is not passed)")
 
+        # THE ACT COMES BEFORE THE ANNOUNCEMENT, ALWAYS.
+        queued = False
+        queue_failed = False
+        if args.queue and allowed:
+            ok_queue, detail = request_auto_merge(args.pr)
+            if ok_queue:
+                queued = True
+                print(f"QUEUED: PR #{args.pr} handed to GitHub's auto-merge queue — it will "
+                      f"land when `main-production-gate` is satisfied. {detail}")
+            else:
+                # ALLOWED-AND-NOT-QUEUED IS NOT A REFUSAL. Every cage passed;
+                # something outside this file said no. Printing "ask the owner"
+                # here would blame the PR for a repository setting, and the
+                # owner would go looking for a fault in the change.
+                print(f"ALLOWED BUT NOT QUEUED: `gh pr merge --auto` was refused — {detail}\n"
+                      f"  FIX: this is almost always `allow_auto_merge` being off on the "
+                      f"repository, which is the owner's switch and nobody else's: "
+                      f"`gh api -X PATCH repos/{REPO} -F allow_auto_merge=true`. "
+                      f"The verdict above stands either way.", file=sys.stderr)
+                # DEFERRED, NOT RETURNED. Returning here would skip Slack, the
+                # advice file and --verdict-json — and this is the one case
+                # where every cage PASSED, so it is the case a machine reader
+                # most needs to be able to see. An early return in the arm's
+                # failure branch would make "the cages passed but the queue
+                # refused" the quietest outcome in the file, which is backwards.
+                # (CodeRabbit, PR #380.)
+                queue_failed = True
+
         if args.slack:
             chan = "ready-to-merge" if allowed else "needs-your-decision"
-            if not slack(chan, plain_english(args.pr, meta, allowed, verdicts)):
+            if not slack(chan, plain_english(args.pr, meta, allowed, verdicts, queued)):
                 # Announcing is part of the job. A merge nobody was told about is
                 # indistinguishable from a merge that never happened.
                 print("REFUSING TO PROCEED: the owner could not be told.", file=sys.stderr)
@@ -2261,6 +2638,10 @@ def main(argv: list[str] | None = None) -> int:
                           for v in verdicts],
             }, indent=1), encoding="utf-8")
 
+        # The arm's own failure is reported LAST, after every output above has
+        # been produced. Same code as before, a later line.
+        if queue_failed:
+            return EXIT_CAGE_BROKE
         return EXIT_ALLOW if allowed else EXIT_REFUSE
 
     except SystemExit:

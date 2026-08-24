@@ -1,0 +1,375 @@
+name: Auto-merge (the cage's arm, and only inside its lane)
+
+# THE ARM THE CAGE NEVER HAD.
+# ---------------------------
+# For a week this repo has had a 2,300-line judge, a lane map, a live watcher
+# and a rollback gear, and NOTHING that could act on any of it. `merge-policy.yml`
+# says `harness: auto_merge: true` and `product: auto_merge: true`, and no code
+# anywhere could carry those two sentences out. A policy with no executor is a
+# plan, not a program — which is why 5,000 lines felt like nothing happened.
+#
+# WHAT THIS DOES, AND THE ONE THING IT DELIBERATELY DOES NOT
+# It runs the cage. If the cage allows the PR AND the PR's lane says a machine
+# may decide it, it hands the PR to GITHUB'S OWN auto-merge queue. It does not
+# merge. `merge_cage.py --queue` runs `gh pr merge --auto`, so:
+#
+#     this cage  ->  lane, review threads, ratchets, size, paths, lane tags
+#     GitHub     ->  `main-production-gate` and its 11 required contexts
+#
+# Two independent authorities, and the one that actually performs the act is the
+# one no agent wrote. If this cage is ever wrong in the permissive direction,
+# the ruleset is still standing. That is the entire reason `--queue` exists
+# instead of the `--merge` this file's ancestor had — and B20 in
+# `scripts/cage_blockers.py` records why that ancestor was deleted.
+#
+# WHY THE THREE CHECKOUTS ARE NOT INTERCHANGEABLE (rule G5, and it has bitten)
+#   ROOT   the DEFAULT BRANCH -> the RULES. A PR must not supply the code that
+#          judges it. The previous version of this file checked out the PR at
+#          the root and ran the PR's own copy of the cage.
+#   _pr    `refs/pull/N/merge` -> the tree that would actually ship. Its NUMBERS
+#          are read via `--tree`; its code never judges anything.
+#   _base  the PR's base ref -> the numbers to compare against. A ratchet
+#          measured on the same tree twice compares a value to itself.
+#
+# WHY THESE TRIGGERS AND NOT `push` OR `workflow_run` (rule G2)
+# Both of those fire AFTER the thing they would be judging, so a merge hung off
+# them is a post-mortem with a button. `gate_wiring_check.py` fails the build if
+# this file ever grows one. `check_suite: completed` is the honest signal that
+# the evidence has arrived; the schedule is the sweep that catches every PR the
+# events missed, because a queue whose only input is webhooks forgets things.
+#
+# AND WHY IT IS SAFE TO RUN THIS OFTEN: every decision is idempotent. Asking
+# GitHub to auto-merge a PR that is already queued changes nothing, and a PR the
+# cage refuses is simply refused again, in writing.
+
+on:
+  check_suite:
+    types: [completed]
+  pull_request_review:
+    types: [submitted]
+  schedule:
+    - cron: "*/20 * * * *" # the sweep — a webhook can be missed, this cannot
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to consider (blank = every open PR)"
+        required: false
+        type: string
+
+permissions:
+  contents: write # the queue request
+  pull-requests: write # `gh pr merge --auto`, and the comment when it refuses
+  checks: read
+
+concurrency:
+  # Never two arms on one PR. `cancel-in-progress: false` because a half-run
+  # judgement is worse than a slightly late one.
+  group: auto-merge-${{ github.event.check_suite.pull_requests[0].number || github.event.pull_request.number || inputs.pr || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  # The cage cannot judge from a branch that does not have it. Reported as a
+  # stand-down rather than a failure: the PR is not at fault, and a red X here
+  # made six PRs look broken when none were.
+  precheck:
+    name: Are the rules available yet
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.look.outputs.ready }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - id: look
+        run: |
+          set -euo pipefail
+          # THE FILE EXISTING IS NOT THE CAPABILITY EXISTING.
+          # The first version of this step asked only "is merge_cage.py here?".
+          # It is — on the default branch, without `--queue`, because the arm
+          # arrives in the same PR as this workflow. So `ready` said true, the
+          # arm ran, and `merge_cage` exited 4 (called wrongly) on its own PR.
+          # Measured on run 32723877283, the very first time this file executed.
+          #
+          # The three-checkout rule was working exactly as designed: the RULES
+          # come from a branch the PR cannot edit, and that branch genuinely
+          # could not do what it was being asked. The bug was this precheck
+          # asking the wrong question. Ask the cage what it can do, by running
+          # it — a capability you have not confirmed you possess is not one you
+          # can build a lane on, which is the same rule the policy applies to
+          # `canRollback` before it lets the product lane merge at all.
+          if [ -f scripts/merge_cage.py ] && [ -f scripts/lane.py ] && [ -f .github/merge-policy.yml ] \
+             && python scripts/merge_cage.py --help 2>&1 | grep -q -- "--queue"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            # A GREEN RUN THAT QUEUED NOTHING AND A GREEN RUN THAT HAD NOTHING
+            # TO QUEUE MUST NOT LOOK THE SAME IN THE RUN LIST. The stand-down is
+            # correct behaviour, so this is not a failure — but a step summary
+            # inside a green run is invisible to anyone not already reading it,
+            # and a silent skip in an alerting path IS the bug. The annotation
+            # puts it on the run's own face. (CodeRabbit, PR #380.)
+            echo "::warning::auto-merge stood down — the default branch's cage cannot queue yet, so NO PR was judged"
+            {
+              echo "### Auto-merge stood down — nothing was queued"
+              echo
+              echo "The default branch either lacks the cage, the lane map and the policy, or"
+              echo "has a copy of \`merge_cage.py\` with no \`--queue\`. Either way the rules a PR"
+              echo "cannot edit cannot do the job, and falling back to the PR's own copy is"
+              echo "exactly what rule G5 forbids — so this lane declines to act."
+              echo
+              echo "**Expected until the arm lands on the default branch.** Reported as a"
+              echo "stand-down and not a failure: the PR is not at fault, and a red X here made"
+              echo "six PRs look broken when none were."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # Which PRs are even worth spending a judgement on. Split out so the expensive
+  # job below runs once per candidate and not once per event.
+  pick:
+    name: Which PRs
+    needs: precheck
+    if: needs.precheck.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      prs: ${{ steps.list.outputs.prs }}
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - id: list
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          SUITE_PR: ${{ github.event.check_suite.pull_requests[0].number }}
+          REVIEW_PR: ${{ github.event.pull_request.number }}
+          INPUT_PR: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            check_suite)         prs="${SUITE_PR:-}" ;;
+            pull_request_review) prs="${REVIEW_PR:-}" ;;
+            *)
+              if [ -n "${INPUT_PR:-}" ]; then prs="$INPUT_PR"
+              else prs=$(gh pr list --state open --limit 30 --json number --jq '.[].number'); fi ;;
+          esac
+          # Only OPEN, non-draft, same-repo PRs are ever candidates. A fork PR is
+          # a stranger's code and never reaches the arm — the cage would refuse
+          # it, but a refusal should be the second line of defence, not the first.
+          keep=""
+          for pr in $prs; do
+            meta=$(gh pr view "$pr" --json state,isDraft,headRepositoryOwner 2>/dev/null || echo '')
+            [ -n "$meta" ] || continue
+            [ "$(echo "$meta" | jq -r .state)" = "OPEN" ] || continue
+            [ "$(echo "$meta" | jq -r .isDraft)" = "false" ] || continue
+            [ "$(echo "$meta" | jq -r .headRepositoryOwner.login)" = "${GH_REPO%%/*}" ] || continue
+            keep="$keep $pr"
+          done
+          json=$(echo $keep | tr ' ' '\n' | grep -E '^[0-9]+$' | jq -R . | jq -sc . || echo '[]')
+          echo "prs=$json" >> "$GITHUB_OUTPUT"
+          echo "candidates: ${keep:-none}" >> "$GITHUB_STEP_SUMMARY"
+
+  arm:
+    name: Judge, and queue only inside the lane
+    needs: pick
+    if: needs.pick.outputs.prs != '[]' && needs.pick.outputs.prs != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false # one refused PR must never stop the others being judged
+      max-parallel: 1 # they all touch the same queue; judge them in order
+      matrix:
+        pr: ${{ fromJSON(needs.pick.outputs.prs) }}
+    steps:
+      # THE RULES. From the default branch, which the PR cannot edit.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      # THE TREE UNDER JUDGEMENT — the PR merged into its base, i.e. what would
+      # actually ship, not the head, which has never been combined with anything.
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/pull/${{ matrix.pr }}/merge
+          path: _pr
+
+      # WHICH BASE THIS PR IS ACTUALLY ON.
+      # Read per PR from the API, NOT from the event payload. `check_suite` and
+      # `schedule` carry no `pull_request.base.ref`, so the payload form would
+      # silently fall back to the default branch — and then the ratchet baseline
+      # would be MAIN's numbers for a PR based on a feature branch. That is rule
+      # G4's exact failure ("a tree-scoped ratchet measured on the wrong tree"),
+      # arrived at through a different door: not the wrong checkout, but the
+      # right checkout of the wrong ref. The matrix means one job per PR, so
+      # there is a correct answer available for each one and no excuse to guess.
+      - name: Which COMMIT is this PR based on
+        id: baseref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A SHA, NOT A REF. `.base.ref` is a moving branch name: another
+          # session merges to main between the `_pr` checkout and the `_base`
+          # checkout, and the two trees are then snapshots of different moments
+          # — a ratchet comparison between two things that never coexisted. The
+          # PR API hands back `.base.sha`, which is the commit the merge ref was
+          # actually computed against, so it is the only honest baseline.
+          # (CodeRabbit, PR #380.)
+          sha=$(gh api "repos/$GH_REPO/pulls/${{ matrix.pr }}" --jq '.base.sha')
+          ref=$(gh api "repos/$GH_REPO/pulls/${{ matrix.pr }}" --jq '.base.ref')
+          [ -n "$sha" ] && [ -n "$ref" ] || { echo "::error::could not read the base commit for PR #${{ matrix.pr }}"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "PR #${{ matrix.pr }} is based on \`$ref\` at \`${sha:0:7}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # THE BASELINE TREE, PINNED TO THAT COMMIT.
+      # NOT `continue-on-error`. That was paired with `[ -d _base ]` below, and a
+      # failed checkout can leave the directory behind — so the "did it work?"
+      # test could pass over a tree that is empty or half-written, and the
+      # ratchet would then be measured against nothing while the run stayed
+      # green. A baseline that cannot be fetched must stop the lane, which is
+      # the safe direction and costs one retry.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.baseref.outputs.sha }}
+          path: _base
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # `lane.py` reads the policy with PyYAML; `merge_cage.py` has no
+      # dependencies at all and is deliberately kept that way.
+      - name: The classifier's one dependency
+        run: python -m pip install --quiet pyyaml
+
+      # PROVING THE CAGE STILL REFUSES ON PURPOSE COSTS SECONDS, and it is the
+      # only thing between "there is a cage" and "the cage works". Run BEFORE
+      # any judgement, so a broken cage can never queue anything.
+      - name: The cage still refuses — and can still allow
+        run: python scripts/merge_cage.py --drill
+
+      - name: The lane map still classifies — and still escalates
+        run: python scripts/lane.py --drill
+
+      - name: The merge wiring is still somewhere it could stop something
+        run: python scripts/gate_wiring_check.py
+
+      - name: Which files this PR changes
+        id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/pulls/${{ matrix.pr }}/files?per_page=100" \
+            --jq '.[].filename' > changed.txt
+          echo "$(wc -l < changed.txt) changed file(s)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Which lane is this PR in
+        run: |
+          set -euo pipefail
+          python scripts/lane.py --json lane.json $(tr '\n' ' ' < changed.txt)
+          {
+            echo "### PR #${{ matrix.pr }} — lane \`$(jq -r .lane lane.json)\`"
+            echo "auto_merge: \`$(jq -r .auto_merge lane.json)\` · requires: \`$(jq -r '.requires|join(", ")' lane.json)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Measure the baseline on the PR's base
+        id: baseline
+        run: |
+          set -euo pipefail
+          # PROVE THE TREE IS THE COMMIT WE ASKED FOR, don't just check that a
+          # directory exists — a failed checkout can leave the directory behind,
+          # so `[ -d _base ]` was a test that could pass over an empty or
+          # half-written tree while the ratchet was measured against nothing.
+          # Asking git which commit is actually there is the only form that
+          # cannot be satisfied by wreckage. (CodeRabbit, PR #380.)
+          want="${{ steps.baseref.outputs.sha }}"
+          got=$(git -C _base rev-parse HEAD 2>/dev/null || echo "")
+          if [ "$got" != "$want" ]; then
+            echo "::error::the baseline tree is at '${got:-nothing}' but PR #${{ matrix.pr }} is based on '$want' — refusing to ratchet against a tree I cannot identify"
+            exit 1
+          fi
+          echo "json=$(python scripts/merge_cage.py --measure --tree _base)" >> "$GITHUB_OUTPUT"
+
+      - name: Judge — and queue it only if the lane allows a machine to
+        id: judge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ matrix.pr }}
+          BASE_JSON: ${{ steps.baseline.outputs.json }}
+        run: |
+          set -euo pipefail
+          set +e
+          python scripts/merge_cage.py "$PR" \
+            --baseline "$BASE_JSON" \
+            --tree _pr \
+            --lane lane.json \
+            --queue \
+            --verdict-json verdict.json | tee cage-output.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+
+          # merge_cage's exit codes are a TYPED channel, one meaning each, and
+          # they are read here rather than grepped out of the prose — a reader
+          # that greps English is the same instrument-shaped mistake as a
+          # self-test that greps its own source.
+          case "$rc" in
+            0) echo "queued=true"  >> "$GITHUB_OUTPUT" ;;
+            1) echo "queued=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "::error::PR #$PR: the owner could not be told, so nothing proceeded."; exit 1 ;;
+            3) echo "::error::PR #$PR: the cage itself broke, or GitHub refused the queue request — see the output above."; exit 1 ;;
+            4) echo "::error::PR #$PR: merge_cage was called wrongly by this workflow."; exit 1 ;;
+            *) echo "::error::PR #$PR: merge_cage exited $rc — an undefined code."; exit 1 ;;
+          esac
+
+      # HONESTY RULE: every PR this lane looks at gets one line saying what
+      # happened and why. A queue manager that silently skips is how work rots
+      # invisibly — the same rule dependabot-auto and pr-shepherd already follow.
+      - name: Say what happened, either way
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ matrix.pr }}
+          QUEUED: ${{ steps.judge.outputs.queued }}
+        run: |
+          set -euo pipefail
+          if [ "$QUEUED" = "true" ]; then
+            {
+              echo "### PR #$PR — **queued for merge**"
+              echo "Every cage passed and its lane allows a machine to decide it. GitHub will"
+              echo "land it when \`main-production-gate\` is satisfied."
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$QUEUED" = "false" ]; then
+            {
+              echo "### PR #$PR — **not queued**, and here is every reason"
+              echo '```'
+              # NOT `sed ... | head -40`. `set -o pipefail` is on, so when the
+              # output is longer than 40 lines `head` exits first, `sed` takes
+              # SIGPIPE and returns 141, the pipeline fails AFTER head has
+              # already written its lines, and the `||` arm then appends "no
+              # output captured" underneath the output it just captured. The
+              # bug only appears on a big PR, which is the worst time to learn
+              # about it. Two seds, no pipe, no size dependence.
+              if [ -s cage-output.txt ]; then
+                sed -n '/VERDICT/,$p' cage-output.txt | sed -n '1,40p'
+              else
+                echo "(no cage output captured)"
+              fi
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### PR #$PR — the lane did not reach a verdict; see the failing step above." >> "$GITHUB_STEP_SUMMARY"
+          fi
