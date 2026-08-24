@@ -29,6 +29,7 @@ from src.services.job_enrichment import ENRICHMENT_ENABLED, _build_enrichment_lo
 from src.services.job_signals import signal_backed_lookup
 from src.services.prefilter import FilterProfile, passes_prefilter
 from src.services.profile.models import SearchConfig
+from src.services.query_text import clean_query_text, needs_cleaning
 from src.services.skill_matcher import JobScorer
 from src.utils.logger import get_logger
 
@@ -1722,6 +1723,10 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
     # structurally unreachable.
     union = SearchConfig()
     profiles_used = 0
+    # Profile strings repaired before being sent upstream. Collected so the run
+    # can SAY a profile is carrying undecodable text — repairing it silently
+    # would hide the condition that let a guaranteed-empty query run nightly.
+    repaired_queries: list[str] = []
     for uid in list_profile_user_ids():
         profile = load_profile(uid)
         if not profile or not profile.is_complete:
@@ -1744,6 +1749,17 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
         ):
             merged = getattr(union, attr)
             for item in getattr(cfg, attr):
+                # These strings are sent upstream AS QUERIES. A profile value
+                # carrying U+FFFD (the replacement character a decoder writes
+                # when the original bytes are lost) cannot match any advert, so
+                # it turns a source into a silent zero. Measured live: findwork
+                # returns 9 jobs on a neutral query and 0 on the production one.
+                if isinstance(item, str):
+                    if needs_cleaning(item):
+                        repaired_queries.append(item)
+                    item = clean_query_text(item)
+                    if not item:
+                        continue
                 if item not in merged:
                     merged.append(item)
         union.core_domain_words |= cfg.core_domain_words
@@ -1760,6 +1776,16 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
             "catalog refresh skipped: no complete user profiles found — nothing to fetch for"
         )
         return {"sources_queried": 0, "total_found": 0, "new_jobs": 0, "profiles_used": 0}
+
+    if repaired_queries:
+        logging.getLogger(__name__).warning(
+            "catalog refresh: %d profile string(s) carried undecodable characters "
+            "and were repaired before being sent as queries — a query containing "
+            "U+FFFD matches nothing upstream, so this silently zeroes keyword "
+            "sources. Fix the stored profile to stop repairing it every night: %s",
+            len(repaired_queries),
+            "; ".join(sorted(set(repaired_queries))[:10]),
+        )
 
     logging.getLogger(__name__).info(
         "catalog refresh: union of %s profile(s) — %s titles, %s keywords",
