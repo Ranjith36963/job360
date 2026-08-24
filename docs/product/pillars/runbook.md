@@ -36,14 +36,21 @@ python -m src.cli status
 
 ### See the last 20 runs with per-source timing + errors
 
+`run_log` is **per-user** operational metadata — it has a `user_id` column
+(migration `0010`, mirrored at `backend/src/repositories/database.py:208`), and
+rule #12 applies. Scope by it, or you are reading someone else's runs:
+
 ```sql
 SELECT timestamp, run_uuid, total_found, new_jobs, total_duration, per_source_errors
-FROM run_log ORDER BY timestamp DESC LIMIT 20;
+FROM run_log WHERE user_id = '<uuid>' ORDER BY timestamp DESC LIMIT 20;
 ```
 
-Same data is exposed at `GET /api/runs/recent` (auth-gated), with
-`GET /api/runs/source-health` beside it — `backend/src/api/routes/runs.py:63,150`.
-There is no bare `GET /api/runs`.
+That is the query `GET /api/runs/recent` (auth-gated) runs — `get_recent_runs(user_id=…)`
+at `backend/src/repositories/database.py:2002-2015`, which also drops legacy rows with a
+NULL `user_id`. `GET /api/runs/source-health` sits beside it
+(`backend/src/api/routes/runs.py:63,150`). There is no bare `GET /api/runs`.
+
+Drop the `WHERE` only when you deliberately want the operator-wide view across all users.
 
 ### List configured sources
 
@@ -66,7 +73,7 @@ python -m src.cli view --visa-only
 
 ```bash
 psql postgresql://job360:job360dev@localhost:5433/job360   # local dev
-railway run -s Postgres psql "$DATABASE_PUBLIC_URL"        # production
+railway run -s Postgres sh -c 'psql "$DATABASE_PUBLIC_URL"'   # production
 ```
 
 ### See what migrations have been applied
@@ -76,8 +83,10 @@ python -m migrations.runner status
 ```
 
 ```sql
--- or straight from psql:
-SELECT * FROM _schema_migrations ORDER BY version;
+-- or straight from psql. The table is (id TEXT PRIMARY KEY, applied_at TEXT)
+-- — backend/migrations/runner.py:53-56. There is no `version` column; `id` is
+-- the zero-padded migration stem, so it sorts correctly as text.
+SELECT * FROM _schema_migrations ORDER BY id;
 ```
 
 ### Apply pending migrations (idempotent, safe to re-run)
@@ -363,13 +372,21 @@ worker logs for `rescore_backfill_done`.
 
 Automatically, since migration `0018`. `POST /api/profile` compares the last two
 `user_profile_versions` snapshots; if the content actually changed it enqueues
-`rescore_user_feed_task` on the ARQ queue (`backend/src/api/routes/profile.py:163`),
-which clears the user's LLM verdicts and re-scores **every** job in their 30-day catalog
-view. Only when Redis is unreachable does it fall back to an in-process `asyncio` task
-that dies with the web process (`profile.py:179-184`).
+`rescore_user_feed_task` on the ARQ queue (`backend/src/api/routes/profile.py:163`).
+Only when Redis is unreachable does it fall back to an in-process `asyncio` task that
+dies with the web process (`profile.py:179-184`).
 
+What `rescore_user_feed` actually does, precisely:
+
+- It reads **up to 50,000** catalog rows — `get_catalog_jobs_for_rescore(limit=50000)`, `backend/src/repositories/database.py:750-777`. The SQL is `SELECT … FROM jobs ORDER BY date_found DESC LIMIT ?` with **no date predicate**. The 30-day horizon people quote is a *consequence* of `purge_old_jobs()` capping the catalog, not a filter in this query — and the limit is deliberately set far above the catalog so a "full re-score" really is one.
+- It clears the user's LLM verdicts **only when `ENGINE4_ENABLED or MATCHER_ENABLED`** (`backend/src/services/rescore.py:589,595-598`). With the judge off — the default — no verdict is touched.
+
+And the part that is easy to get wrong:
+
+- **Ordinary searches do re-score.** `run_search` calls `backfill_feed_from_catalog(user_id, db)` on **every** authenticated search (`backend/src/main.py:1272-1278`), which scores the whole catalog for that user and upserts feed rows. It is not "newly-fetched jobs only".
+- **But an existing row's score still doesn't drift.** `upsert_feed_row` applies a *version-conditional freeze*: on an existing row the score is kept when the incoming `profile_version` **and** `scorer_version` both match what's stored, and overwritten when either differs (`backend/src/services/feed.py:288-303`). So a score moves when the PROFILE changes or `SCORER_VERSION` is bumped — never merely because time passed. `bucket` and both version stamps are always rewritten.
+- The mechanism is that freeze, **not** `skip_existing`. `match_batch(..., skip_existing=True)` (`backend/src/services/llm_matcher.py:436,443`) stops the LLM re-judging a job it already judged for this user — it guards verdicts, not keyword scores.
 - **Dashboard reads** use whatever's in `user_feed` *now* — so a read landing before the worker drains still shows old scores.
-- **Ordinary searches** score only newly-fetched jobs; existing feed rows are left alone. A score changes when the PROFILE changes, never just because time passed. (Separately, `match_batch(..., skip_existing=True)` — `backend/src/services/llm_matcher.py:436,443` — stops the LLM re-judging a job it has already judged for this user. That guards verdicts, not keyword scores.)
 - To force it by hand: `rescore-backfill` above. There is no `db.purge_user_feed()` helper — that name does not exist in `backend/src/`.
 
 ---
@@ -539,7 +556,7 @@ arq src.workers.settings.WorkerSettings
 | `argon2.exceptions.InvalidHash` on login | DB password_hash got corrupted | Re-register the user; old hash is unrecoverable |
 | All 0-score jobs in `user_feed` | No user profile / empty `SearchConfig` | `setup-profile` or check `keywords.py` (empty defaults since 3ba1342) |
 | One source always fails | Likely auth/markup change | See §8 above; in worst case mark `enabled=False` (no such flag yet — comment out of `SOURCE_REGISTRY`) |
-| `ModuleNotFoundError: psycopg` | Backend deps not installed in this env | `pip install -e backend/` or `pip install -r backend/requirements.txt`. Note: **`aiosqlite` is not a dependency** — every module does `from src.repositories import pg as aiosqlite`, so the name is a local alias for the Postgres shim, never an installed package |
+| `ModuleNotFoundError: psycopg` | Backend deps not installed in this env | `pip install -e .` from `backend/` (these commands assume `cwd = backend/`, so a `backend/`-prefixed path would resolve to `backend/backend/`). There is **no `requirements.txt`** — `backend/pyproject.toml` is the only dependency manifest. Note: **`aiosqlite` is not a dependency** — every module does `from src.repositories import pg as aiosqlite`, so the name is a local alias for the Postgres shim, never an installed package |
 | Notification rule fires but no message arrives | Channel credential decrypted wrong, or Apprise URL malformed | `POST /api/settings/channels/{id}/test` to surface the error |
 | Pipeline shows "stalled" too aggressively | Default is 7-day threshold | Hard-coded in `pipeline.py` reminder logic — adjust there |
 | Hybrid retrieval returns 0 results | ChromaDB empty or `SEMANTIC_ENABLED=false` | Check `VectorIndex.count()`; if zero, re-ingest with the flag on |
