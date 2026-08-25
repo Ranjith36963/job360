@@ -207,7 +207,7 @@ async def main():
             'SELECT channel_type, enabled FROM user_channels WHERE user_id = ?', (uid,)
         )).fetchall()
         rule = await (await db.execute(
-            'SELECT notify_mode, min_score FROM notification_rules WHERE user_id = ?', (uid,)
+            'SELECT notify_mode, score_threshold FROM notification_rules WHERE user_id = ?', (uid,)
         )).fetchone()
         print(f'user {uid}: {len(chans)} channel(s)')
         for c in chans:
