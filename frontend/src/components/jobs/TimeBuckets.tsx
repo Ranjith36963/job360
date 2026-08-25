@@ -24,21 +24,12 @@ export function TimeBuckets({
   onBucketChange,
   counts,
 }: TimeBucketsProps) {
-  // Keep the SELECTED bucket on screen.
-  //
-  // This row is overflow-x-auto with scrollbar-none, so on a phone it scrolls
-  // but shows no scrollbar to say so. The default bucket is the LAST one (7d),
-  // which meant a 390px screen opened on "All 24h 48h 3d 5d…" with the active
-  // filter off the right edge and no hint it existed — the user could not see
-  // which range they were looking at, and the row looked truncated rather than
-  // scrollable. Centring the active chip fixes both: the selection is always
-  // visible, and chips are visibly cut off on BOTH sides, which reads as
-  // "scroll me".
-  // Feature-detected: jsdom implements no layout, so Element.scrollIntoView is
-  // simply absent there. Calling it unguarded threw during mount and took the
-  // whole DashboardPage down with it — 9 dashboard tests failed on a change
-  // that was purely cosmetic. Scrolling is an enhancement; never let it break
-  // rendering.
+  // Keep the SELECTED bucket on screen: this row scrolls with no visible
+  // scrollbar, and the default bucket is the last one, so on a phone the active
+  // filter opened off-screen with no hint it existed.
+  // Feature-detected because jsdom has no layout and no scrollIntoView; calling
+  // it unguarded threw during mount and took the whole page down.
+  // Numbers: tests/design/README.md.
   const activeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const el = activeRef.current;
