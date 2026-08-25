@@ -131,8 +131,14 @@ was added to `check_uk` and no city was typed — the fix is DATA, which is the
 rule. Still admitted on purpose: `"London, Ontario"` — a big UK city beside a
 foreign region is how both a foreign address and a genuine two-site ad get
 written, and `london` never enters `ambiguous.txt`, so the escape still speaks
-for it (`uk_gate.py:367-382`; root CLAUDE.md rule #30 records this as the
-remaining gap).
+for it (`backend/src/services/uk_gate.py:367-382`; root `CLAUDE.md:57` rule #30
+records this as the remaining gap). **No test pins that exact input** —
+`tests/test_uk_gate.py:161` asserts only bare `check_uk("London", …)`, and
+`tests/test_scorer.py:673-679` names "London, Ontario" expressly to say it is
+*not* asserted there. The behaviour above is read off the gate logic and the
+shipped gazetteer data (`ontario` in `foreign_admin.txt`, absent from
+`uk_places.txt`; `london` in neither ambiguity list), so treat it as
+documented-and-unguarded until a test claims it.
 
 **Traps found by dry-running over the live catalog** (do this before shipping
 any location rule):

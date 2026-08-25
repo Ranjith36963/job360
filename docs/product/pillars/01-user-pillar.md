@@ -134,7 +134,7 @@ Alice's inbox: one email with job title, score 87, deep link to `/jobs/<id>`.
 
 ### T+5 days — Alice advances the application
 
-After an interview: `POST /api/pipeline/42/advance {"to_stage": "interview", "notes": "1st screen w/ recruiter"}`. Route updates `applications.stage='interview'`, sets `last_advanced_at=now()`, INSERTs an `application_stage_history` row with `from_stage='applied'`, appends to `notes_history` JSON.
+After an interview: `POST /api/pipeline/42/advance {"stage": "interview"}`. The body model is one field — `PipelineAdvanceRequest.stage` (`backend/src/api/models.py:406-407`); there is no `to_stage` key and the endpoint accepts no `notes`. Route validates against `_VALID_STAGES` (`routes/pipeline.py:36,121-125`) then calls `advance_application`, which updates `applications.stage='interview'`, sets `last_advanced_at=now()`, and INSERTs an `application_stage_history` row with `from_stage='applied'` — the two writes share one transaction (`repositories/database.py:1127-1147`). It does **not** touch `notes_history`: that column is written only by `PATCH /api/pipeline/{job_id}/notes` → `update_application_notes` (`database.py:1777`).
 
 ### Tables touched, in order
 
