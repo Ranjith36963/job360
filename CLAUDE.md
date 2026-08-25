@@ -8,14 +8,8 @@
      .claude/skills/. If you are about to add a paragraph here, add it there and
      leave a one-line pointer. CI enforces this (doc_sync_check.py). -->
 
-## How to talk to me (STRICT — always follow)
-
-**Explain everything in simple, plain English.** This is a strict rule, never skip it.
-
-- Use short sentences and easy words. Imagine explaining to a smart friend who is not a coding expert.
-- Avoid jargon. If a technical word is needed, say what it means in plain words right after it (one short line).
-- No long walls of text. Get to the point: what happened, what I did, what's next.
-- When I ask for something, show me the result in plain words first, then the details if needed.
+<!-- Tone rules live in ~/.claude/CLAUDE.md (loads in every project);
+     duplicating them here cost a paragraph per session for nothing. -->
 
 ## 🔴 `main` IS PRODUCTION. MERGING SHIPS TO REAL USERS.
 
