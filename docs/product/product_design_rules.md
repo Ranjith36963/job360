@@ -126,7 +126,14 @@ already closed sets, so they now feed the same computation at a flat weight —
 The weight is measured, not chosen by taste: the 84 UK names colliding with a
 foreign country or admin1 have exactly one population gap, between Warwick
 (37,267) and Portsmouth (47,350), so a 40,000-effective cut-off keeps
-Manchester, Southampton and Canterbury while dropping the hamlets. No branch
+Manchester, Southampton and Canterbury while dropping the hamlets. **Those
+figures are a dated measurement, not something you can re-derive from this
+repo:** they were taken on 2026-08-19 and are recorded in the builder's own
+comment (`backend/scripts/build_uk_gazetteer.py:90-95`); the GeoNames snapshot
+they came from is fetched at build time and never checked in, so `--check`
+validates file counts and canaries, not these populations. Treat them as the
+recorded basis for the threshold, and re-measure rather than re-cite if the
+gazetteer is ever rebuilt against newer GeoNames data. No branch
 was added to `check_uk` and no city was typed — the fix is DATA, which is the
 rule. Still admitted on purpose: `"London, Ontario"` — a big UK city beside a
 foreign region is how both a foreign address and a genuine two-site ad get
