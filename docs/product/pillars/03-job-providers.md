@@ -632,4 +632,4 @@ backend/tests/
 
 ---
 
-*Source roster (post-2026-08-10 rotation): 40 classes / 41 registry keys / 40 instances. Backend tests: 218 `test_*.py` files; measure the collected count, never quote it (2 `live` deselected offline).*
+*Source roster (post-2026-08-10 rotation): 40 classes / 41 registry keys / 40 instances. Backend tests: measure the counts, never quote them (2 `live` deselected offline).*

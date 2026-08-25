@@ -209,7 +209,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
   The old built-in channel classes are REMOVED.
 - CLI commands (7, all in `src/cli.py`): run, status, view, api, sources, setup-profile, rescore-backfill
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- Tests: 218 `test_*.py` modules; measure the collected count, never quote it (2 `live` deselected offline); 3 skip on Windows (bash-only `setup.sh` / `cron_setup.sh` tests)
+- Tests: measure both the module and collected counts, never quote them (2 `live` deselected offline); 3 skip on Windows (bash-only `setup.sh` / `cron_setup.sh` tests)
 
 ---
 
@@ -253,7 +253,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 > per-file counts roughly a third of the real ones. Two copies of a number is one copy too
 > many — README's is the measured one.
 
-**Current green baseline:** 218 `test_*.py` modules, 2 `live` tests deselected offline, 3 skipped
+**Current green baseline:** 2 `live` tests deselected offline, 3 skipped
 on Windows. The collected count is deliberately not recorded here — measure it, never quote it:
 `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`.
 
