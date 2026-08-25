@@ -213,7 +213,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | Source/Component | Risk | Notes |
 |------------------|------|-------|
 | **HTML scrapers** (5) | High | LinkedIn, Climatebase, 80000Hours, BCS Jobs, AIJobs AI all use regex parsing on HTML. Any layout change breaks them silently (returns 0 jobs, no error). |
-| **python-jobspy** (Indeed/Glassdoor) | Medium | Not in backend/pyproject.toml. Optional dependency. If Indeed/Glassdoor change their site, python-jobspy breaks. |
+| **python-jobspy** (Indeed/Glassdoor) | Medium | If Indeed/Glassdoor change their site, python-jobspy breaks. |
 | **Workday ATS** | Medium | Complex dict-format config (tenant/wd/site). Workday API endpoints change occasionally. 20 companies = 20 potential breakpoints. |
 | **SuccessFactors** | Medium | Parses sitemap.xml files. Only 3 companies. MBDA already removed (DNS failure). |
 | **Personio** | Medium | Uses XML job feed API. 26 companies. Personio may restrict access. |
