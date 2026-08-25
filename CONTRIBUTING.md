@@ -52,7 +52,9 @@ Scope is optional. Body (blank line, wrap at 72) explains the *why*.
    ```
 6. Commit with a conventional message (see above). Use one logical commit per
    concern; avoid mixing refactors and features.
-7. Open the PR against `main`. Fill the template. Link the issue.
+7. Open the PR against `main`. There is **no PR template in this repo** — nothing under
+   `.github/` provides one — so write the body yourself: what changed, why, what you ran
+   to verify it, and the linked issue.
 8. Request review. Do not self-merge unless explicitly authorised.
 
 ## ⚠️ Merging to `main` deploys to production
@@ -108,9 +110,13 @@ instructions.
 
 Two `scripts/` directories exist by design:
 
-- **`scripts/`** at repo root — repo-wide shell helpers the Makefile shells
-  out to (currently `migration_roundtrip.sh`, `review_batch.sh`). Add new
-  shell or cross-service tooling here.
+- **`scripts/`** at repo root — repo-wide tooling that must not import from
+  `backend/src/`: **32 Python files + 7 shell files** today, not two shell
+  scripts. Most of it is the CI/harness guard estate (`doc_sync_check.py`,
+  `doc_sync_mutation_test.py`, `merge_cage.py`, `ruleset_gate.py`, …), which
+  `.github/workflows/` runs directly; the Makefile shells out to
+  `migration_roundtrip.sh`, and `agent-gate.sh` is the commit gate. Add new
+  cross-service tooling here, in **either** language.
 - **`backend/scripts/`** — backend-only Python helpers, run via
   `cd backend && python scripts/X.py`. Add ESCO-index builders, dev
   bootstrappers, verification scripts, dump/inspection tools, and any

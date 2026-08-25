@@ -460,15 +460,26 @@ Engine-relevant tables and columns:
 
 Both flags default `false` per CLAUDE.md rule #18, and the **no-op path must exactly match pre-Pillar-2 behaviour**. Documented here for completeness.
 
-### 5.1 `ENRICHMENT_ENABLED=true` → LLM enrichment
+### 5.1 `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` → LLM enrichment
+
+The gate at every Engine-2 call site is `ENGINE2_ENABLED or ENRICHMENT_ENABLED`
+(`main.py:853`, `main.py:1137`, `rescore.py:85`, `jobs.py:779`, `tasks.py:237`) — rule #18.
+Either name opens it; testing only the legacy one is how a flipped `ENGINE2_ENABLED`
+goes unnoticed.
 
 When on:
 - Stage 5 runs (see §2).
-- `JobScorer` gains a populated `enrichment_lookup` and the Batch 2.9 dimension scorers actually fire.
+- `JobScorer` gains a populated `enrichment_lookup` and the Batch 2.9 dimension scorers read real data.
 - Dedup tie-breaker uses the `+5` enrichment bonus.
 
 When off:
-- `enrichment_lookup` is an empty dict → all four dim scorers return 0 → `JobScorer` effectively reverts to the legacy 4-component formula.
+- `enrichment_lookup` is an empty dict, so every lookup returns `None`. The four dim
+  scorers are **still called** and each returns its NEUTRAL half — seniority 4, salary 5,
+  workplace 3, and visa 3 when `needs_visa` is set (`scoring_dimensions.py:157,198-200,245,278`).
+  They do **not** return 0, and `JobScorer` does **not** revert to the legacy 4-component
+  formula: the dims are gated on `user_preferences` alone (`skill_matcher.py:587`, rules
+  #20/#29). The one real zero is `visa_score` with `needs_visa=False`
+  (`scoring_dimensions.py:242`) — "no reward for something irrelevant", not a penalty.
 - No LLM API calls, no `job_enrichment` DB writes.
 
 ### 5.2 `SEMANTIC_ENABLED=true` → embeddings + hybrid retrieval
@@ -519,7 +530,7 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | `VISA_WEIGHT` | `6` | Visa dimension max | Only meaningful when users have `needs_visa=True` |
 | `WORKPLACE_WEIGHT` | `6` | Workplace (remote/hybrid/onsite) dimension max | Raise to make workplace preference more decisive |
 | `ENRICHMENT_THRESHOLD` | `60` | Jobs need to score this high to be sent to the LLM enrichment pipeline | Raise to save LLM cost; lower to enrich more aggressively |
-| `ENRICHMENT_ENABLED` | `false` | Master switch for LLM enrichment + multi-dim activation | Flip on after setting LLM keys — see rule #18 |
+| `ENRICHMENT_ENABLED` | `false` | Legacy switch for the LLM **enrichment step**. Every call site is gated on `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853,1137`), so `ENGINE2_ENABLED=true` runs Engine 2 with this name still false — test BOTH (rule #18). It does **not** activate the multi-dim path: that is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20); this flag only decides whether the dims read real data or their neutral halves | Flip on after setting LLM keys — see rule #18 |
 | `SEMANTIC_ENABLED` | `false` | Writes embeddings into the pgvector store (`main.py:1292,1348` read this name ALONE). Hybrid retrieval is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), so `ENGINE3_ENABLED` alone queries an index nothing fills. It does **not** switch ESCO on: that also needs `is_available()` (`cv_parser.py:821,830`) and the index artefacts have never been built | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
 | `TARGET_SALARY_MIN` / `_MAX` | `40000` / `120000` | Salary-range *tiebreaker* (not scoring) for sort order on the dashboard | Display preference only |
 | `GEMINI_API_KEY` | (unset) | First-choice LLM provider | Unset → falls to Groq |
