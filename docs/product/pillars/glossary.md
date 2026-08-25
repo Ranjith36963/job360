@@ -193,7 +193,7 @@ The four concentric layers of the User pillar: Identity → Profile → Delivery
 
 ### Run (run_search / run_log)
 
-A single end-to-end pass of the pipeline. Tagged with a `run_uuid` correlation id in a `contextvar`; logged to `run_log` with per-source error counts and durations (migration `0010`). Surfaced via `GET /api/runs`.
+A single end-to-end pass of the pipeline. Tagged with a `run_uuid` correlation id in a `contextvar`; logged to `run_log` with per-source error counts and durations (migration `0010`). Surfaced via `GET /api/runs/recent` and `GET /api/runs/source-health` (`backend/src/api/routes/runs.py:63,150`); there is no bare `GET /api/runs`.
 **Code:** `backend/src/main.py:run_search()` · **Pillar 2**
 
 ### ScoreBreakdown

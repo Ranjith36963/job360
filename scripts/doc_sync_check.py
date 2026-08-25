@@ -446,6 +446,108 @@ def landing_page_source_claims() -> list[tuple[int, int]]:
     return out
 
 
+def control_chars_in_guards() -> list[tuple[str, str, str]]:
+    """(file, line, byte) for any C0 control character in this repo's guards.
+
+    Added 2026-08-25 after a real, expensive miss. Writing the route guard I
+    produced `r"\\b(there is no...` where the `\\b` was a single 0x08 BACKSPACE
+    byte, not backslash-plus-b -- a non-raw patch string collapsed it before it
+    ever reached disk. The regex then required a literal backspace in the text,
+    so it never matched and the negation branch was dead code.
+
+    What makes this class worth a permanent guard: `sed`, `grep`, `cat` and
+    even `inspect.getsource` ALL render 0x08 as `\\b`, identical to the word
+    boundary intended. Every instrument I reached for agreed with the mistake.
+    Only `od -c` disagreed. A guard whose regex silently cannot match is
+    indistinguishable from a guard that is passing, which is the exact failure
+    doc-sync exists to prevent -- so the bytes get checked, not the rendering.
+
+    Tabs, newlines and carriage returns are legitimate and skipped.
+    """
+    allowed = {0x09, 0x0A, 0x0D}
+    out: list[tuple[str, str, str]] = []
+    for rel in ("scripts/doc_sync_check.py", "scripts/doc_sync_mutation_test.py",
+                "scripts/encoding_guard.py", "scripts/drill_registry.py"):
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        for i, raw in enumerate(path.read_bytes().split(b"\n"), 1):
+            for b in raw:
+                if b < 0x20 and b not in allowed:
+                    out.append((rel, str(i), f"0x{b:02x}"))
+                    break
+    return out
+
+
+def documented_routes_exist() -> list[tuple[str, str, str]]:
+    """(doc, line, route) for `METHOD /api/...` a doc names that no router declares.
+
+    Added 2026-08-25, closing the class cycle 13 found by reading:
+    01-user-pillar.md documented `POST /api/pipeline/applications {"job_id": 42}`
+    in THREE places. The real route is `POST /api/pipeline/{job_id}` with no
+    body, and no `/applications` collection route has ever existed. Anyone
+    integrating from that doc gets a 404 -- the most expensive kind of doc lie,
+    because it looks like a contract.
+
+    Path PARAMETERS are normalised, so `/pipeline/{job_id}` in the code matches
+    `/pipeline/42` or `/pipeline/{id}` in a doc: the guard is about whether the
+    ENDPOINT exists, not whether the placeholder is spelled the same.
+    """
+    routes_dir = ROOT / "backend/src/api/routes"
+    if not routes_dir.exists():
+        return []
+
+    decl = re.compile(r"@router\.(get|post|put|patch|delete)\(\s*[\"']([^\"']*)")
+    # A FastAPI path is assembled in THREE places: APIRouter(prefix=...), the
+    # decorator, and include_router(prefix="/api"). Reading only the decorator
+    # sees a third of the truth -- the first cut of this guard did exactly that
+    # and reported five REAL routes (/api/auth/me, /api/settings/channels) as
+    # missing. A guard that cries wolf gets ignored, which kills the loop.
+    router_prefix = re.compile(r"APIRouter\(\s*prefix=[\"']([^\"']+)")
+    known: set[tuple[str, str]] = set()
+    for p in routes_dir.glob("*.py"):
+        body = p.read_text(encoding="utf-8", errors="replace")
+        pm = router_prefix.search(body)
+        prefix = pm.group(1).rstrip("/") if pm else ""
+        for m in decl.finditer(body):
+            method, path = m.group(1).upper(), prefix + m.group(2)
+            known.add((method, re.sub(r"\{[^}]+\}", "{}", path.rstrip("/")) or "/"))
+
+    # Docs write the /api prefix that main.py mounts; the routers do not.
+    NEGATED_ROUTE = re.compile(
+        r"\b(there is no|no such|does not exist|never existed|is not a route|"
+        r"was removed|no longer|instead of|not\s+`?[A-Z]{3,6}\s+/api)\b", re.I)
+    cited = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\s+`?(/api/[A-Za-z0-9_{}/\-]+)")
+    out: list[tuple[str, str, str]] = []
+    for rel in LIVING_DOCS:
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in cited.finditer(line):
+                method, doc_path = m.group(1), m.group(2)
+                # A doc that says "There is no bare `GET /api/runs`" is CORRECT
+                # (runbook.md:51 exists precisely to record that absence, and
+                # the guard would have deleted its own evidence). But scanning
+                # the WHOLE line for a negation silenced a REAL finding at
+                # 01-user-pillar.md:505, whose far-right cell holds the UI copy
+                # "Job no longer available". A false negative is worse than a
+                # false alarm, so the negation must sit just BEFORE the route.
+                if NEGATED_ROUTE.search(line[max(0, m.start() - 60):m.start()]):
+                    continue
+                tail = line[m.end():m.end() + 2]
+                if doc_path.endswith("/") or tail.startswith(("*", "<")):
+                    continue  # a wildcard/placeholder family, not one endpoint
+                stripped = doc_path[len("/api"):].rstrip("/") or "/"
+                norm = re.sub(r"\{[^}]+\}", "{}", stripped)
+                # A concrete id in the doc (/pipeline/42) matches a param route.
+                numeric = re.sub(r"/\d+", "/{}", norm)
+                if (method, norm) in known or (method, numeric) in known:
+                    continue
+                out.append((rel, str(i), f"{method} {doc_path}"))
+    return out
+
+
 def constant_disagreements() -> list[tuple[str, str, str, str]]:
     """(const, doc:line, claimed, disagrees-with) where two docs give one CONSTANT different values.
 
@@ -1170,6 +1272,20 @@ def main() -> int:
             drift.append((rel, "-", "doc-type", "no doc-type header", "needs <!-- doc: LIVING ... -->"))
         elif type_tag.group(1) != "LIVING":
             drift.append((rel, "-", "doc-type", f"tagged {type_tag.group(1)}", "this file is a LIVING doc"))
+
+    # A control byte inside a guard's own regex silently disables it.
+    for gfile, line_no, byte in control_chars_in_guards():
+        drift.append((
+            gfile, line_no, "control-char", byte,
+            "a control byte in a guard's regex makes it unable to ever match",
+        ))
+
+    # A documented endpoint that no router declares is a contract that 404s.
+    for doc, line_no, route in documented_routes_exist():
+        drift.append((
+            doc, line_no, "route-not-found", route,
+            "no @router declares this — a documented endpoint that 404s",
+        ))
 
     # Do the docs agree with EACH OTHER about each named constant? Six of ten
     # findings in the 2026-08-25 scout pass were docs contradicting other docs

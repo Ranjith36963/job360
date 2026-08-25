@@ -89,7 +89,7 @@ Heart icon clicked. Frontend `POST /api/jobs/42/action {"action": "liked"}`. Rou
 
 ### T+15 — Alice applies
 
-Click "Apply" → browser opens external `apply_url`. Returning, Alice clicks "Mark Applied". Frontend `POST /api/pipeline/applications {"job_id": 42}`. Route (`routes/pipeline.py`):
+Click "Apply" → browser opens external `apply_url`. Returning, Alice clicks "Mark Applied". Frontend `POST /api/pipeline/42` (the job id is the PATH, there is no body). Route (`routes/pipeline.py`):
 
 1. **410 Gone** if `jobs.staleness_state='confirmed_expired'` (ghost-detection guard).
 2. INSERT `applications(user_id, job_id=42, stage='applied')`.
@@ -214,7 +214,7 @@ Writes to `DEFAULT_TENANT_ID` (the placeholder user). Used by single-tenant inst
 - `POST /api/profile/github` — accepts `{username}`
 - `GET /api/profile/versions` — returns the last 10 snapshots
 - `POST /api/profile/versions/{id}/restore` — atomic rollback to a snapshot
-- `GET /api/profile/jsonresume` — exports the profile in [JSON Resume](https://jsonresume.org/) schema
+- `GET /api/profile/json-resume` — exports the profile in [JSON Resume](https://jsonresume.org/) schema
 
 ### 3.2 The four data sources
 
@@ -407,7 +407,7 @@ Backed by the `user_actions` table (rebuilt with a `user_id` column in migration
 
 - Stages: `applied` → `outreach` → `interview` → `offer` → `rejected`
 - `GET /api/pipeline` (optional `?stage=`), `GET /api/pipeline/counts`, `GET /api/pipeline/reminders` (stalled >7 days)
-- `POST /api/pipeline/applications` to create — returns **410 Gone** if the target job has `staleness_state='confirmed_expired'`, so users cannot start an application against a ghost posting
+- `POST /api/pipeline/{job_id}` to create — returns **410 Gone** if the target job has `staleness_state='confirmed_expired'`, so users cannot start an application against a ghost posting
 - `POST /api/pipeline/{job_id}/advance` to move stage
 - `GET /api/pipeline/{job_id}/timeline` — full stage history
 - `PATCH /api/pipeline/{job_id}/notes`
@@ -502,7 +502,7 @@ A non-exhaustive table of failures an operator or agent will actually see, where
 | GitHub enrichment slow / 403 errors | Anonymous rate limit (60 req/hr) hit | `github_enricher` logs 403 rate limited | Set `GITHUB_TOKEN` (no scopes needed for public repos) |
 | Notification rule fires, no email arrives | The platform has no mail transport, or the built URL is malformed. Note the user never types this URL — the backend builds it from `RESEND_API_KEY` / `SMTP_*` | `notification_ledger.status='failed'`, `error_message` populated. If the channel could not even be created, `POST /api/settings/channels` returned 503 | `GET /api/notifications?status=failed` to see the error. Check `RESEND_API_KEY` first: on Railway `mailtos://` cannot deliver (SMTP ports blocked), so a channel built on the SMTP fallback times out and is recorded as failed |
 | Digest queue fills, never drains | ARQ worker not running, or digest_send_time evaluated in wrong zone | `user_notification_digests.sent=0` count growing | Confirm `arq` process up; verify `users.timezone` value; quiet-hours and digest_send_time both read this column |
-| `POST /api/pipeline/applications` returns 410 | Job has `staleness_state='confirmed_expired'` — guard rail | UI shows "Job no longer available" | If the job is actually live: `UPDATE jobs SET staleness_state='active' WHERE id=?` |
+| `POST /api/pipeline/{job_id}` returns 410 | Job has `staleness_state='confirmed_expired'` — guard rail | UI shows "Job no longer available" | If the job is actually live: `UPDATE jobs SET staleness_state='active' WHERE id=?` |
 | Pipeline UI shows wrong stage after advance | `applications.stage` ≠ latest `application_stage_history.to_stage` (only possible via direct SQL) | `/pipeline` shows stale stage | Re-derive: `SELECT to_stage FROM application_stage_history WHERE job_id=? AND user_id=? ORDER BY transitioned_at DESC LIMIT 1` and UPDATE applications |
 | Frontend page renders blank after deploy | Next.js 16 `params` not `await`ed (rule #22 — training-data trap) | Component renders without data | Convert to `params: Promise<{ id: string }>` and `await params` |
 | Profile completeness stuck at 0% after upload | Either no `user_profiles` row (silent save failure) or LLM returned empty schema | Inspect: `SELECT * FROM user_profiles WHERE user_id=?` | If no row: tail logs for the save error. If row exists with empty fields: LLM produced empty extraction — retry with a clearer CV or different provider |
