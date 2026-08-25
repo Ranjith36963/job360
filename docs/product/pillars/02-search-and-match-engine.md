@@ -1,4 +1,4 @@
-<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-25 by the nightly doc-truth routine -->
 # Pillar 2 — The Search & Match Engine
 
 > **Audience.** Read this if you want to understand what happens *between* "a job posting exists on the internet" (Pillar 3 fetches it) and "a job appears on a user's dashboard ranked 87/100" (Pillar 1 shows it). The engine is the brain — it takes raw postings, filters out the irrelevant ones, scores the survivors against the user, deduplicates near-duplicate listings, enriches the high-scorers with LLM-extracted structured data, and writes everything to the shared `jobs` catalog.
@@ -38,7 +38,7 @@ The pipeline is a **6-stage straight line**, with the scheduler + circuit breake
 
 > *"All AI/ML default lists have been removed. The system now requires a user profile (CV upload or manual preferences) — there are no domain-biased defaults to fall back on."*
 
-What survives in `keywords.py`: only `LOCATIONS` (25 UK places) and `VISA_KEYWORDS` (8 phrases) — both genuinely domain-agnostic.
+What survives in `keywords.py`: only `LOCATIONS` (26 entries — 24 UK places plus `Remote` and `Hybrid`, which `_location_score` skips when matching) and `VISA_KEYWORDS` (8 phrases) — both genuinely domain-agnostic.
 
 **Implication:** the legacy module-level `score_job(job)` function in `skill_matcher.py:416` is essentially dead code — it still runs, but it scores against empty lists. Every meaningful scoring path in the live system goes through `JobScorer(config, user_preferences, enrichment_lookup)` (Pillar 2 Batch 2.9), and `run_search()` always instantiates it with all three kwargs (`backend/src/main.py:857`).
 
@@ -513,7 +513,8 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 
 | Var | Default | What it controls | Effect of changing |
 | --- | --- | --- | --- |
-| `MIN_MATCH_SCORE` | `30` | Jobs below this score are omitted from the user's feed entirely | Raise to be stricter (fewer results), lower for permissive feed |
+| `MIN_MATCH_SCORE` | `30` | **Display** floor, applied at READ time — jobs below it are still stored and still in `user_feed`, they are just filtered out of the default view (`api/routes/jobs.py:564-570` fetches with `min_score=0` and filters in Python; the CLI viewer's `--min-score` defaults to it). It is **not** a write gate: `score_and_ingest` upserts every prefilter survivor regardless of score (`workers/tasks.py:208-217`) | Raise to be stricter (fewer results shown), lower for a permissive view — nothing is lost either way |
+| `MIN_STORE_SCORE` | `1` | The **storage** floor — the spam cut a job must beat to be persisted at all (`core/settings.py:115-120`, applied at `main.py:729` and `services/rescore.py:271`) | This is the one that destroys rows; raise it only to cut genuine junk |
 | `MIN_TITLE_GATE` | `0.15` (= 6 pts of 40) | Title-component floor; below it the whole score collapses to suppression | Raise to require closer title matches; lower to admit weaker title alignments |
 | `MIN_SKILL_GATE` | `0.15` (= 6 pts of 40) | Skill-component floor; same collapse behaviour | Same as above for skill alignment |
 | `SALARY_WEIGHT` | `10` | Salary dimension max (Batch 2.9) | Raise to weight salary fit more heavily in final score |
