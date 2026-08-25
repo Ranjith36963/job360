@@ -1,6 +1,8 @@
 # Pricing — Final Decision (Job360)
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 **Decided 2026-06-25, research-verified. UPDATED 2026-07-05 (two advisers, incl. Fable):
 LAUNCH WITH 2 TIERS, not 3.** Detail + sources live in `PRICING_METHOD_3TIER.md` and
 `PRICING_METHOD_DRUG_DEALER.md`.

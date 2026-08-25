@@ -1,6 +1,8 @@
 # Maintenance Journal (append-only)
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 ## 2026-06-10 ~21:50 — bootstrap (manual, by the orchestrator)
 
 - Created `/maintain` skill + this backlog/journal pair; loop armed every 2h.

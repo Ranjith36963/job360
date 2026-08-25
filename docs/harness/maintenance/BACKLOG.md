@@ -1,6 +1,8 @@
 # Job360 Maintenance Backlog
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 Worked by the `/maintain` loop (one item per round, top TODO first).
 Statuses: TODO / DOING / DONE (sha) / BLOCKED(reason) / NEEDS-HUMAN / DEAD.
 Aging: every round increments `skipped: N` on items it passes over; at `skipped: 3` an item must be taken or escalated to NEEDS-HUMAN with justification. Keep newest discoveries at the right priority, not at the bottom.

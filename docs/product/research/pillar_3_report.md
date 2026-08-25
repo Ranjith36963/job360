@@ -1,6 +1,8 @@
 # Deep analysis of Job360 Pillar 3 improvements
 <!-- doc: REFERENCE -->
 
+> **REFERENCE — pinned to its research date.** External facts move; re-check anything load-bearing. <!-- banner: auto -->
+
 **Job360 can reach 500+ company slugs within days, add 4 high-value free APIs immediately, and cut fetching bandwidth by 60–90% — but most UK niche job boards have no free APIs.** The most impactful discovery is that two GOV.UK services (Teaching Vacancies and Apprenticeships) offer fully free, open-licensed REST APIs returning schema.org-compliant JSON with real posting dates. Meanwhile, the Feashliaa/job-board-aggregator GitHub repo contains ~95,000 ATS company slugs harvested via Common Crawl, making the 500+ slug target trivially achievable. Non-tech domain coverage will rely primarily on better use of generalist aggregators (Reed, Adzuna) with sector filtering rather than dozens of niche integrations, since the research found that **zero** free APIs exist across finance, legal, marketing, consulting, supply chain, and media job boards in the UK.
 
 ---

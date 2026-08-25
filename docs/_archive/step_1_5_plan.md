@@ -1,6 +1,8 @@
 # Step 1.5 — Pre-Step-2 Stabilisation (S1.1 + S1.5 + Step-3-MVP) — Ralph-Loop-Driven Plan
 <!-- doc: FROZEN -->
 
+> **FROZEN — closed or superseded.** Kept as evidence of what was true then. Do not act on it. <!-- banner: auto -->
+
 > **Status:** Approved 2026-04-25. Mirror of `.claude/plans/now-i-ve-got-another-crispy-island.md`. Hand this file to the generator worktree to implement, and to the reviewer worktree to audit.
 >
 > **Purpose:** Close every gap that Step 2 depends on, in one Ralph-Loop session, before any UI work begins. Three mini-batches bundled into a single execution because their dependencies are tightly coupled and shipping them separately would burn three sessions to do one session's work.

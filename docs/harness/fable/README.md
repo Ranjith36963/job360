@@ -1,4 +1,6 @@
 <!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 > **⚠️ CLOSED / SUPERSEDED (2026-07-23).** This is a historical snapshot. The
 > current verified status of every finding lives in **[AUDIT-2026-07-23-FULL-REVERIFY.md](AUDIT-2026-07-23-FULL-REVERIFY.md)** — the fable backlog
 > is closed there (92 of 106 fixed; the rest are owner decisions or scheduled audit

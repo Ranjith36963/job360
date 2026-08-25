@@ -1,6 +1,8 @@
 # Staging review packet — 2026-06-12 (round 15)
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 **New: M3 fully integrated (`25c1b3c`)** — worker-a's settings/account RHF+zod forms + KanbanBoard keyboard a11y (@dnd-kit) + CV upload caps, merged with the integrator's earlier auth-form slice. **risk: low-med** (frontend + the auth-adjacent profile.py upload route; full gate green, account forms live-verified). The V-04 upload validation was reconciled to the best of both versions (memory-safe bounded read + robust extension-only MIME). Also fixed a real gap: the M3-slice's zod/react-hook-form deps weren't declared in package.json (a fresh install would have broken). M3 now fully DONE. Evidence: JOURNAL round 15.
 
 **ALL 8 MISSIONS NOW DONE** (M1–M8) except M2 (Pillar-2, owner hands-off). Remaining: small follow-ups (M3-rem noValidate, M7a api.ts types, M8a un-ignore test_main, 7b vector path) — none blocking.

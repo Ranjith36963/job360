@@ -1,4 +1,6 @@
 <!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 ============================================================================================
 JOB360 ENGINE ABLATION — STRONG (bootstrap 95% CIs + significance)
 ============================================================================================

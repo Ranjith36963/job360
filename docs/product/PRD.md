@@ -1,6 +1,8 @@
 # Job360 — Product Requirements Document (PRD)
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 > **Version:** 1.0  
 > **Date:** 15 April 2026  
 > **Author:** Ranjith (Founder & Engineer)  
@@ -62,7 +64,7 @@ This is the core of Job360. It fetches job listings from all sources, normalises
 | Negative penalty | −30 points | Presence of explicitly excluded keywords in the title |
 | Foreign penalty | −15 points | Job is located outside the UK |
 
-**Quality threshold:** Jobs scoring below 30/100 are silently dropped. Only jobs meeting this bar reach the user.
+**Quality threshold:** ~~Jobs scoring below 30/100 are silently dropped. Only jobs meeting this bar reach the user.~~ **WITHDRAWN 2026-08-25 — never true of the shipped system, and describing a data-loss bug that was deliberately removed.** The store floor is `MIN_STORE_SCORE` (default **1**, `backend/src/core/settings.py:115-120`, applied `backend/src/main.py:729`); `MIN_MATCH_SCORE` (30) is a *display* floor applied at read time, so low-scoring jobs are kept and simply rank last. `main.py:720-728` records why the pre-store drop was torn out: "a job that scored 35 one week scored 25 the next and silently vanished."
 
 **Design constraint:** The engine's quality is the single most important factor in the product. If the engine delivers irrelevant jobs, no amount of features (pipeline tracker, push notifications, beautiful dashboard) will retain users. The engine must be the primary focus of engineering effort until it demonstrably delivers trusted results across multiple professional domains.
 

@@ -1,6 +1,8 @@
 # 00 — Executive Summary
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 > ## 🔎 VERIFIED 2026-07-17 → [`AUDIT-2026-07-17-VERIFIED.md`](AUDIT-2026-07-17-VERIFIED.md)
 > All 101 findings re-verified against live `main` by 11 parallel agents reading the real
 > code. **50 fixed · 12 partial · 20 open · 14 accepted · 2 needs-you · 2 were claimed-fixed

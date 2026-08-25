@@ -1,6 +1,8 @@
 # Step 3 — New Endpoints + Settings UI — Ralph-Loop-Driven Execution Plan
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 > **For agentic workers:** REQUIRED SUB-SKILLS: `superpowers:test-driven-development`, `superpowers:verification-before-completion`, `superpowers:dispatching-parallel-agents`, `superpowers:executing-plans`. Steps use checkbox syntax.
 >
 > **Pre-reqs carried from Step 2:** `main @ 9868877`, tag `step-2-green`, ≥1,056p / 0f / 3s backend baseline + ≥30 frontend unit tests + ≥5 Playwright E2E. Step 1.6 generator/reviewer contract enforced (every commit produces `.claude/generator-commit.md` + `.claude/reviewer-verdict.md` + green `make verify-batch`).

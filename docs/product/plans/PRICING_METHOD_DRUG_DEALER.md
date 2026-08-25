@@ -1,6 +1,8 @@
 # Pricing Method — The "Drug Dealer" Method (Reverse Trial)
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 **Captured 2026-06-25. Research-backed. Status: design captured, not built.**
 
 The industry name for the "drug dealer method" is the **Reverse Trial**:

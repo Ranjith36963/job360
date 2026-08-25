@@ -1,6 +1,8 @@
 # Health schedule — wiring the daily `health` skill to a real cron
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 > ## ⚠️ NOT RUNNING — measured 2026-08-24
 >
 > This document describes the wiring in the present tense. Nothing is running.

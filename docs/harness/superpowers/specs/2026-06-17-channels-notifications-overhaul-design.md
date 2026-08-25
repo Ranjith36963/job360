@@ -1,6 +1,8 @@
 # Channels & Notifications Overhaul — Design
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 **Date:** 2026-06-17
 **Branch:** `worktree-channels-notifications-overhaul`
 **Status:** Approved design — ready for implementation plan
