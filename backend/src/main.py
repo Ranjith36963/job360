@@ -51,6 +51,7 @@ from src.services.profile.keyword_generator import generate_search_config
 from src.services.profile.models import SearchConfig, UserProfile
 from src.services.profile.storage import current_profile_version_id, load_profile
 from src.services.scheduler import TieredScheduler
+from src.services.shelf_gate import fill_shelves
 from src.services.skill_matcher import (
     SCORER_VERSION,
     JobScorer,
@@ -102,6 +103,7 @@ from src.sources.scrapers.climatebase import ClimatebaseSource
 from src.sources.scrapers.eightykhours import EightyKHoursSource
 from src.sources.scrapers.linkedin import LinkedInSource
 from src.utils.logger import set_run_uuid, setup_logging
+from src.utils.loop_guard import cpu_bound
 from src.utils.telemetry import source_timer
 
 logger = logging.getLogger("job360.main")
@@ -188,18 +190,61 @@ async def _ghost_detection_pass(
     Returns {source_name: missed_count} for observability.
     """
     missed_by_source: dict[str, int] = {}
+
+    async def _warn_sweep_skipped(source_name: str, reason: str, detail: str) -> None:
+        """Name the cost of a skipped absence sweep, not just the skip.
+
+        PROD 2026-08-13: adzuna, linkedin and workday raise on EVERY run
+        (run_log.per_source_errors; workday's duration is pinned at the 240s
+        timeout). Skipping them is correct — a failed scrape must never be read
+        as "the jobs disappeared" — but the skip used to be a bare `continue`
+        with no log at all for the failure branch. So their listings stopped
+        ageing and were served as live indefinitely: 140 rows sat in
+        `staleness_state='active'` with `last_seen_at` 3-8 days old, and
+        because `consecutive_misses` never reached 2 the nightly ghost sweep
+        legitimately reported `transitioned: 0`. Every instrument said fine.
+        """
+        # `-1` IS NOT A COUNT. When the count itself failed this logged
+        # "-1 live job(s)" and swallowed the exception whole, so a reader could
+        # not tell a source-FETCH failure from a second failure in the DATABASE,
+        # and had no stack trace for either. A log line that exists to name a
+        # cost must not quietly invent the number. Say so, and record why.
+        # (CodeRabbit, PR #387.)
+        frozen: int | str
+        try:
+            frozen = await db.count_unexpired_jobs_for_source(source_name)
+        except Exception:  # noqa: BLE001 — observability must never break a run
+            frozen = "an unknown number of"
+            logger.warning(
+                "  %s: could not count this source's live jobs either — the "
+                "absence-sweep warning below has no number behind it",
+                source_name,
+                exc_info=True,
+            )
+        logger.warning(
+            "  %s: absence sweep SKIPPED (%s: %s) — %s live job(s) of this source "
+            "stopped ageing and are still served as active",
+            source_name,
+            reason,
+            detail,
+            frozen,
+        )
+
     for source, result in zip(sources, results):
         if isinstance(result, BaseException) or result is None:
+            await _warn_sweep_skipped(
+                source.name,
+                "fetch failed",
+                type(result).__name__ if isinstance(result, BaseException) else "no result",
+            )
             continue
         past = history.get(source.name, [])
         rolling_avg = (sum(past) / len(past)) if past else 0.0
         if rolling_avg > 0 and len(result) < completeness_threshold * rolling_avg:
-            logger.warning(
-                "  %s: result count (%s) below %.0f%% of 7-day avg (%.1f) — " "skipping absence sweep",
+            await _warn_sweep_skipped(
                 source.name,
-                len(result),
-                completeness_threshold * 100,
-                rolling_avg,
+                "incomplete scrape",
+                f"{len(result)} results < {completeness_threshold * 100:.0f}% of 7-day avg {rolling_avg:.1f}",
             )
             continue
         seen: set[tuple[str, str]] = {job.normalized_key() for job in result}
@@ -678,9 +723,10 @@ async def _embed_backfill_budget(db: Any, conn: Any, budget: int) -> int:
     return embedded
 
 
+@cpu_bound
 def _score_dedup_and_filter(all_jobs: list[Job], scorer: JobScorer) -> list[Job]:
-    """Score every job, extract deadlines, dedup, and score-filter — the whole
-    SYNCHRONOUS, CPU-heavy stage of the pipeline in one place.
+    """Fill every UNIVERSAL SHELF, score every job, dedup, and score-filter —
+    the whole SYNCHRONOUS, CPU-heavy stage of the pipeline in one place.
 
     Invoked from ``run_search`` via ``asyncio.to_thread`` so it runs OFF the
     event loop. Inline (the old code) this same block blocked the single backend
@@ -691,9 +737,24 @@ def _score_dedup_and_filter(all_jobs: list[Job], scorer: JobScorer) -> list[Job]
     the loop free to service those polls. **No scoring behaviour changes** — the
     exact same functions run, just not on the loop.
 
-    Mutates each Job in ``all_jobs`` in place (scores/deadline) and returns the
-    deduplicated, score-filtered subset. Contains no ``await`` — safe to thread.
+    Mutates each Job in ``all_jobs`` in place (shelves/provenance, then
+    scores) and returns the deduplicated, score-filtered subset. Contains no
+    ``await`` — safe to thread.
     """
+    # THE UNIVERSAL SHELF GATE — one door, every job, FIRST
+    # (docs/pillars/UNIVERSAL_SHELF.md §5). It normalises the closed-enum
+    # shelves (employment type / workplace mode / seniority / category),
+    # annualises + converts the salary band to GBP and then clamps it,
+    # derives the deadline from the ad text, runs the visa detector, and
+    # stamps `shelf_provenance` for EVERY shelf — filled or absent, with the
+    # reason. It runs BEFORE scoring so the scorer reads normalised shelves,
+    # and no source can bypass it because sources never call it: the
+    # orchestrator does, downstream of all of them. A source that forgets a
+    # shelf now produces a counted `absent:not_mapped`, not a silent hole.
+    # Synchronous and I/O-free, so it is safe inside this threaded stage.
+    for job in all_jobs:
+        fill_shelves(job)
+
     for job in all_jobs:
         breakdown = scorer.score(job)
         job.match_score = breakdown.match_score
@@ -705,15 +766,11 @@ def _score_dedup_and_filter(all_jobs: list[Job], scorer: JobScorer) -> list[Job]
         job.visa_flag = scorer.check_visa_flag(job)
         job.experience_level = detect_experience_level(job.title)
 
-    # Deadline extraction — fill any job lacking a structured deadline from its
-    # description text. Lazy-imported to keep the top-level import surface small.
-    from src.services.deadline import extract_deadline  # noqa: PLC0415
-
-    for job in all_jobs:
-        if job.deadline is None and job.description:
-            result = extract_deadline(job.description)
-            if result is not None:
-                job.deadline, job.deadline_source = result
+    # (The deadline-extraction pass that used to sit here MOVED INTO THE GATE
+    # above — services/shelf_gate.py::_fill_deadline. Same function, same
+    # regex, same `deadline_source='description'` stamp; it now runs at the
+    # one door every job passes through, and the reason a deadline is missing
+    # is recorded in `shelf_provenance` instead of being inferred from NULL.)
 
     unique_jobs = deduplicate(all_jobs)
     logger.info("After dedup: %s unique jobs", len(unique_jobs))
@@ -750,7 +807,7 @@ async def run_search(
 ) -> dict[str, Any]:
     # SI1 — ``enqueue`` is the notification fan-out hook. The per-user feed-write
     # path historically wrote user_feed but NEVER triggered a notification, so no
-    # user ever got a job-match email/Slack/Discord (the whole score_threshold
+    # user ever got a job-match notification (the whole score_threshold
     # gate was dead). When a caller (the ARQ worker / an API path with Redis)
     # passes an ``enqueue(function_name, *args)`` callable, run_search enqueues
     # ``send_notification`` for above-threshold feed rows after writing them.
@@ -880,6 +937,34 @@ async def run_search(
             if not sources:
                 logger.error("No sources matched filter: %s", source_filter)
                 return {"total_found": 0, "new_jobs": 0, "sources_queried": 0, "per_source": {}}
+
+            # A source with no credential returns [] INSTANTLY and logs at INFO,
+            # so in run_log it is byte-identical to a source that ran properly and
+            # found nothing: per_source=0, no exception, ~0.0s duration.
+            #
+            # Measured 2026-08-24 on three consecutive prod runs: seven sources
+            # (careerjet, findwork, google_jobs, gov_apprenticeships, indeed,
+            # jooble, jsearch) sat at 0 jobs / 0.0s / no error. Reading the run log
+            # could not tell "we never asked" from "we asked and there was
+            # nothing", and probing them by hand showed gov_apprenticeships
+            # returning 250 real UK jobs and careerjet 121 the moment they were
+            # invoked with a key. That gap is the bug: the absence was invisible.
+            #
+            # Naming them at WARNING makes the unasked question answerable from the
+            # run itself. It does not fix a missing key — it stops a missing key
+            # from looking like an empty upstream.
+            unconfigured = sorted(
+                s.name for s in sources if not getattr(s, "is_configured", True)
+            )
+            if unconfigured:
+                logger.warning(
+                    "%d of %d sources are NOT CONFIGURED and will self-skip "
+                    "(0 jobs, no error, ~0s — indistinguishable from an empty "
+                    "upstream unless you read this line): %s",
+                    len(unconfigured),
+                    len(sources),
+                    ", ".join(unconfigured),
+                )
 
             # Fetch via TieredScheduler (Batch 3.5 Deliverable E):
             #   * One-shot CLI runs pass force=True so every source dispatches

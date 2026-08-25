@@ -21,14 +21,20 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
 if TYPE_CHECKING:
     from src.services.profile.models import UserProfile
 
-from src.core.settings import ENRICHMENT_THRESHOLD
+from src.core.settings import ENRICHMENT_THRESHOLD, SITE_BASE_URL
 from src.models import Job
 from src.repositories import pg
+from src.services.delivery.decision_card import build_decision_card
+from src.services.delivery.email_body import (
+    render_digest_subject,
+    render_digest_text,
+)
 from src.services.feed import FeedService
 from src.services.job_enrichment import ENRICHMENT_ENABLED, _build_enrichment_lookup
 from src.services.job_signals import signal_backed_lookup
 from src.services.prefilter import FilterProfile, passes_prefilter
 from src.services.profile.models import SearchConfig
+from src.services.query_text import clean_query_text, needs_cleaning
 from src.services.skill_matcher import JobScorer
 from src.utils.logger import get_logger
 
@@ -677,7 +683,7 @@ async def _backfill_thin_descriptions(db: pg.Connection, budget: int) -> dict[st
 
     Selects the ``budget`` highest-value ACTIVE jobs (same
     COALESCE(llm_fit_score, score) value ordering as the other phases) whose
-    ``description`` is under ``MIN_DESCRIPTION_CHARS`` AND whose source is on
+    ``description`` is under ``BACKFILL_SELECT_BELOW_CHARS`` AND whose source is on
     the ``ALLOWED_BACKFILL_SOURCES`` capability list (LinkedIn and
     structurally-textless sources are OUT — pushed into the SQL itself,
     not filtered in Python after the fact, so a 50/tick budget is never
@@ -716,6 +722,7 @@ async def _backfill_thin_descriptions(db: pg.Connection, budget: int) -> dict[st
 
     from src.services.description_backfill import (  # noqa: PLC0415
         ALLOWED_BACKFILL_SOURCES,
+        BACKFILL_SELECT_BELOW_CHARS,
         MAX_BACKFILL_ATTEMPTS,
         MIN_DESCRIPTION_CHARS,
         fetch_description,
@@ -740,7 +747,12 @@ async def _backfill_thin_descriptions(db: pg.Connection, budget: int) -> dict[st
         ORDER BY max(COALESCE(f.llm_fit_score, f.score)) DESC
         LIMIT ?
         """,  # noqa: S608 — source_placeholders is "?"*len(allowed_sources), no user input
-        (MIN_DESCRIPTION_CHARS, MAX_BACKFILL_ATTEMPTS, *allowed_sources, budget),
+        # SELECT below the ENRICHMENT floor (600), not the skill-text floor (200).
+        # The two are different questions and sharing one constant meant the sweep
+        # only ever looked at nearly-empty rows, leaving 5,525 production rows
+        # (32.7% of the catalog) at 200-599 chars permanently un-enrichable and
+        # never retried. See BACKFILL_SELECT_BELOW_CHARS for the measurement.
+        (BACKFILL_SELECT_BELOW_CHARS, MAX_BACKFILL_ATTEMPTS, *allowed_sources, budget),
     )
     rows = [dict(r) for r in await cur.fetchall()]
 
@@ -983,6 +995,14 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
       * skipped  → leave the queue rows untouched (rule disabled mid-flight etc.).
     ``last_sent_at`` is stamped only when at least one channel actually sent.
 
+    What the email CONTAINS (rebuilt 2026-08-24): the body is no longer a list
+    of links. Jobs are joined against ``user_feed`` (score + the judge's
+    verdict and reason — all per-user, none of it on the shared catalog) and
+    ``job_enrichment`` (salary, parsed by the SAME function the dashboard uses),
+    turned into ``DecisionCard``s and rendered by ``services/delivery``. The
+    card module is the one definition of what a job says, so the email and the
+    screen cannot drift. See docs/plans/2026-08-24-email-webhook-only-delivery.md.
+
     Returns {'sent': int, 'failed': int, 'jobs_count': int}.
     """
     db: pg.Connection = ctx["db"]
@@ -996,7 +1016,11 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
         )
         pending = [dict(r) for r in await cur.fetchall()]
     except Exception:  # noqa: BLE001
-        return {"sent": 0, "failed": 0, "jobs_count": 0}
+        # Same trap as notification_tick: a dead query returned the dict that
+        # means "the digest queue is empty". Mark it as an error so the two are
+        # distinguishable in the worker log and in any future alert.
+        _log.exception("send_bundle: digest query failed for user_id=%s", user_id)
+        return {"sent": 0, "failed": 0, "jobs_count": 0, "error": 1}
 
     if not pending:
         return {"sent": 0, "failed": 0, "jobs_count": 0}
@@ -1009,30 +1033,84 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
     # `WHERE id IN (...)` instead of a per-job_id SELECT in a loop (this cron
     # runs every 5 min forever). Placeholders are generated from the id count
     # only — no user input in the SQL text.
-    job_details: dict[int, dict[str, Any]] = {}
+    #
+    # 2026-08-24 — this used to select four columns from `jobs` alone, which is
+    # why the digest could only ever say "Title @ Company — url". The score, the
+    # judge's verdict and the reason it wrote are PER-USER: they live on
+    # `user_feed`, not on the shared catalog. Without this join the email
+    # structurally cannot say what the dashboard says, no matter how the body is
+    # formatted. The join is INNER on purpose — a queued job with no feed row
+    # for this user is not something we can score or explain, so we do not send
+    # it.
+    rows: list[dict[str, Any]] = []
     _job_ids = {r["job_id"] for r in pending}
     if _job_ids:
         _placeholders = ",".join("?" for _ in _job_ids)
         cur = await db.execute(
-            f"SELECT id, title, company, apply_url FROM jobs WHERE id IN ({_placeholders})",  # noqa: S608 — placeholders only
-            tuple(_job_ids),
+            "SELECT j.id AS job_id, j.title, j.company, j.location, e.salary AS enr_salary, "  # noqa: S608 — placeholders only
+            "       f.score, f.llm_fit_score, f.llm_verdict, f.llm_reason "
+            "FROM jobs j "
+            "JOIN user_feed f ON f.job_id = j.id AND f.user_id = ? "
+            "LEFT JOIN job_enrichment e ON e.job_id = j.id "
+            f"WHERE j.id IN ({_placeholders}) "
+            "ORDER BY COALESCE(f.llm_fit_score, f.score) DESC",
+            (user_id, *tuple(_job_ids)),
         )
-        for row in await cur.fetchall():
-            job_details[row["id"]] = {
-                "title": row["title"],
-                "company": row["company"],
-                "apply_url": row["apply_url"],
-            }
+        rows = [dict(r) for r in await cur.fetchall()]
 
-    jobs_count = len(job_details)
+    jobs_count = len(rows)
     if jobs_count == 0:
         # Jobs were purged — drop the orphaned queue rows so we don't loop forever.
         await _mark_digest_rows_sent(db, user_id)
         return {"sent": 0, "failed": 0, "jobs_count": 0}
 
-    digest_title = f"Job360 Digest — {jobs_count} new match{'es' if jobs_count > 1 else ''}"
-    lines = [f"• {jd['title']} @ {jd['company']} — {jd['apply_url']}" for jd in job_details.values()]
-    digest_body = "\n".join(lines)
+    # ONE definition of what a job says, shared with the dashboard. The email
+    # must not re-derive a score or re-word a reason — see
+    # src/services/delivery/decision_card.py for why that is load-bearing.
+    cards = [build_decision_card(r, site_base_url=SITE_BASE_URL) for r in rows]
+    deliverable_ids = {int(r["job_id"]) for r in rows}
+
+    # Drain queue rows we can never deliver. The join above is INNER, so a
+    # queued job whose user_feed row has since gone (purged, or the user's
+    # verdicts were cleared) produces no card — and without this it would also
+    # never be marked sent, leaving a row at sent=0 that notification_tick
+    # re-enqueues every five minutes forever. Same class of infinite loop the
+    # `jobs_count == 0` branch above already guards; this is the partial case,
+    # which the old catalog-only query could not produce and this one can.
+    _undeliverable = {int(r["job_id"]) for r in pending} - deliverable_ids
+    if _undeliverable:
+        _ph = ",".join("?" for _ in _undeliverable)
+        _now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        await db.execute(
+            "UPDATE user_notification_digests SET sent=1, sent_at=? "  # noqa: S608 — placeholders only
+            f"WHERE user_id=? AND sent=0 AND job_id IN ({_ph})",
+            (_now, user_id, *tuple(_undeliverable)),
+        )
+        await db.commit()
+        _log.info(
+            "send_bundle dropped %d queued job(s) with no user_feed row (user=%s)",
+            len(_undeliverable),
+            user_id,
+        )
+    # `considered` is how many jobs were QUEUED for this user, not how many
+    # survived the join. Passing the survivor count made the arithmetic in
+    # render_digest_text (`dropped = considered - shown`) evaluate to 0 on every
+    # single call, so the "we checked N and dropped M" line could never render —
+    # and the jobs the drain above throws away vanished without a word. That is
+    # exactly the unexplained silence email_body exists to refuse.
+    #
+    # The count still is not the full funnel (jobs filtered out before they were
+    # ever queued are not visible from here); wiring that through is Phase 5.
+    # But queued-minus-shown is a number we can actually source, and it covers
+    # the drop this function itself performs.
+    considered = len(_job_ids)
+    dropped_reasons = (
+        ["no longer in your feed"] if considered > jobs_count else []
+    )
+    digest_title = render_digest_subject(shown=jobs_count, considered=considered)
+    digest_body = render_digest_text(
+        cards, considered=considered, dropped_reasons=dropped_reasons
+    )
 
     dispatcher_fn = ctx.get("dispatcher")
     if dispatcher_fn is None:
@@ -1062,7 +1140,11 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
     sent = failed = 0
     any_sent = False
     for channel, jids in by_channel.items():
-        uniq_jids = [j for j in dict.fromkeys(jids) if j in job_details]
+        # Only mark queue rows for jobs that actually made it into the email.
+        # `deliverable_ids` replaces the old `job_details` dict: a job now has to
+        # survive the user_feed join to be sent, so "was it in the email" and
+        # "does the catalog still have it" are no longer the same question.
+        uniq_jids = [j for j in dict.fromkeys(jids) if j in deliverable_ids]
         if not uniq_jids:
             continue
         st, err = status_by_channel.get(channel, ("failed", "channel not dispatched"))
@@ -1079,11 +1161,19 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
                 await FeedService(db).mark_notified_for_jobs(user_id, uniq_jids)
             except Exception as exc:  # noqa: BLE001 — telemetry never fails a send
                 _log.warning("mark_notified failed user=%s: %s", user_id, exc)
+            # Scoped to the job ids this send actually CARRIED. Without the
+            # job_id filter this marked every unsent row for the channel —
+            # including jobs deliberately excluded from the email (no user_feed
+            # row), which were then recorded as delivered having never been
+            # mentioned to anyone. It also made the orphan-drain block above
+            # untestable: its effect was indistinguishable from this statement's
+            # overreach. (CodeRabbit, PR #381.)
+            _ph_sent = ",".join("?" for _ in uniq_jids)
             await db.execute(
-                "UPDATE user_notification_digests SET sent=1, "
+                "UPDATE user_notification_digests SET sent=1, "  # noqa: S608 — placeholders only
                 "sent_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') "
-                "WHERE user_id=? AND channel=? AND sent=0",
-                (user_id, channel),
+                f"WHERE user_id=? AND channel=? AND sent=0 AND job_id IN ({_ph_sent})",
+                (user_id, channel, *uniq_jids),
             )
             await db.commit()
             sent += 1
@@ -1265,7 +1355,13 @@ async def notification_tick(ctx: dict[str, Any]) -> dict[str, int]:
         )
         rules = [dict(r) for r in await cur.fetchall()]
     except Exception:  # noqa: BLE001
-        return {"checked": 0, "enqueued": 0}
+        # A crashed query used to return the SAME dict as "there are no rules",
+        # with no log line — so `{'checked': 0, 'enqueued': 0}` in the worker log
+        # meant either "idle" or "the notification system is down" and nothing
+        # could tell them apart. Say which. Still never re-raise: an ARQ cron
+        # that throws is retried blindly every 5 minutes.
+        _log.exception("notification_tick: rules query failed")
+        return {"checked": 0, "enqueued": 0, "error": 1}
 
     enqueued = 0
     for rule in rules:
@@ -1716,6 +1812,10 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
     # structurally unreachable.
     union = SearchConfig()
     profiles_used = 0
+    # Profile strings repaired before being sent upstream. Collected so the run
+    # can SAY a profile is carrying undecodable text — repairing it silently
+    # would hide the condition that let a guaranteed-empty query run nightly.
+    repaired_queries: list[str] = []
     for uid in list_profile_user_ids():
         profile = load_profile(uid)
         if not profile or not profile.is_complete:
@@ -1738,6 +1838,17 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
         ):
             merged = getattr(union, attr)
             for item in getattr(cfg, attr):
+                # These strings are sent upstream AS QUERIES. A profile value
+                # carrying U+FFFD (the replacement character a decoder writes
+                # when the original bytes are lost) cannot match any advert, so
+                # it turns a source into a silent zero. Measured live: findwork
+                # returns 9 jobs on a neutral query and 0 on the production one.
+                if isinstance(item, str):
+                    if needs_cleaning(item):
+                        repaired_queries.append(item)
+                    item = clean_query_text(item)
+                    if not item:
+                        continue
                 if item not in merged:
                     merged.append(item)
         union.core_domain_words |= cfg.core_domain_words
@@ -1754,6 +1865,16 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
             "catalog refresh skipped: no complete user profiles found — nothing to fetch for"
         )
         return {"sources_queried": 0, "total_found": 0, "new_jobs": 0, "profiles_used": 0}
+
+    if repaired_queries:
+        logging.getLogger(__name__).warning(
+            "catalog refresh: %d profile string(s) carried undecodable characters "
+            "and were repaired before being sent as queries — a query containing "
+            "U+FFFD matches nothing upstream, so this silently zeroes keyword "
+            "sources. Fix the stored profile to stop repairing it every night: %s",
+            len(repaired_queries),
+            "; ".join(sorted(set(repaired_queries))[:10]),
+        )
 
     logging.getLogger(__name__).info(
         "catalog refresh: union of %s profile(s) — %s titles, %s keywords",
@@ -1842,10 +1963,56 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
             ingested_rows,
         )
 
+    # ---- JOB SOURCE ENRICHMENT — the two-pass catalog sweep ----------------
+    #
+    # An LLM reading the ads we just fetched to fill the shelves no source
+    # states as a field (visa 1.6% filled, seniority 7.5%, category 7.5% —
+    # measured 2026-08-17). It belongs HERE and not in a user search: these
+    # are facts about the JOB, identical for every user, so the cost is paid
+    # once per job by the shared catalog and never scales with user count
+    # (rule #10). It runs AFTER the fan-out so jobs fetched this very tick are
+    # eligible in the same run.
+    #
+    # Gated exactly like every other Engine-2 call site: ENGINE2_ENABLED OR the
+    # legacy ENRICHMENT_ENABLED (rule #18 — BOTH names). Both off ⇒ this block
+    # is never entered, and this cron behaves byte-identically to before it
+    # existed. That is deliberate: merging this must not start spending money.
+    # Its own hard caps (SHELF_ENRICHMENT_MAX_JOBS / _MAX_SPEND_USD) are the
+    # second line, and it writes what it spent into run_log.
+    enrichment_sweep_stats: dict[str, Any] = {}
+    if db is not None:
+        from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+
+        if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
+            from src.services.shelf_enrichment import (  # noqa: PLC0415
+                run_shelf_enrichment_sweep,
+            )
+
+            # ISOLATED, BECAUSE THIS TASK RETRIES. `max_tries = 5` on the ARQ
+            # worker means an exception escaping here re-runs the ENTIRE
+            # `refresh_catalog` — every source re-fetched, every job re-scored —
+            # to retry a bonus pass that runs after all of that work already
+            # succeeded. Up to four extra full catalog refreshes for one failed
+            # enrichment sweep. The sweep's own value is real but strictly
+            # additive: shelves it does not fill this tick are filled next tick.
+            # (CodeRabbit, PR #388.)
+            try:
+                enrichment_sweep_stats = await run_shelf_enrichment_sweep(
+                    db,
+                    llm_extract_validated_fn=ctx.get("llm_extract_validated"),
+                )
+            except Exception:  # noqa: BLE001 — a bonus pass must not undo the run
+                logging.getLogger(__name__).exception(
+                    "shelf_enrichment_sweep_failed",
+                    extra={"event": "shelf_enrichment_sweep_failed"},
+                )
+                enrichment_sweep_stats = {"error": "sweep raised — see the logged traceback"}
+
     return {
         "sources_queried": stats.get("sources_queried", 0),
         "total_found": stats.get("total_found", 0),
         "new_jobs": stats.get("new_jobs", 0),
         "scored_jobs": scored_jobs,
         "ingested_rows": ingested_rows,
+        "shelf_enrichment": enrichment_sweep_stats,
     }

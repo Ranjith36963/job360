@@ -49,10 +49,20 @@ logger = logging.getLogger("job360.utils.telemetry")
 class EnrichmentTelemetry:
     """Counters for the LLM enrichment pipeline."""
 
+    #: LLM requests actually MADE. Incremented after the call returns, never
+    #: before it — a job refused up front (see `stub_skipped`) costs nothing
+    #: and must not appear here, or the counter we bill and alert on reports
+    #: spend that did not happen.
     llm_calls: int = 0
     cache_hits: int = 0
+    #: The LLM was asked and its answer could not be validated into the schema.
     validation_failures: int = 0
     timeouts: int = 0
+    #: The ad was too thin to read honestly, so no provider was called. A
+    #: REFUSAL, not a failure — kept separate so it cannot be mistaken for the
+    #: model misbehaving, and so "how much of the catalog arrives unenrichable"
+    #: is answerable on its own.
+    stub_skipped: int = 0
 
 
 @dataclass

@@ -33,6 +33,7 @@ from typing import Any, Optional, cast
 
 from src.repositories import pg
 from src.services.channels.crypto import decrypt
+from src.services.channels.email_url import refresh_email_apprise_url
 from src.services.channels.ssrf_guard import assert_public_http_url
 from src.services.notifications.defaults import DEFAULT_SCORE_THRESHOLD
 from src.utils.logger import get_logger
@@ -87,8 +88,8 @@ def _assert_webhook_url_safe(channel_type: str, apprise_url: str) -> None:
     create time — this catches a host that was public when the channel was
     created but has since been re-pointed to a private IP (DNS rebinding).
 
-    No-op for non-webhook channels (slack/discord/telegram/email use their own
-    provider URLs, not user-supplied hosts). Raises ``ValueError`` when unsafe.
+    No-op for ``email`` — its Apprise URL points at our own provider, not at a
+    user-supplied host. Raises ``ValueError`` when unsafe.
     """
     if channel_type != "webhook":
         return
@@ -101,21 +102,55 @@ def _assert_webhook_url_safe(channel_type: str, apprise_url: str) -> None:
     assert_public_http_url(http_url)
 
 
+def _credential_for_send(channel_type: str, url: str) -> str:
+    """Return the URL to hand Apprise — rebuilt from the environment if we can.
+
+    Only ``email`` is rebuilt, and only when the rebuild is unambiguous;
+    everything else is returned untouched. See
+    ``email_url.refresh_email_apprise_url`` for why a stored email credential
+    goes stale (the Resend API key is baked inside it) and why a failed rebuild
+    must fall back to the stored value rather than fail the send — an
+    unconfigured environment must not turn a maybe-working channel into a
+    certainly-dead one.
+    """
+    if channel_type != "email":
+        return url
+    try:
+        rebuilt = refresh_email_apprise_url(url)
+    except Exception as exc:  # noqa: BLE001 — a refresh bug must never stop delivery
+        # This runs OUTSIDE the per-channel try/except below, so an escaping
+        # exception would abort the whole dispatch loop, not just this channel.
+        logger.warning("email credential refresh failed, using stored URL: %s", exc)
+        return url
+    if rebuilt is not None:
+        return rebuilt
+    if url.startswith("resend://"):
+        # Stored credential IS a resend URL, but the environment cannot produce
+        # one right now — RESEND_API_KEY missing, or outside the key alphabet.
+        # Say so loudly: without this line, "key rotated to something malformed"
+        # and "everything is fine" look identical in the logs, which is the
+        # exact failure class this branch exists to kill.
+        logger.warning(
+            "RESEND_API_KEY is missing or malformed; email channels are falling "
+            "back to their stored credential, which may be stale"
+        )
+    return url
+
+
 def format_payload(channel_type: str, title: str, body: str) -> tuple[str, str]:
     """Return (title, body) formatted for ``channel_type``.
 
-    Stub — Phase 6 ships a single plain-text shape. Blueprint §1 calls for
-    Slack Block Kit / Discord embed / Telegram MarkdownV2 richness; the
-    design keeps the channel-specific templating in one place so the
-    upgrade is a local change.
+    Today this is pass-through for both live channels. It is kept as a seam,
+    not as dead code: it is the ONE place per-channel templating belongs, so
+    the HTML email upgrade lands here instead of being sprayed through the
+    worker.
+
+    The Slack ``*bold*`` / Discord ``**bold**`` / Telegram MarkdownV2 branches
+    were deleted with those channels on 2026-08-24. `webhook` must stay raw —
+    it carries JSON to a user's own tooling, and markup would corrupt it.
+
+    Guard: ``tests/test_channels_dispatcher.py::test_format_payload_does_not_resurrect_chat_markup``
     """
-    if channel_type == "slack":
-        return title, f"*{title}*\n{body}"
-    if channel_type == "discord":
-        return title, f"**{title}**\n{body}"
-    if channel_type == "telegram":
-        return title, f"*{title}*\n{body}"
-    # email, webhook, default
     return title, body
 
 
@@ -328,7 +363,7 @@ async def dispatch(
             continue
 
         # Immediate dispatch via Apprise
-        url = decrypt(ch["credential_encrypted"])
+        url = _credential_for_send(ch_type, decrypt(ch["credential_encrypted"]))
         # SSRF re-check: block a webhook re-pointed to a private IP after create.
         try:
             _assert_webhook_url_safe(ch_type, url)
@@ -401,7 +436,7 @@ async def test_send(db: pg.Connection, channel_id: int, *, user_id: Optional[str
     row = await cur.fetchone()
     if row is None:
         return ChannelSendResult(channel_id=channel_id, channel_type="", ok=False, error="channel not found")
-    url = decrypt(row["credential_encrypted"])
+    url = _credential_for_send(row["channel_type"], decrypt(row["credential_encrypted"]))
     # SSRF re-check: block a webhook re-pointed to a private IP after create.
     try:
         _assert_webhook_url_safe(row["channel_type"], url)

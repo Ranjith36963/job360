@@ -2,6 +2,7 @@ import re
 from typing import Any, Callable, cast
 
 from src.models import Job
+from src.utils.loop_guard import cpu_bound
 
 # The ordering tuple produced by `_rank_key`: (match_score, enrichment bonus,
 # completeness). Layers 2–4 receive it as an injected callable.
@@ -81,6 +82,7 @@ def _enrichment_bonus(job: Job, enrichments: dict[int, Any] | None) -> int:
     return 5 if job_id is not None and job_id in enrichments else 0
 
 
+@cpu_bound
 def deduplicate(
     jobs: list[Job],
     enrichments: dict[int, Any] | None = None,

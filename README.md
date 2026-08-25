@@ -1,7 +1,7 @@
 # Job360
 <!-- doc: LIVING | last-verified: 2026-08-25 by the nightly doc-truth routine -->
 
-Automated UK job search system supporting **any professional domain**. Aggregates jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
+Automated UK job search system supporting **any professional domain**. Aggregates jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email or webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
 
 > **A profile is required.** Default keyword lists (`JOB_TITLES`, `PRIMARY_SKILLS`, …) were emptied on 2026-04-09 (commit `3ba1342`). Without a profile, the system has nothing to score against — `setup-profile` is now a mandatory first step, not optional.
 
@@ -37,9 +37,8 @@ flowchart TD
     Dedup --> DB[(Postgres\nSeen Jobs + Run Log)]
 
     DB --> Channels{Apprise dispatcher}
-    Channels --> Email[Email\nHTML + CSV]
-    Channels --> Slack[Slack\nBlock Kit]
-    Channels --> Discord[Discord\nEmbeds]
+    Channels --> Email[Email\nThe product]
+    Channels --> Webhook[Webhook\nRaw JSON, unsupported]
 
     DB --> CSV[CSV Export]
     DB --> Report[Markdown Report]
@@ -86,15 +85,14 @@ flowchart TD
 - **Company name cleaning** — strips suffixes like "Ltd", "Inc", "Limited", and region tags like "UK", "EMEA" for consistent dedup
 - **Salary outlier filtering** — ignores unrealistic salary values (<10k or >500k)
 
-### Notifications (extensible)
-- **Email** — HTML digest with top jobs, scores, apply links, and CSV attachment via Gmail SMTP
-- **Slack** — rich Block Kit message with top 10 jobs via webhook
-- **Discord** — embed message with top 10 jobs via webhook
-- **Apprise dispatcher** — per-user channels stored in the DB; add one as an Apprise URL, not a Python class
+### Notifications (email + webhook only)
+- **Email** — the product. The daily shortlist, built from the same `DecisionCard` the dashboard renders (score, verdict, reason, salary). **Resend's HTTPS API is the production transport** (Railway blocks outbound SMTP ports 25/465/587); a local or self-hosted SMTP relay remains supported as a fallback when no Resend key is configured — see `backend/src/services/channels/email_url.py`
+- **Webhook** — unsupported escape hatch. Raw JSON for a technical user's own tooling; no design, no promises
+- **Apprise dispatcher** — per-user channels stored in the DB. Slack, Discord and Telegram were removed 2026-08-24 (never configured in production, zero users ever connected one) — see `docs/plans/2026-08-24-email-webhook-only-delivery.md`
 
 ### CLI (Click)
-- `run` — full pipeline with `--source`, `--dry-run`, `--log-level`, `--db-path`, `--no-email` options
-- `view` — Rich terminal table with `--hours`, `--min-score`, `--source`, `--visa-only`, `--db-path` filters
+- `run` — full pipeline with `--source`, `--dry-run`, `--log-level`, `--no-email` options
+- `view` — Rich terminal table with `--hours`, `--min-score`, `--source`, `--visa-only` filters
 - `setup-profile` — interactive profile wizard with `--cv`, `--linkedin`, `--github` options
 - `api` — start the FastAPI backend server (consumed by the Next.js frontend)
 - `status` — show last run stats from database
@@ -103,7 +101,7 @@ flowchart TD
 
 ### Frontend (Next.js + FastAPI)
 - Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
-- Talks to FastAPI (`backend/src/api/`) over HTTP — 13 route modules, 72 endpoints (health, jobs, actions, profile, search, pipeline, tailor, channels, notifications, runs)
+- Talks to FastAPI (`backend/src/api/`) over HTTP — 13 route modules, 65 endpoints (health, jobs, actions, profile, search, pipeline, tailor, channels, notifications, runs)
 - Job list with filters, score radar, time buckets
 - Profile setup: CV upload, LinkedIn profile PDF import, GitHub username, preferences form
 - Application pipeline Kanban board
@@ -146,8 +144,10 @@ flowchart TD
 | `test_models.py` | 25 | Job dataclass, normalisation, company cleaning |
 | `test_main.py` | 18 | Orchestrator (IS in the canonical run — carries no `live` marker) |
 | `test_llm_provider.py` | 18 | Multi-provider LLM client for CV parsing |
+| `test_decision_card.py` | 22 | What a matched job *says* — one definition shared by dashboard and email |
 | `test_database.py` | 16 | Postgres operations, migrations, source history |
-| `test_channels_dispatcher.py` | 15 | Apprise dispatch, quiet hours, digest queueing |
+| `test_channels_dispatcher.py` | 16 | Apprise dispatch, quiet hours, digest queueing |
+| `test_digest_email_body.py` | 12 | How the daily email reads (verdict first, the honest "no", empty days) |
 | `test_cli.py` | 11 | CLI commands + SOURCE_REGISTRY assertions |
 | `test_notification_rules.py` | 11 | One-rulebook-per-user rules + routes |
 | `test_reports.py` | 6 | Markdown + HTML report generation |
@@ -211,9 +211,6 @@ python -m src.cli run --no-email
 # Debug logging
 python -m src.cli run --log-level DEBUG
 
-# Custom database path
-python -m src.cli run --db-path /tmp/test.db
-
 # Combine options
 python -m src.cli run --source greenhouse --dry-run --log-level DEBUG
 
@@ -227,7 +224,6 @@ python -m src.cli setup-profile --linkedin linkedin-profile.pdf --github user
 python -m src.cli view
 python -m src.cli view --hours 24 --min-score 50
 python -m src.cli view --source reed --visa-only
-python -m src.cli view --db-path /tmp/test.db
 
 # Start the FastAPI backend (consumed by the Next.js frontend)
 python -m src.cli api
@@ -253,18 +249,20 @@ python -m src.cli sources
 | GitHub | [github.com/settings/tokens](https://github.com/settings/tokens) | `GITHUB_TOKEN` (optional, for profile enrichment) |
 | Email delivery | [resend.com](https://resend.com/) | `RESEND_API_KEY` (+ `SMTP_FROM`). Powers magic-link email AND the per-user email alert channel. Falls back to `SMTP_EMAIL`/`SMTP_PASSWORD`/`SMTP_HOST`/`SMTP_PORT` over SMTP where the host allows it — Railway does not |
 
-> **`NOTIFY_EMAIL`, `SLACK_WEBHOOK_URL` and `DISCORD_WEBHOOK_URL` no longer notify anyone.**
-> They are still declared in `backend/src/core/settings.py:78,81,82` and read by
-> nothing under `backend/src/`, `backend/tests/` or `scripts/`. They belonged to the
-> pre-Batch-2 single-tenant notifier, which was deleted. Slack, Discord and Telegram
-> are now per-user channels created through the Connect flow
-> (`GET /api/settings/channels/connect/*`), not env vars.
+> **`NOTIFY_EMAIL` no longer notifies anyone.** It is still declared in
+> `backend/src/core/settings.py:78` and read by nothing under `backend/src/`,
+> `backend/tests/` or `scripts/`. It belonged to the pre-Batch-2 single-tenant
+> notifier, which was deleted.
 >
-> The names do appear elsewhere, and it is a different system: `cron_setup.sh:41-42`
-> greps `.env` for them only to print a "configured" line, and CI sends its own
-> build alerts through a `SLACK_WEBHOOK_URL` **repository secret**
-> (`.github/workflows/post-merge-watch.yml:413-423`). Setting them in the app's
-> environment still delivers nothing to a user.
+> **`SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL` and the `TELEGRAM_*` settings are
+> gone entirely** — deleted on 2026-08-24 along with the chat channels themselves
+> (never configured in production, zero users ever connected one). Delivery is
+> email + webhook only; see `docs/plans/2026-08-24-email-webhook-only-delivery.md`.
+>
+> One name survives elsewhere and it is a DIFFERENT system: CI sends its own build
+> alerts through a `SLACK_WEBHOOK_URL` **repository secret**
+> (`.github/actions/slack`), which pages the owner when `main` goes red. That is
+> untouched. Setting either name in the *app's* environment delivers nothing.
 
 **Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, HN Jobs, Teaching Vacancies, LinkedIn, Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, NHS Jobs, WeWorkRemotely, RealWorkFromAnywhere, University Jobs, Climatebase, 80000Hours, BCS Jobs, AIJobs AI, Indeed/Glassdoor (if python-jobspy installed), HackerNews, TheMuse, NoFluffJobs, Gov Apprenticeships (DFE_APPRENTICESHIPS_API_KEY — key required) — **33 of 41 sources work without any API keys** (8 keyed). Dropped in Batch 3: yc_companies, findajob, nomis. Dropped in M6: jobtensor, comeet, aijobs_global. Dropped 2026-08-10 (dead upstreams): aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml.
 
@@ -299,9 +297,13 @@ Four engines, all opt-in except the keyword engine. **Engines 2–4 default OFF.
 ## Notification Channels
 
 Notification delivery goes through the **Apprise dispatcher** at
-`backend/src/services/channels/dispatcher.py`. It handles multi-channel per-user delivery
-(email/Slack/Discord/Telegram/webhook) and applies each user's rules: score threshold,
-timezone-aware quiet hours, and digest mode.
+`backend/src/services/channels/dispatcher.py`. It handles per-user delivery on the two
+supported channels — **email** (the product) and **webhook** (an unsupported raw-JSON escape
+hatch) — and applies each user's single rulebook: score threshold, timezone-aware quiet
+hours, and digest mode (rule #23 — one `notification_rules` row per user governs every
+channel they've connected, never one row per channel). Slack, Discord and Telegram channels
+were removed 2026-08-24 — never configured in production, zero users ever connected one. See
+`docs/plans/2026-08-24-email-webhook-only-delivery.md`.
 
 > ⚠️ **The `NotificationChannel` ABC is GONE — do not write against it.** It used to live at
 > `backend/src/services/notifications/base.py`. That file, the auto-discovery helpers
@@ -321,9 +323,11 @@ await dispatcher.dispatch(...)                               # deliver, honourin
 await dispatcher.test_send(db, channel_id)                   # one-off "does this work?" send
 ```
 
-**Adding a new channel** (e.g. Telegram): Apprise already speaks most services, so a channel is
-normally a new Apprise URL stored against the user — not a new Python class. Recipe:
-`.claude/skills/add-source/SKILL.md`.
+**Adding a new channel:** delivery is deliberately email + webhook only — see
+`.claude/skills/add-source/SKILL.md` ("do not add one" — zero users ever connected a third
+channel, and the earlier five-channel surface was cut for exactly that reason). If a real need
+appears, Apprise already speaks most services, so a channel is normally a new Apprise URL
+stored against the user, not a new Python class; the recipe is in that same skill file.
 
 ## Adding a New Job Source
 
@@ -377,12 +381,12 @@ job360/
 │   ├── main.py                  # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml           # Deps + [dev] extras; ruff/mypy/pytest config
 │   ├── data/                    # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — Postgres since 2026-07-02
-│   ├── migrations/              # 31 forward+reverse SQL migration pairs (0000 → 0030) + runner.py
+│   ├── migrations/              # forward/reverse SQL migration pairs + runner.py (counts: ARCHITECTURE.md code-facts)
 │   └── src/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (41), _build_sources()
 │       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile, rescore-backfill
 │       ├── models.py            # Job dataclass + normalized_key()
-│       ├── api/                 # FastAPI app + 13 route modules (72 endpoints)
+│       ├── api/                 # FastAPI app + 13 route modules (65 endpoints)
 │       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)
@@ -456,9 +460,8 @@ Each run produces:
 | CSV | `backend/data/exports/jobs_YYYYMMDD_HHMMSS.csv` | Full job data with scores |
 | Markdown | `backend/data/reports/report_YYYYMMDD_HHMMSS.md` | Ranked job tables |
 | Rich table | Terminal (`python -m src.cli view`) | Time-bucketed terminal table with filters |
-| Email | Inbox | HTML digest with top jobs + CSV attachment |
-| Slack | Channel | Block Kit message with top 10 jobs |
-| Discord | Channel | Embed message with top 10 jobs |
+| Email | Inbox | The daily shortlist — same `DecisionCard` data the dashboard shows |
+| Webhook | Configured endpoint | Raw JSON, unsupported escape hatch |
 | Frontend | `http://localhost:3000` | Next.js UI (requires FastAPI on `:8000`) |
 | Console | Terminal | Time-bucketed summary of new jobs found |
 | Logs | `backend/data/logs/job360.log` | Rotating log file (5MB, 3 backups) |

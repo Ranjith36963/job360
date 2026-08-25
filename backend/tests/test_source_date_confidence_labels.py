@@ -55,7 +55,11 @@ def _literal_confidences(source_path: Path) -> list[str]:
 # ignoring, so all four now derive their label dynamically via
 # normalize_posted_at() instead of hardcoding one.
 #
-#   workable    -> `published`       (100% fill)
+#   workable    -> `published_on`    (100% fill on the widget endpoint,
+#                                     re-measured 2026-08-24. It was recorded
+#                                     here as `published`, which is the OLD
+#                                     POST /api/v2 name and is 0% present on
+#                                     the widget response the adapter now uses.)
 #   personio    -> `createdAt`       (ISO-8601)
 #   nhs_jobs    -> `postDate`        (100% fill; the feed comment claiming no
 #                                     posted date was simply out of date)

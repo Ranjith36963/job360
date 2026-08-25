@@ -61,6 +61,26 @@ class LandingJobsSource(BaseJobSource):
                 else:
                     description = tags
 
+                # `main_requirements` (98% fill live) / `nice_to_have` (48%
+                # fill live) are separate HTML-prose fields that sat unread
+                # next to role_description. Append them so the requirements
+                # text — which is where visa/deadline extraction usually
+                # finds its evidence — actually reaches the description.
+                for extra_key in ("main_requirements", "nice_to_have"):
+                    extra_raw = item.get(extra_key) or ""
+                    if extra_raw:
+                        extra_text = _HTML_TAG_RE.sub(" ", html.unescape(extra_raw)).strip()
+                        if extra_text:
+                            description = (description + "\n\n" + extra_text).strip()
+
+                # CAPPED, like every other source in this cohort — devitjobs,
+                # hn_jobs, remotive, teaching_vacancies, careerjet and findwork
+                # all use 5,000. Appending two more prose fields made this the
+                # one source that could store an unbounded description, and that
+                # text rides into the enrichment LLM prompt, where length is
+                # money. (CodeRabbit, PR #388.)
+                description = description[:5000]
+
                 # Build location string
                 location_parts = []
                 for loc in locations:
@@ -102,6 +122,26 @@ class LandingJobsSource(BaseJobSource):
                 except (ValueError, TypeError):
                     salary_max = None
 
+                # `currency_code` (100% fill live) is the real currency of
+                # gross_salary_low/high — measured live 2026-08-16: 0 of 50
+                # sampled jobs are actually GBP (46 EUR, 3 BRL, 1 USD), all of
+                # which were being stored as if they were GBP with no
+                # currency tag at all. Raw value only; the gate converts
+                # units (UNIVERSAL_SHELF.md SS2 SALARY).
+                salary_currency = item.get("currency_code")
+
+                # `type` (100% fill live, e.g. "Full-time") is the listing's
+                # own employment type string. Raw value; the gate normalises
+                # against the closed EmploymentType enum.
+                employment_type = item.get("type")
+
+                # `remote` (100% fill live, already used above to build the
+                # location string) was never handed to workplace_mode. Only
+                # the TRUE case is mapped -- False just means "not tagged
+                # remote", not "definitely onsite/hybrid" (rule #29: never
+                # invent the untold half of a fact).
+                workplace_mode = "Remote" if is_remote else None
+
                 jobs.append(Job(
                     title=title,
                     company=company,
@@ -117,6 +157,10 @@ class LandingJobsSource(BaseJobSource):
                     deadline_source=deadline_source,
                     salary_min=salary_min,
                     salary_max=salary_max,
+                    salary_currency=salary_currency,
+                    employment_type=employment_type,
+                    workplace_mode=workplace_mode,
+                    source_tags=item.get("tags") or [],
                 ))
 
             if len(data) < limit:

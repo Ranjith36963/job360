@@ -21,7 +21,7 @@ def cli() -> None:
 @click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
               default="INFO", help="Set logging verbosity.")
 @click.option("--db-path", default=None, help="Override database file path.")
-@click.option("--no-email", is_flag=True, help="Skip all notifications (email, Slack, Discord).")
+@click.option("--no-email", is_flag=True, help="Skip all notifications (email, webhook).")
 def run(
     source: Optional[str],
     dry_run: bool,

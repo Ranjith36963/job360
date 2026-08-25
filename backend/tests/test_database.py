@@ -364,3 +364,55 @@ async def test_refetch_backfills_empty_description():
         assert (await cur.fetchone())[0] == "Full posting text now available."
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_refetch_upgrades_a_teaser_to_the_full_advert():
+    """A TEASER IS NOT EMPTY — the whole reason the source-side text recovery
+    needed an ingest change too.
+
+    reed's list endpoint ships a ~453-char teaser and its detail endpoint the
+    full ~4,700-char ad. The old guard only filled a description that was
+    EMPTY, so on the 10,579 jobs already stored the recovered full text could
+    never land: the row kept its teaser until it aged out through the 30-day
+    purge. Now a MATERIALLY longer description replaces a shorter one, and the
+    three guards below stop that from becoming churn.
+    """
+    from src.models import Job as _Job
+
+    def _job(desc: str, when: str) -> _Job:
+        return _Job(title="AI Architect", company="Reed Client", apply_url="https://x/1",
+                    source="reed", date_found=when, location="London, UK", description=desc)
+
+    teaser = "A" * 453
+    full_ad = "B" * 4700
+
+    db = JobDatabase(":memory:")
+    await db.init_db()
+    try:
+        assert await db.insert_job(_job(teaser, "2026-08-16T00:00:00+00:00")) is True
+
+        # 1. The full advert REPLACES the teaser.
+        assert await db.insert_job(_job(full_ad, "2026-08-16T01:00:00+00:00")) is False
+        cur = await db._db.execute("SELECT description FROM jobs")
+        assert (await cur.fetchone())[0] == full_ad, "the full advert did not replace the teaser"
+
+        # 2. It can never go BACKWARDS. Next run the detail-fetch budget is
+        #    spent and only the teaser comes back — the stored text must hold.
+        await db.insert_job(_job(teaser, "2026-08-16T02:00:00+00:00"))
+        cur = await db._db.execute("SELECT description FROM jobs")
+        assert (await cur.fetchone())[0] == full_ad, "a shorter re-fetch overwrote the full advert"
+
+        # 3. NO THRASH. A version that is merely a bit longer (a footer, a
+        #    cookie banner, a re-rendered 'Apply now') does not rewrite the row:
+        #    it clears neither the +200-char floor nor the 1.2x ratio.
+        assert await db.insert_job(_job(full_ad + "C" * 150, "2026-08-16T03:00:00+00:00")) is False
+        cur = await db._db.execute("SELECT description FROM jobs")
+        assert (await cur.fetchone())[0] == full_ad, "a trivial length gain rewrote the row"
+
+        # 4. And an identical re-fetch is a no-op for the same reason.
+        await db.insert_job(_job(full_ad, "2026-08-16T04:00:00+00:00"))
+        cur = await db._db.execute("SELECT description FROM jobs")
+        assert (await cur.fetchone())[0] == full_ad
+    finally:
+        await db.close()

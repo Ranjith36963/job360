@@ -71,6 +71,13 @@ LIVING_DOCS = [
     "docs/product/pillars/01-user-pillar.md",
     "docs/product/pillars/02-search-and-match-engine.md",
     "docs/product/pillars/glossary.md",
+    # Added 2026-08-25 with the Universal Shelf. `pillar-unwatched` exists
+    # precisely so a new AUTHORITATIVE doc cannot arrive unchecked, and it
+    # fired on all three of these the moment they landed — the guard catching
+    # its own blind spot being widened, which is the point of it.
+    "docs/product/pillars/CATALOG_STATE.md",
+    "docs/product/pillars/SHELF_FILL_MEASURED.md",
+    "docs/product/pillars/UNIVERSAL_SHELF.md",
     # Added 2026-08-24 (third batch) after the nightly routine found
     # runbook.md still telling operators to run `sqlite3 data/jobs.db` against a
     # database that has been Postgres since 2026-07-02 -- five dead commands in
@@ -546,13 +553,27 @@ def living_surface() -> tuple[int, int]:
     deleted is a lie that can never be told again; a line reworded is a lie
     with a fresh expiry date. Watch the trend, not any single run.
     """
+    # Swallows the blank line that follows the block too: a generated
+    # region must cost ZERO surface lines, or converting prose into one
+    # still nudges the number up and the incentive breaks at the margin.
+    GENERATED = re.compile(
+        r"<!--\s*generated:.*?-->.*?<!--\s*/generated\s*-->\n?", re.S)
     docs = lines = 0
     for rel in living_stamped_docs():
         path = ROOT / rel
         if not path.exists():
             continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        # Generated regions are EXCLUDED, and the incentive is the point.
+        # This number is meant to count prose that CAN become false; a block
+        # written from the code every build cannot. Counting it would punish
+        # the one fix that ends drift instead of merely reporting it -- adding
+        # a generated table would raise the surface and fail the ratchet, so
+        # nobody would ever do it. Excluded, converting prose into a generated
+        # block makes the number FALL, which is the behaviour worth rewarding.
+        text = GENERATED.sub("", text)
         docs += 1
-        lines += len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+        lines += len(text.splitlines())
     return (docs, lines)
 
 
@@ -754,6 +775,124 @@ def missing_reader_banner() -> list[str]:
         if m and m.group(1) in kinds and "<!-- banner: auto -->" not in head:
             bad.append(f"{rel} ({m.group(1)})")
     return bad
+
+
+def unreadable_env_vars() -> list[tuple[str, str, str]]:
+    """(doc, line, NAME) for a row under an env-var heading that no code reads.
+
+    Added 2026-08-25. ARCHITECTURE.md's "Environment Variables (.env)" table
+    listed SEVEN names that are plain constants in `core/settings.py` with no
+    `os.getenv` anywhere: MIN_MATCH_SCORE, MAX_RESULTS_PER_SOURCE,
+    MAX_DAYS_OLD, MAX_RETRIES, RETRY_BACKOFF, REQUEST_TIMEOUT, USER_AGENT.
+
+    This is the actively misleading kind rather than the merely stale kind.
+    Someone sets MAX_DAYS_OLD=30 in .env, restarts, sees no change, and has no
+    way to discover why -- the doc told them it was a knob and the code never
+    looks. All seven were deleted; the fact lives in the code that holds them.
+
+    ONE DIRECTION ONLY, deliberately. "Listed but never read" is decidable from
+    a name search. The reverse -- "read but not documented" -- is not: 105
+    names are read across the tree, most of them incidental (CI, tooling,
+    third-party libraries), and demanding every one appear in a hand-written
+    table would be noise, then an ignored report, then a dead guard.
+    """
+    heading = re.compile(r"^#{2,4}\s+Environment Variables", re.I)
+    row = re.compile(r"^\|\s*`([A-Z][A-Z0-9_]{3,})`")
+    out: list[tuple[str, str, str]] = []
+
+    sources = ""
+    for sub, globs in (("backend/src", ("*.py",)), ("frontend/src", ("*.ts", "*.tsx"))):
+        base = ROOT / sub
+        if not base.exists():
+            continue
+        for g in globs:
+            for f in base.rglob(g):
+                sources += f.read_text(encoding="utf-8", errors="replace")
+    if not sources:
+        return []
+
+    for rel in living_stamped_docs():
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        in_section = False
+        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if line.startswith("#"):
+                in_section = bool(heading.match(line))
+                continue
+            if not in_section:
+                continue
+            m = row.match(line)
+            if not m:
+                continue
+            name = m.group(1)
+            if f'"{name}"' in sources or f"'{name}'" in sources \
+                    or f"process.env.{name}" in sources:
+                continue
+            out.append((rel, str(i), name))
+    return out
+
+
+def doc_tree_dead_paths() -> list[tuple[str, str, str]]:
+    """(doc, line, path) for a directory-tree entry naming a file that is gone.
+
+    Added 2026-08-25. ARCHITECTURE.md carries a 69-entry tree of the repo, and
+    a tree is the purest restatement there is -- it is a copy of `ls`. The
+    honest first instinct was to delete it, and the second was to generate it,
+    but neither is right: the tree is CURATED. It names the ~69 paths that
+    matter out of thousands, and that selection is real editorial judgement a
+    generator cannot reproduce and a deletion would throw away.
+
+    What is checkable is every path it names. A tree rots one way -- a file
+    moves or dies and the entry stays, sending a reader (or an agent) to a path
+    that is not there. `LOCATIONS (25)` lived in this tree, wrong, for weeks.
+
+    Depth comes from where the ``+--`` marker sits: four columns per level.
+    Only entries under a directory the tree itself introduced are resolved, so
+    a bare filename never gets checked against the repo root by accident.
+    """
+    entry = re.compile(r"^(?P<indent>[\s│]*)[├└]──\s+"
+                       r"(?P<name>[A-Za-z0-9_.\-/]+)")
+    out: list[tuple[str, str, str]] = []
+
+    for rel in living_stamped_docs():
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        stack: dict[int, str] = {}
+        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            m = entry.match(line)
+            if not m:
+                continue
+            depth = len(m.group("indent")) // 4
+            name = m.group("name").rstrip("/")
+            parent = stack.get(depth - 1, "") if depth else ""
+            full = f"{parent}/{name}" if parent else name
+            stack[depth] = full
+            for deeper in [d for d in stack if d > depth]:
+                stack.pop(deeper, None)
+            # A trailing-slash or extension-less entry is a directory; either
+            # way the question is the same: is anything there?
+            # Only trust the verdict when the PARENT resolves. A tree whose
+            # root is a bare header line ("frontend/src/components/") rather
+            # than a ├── entry gives its children no prefix, and they then
+            # resolve against the repo root: the first cut reported 142 dead
+            # paths, of which the overwhelming majority were `ui`, `jobs`,
+            # `profile` -- my parsing being wrong, not the doc being wrong.
+            # 142 false alarms would have buried the handful of real ones and
+            # taught everyone to skip the report.
+            # COVERAGE BOUND, stated plainly: only entries whose parent was
+            # established INSIDE the tree are checked. A depth-0 entry in a
+            # tree introduced by a bare header ("frontend/src/components/")
+            # has no prefix at all, so `src` or `ui` would be resolved against
+            # the repo root and reported dead when the doc is fine. This guard
+            # therefore watches nested entries, not every line of every tree —
+            # a smaller true claim beats a larger false one.
+            if not parent or not (ROOT / parent).is_dir():
+                continue
+            if not (ROOT / full).exists():
+                out.append((rel, str(i), full))
+    return out
 
 
 def control_chars_in_guards() -> list[tuple[str, str, str]]:
@@ -1388,7 +1527,6 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
     drift apart — which is the exact failure mode this whole file exists for.
     """
     registry, unique_classes = registry_counts()
-    mig_head = migration_head()
     ats_slugs, ats_lists = ats_slug_count()
     job_fields = dataclass_field_count("backend/src/models.py", "Job")
     enr_fields = dataclass_field_count(
@@ -1413,7 +1551,6 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # nothing at all.
         ("registry", registry, r"SOURCE_REGISTRY`?\s+has\s+(\d+)\s+entries"),
         ("unique-classes", unique_classes, r"(\d+) unique source classes"),
-        ("migration-head", mig_head, r"0000 → (\d{4})"),
         # Added 2026-08-03. The checker tracked THREE facts, so every other
         # number in the docs rotted silently — an audit found the rule count,
         # the route/endpoint counts and three mutually-contradictory test counts
@@ -1470,8 +1607,6 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # search-and-match-engine pillar read "14-migration" against 31 actual
         # forward migrations. The existing `migration-head` guard watches only
         # "0000 → NNNN" phrasing, so both stale numbers slid past for weeks.
-        ("migrations-schema", migration_file_count(),
-         r"(\d+)-migration forward-compat schema"),
         # The same COUNT, stated two other ways in the directory trees. Found by
         # CodeRabbit on PR #394: both lines end "(0000 → 0030)", so
         # `migration-head` matched them and they LOOKED guarded -- but that guard
@@ -1479,10 +1614,14 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # correctly force the head to 0031 while "31 forward/reverse SQL
         # migrations" quietly stayed 31. A guard on the same line is not a guard
         # on the same fact.
-        ("migrations-schema", migration_file_count(),
-         r"(\d+) forward/reverse SQL migrations"),
-        ("migrations-schema", migration_file_count(),
-         r"(\d+) forward\+reverse SQL migration pairs"),
+        # RETIRED 2026-08-25, and this is the flywheel arriving. The migration
+        # head and the migration COUNT are both produced by gen_doc_blocks.py
+        # into ARCHITECTURE.md's code-facts block, so they cannot drift at all
+        # -- and the hand-written copies these patterns watched are deleted.
+        # A guard watching a claim nobody writes any more is not free: it is a
+        # green tick asserting nothing, which is the failure this whole file
+        # exists to prevent. Generation retires its own guards; that is the
+        # point of preferring it.
         # Sixth batch, 2026-08-24, at CodeRabbit's request on PR #394.
         # CONFIGURED (302 slugs / 11 lists) was guarded; ACTIVE (10 boards
         # polling 297) was not, though the docs state both. A rotation that
@@ -1627,6 +1766,17 @@ def main() -> int:
         rel, _, detail = row.partition(": ")
         drift.append((rel, "1", "line-citation-ratchet", detail,
                       "a line number rots on any edit above it — cite a symbol"))
+
+    # An env var the code never reads is a knob that does nothing.
+    for doc, line_no, name in unreadable_env_vars():
+        drift.append((doc, line_no, "env-var-not-read", name,
+                      "listed as an environment variable, but no code reads it"))
+
+    # A tree entry pointing at a file that is gone sends a reader, or an
+    # agent, to a path that is not there.
+    for doc, line_no, dead in doc_tree_dead_paths():
+        drift.append((doc, line_no, "tree-dead-path", dead,
+                      "directory-tree entry names a path that does not exist"))
 
     # A stamp the reader cannot see does not retire the claim under it.
     for rel in missing_reader_banner():

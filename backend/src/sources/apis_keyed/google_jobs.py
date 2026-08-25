@@ -56,6 +56,16 @@ class GoogleJobsSource(BaseJobSource):
                 "q": query,
                 "location": "United Kingdom",
                 "api_key": self._api_key,
+                # SerpApi otherwise localises detected_extensions to whatever
+                # language it infers from the request — confirmed live
+                # 2026-08-16: the SAME query returned "Tiempo completo"/
+                # "Contratista" (Spanish) with no hl/gl, and "Full-time"/
+                # "Contractor" once these were added. That silently broke
+                # BOTH _parse_posted_at's "X days ago" regex (Spanish "hace
+                # X días" never matched) AND schedule_type below — zero
+                # extra requests, same SerpApi call, real correctness fix.
+                "hl": "en",
+                "gl": "uk",
             }
             data = await self._get_json(
                 "https://serpapi.com/search",
@@ -121,6 +131,10 @@ class GoogleJobsSource(BaseJobSource):
                     date_posted_raw=raw_posted or None,
                     salary_min=salary_min,
                     salary_max=salary_max,
+                    # `schedule_type` sits in the SAME detected_extensions
+                    # dict we already read posted_at and salary from — zero
+                    # extra cost, confirmed populated live 2026-08-16.
+                    employment_type=extensions.get("schedule_type"),
                 ))
 
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]

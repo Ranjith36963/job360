@@ -36,22 +36,50 @@ REPORTS_DIR = DATA_DIR / "reports"
 LOGS_DIR = DATA_DIR / "logs"
 METRICS_DIR = DATA_DIR / "metrics"
 
+def _secret(name: str) -> str:
+    """Read a credential, stripping surrounding whitespace.
+
+    Secrets are pasted into a dashboard by hand, so a trailing newline or space
+    rides along more often than anyone expects. It is invisible in every UI and
+    fatal wherever the value is concatenated rather than form-encoded — a key in
+    a URL path or a header becomes a DIFFERENT key, and the upstream answers 401
+    or 403, which reads exactly like "the key is wrong" rather than "the key has
+    a space on the end".
+
+    Measured on production 2026-08-24: SERPAPI_KEY and JSEARCH_API_KEY both carry
+    surrounding whitespace on the worker service, and google_jobs was returning
+    HTTP 401 while the same account's key looked correct.
+
+    Stripping is safe for every credential here: none of these vendors issue keys
+    whose leading or trailing whitespace is significant.
+    """
+    return os.getenv(name, "").strip()
+
+
 # API Keys (Group A)
-REED_API_KEY = os.getenv("REED_API_KEY", "")
-ADZUNA_APP_ID = os.getenv("ADZUNA_APP_ID", "")
-ADZUNA_APP_KEY = os.getenv("ADZUNA_APP_KEY", "")
-JSEARCH_API_KEY = os.getenv("JSEARCH_API_KEY", "")
-JOOBLE_API_KEY = os.getenv("JOOBLE_API_KEY", "")
-SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
-CAREERJET_AFFID = os.getenv("CAREERJET_AFFID", "")
-FINDWORK_API_KEY = os.getenv("FINDWORK_API_KEY", "")
+REED_API_KEY = _secret("REED_API_KEY")
+ADZUNA_APP_ID = _secret("ADZUNA_APP_ID")
+ADZUNA_APP_KEY = _secret("ADZUNA_APP_KEY")
+JSEARCH_API_KEY = _secret("JSEARCH_API_KEY")
+JOOBLE_API_KEY = _secret("JOOBLE_API_KEY")
+SERPAPI_KEY = _secret("SERPAPI_KEY")
+CAREERJET_AFFID = _secret("CAREERJET_AFFID")
+FINDWORK_API_KEY = _secret("FINDWORK_API_KEY")
 # DfE "Find an apprenticeship" Display Advert API v2 — register for a free
 # subscription key at https://developer.apprenticeships.education.gov.uk.
 # Empty (default) → the gov_apprenticeships source skips gracefully.
-DFE_APPRENTICESHIPS_API_KEY = os.getenv("DFE_APPRENTICESHIPS_API_KEY", "")
+DFE_APPRENTICESHIPS_API_KEY = _secret("DFE_APPRENTICESHIPS_API_KEY")
 
 # GitHub (optional — for higher rate limits on profile enrichment)
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+# Accepts either name. Measured 2026-08-24 across all four environments: the
+# developer's .env defines GITHUB_TOKEN, while BOTH Railway services define
+# GITHUB_PERSONAL_ACCESS_TOKEN — so `os.getenv("GITHUB_TOKEN")` found nothing in
+# production and GitHub profile enrichment ran unauthenticated at 60 requests/hour
+# instead of 5,000, silently, because an absent token is a supported state.
+#
+# Reading both is the fix that cannot drift: renaming one side would leave the
+# other environment broken until someone noticed, and nobody noticed this one.
+GITHUB_TOKEN = _secret("GITHUB_TOKEN") or _secret("GITHUB_PERSONAL_ACCESS_TOKEN")
 
 # LLM providers for CV analysis.
 # OpenAI (paid) is the PRIMARY — reliable quota, deterministic (temp 0), structured
@@ -77,33 +105,45 @@ SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 
-# Slack / Discord webhooks
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+# NOTE (2026-08-24) — the per-user Slack / Discord / Telegram delivery channels
+# were removed. Nine settings lived here for them: SLACK_WEBHOOK_URL,
+# DISCORD_WEBHOOK_URL (which had ZERO consumers anywhere in the codebase — dead
+# on arrival), SLACK_CLIENT_ID/SECRET, DISCORD_CLIENT_ID/SECRET,
+# TELEGRAM_BOT_TOKEN/USERNAME, and OAUTH_REDIRECT_BASE, which existed solely to
+# build the Slack and Discord OAuth redirect URIs.
+#
+# Delivery is email + webhook only. See
+# docs/plans/2026-08-24-email-webhook-only-delivery.md
+#
+# Do NOT confuse these with the CI/harness alerting secrets of the same family
+# (SLACK_BOT_TOKEN, and the repo-level SLACK_WEBHOOK_URL used by
+# .github/actions/slack). Those page the owner when a build breaks, are
+# configured as GitHub repo secrets rather than app settings, and are untouched.
 
-# Slack OAuth App credentials (one-click connect flow).
-# Register at https://api.slack.com/apps — set OAuth redirect URL to
-# {OAUTH_REDIRECT_BASE}/api/settings/channels/callback/slack
-# Leave blank (default) to disable the /connect/slack endpoint.
-SLACK_CLIENT_ID = os.getenv("SLACK_CLIENT_ID", "")
-SLACK_CLIENT_SECRET = os.getenv("SLACK_CLIENT_SECRET", "")
-# Public-facing base URL of this deployment (no trailing slash).
-# Used to build the OAuth redirect_uri sent to Slack and Discord.
-OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "")
-
-# Discord OAuth App credentials (one-click connect flow).
-# Register at https://discord.com/developers/applications — add the
-# incoming-webhook scope and set the redirect URL to
-# {OAUTH_REDIRECT_BASE}/api/settings/channels/callback/discord
-# Leave blank (default) to disable the /connect/discord endpoint.
-DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
-DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
-
-# Telegram Bot credentials (deep-link + poll connect flow).
-# Create a bot via @BotFather on Telegram to obtain both values.
-# Leave blank (default) to disable the /connect/telegram endpoint.
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")
+# Where a link in a delivered notification points. Every job link in an email
+# is built from this, never from the employer's raw ``apply_url`` — the click
+# has to land on our page so we can (a) attribute it, (b) say "this closed"
+# instead of dumping the reader on a 404, and (c) not look like the scam mail
+# job seekers are drowning in.
+#
+# A PARAMETER, not a hardcode: staging, preview deploys and local dev all need
+# a different origin, and a link that silently points at production from a
+# staging send is a real way to mislead a real person.
+# NORMALISE FIRST, fall back LAST. This got written wrong three times, each a
+# narrower version of the same mistake — every one of which would have shipped
+# job links with no origin ("/jobs/147" in someone's inbox, resolving to
+# nothing):
+#   1. `os.getenv("SITE_BASE_URL", default)` — a getenv default never fires for
+#      a var that is SET BUT EMPTY, which is what a blank Railway variable or a
+#      bare `SITE_BASE_URL=` line in .env produces.
+#   2. `os.getenv(...) or default` — closes (1), but `" "` is truthy, so the
+#      fallback is skipped and the later .strip() empties it again.
+#   3. `(...strip() or default).rstrip("/")` — closes (2), but `"/"` and `"///"`
+#      are truthy AND survive the fallback, then rstrip turns them into "".
+# The fix is to do every transformation the value needs, and only then decide
+# whether what is left is usable. Guard: tests/test_site_base_url.py.
+_SITE_BASE_URL_RAW = os.getenv("SITE_BASE_URL", "").strip().rstrip("/")
+SITE_BASE_URL = _SITE_BASE_URL_RAW or "https://job360.uk"
 
 # Search
 # MIN_MATCH_SCORE is the *display* floor — the default "good enough to show"
@@ -238,6 +278,70 @@ EMBED_BACKFILL_PER_RUN = int(os.getenv("EMBED_BACKFILL_PER_RUN", "300"))
 # volume polite across the 30-min cron cadence; `0` disables the phase
 # entirely (no SELECT, no fetch, no-op).
 DESCRIPTION_BACKFILL_PER_TICK = int(os.getenv("DESCRIPTION_BACKFILL_PER_TICK", "50"))
+
+# ---------------------------------------------------------------------------
+# JOB SOURCE ENRICHMENT sweep — the two-pass catalog pass
+# (docs/pillars/UNIVERSAL_SHELF.md §6 step 3, §7 cost).
+#
+# JOB SOURCE ENRICHMENT = an LLM READING a job ad to extract facts about the
+# JOB (salary, seniority, workplace, visa, employment type, category). Facts
+# about the JOB, identical for every user, so the cost is CATALOG cost: it is
+# paid once per job and shared by everyone. It does NOT scale with user count.
+#
+# Two budgets, both hard, both loud when they bite (services/shelf_enrichment.py):
+#   * a JOB cap  — how many ads one sweep may read;
+#   * a SPEND cap — estimated USD one sweep may spend, checked BEFORE each
+#     call, so the sweep stops on the cheaper of the two.
+# The owner is pre-revenue: a sweep must never be able to surprise him.
+SHELF_ENRICHMENT_MAX_JOBS = int(os.getenv("SHELF_ENRICHMENT_MAX_JOBS", "500"))
+SHELF_ENRICHMENT_MAX_SPEND_USD = float(os.getenv("SHELF_ENRICHMENT_MAX_SPEND_USD", "1.00"))
+
+# WALL-CLOCK ceiling for pass 2, in seconds. The third cap, and the only one
+# grounded in how long things actually take rather than how many of them there
+# are.
+#
+# Sized from measurement, not taste: `refresh_catalog` runs under ARQ's
+# job_timeout=600s (`job_timeout` in workers/settings.py) and the source fan-out alone took
+# ~430s on a real 40-source run (2026-08-17). That leaves ~170s, so 150 is the
+# honest budget with a little headroom for pass 1 and the final ledger write.
+#
+# Why a TIME cap when max_jobs already exists: a healthy LLM call measured 2-4s,
+# but with a dead provider key the retry cascade took ~120s PER JOB — so 500
+# jobs is anywhere from 25 minutes to 16 hours. A job count cannot bound that;
+# a clock can. And overrunning is not a soft failure here: ARQ retries on
+# `max_tries = 5` (workers/settings.py), so being killed re-runs the WHOLE task
+# — re-fetching every source and re-spending — up to five times. Named by
+# SYMBOL, not by line: the `:175`/`:196` that stood here pointed at neither
+# setting, and there is no explicit `retry_jobs` in that file at all — a
+# reference that has gone stale sends the reader somewhere with confidence.
+# (CodeRabbit, PR #388.)
+SHELF_ENRICHMENT_MAX_SECONDS = float(os.getenv("SHELF_ENRICHMENT_MAX_SECONDS", "150"))
+
+# PASS 1 is FREE (no LLM): it re-runs the gate's own detectors over rows
+# ALREADY in the catalog, so existing jobs gain visa / deadline / normalised
+# enum / annualised-salary shelves without paying for a single token. Its only
+# cost is DB writes, so its budget is much larger than the LLM pass's.
+SHELF_ENRICHMENT_PASS1_MAX_JOBS = int(os.getenv("SHELF_ENRICHMENT_PASS1_MAX_JOBS", "2000"))
+
+# How many still-absent consumer shelves a job must have before it is worth
+# reading its ad. Measured on the live catalog 2026-08-17 (2,826 eligible
+# jobs): absence is CORRELATED — 99.6% of eligible jobs are missing 2+ shelves
+# and 78% are missing 4+ — so raising this from 1 to 4 saves only ~17% of the
+# spend while dropping 15% of the jobs. 1 is the honest default; the knob
+# exists so the cost/coverage trade stays a setting, not a code change.
+SHELF_ENRICHMENT_MIN_ABSENT_SHELVES = int(os.getenv("SHELF_ENRICHMENT_MIN_ABSENT_SHELVES", "1"))
+
+# gpt-4o-mini list price, web-verified 2026-08-17. There is no other price
+# constant in this repo — before this, NOTHING could answer "what did last
+# night cost". Env-overridable for exactly the same reason OPENAI_MODEL is:
+# the model can be swapped, and a stale hardcoded price is a silent lie.
+# Batch API is -50% on both numbers if the sweep ever moves to it.
+LLM_INPUT_USD_PER_1M = float(os.getenv("LLM_INPUT_USD_PER_1M", "0.150"))
+LLM_OUTPUT_USD_PER_1M = float(os.getenv("LLM_OUTPUT_USD_PER_1M", "0.600"))
+# Output cannot be measured without making the call, so it is ESTIMATED per
+# job: the enrichment contract is a fixed ~16-field JSON object, measured at
+# ~200 tokens. Input IS measured, from the real prompt text.
+LLM_OUTPUT_TOKENS_PER_JOB = int(os.getenv("LLM_OUTPUT_TOKENS_PER_JOB", "200"))
 
 
 def _env_flag(name: str, default: bool) -> bool:

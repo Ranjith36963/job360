@@ -43,7 +43,7 @@ def _db_with_ledger(path: str) -> None:
             ("u1", 1, "email", "sent", "2026-05-01T10:00:00", 0),
             ("u1", 2, "email", "sent", "2026-05-01T10:05:00", 0),
             ("u1", 3, "email", "failed", None, 2),
-            ("u1", 4, "slack", "sent", "2026-05-01T10:10:00", 0),
+            ("u1", 4, "webhook", "sent", "2026-05-01T10:10:00", 0),
         ],
     )
     con.commit()
@@ -109,5 +109,5 @@ def test_export_notification_metrics_aggregates_correctly(tmp_path):
     assert email_failed["count"] == 1
     assert email_failed["total_retries"] == 2
 
-    slack_sent = by_key[("slack", "sent")]
-    assert slack_sent["count"] == 1
+    webhook_sent = by_key[("webhook", "sent")]
+    assert webhook_sent["count"] == 1

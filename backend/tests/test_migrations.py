@@ -300,9 +300,9 @@ async def test_0018_adds_profile_version_column(tmp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_0019_adds_oauth_states_table_and_channel_columns(tmp_db_path):
-    """Migration 0019 adds connection_status + target_label to user_channels
-    and creates the oauth_states table with the expected columns."""
+async def test_0019_channel_columns_survive_and_oauth_states_is_dropped(tmp_db_path):
+    """End state after ALL migrations: user_channels keeps connection_status +
+    target_label (0019), but oauth_states is gone (dropped by 0031)."""
     async with pg.connect(tmp_db_path) as db:
         await db.executescript(
             """
@@ -362,16 +362,16 @@ async def test_0019_adds_oauth_states_table_and_channel_columns(tmp_db_path):
             "user_channels missing target_label after migration 0019"
         )
 
-        # oauth_states table exists with all expected columns.
+        # oauth_states is GONE. 0019 created it for the Slack/Discord OAuth
+        # connect flow; 0031 dropped it when those channels were deleted
+        # (2026-08-24). `runner.up` applies EVERY migration, so this test sees
+        # the end state, not 0019's — asserting the table exists here would
+        # have gone red the moment 0031 landed.
         cur2 = await conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='oauth_states'"
         )
-        assert await cur2.fetchone() is not None, "oauth_states table was not created"
-
-        cur3 = await conn.execute("PRAGMA table_info(oauth_states)")
-        oauth_cols = {row[1] for row in await cur3.fetchall()}
-        assert {"state", "user_id", "channel_type", "created_at"} <= oauth_cols, (
-            f"oauth_states missing expected columns; got {oauth_cols}"
+        assert await cur2.fetchone() is None, (
+            "oauth_states still exists — migration 0031 should have dropped it"
         )
 
 

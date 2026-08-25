@@ -11,7 +11,7 @@
 
 In one sentence:
 
-> *Job360 lets a user create an account, describe themselves (CV + LinkedIn + GitHub + preferences), automatically receive a personalised stream of UK jobs ranked 0–100, take action on them (like, apply, dismiss), track their applications through a pipeline, and get notified via email/Slack/Discord/Telegram/webhook with per-channel quiet-hours and digest schedules.*
+> *Job360 lets a user create an account, describe themselves (CV + LinkedIn + GitHub + preferences), automatically receive a personalised stream of UK jobs ranked 0–100, take action on them (like, apply, dismiss), track their applications through a pipeline, and get notified via email or webhook, governed by ONE per-user quiet-hours and digest schedule that applies to every channel they've connected (rule #23) — never a separate schedule per channel.*
 
 The user pillar is implemented as **four concentric rings**, each one assuming the previous:
 
@@ -333,11 +333,8 @@ Only the survivors get the full `JobScorer` treatment (Pillar 2).
 
 ### 4.4 Channels — `backend/src/services/channels/`
 
-- **`user_channels` table** (`backend/migrations/0005_user_channels.up.sql`) — per-user channel config. Credentials are encrypted with **Fernet** using `CHANNEL_ENCRYPTION_KEY`. Five `channel_type` values map to Apprise URL schemes:
-  - `email` → `resend://{key}:{from}/{to}/` (HTTPS:443). `mailtos://` is only the **fallback**, used when no Resend key is present but `SMTP_EMAIL` + `SMTP_PASSWORD` are — Railway blocks outbound SMTP 25/465/587, so a `mailtos://` channel cannot deliver there. Built by `services/channels/email_url.py:97-142`, never supplied by the user
-  - `slack` → `slack://tokenA/tokenB/tokenC`
-  - `discord` → `discord://webhook_id/webhook_token`
-  - `telegram` → `tgram://bot_token/chat_id`
+- **`user_channels` table** (`backend/migrations/0005_user_channels.up.sql`) — per-user channel config. Credentials are encrypted with **Fernet** using `CHANNEL_ENCRYPTION_KEY`. **Two** `channel_type` values map to Apprise URL schemes (Slack, Discord and Telegram were removed on 2026-08-24 — see `docs/plans/2026-08-24-email-webhook-only-delivery.md`):
+  - `email` → `resend://{key}:{from}/{to}/` (HTTPS:443). `mailtos://` is only the **fallback**, used when no Resend key is present but `SMTP_EMAIL` + `SMTP_PASSWORD` are — Railway blocks outbound SMTP 25/465/587, so a `mailtos://` channel cannot deliver there. Built by `services/channels/email_url.py:build_email_apprise_url()`, never supplied by the user; returns `None` (caller decides 503 vs. silent skip) when neither transport is configured
   - `webhook` → `json://host/path`
 - **`backend/src/services/channels/crypto.py`** — `encrypt(plaintext) → bytes` / `decrypt(ciphertext) → str`. Fails closed if `CHANNEL_ENCRYPTION_KEY` is unset.
 - **`backend/src/services/channels/dispatcher.py`** — thin wrapper around Apprise. Imports `apprise` *lazily inside the function* (CLAUDE.md rule #11 — Apprise pulls ~30 MB of deps; library code must not pay that cost on import). Tests monkeypatch `apprise.Apprise`. The dispatcher runs each notification through gates before sending: (1) `enabled=0` skip, (2) `match_score < score_threshold` skip, (3+4) `notify_mode` is a **bundling** mode (`daily` / `every_n_hours`) **or** the moment falls inside the quiet-hours window (evaluated with stdlib `zoneinfo` against `users.timezone`) → queue for the digest instead of sending now (`backend/src/services/channels/dispatcher.py:317`). `force=True` bypasses gate 3+4 and is how `send_bundle` delivers already-queued rows.
@@ -360,7 +357,7 @@ notification_rules(id, user_id FK, score_threshold=60,
 UNIQUE(user_id)
 ```
 
-One rulebook governs **all** of a user's channels at once (CLAUDE.md rule #23), so the user says *"notify me for score ≥ 75, bundled daily at 08:00, nothing between 22:00 and 07:00"* — not one policy per channel. The `users.timezone` column (added by `0012`, default `'UTC'`) is what quiet hours and `daily_send_time` are evaluated against.
+One rulebook governs **all** of a user's channels at once (CLAUDE.md rule #23), so the user says *"notify me for score ≥ 75, bundled daily at 08:00, nothing between 22:00 and 07:00"* — not one policy per channel. Since 2026-08-24 "all channels" means email and webhook, and nothing else. The `users.timezone` column (added by `0012`, default `'UTC'`) is what quiet hours and `daily_send_time` are evaluated against.
 
 - API: `backend/src/api/routes/notification_rules.py` — exactly two endpoints, `GET /api/settings/notification-rule` (returns `null` when unset) and `PUT /api/settings/notification-rule` (upsert, merging unsupplied fields). Both gate on `Depends(require_user)` and key off `user.id`; neither accepts a `user_id` from the request (rule #12).
 - A rulebook is **seeded at signup** (`services/notifications/defaults.py`, master switch `NOTIFY_SEED_DEFAULTS`) — before that, nothing in the product ever created a row, so no user could be alerted at all.
@@ -498,9 +495,11 @@ Consolidated so you can `grep` once and see them all. Defaults come from `backen
 | `CEREBRAS_API_KEY` | no | (unset) | Last-choice LLM. **All FOUR unset** → `require_llm_key()` raises `LLMKeyMissing` before any provider is tried (`llm_provider.py:264-283`); it subclasses `LLMError(RuntimeError)`, which is what the 502 in the failure table below is made of. |
 | `GITHUB_TOKEN` | no | (unset) | Bumps GitHub API quota from 60 → 5000 req/hr. Anonymous still works for public repos. |
 | `LOG_LEVEL` | no | `INFO` | Python logging level. `DEBUG` exposes request bodies + profile parsing internals. |
-| `RESEND_API_KEY` | recommended in prod | (unset) | The platform's mail transport. Used for BOTH system email (magic links, `auth/email_sender.py`) and the per-user email alert channel, which is built as `resend://` (`services/channels/email_url.py:51-61`). A key sitting in `SMTP_PASSWORD` is recognised by its `re_` prefix and honoured too. |
-| `SMTP_EMAIL` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_HOST` / `SMTP_PORT` | no | — | **Live, not legacy.** These are the PLATFORM's mail credentials. `SMTP_FROM`→`SMTP_EMAIL`→`onboarding@resend.dev` is the from-address (`email_url.py:83-94`), and with no Resend key the email channel falls back to `mailtos://` built from `SMTP_EMAIL`/`SMTP_PASSWORD`/`SMTP_HOST`/`SMTP_PORT` (`email_url.py:121-140`). A user never supplies any of these. |
-| `NOTIFY_EMAIL` / `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | no | — | **DEAD at application runtime.** Declared at `core/settings.py:78,81,82` and read by nothing under `backend/src/`, `backend/tests/` or `scripts/`. They belonged to the pre-Batch-2 single-tenant notifier that was deleted, so setting them sends no user a thing. The NAMES do survive outside the app: `cron_setup.sh:41-42` greps `.env` for them to print a "configured" line, `setup.sh:56`/`setup.bat:69` mention `NOTIFY_EMAIL`, and CI reads a `SLACK_WEBHOOK_URL` **repo secret** for its own alerts (`.github/workflows/post-merge-watch.yml:413-423`) — that is the harness talking to the owner, not the product talking to a user. |
+| `RESEND_API_KEY` | recommended in prod | (unset) | The platform's mail transport. Used for BOTH system email (magic links, `auth/email_sender.py`) and the per-user email alert channel, which is built as `resend://` (`services/channels/email_url.py`). A key sitting in `SMTP_PASSWORD` is recognised by its `re_` prefix and honoured too. |
+| `SMTP_EMAIL` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_HOST` / `SMTP_PORT` | no | — | **Live, not legacy.** These are the PLATFORM's mail credentials. `SMTP_FROM`→`SMTP_EMAIL`→`onboarding@resend.dev` is the from-address, and with no Resend key the email channel falls back to `mailtos://` built from them. A user never supplies any of these. |
+| `SITE_BASE_URL` | no | `https://job360.uk` | Origin every job link in a delivered email is built from. A staging or preview deploy MUST set it, or its emails link people at production. Blank and whitespace-only values fall back to the default rather than shipping an origin-less `/jobs/147` — guarded by `tests/test_site_base_url.py`. |
+| `NOTIFY_EMAIL` | no | — | **DEAD at application runtime.** Declared at `core/settings.py:78` and read by nothing under `backend/src/`, `backend/tests/` or `scripts/`. It belonged to the pre-Batch-2 single-tenant notifier that was deleted, so setting it sends no user a thing. The name survives outside the app: `cron_setup.sh` greps `.env` for it to print a "configured" line, and `setup.sh`/`setup.bat` mention it. |
+| ~~`SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` / `TELEGRAM_*`~~ | **REMOVED** | — | Deleted from settings on 2026-08-24 with the chat channels themselves (`core/settings.py:80-93` documents the removal). **Do not confuse with the unrelated, still-live `SLACK_WEBHOOK_URL` repo secret** that `.github/actions/slack` uses to page the owner when a build breaks — the harness talking to the owner, not the product talking to a user. Untouched. |
 
 ---
 
@@ -581,7 +580,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Per-user job actions (like/apply/dismiss) | ✅ | `routes/actions.py` |
 | Pipeline (5 stages, history, reminders) | ✅ | `routes/pipeline.py` + migration `0014` (history, interview dates, notes log) |
 | `user_channels` table + Fernet crypto | ✅ | migration `0005`, `crypto.py` |
-| 5 channel types (email/slack/discord/telegram/webhook) via Apprise | ✅ | `dispatcher.py`, lazy import |
+| 2 channel types (email/webhook) via Apprise | ✅ | `dispatcher.py`, lazy import |
 | Channel CRUD + test-send endpoint | ✅ | `routes/channels.py`, two-layer ownership check |
 | `notification_rules` — ONE row per user (threshold, mode, quiet hours, daily send time, interval) | ✅ | migration `0012`, collapsed to `UNIQUE(user_id)` by `0020` |
 | Notification rule endpoints (`GET` / `PUT` on `/api/settings/notification-rule`) | ✅ | `routes/notification_rules.py` |

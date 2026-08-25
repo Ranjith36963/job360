@@ -48,13 +48,33 @@ class HimalayasSource(BaseJobSource):
             deadline_source = "listing" if deadline else None
 
             # `seniority` (100% fill) arrives as a list, e.g. ["Senior"].
-            seniority = item.get("seniority")
-            if isinstance(seniority, list) and seniority:
-                experience_level = str(seniority[0])
-            elif isinstance(seniority, str):
-                experience_level = seniority
+            # Feeds the legacy free-text `experience_level` (unchanged) AND
+            # -- new -- the closed-enum `seniority` shelf, same raw string
+            # unwrapped from its one-element list, no interpretation added.
+            seniority_raw = item.get("seniority")
+            if isinstance(seniority_raw, list) and seniority_raw:
+                experience_level = str(seniority_raw[0])
+                seniority_scalar = str(seniority_raw[0])
+            elif isinstance(seniority_raw, str):
+                experience_level = seniority_raw
+                seniority_scalar = seniority_raw
             else:
                 experience_level = ""
+                seniority_scalar = None
+
+            # `description` (100% fill, median 6,139 chars live) is the real
+            # prose posting. `excerpt` (100% fill too, ~150-300 chars) is a
+            # short teaser sitting in the SAME parsed response -- the old code
+            # stored the teaser, silently starving the skill scorer and the
+            # stub-description check (shelf_gate.is_stub_description) of real
+            # text every excerpt was too short to pass anyway.
+            description = item.get("description") or item.get("excerpt", "")
+
+            # `employmentType`/`currency`/`salaryPeriod`/`categories` all sit
+            # on the same parsed item, unread until now -- raw values only,
+            # the gate normalises. `categories` (100% fill live) is the job's
+            # own tag list, same contract as arbeitnow/remotive's `tags`.
+            source_tags = [str(c) for c in (item.get("categories") or []) if c]
 
             jobs.append(Job(
                 title=item.get("title", ""),
@@ -62,7 +82,9 @@ class HimalayasSource(BaseJobSource):
                 location=location,
                 salary_min=item.get("minSalary"),
                 salary_max=item.get("maxSalary"),
-                description=item.get("excerpt", ""),
+                salary_currency=item.get("currency"),
+                salary_period=item.get("salaryPeriod"),
+                description=description,
                 apply_url=apply_url,
                 source=self.name,
                 date_found=now_iso,
@@ -72,6 +94,9 @@ class HimalayasSource(BaseJobSource):
                 deadline=deadline,
                 deadline_source=deadline_source,
                 experience_level=experience_level,
+                seniority=seniority_scalar,
+                employment_type=item.get("employmentType"),
+                source_tags=source_tags,
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Himalayas: found %s relevant jobs", len(jobs))

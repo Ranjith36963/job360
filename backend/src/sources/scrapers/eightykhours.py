@@ -1,13 +1,66 @@
 import logging
 import os
+import re
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.eightykhours")
+
+# `salary` (confirmed live 2026-08-17, 75.8% fill) is the board's own
+# free-text compensation line -- "$100,000 - $175,000", "£65,000 -
+# £145,000", "$50 - $100 per hour". A STRICT full-string match only: a
+# leading currency symbol, one or two numbers, an optional pay-period
+# suffix, nothing else. This deliberately REJECTS "£25,000 stipend" (a
+# lump sum, not a rate), "$750 per piece", "Base: $110,000" and dual-
+# currency lines like "£81,000 - £93,000; $116,000 - $176,000" -- any of
+# those parsed naively would produce a confidently WRONG number, worse
+# than none (rule #29). Measured live: 199/213 (93%) of non-empty salary
+# strings are this clean.
+_SALARY_CURRENCY_SYMBOLS = {"$": "USD", "£": "GBP", "€": "EUR"}
+_SALARY_RE = re.compile(
+    # The SECOND symbol is captured, not discarded. `[£$€]?` threw it away, so
+    # "$50 - £100 per hour" parsed as USD 50-100 and the gate then converted a
+    # sterling figure as dollars — a confidently wrong number, which this
+    # function's own docstring says it never produces. (CodeRabbit, PR #388.)
+    r"^([£$€])([\d,]+(?:\.\d+)?)\s*(?:-\s*([£$€]?)([\d,]+(?:\.\d+)?))?"
+    r"\s*(per hour|per month|per annum|per year)?$",
+    re.IGNORECASE,
+)
+_SALARY_PERIOD_MAP = {
+    "per hour": "hourly",
+    "per month": "monthly",
+    "per annum": "annual",
+    "per year": "annual",
+}
+
+
+def _parse_clean_salary_text(
+    text: str,
+) -> tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
+    """(min, max, currency, period) for an UNAMBIGUOUS salary line, else all
+    None. Never guesses at anything with a stipend/award/base-pay/dual-
+    currency shape."""
+    m = _SALARY_RE.match(text.strip())
+    if not m:
+        return None, None, None, None
+    symbol, first, second_symbol, second, period_raw = m.groups()
+    # A RANGE THAT CROSSES CURRENCIES IS NOT UNAMBIGUOUS. Refuse it whole
+    # rather than keep half: one number in the wrong currency is worse than no
+    # number at all, and the dual-currency shape is exactly what the docstring
+    # above promises to decline.
+    if second_symbol and second_symbol != symbol:
+        return None, None, None, None
+    currency = _SALARY_CURRENCY_SYMBOLS[symbol]
+    first_val = float(first.replace(",", ""))
+    second_val = float(second.replace(",", "")) if second else None
+    period = _SALARY_PERIOD_MAP.get((period_raw or "").lower())
+    if second_val is not None:
+        return min(first_val, second_val), max(first_val, second_val), currency, period
+    return first_val, None, currency, period
 
 # 80,000 Hours uses Algolia for their job board (jobs.80000hours.org)
 # These are public search-only keys; overridable via env vars.
@@ -89,8 +142,51 @@ class EightyKHoursSource(BaseJobSource):
                 description = hit.get("description_short", "") or hit.get("description", "") or title
 
                 now_iso = datetime.now(timezone.utc).isoformat()
-                raw_published = hit.get("date_published", "")
+                # BUG FIX (confirmed live 2026-08-16): the payload has no
+                # "date_published" key at all -- 0/20 filled in a live sample.
+                # The real posting date is "posted_at" (Algolia epoch
+                # seconds), 20/20 filled. The old key name meant every
+                # eightykhours job stored posted_at=None, date_confidence="low"
+                # regardless of what the source actually knows.
+                raw_published = hit.get("posted_at")
                 posted_at, confidence = normalize_posted_at(raw_published)
+
+                # closes_at (Algolia epoch seconds, ~45% filled live) is the
+                # posting's own application deadline -- distinct from
+                # posted_at, goes on the deadline shelf only.
+                raw_closes = hit.get("closes_at")
+                deadline_iso, deadline_confidence = normalize_posted_at(raw_closes)
+                deadline = deadline_iso[:10] if deadline_confidence == "high" and deadline_iso else None
+                deadline_source = "listing" if deadline else None
+
+                # tags_exp_required (100% filled live, e.g. "Mid (5-9 years
+                # experience)") is seniority-shaped free text the gate can
+                # normalise later -- take the raw first value, no mapping here.
+                tags_exp = hit.get("tags_exp_required")
+                seniority = (
+                    tags_exp[0] if isinstance(tags_exp, list) and tags_exp else None
+                )
+
+                # tags_role_type (100% filled live 2026-08-17, e.g.
+                # "Full-time"/"Internship") and tags_location_type (~15%
+                # filled, "Remote") ride the SAME hit this source already
+                # reads and were thrown away entirely -- raw first value
+                # only, no enum-mapping here.
+                tags_role = hit.get("tags_role_type")
+                employment_type = (
+                    tags_role[0] if isinstance(tags_role, list) and tags_role else None
+                )
+                tags_loc_type = hit.get("tags_location_type")
+                workplace_mode = (
+                    tags_loc_type[0] if isinstance(tags_loc_type, list) and tags_loc_type else None
+                )
+
+                raw_salary_text = (hit.get("salary") or "").strip()
+                salary_min = salary_max = salary_currency = salary_period = None
+                if raw_salary_text:
+                    salary_min, salary_max, salary_currency, salary_period = (
+                        _parse_clean_salary_text(raw_salary_text)
+                    )
 
                 jobs.append(Job(
                     title=title,
@@ -102,7 +198,16 @@ class EightyKHoursSource(BaseJobSource):
                     date_found=now_iso,
                     posted_at=posted_at,
                     date_confidence=confidence,
-                    date_posted_raw=raw_published or None,
+                    date_posted_raw=str(raw_published) if raw_published else None,
+                    deadline=deadline,
+                    deadline_source=deadline_source,
+                    seniority=seniority,
+                    employment_type=employment_type,
+                    workplace_mode=workplace_mode,
+                    salary_min=salary_min,
+                    salary_max=salary_max,
+                    salary_currency=salary_currency,
+                    salary_period=salary_period,
                 ))
 
         logger.info("80,000 Hours: found %s relevant jobs", len(jobs))

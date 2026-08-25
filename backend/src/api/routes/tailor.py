@@ -11,6 +11,7 @@ tests monkeypatch them here (``monkeypatch.setattr(tailor, "llm_extract", fake)`
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -306,11 +307,18 @@ async def download(
     text = row.get("polished") or row.get("ai_draft") or ""
     title = "Curriculum Vitae" if doc_kind == "cv" else "Cover Letter"
 
+    # Rendering is synchronous and CPU-bound (fpdf2 / python-docx build the
+    # whole document in memory). Inline it froze the single event loop for every
+    # other request for the length of the render — same bug class as PR #123 and
+    # the CV-upload stall. @cpu_bound on render_pdf/render_docx reports an
+    # inline call — raising in tests and dev, but in production only logging an
+    # ERROR + one Sentry message before rendering anyway. So the
+    # `asyncio.to_thread` calls below are what actually keep it off the loop.
     if fmt == "docx":
-        content = render_docx(text, title=title)
+        content = await asyncio.to_thread(render_docx, text, title=title)
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     else:
-        content = render_pdf(text, title=title)
+        content = await asyncio.to_thread(render_pdf, text, title=title)
         media_type = "application/pdf"
 
     # Downloading counts as 'used' → keep it + learn from it (§5).

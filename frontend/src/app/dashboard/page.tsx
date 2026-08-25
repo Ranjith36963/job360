@@ -356,6 +356,32 @@ export default function DashboardPage() {
     setSearching(true);
     setSearchProgress("Starting search...");
 
+    // search_run telemetry. It used to be a bare `posthog.capture("search_run")`
+    // INSIDE the `status === "completed"` branch, with no properties at all. So
+    // PostHog could not tell a good search from a search that returned zero
+    // jobs, and a failed / timed-out / "Lost contact with the server" search
+    // (the ~60s event-loop block of PR #123) emitted NOTHING — the instrument
+    // was structurally blind to the exact failure it exists to catch. Report
+    // EVERY terminal outcome, and say how it went.
+    const searchStartedAt = Date.now();
+    let searchReported = false;
+    const reportSearchRun = (
+      outcome: "completed" | "failed" | "timed_out" | "lost_contact" | "start_failed",
+      result?: Record<string, unknown> | null
+    ) => {
+      if (searchReported) return; // exactly one event per search
+      searchReported = true;
+      const r = result ?? {};
+      posthog.capture("search_run", {
+        outcome,
+        duration_ms: Date.now() - searchStartedAt,
+        total_found: typeof r.total_found === "number" ? r.total_found : null,
+        new_jobs: typeof r.new_jobs === "number" ? r.new_jobs : null,
+        sources_queried: typeof r.sources_queried === "number" ? r.sources_queried : null,
+        mode: "hybrid",
+      });
+    };
+
     try {
       const { run_id } = await startSearch({ safe: false });
       setSearchProgress("Search running...");
@@ -385,6 +411,7 @@ export default function DashboardPage() {
         };
 
         if (Date.now() - pollStartedAt > MAX_POLL_MS) {
+          reportSearchRun("timed_out");
           stopPolling(
             "Search is taking longer than expected — we stopped waiting. Your results may still appear; try refreshing."
           );
@@ -405,9 +432,10 @@ export default function DashboardPage() {
                 ? "Search complete!"
                 : "Search failed"
             );
-            if (status.status === "completed") {
-              posthog.capture("search_run");
-            }
+            reportSearchRun(
+              status.status === "completed" ? "completed" : "failed",
+              status.result as Record<string, unknown> | null | undefined
+            );
             // Invalidate all job queries so both lists re-fetch with fresh data
             void queryClient.invalidateQueries({ queryKey: queryKeys.jobs() });
             // Clear message after a few seconds
@@ -420,6 +448,7 @@ export default function DashboardPage() {
           // on a spinner is worse than telling them.
           consecutiveErrors += 1;
           if (consecutiveErrors >= 20) {
+            reportSearchRun("lost_contact");
             stopPolling(
               "Lost contact with the server while searching. Please try again."
             );
@@ -427,6 +456,7 @@ export default function DashboardPage() {
         }
       }, POLL_INTERVAL_MS);
     } catch (err) {
+      reportSearchRun("start_failed");
       setSearching(false);
       setSearchProgress("");
       toast.apiError(err, "Failed to start search. Is the backend running?");

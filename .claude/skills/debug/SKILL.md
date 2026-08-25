@@ -181,7 +181,8 @@ If the user provides `[source]` or `[severity]`, filter the output accordingly.
 > (the old `SlackChannel`/`DiscordChannel`/`EmailChannel` are gone). They are now
 > **per-user**: `src/services/channels/dispatcher.py::dispatch()` reads the user's single
 > `notification_rules` row + their Fernet-encrypted `user_channels` and sends via Apprise.
-> There is no standalone "send to slack" — a test-send needs a user context.
+> There is no standalone "send to slack" — and since 2026-08-24 there is no Slack
+> channel at all. Delivery is email + webhook only; a test-send needs a user context.
 
 Verify the notification path is importable and inspect a user's channel config:
 
@@ -207,7 +208,7 @@ async def main():
             'SELECT channel_type, enabled FROM user_channels WHERE user_id = ?', (uid,)
         )).fetchall()
         rule = await (await db.execute(
-            'SELECT notify_mode, min_score FROM notification_rules WHERE user_id = ?', (uid,)
+            'SELECT notify_mode, score_threshold FROM notification_rules WHERE user_id = ?', (uid,)
         )).fetchone()
         print(f'user {uid}: {len(chans)} channel(s)')
         for c in chans:
