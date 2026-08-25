@@ -496,6 +496,18 @@ def constant_disagreements() -> list[tuple[str, str, str, str]]:
         r"superseded|deprecated|formerly|previously|used to be)\b",
         re.IGNORECASE,
     )
+    # A CONDITIONAL value is not a claim about the default. "or
+    # `ENRICHMENT_MAX_JOBS=0` — a zero budget selects nothing" documents a
+    # failure mode and is correct; flagging it against the real default (20)
+    # would be the fourth false-positive class this guard has had to learn,
+    # after loose binding, bare "was", and bare "legacy". Same shape as the
+    # retired-value tombstone: a doc describing when something breaks has to
+    # name the value that breaks it.
+    CONDITIONAL = re.compile(
+        r"\b(if |when |unless |never runs|selects nothing|set to|setting|"
+        r"would|could|suppose|e\.g\.|example)\b",
+        re.IGNORECASE,
+    )
     seen: dict[str, list[tuple[str, str]]] = {}
     for rel in LIVING_DOCS:
         path = ROOT / rel
@@ -513,7 +525,16 @@ def constant_disagreements() -> list[tuple[str, str, str, str]]:
                 # states LOCATIONS (25) — one historical aside was suppressing
                 # a live claim beside it. Third time a line-level filter has
                 # done this (write-verbs on skill paths, bare "was", "legacy").
-                if HISTORICAL.search(line[max(0, m.start() - 40):m.start()]):
+                # Look BOTH ways. The qualifier can precede the value ("if
+                # X=0 …") or follow it ("`X=0` — a zero budget selects
+                # nothing"). Checking only the left side left that second shape
+                # firing, which is how this guard learned its fourth
+                # false-positive class.
+                before = line[max(0, m.start() - 40):m.start()]
+                after = line[m.end():m.end() + 40]
+                if HISTORICAL.search(before) or HISTORICAL.search(after):
+                    continue
+                if CONDITIONAL.search(before) or CONDITIONAL.search(after):
                     continue
                 seen.setdefault(name, []).append((f"{rel}:{i}", val))
 
