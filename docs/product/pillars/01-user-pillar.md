@@ -89,12 +89,15 @@ Heart icon clicked. Frontend `POST /api/jobs/42/action {"action": "liked"}`. Rou
 
 ### T+15 — Alice applies
 
-Click "Apply" → browser opens external `apply_url`. Returning, Alice clicks "Mark Applied". Frontend `POST /api/pipeline/applications {"job_id": 42}`. Route (`routes/pipeline.py`):
+Click "Apply" → browser opens external `apply_url`. Returning, Alice clicks "Mark Applied". Frontend `POST /api/pipeline/42` — the job id is in the PATH, there is no `/applications` collection route and no request body (`frontend/src/lib/api.ts:355`, `backend/src/api/routes/pipeline.py:84`). Route (`routes/pipeline.py`):
 
-1. **410 Gone** if `jobs.staleness_state='confirmed_expired'` (ghost-detection guard).
-2. INSERT `applications(user_id, job_id=42, stage='applied')`.
-3. INSERT `application_stage_history(user_id, job_id=42, from_stage=NULL, to_stage='applied')` — the audit trail starts.
-4. UPDATE `user_feed SET status='applied' WHERE user_id=alice.id AND job_id=42`.
+1. **404** if the job id is unknown; **410 Gone** if `jobs.staleness_state='confirmed_expired'` (ghost-detection guard, `routes/pipeline.py:98-104`).
+2. `INSERT OR IGNORE INTO applications(user_id, job_id=42, stage='applied')` — and that is the whole write (`repositories/database.py:1100-1109`).
+
+Two things this step does **not** do, both worth knowing before you debug the pipeline:
+
+- **No `application_stage_history` row is written on create.** The only INSERT into that table lives in `advance_application` (`repositories/database.py:1136-1141`), so a just-created application has an empty history and `GET /api/pipeline/42/timeline` answers **404** until Alice moves it to a second stage (`routes/pipeline.py:144-145`).
+- **`user_feed.status` is not flipped to `'applied'`.** The column exists and its comment lists `'applied'` as a legal value (`migrations/0003_user_feed.up.sql:10`), but no production path ever puts that value there. Be precise about why, because the obvious grep misleads twice. `FeedService.update_status` (`services/feed.py:189-198`) *would* write any status string, and it has **no caller under `backend/src/`** — only `tests/test_feed_service.py:66,143`. Every other write to the column is a hard-coded `'active'` or `'stale'` (`feed.py:207,245,250,264`, `rescore.py:438`). And the `'applied'` literals that *do* exist belong to two other columns entirely: `user_actions.action` (`routes/actions.py:12,73`, read at `rescore.py:118,182`) and `applications.stage` (`database.py:152,1105`; `routes/pipeline.py:36` validates stage names). The card's applied state is read from `applications`, not from the feed row.
 
 ### T+30 — Alice sets up email notifications
 
@@ -131,7 +134,7 @@ Alice's inbox: one email with job title, score 87, deep link to `/jobs/<id>`.
 
 ### T+5 days — Alice advances the application
 
-After an interview: `POST /api/pipeline/42/advance {"to_stage": "interview", "notes": "1st screen w/ recruiter"}`. Route updates `applications.stage='interview'`, sets `last_advanced_at=now()`, INSERTs an `application_stage_history` row with `from_stage='applied'`, appends to `notes_history` JSON.
+After an interview: `POST /api/pipeline/42/advance {"stage": "interview"}`. The body model is one field — `PipelineAdvanceRequest.stage` (`backend/src/api/models.py:406-407`); there is no `to_stage` key and the endpoint accepts no `notes`. Route validates against `_VALID_STAGES` (`routes/pipeline.py:36,121-125`) then calls `advance_application`, which updates `applications.stage='interview'`, sets `last_advanced_at=now()`, and INSERTs an `application_stage_history` row with `from_stage='applied'` — the two writes share one transaction (`repositories/database.py:1127-1147`). It does **not** touch `notes_history`: that column is written only by `PATCH /api/pipeline/{job_id}/notes` → `update_application_notes` (`database.py:1777`).
 
 ### Tables touched, in order
 
@@ -143,7 +146,7 @@ After an interview: `POST /api/pipeline/42/advance {"to_stage": "interview", "no
 | Engine scores for Alice | `user_feed` (write) | 2 → 1 seam |
 | Dashboard view | `user_feed`, `jobs`, `job_enrichment` (read) | 1 |
 | Like | `user_actions` | 1 |
-| Apply | `applications`, `application_stage_history`, `user_feed` (status flip) | 1 |
+| Apply | `applications` only — no history row, no `user_feed` flip (see T+15) | 1 |
 | Channel setup | `user_channels` (Fernet) | 1 |
 | Rule setup | `notification_rules` | 1 |
 | New job notification | `notification_ledger`, optionally `user_notification_digests` | 1 |
@@ -214,7 +217,7 @@ Writes to `DEFAULT_TENANT_ID` (the placeholder user). Used by single-tenant inst
 - `POST /api/profile/github` — accepts `{username}`
 - `GET /api/profile/versions` — returns the last 10 snapshots
 - `POST /api/profile/versions/{id}/restore` — atomic rollback to a snapshot
-- `GET /api/profile/jsonresume` — exports the profile in [JSON Resume](https://jsonresume.org/) schema
+- `GET /api/profile/json-resume` — exports the profile in [JSON Resume](https://jsonresume.org/) schema. The path is **hyphenated** (`routes/profile.py:1230`); `jsonresume` is not a route
 
 ### 3.2 The four data sources
 
@@ -407,7 +410,7 @@ Backed by the `user_actions` table (rebuilt with a `user_id` column in migration
 
 - Stages: `applied` → `outreach` → `interview` → `offer` → `rejected`
 - `GET /api/pipeline` (optional `?stage=`), `GET /api/pipeline/counts`, `GET /api/pipeline/reminders` (stalled >7 days)
-- `POST /api/pipeline/applications` to create — returns **410 Gone** if the target job has `staleness_state='confirmed_expired'`, so users cannot start an application against a ghost posting
+- `POST /api/pipeline/{job_id}` to create — returns **410 Gone** if the target job has `staleness_state='confirmed_expired'`, so users cannot start an application against a ghost posting. Writes only the `applications` row; no stage-history row, no `user_feed` update
 - `POST /api/pipeline/{job_id}/advance` to move stage
 - `GET /api/pipeline/{job_id}/timeline` — full stage history
 - `PATCH /api/pipeline/{job_id}/notes`
@@ -502,7 +505,7 @@ A non-exhaustive table of failures an operator or agent will actually see, where
 | GitHub enrichment slow / 403 errors | Anonymous rate limit (60 req/hr) hit | `github_enricher` logs 403 rate limited | Set `GITHUB_TOKEN` (no scopes needed for public repos) |
 | Notification rule fires, no email arrives | The platform has no mail transport, or the built URL is malformed. Note the user never types this URL — the backend builds it from `RESEND_API_KEY` / `SMTP_*` | `notification_ledger.status='failed'`, `error_message` populated. If the channel could not even be created, `POST /api/settings/channels` returned 503 | `GET /api/notifications?status=failed` to see the error. Check `RESEND_API_KEY` first: on Railway `mailtos://` cannot deliver (SMTP ports blocked), so a channel built on the SMTP fallback times out and is recorded as failed |
 | Digest queue fills, never drains | ARQ worker not running, or digest_send_time evaluated in wrong zone | `user_notification_digests.sent=0` count growing | Confirm `arq` process up; verify `users.timezone` value; quiet-hours and digest_send_time both read this column |
-| `POST /api/pipeline/applications` returns 410 | Job has `staleness_state='confirmed_expired'` — guard rail | UI shows "Job no longer available" | If the job is actually live: `UPDATE jobs SET staleness_state='active' WHERE id=?` |
+| `POST /api/pipeline/{job_id}` returns 410 | Job has `staleness_state='confirmed_expired'` — guard rail | UI shows "Job no longer available" | If the job is actually live: `UPDATE jobs SET staleness_state='active' WHERE id=?` |
 | Pipeline UI shows wrong stage after advance | `applications.stage` ≠ latest `application_stage_history.to_stage` (only possible via direct SQL) | `/pipeline` shows stale stage | Re-derive: `SELECT to_stage FROM application_stage_history WHERE job_id=? AND user_id=? ORDER BY transitioned_at DESC LIMIT 1` and UPDATE applications |
 | Frontend page renders blank after deploy | Next.js 16 `params` not `await`ed (rule #22 — training-data trap) | Component renders without data | Convert to `params: Promise<{ id: string }>` and `await params` |
 | Profile completeness stuck at 0% after upload | Either no `user_profiles` row (silent save failure) or LLM returned empty schema | Inspect: `SELECT * FROM user_profiles WHERE user_id=?` | If no row: tail logs for the save error. If row exists with empty fields: LLM produced empty extraction — retry with a clearer CV or different provider |
@@ -618,7 +621,7 @@ backend/
 │   │   ├── main.py                            — lifespan + CORS allow-list
 │   │   └── routes/
 │   │       ├── auth.py                        — register / login / logout / me / password / email / delete
-│   │       ├── profile.py                     — get / upload / linkedin / github / versions / restore / jsonresume
+│   │       ├── profile.py                     — get / upload / linkedin / github / versions / restore / json-resume
 │   │       ├── jobs.py                        — list / get / export
 │   │       ├── actions.py                     — like / apply / not_interested
 │   │       ├── pipeline.py                    — 5-stage Kanban API
