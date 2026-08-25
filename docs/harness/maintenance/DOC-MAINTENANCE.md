@@ -59,7 +59,8 @@ DRAFT ──► ACTIVE ──► IMPLEMENTED ──► ARCHIVED
   "Never deleted" was amended by the owner on 2026-08-25. Scaffolding whose
   output has merged — step plans, prompt batches — may be deleted, because git
   history holds the content and `IMPLEMENTATION_LOG.md` holds the narrative.
-  Five were removed that day.
+  Five scaffolding docs went that day, alongside four superseded audit
+  records — nine files, 3,123 lines in total.
 
   What may NOT be deleted is anything still cited: `CurrentStatus.md` is
   hardcoded in `merge_cage.py`, and the two `*_progress.md` logs are cited from
@@ -125,7 +126,7 @@ report, but never edits them — memory hygiene is the session's own job.
 | Dedicated technical writers | Loop 3 tooling is the writer; you are the editor who merges |
 | Freshness SLAs + staleness dashboards | Tier-1 daily check + `DOC-HEALTH.md` scorecard |
 | ADRs (architecture decision records) | `docs/product/plans/batch-2-decisions.md` pattern — keep appending |
-| Archive-over-delete retention | `docs/_archive/` + stamps, nothing deleted |
+| Archive-over-delete retention | `docs/_archive/` + stamps. Nothing deleted EXCEPT merged scaffolding, per the 2026-08-25 amendment in §2 |
 | Doc impact required in code review | Rule 5 above |
 
 ## 6. Outputs this framework maintains
