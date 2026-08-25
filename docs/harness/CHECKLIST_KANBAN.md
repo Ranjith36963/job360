@@ -1,4 +1,5 @@
 # Job360 — End-to-End Verification & Audit (merged)
+<!-- doc: LOG -->
 
 > Merges the two prior docs into one source of truth:
 > - **VERIFY_KANBAN** — deep *functional* live pass with **real user data** (real CV/LinkedIn/GitHub,

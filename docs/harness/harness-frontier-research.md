@@ -1,4 +1,5 @@
 # Harness vs the Frontier — research 2026-07-31
+<!-- doc: REFERENCE -->
 
 > 6 Sonnet web-researchers + 1 Opus synthesiser (manager/worker rule). Every claim carries a URL.
 > The synthesiser also grepped OUR workflows itself and corrected the brief in 3 places.

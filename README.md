@@ -1,5 +1,5 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-25 by the nightly doc-truth routine -->
 
 Automated UK job search system supporting **any professional domain**. Aggregates jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
 
@@ -251,9 +251,20 @@ python -m src.cli sources
 | Careerjet | [careerjet.com/partners](https://www.careerjet.com/partners/) | `CAREERJET_AFFID` |
 | Findwork | [findwork.dev](https://findwork.dev/) | `FINDWORK_API_KEY` |
 | GitHub | [github.com/settings/tokens](https://github.com/settings/tokens) | `GITHUB_TOKEN` (optional, for profile enrichment) |
-| Gmail | [Google App Passwords](https://myaccount.google.com/apppasswords) | `SMTP_EMAIL`, `SMTP_PASSWORD`, `NOTIFY_EMAIL` |
-| Slack | [Slack Webhooks](https://api.slack.com/messaging/webhooks) | `SLACK_WEBHOOK_URL` |
-| Discord | [Discord Webhooks](https://discord.com/developers/docs/resources/webhook) | `DISCORD_WEBHOOK_URL` |
+| Email delivery | [resend.com](https://resend.com/) | `RESEND_API_KEY` (+ `SMTP_FROM`). Powers magic-link email AND the per-user email alert channel. Falls back to `SMTP_EMAIL`/`SMTP_PASSWORD`/`SMTP_HOST`/`SMTP_PORT` over SMTP where the host allows it — Railway does not |
+
+> **`NOTIFY_EMAIL`, `SLACK_WEBHOOK_URL` and `DISCORD_WEBHOOK_URL` no longer notify anyone.**
+> They are still declared in `backend/src/core/settings.py:78,81,82` and read by
+> nothing under `backend/src/`, `backend/tests/` or `scripts/`. They belonged to the
+> pre-Batch-2 single-tenant notifier, which was deleted. Slack, Discord and Telegram
+> are now per-user channels created through the Connect flow
+> (`GET /api/settings/channels/connect/*`), not env vars.
+>
+> The names do appear elsewhere, and it is a different system: `cron_setup.sh:41-42`
+> greps `.env` for them only to print a "configured" line, and CI sends its own
+> build alerts through a `SLACK_WEBHOOK_URL` **repository secret**
+> (`.github/workflows/post-merge-watch.yml:413-423`). Setting them in the app's
+> environment still delivers nothing to a user.
 
 **Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, HN Jobs, Teaching Vacancies, LinkedIn, Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, NHS Jobs, WeWorkRemotely, RealWorkFromAnywhere, University Jobs, Climatebase, 80000Hours, BCS Jobs, AIJobs AI, Indeed/Glassdoor (if python-jobspy installed), HackerNews, TheMuse, NoFluffJobs, Gov Apprenticeships (DFE_APPRENTICESHIPS_API_KEY — key required) — **33 of 41 sources work without any API keys** (8 keyed). Dropped in Batch 3: yc_companies, findajob, nomis. Dropped in M6: jobtensor, comeet, aijobs_global. Dropped 2026-08-10 (dead upstreams): aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml.
 
@@ -281,7 +292,7 @@ Four engines, all opt-in except the keyword engine. **Engines 2–4 default OFF.
 
 **Engine 2 — Dimensions** (opt-in, `ENGINE2_ENABLED=true` / `ENRICHMENT_ENABLED=true`): `services/scoring_dimensions.py`, wired into `JobScorer` at `skill_matcher.py:582-617`. Adds four dimension scorers on top of the keyword score — Salary 10 / Seniority 8 / Visa 6 / Workplace 6 (raw max 130, clamped to [0, 100]). Its data is supplied by the **enrichment** step (`services/job_enrichment.py`): jobs scoring >= `ENRICHMENT_THRESHOLD` (default **10**, not 60 — `settings.py:152-155`) go to the OpenAI→Gemini→Groq→Cerebras LLM chain, stored in the shared `job_enrichment` table (16-field `JobEnrichment` schema, 7 enums, idempotent). Both halves are gated the same way — `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853`, `main.py:1137`, `services/rescore.py:85`), so either name switches Engine 2 on (rule #18).
 
-**Engine 3 — Hybrid retrieval** (opt-in, `SEMANTIC_ENABLED=true` / `ENGINE3_ENABLED=true`): `services/embeddings.py` encodes jobs via `all-MiniLM-L6-v2` (384-dim), stored in ChromaDB (`services/vector_index.py`). Query path (`services/retrieval.py` `retrieve_for_user`, wired live via `_hybrid_reorder_rows` in `api/routes/jobs.py`) fuses three rankings via RRF (k=60) — keyword `match_score`, **BM25** (`bm25_rank`), and vector ANN — then **cross-encoder reranks** the top survivors (`cross_encoder_rerank`, `ms-marco-MiniLM-L-6-v2`). Surfaced via `GET /api/jobs?mode=hybrid`. The BM25 leg is pure-Python, so it still applies even if the semantic leg or the reranker degrade.
+**Engine 3 — Hybrid retrieval** (opt-in, `SEMANTIC_ENABLED=true` / `ENGINE3_ENABLED=true`): `services/embeddings.py` encodes jobs via `all-MiniLM-L6-v2` (384-dim), stored in Postgres as `job_embeddings.embedding` (pgvector, migration `0027`) via `services/pg_vector_index.py`. The older ChromaDB wrapper `services/vector_index.py` still exists, but no production call site builds it — the on-disk store could not be shared between the backend and worker containers, so the scheduled run could never add an embedding and coverage froze at 284. Note the two flags are not interchangeable: `ENGINE3_ENABLED or SEMANTIC_ENABLED` opens the hybrid READ path (`api/routes/jobs.py:368-369`), but the embedding WRITES read `SEMANTIC_ENABLED` alone (`main.py:1292,1348`). Query path (`services/retrieval.py` `retrieve_for_user`, wired live via `_hybrid_reorder_rows` in `api/routes/jobs.py`) fuses three rankings via RRF (k=60) — keyword `match_score`, **BM25** (`bm25_rank`), and an **exact vector scan** (`ORDER BY cosine_distance(...) LIMIT k` — no ANN index exists yet, see migration `0027`) — then **cross-encoder reranks** the top survivors (`cross_encoder_rerank`, `ms-marco-MiniLM-L-6-v2`). Surfaced via `GET /api/jobs?mode=hybrid`. The BM25 leg is pure-Python, so it still applies even if the semantic leg or the reranker degrade.
 
 **Engine 4 — LLM judge** (opt-in, `ENGINE4_ENABLED=true` / `MATCHER_ENABLED=true`, gate at `main.py:352`): `services/llm_matcher.py`. Per-user `MatchVerdict{fit_score 0-100, verdict, reason}` persisted onto `user_feed` (migration 0017). Runs after the per-user feed write (`_run_matcher_stage`). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Dashboard shows AI-verdict badge. Measured: 18/18 jobs judged in 89.8 s (concurrency 3, Groq/Cerebras), judge spread 20–92 vs keyword 30–43, 10/10 fit accuracy on labeled sample.
 
@@ -334,7 +345,7 @@ normally a new Apprise URL stored against the user — not a new Python class. R
 **All AI/ML keyword lists were emptied on 2026-04-09 (commit `3ba1342`).** The following lists are now `[]`: `JOB_TITLES`, `PRIMARY_SKILLS`, `SECONDARY_SKILLS`, `TERTIARY_SKILLS`, `RELEVANCE_KEYWORDS`, `NEGATIVE_TITLE_KEYWORDS`. Without a user profile, sources iterate empty lists and return near-zero results — `setup-profile` is a mandatory first step.
 
 What `keywords.py` still contains (domain-agnostic, applies to any profession):
-- **25 UK locations** + Remote/Hybrid (the `LOCATIONS` list)
+- **24 UK place/country names** + `Remote` + `Hybrid` — 26 entries in the `LOCATIONS` list (`backend/src/core/keywords.py:28-55`). `_location_score` skips the two non-places, so only the 24 can score the full 10
 - **8 visa/sponsorship keywords** (the `VISA_KEYWORDS` list: "visa sponsorship", "tier 2", "skilled worker visa", etc.)
 
 **LLM-only CV parsing** is at `backend/src/services/profile/llm_provider.py` (multi-provider: **OpenAI (PRIMARY, `gpt-4o-mini`)** → Gemini → Groq → Cerebras fallback chain — `llm_provider.py:329-334`). The earlier 391-entry `KNOWN_SKILLS` regex set and all keyword defaults were removed in commits `804725c` and `3ba1342`.
@@ -365,7 +376,7 @@ job360/
 ├── backend/
 │   ├── main.py                  # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml           # Deps + [dev] extras; ruff/mypy/pytest config
-│   ├── data/                    # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
+│   ├── data/                    # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — Postgres since 2026-07-02
 │   ├── migrations/              # 31 forward+reverse SQL migration pairs (0000 → 0030) + runner.py
 │   └── src/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (41), _build_sources()
@@ -375,7 +386,7 @@ job360/
 │       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)
-│       │   ├── keywords.py      # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] since 3ba1342
+│       │   ├── keywords.py      # LOCATIONS (26) + VISA_KEYWORDS (8); all other lists [] since 3ba1342
 │       │   ├── companies.py     # ATS company slugs (297 polled across 10 ATS sources; RIPPLING_COMPANIES has slugs but no source class)
 │       │   ├── skill_synonyms.py
 │       │   ├── fx.py
@@ -387,7 +398,8 @@ job360/
 │       │   ├── llm_matcher.py   # Engine #4 — LLM judge (MATCHER_ENABLED flag)
 │       │   ├── job_enrichment.py
 │       │   ├── embeddings.py
-│       │   ├── vector_index.py
+│       │   ├── pg_vector_index.py  # the live vector store (job_embeddings.embedding)
+│       │   ├── vector_index.py     # legacy Chroma wrapper, no production caller
 │       │   ├── retrieval.py
 │       │   ├── scheduler.py
 │       │   ├── circuit_breaker.py

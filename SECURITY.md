@@ -1,4 +1,5 @@
 # Security Policy
+<!-- doc: LIVING -->
 
 ## Reporting a vulnerability
 

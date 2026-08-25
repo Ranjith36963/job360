@@ -1,4 +1,5 @@
 # PLAN 1 — Fix the red CI gate + merge the live synthetic smoke test
+<!-- doc: PLAN -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

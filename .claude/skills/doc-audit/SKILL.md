@@ -1,4 +1,5 @@
 # /doc-audit — Tier-3 Doc Lifecycle Audit (Loop 3)
+<!-- doc: LIVING -->
 
 Triggered by: `/doc-audit` (optionally `/doc-audit <area>`)
 

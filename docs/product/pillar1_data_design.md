@@ -1,3 +1,4 @@
+<!-- doc: PLAN -->
 ## Your two questions, simple words first
 
 **Are CV / LinkedIn / GitHub skills merged into one list?**

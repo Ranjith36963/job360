@@ -1,4 +1,5 @@
 # 03 — Frontend & Auth-UI
+<!-- doc: LOG -->
 
 > Source: frontend sweep (Sonnet), Next.js 16 + React 19. Read-only, evidence as `file:line`.
 > **Headline:** core is clean — JSON-LD escaping, `safeUrl`, the API client, CSRF/cookie

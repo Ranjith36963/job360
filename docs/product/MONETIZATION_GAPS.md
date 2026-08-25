@@ -1,10 +1,18 @@
 # Monetization Gaps — What's Missing to Make Money
+<!-- doc: LIVING -->
 
 > **What this is.** An honest gap analysis of everything between "Job360 is a working app" and "Job360 is a SaaS that charges money." Created 2026-06-22 from a code-verified audit.
 >
 > **What this is NOT.** A feature plan (see `LAUNCH_PLAN.md`) or a status doc (see `STATUS.md`). This answers one question: *what stops me taking real money today, and in what order do I fix it?*
 >
-> **The headline.** The **product is ~90% built**; the **business around it is ~30% built**. The remaining work is a different discipline — payments, hosting, metrics, legal — not features.
+> **The headline.** The **product is ~90% built**; the **business around it is ~30% built**. The remaining work is a different discipline — payments, metrics, legal — not features.
+>
+> **Correction 2026-08-24 (doc truth check).** This doc listed hosting, a
+> domain, Postgres and Sentry as gaps. All four shipped on 2026-07-02. They are
+> struck through below. Listing shipped infrastructure as a gap is the
+> expensive kind of stale: a reader goes and builds it twice. The payments /
+> Stripe gap is still real and still unbuilt — verified, no Stripe anywhere in
+> `backend/src/`.
 
 ---
 
@@ -26,7 +34,7 @@
 |---|---|
 | **Payments** | No Stripe, no billing route, no checkout. £0 is collectable. |
 | **Plans + paywall** | No free/premium tiers, no quota enforcement, no pricing page. Design exists (`docs/product/plans/2026-06-21-free-premium-plans.md`) — not built. Without a gate, nobody has a reason to upgrade. |
-| **A live website** | Runs only on localhost. No hosting, no domain — customers can't reach it. |
+| ~~A live website~~ **SHIPPED** | Live on Railway at **job360.uk** since 2026-07-02 — five services (backend, frontend, worker, Postgres, Redis). No longer a gap. |
 | **Legal-to-charge** | `/privacy` + `/terms` pages exist ✅; but **ICO registration** (UK — CVs are personal data) + lawyer review are still owner to-dos. |
 
 ## 🟠 Tier 2 — Keep customers & don't bleed money
@@ -36,7 +44,7 @@
 | **Notifications firing in prod** (Redis + ARQ deployed) | The core pitch is "works while you sleep" — dead in prod until the worker runs. |
 | **Email backbone (SES)** | Gmail SMTP won't send receipts / resets / alerts at scale. |
 | **LLM cost control + per-user quota** | Every search burns paid LLM calls. No caps = a few heavy/free users (or abuse) drain the wallet. No cost tracking exists. |
-| **Scale + reliability** | SQLite locks under concurrent load (bug #11) → Postgres for paying users; plus DB backups + error monitoring (no Sentry). |
+| **Scale + reliability** — *partly shipped* | Postgres via psycopg3 since 2026-07-02 (the SQLite lock problem is gone), Sentry wired at `backend/src/api/main.py:82-98`, nightly `db-backup` workflow. What REMAINS: load testing, and alerting anyone actually reads. |
 
 ## 🟡 Tier 3 — Grow revenue (flying blind without these)
 
@@ -53,7 +61,7 @@
 
 These four make it **charge** (everything in Tier 3 makes it **grow**):
 
-1. **Deploy it live** — hosting + domain (Step 4 ops).
+1. ~~**Deploy it live**~~ — **DONE 2026-07-02**: Railway + job360.uk. Left here so the ordering below still reads.
 2. **Stripe + a free/Pro paywall with a usage cap** — the cap is the hard, valuable part, not the Stripe wiring.
 3. **Prod notifications + SES working** — so the product's promise is real and emails send.
 4. **ICO registration + a working contact email** — legal to operate + take money.
@@ -64,7 +72,7 @@ These four make it **charge** (everything in Tier 3 makes it **grow**):
 
 - **The paywall matters more than the payment.** Stripe is a weekend; deciding *what's free vs paid* and *enforcing the quota* is what creates the reason to pay. Without a gate, even with Stripe wired, conversion ≈ 0.
 - **The cost trap.** The product calls paid LLMs on every search. A free tier with no LLM-cost cap can lose money on every signup. Monetization here = making sure each user's revenue > their LLM cost. That gate must exist *before* opening the doors.
-- **Built ≠ shippable.** The 10% that's left (payments, hosting, metrics, legal) is the entire gap between "cool tool" and "business." It feels small but it's a different kind of work.
+- **Built ≠ shippable.** The 10% that's left (payments, metrics, legal) is the entire gap between "cool tool" and "business." It feels small but it's a different kind of work.
 
 ---
 

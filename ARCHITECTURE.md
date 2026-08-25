@@ -1,13 +1,13 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-25 by the nightly doc-truth routine -->
 
 > **Current state lives in `docs/product/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/product/pillars/` first.
 
 ## System Overview
 
-Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 16-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
+Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 16-field structured schema, optionally encodes semantic embeddings into Postgres (pgvector), and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
 
-**Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (25) and `VISA_KEYWORDS` (8) remain — both domain-agnostic.
+**Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (26) and `VISA_KEYWORDS` (8) remain — both domain-agnostic. The 26 are 24 UK place/country names plus `Remote` and `Hybrid`; `_location_score` skips those two when matching, so only the 24 can score the full 10 (`core/keywords.py:28-55`).
 
 ```
 User Input                    Pipeline (Pillar 2: 6 stages)          Output
@@ -20,13 +20,13 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
   + GitHub API     |                                        v   +-> Next.js dashboard (per-user)
 .env (API keys) ---+                              Enrich (opt-in, LLM)
                                                   Store -> Postgres catalog (jobs table)
-                                                  Embed (opt-in) -> ChromaDB
+                                                  Embed (opt-in) -> job_embeddings.embedding (pgvector)
 ```
 
-Two opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18):
+Two legacy opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18). Each is only HALF of its gate — the effective condition is `ENGINEx_ENABLED or <legacy flag>`, so test both names:
 
-- `ENRICHMENT_ENABLED=true` → LLM enrichment + multi-dimensional scoring activates
-- `SEMANTIC_ENABLED=true` → embeddings + ChromaDB + hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) activate. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
+- `ENRICHMENT_ENABLED=true` → the LLM **enrichment step** runs, so the Batch-2.9 dimensions read real data instead of their neutral halves. The dimensions themselves are not gated on this flag — they fire on `user_preferences` alone (`skill_matcher.py:587`, rule #20). Effective gate at every call site: `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853,1137`)
+- `SEMANTIC_ENABLED=true` → embeddings into the pgvector store (`job_embeddings.embedding`, migration `0027` — **not** ChromaDB; see `services/pg_vector_index.py`). Hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), while the embedding WRITES are gated on `SEMANTIC_ENABLED` alone (`main.py:1292,1348`) — so `ENGINE3_ENABLED=true` by itself queries an index nothing fills. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
 
 ---
 
@@ -39,7 +39,7 @@ job360/
 ├── backend/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
-│   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
+│   ├── data/                         # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — the store is Postgres; DB_PATH is a connection selector, not a file (settings.py:15-20, pg.py:732-737)
 │   ├── migrations/                   # 31 forward/reverse SQL migrations (0000 → 0030) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (41 keys → 40 instances), _build_sources()
@@ -50,7 +50,7 @@ job360/
 │   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (41 entries), thresholds, feature flags
-│   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
+│   │   │   ├── keywords.py           # LOCATIONS (26) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
 │   │   │   ├── companies.py          # ATS company slugs (297 polled across 10 ATS sources; RIPPLING_COMPANIES has slugs but no source class)
 │   │   │   ├── skill_synonyms.py     # 493-entry alias dict (k8s↔kubernetes, ...)
 │   │   │   ├── fx.py                 # 18-currency → GBP rates
@@ -67,11 +67,12 @@ job360/
 │   │   │   ├── scheduler.py          # TieredScheduler (poll: 60s ATS / 5m reed / 15m workday+RSS / 60m rest; fetch ceiling 240s ATS / 60s others)
 │   │   │   ├── circuit_breaker.py    # 5-fail/300s per-source state machine
 │   │   │   ├── conditional_cache.py  # 256-entry FIFO for ETag/Last-Modified
-│   │   │   ├── llm_matcher.py        # Engine #4: LLM judge (MATCHER_ENABLED; MatchVerdict persisted onto user_feed)
+│   │   │   ├── llm_matcher.py        # Engine #4: LLM judge (ENGINE4_ENABLED or MATCHER_ENABLED; MatchVerdict persisted onto user_feed)
 │   │   │   ├── job_enrichment.py     # enrich_batch() (opt-in)
 │   │   │   ├── job_enrichment_schema.py  # 16-field Pydantic JobEnrichment + 7 enums
 │   │   │   ├── embeddings.py         # encode_job() via sentence-transformers (opt-in, lazy)
-│   │   │   ├── vector_index.py       # ChromaDB wrapper (opt-in, lazy)
+│   │   │   ├── pg_vector_index.py    # THE vector store — job_embeddings.embedding (pgvector)
+│   │   │   ├── vector_index.py       # legacy ChromaDB wrapper (still builds a client itself); no production caller
 │   │   │   ├── retrieval.py          # BM25 + RRF fusion + cross-encoder rerank (opt-in)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
 │   │   │   ├── channels/             # dispatcher (Apprise lazy), crypto (Fernet), email_url, ssrf_guard
@@ -207,11 +208,14 @@ unique = deduplicate(all_jobs)
 ### 8. Output Pipeline
 
 ```python
-# Filter by MIN_MATCH_SCORE (30)
-unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
+# Filter by MIN_STORE_SCORE (the STORAGE floor, default 1) — NOT MIN_MATCH_SCORE.
+# MIN_MATCH_SCORE (30) is a DISPLAY floor applied at read time; the pipeline used
+# to drop <30 before persisting, which destroyed rows a thin profile or recency
+# decay had scored low (src/main.py:720-737).
+kept = [j for j in unique_jobs if (j.match_score or 0) >= MIN_STORE_SCORE]
 
 # Check against DB for new-ness
-for job in unique_jobs:
+for job in kept:
     if not await db.is_job_seen(job.normalized_key()):
         await db.insert_job(job)
         new_jobs.append(job)
@@ -237,11 +241,11 @@ In dry-run mode: scoring and dedup still happen, but no DB writes and no notific
 | Component | Max Points | How |
 |-----------|-----------|-----|
 | Title match | 40 | Exact match = 40, substring = 20, partial keyword overlap = 5*core + 3*support (capped at 20) |
-| Skill match | 40 | primary skills = 3 pts each, secondary = 2, tertiary = 1 (capped at 40) |
+| Skill match | 40 | primary skills = 3 pts each, secondary = 2, tertiary = 1, then **length-normalised** (BM25-style: divided by `max(1, (1-b) + b * words / SKILL_LENGTH_BASELINE_WORDS)`, baseline 400 words — a long ad no longer saturates the cap by accident; `skill_matcher.py:107-119`, applied at `:543`), finally capped at 40 |
 | Location | 10 | UK city = 10, remote = 8, unknown = 0 |
 | Recency | 10 | <=1 day = 10, <=3d = 8, <=5d = 6, <=7d = 4, older = 0 |
 | **Penalties** | | |
-| Negative title | -30 | Title contains excluded keywords (60 default entries across 12 categories) |
+| Negative title | -30 | Title contains an excluded keyword. **There are no defaults** — `NEGATIVE_TITLE_KEYWORDS` is `[]` (`core/keywords.py:21`, emptied 2026-04-09) and the live list is whatever the user typed into their own preferences (`keyword_generator.py:546` — `negatives = list(prefs.negative_keywords)`). With no negative keywords on the profile this penalty never fires |
 
 There is **no foreign-location penalty**. It was deleted 2026-08-12 (rule #30): a non-UK job is refused at the door (`services/uk_gate.check_uk`), never docked points.
 
@@ -264,10 +268,10 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 
 | # | Engine | Service | Flag | Default |
 |---|--------|---------|------|---------|
-| 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
-| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:582-617`; data from the enrichment step `services/job_enrichment.py`) | `ENRICHMENT_ENABLED` | false |
-| 3 | Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
-| 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
+| 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | `ENGINE1_ENABLED` (no legacy alias; `skill_matcher.py:480-483` reads it, `:560` gates the keyword half) | **true** |
+| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:582-617`; data from the enrichment step `services/job_enrichment.py`) | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` at every call site (`main.py:853,1137`, `rescore.py:85`, `api/routes/jobs.py:779`, `workers/tasks.py:237`) — this gates the enrichment DATA, not the dim path: the dims fire on `user_preferences` alone (`skill_matcher.py:587`, rule #20) | false |
+| 3 | Hybrid | `services/embeddings.py` + `pg_vector_index.py` + `retrieval.py` (`vector_index.py` is the legacy Chroma wrapper, no production caller) | reads: `ENGINE3_ENABLED` **or** `SEMANTIC_ENABLED`; embedding writes: `SEMANTIC_ENABLED` alone | false |
+| 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` (`main.py:352`, `rescore.py:395,589`) | false |
 
 **Engine 4 — LLM judge detail:**
 - Service: `backend/src/services/llm_matcher.py`. `MatchVerdict{fit_score: int 0-100, verdict: str, reason: str}`.
@@ -285,7 +289,7 @@ Every row written to `user_feed` now carries a `profile_version INTEGER` column 
 
 Two operating modes:
 
-- **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it enqueues `rescore_user_feed_task` on the ARQ worker queue (`src/api/routes/profile.py:163`) — a deploy that kills the web process no longer drops the re-score, and ARQ retries it. Only when the queue is unreachable does it fall back to an in-process `asyncio` task (`profile.py:179-184`). The rescore service (`src/services/rescore.py`) clears the user's LLM verdicts (`clear_user_verdicts` in `llm_matcher.py`) and re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. If `MATCHER_ENABLED` is on, the LLM re-judge also runs for the top candidates.
+- **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it enqueues `rescore_user_feed_task` on the ARQ worker queue (`src/api/routes/profile.py:163`) — a deploy that kills the web process no longer drops the re-score, and ARQ retries it. Only when the queue is unreachable does it fall back to an in-process `asyncio` task (`profile.py:179-184`). The rescore service (`src/services/rescore.py`) re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. The LLM verdicts are cleared (`clear_user_verdicts` in `llm_matcher.py`) **only when the judge is on** — `matcher_on = ENGINE4_ENABLED or MATCHER_ENABLED` (`rescore.py:589,595-598`); with the judge off, which is the default, no verdict is touched. When it is on, the LLM re-judge runs for the top candidates. Either flag name opens it (rule #18).
 - **Mode 2 — ordinary search / refresh.** Newly-fetched jobs get scored and stamped with the current profile version. Every authenticated search ALSO runs `backfill_feed_from_catalog(user_id, db)` (`src/main.py:1272-1278`), which scores the shared catalog for that user and upserts feed rows — so existing rows are re-visited, not skipped. Their **scores** still hold steady: `upsert_feed_row` freezes the score on an existing row when the incoming `profile_version` **and** `scorer_version` both match the stored ones, and overwrites it when either differs (`src/services/feed.py:288-303`). `bucket` and both version stamps are always rewritten. Verdicts are separately protected by the `skip_existing` lock in `match_batch` (`src/services/llm_matcher.py:436,443`).
 
 **Invariant:** a job's score only changes when the PROFILE changes or `SCORER_VERSION` is bumped — never just because time passed. That is enforced by the version-conditional freeze above, not by skipping the write. The `jobs` and `job_enrichment` shared catalog tables are not touched (rules #10/#17 still hold).
@@ -329,19 +333,21 @@ RemotiveSource, DevITJobsSource, LandingJobsSource, AIJobsSource,
 HNJobsSource
 ```
 
-**ATS Boards** (11 — iterate company slugs from companies.py):
+**ATS Boards** (10 — iterate company configurations from companies.py; plain
+string slugs except Workday and SuccessFactors, whose entries are dicts):
 ```
-GreenhouseSource(session, companies, search_config)   # 25 companies
-LeverSource(session, companies, search_config)         # 12 companies
-WorkableSource(session, companies, search_config)      # 8 companies
-AshbySource(session, companies, search_config)         # 9 companies
-SmartRecruitersSource(session, companies, search_config) # 6 companies
-PinpointSource(session, companies, search_config)      # 8 companies
-RecruiteeSource(session, companies, search_config)     # 8 companies
-WorkdaySource(session, companies, search_config)       # 15 companies (dict format)
-PersonioSource(session, companies, search_config)      # 10 companies
+GreenhouseSource(session, companies, search_config)   # 82 companies
+LeverSource(session, companies, search_config)         # 35 companies
+WorkableSource(session, companies, search_config)      # 21 companies
+AshbySource(session, companies, search_config)         # 25 companies
+SmartRecruitersSource(session, companies, search_config) # 15 companies
+PinpointSource(session, companies, search_config)      # 39 companies
+RecruiteeSource(session, companies, search_config)     # 31 companies
+WorkdaySource(session, companies, search_config)       # 20 companies (dict format)
+PersonioSource(session, companies, search_config)      # 26 companies
 SuccessFactorsSource(session, companies, search_config) # 3 companies (sitemap format)
-RipplingSource(session, companies, search_config)       # added Batch 3
+# RipplingSource retired in the 2026-08-10 rotation — RIPPLING_COMPANIES (5)
+# remains in companies.py but no source class builds it, so 10 boards poll 297.
 ```
 
 **RSS/XML Feeds** (9 — parse with xml.etree.ElementTree):
@@ -576,6 +582,8 @@ and must never be imported at module top level.
 
 ## Database Schema
 
+> **The SQL below is SQLite-flavoured, and is never executed as written.** It is the legacy baseline `init_db()` hands to `executescript()`, which pushes every statement through `pg.translate()` first (`repositories/pg.py:670-674`) — `INTEGER PRIMARY KEY AUTOINCREMENT` becomes a Postgres identity column (`pg.py:193-195`), and `?` placeholders, `datetime('now')`, `INSERT OR IGNORE` and FK clauses are rewritten or stripped the same way. Read it as the *shape* of the baseline, not as DDL you could run against Postgres by hand.
+>
 > This section shows the baseline schema. The full schema is built by 31 forward-migrations (0000–0030). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
 
 ```sql
@@ -632,9 +640,9 @@ CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
 CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 ```
 
-**Pragmas:** `journal_mode=WAL`, `busy_timeout=5000`
+**Pragmas:** none. This was a SQLite-era line (`journal_mode=WAL`, `busy_timeout=5000`); the store has been Postgres since 2026-07-02 and sets neither — `database.py:94` says so in as many words, `db_retry.open_db()` accepts `busy_timeout_ms` only for signature compatibility and ignores it (`db_retry.py:30-31`), and the `pg.py` shim turns any remaining `PRAGMA` into a no-op (`pg.py:316-317`).
 
-**Auto-purge:** `purge_old_jobs(days=30)` deletes jobs where `first_seen` is older than 30 days. Runs at the start of every pipeline run.
+**Auto-purge:** `purge_old_jobs(days=30)` deletes jobs by **liveness, not ingestion** — `DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < cutoff` (`repositories/database.py:688,723`). A posting still live after 30 days is KEPT; `first_seen` is only the fallback for legacy rows whose `last_seen_at` is NULL. It also deletes the catalog-derived child rows itself because the shim strips every FK clause, including `ON DELETE CASCADE`. Runs at the start of every pipeline run (`main.py:840`).
 
 **first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a database DEFAULT).
 
@@ -656,7 +664,8 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 |----------|----------|---------|
 | `REED_API_KEY` / `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` / `JSEARCH_API_KEY` / `JOOBLE_API_KEY` / `SERPAPI_KEY` / `CAREERJET_AFFID` / `FINDWORK_API_KEY` / `DFE_APPRENTICESHIPS_API_KEY` | No | Keyed API sources (skip on empty) |
 | `GITHUB_TOKEN` | No | Higher GitHub API rate limit (5000/hr vs 60/hr) |
-| `SMTP_EMAIL` + `SMTP_PASSWORD` + `NOTIFY_EMAIL` / `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | No | Built-in notification channels |
+| `SMTP_EMAIL` + `SMTP_PASSWORD` (+ `SMTP_HOST` / `SMTP_PORT`) | No | The PLATFORM's SMTP credentials — the `mailtos://` fallback for both system email and the per-user email channel (`services/channels/email_url.py:121-140`). Prefer `RESEND_API_KEY` (row below): Railway blocks SMTP 25/465/587 |
+| ~~`NOTIFY_EMAIL`~~ / ~~`SLACK_WEBHOOK_URL`~~ / ~~`DISCORD_WEBHOOK_URL`~~ | **DEAD** | Declared at `core/settings.py:78,81,82` and imported by nothing in `src/`, `tests/` or `scripts/`. They drove the pre-Batch-2 single-tenant notifier, which was deleted; setting them has no effect. Slack/Discord/Telegram are per-user channels via the Connect flow now |
 | `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker (default 40k–120k) |
 | `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py:25). Enforced by `validate_required_env()` |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py:60-71) |
@@ -697,7 +706,8 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `MIN_MATCH_SCORE` | 30 | Minimum score to keep a job |
+| `MIN_MATCH_SCORE` | 30 | **Display** floor, applied at READ time — the CLI viewer's `--min-score` default and the dashboard's `min_score`. It does NOT decide what is kept (`settings.py:109-114`) |
+| `MIN_STORE_SCORE` | 1 (env-overridable) | **Catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`) (`settings.py:115-120`, applied at `main.py:729`; re-applied by the backfill at `services/rescore.py:271`). It does **not** gate `user_feed`: `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison (`workers/tasks.py:208-217`) |
 | `MAX_RESULTS_PER_SOURCE` | 100 | Cap per source |
 | `MAX_DAYS_OLD` | 7 | Maximum job age |
 | `MAX_RETRIES` | 3 | HTTP retry attempts |
@@ -771,7 +781,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | rapidfuzz / scikit-learn | >=3.0 / >=1.4 | Pillar 2 dedup layers 2–3 (**lazy-imported**, rule #16) |
 | arq | >=0.25 | Async task queue (worker process) |
 | sentry-sdk | >=1.40.0 | Error tracking + performance monitoring (Phase 3) |
-| sentence-transformers / numpy / chromadb | `[semantic]` extra (~300 MB) | Pillar 2 embeddings + ChromaDB (**lazy-imported**, opt-in) |
+| sentence-transformers / numpy / chromadb | `[semantic]` extra (~300 MB) | Pillar 2 embeddings (**lazy-imported**, opt-in). `chromadb` is still declared, and `services/vector_index.py:39-45` still builds a `PersistentClient` when something calls it — but the live vector store is pgvector, and nothing on the production pipeline or API path calls it. Its remaining callers are two `backend/scripts/` helpers and two tests |
 
 ### Dev (`pip install -e ".[dev]"` from `backend/`)
 
