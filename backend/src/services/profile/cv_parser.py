@@ -280,6 +280,15 @@ _SECTION_HINT_HEADINGS = (
 )
 
 
+# TAGGED, BECAUSE THE CALLER'S `to_thread` IS NOT THE GUARD — this is.
+# `parse_cv_async` now offloads this call, so today's path is safe. But that is
+# the CALLER remembering, and the whole thesis of `@cpu_bound` (post-mortem §4)
+# is that the guard moved from the caller to the callee precisely because
+# callers forget: the next `await`-less call from async code would push every
+# PDF page through pdfplumber on the loop thread with nothing to stop it.
+# Fixing the one call site and not tagging the function is exactly the
+# half-measure that let this bug class bite three times.
+# (CodeRabbit, PR #386.)
 @cpu_bound
 def _build_section_hint(file_path: str) -> str:
     """Batch 1.7b — pre-segment the PDF via font-size clustering and
