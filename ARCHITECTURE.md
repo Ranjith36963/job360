@@ -732,7 +732,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 
 4. **Normalization for dedup:** Company names are aggressively normalized (strip suffixes, regions, lowercase) to merge "Anthropic Ltd" and "Anthropic" as the same employer. This is deliberately aggressive — false positives (merging different companies) are considered less harmful than false negatives (duplicate listings).
 
-5. **python-jobspy as optional dependency:** Not listed in backend/pyproject.toml because it has heavy transitive dependencies. Indeed/Glassdoor source gracefully skips if not installed.
+5. **python-jobspy as optional dependency:** the `indeed` extra in `backend/pyproject.toml` — `pip install '.[indeed]'`. Absent, `JobSpySource.fetch_jobs` catches `ImportError` and returns `[]`.
 
 ---
 
