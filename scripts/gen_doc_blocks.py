@@ -81,9 +81,50 @@ def code_facts() -> str:
     return "\n".join(rows)
 
 
+def api_routes() -> str:
+    """Every route FastAPI actually declares, grouped by router file.
+
+    The most expensive doc lie in this repo has twice been a route. A wrong
+    number is a bad fact; a wrong endpoint reads like a CONTRACT, and whoever
+    trusts it gets a 404. `POST /api/pipeline/applications` was documented in
+    three places and never existed. `.claude/skills/health/SKILL.md` told an
+    agent to call `GET /api/me` nightly — it would 404 and report a healthy
+    system as broken.
+
+    A path is assembled in THREE places, and reading fewer than three is how
+    the guard for this was wrong on its first attempt: APIRouter(prefix=...),
+    the decorator, and include_router(prefix="/api"). All three here.
+    """
+    routes_dir = ROOT / "backend/src/api/routes"
+    if not routes_dir.exists():
+        return "_(no routes directory)_"
+
+    decl = re.compile(r"@router\.(get|post|put|patch|delete)\(\s*[\"']([^\"']*)")
+    prefix_re = re.compile(r"APIRouter\(\s*prefix=[\"']([^\"']+)")
+
+    lines = ["| Method | Path | Router |", "| --- | --- | --- |"]
+    total = 0
+    for path in sorted(routes_dir.glob("*.py")):
+        body = path.read_text(encoding="utf-8", errors="replace")
+        pm = prefix_re.search(body)
+        prefix = pm.group(1).rstrip("/") if pm else ""
+        found = []
+        for m in decl.finditer(body):
+            full = f"/api{prefix}{m.group(2)}".rstrip("/") or "/api"
+            found.append((m.group(1).upper(), full))
+        for method, full in sorted(found, key=lambda r: (r[1], r[0])):
+            lines.append(f"| `{method}` | `{full}` | `{path.name}` |")
+            total += 1
+    lines.append("")
+    lines.append(f"**{total} routes.** Generated from the routers; a path is "
+                 f"assembled from `APIRouter(prefix=…)` + the decorator + "
+                 f"`include_router(prefix=\"/api\")`.")
+    return "\n".join(lines)
+
+
 # doc -> {block name: producer}
 BLOCKS: dict[str, dict[str, callable]] = {
-    "ARCHITECTURE.md": {"code-facts": code_facts},
+    "ARCHITECTURE.md": {"code-facts": code_facts, "api-routes": api_routes},
 }
 
 OPEN = "<!-- generated: {name} -->"

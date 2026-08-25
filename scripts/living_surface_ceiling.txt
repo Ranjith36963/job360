@@ -21,4 +21,9 @@
 # 8353 (2026-08-25): +2 blank lines from moving two stamps BELOW their YAML
 # front matter — placing them above stopped the front matter parsing, which
 # silently unloads a skill. Structural, not new prose.
-8353
+# 8359 (2026-08-25): +6 for the 'API Routes' heading and the two lines of
+# prose introducing it. The 65 ROUTES themselves cost zero -- they are a
+# generated block. Six lines of WHY bought 65 facts that can never drift,
+# and route lies are the most expensive class in this repo: a wrong endpoint
+# reads like a contract and 404s whoever trusts it.
+8359
