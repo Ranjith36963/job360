@@ -20,7 +20,7 @@
 
 | Dimension | % | Evidence |
 |---|---|---|
-| Product (features) | ~90% | engine + API + UI + auth + profiles + 4 scoring engines + control surface; 1,571 tests green |
+| Product (features) | ~90% | engine + API + UI + auth + profiles + 4 scoring engines + control surface; ~~1,571 tests green~~ (that count was the 2026-06-22 reading and is long stale — measure it, never quote it: `cd backend && python -m pytest --collect-only -q \| tail -1`; the merge-gate floor lives only in `CONTRIBUTING.md`) |
 | Launch readiness (ship it live) | ~30% | no CI gate, no Dockerfile/deploy, no prod Redis+ARQ, no SES |
 | **Money layer (charge for it)** | **~5%** | **no Stripe, no billing, no plans, no pricing page**, ~~no analytics~~ (analytics shipped since — see Tier 3) |
 
