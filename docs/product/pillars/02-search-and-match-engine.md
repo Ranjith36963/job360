@@ -292,9 +292,9 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
 2. **Enrichment bonus** (+5 if the job has a `job_enrichment` row — encourages enriched candidates to win, so structured data survives downstream)
 3. **Completeness** (+10 each for salary_min/max, +5 for location, +min(len(desc), 20) for description)
 
-### Stage 5 — Enrich (opt-in, `ENRICHMENT_ENABLED=true`)
+### Stage 5 — Enrich (opt-in, `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED`)
 
-- Gate: only jobs with `match_score >= ENRICHMENT_THRESHOLD` (default 60) are sent to the LLM.
+- Gate: **a budget, not a threshold** (`main.py:1137-1163`). Jobs must clear a low floor — `match_score >= ENRICHMENT_MIN_SCORE` (default **10**, `settings.py:152`) — and then the best `ENRICHMENT_MAX_JOBS` (default **20**) are sent to the LLM. `ENRICHMENT_THRESHOLD` is only a back-compat alias of the floor (`settings.py:155`) and is not read at this call site; the old "default 60" gate sat above the highest score the scorer produced, so the stage had never run once.
 - `enrich_batch(jobs, semaphore_limit=10, skip_existing=True)` (`job_enrichment.py`) runs asyncio-parallel LLM calls capped at 10 concurrent.
 - Each call goes through `llm_extract_validated(prompt, JobEnrichment, max_retries=2)`:
   - **Provider chain** (`llm_provider.py:329-334`): **OpenAI (`gpt-4o-mini`, PRIMARY)** → Gemini (`gemini-3.7-flash`) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`gpt-oss-120b`). Every model id is env-overridable.
@@ -462,24 +462,15 @@ Both flags default `false` per CLAUDE.md rule #18, and the **no-op path must exa
 
 ### 5.1 `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` → LLM enrichment
 
-The gate at every Engine-2 call site is `ENGINE2_ENABLED or ENRICHMENT_ENABLED`
-(`main.py:853`, `main.py:1137`, `rescore.py:85`, `jobs.py:779`, `tasks.py:237`) — rule #18.
-Either name opens it; testing only the legacy one is how a flipped `ENGINE2_ENABLED`
-goes unnoticed.
+Either name opens this surface — every E2 call site reads `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853`, `main.py:1137`, `rescore.py:85`, `api/routes/jobs.py:779`, `workers/tasks.py:237`), rule #18.
 
 When on:
 - Stage 5 runs (see §2).
-- `JobScorer` gains a populated `enrichment_lookup` and the Batch 2.9 dimension scorers read real data.
+- `JobScorer` gains a populated `enrichment_lookup`, so the Batch 2.9 dimension scorers have real data instead of their neutral halves.
 - Dedup tie-breaker uses the `+5` enrichment bonus.
 
 When off:
-- `enrichment_lookup` is an empty dict, so every lookup returns `None`. The four dim
-  scorers are **still called** and each returns its NEUTRAL half — seniority 4, salary 5,
-  workplace 3, and visa 3 when `needs_visa` is set (`scoring_dimensions.py:157,198-200,245,278`).
-  They do **not** return 0, and `JobScorer` does **not** revert to the legacy 4-component
-  formula: the dims are gated on `user_preferences` alone (`skill_matcher.py:587`, rules
-  #20/#29). The one real zero is `visa_score` with `needs_visa=False`
-  (`scoring_dimensions.py:242`) — "no reward for something irrelevant", not a penalty.
+- `enrichment_lookup` is an empty dict, so every lookup returns `None`. The four dim scorers still RUN — the path is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20) — and each returns its documented **neutral half weight**, never a zero: seniority 4 (`scoring_dimensions.py:157`), salary 5 (`:198-200`), workplace 3 (`:278`), visa 3 (`:245`), so **+15** rather than the +30 a fully enriched job can reach (rule #29; `visa_score` is the one exception, returning 0 at `:242` when the user does not need sponsorship). A user with no preferences at all gets the legacy 4-component formula; a user with preferences does not.
 - No LLM API calls, no `job_enrichment` DB writes.
 
 ### 5.2 `SEMANTIC_ENABLED=true` → embeddings + hybrid retrieval
@@ -495,7 +486,7 @@ When on:
   2. Pulls semantic top-500 from `job_embeddings.embedding` (cosine distance `<=>`, exact scan — no ANN index yet, see `0027`).
   3. Fuses via **Reciprocal Rank Fusion** with `k=60`: `score(item) = Σ 1 / (k + rank_i + 1)` across all input lists.
   4. Optionally reranks the top-50 with the **cross-encoder** `cross-encoder/ms-marco-MiniLM-L-6-v2` (Batch 2.8).
-- ESCO skill normalisation in CV parsing also flips on (Pillar 1 Ring 2 §3.2).
+- ESCO skill normalisation in CV parsing does **not** flip on. `_maybe_normalise_skills_via_esco()` is double-gated: `SEMANTIC_ENABLED` **and** `is_available()` (`cv_parser.py:821,830`), and the index artefacts have never been built, so it stays an identity transform either way (rule #28; `docs/product/PILLAR1_EXTRACTION_AUDIT.md`).
 
 When off:
 - No `sentence_transformers` import at all (saves ~150 ms–2 s startup).
@@ -529,16 +520,19 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | `SENIORITY_WEIGHT` | `8` | Seniority dimension max | Raise to penalise mismatched levels harder |
 | `VISA_WEIGHT` | `6` | Visa dimension max | Only meaningful when users have `needs_visa=True` |
 | `WORKPLACE_WEIGHT` | `6` | Workplace (remote/hybrid/onsite) dimension max | Raise to make workplace preference more decisive |
-| `ENRICHMENT_THRESHOLD` | `60` | Jobs need to score this high to be sent to the LLM enrichment pipeline | Raise to save LLM cost; lower to enrich more aggressively |
-| `ENRICHMENT_ENABLED` | `false` | Legacy switch for the LLM **enrichment step**. Every call site is gated on `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853,1137`), so `ENGINE2_ENABLED=true` runs Engine 2 with this name still false — test BOTH (rule #18). It does **not** activate the multi-dim path: that is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20); this flag only decides whether the dims read real data or their neutral halves | Flip on after setting LLM keys — see rule #18 |
+| `ENRICHMENT_MIN_SCORE` | `10` | The low floor a job must clear to be enrichment-eligible (`settings.py:152`) | Raise only to skip obvious junk — the budget below is the real lever |
+| `ENRICHMENT_MAX_JOBS` | `20` | Per-run budget: the best N eligible jobs are enriched (`settings.py:151`) | Raise to enrich more per run; this is the hard cost ceiling |
+| `ENRICHMENT_THRESHOLD` | `10` | Back-compat alias that resolves to `ENRICHMENT_MIN_SCORE` (`settings.py:155`). **Not the gate** — the pipeline reads `ENRICHMENT_MIN_SCORE` + `ENRICHMENT_MAX_JOBS` | Left in place so old `.env` files keep working |
+| `ENRICHMENT_ENABLED` | `false` | Legacy switch for LLM enrichment; `ENGINE2_ENABLED` opens the same gate (`ENGINE2_ENABLED or ENRICHMENT_ENABLED`). It switches the enrichment DATA on, **not** the dim scorers — those run on `user_preferences` alone (rule #20) | Flip on after setting LLM keys — see rule #18 |
 | `SEMANTIC_ENABLED` | `false` | Writes embeddings into the pgvector store (`main.py:1292,1348` read this name ALONE). Hybrid retrieval is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), so `ENGINE3_ENABLED` alone queries an index nothing fills. It does **not** switch ESCO on: that also needs `is_available()` (`cv_parser.py:821,830`) and the index artefacts have never been built | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
 | `TARGET_SALARY_MIN` / `_MAX` | `40000` / `120000` | Salary-range *tiebreaker* (not scoring) for sort order on the dashboard | Display preference only |
-| `GEMINI_API_KEY` | (unset) | First-choice LLM provider | Unset → falls to Groq |
-| `GROQ_API_KEY` | (unset) | Second-choice LLM | Unset → falls to Cerebras |
-| `CEREBRAS_API_KEY` | (unset) | Third-choice LLM | All three unset → enrichment + LLM-CV-parse both raise `RuntimeError` |
-| Source-keyed APIs (`REED_API_KEY`, `ADZUNA_APP_ID`+`ADZUNA_APP_KEY`, `JSEARCH_API_KEY`, `JOOBLE_API_KEY`, `SERPAPI_KEY`, `CAREERJET_AFFID`, `FINDWORK_API_KEY`) | (unset) | The 7 keyed sources from Pillar 3 | Each unset source `return []` silently (logged at INFO) |
+| `OPENAI_API_KEY` | (unset) | **PRIMARY** LLM provider — heads the chain (`llm_provider.py:329-334`) | Unset → falls to Gemini |
+| `GEMINI_API_KEY` | (unset) | Second-choice LLM | Unset → falls to Groq |
+| `GROQ_API_KEY` | (unset) | Third-choice LLM | Unset → falls to Cerebras |
+| `CEREBRAS_API_KEY` | (unset) | Fourth-choice LLM | All four unset → enrichment + LLM-CV-parse both raise `RuntimeError` |
+| Source-keyed APIs (`REED_API_KEY`, `ADZUNA_APP_ID`+`ADZUNA_APP_KEY`, `JSEARCH_API_KEY`, `JOOBLE_API_KEY`, `SERPAPI_KEY`, `CAREERJET_AFFID`, `FINDWORK_API_KEY`, `DFE_APPRENTICESHIPS_API_KEY`) | (unset) | The 8 keyed sources from Pillar 3 (`sources/apis_keyed/`) | Each unset source `return []` silently (logged at INFO) |
 
-> Tuning recipe — *"feed too noisy"*: raise `MIN_MATCH_SCORE` (e.g. 40), or raise `MIN_TITLE_GATE`/`MIN_SKILL_GATE` (e.g. 0.25). *"Feed too sparse"*: lower the same, or expand `additional_skills` on the user profile (cheaper than tuning). *"Want more weight on salary fit"*: bump `SALARY_WEIGHT` to 15, but watch the [0,100] clamp — rule #23.
+> Tuning recipe — *"feed too noisy"*: raise `MIN_MATCH_SCORE` (e.g. 40), or raise `MIN_TITLE_GATE`/`MIN_SKILL_GATE` (e.g. 0.25). *"Feed too sparse"*: lower the same, or expand `additional_skills` on the user profile (cheaper than tuning). *"Want more weight on salary fit"*: bump `SALARY_WEIGHT` to 15, but watch the [0,100] clamp — rule #27.
 
 ---
 
@@ -548,7 +542,7 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | --- | --- | --- | --- |
 | All scores are 0 / suspiciously low | No user profile loaded → `score_job()` legacy path firing against empty `keywords.py` | `match_score` column near 0 for every row | Run `setup-profile`. The "empty keywords.py" inflection from 2026-04-09 means a profile is mandatory now |
 | Dim columns all zero except classic 4 | `user_preferences` was **not** passed at all — that, not the lookup, is the gate (rule #20) | DB inspection of `seniority_score`/`salary_score`/etc all zero despite enrichment rows existing. Note a *neutral half* (e.g. visa 3 of `VISA_WEIGHT=6`) is correct, not a bug — as is a visa `0` when the user does not need sponsorship — only a flat 0 across all four points at a missing `user_preferences` | Confirm the caller passes `user_preferences`; `main.py:857` and `workers/tasks.py::score_and_ingest` show the correct pattern |
-| Enrichment never runs | `ENRICHMENT_ENABLED=false` (default), or all 3 LLM providers unset, or score never crosses `ENRICHMENT_THRESHOLD` | `job_enrichment` table stays empty | Check the three preconditions in that order |
+| Enrichment never runs | Both `ENGINE2_ENABLED` and `ENRICHMENT_ENABLED` false (the default), or all 4 LLM providers unset, or no job clears `ENRICHMENT_MIN_SCORE` (default 10) | `job_enrichment` table stays empty | Check the three preconditions in that order. A selected-zero run logs `Enrichment selected 0 jobs …` at WARNING (`main.py:1172`) |
 | Enrichment runs but every row is `category="other"` etc | LLM returning generic enum values; the validation loop converged on weak output | `SELECT category, COUNT(*) FROM job_enrichment GROUP BY category` shows skewed dist | Prompt-engineering territory — see `job_enrichment.py` system prompt; try forcing Gemini-only by unsetting the others |
 | Cross-encoder rerank takes too long | First call on each process initialises the model (~2 s download + load) | API request latency spike | Pre-warm via a startup hook, or accept the cold-start cost once per worker process |
 | Vector query returns 0 even with `SEMANTIC_ENABLED=true` | No rows carry a vector (`PgVectorIndex().count() == 0`, i.e. `SELECT count(*) FROM job_embeddings WHERE embedding IS NOT NULL` is 0) — embeddings never built, **or** this Postgres has no pgvector so `0027` was a no-op and every method degrades to empty | Hybrid retrieval falls back to keyword-only silently | Run a CLI pass with the flag on to populate (`main._embed_backfill_budget`, `backend/src/main.py:548`, re-fills rows where `e.job_id IS NULL OR e.embedding IS NULL`). To force re-embed: `UPDATE job_embeddings SET embedding = NULL;` and re-run. **Deleting `data/chroma/` does nothing** — that store is not read any more |
@@ -577,7 +571,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Negative-title penalty (-30) only — the foreign-location penalty was deleted 2026-08-12 | ✅ | `REMOTE_TERMS` (4); UK/foreign matching lives in `uk_gate` data |
 | Batch 2.9 multi-dim (seniority / salary / visa / workplace) | ✅ | `scoring_dimensions.py`, env-tunable weights |
 | 9-field `ScoreBreakdown` dataclass | ✅ | replaces flat int return |
-| Skill synonym expansion (529 aliases) | ✅ | `skill_synonyms.py` + `_text_contains_skill` |
+| Skill synonym expansion (493 aliases) | ✅ | `skill_synonyms.py` + `_text_contains_skill` |
 | Word-boundary skill matching | ✅ | prevents "rust" matching "trust" |
 | 5-column date-confidence model for recency | ✅ | Pillar 3 Batch 1 — fabricated dates score 0 |
 | Empty `keywords.py` (user-profile mandatory) | ✅ | architectural inflection 2026-04-09 |
@@ -608,7 +602,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Multi-provider LLM fallback (OpenAI → Gemini → Groq → Cerebras) | ✅ | `llm_provider.llm_extract` (`:329-334`) |
 | Self-correction loop (max 2 retries with appended errors) | ✅ | `llm_extract_validated` |
 | `_build_enrichment_lookup()` bulk-load for scoring | ✅ | graceful empty-dict on missing table |
-| `ENRICHMENT_THRESHOLD=60` gate | ✅ | only high-scoring jobs sent to LLM |
+| Enrichment selection = `ENRICHMENT_MIN_SCORE` floor (10) + `ENRICHMENT_MAX_JOBS` budget (20) | ✅ | a budget, not a threshold — the old `ENRICHMENT_THRESHOLD=60` gate sat above the scorer's real maximum and never fired (`main.py:1137-1163`) |
 | `ENRICHMENT_ENABLED` flag defaults `false` | ✅ | rule #18 |
 | Cost tracking per provider call | ❌ | no `llm_usage` table yet |
 
