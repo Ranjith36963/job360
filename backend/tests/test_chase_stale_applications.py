@@ -145,6 +145,48 @@ async def test_a_quiet_application_produces_a_message_naming_the_job(db):
     assert result["chased"] == 1
 
 
+@pytest.mark.parametrize(
+    "company", ["Meta", "Monzo", "Wise", "Octopus Energy", "Deloitte", "Starling Bank"]
+)
+def test_company_names_ending_in_a_or_t_are_not_truncated(company: str) -> None:
+    """Regression: the first version used ``f"{t} at {c}".strip(" at")``.
+
+    ``str.strip`` takes a SET OF CHARACTERS, not a suffix — so it ate any trailing
+    space/'a'/'t' and "Data Engineer at Meta" went out as "Data Engineer at Me".
+    The original tests used "Northwind" and "Acme", which both end in safe letters,
+    so the bug shipped. This parametrisation exists specifically to include names
+    that end in the stripped characters.
+    """
+    label = worker_tasks._job_label(
+        {"title": "Data Engineer", "company": company, "job_id": 1}
+    )
+    assert label == f"Data Engineer at {company}"
+    assert label.endswith(company), f"company name truncated: {label!r}"
+
+
+def test_job_label_degrades_when_the_catalog_row_is_gone() -> None:
+    """get_applications_to_chase LEFT JOINs jobs, so title/company can be empty."""
+    assert worker_tasks._job_label({"title": "Data Engineer", "company": "", "job_id": 7}) == "Data Engineer"
+    assert worker_tasks._job_label({"title": "", "company": "Acme", "job_id": 7}) == "Acme"
+    # Never render a dangling "at" with a hole in it.
+    assert worker_tasks._job_label({"title": "", "company": "", "job_id": 7}) == "job #7"
+    assert " at " not in worker_tasks._job_label({"title": "", "company": "Acme", "job_id": 7})
+
+
+@pytest.mark.asyncio
+async def test_the_message_names_a_company_that_ends_in_a_stripped_character(db):
+    """End-to-end version of the above, through the real cron."""
+    await _enable_rule(db)
+    job_id = await _add_job(db, "Data Engineer", "Meta")
+    await _add_application(db, job_id, quiet_days=30)
+    disp = _RecordingDispatcher()
+
+    await _run(db, disp)
+
+    assert "Meta" in disp.calls[0]["body"]
+    assert "at Me\n" not in disp.calls[0]["body"]
+
+
 @pytest.mark.asyncio
 async def test_the_score_gate_is_bypassed_and_quiet_hours_are_not(db):
     """match_score must be absent; force must not be set.

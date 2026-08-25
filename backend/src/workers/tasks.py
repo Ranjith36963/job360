@@ -1383,17 +1383,34 @@ CHASE_COOLDOWN_DAYS = 7
 CHASE_MAX_PER_USER = 5
 
 
+def _job_label(row: dict[str, Any]) -> str:
+    """``"Title at Company"``, degrading cleanly when either side is missing.
+
+    NOT ``f"{title} at {company}".strip(" at")``, which is what this was first
+    written as and was wrong: :meth:`str.strip` takes a SET OF CHARACTERS, not a
+    suffix. It strips any leading/trailing space, ``a`` or ``t``, so
+    ``"Data Engineer at Meta"`` came out as ``"Data Engineer at Me"``. Every
+    employer whose name ends in ``a`` or ``t`` was silently truncated in the email.
+    Guarded by ``test_company_names_ending_in_a_or_t_are_not_truncated``.
+    """
+    title = (row.get("title") or "").strip()
+    company = (row.get("company") or "").strip()
+    if title and company:
+        return f"{title} at {company}"
+    # A job row can LEFT JOIN to nothing (catalog purge), so never render
+    # "at " with a hole in it — fall back to whichever half exists.
+    return title or company or f"job #{row.get('job_id')}"
+
+
 def _chase_message(rows: list[dict[str, Any]]) -> tuple[str, str]:
     """Build the chase notification. Names the jobs — a count alone is not useful."""
     if len(rows) == 1:
-        r = rows[0]
-        where = f"{r['title']} at {r['company']}".strip(" at")
         return (
             "No reply yet — worth a chase?",
-            f"You applied to {where} and it has been quiet since.\n"
+            f"You applied to {_job_label(rows[0])} and it has been quiet since.\n"
             f"Worth a follow-up, or mark it ghosted on your Job360 pipeline.",
         )
-    listed = "\n".join(f"- {r['title']} at {r['company']}".rstrip(" at") for r in rows)
+    listed = "\n".join(f"- {_job_label(r)}" for r in rows)
     return (
         f"{len(rows)} applications have gone quiet",
         f"These have had no movement in a while:\n{listed}\n\n"
