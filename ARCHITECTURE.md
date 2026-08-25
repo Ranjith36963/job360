@@ -17,6 +17,13 @@ Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from 
 | `LOCATIONS` entries | **26** | `core/keywords.py` `LOCATIONS` |
 | Migration head | **0030** | `backend/migrations/` |
 | `SCORER_VERSION` | **7** | `services/skill_matcher.SCORER_VERSION` |
+| `BaseJobSource` subclasses | **40** | `src/sources/` |
+| ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
+| Enrichment enum values | **7** | `services/enrichment` schema |
+| Migration files | **31** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **218** | `backend/tests/` |
+| GitHub Actions workflows | **30** | `.github/workflows/` |
+| Hard rules in CLAUDE.md | **31** | root `CLAUDE.md` |
 <!-- /generated -->
 
 **Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (26) and `VISA_KEYWORDS` (8) remain — both domain-agnostic. `_location_score` skips `Remote` and `Hybrid` when matching, so only the place names can score the full 10 (`core/keywords.LOCATIONS`).
