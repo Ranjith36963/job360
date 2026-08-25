@@ -47,7 +47,11 @@ one test writes to schema A while another reads schema B.
 # From the repo root. `make redis-up` starts the redis service ONLY
 # (Makefile:238 → `docker compose ... up -d redis`), so it does NOT fix this
 # symptom — postgres is a separate service in docker-compose.dev.yml:37.
-docker compose -f docker-compose.dev.yml up -d      # both: postgres + redis
+# `--wait` is load-bearing: plain `up -d` returns as soon as the container is
+# RUNNING, so pytest can start before postgres accepts connections and you get
+# this exact symptom back. `--wait` blocks on the pg_isready healthcheck at
+# docker-compose.dev.yml:50-54.
+docker compose -f docker-compose.dev.yml up -d --wait   # both: postgres + redis
 cd backend && python -m pytest -q -p no:randomly
 ```
 
@@ -220,9 +224,9 @@ python -m migrations.runner up
 > worked and changes nothing about 0010.
 
 > ⚠️ **`down` takes NO migration stem.** It reverts the *last applied* migration and
-> nothing else — `runner.py:281-297` reads `applied[-1]` and runs that stem's
+> nothing else — `backend/migrations/runner.py:281-297` reads `applied[-1]` and runs that stem's
 > `.down.sql`. The second positional argument is the **db_path**, not a selector
-> (`runner.py:395,399`: usage is `[up|down|status] [db_path]`, defaulting to
+> (`backend/migrations/runner.py:395,399`: usage is `[up|down|status] [db_path]`, defaulting to
 > `data/jobs.db`). So `python -m migrations.runner down 0010` does **not** target
 > migration 0010 — it swallows `0010` as a connection path and still reverts
 > whatever is at the head. Against a head of `0030` that reverts `0030`.

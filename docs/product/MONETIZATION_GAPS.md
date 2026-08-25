@@ -50,7 +50,7 @@
 
 | Missing | Why |
 |---|---|
-| ~~**Analytics + funnel**~~ **PARTLY SHIPPED** | PostHog **is** wired and consent-gated (`posthog-js` in `frontend/package.json:38`, mounted at `frontend/src/app/layout.tsx:66`, init at `PostHogProviderWrapper.tsx:61-80`), and the signup→activation funnel is instrumented: `signup_completed`, `cv_uploaded`, `extraction_completed`, `search_run`, `job_viewed`, `application_created`, `$pageview`. What REMAINS is the **paid → churn** half, which needs the Stripe work in Tier 1 — there is no revenue event to track yet. |
+| ~~**Analytics + funnel**~~ **PARTLY SHIPPED** | PostHog **is** wired and consent-gated (`posthog-js` in `frontend/package.json:38`, mounted at `frontend/src/app/layout.tsx:66`, init at `frontend/src/components/providers/PostHogProviderWrapper.tsx:61-80`), and the signup→activation funnel is instrumented: `signup_completed`, `cv_uploaded`, `extraction_completed`, `search_run`, `job_viewed`, `application_created`, `$pageview`. What REMAINS is the **paid → churn** half, which needs the Stripe work in Tier 1 — there is no revenue event to track yet. |
 | **Onboarding** | Get users to the "wow" (CV → first great matches) fast = activation = conversion. |
 | **Subscription management UI** | Upgrade / downgrade / cancel / invoices / billing history. |
 | **Lifecycle emails + support** | Welcome, trial-ending, payment-failed, receipts; a contact/support channel. |

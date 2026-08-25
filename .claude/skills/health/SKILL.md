@@ -28,9 +28,15 @@ You are the Job360 health checker. You ignore the backlog and missions entirely 
 - RED: ranking ignores the judge, judged coverage 0 on a fresh feed, or any engine throwing.
 
 ### Pillar 3 — Delivery
-- Auth round-trip: register-or-login the test account, GET /api/auth/me. (The route is
-  `/api/auth/me` — `auth.py:39` `APIRouter(prefix="/auth")` + `auth.py:336` `@router.get("/me")`,
-  mounted under `/api`. There is no bare `/api/me`; it 404s.)
+- Auth round-trip: POST /api/auth/register (new account) **then always** POST /api/auth/login,
+  and only then GET /api/auth/me carrying the `job360_session` cookie.
+  - `/register` deliberately does **not** log you in — `backend/src/api/routes/auth.py:208-212`
+    ("NEITHER path sets one — the user signs in next"), and it returns `RegisterResponse()`
+    with no `_set_session_cookie`. The only cookie-setter on this flow is `/login`
+    (`auth.py:296`). Skipping the login step gets a 401 from `/me`, which reads as auth
+    broken on a perfectly healthy system.
+  - The route is `/api/auth/me` — `backend/src/api/routes/auth.py:39` `APIRouter(prefix="/auth")`
+    + `auth.py:336` `@router.get("/me")`, mounted under `/api`. There is no bare `/api/me`; it 404s.
 - Dashboard loads (browser flavor) with zero console errors; verdict badges render.
 - Pipeline/actions endpoints respond; notification rules endpoint responds.
 - GREEN: all respond 2xx, console clean. RED: any 5xx on the happy path or auth broken.

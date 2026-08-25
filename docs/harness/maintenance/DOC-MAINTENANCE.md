@@ -115,7 +115,9 @@ report, but never edits them — memory hygiene is the session's own job.
 
 ## 6. Outputs this framework maintains
 
-- `docs/harness/maintenance/DOC-HEALTH.md` — scorecard from each Tier-3 audit:
+- `docs/harness/maintenance/DOC-HEALTH.md` — **written by the first Tier-3 audit; absent
+  until one runs**, so an unresolved link here is expected, not rot. This is the
+  destination `.claude/skills/doc-audit/SKILL.md:89` writes to. Scorecard from each audit:
   docs checked, drifts fixed, plans archived, gaps parked, modules undocumented.
 - `docs/harness/maintenance/PARKED.md` — the "code is behind the doc" list: intentions
   found in docs that are not yet implemented, each with source doc + date.
