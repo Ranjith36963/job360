@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from src.services.profile.models import CVData
+from src.utils.loop_guard import cpu_bound
 
 logger = logging.getLogger("job360.profile.cv_parser")
 
@@ -249,6 +250,7 @@ def extract_text_from_docx(file_path: str) -> str:
         return ""
 
 
+@cpu_bound
 def extract_text(file_path: str) -> str:
     """Extract text from PDF or DOCX based on file extension."""
     path = Path(file_path)
@@ -278,6 +280,19 @@ _SECTION_HINT_HEADINGS = (
 )
 
 
+# TAGGED, BECAUSE THE CALLER'S `to_thread` IS NOT THE GUARD — this is.
+# `parse_cv_async` now offloads this call, so today's path is safe. But that is
+# the CALLER remembering, and the whole thesis of `@cpu_bound` (post-mortem §4)
+# is that the guard moved from the caller to the callee precisely because
+# callers forget: the next `await`-less call from async code would push every
+# PDF page through pdfplumber on the loop thread. The tag makes that LOUD, not
+# impossible — it raises in tests and dev, but in PRODUCTION it logs an ERROR +
+# one Sentry message and then runs the work anyway (a slow response beats a
+# 500), so `asyncio.to_thread` at the call site is still required.
+# Fixing the one call site and not tagging the function is exactly the
+# half-measure that let this bug class bite three times.
+# (CodeRabbit, PR #386.)
+@cpu_bound
 def _build_section_hint(file_path: str) -> str:
     """Batch 1.7b — pre-segment the PDF via font-size clustering and
     emit a compact hint block the LLM can use as structural guidance.
@@ -730,7 +745,10 @@ async def parse_cv_async(file_path: str) -> CVData:
     fallback for callers that pass pre-fetched dicts OR when strict
     validation fails after all retries (review fix #3).
     """
-    raw_text = extract_text(file_path)
+    # pdfplumber/python-docx are synchronous and CPU-bound; a 2-page PDF was
+    # measured stalling the loop 2,399 ms (tests/test_upload_does_not_block_loop.py).
+    # The upload ROUTE already used to_thread — this async parser did not.
+    raw_text = await asyncio.to_thread(extract_text, file_path)
     if not raw_text:
         raise RuntimeError(
             f"Failed to extract text from {file_path}. "
@@ -740,7 +758,15 @@ async def parse_cv_async(file_path: str) -> CVData:
 
     # PDF-only font-size section hint (needs the file). The LLM extraction
     # itself works purely off text — see ``llm_cv_fields_from_text``.
-    section_hint = _build_section_hint(file_path)
+    #
+    # OFFLOADED FOR THE SAME REASON AS `extract_text` above, and it was
+    # missed the first time round: `_build_section_hint` opens the PDF again and
+    # pushes every page through `extract_sections_from_pdf`. Leaving it on the
+    # loop meant a CV upload could still stall unrelated requests — the exact
+    # defect this change exists to remove, surviving in the very next statement
+    # after the fix. Offloading one of two blocking calls in a function leaves
+    # the function blocking. (CodeRabbit, PR #386.)
+    section_hint = await asyncio.to_thread(_build_section_hint, file_path)
     return await llm_cv_fields_from_text(raw_text, section_hint=section_hint)
 
 

@@ -129,6 +129,26 @@ def _reset_auth_rate_limit():
 
 
 @pytest.fixture(autouse=True)
+def _loop_guard_strict(monkeypatch):
+    """The whole suite runs the event-loop guard in STRICT mode.
+
+    ``@cpu_bound`` (src/utils/loop_guard.py) decides raise-vs-log from the
+    environment. Pinning it here means strictness never depends on which env
+    vars happen to be exported on the box — a CPU-bound helper called inline on
+    the loop fails LOUDLY in tests, every time, on any fixture size.
+
+    The loop-lag WATCHDOG is forced OFF for the opposite reason: the
+    ``_instant_asyncio_sleep`` fixture below makes ``asyncio.sleep`` return
+    immediately, which would turn the watchdog's 100 ms sampler into a
+    busy-spin that starves the test it is meant to observe.
+    """
+    from src.utils import loop_guard as _lg
+
+    monkeypatch.setattr(_lg, "STRICT_OVERRIDE", True, raising=False)
+    monkeypatch.setenv("LOOP_WATCHDOG_ENABLED", "false")
+
+
+@pytest.fixture(autouse=True)
 def _offline_openai(monkeypatch):
     """Keep the WHOLE suite offline for LLMs (rule #4).
 

@@ -22,6 +22,7 @@ from typing import Any
 
 from src.services.profile._llm_utils import coerce_str
 from src.services.profile.models import CVData
+from src.utils.loop_guard import cpu_bound
 
 logger = logging.getLogger("job360.profile.linkedin")
 
@@ -127,6 +128,7 @@ def _dewrap_columns(words: list[dict[str, Any]], page_width: float) -> str | Non
     return _words_to_lines(left) + "\n" + _words_to_lines(right)
 
 
+@cpu_bound
 def _extract_text(file_path: str) -> str:
     """Read all pages of a PDF into one newline-joined string. Empty on failure.
 
@@ -945,7 +947,9 @@ async def parse_linkedin_pdf_async(file_path: str) -> dict[str, Any]:
     Returns an empty-data dict on failure (missing pdfplumber, corrupt PDF,
     non-LinkedIn PDF, LLM unavailable) — never raises.
     """
-    text = _extract_text(file_path)
+    # Synchronous pdfplumber work — must not run on the event loop (the
+    # LinkedIn upload route already threads its own call; this one did not).
+    text = await asyncio.to_thread(_extract_text, file_path)
     if not text or not _looks_like_linkedin(text):
         if text:
             logger.info("PDF at %s does not look like a LinkedIn export; skipping", file_path)
