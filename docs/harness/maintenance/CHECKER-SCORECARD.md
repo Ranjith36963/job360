@@ -1,4 +1,5 @@
 # Blind-checker scorecard — last 30 days
+<!-- doc: LOG -->
 
 - Loop PRs opened: **4**
 - Got a checker verdict: **0** (0% coverage)

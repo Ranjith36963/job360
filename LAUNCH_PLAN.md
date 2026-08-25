@@ -1,4 +1,5 @@
 # LAUNCH_PLAN.md — From verified app to live SaaS
+<!-- doc: PLAN -->
 
 > Updated 2026-06-21: Phase −2/−1 build+verify items are shipped (see docs/harness/CHECKLIST_KANBAN.md).
 

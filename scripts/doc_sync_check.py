@@ -29,6 +29,7 @@ import ast
 import datetime as _dt
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -444,6 +445,48 @@ def landing_page_source_claims() -> list[tuple[int, int]]:
                 if claimed:
                     out.append((i, int(claimed)))
     return out
+
+
+DOC_KINDS = ("LIVING", "PLAN", "LOG", "REFERENCE", "FROZEN")
+
+
+def unstamped_docs() -> list[str]:
+    """Tracked .md files that never say what they are.
+
+    Added 2026-08-25, and it is the structural reason thirteen nightly cycles
+    never returned zero. Only 20 of 148 docs carried a `<!-- doc: KIND -->`
+    stamp, so the routine could not tell a FROZEN 2026-06 audit from a LIVING
+    spec: both are just prose. A stale number in a dated record is CORRECT for
+    its date, but every pass re-litigated it, and the finding count could never
+    reach zero however many real fixes landed.
+
+    Only LIVING can drift. PLAN/LOG/REFERENCE/FROZEN are records of a moment,
+    and the routine must leave them alone. That makes the checkable surface
+    finite -- which is what makes converging possible at all.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "*.md"], cwd=ROOT,
+            capture_output=True, encoding="utf-8", check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+    stamp = re.compile(r"<!--\s*doc:\s*([A-Z]+)")
+    bad: list[str] = []
+    for rel in out.splitlines():
+        rel = rel.strip()
+        if not rel:
+            continue
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        m = stamp.search(path.read_text(encoding="utf-8", errors="replace")[:400])
+        if not m:
+            bad.append(rel)
+        elif m.group(1) not in DOC_KINDS:
+            bad.append(f"{rel} (unknown kind {m.group(1)})")
+    return bad
 
 
 def control_chars_in_guards() -> list[tuple[str, str, str]]:
@@ -1272,6 +1315,14 @@ def main() -> int:
             drift.append((rel, "-", "doc-type", "no doc-type header", "needs <!-- doc: LIVING ... -->"))
         elif type_tag.group(1) != "LIVING":
             drift.append((rel, "-", "doc-type", f"tagged {type_tag.group(1)}", "this file is a LIVING doc"))
+
+    # A doc that never says what it is cannot be checked OR left alone.
+    for rel in unstamped_docs():
+        drift.append((
+            rel, "1", "unstamped-doc", "no <!-- doc: KIND -->",
+            "a doc that never declares LIVING/PLAN/LOG/REFERENCE/FROZEN "
+            "gets re-litigated every cycle and never converges",
+        ))
 
     # A control byte inside a guard's own regex silently disables it.
     for gfile, line_no, byte in control_chars_in_guards():

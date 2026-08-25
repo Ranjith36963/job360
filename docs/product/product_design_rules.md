@@ -1,4 +1,5 @@
 # Product Design Rules
+<!-- doc: LIVING -->
 
 Owner-set rules that shape every feature. Each rule records WHY it exists and
 what obeying it looks like in code, so a future session applies it rather than

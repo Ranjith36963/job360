@@ -1,4 +1,5 @@
 # Monetization Gaps — What's Missing to Make Money
+<!-- doc: LIVING -->
 
 > **What this is.** An honest gap analysis of everything between "Job360 is a working app" and "Job360 is a SaaS that charges money." Created 2026-06-22 from a code-verified audit.
 >

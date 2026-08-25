@@ -1,4 +1,5 @@
 # Job360 — Documentation Index
+<!-- doc: LIVING -->
 
 A curated map of the docs worth reading under `docs/` (plus the load-bearing
 docs at the repo root). Start here to find the right doc fast.

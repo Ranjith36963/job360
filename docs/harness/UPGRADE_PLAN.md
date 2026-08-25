@@ -1,4 +1,5 @@
 # Job360 — Stack Upgrade Plan (Phases 1–3)
+<!-- doc: PLAN -->
 
 > **Goal.** Take Job360 from its current stack to the target stack in `STACK.md` / `STACK_checklist.md`, one phase at a time, each verified end-to-end before the next.
 >

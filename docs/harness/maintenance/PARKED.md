@@ -1,4 +1,5 @@
 # PARKED — docs ahead of the code
+<!-- doc: LOG -->
 
 When a doc claims something the code does NOT do, the claim is never silently
 deleted and the doc is never "fixed" to describe missing code — the gap lands

@@ -1,4 +1,5 @@
 # Step 0 Pre-Flight — Ralph-Loop-Driven Execution Plan
+<!-- doc: FROZEN -->
 
 > **Generator handoff.** This is the repo-visible mirror of the plan approved in plan mode on 2026-04-23.
 > Source plan artifact: `C:\Users\Ranjith\.claude\plans\now-i-ve-got-another-crispy-island.md` (local-only, not committed to repo).

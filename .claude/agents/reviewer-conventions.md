@@ -1,3 +1,4 @@
+<!-- doc: LIVING -->
 ---
 name: reviewer-conventions
 description: Project-conventions reviewer (the R1 "conventions" lens). Reviews a diff for adherence to Job360's hard rules, patterns, and the five-surface source contract — reporting only real violations with file:line evidence. Use when a worker/integrator wants a conventions review pass.

@@ -159,6 +159,11 @@ CASES: list[tuple[str, str, str, str]] = [
     ("docs/product/pillars/glossary.md",
      r"`GET (/api/runs/recent)`", "`GET /api/runs/definitely-not-a-route`",
      "route-not-found"),
+    # The stamp guard. A KIND outside the five is as unreadable as no stamp at
+    # all -- both leave the routine unable to tell a dated record from a live
+    # claim, which is why thirteen cycles could never reach zero.
+    ("STATUS.md",
+     r"<!-- doc: (LIVING)", "<!-- doc: BOGUS", "unstamped-doc"),
 ]
 
 

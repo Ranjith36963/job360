@@ -1,4 +1,5 @@
 # Pillar 3 — what every job source ACTUALLY gives us
+<!-- doc: LOG -->
 
 **Probed 2026-08-08 against `main` @ `dc9e546`.** Nine parallel workers called all 46
 sources' **live** upstream endpoints, dumped every field returned, measured fill-rates,

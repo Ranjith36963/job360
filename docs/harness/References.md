@@ -1,4 +1,5 @@
 # Job360 — References
+<!-- doc: REFERENCE -->
 
 > External repos, APIs, tools, patterns, and competitive intelligence for building and improving Job360.
 > Every entry verified from research conducted 2026-04-11; competitive landscape extended 2026-04-25 (Dex, Sprout) and 2026-06-04 (free-forever / UK sweep §1.9–1.12).

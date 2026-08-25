@@ -1,3 +1,4 @@
+<!-- doc: LIVING -->
 ---
 name: add-source
 description: Job360 recipes for adding or removing a job source (the five load-bearing surfaces), and for adding a notification channel. Use when adding/removing/rewriting a source in backend/src/sources/, changing SOURCE_REGISTRY or RATE_LIMITS, or wiring a new notification/delivery channel.

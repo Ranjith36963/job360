@@ -1,4 +1,5 @@
 # Batch 3.5.4 — Test Cleanup Investigation
+<!-- doc: PLAN -->
 
 **Run:** 2026-04-19
 **Baseline run:** `/tmp/pytest_baseline_3_5_4.log` — 24 failed / 578 passed / 3 skipped

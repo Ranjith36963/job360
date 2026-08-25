@@ -1,4 +1,5 @@
 # Batch Prompts — Pillar 3
+<!-- doc: FROZEN -->
 
 > **Worktrees already exist at absolute paths:**
 > - Generator: `C:\Users\Ranjith\OneDrive\Documents\job360\.claude\worktrees\generator`

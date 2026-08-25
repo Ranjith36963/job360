@@ -1,4 +1,5 @@
 # Engine-Eval Measurement-Tool Audit Log
+<!-- doc: LOG -->
 
 Running record of every weakness found in the eval ("measurement tool") and how
 it was fixed. The goal: a tool trustworthy enough to decide which engines to

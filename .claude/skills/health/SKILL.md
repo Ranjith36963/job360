@@ -1,3 +1,4 @@
+<!-- doc: LIVING -->
 ---
 name: health
 description: Job360 health: daily system check of all three pillars against GREEN/AMBER/RED definitions, written to docs/harness/maintenance/STATUS-DAILY.md with verbatim evidence. Use for the daily health report.

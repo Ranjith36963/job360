@@ -1,4 +1,5 @@
 # 08 — Gaps Not Yet Audited (the honest boundary)
+<!-- doc: LOG -->
 
 > An audit is only trustworthy if it says what it did NOT look at. The first six docs
 > swept security, data, frontend, ops, compliance, and the harness. These dimensions

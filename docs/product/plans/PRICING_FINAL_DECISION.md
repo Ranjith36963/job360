@@ -1,4 +1,5 @@
 # Pricing — Final Decision (Job360)
+<!-- doc: PLAN -->
 
 **Decided 2026-06-25, research-verified. UPDATED 2026-07-05 (two advisers, incl. Fable):
 LAUNCH WITH 2 TIERS, not 3.** Detail + sources live in `PRICING_METHOD_3TIER.md` and

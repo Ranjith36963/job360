@@ -1,4 +1,5 @@
 # Open-source patterns to supercharge Job360's Search & Match Engine
+<!-- doc: REFERENCE -->
 
 **Job360's Pillar 2 can leap from a 4-dimension regex scorer to a production-grade semantic matching engine by adopting proven patterns from HiringCafe, career-ops, JobFunnel, and the sentence-transformers ecosystem.** The highest-impact upgrades — LLM enrichment via GPT-4o-mini ($54/month for 10K jobs), gate-pass scoring from career-ops, and hybrid BM25+semantic retrieval using RRF — are all documented in open-source code with clear implementation paths. This report maps each technique to Job360's codebase, provides concrete code patterns, and sequences 14 improvements by impact-per-effort ratio.
 

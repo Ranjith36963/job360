@@ -1,3 +1,4 @@
+<!-- doc: LIVING -->
 ---
 name: scout
 description: Job360 scout: read-only problem finder — sweep logs, run_log, DB sanity, doc drift; append evidence-backed candidates to the canonical MISSIONS.md. Never fixes anything. Use for a scout pass.

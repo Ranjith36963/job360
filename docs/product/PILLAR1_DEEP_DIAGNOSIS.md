@@ -1,4 +1,5 @@
 # Pillar 1 — Deep Honest Diagnosis (Profile Extraction)
+<!-- doc: LOG -->
 
 > Date: 2026-06-25 · Model: OpenAI `gpt-4o-mini` (paid, temp 0, JSON mode) PRIMARY,
 > free Gemini/Groq/Cerebras as fallback. Measured live on 5 real CVs + 3 GitHub +

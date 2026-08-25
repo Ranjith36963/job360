@@ -1,4 +1,5 @@
 # test-artifacts/
+<!-- doc: LIVING -->
 
 Test fixtures and E2E verification artifacts.
 

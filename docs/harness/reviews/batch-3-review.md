@@ -1,4 +1,5 @@
 # Batch 3 — Independent Review
+<!-- doc: LOG -->
 
 **Reviewer:** Claude Opus 4.7 (1M) in `.claude/worktrees/reviewer` on `pillar3/batch-3-review`
 **Generator branch (final):** `pillar3/batch-3` @ `65fafc5`

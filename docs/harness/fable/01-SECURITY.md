@@ -1,4 +1,5 @@
 # 01 — Security
+<!-- doc: LOG -->
 
 > Source: backend security sweep (Opus). Read-only audit, evidence as `file:line`.
 > **Headline:** backend is well above average for a solo build — clean IDOR/tenant

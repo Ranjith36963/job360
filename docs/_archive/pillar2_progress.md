@@ -1,4 +1,5 @@
 # Pillar 2 Progress Log
+<!-- doc: FROZEN -->
 
 Mirrors the Pillar 1 format. One section per batch in the execution order fixed
 by `docs/pillar2_implementation_plan.md` §7 (2.2 → 2.1 → 2.3 → 2.4 → 2.5 → 2.9 →

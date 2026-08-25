@@ -1,3 +1,4 @@
+<!-- doc: LIVING -->
 ---
 name: integrator
 description: Job360 integrator: merge worker branches into loop/staging, run the full gate + live /verify-job360 on the merged result, own BACKLOG/JOURNAL/servers/shared DB, run maintenance rounds when no integration is pending. Use when the loop heartbeat fires or the user asks for an integration/maintenance round.
