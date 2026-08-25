@@ -114,7 +114,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # across 220 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # count is in the table above — measure it, never quote it
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
