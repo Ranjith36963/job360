@@ -432,9 +432,13 @@ Backed by the `applications` table (also rebuilt in `0002_multi_tenant`) and a s
 | `/(auth)/register` | `frontend/src/app/(auth)/register/page.tsx` | Client | Same shape, redirects to `/profile` on success |
 | `/dashboard` | `frontend/src/app/dashboard/page.tsx` | Client | Job browser. Time-bucket pills (24h / 48h / 3d / 5d / 7d / all), min-score slider, source dropdown, visa toggle, async "Run search" button polling `getSearchStatus()`. Renders `<JobList>` of `<JobCard>`s. |
 | `/jobs/[id]` | `frontend/src/app/jobs/[id]/page.tsx` | Server + Client | Server shell fetches via `getJob(id)` with 5-min revalidate, emits JobPosting JSON-LD for SEO, then renders `<JobDetailClient>` for interactive actions. Uses the Next.js 16 `params: Promise<{id}>` pattern. |
-| `/profile` | `frontend/src/app/profile/page.tsx` | Client | The single biggest page — CVUpload, LinkedIn upload, GitHub username input, PreferencesForm, skill-tier display with ESCO badges, version-history drawer with restore. Profile-completeness % is shown at the top (40% CV / 15% job titles / 15% skills / 15% prefs / 7.5% LinkedIn / 7.5% GitHub). |
+| `/profile` | `frontend/src/app/profile/page.tsx` | Client | The single biggest page — CVUpload, LinkedIn upload, GitHub username input, PreferencesForm, skill-tier display, version-history drawer with restore (**no ESCO badges** — see below). Profile-completeness % is shown at the top (40% CV / 15% job titles / 15% skills / 15% prefs / 7.5% LinkedIn / 7.5% GitHub). |
 | `/pipeline` | `frontend/src/app/pipeline/page.tsx` | Client | 5-column Kanban; drag-and-drop between stages calls `advancePipelineStage`. Reminder banner for >7-day stalled applications. |
-| `/channels` (linked from Navbar) | (route handlers below) | Client | List / add / delete / test channels |
+| `/channels` (linked from Navbar) | `frontend/src/app/channels/page.tsx` | Client | List / add / delete / test channels, plus the Telegram deep-link connect flow (`connectTelegram` / `pollTelegram`) and the Slack/Discord OAuth hand-off (`channelConnectUrl`) |
+
+> **This table is a tour of the main pages, not an inventory.** There are **22** `page.tsx` files under `frontend/src/app/`; the rest are the auth long-tail (`forgot-password`, `reset-password`, `verify-email`, `auth/magic`), settings (`/settings`, `/settings/account`, `/settings/notifications`), `/notifications`, `/jobs`, `/admin/sources`, the legal pages (`/privacy`, `/terms`, `/contact`) and `/sentry-test`. Count them, don't trust this list.
+>
+> **No ESCO badges on `/profile`.** The page does carry an "ESCO mappings" block (`profile/page.tsx:546-558`), but it renders only when `profile.skill_esco` is non-empty, and that map is filled only when `SEMANTIC_ENABLED` is on **and** the ESCO index artefacts are present on disk (`backend/src/services/profile/cv_parser.py:804-831` returns the identity transform otherwise). Hard rule #28: those artefacts are inert scaffolding, never built and never shipped. So in production the block never draws — do not describe it as something a user sees.
 
 ### 5.2 API client — `frontend/src/lib/api.ts`
 
@@ -446,22 +450,30 @@ A thin fetch wrapper (`request<T>()` with an `ApiError` class). Every call uses 
 - **Profile**: `getProfile`, `uploadProfile(cv, prefs)`, `uploadLinkedin(file)`, `uploadGithub(username)`, `getProfileVersions`, `restoreProfileVersion`, `getJsonResume`, `getProfileVersionDiff`
 - **Search**: `startSearch`, `getSearchStatus`
 - **Pipeline**: `getPipelineApplications`, `createPipelineApplication`, `advancePipelineStage`, `getPipelineReminders`, `getPipelineCounts`, `getApplicationTimeline`, `updateApplicationNotes`
-- **Channels + notifications**: `listChannels`, `createChannel`, `deleteChannel`, `testChannel`, `getNotificationRules`, `createNotificationRule`, `updateNotificationRule`, `deleteNotificationRule`, `getNotificationLedger`
-- **Meta**: `getSources`, `getHealth`, `getStatus`, `getRecentRuns`
+- **Channels**: `listChannels`, `createChannel`, `deleteChannel`, `testChannel`, `getProviders`, `channelConnectUrl`, `connectTelegram`, `pollTelegram`
+- **Notifications**: `getNotificationRule` / `saveNotificationRule` (**singular — there is no create/update/delete pair**; rule #23 gives each user exactly ONE rulebook, so the client mirrors the two endpoints `GET`/`PUT /api/settings/notification-rule` — `api.ts:542,551`), `getNotificationLedger`, `getNotificationStats`
+- **Meta**: `getSources`, `getHealth`, `getStatus`, `getRecentRuns`, `getSourceHealth`
 
 ### 5.3 Type system — `frontend/src/lib/types.ts`
 
-Hand-written TypeScript that mirrors the backend Pydantic models in `backend/src/api/models.py`. Top-level types include `JobResponse` (with the 8D score breakdown — role, skill, seniority, experience, credentials, location, recency, semantic, penalty), `ProfileResponse`, `NotificationRule`, `NotificationLedger`, `PipelineApplication`, `TimelineEntry`. There is **no codegen** — frontend and backend types must be kept in sync by hand (a known maintenance burden).
+**Generated, not hand-written.** `types.ts:11` imports `components` from `./api-types`, and every backend-shaped type is a one-line alias off it (`export type JobResponse = Schemas["JobResponse"];`). `frontend/src/lib/api-types.ts` and `frontend/openapi.json` are both produced offline by `scripts/gen-api-types.sh`, which calls `app.openapi()` and pipes it through `openapi-typescript` — run it after any change to `backend/src/api/models.py` (or `npm run gen:types` from `frontend/`). The commit gate regenerates both files and fails on any diff (`scripts/agent-gate.sh:231-239`), so the hand-sync burden this section used to describe is gone. Only genuinely frontend-only shapes are still written by hand (`JobFilters`, `DuplicateJobsResponse`, `DuplicateJobSummary`, `ProfileVersionDiff`, `PreferencesRequest`, `SkillProvenance`, `SkillTiers`, `TailorDocKind`), plus two that intentionally narrow a backend `str` to a literal union via `Omit<…> & {…}` (`TailoredDocOut`, `TailorBundle`).
+
+Top-level types include `JobResponse`, `ProfileResponse`, `NotificationRule`, `NotificationLedgerEntry`, `PipelineApplication`, `TimelineEntry`.
+
+> **The 8D breakdown on `JobResponse` is not the list this doc used to print.** The eight dimensions the engine actually computes are `role`, `skill`, `location_score`, `recency`, `seniority_score`, `salary_score`, `visa_score`, `workplace_score` (`backend/src/api/models.py:80-87`). `experience`, `credentials` and `semantic` are also on the model, but they are **legacy dead columns from migration `0011` that the engine never produced** (`models.py:94-99`) — a UI that draws them draws zeros forever. `penalty` is not a dimension either. Never sum the eight to get the total: the raw max is 130 clamped to `[0, 100]` (rule #27) and the −30 negative-title penalty lands on no dimension, so `match_score` is the only truth for the total.
 
 ### 5.4 Component organisation
 
 ```
-frontend/src/components/
-├── ui/        — shadcn primitives (button, card, dialog, input, sheet, tabs, badge, …)
-├── jobs/      — JobCard, JobList, FilterPanel, ScoreRadar, ScoreCounter, TimeBuckets, DedupGroupViewer, ApplyButton
-├── profile/   — CVUpload, CVViewer, PreferencesForm, VersionHistoryDrawer, VersionDiffDrawer, JsonResumeExportButton
-├── pipeline/  — KanbanBoard, NotesEditor, PipelineFilterPanel
-└── layout/    — Navbar, Footer, FloatingIcons
+frontend/src/components/   (8 folders)
+├── ui/         — shadcn primitives (badge, button, card, dialog, input, label, select, separator, sheet, skeleton, slider, tabs, textarea, tooltip, empty-state)
+├── jobs/       — JobCard, JobList, FilterPanel, ScoreRadar, ScoreCounter, TimeBuckets, DedupGroupViewer, ApplyButton, SearchingFor
+├── profile/    — CVUpload, CVViewer, PreferencesForm, VersionHistoryDrawer, VersionDiffDrawer, JsonResumeExportButton, ClearButton
+├── pipeline/   — KanbanBoard, NotesEditor, PipelineFilterPanel
+├── tailor/     — TailorButton, TailorPanel, TailorSection
+├── consent/    — ConsentBanner
+├── providers/  — QueryProvider, PostHogProviderWrapper
+└── layout/     — Navbar, Footer, FloatingIcons, AuthProvider, ThemeProvider
 ```
 
 State is cached with **TanStack Query** keyed by `queryKeys.jobList(filters)` etc., which is what enables the optimistic UI on the like/apply buttons.
@@ -470,18 +482,20 @@ State is cached with **TanStack Query** keyed by `queryKeys.jobList(filters)` et
 
 ## Environment variables — every var the User pillar reads
 
-Consolidated so you can `grep` once and see them all. Defaults come from `backend/src/core/settings.py` + `services/auth/sessions.py` + `services/channels/crypto.py`.
+Consolidated so you can `grep` once and see them all. Defaults come from `backend/src/core/settings.py`; the two secrets are read at call time by `api/auth_deps.py` and `services/channels/crypto.py` instead (`services/auth/sessions.py` reads no environment at all — it takes the secret as an argument).
 
 | Var | Required | Default | What changes when you flip it |
 | --- | --- | --- | --- |
-| `SESSION_SECRET` | **yes** (prod) | dev fallback string | HMAC secret for session cookies. Rotating invalidates every active session. Fail-closed under `JOB360_ENV=prod` if unset. |
-| `CHANNEL_ENCRYPTION_KEY` | **yes** (prod) | dev fallback | Fernet key for `user_channels.credential_encrypted`. **Do not rotate without a re-encryption migration** — existing channels become undecryptable. |
-| `JOB360_ENV` | no | (unset) | Set to `prod` → session cookie gets `secure=True`; otherwise `secure=False` for localhost dev. |
+| `SESSION_SECRET` | **yes, everywhere** | **none — there is no dev fallback** | HMAC secret for session cookies. Rotating invalidates every active session. Fail-closed at CALL time: `auth_deps._secret()` raises `RuntimeError` whenever it is unset, in dev as well as prod (`backend/src/api/auth_deps.py:36-41`). `settings.py` deliberately does **not** bind it as a module constant — the old `os.getenv(..., "")` default read as "an empty secret is a valid state" and was removed in M10 (`core/settings.py:362-376`). Also boot-checked in prod, below. |
+| `CHANNEL_ENCRYPTION_KEY` | **yes, everywhere** | **none — there is no dev fallback** | Fernet key for `user_channels.credential_encrypted`. Same fail-closed shape: `channels/crypto.py:19-33` raises if unset. **Do not rotate without a re-encryption migration** — existing channels become undecryptable. |
+| ~~`JOB360_ENV`~~ | — | — | **DEAD — read by nothing under `backend/src/`.** The only trace is a comment at `api/routes/auth.py:130`. The session cookie's `Secure` flag now gates on the same signal as HSTS, Sentry and CORS: `middleware._is_production()`, i.e. `APP_ENV=production` **or** `RAILWAY_ENVIRONMENT` set (`api/middleware.py:34-38`, used by `_set_session_cookie` at `auth.py:125-132`). Setting `JOB360_ENV=prod` on its own changes nothing, and on Railway it was never set at all. |
+| `APP_ENV` / `RAILWAY_ENVIRONMENT` | no (Railway sets the latter) | (unset) | The real production switch, and the two halves are **not** symmetric: `APP_ENV` counts only when it equals `production` (case-insensitive), whereas **any non-empty `RAILWAY_ENVIRONMENT` counts, whatever its value** — `staging` and `preview` included. Either half satisfying that makes `_is_production()` true → `Secure` session cookie + HSTS, and makes `validate_required_env()` refuse to boot when `SESSION_SECRET`, `CHANNEL_ENCRYPTION_KEY` or `DATABASE_URL` is empty (`api/middleware.py:34-38`, `core/settings.py:384-400`). |
 | `FRONTEND_ORIGIN` | no | `http://localhost:3000` | CORS allow-list (comma-separated for multiple). |
 | `REDIS_URL` | only for ARQ worker | `redis://localhost:6379` | Worker broker; not used by API or CLI. |
-| `GEMINI_API_KEY` | no | (unset) | First-choice LLM for CV parsing. Unset → falls through to Groq. |
-| `GROQ_API_KEY` | no | (unset) | Second-choice LLM. Unset → falls to Cerebras. |
-| `CEREBRAS_API_KEY` | no | (unset) | Last-choice LLM. **All three unset** → CV parse raises `RuntimeError`. |
+| `OPENAI_API_KEY` (+ `OPENAI_MODEL`, default `gpt-4o-mini`) | no | (unset) | **First-choice** LLM for CV parsing — the chain is OpenAI → Gemini → Groq → Cerebras (`services/profile/llm_provider.py:329-334`). A lowercase `openai_api_key` is accepted too (`core/settings.py:60`). |
+| `GEMINI_API_KEY` | no | (unset) | Second-choice LLM. Unset → falls through to Groq. |
+| `GROQ_API_KEY` | no | (unset) | Third-choice LLM. Unset → falls to Cerebras. |
+| `CEREBRAS_API_KEY` | no | (unset) | Last-choice LLM. **All FOUR unset** → `require_llm_key()` raises `LLMKeyMissing` before any provider is tried (`llm_provider.py:264-283`); it subclasses `LLMError(RuntimeError)`, which is what the 502 in the failure table below is made of. |
 | `GITHUB_TOKEN` | no | (unset) | Bumps GitHub API quota from 60 → 5000 req/hr. Anonymous still works for public repos. |
 | `LOG_LEVEL` | no | `INFO` | Python logging level. `DEBUG` exposes request bodies + profile parsing internals. |
 | `RESEND_API_KEY` | recommended in prod | (unset) | The platform's mail transport. Used for BOTH system email (magic links, `auth/email_sender.py`) and the per-user email alert channel, which is built as `resend://` (`services/channels/email_url.py:51-61`). A key sitting in `SMTP_PASSWORD` is recognised by its `re_` prefix and honoured too. |
@@ -496,11 +510,12 @@ A non-exhaustive table of failures an operator or agent will actually see, where
 
 | Symptom | Root cause | Where it surfaces | Fix |
 | --- | --- | --- | --- |
-| Server refuses to start: `RuntimeError: SESSION_SECRET unset` | Env var missing | API/CLI boot | Set the env var; fail-closed by design |
-| Server refuses to start: `RuntimeError` re Fernet key | `CHANNEL_ENCRYPTION_KEY` unset | API/CLI boot | Set the env var; fail-closed by design |
+| API refuses to start: `RuntimeError` naming `SESSION_SECRET` / `CHANNEL_ENCRYPTION_KEY` / `DATABASE_URL` | One of those three empty, **and** `validate_required_env()`'s gate is open. That gate is `APP_ENV=production` **or a non-empty `RAILWAY_ENVIRONMENT` of any value** (`core/settings.py:393-395`) — so a Railway `staging` or preview environment boot-checks exactly like production does; "production" here means the gate, not the deploy's name | FastAPI `lifespan` → `validate_required_env()` (`api/main.py:114`, `core/settings.py:387-400`) | Set the env var; fail-closed by design |
+| Dev/CLI instead: server starts fine, then a 500 on the first request that needs a session or a channel credential | `SESSION_SECRET` / `CHANNEL_ENCRYPTION_KEY` empty with that gate shut (no `APP_ENV=production`, no `RAILWAY_ENVIRONMENT`), and the CLI never builds the FastAPI app, so nothing boot-checks them either way | `auth_deps._secret()` (`:36-41`) / `channels/crypto._fernet()` (`:19-33`) raise at CALL time | Set the env var. Do not read the boot row above as "it always fails at startup" — with the gate shut it fails later, further from the cause |
+| Not this row: `DATABASE_URL` | It has a working dev default (`postgresql://job360:job360dev@localhost:5433/job360`, `core/settings.py:25-27`), so outside the gate it is never *missing* — it is merely pointed somewhere | A bad or unreachable DSN surfaces as a connection error from `pg`/`pgsync`, never from `_secret()` or `_fernet()` — those two only ever cover the session and channel secrets | Check the DSN and that Postgres is up (`docker-compose.dev.yml`, port 5433) |
 | Login fails on a correct password | `password_hash` in DB corrupted (typically from direct SQL writes) | `passwords.verify_password()` returns False | Re-hash via `setup-profile` route or DB UPDATE |
 | 401 on every frontend `/api/*` call | Cookie missing or expired or domain mismatch | Browser devtools → Cookies | `credentials: 'include'` is required (already in `api.ts`); confirm cookie domain matches `FRONTEND_ORIGIN` |
-| CV upload returns 502; profile fields empty | All 3 LLM providers exhausted / returned malformed JSON twice | `parse_cv_async` raises `RuntimeError`, route surfaces 502 | Check provider env vars; tail logs filtered by `cv_parser`; try a smaller/cleaner PDF |
+| CV upload returns 502; profile fields empty | All **four** LLM providers (OpenAI → Gemini → Groq → Cerebras) exhausted / returned malformed JSON twice | `parse_cv_async` raises — `LLMKeyMissing` if no key is set at all, else `LLMAllProvidersFailed` / `LLMRateLimited`; all three subclass `LLMError(RuntimeError)` (`llm_provider.py:48-71`), and the route surfaces 502 | Check provider env vars; tail logs filtered by `cv_parser`; try a smaller/cleaner PDF |
 | LinkedIn PDF treated as a regular CV | 2-of-3 detection heuristic failed | `is_linkedin_pdf` returns False → CV pipeline runs → fields land in wrong slots | Inspect PDF for: `linkedin.com/in/` URL, ≥3 known section headings, "Page N of M" footer |
 | GitHub enrichment slow / 403 errors | Anonymous rate limit (60 req/hr) hit | `github_enricher` logs 403 rate limited | Set `GITHUB_TOKEN` (no scopes needed for public repos) |
 | Notification rule fires, no email arrives | The platform has no mail transport, or the built URL is malformed. Note the user never types this URL — the backend builds it from `RESEND_API_KEY` / `SMTP_*` | `notification_ledger.status='failed'`, `error_message` populated. If the channel could not even be created, `POST /api/settings/channels` returned 503 | `GET /api/notifications?status=failed` to see the error. Check `RESEND_API_KEY` first: on Railway `mailtos://` cannot deliver (SMTP ports blocked), so a channel built on the SMTP fallback times out and is recorded as failed |
