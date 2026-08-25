@@ -770,6 +770,68 @@ def missing_reader_banner() -> list[str]:
     return bad
 
 
+def doc_tree_dead_paths() -> list[tuple[str, str, str]]:
+    """(doc, line, path) for a directory-tree entry naming a file that is gone.
+
+    Added 2026-08-25. ARCHITECTURE.md carries a 69-entry tree of the repo, and
+    a tree is the purest restatement there is -- it is a copy of `ls`. The
+    honest first instinct was to delete it, and the second was to generate it,
+    but neither is right: the tree is CURATED. It names the ~69 paths that
+    matter out of thousands, and that selection is real editorial judgement a
+    generator cannot reproduce and a deletion would throw away.
+
+    What is checkable is every path it names. A tree rots one way -- a file
+    moves or dies and the entry stays, sending a reader (or an agent) to a path
+    that is not there. `LOCATIONS (25)` lived in this tree, wrong, for weeks.
+
+    Depth comes from where the ``+--`` marker sits: four columns per level.
+    Only entries under a directory the tree itself introduced are resolved, so
+    a bare filename never gets checked against the repo root by accident.
+    """
+    entry = re.compile(r"^(?P<indent>[\s│]*)[├└]──\s+"
+                       r"(?P<name>[A-Za-z0-9_.\-/]+)")
+    out: list[tuple[str, str, str]] = []
+
+    for rel in living_stamped_docs():
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        stack: dict[int, str] = {}
+        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            m = entry.match(line)
+            if not m:
+                continue
+            depth = len(m.group("indent")) // 4
+            name = m.group("name").rstrip("/")
+            parent = stack.get(depth - 1, "") if depth else ""
+            full = f"{parent}/{name}" if parent else name
+            stack[depth] = full
+            for deeper in [d for d in stack if d > depth]:
+                stack.pop(deeper, None)
+            # A trailing-slash or extension-less entry is a directory; either
+            # way the question is the same: is anything there?
+            # Only trust the verdict when the PARENT resolves. A tree whose
+            # root is a bare header line ("frontend/src/components/") rather
+            # than a ├── entry gives its children no prefix, and they then
+            # resolve against the repo root: the first cut reported 142 dead
+            # paths, of which the overwhelming majority were `ui`, `jobs`,
+            # `profile` -- my parsing being wrong, not the doc being wrong.
+            # 142 false alarms would have buried the handful of real ones and
+            # taught everyone to skip the report.
+            # COVERAGE BOUND, stated plainly: only entries whose parent was
+            # established INSIDE the tree are checked. A depth-0 entry in a
+            # tree introduced by a bare header ("frontend/src/components/")
+            # has no prefix at all, so `src` or `ui` would be resolved against
+            # the repo root and reported dead when the doc is fine. This guard
+            # therefore watches nested entries, not every line of every tree —
+            # a smaller true claim beats a larger false one.
+            if not parent or not (ROOT / parent).is_dir():
+                continue
+            if not (ROOT / full).exists():
+                out.append((rel, str(i), full))
+    return out
+
+
 def control_chars_in_guards() -> list[tuple[str, str, str]]:
     """(file, line, byte) for any C0 control character in this repo's guards.
 
@@ -1641,6 +1703,12 @@ def main() -> int:
         rel, _, detail = row.partition(": ")
         drift.append((rel, "1", "line-citation-ratchet", detail,
                       "a line number rots on any edit above it — cite a symbol"))
+
+    # A tree entry pointing at a file that is gone sends a reader, or an
+    # agent, to a path that is not there.
+    for doc, line_no, dead in doc_tree_dead_paths():
+        drift.append((doc, line_no, "tree-dead-path", dead,
+                      "directory-tree entry names a path that does not exist"))
 
     # A stamp the reader cannot see does not retire the claim under it.
     for rel in missing_reader_banner():
