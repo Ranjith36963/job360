@@ -242,6 +242,40 @@ def migration_head() -> int:
     return max(_migration_pairs())
 
 
+def locations_count() -> int:
+    """Entries in LOCATIONS (backend/src/core/keywords.py). AST-strict.
+
+    Added 2026-08-25, and the reason matters more than the number. This repo
+    already had a `disagree:LOCATIONS` guard, and it was GREEN: it asks "do two
+    docs agree?", and five LIVING docs agreed perfectly -- on 25, when the list
+    holds 26. Cycle 14 caught it by counting the source.
+
+    Consensus is not verification. A doc-vs-doc check can only ever find
+    disagreement, never a shared falsehood, and shared falsehoods are exactly
+    what documentation drifts toward, because docs get copied from each other.
+    So this one counts the CODE, and the disagreement guard stays as the
+    cheaper net for facts no extractor owns.
+
+    The 26 includes "Remote" and "Hybrid", which `_location_score` skips when
+    matching (skill_matcher.py:277-278) -- they are workplace modes living in a
+    place list. Counted anyway: this guard reports what the list HOLDS, and a
+    doc wanting to say "24 places" should say so in those words.
+    """
+    tree = ast.parse((ROOT / "backend/src/core/keywords.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        for t in targets:
+            if getattr(t, "id", None) == "LOCATIONS":
+                if not isinstance(node.value, ast.List):
+                    raise RuntimeError("LOCATIONS is not a plain list literal")
+                return len(node.value.elts)
+    raise RuntimeError("LOCATIONS list literal not found in backend/src/core/keywords.py")
+
+
 def rate_limit_count() -> int:
     """Entries in RATE_LIMITS. Same AST-strict style as registry_counts().
 
@@ -1169,6 +1203,17 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # Second promotion batch, 2026-08-24, all found by the nightly routine
         # in the pillar docs and glossary -- the densest concentration of
         # countable facts in the repo, and until today none of them watched.
+        # Counted from the CODE, deliberately alongside the doc-vs-doc
+        # `disagree:LOCATIONS` net. That net was green while five LIVING docs
+        # agreed on 25 and the list held 26 -- agreement is not truth.
+        # UPPERCASE only, and that is the whole rule. A looser second pattern
+        # allowing the lowercase word fired on "top 8 titles x top 2 locations"
+        # (ARCHITECTURE.md:474, 01-user-pillar.md:286) -- a search-query fan-out
+        # that has nothing to do with the constant. Same lesson as the SOURCE
+        # guard, opposite direction: there, case-insensitivity hid a real lie;
+        # here, it invented two.
+        ("locations", locations_count(), r"`?LOCATIONS`?\s*\((\d+)\)"),
+        ("locations", locations_count(), r"(\d+)\s+entries in `?LOCATIONS`?\b"),
         ("rate-limits", rate_limit_count(), r"`?RATE_LIMITS`?[^.\n]{0,40}?\((\d+) entries"),
         ("rate-limits", rate_limit_count(), r"`?RATE_LIMITS`? dict in `?settings\.py`? \((\d+) entries"),
         ("subclasses", source_subclass_count(), r"checking all (\d+) subclasses"),
