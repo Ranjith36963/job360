@@ -595,7 +595,7 @@ and must never be imported at module top level.
 
 > **The SQL below is SQLite-flavoured, and is never executed as written.** It is the legacy baseline `init_db()` hands to `executescript()`, which pushes every statement through `pg.translate()` first (`repositories/pg.py:670-674`) — `INTEGER PRIMARY KEY AUTOINCREMENT` becomes a Postgres identity column (`pg.py:193-195`), and `?` placeholders, `datetime('now')`, `INSERT OR IGNORE` and FK clauses are rewritten or stripped the same way. Read it as the *shape* of the baseline, not as DDL you could run against Postgres by hand.
 >
-> This section shows the baseline schema. The full schema is built by 31 forward-migrations (0000–0030). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
+> This section shows the baseline schema. The full schema is built by the forward migrations in `backend/migrations/` — see the code-facts table above for the current count and head. Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
 
 ```sql
 CREATE TABLE IF NOT EXISTS jobs (
