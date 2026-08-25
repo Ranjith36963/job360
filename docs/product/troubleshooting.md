@@ -69,7 +69,8 @@ isolation, and the symptom looks like unrelated tests failing.
 ## 3. CV parse fails / LLM provider unreachable
 
 **Symptom:** `setup-profile --cv ...` errors with `LLMKeyMissing`, `LLMRateLimited` or
-`LLMAllProvidersFailed` — all subclasses of `LLMError` (`llm_provider.py:48,53,62,71`;
+`LLMAllProvidersFailed` — all subclasses of `LLMError`
+(`backend/src/services/profile/llm_provider.py:48,53,62,71`;
 there is no `LLMProviderError`) — or hangs with no output.
 
 **Cause:** No LLM API key set, or the first provider in the fallback chain is rate-limited.
@@ -82,7 +83,7 @@ GROQ_API_KEY=...
 CEREBRAS_API_KEY=...
 ```
 
-Fallback chain (`src/services/profile/llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. If every configured provider fails, `llm_extract` raises `LLMRateLimited` (retry later) or `LLMAllProvidersFailed`; with no key at all it raises `LLMKeyMissing`. Callers must NOT persist an empty result on `LLMRateLimited`.
+Fallback chain (`backend/src/services/profile/llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. If every configured provider fails, `llm_extract` raises `LLMRateLimited` (retry later) or `LLMAllProvidersFailed`; with no key at all it raises `LLMKeyMissing`. Callers must NOT persist an empty result on `LLMRateLimited`.
 
 Debug with:
 
