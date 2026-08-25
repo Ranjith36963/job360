@@ -300,6 +300,28 @@ def structural_drills() -> list[str]:
                     dsc._LIVING_STAMPED_CACHE = None
                     dsc.ROOT = fake
 
+            # 1e. A directory-tree entry naming a file that is GONE must be
+            #     reported. Not a text mutation on a fake root: the guard
+            #     resolves against the real repo, so the drill renames one real
+            #     entry (backend/src/cli.py) and restores it.
+            real_arch = real_root / "ARCHITECTURE.md"
+            if real_arch.exists():
+                before = real_arch.read_bytes()
+                try:
+                    dsc.ROOT = real_root
+                    dsc._LIVING_STAMPED_CACHE = None
+                    real_arch.write_bytes(before.replace(b"cli.py", b"cli_GONE.py", 1))
+                    if not any("cli_GONE" in row[2] for row in dsc.doc_tree_dead_paths()):
+                        failures.append(
+                            "tree-dead-path: a tree entry naming a missing file went "
+                            "unreported — a tree can keep sending readers to paths "
+                            "that are not there"
+                        )
+                finally:
+                    real_arch.write_bytes(before)
+                    dsc._LIVING_STAMPED_CACHE = None
+                    dsc.ROOT = fake
+
             # 2. A gapped migration sequence must RAISE, not count quietly.
             migs = fake / "backend" / "migrations"
             migs.mkdir(parents=True)
@@ -390,7 +412,7 @@ def structural_drills() -> list[str]:
     if not failures:
         print("PASS  structural      missing subfolder (count + emitted guard), "
               "gapped/malformed/duplicate migrations, unwatched pillar doc, "
-              "control byte in a guard, line-citation ratchet, surface ratchet")
+              "control byte in a guard, line-citation ratchet, surface ratchet, dead tree path")
     return failures
 
 
