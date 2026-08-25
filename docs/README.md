@@ -4,14 +4,18 @@
 A curated map of the docs worth reading under `docs/` (plus the load-bearing
 docs at the repo root). Start here to find the right doc fast.
 
-> **NOT a complete listing.** Measured 2026-08-24: 105 `*.md` files are tracked
-> under `docs/`, and this index links 49 of them. The other 56 are mostly
+> **NOT a complete listing.** Measured 2026-08-25: 105 `*.md` files are tracked
+> under `docs/`, and this index links **41** of them; the other **64** are mostly
 > `_archive/` and dated `harness/` records, which are deliberately left out —
 > but the gap means "not in this index" does NOT mean "does not exist". Use
 > `git ls-files "docs/*.md"` when you need the real list.
 >
 > This file used to call itself "the map of everything", which is the kind of
-> claim that stops people looking further.
+> claim that stops people looking further. It then said "links 49" — that was
+> every unique `.md` link on the page, 8 of which resolve OUTSIDE `docs/` and so
+> are not among the 105: four repo-root files (`CLAUDE.md`, `ARCHITECTURE.md`,
+> `CONTRIBUTING.md`, `STATUS.md`) and four under `backend/`, `frontend/` and
+> `harness/eval/`. Count only the links that land under `docs/`.
 
 > **Regenerated 2026-06-21** after a docs audit (dead/stale files removed, drift fixed).
 > **Legend:** 🟢 current ground truth · 📘 stable reference · 🗄️ historical (append-only / not kept current)
@@ -46,10 +50,10 @@ docs at the repo root). Start here to find the right doc fast.
 |---|---|
 | [`llm_prod.md`](harness/llm_prod.md) | Production LLM provider choice (researched 2026-07-08): why the 429s, provider comparison, GDPR split, recommended chain. TL;DR: Gemini 2.5 Flash single / +DeepSeek for cheap batch. |
 | [`UPGRADE_PLAN.md`](harness/UPGRADE_PLAN.md) | Phase 1–3 execution plan (Postgres → deploy → monitoring): TDD + multi-agent, money + keys per phase. |
-| [`../CLAUDE.md`](../CLAUDE.md) | Load-bearing architecture doc: data flow, module map, **28 hard rules**, scoring, env vars. |
+| [`../CLAUDE.md`](../CLAUDE.md) | Load-bearing architecture doc: data flow, module map, **31 hard rules**, scoring, env vars. |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Deep technical reference: directory tree, DB schema, data-flow diagrams, dependencies. |
 | [`pillars/`](product/pillars/README.md) | **Authoritative** per-pillar deep reference (code-verified). See below. |
-| [`troubleshooting.md`](product/troubleshooting.md) | Dev-environment FAQ: port conflicts, SQLite locks, missing LLM keys, Redis on Windows. |
+| [`troubleshooting.md`](product/troubleshooting.md) | Dev-environment FAQ: port conflicts, Postgres connection/schema errors in tests, missing LLM keys, Redis on Windows. |
 | [`pillars/runbook.md`](product/pillars/runbook.md) | "I see a problem at 2am" operational guide — SQL queries + CLI commands. |
 | [`pillars/glossary.md`](product/pillars/glossary.md) | Plain-English definitions of every domain term. |
 
