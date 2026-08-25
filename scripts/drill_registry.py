@@ -320,11 +320,37 @@ REGISTRY: dict[str, Guard] = {
         since="2026-08-16",
     ),
     "scripts/doc_sync_check.py": Guard(
+        status="drilled",
+        # Owed since 2026-08-16 for exactly the reasons below; PAID 2026-08-25.
+        # It had shipped blind twice (a file missing from LIVING_DOCS, and a
+        # case-sensitive regex that skipped the uppercase constant it existed
+        # to watch), so the drill had to plant a false count AND reach a doc
+        # the checker was not watching. It does both: doc_sync_mutation_test.py
+        # breaks every guard in turn and fails if any stays green, and its
+        # structural half covers the paths no text mutation can express —
+        # a deleted source folder retiring its own check, a gapped migration
+        # sequence, a control byte inside a guard's own regex, and a pillar doc
+        # nobody added to the watched list.
+        drill=[sys.executable, "scripts/doc_sync_mutation_test.py"],
+    ),
+    "scripts/doc_sync_mutation_test.py": Guard(
         status="owed",
-        reason="offline for the parts that matter; it has already shipped blind twice "
-        "(a file missing from LIVING_DOCS, and a case-sensitive regex), so its "
-        "drill must plant a false count AND a doc it is not watching",
-        since="2026-08-16",
+        reason="it IS the drill for doc_sync_check.py, so drilling it means "
+        "breaking a mutation on purpose and proving the runner notices — "
+        "worth doing, but the honest state today is that nothing checks the "
+        "checker's checker. Added to doc-sync.yml 2026-08-25 after Fable 5 "
+        "found it ran in NO workflow at all, which let 27 guards degrade to "
+        "always-green with no signal",
+        since="2026-08-25",
+    ),
+    "scripts/gen_doc_blocks.py": Guard(
+        status="drilled",
+        # Generation, not detection: it writes the countable facts INTO the doc
+        # from code, so those cannot drift at all. Two failure paths, both
+        # watched going red by hand before this entry was written — a wrong
+        # value inside the block, and DELETING the marker (a block quietly
+        # going back to being hand-written, which is the sneakier one).
+        drill=[sys.executable, "scripts/gen_doc_blocks.py"],
     ),
     "scripts/journey_probe.py": Guard(
         status="owed",
