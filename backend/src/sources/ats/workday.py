@@ -178,7 +178,15 @@ class WorkdaySource(BaseJobSource):
                     # survivors reach this point, so the request count matches
                     # what we keep. Failure degrades to "", never drops the job.
                     description = ""
-                    deadline = None
+                    # `job_deadline`, NOT `deadline` — the enclosing loop uses
+                    # `deadline` for its TIME BUDGET (a monotonic float, set at
+                    # line 94 and read at 100 and 129). Reusing the name here
+                    # rebound that float to a date string, so the very next
+                    # budget check raised
+                    #     TypeError: '>=' not supported between 'float' and 'str'
+                    # and killed the whole source mid-fetch. Two different
+                    # meanings of "deadline" sharing one name in one function.
+                    job_deadline = None
                     deadline_source = None
                     if detail_budget > 0:
                         detail_budget -= 1
@@ -203,7 +211,7 @@ class WorkdaySource(BaseJobSource):
                         if end_date:
                             deadline_iso, _ = normalize_posted_at(end_date)
                             if deadline_iso:
-                                deadline = deadline_iso[:10]
+                                job_deadline = deadline_iso[:10]
                                 deadline_source = "listing"
                     jobs.append(Job(
                         title=title,
@@ -216,7 +224,7 @@ class WorkdaySource(BaseJobSource):
                         posted_at=parsed_posted_at,
                         date_confidence=confidence,
                         date_posted_raw=posted_on or None,
-                        deadline=deadline,
+                        deadline=job_deadline,
                         deadline_source=deadline_source,
                         # `timeType` ("Full time") is on every SEARCH-result
                         # item already — verified live 2026-08-17

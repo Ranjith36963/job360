@@ -59,7 +59,13 @@ def _parse_annual_wage_text(text: str) -> tuple[Optional[float], Optional[float]
         return None, None
     try:
         low = float(m.group(1).replace(",", ""))
-        high = float(m.group(2).replace(",", "")) if m.group(2) else low
+        # A MISSING UPPER BOUND STAYS MISSING. Mirroring `low` onto `high`
+        # invents a ceiling the ad never stated — "from £18,000" becomes
+        # "£18,000 to £18,000", which reads as a capped offer to every consumer
+        # downstream and is a fabrication under rule #29. `shelf_gate`'s
+        # `_annualise_one` was written for exactly this and documents the same
+        # rule one layer up. (CodeRabbit, PR #388.)
+        high = float(m.group(2).replace(",", "")) if m.group(2) else None
     except ValueError:
         return None, None
     return low, high

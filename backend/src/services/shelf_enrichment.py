@@ -206,6 +206,12 @@ class SweepStats:
     pass2_blocked_stub: int = 0
     pass2_skipped_no_absent_shelf: int = 0
     pass2_enriched: int = 0
+    # ATTEMPTS, not successes. Every cap below is a spend cap, and an LLM call
+    # that failed was still made and still billed — so counting only successes
+    # makes all three caps go dark in the exact failure mode they exist for
+    # (every call failing: `pass2_enriched` stays 0, spend stays 0, and the
+    # sweep grinds through every row paying for each one). (CodeRabbit, PR #388.)
+    pass2_attempted: int = 0
     pass2_failed: int = 0
     pass2_shelves_filled: int = 0
     pass2_shelves_by_name: dict[str, int] = field(default_factory=dict)
@@ -225,6 +231,7 @@ class SweepStats:
             "pass2_blocked_stub": self.pass2_blocked_stub,
             "pass2_skipped_no_absent_shelf": self.pass2_skipped_no_absent_shelf,
             "pass2_enriched": self.pass2_enriched,
+            "pass2_attempted": self.pass2_attempted,
             "pass2_failed": self.pass2_failed,
             "pass2_shelves_filled": self.pass2_shelves_filled,
             "pass2_shelves_by_name": self.pass2_shelves_by_name,
@@ -561,7 +568,10 @@ async def run_pass2(
     _deadline = time.monotonic() + budget.max_seconds
 
     for row in rows:
-        if stats.pass2_enriched and (time.monotonic() >= _deadline):
+        # ATTEMPTS here too. Gating on successes meant that in a run where
+        # every call failed, this never armed either — so the time budget joined
+        # the other two in going dark exactly when it was needed.
+        if stats.pass2_attempted and (time.monotonic() >= _deadline):
             # `stats.pass2_enriched` gates it so the FIRST ad is always attempted:
             # a guard that can fire before any work turns a misconfigured budget
             # into a permanently silent sweep, which is the failure it exists to
@@ -572,7 +582,7 @@ async def run_pass2(
                 "JOB SOURCE ENRICHMENT: stopping at %s ads — %.0fs wall-clock "
                 "budget spent. The remainder is not lost, it is deferred to the "
                 "next sweep.",
-                stats.pass2_enriched,
+                stats.pass2_attempted,
                 budget.max_seconds,
             )
             break
@@ -603,12 +613,22 @@ async def run_pass2(
         # enriched job already committed individually, but leaving the
         # function through a different door than the happy path is exactly how
         # a "we hit the cap" branch quietly grows a data-loss bug later.
-        if stats.pass2_enriched >= budget.max_jobs:
+        if stats.pass2_attempted >= budget.max_jobs:
             _log_cap(stats, "max_jobs", budget, rows_left=len(rows) - stats.pass2_considered + 1)
             break
         if stats.spend_usd + cost > budget.max_spend_usd:
             _log_cap(stats, "max_spend_usd", budget, rows_left=len(rows) - stats.pass2_considered + 1)
             break
+
+        # BILLED AT THE BOUNDARY, BEFORE THE CALL CAN FAIL. These three lines
+        # used to sit after the `except ... continue` below, so a failed call
+        # cost money and moved no counter. The comment that stood there —
+        # "the call happened, so it is billable whatever we do with the answer"
+        # — was exactly right and was in the one place that could not act on it.
+        stats.pass2_attempted += 1
+        stats.input_tokens += input_tokens
+        stats.output_tokens += budget.output_tokens_per_job
+        stats.spend_usd += cost
 
         try:
             enrichment = await enrich_job(job, llm_extract_validated_fn=llm_extract_validated_fn)
@@ -621,10 +641,6 @@ async def run_pass2(
             )
             continue
 
-        # The call happened, so it is billable whatever we do with the answer.
-        stats.input_tokens += input_tokens
-        stats.output_tokens += budget.output_tokens_per_job
-        stats.spend_usd += cost
         stats.pass2_enriched += 1
 
         try:

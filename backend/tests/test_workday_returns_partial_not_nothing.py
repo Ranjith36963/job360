@@ -14,7 +14,6 @@ The detail cap was tuned to 198s against ONE profile's config. A count cap canno
 hold that line, because the thing that grows is the number of users. A clock can.
 """
 
-import time
 
 import aiohttp
 import pytest

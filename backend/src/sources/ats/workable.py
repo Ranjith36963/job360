@@ -25,6 +25,18 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 # "workable" as a capable source.
 _MAX_DETAIL_FETCHES = 60
 
+# ...AND A PER-COMPANY SLICE OF IT, for the reason successfactors.py already
+# documents (`_MAX_DETAIL_FETCHES_PER_COMPANY = 20`).
+#
+# The old POST /api/v2 endpoint capped at 10 rows per page, so no single
+# company could take much of a shared budget. The widget endpoint above returns
+# EVERY posting — abm-careers alone has 178 — so the first company in the list
+# can now spend all 60 slots and every company after it gets zero detail
+# fetches. The switch that fixed the descriptions quietly created a starvation
+# order dependency, where the fix works for whoever happens to be first.
+# (CodeRabbit, PR #388.)
+_MAX_DETAIL_FETCHES_PER_COMPANY = 20
+
 
 class WorkableSource(BaseJobSource):
     name = "workable"
@@ -38,6 +50,9 @@ class WorkableSource(BaseJobSource):
         jobs = []
         detail_budget = _MAX_DETAIL_FETCHES
         for slug in self._companies:
+            # Reset per company, then bounded by the shared budget as well: a
+            # company cannot starve the others, and the run total still holds.
+            company_detail_budget = _MAX_DETAIL_FETCHES_PER_COMPANY
             # Job-understanding fix (2026-08-16): the POST /api/v2/.../jobs
             # endpoint (old code) returns `description` empty on every row
             # (verified live, 2026-08-08) AND caps at 10 results per page with
@@ -106,8 +121,13 @@ class WorkableSource(BaseJobSource):
                 # actually keep, and a failed detail fetch degrades to an empty
                 # description — never a dropped job.
                 desc = list_desc
-                if _is_uk_or_remote(location) and detail_budget > 0:
+                if (
+                    _is_uk_or_remote(location)
+                    and detail_budget > 0
+                    and company_detail_budget > 0
+                ):
                     detail_budget -= 1
+                    company_detail_budget -= 1
                     desc = await self._fetch_posting_text(slug, shortcode) or list_desc
 
                 jobs.append(Job(

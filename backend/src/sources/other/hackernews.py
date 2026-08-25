@@ -51,7 +51,20 @@ def _parse_hn_comment(text: str) -> dict[str, Any] | None:
     # separating it (the anchor text mirrors the href) -- drop it from the
     # company segment so it does not pollute the company field.
     first_line_no_url = _URL_RE.sub(" ", first_line).strip()
-    parts = [p.strip() for p in first_line_no_url.split("|")]
+
+    # ONE HEADER, SHARED BY ALL FOUR FIELDS.
+    # The paragraph-break fix below was applied to `type_field` alone, so
+    # `company`, `title` and `location` kept reading the LINE-based split — and
+    # a header that wraps without a blank line is truncated there, giving the
+    # two splits different ideas of where field 2 and field 3 are. Fixing one
+    # field of a four-field parse leaves the other three reading the bug.
+    # (CodeRabbit, PR #388.)
+    #
+    # `_PARA_BREAK_RE` cuts at the real end of the header; falling back to the
+    # first line keeps the old behaviour when there is no paragraph break at all.
+    _header = _PARA_BREAK_RE.split(unescaped, maxsplit=1)[0]
+    _header_clean = _URL_RE.sub(" ", _HTML_TAG_RE.sub(" ", _header)).strip()
+    parts = [p.strip() for p in (_header_clean or first_line_no_url).split("|")]
 
     company = parts[0] if parts else ""
 
@@ -110,10 +123,8 @@ def _parse_hn_comment(text: str) -> dict[str, Any] | None:
     # long posts blew the 60-char guard and lost a value they really had, and
     # short ones ("Full-time Join our team.") kept a value the gate can never
     # match. Cut at the paragraph break first, then split on pipes.
-    header = _PARA_BREAK_RE.split(unescaped, maxsplit=1)[0]
-    header_clean = _URL_RE.sub(" ", _HTML_TAG_RE.sub(" ", header))
-    header_parts = [p.strip() for p in header_clean.split("|")]
-    type_field = header_parts[3].strip() if len(header_parts) > 3 else ""
+    # Same `parts` the three fields above read — computed once, near the top.
+    type_field = parts[3].strip() if len(parts) > 3 else ""
     type_field = type_field if type_field and len(type_field) <= 60 else None
 
     return {

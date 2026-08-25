@@ -503,7 +503,15 @@ def test_gov_apprenticeships_parses_response():
                 # Pillar 3 batch: the real bug fix — wageAdditionalInformation
                 # free text, not the nonexistent wageAmount key.
                 assert jobs[0].salary_min == 18000
-                assert jobs[0].salary_max == 18000
+                # A MISSING UPPER BOUND STAYS MISSING. The fixture reads
+                # "£18,000 a year" — one figure, no ceiling. This asserted
+                # `salary_max == 18000`, pinning the parser's habit of mirroring
+                # `low` onto `high`: the test encoded a fabrication AS the
+                # expected result, so the bug could not be fixed without a red
+                # test. "From £18,000" is not "£18,000 to £18,000", and the
+                # difference reads as a capped offer to everything downstream.
+                # (CodeRabbit, PR #388.)
+                assert jobs[0].salary_max is None
                 assert jobs[0].salary_period == "Annually"
                 # closingDate -> deadline, confirmed populated live 2026-08-16.
                 assert jobs[0].deadline == "2026-07-15"

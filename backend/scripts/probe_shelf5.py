@@ -4,12 +4,24 @@ import aiohttp
 
 
 async def get_json(session, url, **kw):
+    """Fetch JSON, and SAY when it could not be fetched.
+
+    This returned a bare None for a 404, a 500, a timeout and a parse error
+    alike, and every caller then did `if not data: continue`. So "the provider
+    is down" and "the provider has no such field" printed as the same silence —
+    a probe reporting an outage as absent data is worse than no probe, because
+    it produces a confident conclusion about the wrong thing.
+    (CodeRabbit, PR #388.)
+    """
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=20), **kw) as r:
             if r.status != 200:
+                print(f"   !! {url} -> HTTP {r.status} (provider failure, NOT missing data)")
                 return None
             return await r.json()
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 — a probe reports every failure
+        # Type only: these URLs can carry credentials in a query string.
+        print(f"   !! {url.split('?')[0]} -> {type(exc).__name__} (provider failure, NOT missing data)")
         return None
 
 

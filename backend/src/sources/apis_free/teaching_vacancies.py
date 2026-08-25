@@ -37,9 +37,17 @@ def _parse_clean_salary_text(text: str) -> tuple[Optional[float], Optional[float
     text = text.strip()
     m = _SALARY_RANGE_RE.match(text)
     if m:
-        lo = float(m.group(1).replace(",", ""))
-        hi = float(m.group(2).replace(",", ""))
-        return min(lo, hi), max(lo, hi), None
+        # AN UNLABELLED RANGE IS NOT UNAMBIGUOUS, WHICH IS WHAT THIS FUNCTION
+        # PROMISES. "£30,000 - £40,000" is annual and "£12 - £15" is hourly, and
+        # the string alone cannot tell them apart. Returning the pair with
+        # `period=None` pushed that ambiguity downstream, where `shelf_gate`'s
+        # `_annualise_one` resolves a missing period as "annual" — so an hourly
+        # range would be stored as an annual salary roughly 2,000x too small,
+        # or clamped away as implausible. Either way a guess.
+        #
+        # The two branches below return a period because the TEXT states one.
+        # This branch cannot, so it declines. (CodeRabbit, PR #388.)
+        return None, None, None
     m = _SALARY_HOURLY_RE.match(text)
     if m:
         val = float(m.group(1))
@@ -143,11 +151,20 @@ class TeachingVacanciesSource(BaseJobSource):
             # here (the gate owns that); the full list stays recoverable
             # from raw_employment_type if a future gate pass wants it.
             raw_employment_type = item.get("employmentType")
-            employment_type = (
-                raw_employment_type[0]
-                if isinstance(raw_employment_type, list) and raw_employment_type
-                else (raw_employment_type if isinstance(raw_employment_type, str) else None)
-            )
+            # A LIST CAN HOLD OBJECTS, and `raw[0]` then hands a dict to a
+            # field the contract says is a string — which reaches the shelf
+            # gate, the DB and the UI as `{'label': 'Full time'}`. Take the
+            # first element ONLY when it is really a string.
+            # (CodeRabbit, PR #388.)
+            if isinstance(raw_employment_type, list):
+                employment_type = next(
+                    (v for v in raw_employment_type if isinstance(v, str) and v.strip()),
+                    None,
+                )
+            elif isinstance(raw_employment_type, str):
+                employment_type = raw_employment_type
+            else:
+                employment_type = None
 
             results.append(Job(
                 title=title or "Teaching Vacancy",

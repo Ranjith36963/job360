@@ -97,7 +97,17 @@ def test_an_unset_credential_is_still_empty_string(name, monkeypatch, reload_set
         )
 
 
+# A VALUE NO SCANNER CAN MISTAKE FOR A SECRET.
+# This was `abcdef0123456789` — sixteen hex characters, which is exactly the
+# shape gitleaks' `generic-api-key` rule exists to catch, so CI went red on a
+# fixture that never held anything real. The fix is NOT an allowlist entry:
+# teaching the scanner to ignore a pattern makes it blind to the next real key
+# of that shape. Make the value unmistakably fake instead. The test only needs
+# a string that survives a round trip unchanged, so the string can say so.
+_CLEAN_FIXTURE_VALUE = "not-a-real-key-only-a-test-fixture"
+
+
 def test_a_clean_credential_is_untouched(monkeypatch, reload_settings):
-    monkeypatch.setenv("SERPAPI_KEY", "abcdef0123456789")
-    if reload_settings().SERPAPI_KEY != "abcdef0123456789":
+    monkeypatch.setenv("SERPAPI_KEY", _CLEAN_FIXTURE_VALUE)
+    if reload_settings().SERPAPI_KEY != _CLEAN_FIXTURE_VALUE:
         pytest.fail("a clean credential must pass through unchanged")

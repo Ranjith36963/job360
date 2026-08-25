@@ -129,9 +129,17 @@ class DevITJobsSource(BaseJobSource):
             fallback_description = ". ".join(desc_bits)
 
             description = fallback_description
-            if detail_budget > 0 and _is_uk_or_remote(location):
+            # THE ID IS CHECKED BEFORE THE BUDGET IS SPENT. `_fetch_job_detail`
+            # returns {} immediately when the id is empty, so no HTTP request
+            # happens — but the slot was already gone, and a feed with missing
+            # ids could burn the whole detail budget without making a single
+            # call. `nofluffjobs.py` gets the order right in this same PR
+            # (`if posting_id and detail_budget > 0`); this now matches it.
+            # (CodeRabbit, PR #388.)
+            job_id = str(item.get("_id", ""))
+            if job_id and detail_budget > 0 and _is_uk_or_remote(location):
                 detail_budget -= 1
-                detail = await self._fetch_job_detail(str(item.get("_id", "")))
+                detail = await self._fetch_job_detail(job_id)
                 detail_description = self._extract_detail_description(detail)
                 if detail_description:
                     description = detail_description

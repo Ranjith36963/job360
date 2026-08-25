@@ -5,6 +5,7 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Optional, cast
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -44,14 +45,49 @@ _MICRODATA_DESC_WINDOW = 8000
 _MAX_DETAIL_FETCHES_PER_COMPANY = 20
 
 
+def _as_number(value):
+    """A JSON-LD number, or None. Never raises — see the call site."""
+    if isinstance(value, bool):  # bool is an int subclass; a flag is not a salary
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        try:
+            return float(value.replace(",", "").strip())
+        except ValueError:
+            return None
+    return None
+
+
 def _extract_from_jsonld(page_html):
-    m = _JSONLD_RE.search(page_html)
-    if not m:
+    # EVERY ld+json BLOCK, NOT THE FIRST. Careers pages routinely carry an
+    # Organization or BreadcrumbList block before the JobPosting one, and
+    # taking `search()` meant landing on that, returning a dict with none of
+    # the fields we want — and then BLOCKING the microdata fallback, because a
+    # non-None return reads as "JSON-LD handled it". Scan for the block that
+    # actually is a JobPosting. (CodeRabbit, PR #388.)
+    blocks = _JSONLD_RE.findall(page_html)
+    if not blocks:
         return None
-    try:
-        data = json.loads(m.group(1))
-    except json.JSONDecodeError:
-        return None
+    data = None
+    for block in blocks:
+        try:
+            candidate = json.loads(block)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, list):
+            candidate = next(
+                (c for c in candidate
+                 if isinstance(c, dict) and "JobPosting" in str(c.get("@type", ""))),
+                None,
+            )
+        if not isinstance(candidate, dict):
+            continue
+        if "JobPosting" in str(candidate.get("@type", "")):
+            data = candidate
+            break
+        if data is None:
+            data = candidate  # keep the first parseable one as a fallback
     if not isinstance(data, dict):
         return None
 
@@ -89,8 +125,13 @@ def _extract_from_jsonld(page_html):
         value = base_salary.get("value")
         currency = base_salary.get("currency")
         if isinstance(value, dict):
-            salary_min = value.get("minValue")
-            salary_max = value.get("maxValue")
+            # COERCED, because JSON-LD is written by hand by whoever runs the
+            # careers site: `"minValue": "45000"` is common and entirely valid
+            # JSON. Handing a str downstream raised mid-loop and took the WHOLE
+            # source's remaining postings with it — one badly-typed field on one
+            # ad silently costing every ad after it. (CodeRabbit, PR #388.)
+            salary_min = _as_number(value.get("minValue"))
+            salary_max = _as_number(value.get("maxValue"))
         salary_currency = currency
 
     return {
@@ -280,7 +321,14 @@ class SuccessFactorsSource(BaseJobSource):
         title segment for both templates (BAE's last segment already IS the
         title, so this is a no-op there).
         """
-        segments = [s.split("?")[0] for s in url.rstrip("/").split("/") if s]
+        # THE PATH ONLY. Splitting the whole URL on "/" leaves `https:` and
+        # the host in the list, so a posting whose path segments are all digits
+        # walked backward straight onto the hostname — or onto `https:` — and
+        # stored that as the job title. `urlsplit().path` cannot do that.
+        # (CodeRabbit, PR #388.)
+        segments = [
+            s.split("?")[0] for s in urlsplit(url).path.rstrip("/").split("/") if s
+        ]
         path = ""
         for seg in reversed(segments):
             if seg and not seg.isdigit():

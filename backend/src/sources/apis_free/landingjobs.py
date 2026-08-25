@@ -73,6 +73,14 @@ class LandingJobsSource(BaseJobSource):
                         if extra_text:
                             description = (description + "\n\n" + extra_text).strip()
 
+                # CAPPED, like every other source in this cohort — devitjobs,
+                # hn_jobs, remotive, teaching_vacancies, careerjet and findwork
+                # all use 5,000. Appending two more prose fields made this the
+                # one source that could store an unbounded description, and that
+                # text rides into the enrichment LLM prompt, where length is
+                # money. (CodeRabbit, PR #388.)
+                description = description[:5000]
+
                 # Build location string
                 location_parts = []
                 for loc in locations:

@@ -729,8 +729,21 @@ def _fill_salary(job: Job) -> dict[str, Any]:
 
     job.salary_min = float(min_annual) if min_annual is not None else None
     job.salary_max = float(max_annual) if max_annual is not None else None
-    job.salary_min_gbp_annual = job.salary_min
-    job.salary_max_gbp_annual = job.salary_max
+    # THE DERIVED PAIR ONLY EXISTS WHEN THE SOURCE REALLY SAID GBP-ANNUAL.
+    # `_annualise_one` falls back to `currency or "GBP"` and `period or
+    # "annual"`, so an ad that named neither still produced a number — and this
+    # copied it into columns whose NAMES assert both facts, while the block
+    # below refuses to write `salary_currency = "GBP"` for that same ad. One
+    # function, two answers to "did the source state a currency?", and the
+    # column that a consumer trusts most got the confident one.
+    #
+    # Rule #29 applies to a derived field exactly as it does to a stored one:
+    # unstated is not a value. Stays NULL, and `salary_min`/`salary_max` keep
+    # the number for anyone who wants it without the currency claim.
+    # (CodeRabbit, PR #388.)
+    _gbp_annual_is_stated = currency is not None and period is not None
+    job.salary_min_gbp_annual = job.salary_min if _gbp_annual_is_stated else None
+    job.salary_max_gbp_annual = job.salary_max if _gbp_annual_is_stated else None
     if min_annual is not None or max_annual is not None:
         # The stored numbers ARE annual GBP now, so the stored unit must say
         # so — but ONLY where the source actually stated that unit. Stamping
@@ -1024,8 +1037,19 @@ def apply_enrichment(job: Job, enrichment: Any, *, by: str = "llm") -> tuple[Job
         if band_min is not None or band_max is not None:
             job.salary_min = band_min
             job.salary_max = band_max
-            job.salary_currency = getattr(band, "currency", None) or None
-            job.salary_period = _enum_str(getattr(band, "frequency", None))
+            # THE SOURCE'S OWN UNIT WINS. This shelf is only a target when it is
+            # ABSENT — but "absent" means the NUMBERS are missing, and a source
+            # can state a currency and a period whose figures were then refused
+            # as implausible. Overwriting those with the model's guess replaces
+            # a stated fact with an inferred one, which is the one direction
+            # this file is built never to go. Only fill what the source left
+            # empty. (CodeRabbit, PR #388.)
+            _llm_currency = getattr(band, "currency", None) or None
+            _llm_period = _enum_str(getattr(band, "frequency", None))
+            if job.salary_currency is None:
+                job.salary_currency = _llm_currency
+            if job.salary_period is None:
+                job.salary_period = _llm_period
             # Same policy as ingest, deliberately: annualise + convert, then
             # clamp. If the gate REFUSES the band (implausible / unpriceable
             # currency) that refusal is recorded as-is — an LLM number gets no

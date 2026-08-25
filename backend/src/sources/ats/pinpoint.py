@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 from datetime import datetime, timezone
@@ -66,7 +67,16 @@ def _normalize_employment_type_text(raw: Optional[str]) -> Optional[str]:
 
 
 def _strip_html(raw: Optional[str]) -> str:
-    return _HTML_TAG_RE.sub(" ", raw or "").strip()
+    """Tags out, entities decoded — IN THAT ORDER, and both halves matter.
+
+    `_HTML_TAG_RE` cannot see entity-escaped markup, so `&lt;p&gt;` survives a
+    tag strip untouched and `&amp;` / `&nbsp;` reach storage as literal noise.
+    That text then goes into the enrichment LLM prompt and into the stub-check
+    that decides whether an ad is worth reading at all, so the pollution is not
+    cosmetic. `greenhouse.py` documents this exact trap and unescapes first.
+    (CodeRabbit, PR #388.)
+    """
+    return html.unescape(_HTML_TAG_RE.sub(" ", html.unescape(raw or ""))).strip()
 
 
 def _build_description(item: dict) -> str:

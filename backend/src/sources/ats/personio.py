@@ -26,13 +26,28 @@ _INTER_COMPANY_DELAY = 3.0
 # Verified live 2026-08-16 (flatpay/herdify/holidu feeds): <salaryInformation>
 # <type> only ever reads "yearly"/"monthly" — a literal word-for-word
 # translation of one closed field, not a unit conversion or a guess.
-_SALARY_TYPE_MAP = {
-    "yearly": "annual",
-    "monthly": "monthly",
-    "weekly": "daily",
-    "hourly": "hourly",
-    "daily": "daily",
-}
+# ONE REAL TRANSLATION, AND NO INVENTED ONES.
+#
+# `"weekly": "daily"` was a UNIT ERROR, not a spelling: a weekly figure stored
+# as daily understates the pay by roughly five, and a scorer reading it would
+# rank a good job as a bad one. The other four entries mapped a word to itself.
+#
+# The contract (models.py) is hourly|daily|monthly|annual — there is no
+# "weekly" in it, so a weekly figure CANNOT be expressed here. Unstated is the
+# honest answer for anything outside the contract; guessing a neighbouring unit
+# is the one thing worse than leaving it empty (rule #29).
+# (CodeRabbit, PR #388.)
+_SALARY_PERIOD_CONTRACT = frozenset({"hourly", "daily", "monthly", "annual"})
+_SALARY_TYPE_MAP = {"yearly": "annual"}
+
+
+def _salary_period(raw_type: Optional[str]) -> Optional[str]:
+    """Personio's `<type>` -> our period contract, or None when it cannot be."""
+    if not raw_type:
+        return None
+    key = raw_type.strip().lower()
+    key = _SALARY_TYPE_MAP.get(key, key)
+    return key if key in _SALARY_PERIOD_CONTRACT else None
 
 
 def _parse_salary(position: ET.Element) -> tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
@@ -59,7 +74,7 @@ def _parse_salary(position: ET.Element) -> tuple[Optional[float], Optional[float
     salary_max = _to_float(salary_elem.findtext("max"))
     currency = (salary_elem.findtext("currencyCode") or "").strip() or None
     raw_type = (salary_elem.findtext("type") or "").strip().lower()
-    salary_period = _SALARY_TYPE_MAP.get(raw_type)
+    salary_period = _salary_period(raw_type)
     return salary_min, salary_max, currency, salary_period
 
 

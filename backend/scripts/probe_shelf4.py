@@ -32,9 +32,24 @@ async def get_text(session, url):
 async def main():
     async with aiohttp.ClientSession() as session:
         print("=== SUCCESSFACTORS occupationalCategory + validThrough across several BAE jobs ===")
+        # GUARD BOTH DEREFERENCES. `get_text` returns None on any non-200 or
+        # exception, and `re.search` returns None when the sitemap's shape
+        # changes — so an upstream outage or a redesign crashed this probe with
+        # an AttributeError instead of saying which of the two had happened. A
+        # probe that cannot report its own failure is not a probe.
+        # (CodeRabbit, PR #388.)
         text = await get_text(session, "https://jobs.baesystems.com/sitemap.xml")
+        if not text:
+            print("-> sitemap.xml did not answer (non-200 or network error)")
+            return
         m = re.search(r"<loc>([^<]*sitemap1[^<]*)</loc>", text)
+        if not m:
+            print("-> sitemap.xml no longer contains a `sitemap1` <loc> — its shape changed")
+            return
         child = await get_text(session, m.group(1))
+        if not child:
+            print("-> the child sitemap did not answer")
+            return
         job_urls = re.findall(r"<loc>([^<]*/job/[^<]*)</loc>", child)[:8]
         for u in job_urls:
             page = await get_text(session, u)

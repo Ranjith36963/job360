@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-import traceback
 
 import aiohttp
 
@@ -66,8 +65,15 @@ async def probe(name: str, factory, credential_state: str) -> dict:
     except asyncio.TimeoutError:
         out["error"] = "TIMEOUT after 150s"
     except Exception as exc:  # noqa: BLE001 — this probe reports every failure
-        out["error"] = "%s: %s" % (type(exc).__name__, str(exc)[:220])
-        out["trace"] = traceback.format_exc(limit=3)[-400:]
+        # THE EXCEPTION TEXT IS NOT SAFE TO PRINT. Every source here is called
+        # WITH AN API KEY, and HTTP client libraries routinely put the full
+        # request URL — query string and all — into the message. So `str(exc)`
+        # and a traceback paste live credentials into this probe's output, which
+        # is exactly the text that gets dropped into an issue or a terminal.
+        # The TYPE is what the probe is for ("is this source dead, and how?");
+        # the secret-bearing detail is not. (CodeRabbit, PR #388.)
+        out["error"] = type(exc).__name__
+        out["error_detail"] = "withheld — the message can carry the request URL and its API key"
     return out
 
 
@@ -100,8 +106,8 @@ async def main() -> None:
         )
         if res.get("sample"):
             print("  -> sample:", res["sample"])
-        if res.get("trace"):
-            print("  -> trace tail:", res["trace"].replace("\n", " | ")[:380])
+        if res.get("error_detail"):
+            print("  -> detail:", res["error_detail"])
 
     print("\n\n" + "#" * 68)
     print("VERDICT TABLE")

@@ -13,12 +13,6 @@ logger = logging.getLogger("job360.sources.nofluffjobs")
 _MAX_RESULTS = 200
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
-# Detail-fetch budget per RUN, same reasoning as smartrecruiters/workday/
-# devitjobs (see those files): an uncapped detail pass over every UK-relevant
-# posting risks blowing the fetch time ceiling. Jobs past the budget keep no
-# description rather than a wrong one -- see the description comment below.
-_MAX_DETAIL_FETCHES = 40
-
 # NoFluffJobs API endpoints to try (the public API is unofficial and may change)
 _API_URLS = [
     "https://nofluffjobs.com/api/posting",
