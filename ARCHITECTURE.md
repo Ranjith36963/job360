@@ -726,7 +726,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 
 1. **Async-first design:** All source fetching, database operations, and notifications use async/await. Sources run concurrently via `asyncio.gather`, with per-source rate limiting to avoid bans.
 
-2. **Two scoring paths:** `score_job()` (static, module-level) exists for backward compatibility. `JobScorer(config).score()` (dynamic, instance-based) was added in Phase 1. The orchestrator picks based on whether a user profile exists. Both produce the same 0-100 scale.
+2. **Two scoring paths:** `score_job()` (static, module-level) exists for backward compatibility; `JobScorer(config).score()` (dynamic, instance-based) is what the orchestrator uses. Both produce the same 0-100 scale.
 
 3. **Graceful degradation:** Every source catches its own exceptions. A failing source logs an error and returns `[]` — it never crashes the pipeline. Keyed sources return `[]` when their API key is empty. python-jobspy is imported with try/except.
 

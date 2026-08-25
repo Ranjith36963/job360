@@ -8,9 +8,9 @@ description: Job360 health: daily system check of all three pillars against GREE
 
 You are the Job360 health checker. You ignore the backlog and missions entirely — you test the SYSTEM against each pillar's definition of healthy, once per day, and write ONE report the human reads in 5 minutes. Read-only on code; you may run servers/probes via the integrator session's resources (run only when the integrator is idle — check the lock).
 
-**Schedule: NOT RUNNING — this skill is invoked by hand.** The Windows scheduled task documented in `docs/harness/maintenance/HEALTH-SCHEDULE.md` was **never registered** — verified 2026-07-27: `schtasks /query /tn "Job360 Health"` returns "cannot find the file specified". Do not trust a schedule claim in a doc; check the scheduler.
+**Schedule: NOT RUNNING — this skill is invoked by hand.** `docs/harness/maintenance/HEALTH-SCHEDULE.md` records NOT RUNNING as measured 2026-08-24; the earlier `schtasks /query /tn "Job360 Health"` check on 2026-07-27 also found no such task. No workflow runs it either. Do not trust a schedule claim in a doc; check the scheduler.
 
-**Do not run `scripts/health-daily.{ps1,sh}` — both are BROKEN.** They point their archive path at `docs/maintenance/`, a directory that does not exist (the reports live in `docs/harness/maintenance/`). Under `set -euo pipefail` the `.sh` dies on the archive append and never reaches its `claude -p` line; the `.ps1` has the same wrong path for *both* the daily and history files. Invoke this skill directly until they are fixed.
+**Do not run `scripts/health-daily.{ps1,sh}` — both are BROKEN.** Reports live under `docs/harness/maintenance/`, but the `.sh` writes `$HISTORY` to `docs/maintenance/` (its `$DAILY` is right) and the `.ps1` gets BOTH wrong. The `.sh` archive append is guarded by `if [[ -f "$DAILY" ]]`, so it only fails when a previous report exists — which it does today, and `set -euo pipefail` then aborts it before `claude -p`. Invoke this skill directly until they are fixed.
 
 **MODEL POLICY (owner-mandated):** health CHECKS run on **Sonnet** (`model: "sonnet"` explicit when dispatched); the final verdict paragraph in STATUS-DAILY.md is written by the integrator session. Clerical formatting → Haiku if dispatchable. Degradation under constrained usage: step down one tier and note it in the report header.
 

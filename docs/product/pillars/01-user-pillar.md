@@ -285,7 +285,7 @@ This is the bridge to Pillar 2 (search & match engine). `generate_search_config(
 - **Locations**: UK defaults union prefs union the `work_arrangement` capitalised; top 2 are used to build search queries
 - **Search queries**: top 8 titles × 2 locations, capped at 16
 
-When no profile exists, `SearchConfig.from_defaults()` is used instead — that's the hard-coded AI/ML keyword set in `backend/src/core/keywords.py`.
+`SearchConfig.from_defaults()` is NOT a no-profile fallback for `run_search` (that aborts) — it is the worker's crash-guard in `workers.tasks`, and it returns EMPTY skill lists, never a hard-coded keyword set. Guard: `test_profile.py::TestSearchConfigDefaults`.
 
 ---
 
