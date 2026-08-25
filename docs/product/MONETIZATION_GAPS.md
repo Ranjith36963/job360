@@ -20,7 +20,7 @@
 
 | Dimension | % | Evidence |
 |---|---|---|
-| Product (features) | ~90% | engine + API + UI + auth + profiles + 4 scoring engines + control surface; 1,571 tests green |
+| Product (features) | ~90% | engine + API + UI + auth + profiles + 4 scoring engines + control surface; test suite green — measure the count with `python -m pytest --collect-only -q | tail -1`, never quote it |
 | Launch readiness (ship it live) | ~30% | no CI gate, no Dockerfile/deploy, no prod Redis+ARQ, no SES |
 | **Money layer (charge for it)** | **~5%** | **no Stripe, no billing, no plans, no pricing page, no analytics** |
 
