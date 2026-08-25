@@ -86,7 +86,7 @@ flowchart TD
 - **Salary outlier filtering** — ignores unrealistic salary values (<10k or >500k)
 
 ### Notifications (email + webhook only)
-- **Email** — the product. The daily shortlist, built from the same `DecisionCard` the dashboard renders (score, verdict, reason, salary), sent via Resend's HTTPS API (Railway blocks outbound SMTP)
+- **Email** — the product. The daily shortlist, built from the same `DecisionCard` the dashboard renders (score, verdict, reason, salary). **Resend's HTTPS API is the production transport** (Railway blocks outbound SMTP ports 25/465/587); a local or self-hosted SMTP relay remains supported as a fallback when no Resend key is configured — see `backend/src/services/channels/email_url.py`
 - **Webhook** — unsupported escape hatch. Raw JSON for a technical user's own tooling; no design, no promises
 - **Apprise dispatcher** — per-user channels stored in the DB. Slack, Discord and Telegram were removed 2026-08-24 (never configured in production, zero users ever connected one) — see `docs/plans/2026-08-24-email-webhook-only-delivery.md`
 
@@ -144,9 +144,9 @@ flowchart TD
 | `test_models.py` | 25 | Job dataclass, normalisation, company cleaning |
 | `test_main.py` | 18 | Orchestrator (IS in the canonical run — carries no `live` marker) |
 | `test_llm_provider.py` | 18 | Multi-provider LLM client for CV parsing |
-| `test_decision_card.py` | 18 | What a matched job *says* — one definition shared by dashboard and email |
+| `test_decision_card.py` | 22 | What a matched job *says* — one definition shared by dashboard and email |
 | `test_database.py` | 16 | Postgres operations, migrations, source history |
-| `test_channels_dispatcher.py` | 15 | Apprise dispatch, quiet hours, digest queueing |
+| `test_channels_dispatcher.py` | 16 | Apprise dispatch, quiet hours, digest queueing |
 | `test_digest_email_body.py` | 12 | How the daily email reads (verdict first, the honest "no", empty days) |
 | `test_cli.py` | 11 | CLI commands + SOURCE_REGISTRY assertions |
 | `test_notification_rules.py` | 11 | One-rulebook-per-user rules + routes |

@@ -68,7 +68,7 @@ This is the core of Job360. It fetches job listings from all sources, normalises
 
 ### Layer 3 — Job Provider Data
 
-This layer is responsible for sourcing raw job listings from the web. It operates 41 concurrent async sources (41 `SOURCE_REGISTRY` keys, 40 unique classes — `indeed`/`glassdoor` share `JobSpySource`; measured via `python -c "from src.main import SOURCE_REGISTRY as R; print(len(R), len(set(R.values())))"`) spanning keyed APIs, free JSON APIs, ATS board APIs, RSS feeds, HTML scrapers, and specialty sources. Found stale at 47 while fixing a separate CodeRabbit finding on PR #381 — not one of that finding's three named files, corrected here for consistency.
+This layer is responsible for sourcing raw job listings from the web. It operates 41 concurrent async sources (41 `SOURCE_REGISTRY` keys, 40 unique classes — `indeed`/`glassdoor` share `JobSpySource`; measured via `python -c "from src.main import SOURCE_REGISTRY as R; print(len(R), len(set(R.values())))"`) spanning keyed APIs, free JSON APIs, ATS board APIs, RSS feeds, HTML scrapers, and specialty sources.
 
 **Coverage categories:**
 
