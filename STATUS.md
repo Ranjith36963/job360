@@ -153,10 +153,10 @@ Four engines are available, stacked **keyword → dimensions → hybrid → LLM 
 
 | Engine | Service | Flag | Default |
 |--------|---------|------|---------|
-| #1 Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
+| #1 Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | `ENGINE1_ENABLED` — no legacy alias; `skill_matcher.py:480-483` reads it and `:560` gates the keyword half, so it CAN be switched off | **true** |
 | #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace (`skill_matcher.py:582-617`). **The scorer enters the dim path on `user_preferences` alone** (`skill_matcher.py:587`), no flag involved; the flag gates only whether the **enrichment** LLM step (`services/job_enrichment.py`) has produced data for those dims to read (`main.py:853`, `main.py:1137`). Without it they score their neutral halves | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` (enrichment data only) | false |
 | #3 Hybrid | `services/embeddings.py` + `pg_vector_index.py` + `retrieval.py` (RRF fuse + cross-encoder rerank). Vectors live in `job_embeddings.embedding`; `vector_index.py` is the legacy Chroma wrapper with no production caller | reads: `ENGINE3_ENABLED` **or** `SEMANTIC_ENABLED`; embedding writes: `SEMANTIC_ENABLED` alone | false |
-| #4 LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` (`main.py:352`, `rescore.py:589`) | false |
+| #4 LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` (`main.py:352`, `rescore.py:395,589`) | false |
 
 Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored on `user_feed` (migration 0017). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Measured: 18/18 judged in 89.8 s at concurrency 3; judge spread 20–92 vs keyword 30–43; 10/10 fit accuracy on labeled sample.
 
@@ -203,7 +203,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Pillar 2 opt-in features behind flags (OFF by default): `ENRICHMENT_ENABLED` (LLM enrichment pipeline), `SEMANTIC_ENABLED` (sentence-transformers + the pgvector store, `job_embeddings.embedding`) — hybrid retrieval also answers to the newer `ENGINE3_ENABLED`, for which `SEMANTIC_ENABLED` is the legacy alias (rule #18); the embedding WRITES read the legacy name alone
 - Postgres database with auto-purge (30 days); shared `jobs` catalog + per-user `user_feed` / `user_actions` / `applications`
 - Email, Slack, Discord, Telegram, webhook — all via the Apprise dispatcher, per-user channels (Batch 2). The old built-in channel classes are REMOVED.
-- CLI commands: run, view, api, status, sources, setup-profile
+- CLI commands (7, all in `src/cli.py`): run, status, view, api, sources, setup-profile, rescore-backfill
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
 - Tests: 218 `test_*.py` modules; measure the collected count, never quote it (2 `live` deselected offline); 3 skip on Windows (bash-only `setup.sh` / `cron_setup.sh` tests)
 
@@ -229,7 +229,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | Issue | Severity | Notes |
 |-------|----------|-------|
 | 3 tests skip on Windows | Low | bash-only tests for `setup.sh` and `cron_setup.sh` — pass on Linux/Mac |
-| ~~`test_main.py` still hits live Indeed~~ RESOLVED (M8 batch) | — | JobSpy stubbed via autouse fixture; `load_profile` patched. Runs offline in ~8 s (14 tests). Now part of canonical suite — `--ignore` removed from Makefile, agent-gate.sh, and CLAUDE.md. |
+| ~~`test_main.py` still hits live Indeed~~ RESOLVED (M8 batch) | — | JobSpy stubbed via autouse fixture; `load_profile` patched. Runs offline (18 `def test_` in `test_main.py` as of 2026-08-25 — measure, don't quote). Now part of canonical suite — `--ignore` removed from Makefile, agent-gate.sh, and CLAUDE.md. |
 | Layer-4 embedding repost dedup not activated | Medium | Scaffolded in `backend/src/services/deduplicator.py` but gated behind `SEMANTIC_ENABLED`; the layer needs an `embedding_lookup` handed in (vectors now come from `job_embeddings.embedding`) and is not yet wired into the default pipeline path. |
 | ~~Batch 2.7 hybrid mode flag not wired to HTTP routes~~ RESOLVED 2026-06-10 | — | `GET /api/jobs?mode=hybrid` consults the retrieval stack and the dashboard requests it by default (a19db65); the LLM judge re-ranks on top via `COALESCE(llm_fit_score, score)`. |
 | No skill inference beyond what the LLM extracts | Medium | Profile system relies on LLM-extracted skills + explicit user additions; implicit skill expansion from titles ("Data Scientist" → Python/SQL) not implemented. Partially mitigated by `skill_synonyms.py` canonicalisation (Batch 2.3). |

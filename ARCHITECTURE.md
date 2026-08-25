@@ -23,9 +23,9 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
                                                   Embed (opt-in) -> job_embeddings.embedding (pgvector)
 ```
 
-Two opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18):
+Two legacy opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18). Each is only HALF of its gate — the effective condition is `ENGINEx_ENABLED or <legacy flag>`, so test both names:
 
-- `ENRICHMENT_ENABLED=true` → LLM enrichment + multi-dimensional scoring activates
+- `ENRICHMENT_ENABLED=true` → the LLM **enrichment step** runs, so the Batch-2.9 dimensions read real data instead of their neutral halves. The dimensions themselves are not gated on this flag — they fire on `user_preferences` alone (`skill_matcher.py:587`, rule #20). Effective gate at every call site: `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853,1137`)
 - `SEMANTIC_ENABLED=true` → embeddings into the pgvector store (`job_embeddings.embedding`, migration `0027` — **not** ChromaDB; see `services/pg_vector_index.py`). Hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), while the embedding WRITES are gated on `SEMANTIC_ENABLED` alone (`main.py:1292,1348`) — so `ENGINE3_ENABLED=true` by itself queries an index nothing fills. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
 
 ---
@@ -67,7 +67,7 @@ job360/
 │   │   │   ├── scheduler.py          # TieredScheduler (poll: 60s ATS / 5m reed / 15m workday+RSS / 60m rest; fetch ceiling 240s ATS / 60s others)
 │   │   │   ├── circuit_breaker.py    # 5-fail/300s per-source state machine
 │   │   │   ├── conditional_cache.py  # 256-entry FIFO for ETag/Last-Modified
-│   │   │   ├── llm_matcher.py        # Engine #4: LLM judge (MATCHER_ENABLED; MatchVerdict persisted onto user_feed)
+│   │   │   ├── llm_matcher.py        # Engine #4: LLM judge (ENGINE4_ENABLED or MATCHER_ENABLED; MatchVerdict persisted onto user_feed)
 │   │   │   ├── job_enrichment.py     # enrich_batch() (opt-in)
 │   │   │   ├── job_enrichment_schema.py  # 16-field Pydantic JobEnrichment + 7 enums
 │   │   │   ├── embeddings.py         # encode_job() via sentence-transformers (opt-in, lazy)
@@ -265,10 +265,10 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 
 | # | Engine | Service | Flag | Default |
 |---|--------|---------|------|---------|
-| 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
-| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:582-617`; data from the enrichment step `services/job_enrichment.py`) | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` (enrichment data only — the dims themselves run on `user_preferences` alone, rule #20) | false |
+| 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | `ENGINE1_ENABLED` (no legacy alias; `skill_matcher.py:480-483` reads it, `:560` gates the keyword half) | **true** |
+| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:582-617`; data from the enrichment step `services/job_enrichment.py`) | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` at every call site (`main.py:853,1137`, `rescore.py:85`, `api/routes/jobs.py:779`, `workers/tasks.py:237`) — this gates the enrichment DATA, not the dim path: the dims fire on `user_preferences` alone (`skill_matcher.py:587`, rule #20) | false |
 | 3 | Hybrid | `services/embeddings.py` + `pg_vector_index.py` + `retrieval.py` (`vector_index.py` is the legacy Chroma wrapper, no production caller) | reads: `ENGINE3_ENABLED` **or** `SEMANTIC_ENABLED`; embedding writes: `SEMANTIC_ENABLED` alone | false |
-| 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` (`main.py:352`, `rescore.py:589`) | false |
+| 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` (`main.py:352`, `rescore.py:395,589`) | false |
 
 **Engine 4 — LLM judge detail:**
 - Service: `backend/src/services/llm_matcher.py`. `MatchVerdict{fit_score: int 0-100, verdict: str, reason: str}`.

@@ -462,7 +462,7 @@ Both flags default `false` per CLAUDE.md rule #18, and the **no-op path must exa
 
 ### 5.1 `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` → LLM enrichment
 
-Either name opens this surface — every E2 call site reads `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853`, `main.py:1137`, `rescore.py:85`, `workers/tasks.py:237`), rule #18.
+Either name opens this surface — every E2 call site reads `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853`, `main.py:1137`, `rescore.py:85`, `api/routes/jobs.py:779`, `workers/tasks.py:237`), rule #18.
 
 When on:
 - Stage 5 runs (see §2).
@@ -470,7 +470,7 @@ When on:
 - Dedup tie-breaker uses the `+5` enrichment bonus.
 
 When off:
-- `enrichment_lookup` is an empty dict, so every lookup returns `None`. The four dim scorers still RUN — the path is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20) — and each returns its documented **neutral half weight**, never a zero (rule #29; `visa_score` is the one exception, returning 0 when the user does not need sponsorship). A user with no preferences at all gets the legacy 4-component formula; a user with preferences does not.
+- `enrichment_lookup` is an empty dict, so every lookup returns `None`. The four dim scorers still RUN — the path is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20) — and each returns its documented **neutral half weight**, never a zero: seniority 4 (`scoring_dimensions.py:157`), salary 5 (`:198-200`), workplace 3 (`:278`), visa 3 (`:245`), so **+15** rather than the +30 a fully enriched job can reach (rule #29; `visa_score` is the one exception, returning 0 at `:242` when the user does not need sponsorship). A user with no preferences at all gets the legacy 4-component formula; a user with preferences does not.
 - No LLM API calls, no `job_enrichment` DB writes.
 
 ### 5.2 `SEMANTIC_ENABLED=true` → embeddings + hybrid retrieval
