@@ -481,11 +481,26 @@ def unstamped_docs() -> list[str]:
         path = ROOT / rel
         if not path.exists():
             continue
-        m = stamp.search(path.read_text(encoding="utf-8", errors="replace")[:400])
+        # 4000, not 400: moving the stamp BELOW YAML front matter (which it
+        # must be, or it breaks the file) pushed it past a 400-char window in
+        # two files with long front matter, and they reported as unstamped.
+        head = path.read_text(encoding="utf-8", errors="replace")[:4000]
+        m = stamp.search(head)
         if not m:
             bad.append(rel)
         elif m.group(1) not in DOC_KINDS:
             bad.append(f"{rel} (unknown kind {m.group(1)})")
+        else:
+            # A stamp ABOVE YAML front matter breaks the file it labels.
+            # The first stamping pass put one on line 1 of nine SKILL.md and
+            # agent files, so `---` no longer opened the document and the
+            # front matter stopped parsing -- the skills and agents silently
+            # stopped loading. CodeRabbit caught it on the PR. A guard that
+            # labels a file must not break it, so placement is checked too.
+            lines = head.split("\n")
+            if lines and lines[0].startswith("<!-- doc:") and \
+                    len(lines) > 1 and lines[1].strip() == "---":
+                bad.append(f"{rel} (stamp sits ABOVE YAML front matter)")
     return bad
 
 

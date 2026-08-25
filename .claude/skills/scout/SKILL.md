@@ -1,8 +1,8 @@
-<!-- doc: LIVING -->
 ---
 name: scout
 description: Job360 scout: read-only problem finder — sweep logs, run_log, DB sanity, doc drift; append evidence-backed candidates to the canonical MISSIONS.md. Never fixes anything. Use for a scout pass.
 ---
+<!-- doc: LIVING -->
 
 > **⚠️ DORMANT — this skill is not currently in use.**
 > Its read-only sweep is safe and its "evidence or it didn't happen" discipline
