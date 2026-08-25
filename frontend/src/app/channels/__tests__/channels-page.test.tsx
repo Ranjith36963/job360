@@ -300,10 +300,16 @@ describe("ChannelsSettingsPage — channel list", () => {
     await renderPage();
 
     expect(screen.getByText("My Webhook")).toBeInTheDocument();
-    // target_label is inside a <span> within the type div — use a regex or partial match
-    expect(
-      screen.getByText((content) => content.includes("https://example.com/hook"))
-    ).toBeInTheDocument();
+    // target_label sits in a <span> inside the type div, so this is a partial
+    // text match. Deliberately a REGEX, not `content.includes(url)`:
+    // CodeQL's js/incomplete-url-substring-sanitization flags substring checks
+    // against URL-shaped strings as a high-severity finding, because in
+    // production code that pattern is how host checks get bypassed
+    // ("https://example.com/hook.evil.test" contains the needle). Here it is
+    // only a text matcher and harmless — but a real alert that has to be
+    // explained away on every scan is worse than an assertion that does not
+    // trip it. Anchored on the path so it still fails if the label is wrong.
+    expect(screen.getByText(/example\.com\/hook$/)).toBeInTheDocument();
   });
 
   it("does not render target_label span when null", async () => {
