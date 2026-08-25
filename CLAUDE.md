@@ -1,6 +1,8 @@
 # CLAUDE.md
 <!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
-<!-- SIZE BUDGET: <= 2,000 words. This file is auto-loaded before every session,
+<!-- SIZE BUDGET: <= 1,100 words (was 2,000; halved 2026-08-25 when the hard
+     rules moved to a skill -- a budget left above the real size is slack, not
+     headroom). This file is auto-loaded before every session,
      so it is POINTERS + CRITICAL GOTCHAS ONLY. Long-form history belongs in
      docs/harness/IMPLEMENTATION_LOG.md, reference tables in ARCHITECTURE.md, recipes in
      .claude/skills/. If you are about to add a paragraph here, add it there and
@@ -41,7 +43,7 @@ Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. **Every merge 
 - **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly`. **Never quote a test count from a doc — measure it** (`python -m pytest --collect-only -q | tail -1`); three docs once disagreed by 400–800 tests. Runs against a **real Postgres** (docker-compose.dev.yml, port 5433) via the `sqlite3`/`aiosqlite` shims in `tests/conftest.py`, schema-per-test. HTTP is mocked with `aioresponses`; the suite must run offline. `test_main.py` is in the canonical run — do **not** re-add `--ignore=tests/test_main.py`.
 - Two deployables: `backend/` (Python 3.9+, FastAPI, Postgres via psycopg3) and `frontend/` (Next.js 16, React 19). Runtime data in `backend/data/`. Live on Railway at job360.uk since 2026-07-02; five services: `backend`, `frontend`, `worker`, `Postgres`, `Redis`.
 - What automation is actually running: the GitHub Actions harness — 30 workflows in `.github/workflows/` (repair, triage, doc-sync, ci, ci-offline, codeql, security, uptime, live-e2e, journey, product-health, db-backup, pr-shepherd…). The old agent loop (`docs/harness/maintenance/MISSIONS.md`) is DORMANT — disabled 2026-06-21. Do not wait on it.
-- What surprises new sessions: `SOURCE_REGISTRY` has 41 entries but 40 unique source classes (`indeed` + `glassdoor` both alias `JobSpySource`) — measure it, never quote it. Heavy deps must be lazy-imported (#11/#16). Next.js 16 made `params` async (#22). Adding a source touches five files (#8/#13). Migrations auto-apply on boot: `api.dependencies.init_db()`, called by `api.main.lifespan`.
+- What surprises new sessions: `SOURCE_REGISTRY` has 41 entries but 40 unique source classes (`indeed` + `glassdoor` both alias `JobSpySource`) — measure it, never quote it. Heavy deps must be lazy-imported (top-level imports cost every CLI run and every pytest collection). Next.js 16 made `params` async — await it. Adding a source touches five files — see the `add-source` skill. Migrations auto-apply on boot: `api.dependencies.init_db()`, called by `api.main.lifespan`.
 
 ## Hard Rules
 
@@ -65,7 +67,7 @@ python -m pytest -q -p no:randomly                   # canonical run (needs Post
 python -m pytest tests/test_scorer.py::test_name -v  # single test
 python -m migrations.runner up | status | down       # migrations
 
-# Frontend — run from frontend/  (⚠️ Next.js 16, see rule #22)
+# Frontend — run from frontend/  (⚠️ Next.js 16: `params` is async — await it)
 npm run dev | build | lint | type-check | test:unit | test:e2e
 ```
 
@@ -78,7 +80,8 @@ Pipeline: CLI (Click) → orchestrator `src/main.py` (`run_search()`, `SOURCE_RE
 - `ARCHITECTURE.md` — system overview, full directory tree, DB schema, scoring detail, source-category list, dependency table, and the canonical environment-variable table.
 - `docs/README.md` — index of every plan/design/eval doc (batch-2 decisions, step plans, evaluation report, tailored-CV design).
 - `docs/harness/IMPLEMENTATION_LOG.md` — append-only batch history and the phase/batch summaries that used to live here (read FIRST when picking up unfamiliar work).
-- `docs/product/product_design_rules.md` — owner product rules #29/#30/#31 in full.
+- `docs/product/product_design_rules.md` — the owner's product rules in full
+  (empty preferences stay silent; UK-only is a door, not a penalty).
 - `.claude/skills/add-source/SKILL.md` — adding/removing a source (five surfaces) + adding a notification channel.
 - `STATUS.md` — current phase, carry-overs, fragile-source table. `CONTRIBUTING.md` — branch/commit/PR conventions. `backend/README.md` / `frontend/README.md` — install + run.
 - Second brain: older project memory lives at `D:\second-brain\wiki\projects\job360\`.
