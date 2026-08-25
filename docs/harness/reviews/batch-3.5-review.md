@@ -1,6 +1,8 @@
 # Batch 3.5 — Independent Review
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 **Reviewer:** Claude Opus 4.7 (1M) in `.claude/worktrees/reviewer` on `pillar3/batch-3.5-review`
 **Generator branch:** `pillar3/batch-3.5` @ `f6c589e`
 **Review date:** 2026-04-19

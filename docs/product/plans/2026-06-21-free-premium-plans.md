@@ -1,6 +1,8 @@
 # Plan — Free / Premium subscription tiers (DEFERRED)
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 **Status:** 📌 DEFERRED — captured 2026-06-21, **not started**. Build later.
 **Replaces:** the old "admin RBAC (#13)" idea, which is **scrapped**. Job360 has
 no admin role model. Access is split by **subscription plan**, like a normal SaaS.

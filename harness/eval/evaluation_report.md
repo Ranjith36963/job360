@@ -1,6 +1,8 @@
 # Job360 — Production Readiness Evaluation Report
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 > ## ⚠️ CLOSED RECORD — 2026-04-26, scored 2026-06-21. NOT a current assessment.
 >
 > **The 5.4/10 is withdrawn, not updated.** It was measured before Step 3, the

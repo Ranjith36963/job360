@@ -1,6 +1,8 @@
 # Pillar 3 — what every job source ACTUALLY gives us
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 **Probed 2026-08-08 against `main` @ `dc9e546`.** Nine parallel workers called all 46
 sources' **live** upstream endpoints, dumped every field returned, measured fill-rates,
 and diffed that against the keys our extractors read.

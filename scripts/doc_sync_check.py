@@ -538,6 +538,44 @@ def unstamped_docs() -> list[str]:
     return bad
 
 
+def missing_reader_banner() -> list[str]:
+    """Non-LIVING docs whose reader cannot SEE that they are non-LIVING.
+
+    Added 2026-08-25 after Fable 5 found the hole in the stamping pass:
+    `<!-- doc: PLAN -->` is an HTML COMMENT. It tells this checker to skip the
+    file. It tells the reader nothing -- it does not render, and an agent
+    skimming for an answer walks straight past it.
+
+    docs/product/PRD.md:65 was the proof: "Jobs scoring below 30/100 are
+    silently dropped", false of the shipped system, stamped PLAN, therefore
+    permanently invisible to the routine while still being read by anyone who
+    opened the file. Quarantining a lie from the CHECKER is not retiring it.
+
+    So every PLAN/LOG/REFERENCE/FROZEN doc carries a visible banner saying what
+    it is, and this guard keeps that true for files added later.
+    """
+    kinds = {"PLAN", "LOG", "REFERENCE", "FROZEN"}
+    stamp = re.compile(r"<!--\s*doc:\s*([A-Z]+)\s*-->")
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "*.md"], cwd=ROOT,
+            capture_output=True, encoding="utf-8", check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+    bad: list[str] = []
+    for rel in listing.split():
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        head = path.read_text(encoding="utf-8", errors="replace")[:4000]
+        m = stamp.search(head)
+        if m and m.group(1) in kinds and "<!-- banner: auto -->" not in head:
+            bad.append(f"{rel} ({m.group(1)})")
+    return bad
+
+
 def control_chars_in_guards() -> list[tuple[str, str, str]]:
     """(file, line, byte) for any C0 control character in this repo's guards.
 
@@ -1382,6 +1420,14 @@ def main() -> int:
             rel, "1", "unstamped-doc", "no <!-- doc: KIND -->",
             "a doc that never declares LIVING/PLAN/LOG/REFERENCE/FROZEN "
             "gets re-litigated every cycle and never converges",
+        ))
+
+    # A stamp the reader cannot see does not retire the claim under it.
+    for rel in missing_reader_banner():
+        drift.append((
+            rel, "1", "no-reader-banner", "stamp is invisible",
+            "an HTML-comment stamp hides the doc from the CHECKER while the "
+            "reader still believes it",
         ))
 
     # A control byte inside a guard's own regex silently disables it.

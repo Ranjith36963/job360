@@ -1,6 +1,8 @@
 # 08 — Gaps Not Yet Audited (the honest boundary)
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 > An audit is only trustworthy if it says what it did NOT look at. The first six docs
 > swept security, data, frontend, ops, compliance, and the harness. These dimensions
 > were **not** swept — so an "A" claim isn't complete until they are. Listed by how much

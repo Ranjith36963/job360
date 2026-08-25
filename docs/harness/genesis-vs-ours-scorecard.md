@@ -1,6 +1,8 @@
 # Genesis + expert practice vs our harness — scorecard 2026-08-01
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 > 5 Sonnet web-researchers + Opus synthesis. [V]=verified against our files this session. [R]=relayed from research.
 
 # THE SCORECARD — what WE do vs what THEY do

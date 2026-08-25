@@ -1,6 +1,8 @@
 # 03 — Frontend & Auth-UI
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 > Source: frontend sweep (Sonnet), Next.js 16 + React 19. Read-only, evidence as `file:line`.
 > **Headline:** core is clean — JSON-LD escaping, `safeUrl`, the API client, CSRF/cookie
 > handling, and the Next-16 async-API usage all checked out. Two real fixes; the rest is

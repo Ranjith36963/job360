@@ -1,6 +1,8 @@
 # Pillar 1 Implementation — Progress Log
 <!-- doc: FROZEN -->
 
+> **FROZEN — closed or superseded.** Kept as evidence of what was true then. Do not act on it. <!-- banner: auto -->
+
 > Live log of batch-by-batch progress against `docs/pillar1_implementation_plan.md`.
 > Worktree: `.claude/worktrees/generator` on branch `worktree-generator`.
 > Baseline: merged from `main @ 13d4305` on 2026-04-19. Merge commit: `90f584f`.
