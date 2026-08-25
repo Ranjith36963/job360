@@ -1,4 +1,5 @@
 # Pillar 3 — Batch 3.5.3 Conditional-Cache Pilot Plan
+<!-- doc: PLAN -->
 
 > **For agentic workers:** REQUIRED SUB-SKILLS: `superpowers:test-driven-development`, `superpowers:verification-before-completion`. Steps use checkbox syntax.
 

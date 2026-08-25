@@ -1,4 +1,5 @@
 # Genesis + expert practice vs our harness — scorecard 2026-08-01
+<!-- doc: LOG -->
 
 > 5 Sonnet web-researchers + Opus synthesis. [V]=verified against our files this session. [R]=relayed from research.
 

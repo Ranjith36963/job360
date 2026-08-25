@@ -1,4 +1,5 @@
 # Plan — Free / Premium subscription tiers (DEFERRED)
+<!-- doc: PLAN -->
 
 **Status:** 📌 DEFERRED — captured 2026-06-21, **not started**. Build later.
 **Replaces:** the old "admin RBAC (#13)" idea, which is **scrapped**. Job360 has

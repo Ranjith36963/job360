@@ -1,4 +1,5 @@
 # /sync — Code ↔ Documentation Sync
+<!-- doc: LIVING -->
 
 Triggered by: `/sync` or `/sync <specific file or area>`
 

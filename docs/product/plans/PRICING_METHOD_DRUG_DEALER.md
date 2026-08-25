@@ -1,4 +1,5 @@
 # Pricing Method — The "Drug Dealer" Method (Reverse Trial)
+<!-- doc: PLAN -->
 
 **Captured 2026-06-25. Research-backed. Status: design captured, not built.**
 

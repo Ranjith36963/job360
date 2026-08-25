@@ -1,4 +1,5 @@
 # Job360 — Production Readiness Evaluation Report
+<!-- doc: LOG -->
 
 > ## ⚠️ CLOSED RECORD — 2026-04-26, scored 2026-06-21. NOT a current assessment.
 >

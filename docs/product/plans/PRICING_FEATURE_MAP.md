@@ -1,4 +1,5 @@
 # Pricing — Feature Map (what each paid API unlocks)
+<!-- doc: PLAN -->
 
 **Researched 2026-06-25** (verified against each API's live docs). Maps the real data
 fields of the two paid providers to concrete Pro/Max features. Companion to

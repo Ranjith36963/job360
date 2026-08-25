@@ -1,4 +1,5 @@
 # Anthropic-Patterns Upgrade — apply AFTER Phase 3 is installed and one integrator round has run clean
+<!-- doc: PLAN -->
 
 This patches the installed kit (worker / integrator / health skills + adds two new artifacts) to mirror the five production patterns Anthropic uses internally. Apply as edits to the existing skills — do not rewrite them. Everything here keeps the existing hard rules (gate stamp, no push, NEEDS-HUMAN walls) intact.
 

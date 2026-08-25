@@ -1,4 +1,5 @@
 # Pricing Method — 3-Tier Freemium (Free / Pro / Max)
+<!-- doc: PLAN -->
 
 **Captured 2026-06-25. Research-backed. Status: design captured, not built.**
 

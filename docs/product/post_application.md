@@ -1,4 +1,5 @@
 # Post-Application Features — the "after you apply" career co-pilot
+<!-- doc: PLAN -->
 
 > **The idea in one line:** Once a user applies (with their tailored CV + cover letter), Job360 already knows *everything* about them and the job — so it can carry them through the rest of the journey: **interview prep → mock interview → skill-gap → follow-up email → outreach.** Each feature is "one more prompt + one more screen" using data we already store.
 

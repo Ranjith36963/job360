@@ -1,4 +1,5 @@
 # Engine Evals Plan — making search + match + score trustworthy, accurate, reliable, fast
+<!-- doc: LOG -->
 
 > Plan for **how to pick engines** and **how to make the measurement (evals) good enough to trust that choice**, plus the accuracy/reliability/latency work that follows.
 > Context: see `harness/eval/engine_eval_audit_log.md` for the 11 issues found+fixed across 3 audit rounds, and `engine_eval_gold_v2_blind.json` for the current trustworthy harness.

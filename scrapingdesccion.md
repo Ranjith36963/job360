@@ -1,4 +1,5 @@
 # Scraping Decision — LinkedIn / Indeed / Glassdoor
+<!-- doc: PLAN -->
 
 > **Status: DECISION PENDING — measurement required before acting.**
 > Owner: Ranjith. Written 2026-07-17. Everything below is either verified against

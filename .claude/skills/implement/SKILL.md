@@ -1,4 +1,5 @@
 # /implement — Feature Implementation
+<!-- doc: LIVING -->
 
 Triggered by: `/implement <what to add or change>`
 

@@ -1,4 +1,5 @@
 # Job360 — Deploy Runbook (Railway)
+<!-- doc: LIVING -->
 
 ## 🔴 `main` IS PRODUCTION — deploys are AUTOMATIC
 

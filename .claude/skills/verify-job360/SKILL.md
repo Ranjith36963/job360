@@ -10,6 +10,7 @@ description: >-
   queries the Postgres DB for backend, and walks the full register→CV→search→jobs journey
   for end-to-end. If you changed Job360 code and haven't run it, this skill applies.
 ---
+<!-- doc: LIVING -->
 
 # Verify Job360
 

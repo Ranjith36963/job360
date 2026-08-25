@@ -1,4 +1,5 @@
 # Fable Findings — Verified Audit against production `main`
+<!-- doc: LOG -->
 
 **Audited:** 2026-07-17 · **Base:** this worktree == `origin/main` == live Railway code (`bc3904a`).
 **Method:** 11 parallel verifier agents, each opening the REAL current code (not the docs' stale July-10 line numbers) and quoting the actual lines. Every claim below was checked against code, not against the tracker.

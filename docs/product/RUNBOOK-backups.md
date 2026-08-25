@@ -1,4 +1,5 @@
 # RUNBOOK — Database backup & restore
+<!-- doc: LIVING -->
 
 > Referenced by `.github/workflows/db-backup.yml`. This is the human procedure for
 > restoring the encrypted Postgres backups from Cloudflare R2 during an incident.

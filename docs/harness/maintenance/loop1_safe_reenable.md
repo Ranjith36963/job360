@@ -1,4 +1,5 @@
 # Loop 1 (code-repair) — safe re-enable design
+<!-- doc: LOG -->
 
 > **Status: OFF, on purpose.** Loop 1 (the ralph-loop `worker`/`integrator` code-repair agents) is disabled — `deny: Skill(ralph-loop:ralph-loop)` in settings + kill-switch file absent. It stays off until the guardrails below are in place **and** the first runs are watched. This doc is the checklist to bring it back safely, not a green light.
 

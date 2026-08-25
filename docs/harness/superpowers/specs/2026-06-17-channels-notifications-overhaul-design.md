@@ -1,4 +1,5 @@
 # Channels & Notifications Overhaul — Design
+<!-- doc: PLAN -->
 
 **Date:** 2026-06-17
 **Branch:** `worktree-channels-notifications-overhaul`

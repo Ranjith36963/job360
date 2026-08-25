@@ -1,4 +1,5 @@
 # STORY.md — the true story of Job360
+<!-- doc: LIVING -->
 
 `CLAUDE.md` tells an agent **how to work**.
 `STORY.md` tells the owner **what is actually true** — the product, in plain words, and then the

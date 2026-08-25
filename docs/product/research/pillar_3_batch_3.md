@@ -1,4 +1,5 @@
 # Webhooks don't exist for free job data
+<!-- doc: REFERENCE -->
 
 **The brutal truth: of Job360's 47 current sources, exactly zero offer free webhook-based push delivery of new job postings to external consumers.** The only source with true real-time push capability is the Hacker News Firebase API (WebSocket/SSE streaming), which covers a single niche. Every other source — including all 10 ATS platforms, all 7 keyed APIs, and all RSS/XML feeds — requires polling. This is not a gap in Job360's implementation; it reflects the structural economics of the job data ecosystem, where sources have no incentive to push data to downstream aggregators. The realistic path to Job360's freshness SLA is not webhooks but **optimised tiered polling**, which can achieve sub-5-minute latency for the highest-value sources at zero cost.
 

@@ -1,4 +1,5 @@
 # 05 — Compliance & Legal
+<!-- doc: LOG -->
 
 > The compliance sweep hit the session token limit partway; **Fable finished the
 > verification directly** (facts below checked in-code). This is gap analysis against

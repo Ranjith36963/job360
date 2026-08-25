@@ -1,4 +1,5 @@
 # Pillar 3 Implementation Log
+<!-- doc: LOG -->
 
 > **Purpose.** Single rolling record of pillar 3's batch-by-batch implementation. Each batch appends one section below when it merges. Future Claude sessions (and future-Ranjith) read this file *first* before starting any pillar 3 work — it bridges the 1,800 lines of research in `docs/research/` to the actual state of the code.
 >

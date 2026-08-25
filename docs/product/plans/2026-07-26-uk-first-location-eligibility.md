@@ -1,4 +1,5 @@
 # UK-first feed — location eligibility plan (5-lens review, 2026-07-26)
+<!-- doc: FROZEN -->
 
 > ## ⚠️ SUPERSEDED — 2026-08-24. Do NOT build from this document.
 >
