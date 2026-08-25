@@ -11,4 +11,11 @@
 # raise it: delete the restatement or point at the symbol instead.
 #
 # Set 2026-08-25 at the then-current main.
-8331
+#
+# Lowered 2026-08-25 (cycle 16, follow-up): 8331 -> 8311. #427 shrank the
+# surface to 8,317 but left the ceiling at its pre-shrink value, so the
+# ratchet was slack by 20 lines and prose could creep back for free. This
+# run deleted 6 more (the python-jobspy "not in pyproject.toml" claim, which
+# was false in three places). The ceiling now sits ON the measured surface,
+# which is what makes it a ratchet rather than a ceiling.
+8311
