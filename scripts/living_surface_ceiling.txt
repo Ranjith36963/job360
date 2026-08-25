@@ -10,5 +10,7 @@
 # in the commit what was added. A restatement of code is never a reason to
 # raise it: delete the restatement or point at the symbol instead.
 #
-# Set 2026-08-25 at the then-current main.
-8331
+# Set 2026-08-25 at the then-current main: 8331.
+# Lowered 2026-08-25 to 8317 after cycle 16 (#427) deleted 14 lines --
+# a ceiling left above the real number is slack the haystack grows into.
+8317
