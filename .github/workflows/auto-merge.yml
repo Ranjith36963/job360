@@ -173,7 +173,26 @@ jobs:
             [ "$(echo "$meta" | jq -r .headRepositoryOwner.login)" = "${GH_REPO%%/*}" ] || continue
             keep="$keep $pr"
           done
-          json=$(echo $keep | tr ' ' '\n' | grep -E '^[0-9]+$' | jq -R . | jq -sc . || echo '[]')
+          # BUILT WITHOUT A PIPELINE, because the pipeline produced TWO answers.
+          # It was:
+          #     json=$(echo $keep | tr ' ' '\n' | grep -E '^[0-9]+$' \
+          #            | jq -R . | jq -sc . || echo '[]')
+          # With no candidates, `jq -sc` printed `[]` AND grep's exit 1 reached
+          # the `|| echo '[]'` through `pipefail` — so `$json` held two lines,
+          # `[]` and `[]`, and Actions refused the malformed output:
+          #     ##[error]Invalid format '[]'
+          # Measured on run 32876242568 and reproduced locally, where the empty
+          # case yields $'[]\r\n[]' ONLY with `set -o pipefail` on — which is
+          # why it looked correct in a shell and failed in CI.
+          #
+          # It fires on any `check_suite` for a branch with no open PR: a
+          # common, correct, nothing-to-do case. So the lane showed red runs
+          # while behaving perfectly, and a lane with red in it is a lane people
+          # stop reading — which is how a working guard becomes a dead one.
+          json="[]"
+          if [ -n "${keep// /}" ]; then
+            json=$(printf '%s\n' $keep | jq -R . | jq -sc .)
+          fi
           echo "prs=$json" >> "$GITHUB_OUTPUT"
           echo "candidates: ${keep:-none}" >> "$GITHUB_STEP_SUMMARY"
 
