@@ -13,4 +13,5 @@
 # Set 2026-08-25 at the then-current main: 8331.
 # Lowered 2026-08-25 to 8317 after cycle 16 (#427) deleted 14 lines --
 # a ceiling left above the real number is slack the haystack grows into.
-8317
+# Lowered again 2026-08-25 to 8313 after cycle 17 (#431) deleted 4 more.
+8313
