@@ -49,7 +49,8 @@ done
 # sidesteps both.
 echo "run-backend.sh: no Python interpreter found on PATH (tried python, python3)." >&2
 echo "" >&2
-echo "  1. Install Python 3.12 or newer: https://www.python.org/downloads/" >&2
+echo "  1. Install Python 3.9 or newer (backend/pyproject.toml: requires-python >=3.9):" >&2
+echo "     https://www.python.org/downloads/" >&2
 echo "  2. Then create the venv:" >&2
 echo "" >&2
 echo "     cd \"$ROOT\"" >&2
