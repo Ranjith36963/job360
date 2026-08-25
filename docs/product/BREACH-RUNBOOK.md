@@ -32,8 +32,8 @@ Variables → edit → redeploy happens automatically.
    (`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` in GitHub Actions secrets),
    job-source API keys. Each provider's dashboard → revoke old, issue new.
 4. **`CHANNEL_ENCRYPTION_KEY` — read this before rotating.** Rotating it
-   makes every stored notification-channel credential (Slack/Discord/Telegram
-   webhooks and tokens) permanently unreadable — users will have to
+   makes every stored notification-channel credential (email and webhook
+   credentials) permanently unreadable — users will have to
    reconnect their channels. In a real breach that trade is CORRECT: rotate
    it, accept the reconnects. Just don't be surprised.
 5. **If the app itself is compromised** (malicious deploy, defaced page):

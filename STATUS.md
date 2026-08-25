@@ -1,5 +1,5 @@
 # Job360 Project Status
-<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 
 ## Current State: Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
 
@@ -44,13 +44,15 @@
 > in a real browser (Playwright manual-tester pass — every button/feature/state).
 > Backend 1392 passed / 3 skipped; frontend type-check+lint clean, 107 unit tests.
 > Full detail in `docs/harness/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
-> delivery to live Slack/Telegram/Gmail (needs provider credentials).
+> delivery to a live inbox. (Historical note: Slack/Telegram/Discord were deleted outright
+> on 2026-08-24 — never configured in production, zero users ever connected one. See
+> `docs/plans/2026-08-24-email-webhook-only-delivery.md`.)
 
 **Last updated:** 2026-08-24 (doc truth check; the phase narratives below are older — see `docs/harness/IMPLEMENTATION_LOG.md` for the current history)
 **Total tests:** measure it, never quote it — `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1` (2 `live` tests deselected offline; 3 skip on Windows)
 **Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 218 `test_*.py` modules
 **Job sources:** 41 entries in `SOURCE_REGISTRY`; 40 live instances since `indeed` + `glassdoor` share `JobSpySource`; gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 dropped jobtensor, comeet, aijobs_global; the 2026-08-10 rotation dropped 6 more dead upstreams — aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
-**Latest merged head:** `225040e` on `origin/main` — docs audit + cleanup (2026-06-21); all worktree/feature branches merged and deleted.
+**Latest merged head:** measure it, never quote it — `git rev-parse origin/main`. This line has been stale twice (it sat on a June commit for two months). **This branch's own work — the 2026-08-24 email/webhook-only channel deletion described above — is NOT on `main` yet**: `feat/delivery-email-webhook-only` has not merged, so `main` does not reflect the Slack/Discord/Telegram removal.
 **Sentinel:** removed 2026-08-24. `.claude/step-3-verified.txt` does not exist and no code reads it — `docs/harness/step_3_plan.md:120` still describes a halt-on-sentinel flow that has nothing to halt on. A pointer to a file that was never written is worse than no pointer: it reads as proof that a check ran.
 
 ---
@@ -201,7 +203,10 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Pillar 2 multi-dim scoring activates as soon as `JobScorer(..., user_preferences=...)` is wired — `enrichment_lookup` is optional, and without it each dim scores its NEUTRAL half, not zero (8-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
 - Pillar 2 opt-in features behind flags (OFF by default): `ENRICHMENT_ENABLED` (LLM enrichment pipeline), `SEMANTIC_ENABLED` (sentence-transformers + the pgvector store, `job_embeddings.embedding`) — hybrid retrieval also answers to the newer `ENGINE3_ENABLED`, for which `SEMANTIC_ENABLED` is the legacy alias (rule #18); the embedding WRITES read the legacy name alone
 - Postgres database with auto-purge (30 days); shared `jobs` catalog + per-user `user_feed` / `user_actions` / `applications`
-- Email, Slack, Discord, Telegram, webhook — all via the Apprise dispatcher, per-user channels (Batch 2). The old built-in channel classes are REMOVED.
+- Email (the supported product surface) and webhook (an unsupported raw-JSON escape hatch)
+  — both via the Apprise dispatcher, per-user channels (Batch 2). Slack/Discord/Telegram
+  were removed 2026-08-24 (never configured in production, zero users ever connected one).
+  The old built-in channel classes are REMOVED.
 - CLI commands (7, all in `src/cli.py`): run, status, view, api, sources, setup-profile, rescore-backfill
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
 - Tests: 218 `test_*.py` modules; measure the collected count, never quote it (2 `live` deselected offline); 3 skip on Windows (bash-only `setup.sh` / `cron_setup.sh` tests)

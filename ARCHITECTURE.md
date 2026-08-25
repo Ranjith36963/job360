@@ -5,19 +5,19 @@
 
 ## System Overview
 
-Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 16-field structured schema, optionally encodes semantic embeddings into Postgres (pgvector), and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
+Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 16-field structured schema, optionally encodes semantic embeddings into Postgres (pgvector), and delivers results through CLI, email, webhook, CSV, and a Next.js + FastAPI dashboard.
 
 **Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (26) and `VISA_KEYWORDS` (8) remain — both domain-agnostic. The 26 are 24 UK place/country names plus `Remote` and `Hybrid`; `_location_score` skips those two when matching, so only the 24 can score the full 10 (`core/keywords.py:28-55`).
 
 ```
 User Input                    Pipeline (Pillar 2: 6 stages)          Output
 -----------                   -----------------------------          ------
-                          +-> Sources (40) -+                    +-> Email (Apprise per-user)
-CLI / Frontend   --+      |  (async fetch)  |                    +-> Slack / Discord / Telegram
-                   |      v   tiered cadence v                   +-> Webhook
-Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
-  + LinkedIn PDF   |          (3 gates)   (9-dim)  (4 layer)|   +-> Markdown report
-  + GitHub API     |                                        v   +-> Next.js dashboard (per-user)
+                          +-> Sources (40) -+                    +-> Email  (the product)
+CLI / Frontend   --+      |  (async fetch)  |                    +-> Webhook (raw JSON, unsupported)
+                   |      v   tiered cadence v                   +-> CSV
+Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> Markdown report
+  + LinkedIn PDF   |          (3 gates)   (9-dim)  (4 layer)|   +-> Next.js dashboard (per-user)
+  + GitHub API     |                                        v
 .env (API keys) ---+                              Enrich (opt-in, LLM)
                                                   Store -> Postgres catalog (jobs table)
                                                   Embed (opt-in) -> job_embeddings.embedding (pgvector)
@@ -550,6 +550,13 @@ new sources `about_me_llm` (weight 2.0) and `github_llm` (1.5) feed
 > Verified 2026-08-19 — `grep -rn "class NotificationChannel\|def get_all_channels" backend/src/`
 > returns nothing.
 
+> ⚠️ **REMOVED — do not write against it.** The per-user Slack/Discord/Telegram OAuth
+> channels (client ID/secret + bot-token config, connect endpoints, ~450 lines) were
+> removed on 2026-08-24 — never configured in production, zero users. Delivery is now
+> **email** (the supported, designed, measured product surface) and **webhook** (an
+> unsupported raw-JSON escape hatch for technical users) only. See
+> `docs/plans/2026-08-24-email-webhook-only-delivery.md`.
+
 ### The Apprise dispatcher (the real path)
 
 All delivery goes through `src/services/channels/dispatcher.py`. Channels are **per-user rows
@@ -656,8 +663,10 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 |----------|----------|---------|
 | `REED_API_KEY` / `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` / `JSEARCH_API_KEY` / `JOOBLE_API_KEY` / `SERPAPI_KEY` / `CAREERJET_AFFID` / `FINDWORK_API_KEY` / `DFE_APPRENTICESHIPS_API_KEY` | No | Keyed API sources (skip on empty) |
 | `GITHUB_TOKEN` | No | Higher GitHub API rate limit (5000/hr vs 60/hr) |
-| `SMTP_EMAIL` + `SMTP_PASSWORD` (+ `SMTP_HOST` / `SMTP_PORT`) | No | The PLATFORM's SMTP credentials — the `mailtos://` fallback for both system email and the per-user email channel (`services/channels/email_url.py:121-140`). Prefer `RESEND_API_KEY` (row below): Railway blocks SMTP 25/465/587 |
-| ~~`NOTIFY_EMAIL`~~ / ~~`SLACK_WEBHOOK_URL`~~ / ~~`DISCORD_WEBHOOK_URL`~~ | **DEAD** | Declared at `core/settings.py:78,81,82` and imported by nothing in `src/`, `tests/` or `scripts/`. They drove the pre-Batch-2 single-tenant notifier, which was deleted; setting them has no effect. Slack/Discord/Telegram are per-user channels via the Connect flow now |
+| `SMTP_EMAIL` + `SMTP_PASSWORD` (+ `SMTP_HOST` / `SMTP_PORT`) | No | The PLATFORM's SMTP credentials — the `mailtos://` fallback for both system email and the per-user email channel (`services/channels/email_url.py`). Prefer `RESEND_API_KEY`: Railway blocks SMTP 25/465/587 |
+| `SITE_BASE_URL` | No | Origin every job link in a delivered email is built from (default `https://job360.uk`). A staging deploy MUST set it, or its emails link to production |
+| ~~`NOTIFY_EMAIL`~~ | **DEAD** | Declared at `core/settings.py:78` and imported by nothing in `src/`, `tests/` or `scripts/`. It drove the pre-Batch-2 single-tenant notifier, which was deleted; setting it has no effect |
+| ~~`SLACK_WEBHOOK_URL`~~ / ~~`DISCORD_WEBHOOK_URL`~~ / ~~`TELEGRAM_*`~~ | **REMOVED** | Deleted from settings on 2026-08-24 with the chat channels themselves. Delivery is email + webhook only. Do not confuse with the repo-level `SLACK_WEBHOOK_URL` **GitHub secret** that pages the owner on a red build — different system, untouched |
 | `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker (default 40k–120k) |
 | `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py:25). Enforced by `validate_required_env()` |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py:60-71) |
@@ -673,7 +682,6 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:155) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
 | `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:152) |
 | `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py:151) — in practice the REAL selection lever, not the threshold |
-| Slack/Discord/Telegram OAuth (`SLACK_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`, `TELEGRAM_BOT_TOKEN`/`_USERNAME`, `OAUTH_REDIRECT_BASE`) | No | One-click channel connect flows (skip endpoint when blank) |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
 | `ENGINE1_ENABLED` / `ENGINE2_ENABLED` / `ENGINE3_ENABLED` / `ENGINE4_ENABLED` | No (E1 default `true`; E2/E3/E4 default to their legacy flag) | **Independent per-engine switches** — any combo. Effective gate is `ENGINEx_ENABLED OR <legacy flag>` (E2↔`ENRICHMENT_ENABLED`, E3↔`SEMANTIC_ENABLED`, E4↔`MATCHER_ENABLED`). E1 (keyword) had no prior flag. |

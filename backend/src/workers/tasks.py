@@ -21,9 +21,14 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
 if TYPE_CHECKING:
     from src.services.profile.models import UserProfile
 
-from src.core.settings import ENRICHMENT_THRESHOLD
+from src.core.settings import ENRICHMENT_THRESHOLD, SITE_BASE_URL
 from src.models import Job
 from src.repositories import pg
+from src.services.delivery.decision_card import build_decision_card
+from src.services.delivery.email_body import (
+    render_digest_subject,
+    render_digest_text,
+)
 from src.services.feed import FeedService
 from src.services.job_enrichment import ENRICHMENT_ENABLED, _build_enrichment_lookup
 from src.services.job_signals import signal_backed_lookup
@@ -983,6 +988,14 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
       * skipped  → leave the queue rows untouched (rule disabled mid-flight etc.).
     ``last_sent_at`` is stamped only when at least one channel actually sent.
 
+    What the email CONTAINS (rebuilt 2026-08-24): the body is no longer a list
+    of links. Jobs are joined against ``user_feed`` (score + the judge's
+    verdict and reason — all per-user, none of it on the shared catalog) and
+    ``job_enrichment`` (salary, parsed by the SAME function the dashboard uses),
+    turned into ``DecisionCard``s and rendered by ``services/delivery``. The
+    card module is the one definition of what a job says, so the email and the
+    screen cannot drift. See docs/plans/2026-08-24-email-webhook-only-delivery.md.
+
     Returns {'sent': int, 'failed': int, 'jobs_count': int}.
     """
     db: pg.Connection = ctx["db"]
@@ -1009,30 +1022,84 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
     # `WHERE id IN (...)` instead of a per-job_id SELECT in a loop (this cron
     # runs every 5 min forever). Placeholders are generated from the id count
     # only — no user input in the SQL text.
-    job_details: dict[int, dict[str, Any]] = {}
+    #
+    # 2026-08-24 — this used to select four columns from `jobs` alone, which is
+    # why the digest could only ever say "Title @ Company — url". The score, the
+    # judge's verdict and the reason it wrote are PER-USER: they live on
+    # `user_feed`, not on the shared catalog. Without this join the email
+    # structurally cannot say what the dashboard says, no matter how the body is
+    # formatted. The join is INNER on purpose — a queued job with no feed row
+    # for this user is not something we can score or explain, so we do not send
+    # it.
+    rows: list[dict[str, Any]] = []
     _job_ids = {r["job_id"] for r in pending}
     if _job_ids:
         _placeholders = ",".join("?" for _ in _job_ids)
         cur = await db.execute(
-            f"SELECT id, title, company, apply_url FROM jobs WHERE id IN ({_placeholders})",  # noqa: S608 — placeholders only
-            tuple(_job_ids),
+            "SELECT j.id AS job_id, j.title, j.company, j.location, e.salary AS enr_salary, "  # noqa: S608 — placeholders only
+            "       f.score, f.llm_fit_score, f.llm_verdict, f.llm_reason "
+            "FROM jobs j "
+            "JOIN user_feed f ON f.job_id = j.id AND f.user_id = ? "
+            "LEFT JOIN job_enrichment e ON e.job_id = j.id "
+            f"WHERE j.id IN ({_placeholders}) "
+            "ORDER BY COALESCE(f.llm_fit_score, f.score) DESC",
+            (user_id, *tuple(_job_ids)),
         )
-        for row in await cur.fetchall():
-            job_details[row["id"]] = {
-                "title": row["title"],
-                "company": row["company"],
-                "apply_url": row["apply_url"],
-            }
+        rows = [dict(r) for r in await cur.fetchall()]
 
-    jobs_count = len(job_details)
+    jobs_count = len(rows)
     if jobs_count == 0:
         # Jobs were purged — drop the orphaned queue rows so we don't loop forever.
         await _mark_digest_rows_sent(db, user_id)
         return {"sent": 0, "failed": 0, "jobs_count": 0}
 
-    digest_title = f"Job360 Digest — {jobs_count} new match{'es' if jobs_count > 1 else ''}"
-    lines = [f"• {jd['title']} @ {jd['company']} — {jd['apply_url']}" for jd in job_details.values()]
-    digest_body = "\n".join(lines)
+    # ONE definition of what a job says, shared with the dashboard. The email
+    # must not re-derive a score or re-word a reason — see
+    # src/services/delivery/decision_card.py for why that is load-bearing.
+    cards = [build_decision_card(r, site_base_url=SITE_BASE_URL) for r in rows]
+    deliverable_ids = {int(r["job_id"]) for r in rows}
+
+    # Drain queue rows we can never deliver. The join above is INNER, so a
+    # queued job whose user_feed row has since gone (purged, or the user's
+    # verdicts were cleared) produces no card — and without this it would also
+    # never be marked sent, leaving a row at sent=0 that notification_tick
+    # re-enqueues every five minutes forever. Same class of infinite loop the
+    # `jobs_count == 0` branch above already guards; this is the partial case,
+    # which the old catalog-only query could not produce and this one can.
+    _undeliverable = {int(r["job_id"]) for r in pending} - deliverable_ids
+    if _undeliverable:
+        _ph = ",".join("?" for _ in _undeliverable)
+        _now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        await db.execute(
+            "UPDATE user_notification_digests SET sent=1, sent_at=? "  # noqa: S608 — placeholders only
+            f"WHERE user_id=? AND sent=0 AND job_id IN ({_ph})",
+            (_now, user_id, *tuple(_undeliverable)),
+        )
+        await db.commit()
+        _log.info(
+            "send_bundle dropped %d queued job(s) with no user_feed row (user=%s)",
+            len(_undeliverable),
+            user_id,
+        )
+    # `considered` is how many jobs were QUEUED for this user, not how many
+    # survived the join. Passing the survivor count made the arithmetic in
+    # render_digest_text (`dropped = considered - shown`) evaluate to 0 on every
+    # single call, so the "we checked N and dropped M" line could never render —
+    # and the jobs the drain above throws away vanished without a word. That is
+    # exactly the unexplained silence email_body exists to refuse.
+    #
+    # The count still is not the full funnel (jobs filtered out before they were
+    # ever queued are not visible from here); wiring that through is Phase 5.
+    # But queued-minus-shown is a number we can actually source, and it covers
+    # the drop this function itself performs.
+    considered = len(_job_ids)
+    dropped_reasons = (
+        ["no longer in your feed"] if considered > jobs_count else []
+    )
+    digest_title = render_digest_subject(shown=jobs_count, considered=considered)
+    digest_body = render_digest_text(
+        cards, considered=considered, dropped_reasons=dropped_reasons
+    )
 
     dispatcher_fn = ctx.get("dispatcher")
     if dispatcher_fn is None:
@@ -1062,7 +1129,11 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
     sent = failed = 0
     any_sent = False
     for channel, jids in by_channel.items():
-        uniq_jids = [j for j in dict.fromkeys(jids) if j in job_details]
+        # Only mark queue rows for jobs that actually made it into the email.
+        # `deliverable_ids` replaces the old `job_details` dict: a job now has to
+        # survive the user_feed join to be sent, so "was it in the email" and
+        # "does the catalog still have it" are no longer the same question.
+        uniq_jids = [j for j in dict.fromkeys(jids) if j in deliverable_ids]
         if not uniq_jids:
             continue
         st, err = status_by_channel.get(channel, ("failed", "channel not dispatched"))
@@ -1079,11 +1150,19 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
                 await FeedService(db).mark_notified_for_jobs(user_id, uniq_jids)
             except Exception as exc:  # noqa: BLE001 — telemetry never fails a send
                 _log.warning("mark_notified failed user=%s: %s", user_id, exc)
+            # Scoped to the job ids this send actually CARRIED. Without the
+            # job_id filter this marked every unsent row for the channel —
+            # including jobs deliberately excluded from the email (no user_feed
+            # row), which were then recorded as delivered having never been
+            # mentioned to anyone. It also made the orphan-drain block above
+            # untestable: its effect was indistinguishable from this statement's
+            # overreach. (CodeRabbit, PR #381.)
+            _ph_sent = ",".join("?" for _ in uniq_jids)
             await db.execute(
-                "UPDATE user_notification_digests SET sent=1, "
+                "UPDATE user_notification_digests SET sent=1, "  # noqa: S608 — placeholders only
                 "sent_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') "
-                "WHERE user_id=? AND channel=? AND sent=0",
-                (user_id, channel),
+                f"WHERE user_id=? AND channel=? AND sent=0 AND job_id IN ({_ph_sent})",
+                (user_id, channel, *uniq_jids),
             )
             await db.commit()
             sent += 1

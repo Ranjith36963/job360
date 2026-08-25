@@ -9,7 +9,7 @@ A reference for terms used across the three pillar docs. Cross-cutting; not pill
 
 ### Apprise
 
-Open-source library that lets one Python call fan out to ~80 notification services (email, Slack, Discord, Telegram, Pushover, SMS providers, …) by passing a URL like `slack://tok/tok/tok`. Job360 uses it as the per-user channel delivery layer.
+Open-source library that lets one Python call fan out to ~80 notification services by passing a URL like `resend://key:from/to/`. Job360 uses it as the per-user channel delivery layer, but deliberately for **only two** of those ~80: `email` (via `resend://` — Railway blocks outbound SMTP ports) and `webhook` (via `json://`). Slack, Discord and Telegram were removed on 2026-08-24; Apprise supporting a service has never been a reason to ship it. See `docs/plans/2026-08-24-email-webhook-only-delivery.md`.
 **Code:** `backend/src/services/channels/dispatcher.py` (lazy-imported per rule #11) · **Pillar 1**
 
 ### Argon2id
@@ -48,7 +48,7 @@ The `jobs`, `job_enrichment`, and `job_embeddings` tables — *no* `user_id` col
 
 ### Channel
 
-A user's configured notification destination — one row in `user_channels` with a Fernet-encrypted Apprise URL. Five types today: `email`, `slack`, `discord`, `telegram`, `webhook`.
+A user's configured notification destination — one row in `user_channels` with a Fernet-encrypted Apprise URL. Two types today: `email` (the supported product surface) and `webhook` (an unsupported raw-JSON escape hatch for technical users).
 **Code:** `backend/src/services/channels/`, table `user_channels` (migration `0005`) · **Pillar 1**
 
 ### ChromaDB (legacy — superseded)

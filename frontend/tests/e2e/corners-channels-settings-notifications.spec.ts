@@ -22,9 +22,6 @@ test.describe("Channels page", () => {
 
   test("authenticated visit shows the channels heading", async ({ page, context }) => {
     await context.addCookies([COOKIE]);
-    await page.route("**/api/settings/channels/providers**", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ slack: false, discord: false, telegram: false }) })
-    );
     await page.route("**/api/settings/channels**", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: "[]" })
     );

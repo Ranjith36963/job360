@@ -181,7 +181,8 @@ If the user provides `[source]` or `[severity]`, filter the output accordingly.
 > (the old `SlackChannel`/`DiscordChannel`/`EmailChannel` are gone). They are now
 > **per-user**: `src/services/channels/dispatcher.py::dispatch()` reads the user's single
 > `notification_rules` row + their Fernet-encrypted `user_channels` and sends via Apprise.
-> There is no standalone "send to slack" — a test-send needs a user context.
+> There is no standalone "send to slack" — and since 2026-08-24 there is no Slack
+> channel at all. Delivery is email + webhook only; a test-send needs a user context.
 
 Verify the notification path is importable and inspect a user's channel config:
 
