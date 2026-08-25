@@ -8,7 +8,7 @@
 ## What the backup is (so restore makes sense)
 The nightly `db-backup` workflow does, in order:
 1. `pg_dump --no-owner --no-privileges "$DATABASE_URL" > dump.sql` (plain SQL).
-2. **Verifies** it by restoring into a throwaway Postgres and asserting `users`/`jobs`/`_schema_migrations` are non-empty — a dump that restores empty fails the job.
+2. **Verifies** it by restoring into a throwaway Postgres. Only two gates are enforced: `users >= 1` and `count(_schema_migrations) >= 20`. **`jobs` is printed, never asserted** — an empty `jobs` table alone does NOT fail the job, though an otherwise-empty restore still trips the two gates above.
 3. `gzip` → `gpg --symmetric --cipher-algo AES256 --passphrase $BACKUP_PASSPHRASE` → `job360-<TIMESTAMP>.sql.gz.gpg`.
 4. `aws s3 cp` the encrypted file to `s3://$R2_BUCKET/` (Cloudflare R2, S3-compatible), keeping the newest ~30.
 
