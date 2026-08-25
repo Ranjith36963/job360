@@ -22,7 +22,7 @@
 |---|---|---|
 | Product (features) | ~90% | engine + API + UI + auth + profiles + 4 scoring engines + control surface; 1,571 tests green |
 | Launch readiness (ship it live) | ~30% | no CI gate, no Dockerfile/deploy, no prod Redis+ARQ, no SES |
-| **Money layer (charge for it)** | **~5%** | **no Stripe, no billing, no plans, no pricing page, no analytics** |
+| **Money layer (charge for it)** | **~5%** | **no Stripe, no billing, no plans, no pricing page**, ~~no analytics~~ (analytics shipped since — see Tier 3) |
 
 **What already exists (the hard part is done):** the working product (CV → scored jobs → pipeline → notifications), auth/sessions, profiles, `/privacy` + `/terms` pages, GDPR account-delete (password-gated).
 

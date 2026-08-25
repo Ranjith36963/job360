@@ -75,12 +75,14 @@ there is no `LLMProviderError`) — or hangs with no output.
 
 **Cause:** No LLM API key set, or the first provider in the fallback chain is rate-limited.
 
-**Fix:** At least ONE of these must be set in `.env`:
+**Fix:** At least ONE of these four must be set in `.env` — the same four
+`LLM_KEY_VARS` names the key probe reads (`backend/src/services/profile/llm_provider.py:231-236`):
 
 ```
-GEMINI_API_KEY=...
-GROQ_API_KEY=...
-CEREBRAS_API_KEY=...
+OPENAI_API_KEY=...      # PRIMARY — heads the chain; set this one if you have it
+GEMINI_API_KEY=...      # free tier
+GROQ_API_KEY=...        # free tier
+CEREBRAS_API_KEY=...    # free tier
 ```
 
 Fallback chain (`backend/src/services/profile/llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. If every configured provider fails, `llm_extract` raises `LLMRateLimited` (retry later) or `LLMAllProvidersFailed`; with no key at all it raises `LLMKeyMissing`. Callers must NOT persist an empty result on `LLMRateLimited`.
