@@ -72,8 +72,8 @@ pushed `reaped/` tag already existing.
 
 | # | Thing | Predicate | Action |
 |---|---|---|---|
-| B1 | **Plan doc** | `pr:` header **written by CI, never hand-typed** · PR merged · **not reverted** (no `Revert "…"` of its merge SHA on `origin/main`) · its diff touches/mentions the doc | stamp `IMPLEMENTED in PR #N`, `git mv` → `docs/archive/plans/`, fix referrers |
-| B2 | **Superseded snapshot** | a newer doc declares "supersedes \<this\>" | `git mv` → `docs/archive/` |
+| B1 | **Plan doc** | `pr:` header **written by CI, never hand-typed** · PR merged · **not reverted** (no `Revert "…"` of its merge SHA on `origin/main`) · its diff touches/mentions the doc | stamp `IMPLEMENTED in PR #N`, `git mv` → `docs/_archive/plans/`, fix referrers |
+| B2 | **Superseded snapshot** | a newer doc declares "supersedes \<this\>" | `git mv` → `docs/_archive/` |
 | B3 | **Root-level stray** | `.md` at root not on the §5 whitelist | `git mv` into `docs/` |
 | B4 | **Stale-but-unprovable branch** | can't prove merged, can't prove alive | **`git tag park/<branch> && git push origin park/<branch>`**, then drop the local ref only |
 
