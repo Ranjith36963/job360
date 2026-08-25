@@ -412,10 +412,21 @@ export async function me(): Promise<User | null> {
 // on consume). consume returns the signed-in user (and sets the session
 // cookie) on success, or throws on an invalid / expired / used token.
 
-export async function requestMagicLink(email: string): Promise<void> {
+/**
+ * Email a passwordless sign-in link.
+ *
+ * `next` is where the user was heading before we asked them to sign in — it rides
+ * along in the emailed link so the round trip lands them back there instead of on
+ * the dashboard (wiring.md W-01). It is re-validated server-side, so a hostile
+ * value degrades to a plain sign-in link rather than failing the login.
+ */
+export async function requestMagicLink(
+  email: string,
+  next?: string | null
+): Promise<void> {
   await request<void>("/api/auth/magic-link/request", {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify(next ? { email, next } : { email }),
   });
 }
 

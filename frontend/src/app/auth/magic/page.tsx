@@ -19,6 +19,7 @@ import Link from "next/link";
 
 import { consumeMagicLink } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
+import { safeNext } from "@/lib/safe-next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -37,7 +38,11 @@ function MagicBody() {
     setState("submitting");
     try {
       await consumeMagicLink(token);
-      router.replace("/dashboard");
+      // W-01: land him where he was going, not always on /dashboard. `next`
+      // arrives in the emailed link and was already validated server-side before
+      // it was written there; safeNext re-checks it because the URL in the
+      // address bar is user-editable.
+      router.replace(safeNext(searchParams.get("next")));
     } catch (err) {
       setState("error");
       setError(

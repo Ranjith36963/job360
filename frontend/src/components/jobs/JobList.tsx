@@ -1,7 +1,9 @@
 "use client";
 
-import { SearchX } from "lucide-react";
+import Link from "next/link";
+import { FileUp, SearchX } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { JobCard } from "@/components/jobs/JobCard";
 import type { JobResponse } from "@/lib/types";
@@ -46,9 +48,19 @@ interface JobListProps {
   jobs: JobResponse[];
   loading: boolean;
   onAction: (jobId: number, action: string) => void;
+  /**
+   * Does this account have a profile yet? (wiring.md W-03)
+   *
+   * THREE states, deliberately — `undefined` means "we don't know yet". An empty
+   * list has more than one cause, and telling a returning user to upload a CV he
+   * already uploaded is as wrong as telling a new user to adjust filters he never
+   * set. So the onboarding prompt renders ONLY on a definite `false`; while the
+   * profile query is still in flight we keep the neutral message.
+   */
+  hasProfile?: boolean;
 }
 
-export function JobList({ jobs, loading, onAction }: JobListProps) {
+export function JobList({ jobs, loading, onAction, hasProfile }: JobListProps) {
   if (loading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -62,6 +74,22 @@ export function JobList({ jobs, loading, onAction }: JobListProps) {
   }
 
   if (jobs.length === 0) {
+    // W-03: a brand-new account has no filters to adjust and no search to widen —
+    // the list is empty because we don't know anything about them yet. Say that,
+    // and give them the one door that moves them forward.
+    if (hasProfile === false) {
+      return (
+        <EmptyState
+          icon={<FileUp className="h-8 w-8" />}
+          title="Let's find your jobs"
+          description="Upload your CV and we'll start matching UK roles to your actual experience. It takes about a minute."
+          action={
+            <Button render={<Link href="/profile" />}>Upload your CV</Button>
+          }
+        />
+      );
+    }
+
     return (
       <EmptyState
         icon={<SearchX className="h-8 w-8" />}

@@ -648,6 +648,13 @@ async def verify_email_confirm(req: EmailVerificationConfirmRequest) -> Response
 
 class MagicLinkRequest(BaseModel):
     email: EmailStr
+    # Where the user was heading before we asked him to sign in (wiring.md W-01).
+    # Accepted as free text and validated server-side by
+    # ``auth_magic_link.safe_next_path`` — NOT trusted from the browser, because
+    # this value is interpolated into an email we send, so an unchecked one is an
+    # open redirect carrying our own From: address. An unsafe value is dropped and
+    # the link degrades to a plain sign-in rather than failing the login.
+    next: Optional[str] = Field(default=None, max_length=512)
 
 
 class MagicLinkConsumeRequest(BaseModel):
@@ -685,6 +692,7 @@ async def magic_link_request(
         db_path=str(DB_PATH),
         email=str(req.email),
         frontend_origin=_frontend_origin(),
+        next_path=req.next,
     )
     get_audit_logger().info(
         "auth",
