@@ -196,12 +196,28 @@ cd backend && python -m pytest tests\ -v
 
 ```bash
 cd backend
-python -m migrations.runner status        # lists applied + pending
-# `down` reverts ONLY the most recently applied migration — one step, no argument.
-# To get back to 0010 you must step down repeatedly, checking `status` each time.
+python -m migrations.runner status        # lists applied + pending — read this FIRST
+```
+
+`down` pops exactly one migration off the HEAD, so what to do next depends on where
+the stem you want sits:
+
+```bash
+# CASE A — the stem you want re-run IS the head (status lists it last).
+# `down` reverts it, `up` re-applies it. This pair only does what you want here.
 python -m migrations.runner down
 python -m migrations.runner up
+
+# CASE B — the stem is BURIED (e.g. you want 0010 and head is 0030).
+# There is no way to reach it without reverting 0030…0011 first, one `down` at a
+# time, re-reading `status` between each. That is ~20 destructive down-migrations
+# against real data. In dev, rebuilding the database is almost always the right
+# call instead; in prod, do neither without a backup (docs/product/RUNBOOK-backups.md).
 ```
+
+> ⚠️ Running `down` then `up` while the stem you care about is buried undoes and
+> immediately re-applies the HEAD migration and nothing else — it looks like it
+> worked and changes nothing about 0010.
 
 > ⚠️ **`down` takes NO migration stem.** It reverts the *last applied* migration and
 > nothing else — `runner.py:281-297` reads `applied[-1]` and runs that stem's
