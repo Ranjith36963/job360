@@ -164,6 +164,17 @@ CASES: list[tuple[str, str, str, str]] = [
     # claim, which is why thirteen cycles could never reach zero.
     ("STATUS.md",
      r"<!-- doc: (LIVING)", "<!-- doc: BOGUS", "unstamped-doc"),
+    # Ninth batch, 2026-08-25, and the most instructive promotion so far.
+    # `disagree:LOCATIONS` above was GREEN while FIVE living docs said 25 and
+    # the list held 26 -- because it asks "do two docs agree?", and they all
+    # agreed. Consensus is not verification: a doc-vs-doc check can only find
+    # disagreement, never a shared falsehood, and shared falsehoods are what
+    # docs drift toward because docs are copied from each other. The new guard
+    # counts the SOURCE. Both are kept: one is cheap and needs no extractor,
+    # the other is true.
+    ("ARCHITECTURE.md",
+     r"`LOCATIONS` \((\d+)\) \+ `VISA_KEYWORDS`", "`LOCATIONS` (999) + `VISA_KEYWORDS`",
+     "locations"),
 ]
 
 
