@@ -1,4 +1,5 @@
 # Step 3 — New Endpoints + Settings UI — Ralph-Loop-Driven Execution Plan
+<!-- doc: PLAN -->
 
 > **For agentic workers:** REQUIRED SUB-SKILLS: `superpowers:test-driven-development`, `superpowers:verification-before-completion`, `superpowers:dispatching-parallel-agents`, `superpowers:executing-plans`. Steps use checkbox syntax.
 >

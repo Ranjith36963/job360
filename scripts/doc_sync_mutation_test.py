@@ -73,6 +73,25 @@ CASES: list[tuple[str, str, str, str]] = [
     # that. One capital letter, one blind guard.
     ("frontend/src/lib/catalog.ts",
      r"SOURCE_COUNT = (\d+)", "SOURCE_COUNT = 999", "landing-source-count"),
+    # Eighth batch, 2026-08-25. The disagreement guard: does one doc contradict
+    # ANOTHER doc about a named constant? Six of ten findings in the cycle that
+    # prompted it were exactly this, twice within a single file.
+    #
+    # The mutation flips one of the two agreeing ENRICHMENT_MIN_SCORE claims,
+    # which is the only way to make a DISAGREEMENT guard red: with every copy
+    # equal there is nothing to disagree about.
+    # Anchored on UK_LOCATIONS, which README.md and ARCHITECTURE.md both state
+    # as 25. Flipping ONE of an agreeing pair is the only mutation that can
+    # make a DISAGREEMENT guard red: with every copy equal there is nothing to
+    # disagree about.
+    #
+    # The first draft mutated a line reading "the old ENRICHMENT_THRESHOLD=60
+    # gate never fired" -- which this guard deliberately SKIPS, because a doc
+    # explaining a retired value has to name it. The drill reported the guard
+    # blind, correctly: I had pointed it at the one line the guard is designed
+    # not to read.
+    ("ARCHITECTURE.md",
+     r"`LOCATIONS` \((\d+)\) and", "`LOCATIONS` (777) and", "disagree:LOCATIONS"),
     # Fourth batch, 2026-08-24, from the nightly routine.
     #
     # suite-baseline is the odd one out and the point of it: every other guard
@@ -97,12 +116,30 @@ CASES: list[tuple[str, str, str, str]] = [
      r"([\d,]{3,}) collected", "9,999 collected", "suite-baseline"),
     ("backend/CLAUDE.md",
      r"(SQLite|Postgres) via psycopg3", "SQLite table via psycopg3", "stale-phrase"),
+    # Seventh batch, 2026-08-24. Skills are INSTRUCTIONS AGENTS EXECUTE, so a
+    # dead path there is worse than a wrong sentence: the scout skill told an
+    # agent to append its findings to `D:\dev\job360\docs\maintenance\MISSIONS.md`,
+    # a directory gone since the maintenance docs moved under docs/harness/.
+    # Every scout pass following that rule wrote nowhere. Four skills carried
+    # the same stale root, and scout/SKILL.md contradicted itself: line 9 had
+    # the correct path in prose, line 23 -- the operative rule -- had the dead one.
+    (".claude/skills/scout/SKILL.md",
+     r"docs\\(harness)\\maintenance\\MISSIONS\.md",
+     # Replacement goes through re.subn, so each literal backslash must be
+     # doubled here or `\n` / `\m` are read as escapes.
+     "docs\\\\nowhere\\\\maintenance\\\\MISSIONS.md", "skill-dead-path"),
     # Sixth batch, 2026-08-24. The nightly routine found runbook.md still
     # telling operators to run `sqlite3 data/jobs.db` against a Postgres
     # database -- five dead COMMANDS, not stale prose. The four SQLite entries
     # in FORBIDDEN_PHRASES all pin sentences; none matched a shell command.
     ("docs/product/pillars/runbook.md",
-     r"(railway) run -s Postgres psql", "sqlite3 data/jobs.db run -s Postgres psql",
+     # Anchored on `psql ` rather than the longer `railway run -s Postgres psql`
+     # form this drill originally targeted. #396 rewrote the runbook to use bare
+     # SQL blocks with a connect line, so the longer string vanished and the
+     # drill reported "guard watches nothing" -- correctly. Second time a drill
+     # has caught its own target being removed by someone else's fix (the first
+     # was suite-baseline after #393). That is the drill working, not failing.
+     r"(psql) postgresql://", "sqlite3 data/jobs.db postgresql://",
      "stale-phrase"),
     # Fifth batch, 2026-08-24. Two "N-thing schema" style guards promoted by the
     # nightly routine after ARCHITECTURE.md carried "25-migration forward-compat
@@ -114,6 +151,37 @@ CASES: list[tuple[str, str, str, str]] = [
      "999-migration forward-compat schema", "migrations-schema"),
     ("ARCHITECTURE.md",
      r"\bats/\s*\((\d+)\)", "ats/ (999)", "subfolder-ats"),
+    # Sixth batch, 2026-08-25. The route guard: a documented endpoint that no
+    # router declares. Cycle 13 found `POST /api/pipeline/applications` in
+    # THREE places (real route: `POST /api/pipeline/{job_id}`, id in the path,
+    # no body) -- a doc lie that reads like a contract and 404s whoever trusts
+    # it. The mutation renames a REAL route to one that has never existed.
+    ("docs/product/pillars/glossary.md",
+     r"`GET (/api/runs/recent)`", "`GET /api/runs/definitely-not-a-route`",
+     "route-not-found"),
+    # The stamp guard. A KIND outside the five is as unreadable as no stamp at
+    # all -- both leave the routine unable to tell a dated record from a live
+    # claim, which is why thirteen cycles could never reach zero.
+    ("STATUS.md",
+     r"<!-- doc: (LIVING)", "<!-- doc: BOGUS", "unstamped-doc"),
+    # Ninth batch, 2026-08-25, and the most instructive promotion so far.
+    # `disagree:LOCATIONS` above was GREEN while FIVE living docs said 25 and
+    # the list held 26 -- because it asks "do two docs agree?", and they all
+    # agreed. Consensus is not verification: a doc-vs-doc check can only find
+    # disagreement, never a shared falsehood, and shared falsehoods are what
+    # docs drift toward because docs are copied from each other. The new guard
+    # counts the SOURCE. Both are kept: one is cheap and needs no extractor,
+    # the other is true.
+    #
+    # Anchored on the BACKTICKED prose form at ARCHITECTURE.md:10, not the
+    # tree-diagram line at :53. The first draft targeted the tree line, whose
+    # `LOCATIONS (26) + VISA_KEYWORDS (8)` carries no backticks, and the drill
+    # said "guard watches nothing" instead of passing quietly -- the third time
+    # a drill has caught its own target being rewritten by someone else's fix.
+    ("ARCHITECTURE.md",
+     r"Only `LOCATIONS` \((\d+)\) and `VISA_KEYWORDS`",
+     "Only `LOCATIONS` (999) and `VISA_KEYWORDS`",
+     "locations"),
 ]
 
 
@@ -161,6 +229,30 @@ def structural_drills() -> list[str]:
                     failures.append(
                         f"subfolder-{name}: missing folder scored {counts[name]}, expected 0"
                     )
+
+            # 1b. A C0 control byte planted in a guard file must be REPORTED.
+            #     Text mutation cannot express this: the byte is invisible to
+            #     every text instrument. Writing the route guard I produced a
+            #     0x08 BACKSPACE where `\b` was intended, which killed the
+            #     negation branch outright -- and sed, grep and
+            #     inspect.getsource all rendered it as `\b`, agreeing with the
+            #     mistake. Only the bytes disagreed, so the drill checks bytes.
+            gdir = fake / "scripts"
+            gdir.mkdir(parents=True, exist_ok=True)
+            (gdir / "doc_sync_check.py").write_bytes(
+                b"# planted " + bytes([8]) + b" backspace\n")
+            hits = dsc.control_chars_in_guards()
+            if not any(h[2] == "0x08" for h in hits):
+                failures.append(
+                    "control-char: a planted 0x08 went UNREPORTED — a guard whose "
+                    "regex can never match is indistinguishable from one that passes"
+                )
+            (gdir / "doc_sync_check.py").write_bytes(b"# clean\n")
+            if dsc.control_chars_in_guards():
+                failures.append(
+                    "control-char: fired on a clean file — a guard that cries wolf "
+                    "gets ignored, which kills the loop"
+                )
 
             # 2. A gapped migration sequence must RAISE, not count quietly.
             migs = fake / "backend" / "migrations"
@@ -251,7 +343,8 @@ def structural_drills() -> list[str]:
 
     if not failures:
         print("PASS  structural      missing subfolder (count + emitted guard), "
-              "gapped/malformed/duplicate migrations, unwatched pillar doc")
+              "gapped/malformed/duplicate migrations, unwatched pillar doc, "
+              "control byte in a guard")
     return failures
 
 

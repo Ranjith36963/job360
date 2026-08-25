@@ -1,4 +1,5 @@
 # Feedback Loops Map — where the tool can learn from itself
+<!-- doc: REFERENCE -->
 
 > **The idea in one line:** A feedback loop turns a static corner of the tool into a self-improving one. This is the honest, whole-tool map of **where** loops belong — only corners with a **real signal** (something the user already does) and a **gate** (a check that keeps junk out). More *gated* loops = closer to perfect; ungated loops self-poison, so this list is deliberately selective.
 

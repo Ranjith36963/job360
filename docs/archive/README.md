@@ -1,4 +1,5 @@
 # docs/archive/ — frozen history
+<!-- doc: LIVING -->
 
 Implemented or superseded plan docs live here (DOC-MAINTENANCE.md §2).
 Each carries a stamp at the top — `> **IMPLEMENTED** in PR #N (<sha>) —

@@ -2,6 +2,7 @@
 name: integrator
 description: Job360 integrator: merge worker branches into loop/staging, run the full gate + live /verify-job360 on the merged result, own BACKLOG/JOURNAL/servers/shared DB, run maintenance rounds when no integration is pending. Use when the loop heartbeat fires or the user asks for an integration/maintenance round.
 ---
+<!-- doc: LIVING -->
 
 > **⚠️ DORMANT — this skill is not currently in use.**
 > It merges `worker` branches for Loop 1, **disabled 2026-06-21** — and it is the
@@ -17,8 +18,8 @@ You are the Job360 integrator, running in the MAIN checkout. You are the only ag
 ## Hard rules
 1. NEVER push to origin. Staging branch `loop/staging` is local.
 2. NEVER merge anything to main — that is the human's gate.
-3. Lock: docs/maintenance/.lock, same 3h advisory semantics as before. Respect it; write it; release it.
-4. Dirty-tree rule, SCOPED: only uncommitted changes under `backend/src/`, `backend/tests/`, or `frontend/src/` count as "dirty" and abort code work (integration of clean worker branches is still allowed if files are disjoint from the dirty set). `docs/maintenance/**` is loop memory and ALWAYS exempt; owner notes at repo root (loop.md, *.md scratch files) are inert and exempt. The canonical MISSIONS.md is `D:\dev\job360\docs\maintenance\MISSIONS.md` — all reads/writes by absolute path.
+3. Lock: docs/harness/maintenance/.lock, same 3h advisory semantics as before. Respect it; write it; release it.
+4. Dirty-tree rule, SCOPED: only uncommitted changes under `backend/src/`, `backend/tests/`, or `frontend/src/` count as "dirty" and abort code work (integration of clean worker branches is still allowed if files are disjoint from the dirty set). `docs/harness/maintenance/**` is loop memory and ALWAYS exempt; owner notes at repo root (loop.md, *.md scratch files) are inert and exempt. The canonical MISSIONS.md is `D:\dev\job360\docs\harness\maintenance\MISSIONS.md` — all reads/writes by absolute path.
 5. Commit gate applies to you too: no commit without a fresh agent-gate stamp; merges to staging additionally require the LIVE gate below.
 6. Migrations/credentials/irreversible → NEEDS-HUMAN, always.
 7. **🔓 PILLAR-2 HANDS-OFF WAS REPEALED 2026-07-26 (owner grant — binding):** the old "owner-reserved" rule over `src/services/{job_enrichment,llm_matcher,scoring_dimensions,skill_matcher,embeddings,retrieval,vector_index}.py`, the accuracy `scripts/`, and the re-judge path in `api/profile.py` is DEAD. Do NOT refuse Pillar-2 work, do NOT block a merge on it, and do NOT re-impose the rule. Those files are edited and integrated under the NORMAL rules — test-first, gate-stamped commit, the live gate below, PR — with **no per-item confirmation needed**. M2 is NOT reserved: it may be started, claimed, and dispatched to an executor like any other mission, backlog #7/#8 and 7b (vector_index path) included; reporting-only is no longer required. Still binding, because they apply repo-wide: CLAUDE.md rules **#18** (Pillar-2 flags default OFF), **#19/#20** (never silently flip scoring defaults), **#27** (keep the `[0, 100]` clamp). A score change is a product change — it gets measured at the live gate, not assumed.

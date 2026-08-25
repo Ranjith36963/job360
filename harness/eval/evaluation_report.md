@@ -1,12 +1,26 @@
 # Job360 — Production Readiness Evaluation Report
+<!-- doc: LOG -->
 
-> ⚠️ **Stale score (2026-06-21):** the 5.4/10 below predates Step 3, the LLM matcher (engine #4), two-pass profile extraction, and the #10–#15 audit fixes. The 10-gate rubric is still valid; the score needs re-evaluation.
+> ## ⚠️ CLOSED RECORD — 2026-04-26, scored 2026-06-21. NOT a current assessment.
+>
+> **The 5.4/10 is withdrawn, not updated.** It was measured before Step 3, the
+> LLM matcher (engine #4), two-pass extraction, the #10–#15 audit fixes, and
+> before the product went live. Several of its lowest marks are now provably
+> wrong: ops scored 2-3 against a system that has since shipped to Railway with
+> Sentry, nightly DB backups and 30 CI workflows; compliance scored ~1 against
+> a codebase that now has GDPR export and hard-delete (`api/routes/auth.py`),
+> a privacy policy and terms.
+>
+> **The 10-gate rubric in §II is still the right rubric.** Re-run it and write
+> a NEW dated report; do not edit this one. A score labelled "today" stays
+> quotable however many warnings sit above it, which is why the number is gone
+> from the header rather than re-captioned.
 
-> **Living document.** Read end-to-end once; update the score history (§II.A) after every batch merges. Written 2026-04-26 against `main @ 106768f` (post-Step-1.6).
+> **Dated record**, written 2026-04-26 against `main @ 106768f` (post-Step-1.6). It called itself a living document and was never lived up to — the score was updated once in eight months.
 >
 > **Author's stance.** Job360 is a **UK startup** that will accept CVs (PII) from real users and be shared on LinkedIn — not a portfolio piece. Every gate threshold is calibrated to *"can we accept user #1 without legal, security, or reputational damage,"* not *"is the code clean."*
 >
-> **Aggregate score today: 5.4 / 10** — engineering-strong (~7-8), ops-weak (~2-3), compliance-absent (~1). Path to 8/10 = Step 4 (ops hardening) + Step 5 (Batch 4 / launch readiness). Detailed scoring in §II.
+> **Aggregate score as of 2026-06-21: 5.4 / 10** — engineering-strong (~7-8), ops-weak (~2-3), compliance-absent (~1). Recorded for history only; see the banner above for why two of those three marks no longer hold.
 
 ---
 

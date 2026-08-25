@@ -1,4 +1,5 @@
 # 09 — Production Signals (what your REAL prod data shows)
+<!-- doc: LOG -->
 
 > Not code review — this is what your live Sentry + PostHog actually report. Pulled
 > 2026-07-12 from the `job360` Sentry org and PostHog project 213945. This is the

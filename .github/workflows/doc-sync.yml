@@ -185,7 +185,15 @@ jobs:
               the checker and captured its report there. Fix EVERY drift row it
               lists (numbers, stale phrases) in the LIVING docs.
             - Add/update the `<!-- doc: LIVING | last-verified: YYYY-MM-DD by /sync -->`
-              stamp on line 2 of all six LIVING docs (today's date, UTC).
+              stamp (today's date, UTC) on every LIVING doc you actually edited.
+              Do NOT re-stamp a doc you did not change — a fresh date on an
+              unread file is a claim nobody made. ("all six LIVING docs" stood
+              here until 2026-08-25, when the real count was 45.)
+            - SCOPE: only a doc stamped `<!-- doc: LIVING -->` can drift. A
+              PLAN, LOG, REFERENCE or FROZEN doc is a record of a moment, so a
+              stale number in one is CORRECT for its date — leave it alone.
+              Before this rule existed, thirteen nightly cycles re-litigated
+              dated records and the finding count could never reach zero.
             - If a doc claims something the code does not do, add the gap to
               docs/harness/maintenance/PARKED.md — and leave that source doc untouched.
             - Edit ONLY *.md files. Never touch code, configs, or workflows.

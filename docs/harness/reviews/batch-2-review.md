@@ -1,4 +1,5 @@
 # Batch 2 Review — 2026-04-18 — commit d877bd6
+<!-- doc: LOG -->
 
 ## Verdict
 

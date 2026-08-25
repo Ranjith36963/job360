@@ -1,4 +1,5 @@
 # PLAN 3 — Wire database backups + close the remaining prod-safety gaps
+<!-- doc: PLAN -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

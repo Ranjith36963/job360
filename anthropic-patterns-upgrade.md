@@ -1,4 +1,5 @@
 # Anthropic-Patterns Upgrade — apply AFTER Phase 3 is installed and one integrator round has run clean
+<!-- doc: PLAN -->
 
 This patches the installed kit (worker / integrator / health skills + adds two new artifacts) to mirror the five production patterns Anthropic uses internally. Apply as edits to the existing skills — do not rewrite them. Everything here keeps the existing hard rules (gate stamp, no push, NEEDS-HUMAN walls) intact.
 
@@ -10,7 +11,7 @@ This patches the installed kit (worker / integrator / health skills + adds two n
 Replace the single self-audit with a two-wave review:
 
 - **Wave 1 (find problems):** spawn 3 parallel Sonnet subagents against the diff, each with ONE lens:
-  R1 conventions — violations of CLAUDE.md's 28 rules, style, lazy-import rules (#11/#16)
+  R1 conventions — violations of CLAUDE.md's 31 rules, style, lazy-import rules (#11/#16)
   R2 history — read git log/journal for the touched files; does this change re-break something previously fixed or contradict a documented decision?
   R3 bugs — edge cases, error handling, swallowed exceptions, gamed/weakened tests
 - **Wave 2 (kill false positives):** spawn 2 fresh Sonnet subagents whose ONLY job is to attack Wave 1's findings — for each finding, prove it wrong or confirm it with a file:line reference. Only findings that SURVIVE Wave 2 block the commit.

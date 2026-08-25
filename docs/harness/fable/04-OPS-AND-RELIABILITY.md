@@ -1,4 +1,5 @@
 # 04 — Ops & Reliability
+<!-- doc: LOG -->
 
 > Source: ops/infra sweep (Sonnet), the top P0 **independently verified by Fable**.
 > Read-only, evidence as `file:line`. **Headline:** your backup engineering and

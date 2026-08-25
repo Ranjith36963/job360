@@ -1,4 +1,5 @@
 # 00 — Executive Summary
+<!-- doc: LOG -->
 
 > ## 🔎 VERIFIED 2026-07-17 → [`AUDIT-2026-07-17-VERIFIED.md`](AUDIT-2026-07-17-VERIFIED.md)
 > All 101 findings re-verified against live `main` by 11 parallel agents reading the real

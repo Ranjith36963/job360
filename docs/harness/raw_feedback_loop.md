@@ -1,4 +1,5 @@
 # Raw Feedback Loop — turning hardcoded lists into self-growing data
+<!-- doc: PLAN -->
 
 > **The idea in one line:** Stop hand-typing the skill/company/domain/location lists. Instead, let the LLM (which already reads every CV and job) **remember what it learns** and grow those lists automatically — a data flywheel that raises the bar with every use, so we never hit the tech/UK ceiling.
 

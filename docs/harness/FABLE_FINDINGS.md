@@ -1,3 +1,4 @@
+<!-- doc: FROZEN -->
 > **⚠️ CLOSED / SUPERSEDED (2026-07-23).** This is a historical snapshot. The
 > current verified status of every finding lives in **[AUDIT-2026-07-23-FULL-REVERIFY.md](fable/AUDIT-2026-07-23-FULL-REVERIFY.md)** — the fable backlog
 > is closed there (92 of 106 fixed; the rest are owner decisions or scheduled audit

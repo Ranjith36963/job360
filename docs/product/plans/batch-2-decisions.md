@@ -1,4 +1,5 @@
 # Batch 2 — Design Decisions
+<!-- doc: PLAN -->
 
 > Output of the `superpowers:brainstorming` skill. Every architectural choice in Batch 2 that is irreversible or expensive to reverse is recorded here with 2–3 options, pros/cons, and a recommendation + reason. Subsequent plan + implementation cite this doc by section.
 

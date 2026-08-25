@@ -1,4 +1,5 @@
 # 02 — Data & Database
+<!-- doc: LOG -->
 
 > Source: data-layer sweep (Opus). Read-only, evidence as `file:line`.
 > **Headline:** tenancy isolation is clean (rules #10/#17 hold). The real fragility is

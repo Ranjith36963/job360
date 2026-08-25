@@ -29,6 +29,7 @@ import ast
 import datetime as _dt
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -241,6 +242,40 @@ def migration_head() -> int:
     return max(_migration_pairs())
 
 
+def locations_count() -> int:
+    """Entries in LOCATIONS (backend/src/core/keywords.py). AST-strict.
+
+    Added 2026-08-25, and the reason matters more than the number. This repo
+    already had a `disagree:LOCATIONS` guard, and it was GREEN: it asks "do two
+    docs agree?", and five LIVING docs agreed perfectly -- on 25, when the list
+    holds 26. Cycle 14 caught it by counting the source.
+
+    Consensus is not verification. A doc-vs-doc check can only ever find
+    disagreement, never a shared falsehood, and shared falsehoods are exactly
+    what documentation drifts toward, because docs get copied from each other.
+    So this one counts the CODE, and the disagreement guard stays as the
+    cheaper net for facts no extractor owns.
+
+    The 26 includes "Remote" and "Hybrid", which `_location_score` skips when
+    matching (skill_matcher.py:277-278) -- they are workplace modes living in a
+    place list. Counted anyway: this guard reports what the list HOLDS, and a
+    doc wanting to say "24 places" should say so in those words.
+    """
+    tree = ast.parse((ROOT / "backend/src/core/keywords.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        for t in targets:
+            if getattr(t, "id", None) == "LOCATIONS":
+                if not isinstance(node.value, ast.List):
+                    raise RuntimeError("LOCATIONS is not a plain list literal")
+                return len(node.value.elts)
+    raise RuntimeError("LOCATIONS list literal not found in backend/src/core/keywords.py")
+
+
 def rate_limit_count() -> int:
     """Entries in RATE_LIMITS. Same AST-strict style as registry_counts().
 
@@ -446,6 +481,270 @@ def landing_page_source_claims() -> list[tuple[int, int]]:
     return out
 
 
+DOC_KINDS = ("LIVING", "PLAN", "LOG", "REFERENCE", "FROZEN")
+
+
+def unstamped_docs() -> list[str]:
+    """Tracked .md files that never say what they are.
+
+    Added 2026-08-25, and it is the structural reason thirteen nightly cycles
+    never returned zero. Only 20 of 148 docs carried a `<!-- doc: KIND -->`
+    stamp, so the routine could not tell a FROZEN 2026-06 audit from a LIVING
+    spec: both are just prose. A stale number in a dated record is CORRECT for
+    its date, but every pass re-litigated it, and the finding count could never
+    reach zero however many real fixes landed.
+
+    Only LIVING can drift. PLAN/LOG/REFERENCE/FROZEN are records of a moment,
+    and the routine must leave them alone. That makes the checkable surface
+    finite -- which is what makes converging possible at all.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "*.md"], cwd=ROOT,
+            capture_output=True, encoding="utf-8", check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+    stamp = re.compile(r"<!--\s*doc:\s*([A-Z]+)")
+    bad: list[str] = []
+    for rel in out.splitlines():
+        rel = rel.strip()
+        if not rel:
+            continue
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        # 4000, not 400: moving the stamp BELOW YAML front matter (which it
+        # must be, or it breaks the file) pushed it past a 400-char window in
+        # two files with long front matter, and they reported as unstamped.
+        head = path.read_text(encoding="utf-8", errors="replace")[:4000]
+        m = stamp.search(head)
+        if not m:
+            bad.append(rel)
+        elif m.group(1) not in DOC_KINDS:
+            bad.append(f"{rel} (unknown kind {m.group(1)})")
+        else:
+            # A stamp ABOVE YAML front matter breaks the file it labels.
+            # The first stamping pass put one on line 1 of nine SKILL.md and
+            # agent files, so `---` no longer opened the document and the
+            # front matter stopped parsing -- the skills and agents silently
+            # stopped loading. CodeRabbit caught it on the PR. A guard that
+            # labels a file must not break it, so placement is checked too.
+            lines = head.split("\n")
+            if lines and lines[0].startswith("<!-- doc:") and \
+                    len(lines) > 1 and lines[1].strip() == "---":
+                bad.append(f"{rel} (stamp sits ABOVE YAML front matter)")
+    return bad
+
+
+def control_chars_in_guards() -> list[tuple[str, str, str]]:
+    """(file, line, byte) for any C0 control character in this repo's guards.
+
+    Added 2026-08-25 after a real, expensive miss. Writing the route guard I
+    produced `r"\\b(there is no...` where the `\\b` was a single 0x08 BACKSPACE
+    byte, not backslash-plus-b -- a non-raw patch string collapsed it before it
+    ever reached disk. The regex then required a literal backspace in the text,
+    so it never matched and the negation branch was dead code.
+
+    What makes this class worth a permanent guard: `sed`, `grep`, `cat` and
+    even `inspect.getsource` ALL render 0x08 as `\\b`, identical to the word
+    boundary intended. Every instrument I reached for agreed with the mistake.
+    Only `od -c` disagreed. A guard whose regex silently cannot match is
+    indistinguishable from a guard that is passing, which is the exact failure
+    doc-sync exists to prevent -- so the bytes get checked, not the rendering.
+
+    Tabs, newlines and carriage returns are legitimate and skipped.
+    """
+    allowed = {0x09, 0x0A, 0x0D}
+    out: list[tuple[str, str, str]] = []
+    for rel in ("scripts/doc_sync_check.py", "scripts/doc_sync_mutation_test.py",
+                "scripts/encoding_guard.py", "scripts/drill_registry.py"):
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        for i, raw in enumerate(path.read_bytes().split(b"\n"), 1):
+            for b in raw:
+                if b < 0x20 and b not in allowed:
+                    out.append((rel, str(i), f"0x{b:02x}"))
+                    break
+    return out
+
+
+def documented_routes_exist() -> list[tuple[str, str, str]]:
+    """(doc, line, route) for `METHOD /api/...` a doc names that no router declares.
+
+    Added 2026-08-25, closing the class cycle 13 found by reading:
+    01-user-pillar.md documented `POST /api/pipeline/applications {"job_id": 42}`
+    in THREE places. The real route is `POST /api/pipeline/{job_id}` with no
+    body, and no `/applications` collection route has ever existed. Anyone
+    integrating from that doc gets a 404 -- the most expensive kind of doc lie,
+    because it looks like a contract.
+
+    Path PARAMETERS are normalised, so `/pipeline/{job_id}` in the code matches
+    `/pipeline/42` or `/pipeline/{id}` in a doc: the guard is about whether the
+    ENDPOINT exists, not whether the placeholder is spelled the same.
+    """
+    routes_dir = ROOT / "backend/src/api/routes"
+    if not routes_dir.exists():
+        return []
+
+    decl = re.compile(r"@router\.(get|post|put|patch|delete)\(\s*[\"']([^\"']*)")
+    # A FastAPI path is assembled in THREE places: APIRouter(prefix=...), the
+    # decorator, and include_router(prefix="/api"). Reading only the decorator
+    # sees a third of the truth -- the first cut of this guard did exactly that
+    # and reported five REAL routes (/api/auth/me, /api/settings/channels) as
+    # missing. A guard that cries wolf gets ignored, which kills the loop.
+    router_prefix = re.compile(r"APIRouter\(\s*prefix=[\"']([^\"']+)")
+    known: set[tuple[str, str]] = set()
+    for p in routes_dir.glob("*.py"):
+        body = p.read_text(encoding="utf-8", errors="replace")
+        pm = router_prefix.search(body)
+        prefix = pm.group(1).rstrip("/") if pm else ""
+        for m in decl.finditer(body):
+            method, path = m.group(1).upper(), prefix + m.group(2)
+            known.add((method, re.sub(r"\{[^}]+\}", "{}", path.rstrip("/")) or "/"))
+
+    # Docs write the /api prefix that main.py mounts; the routers do not.
+    NEGATED_ROUTE = re.compile(
+        r"\b(there is no|no such|does not exist|never existed|is not a route|"
+        r"was removed|no longer|instead of|not\s+`?[A-Z]{3,6}\s+/api)\b", re.I)
+    cited = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\s+`?(/api/[A-Za-z0-9_{}/\-]+)")
+    out: list[tuple[str, str, str]] = []
+    for rel in LIVING_DOCS:
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in cited.finditer(line):
+                method, doc_path = m.group(1), m.group(2)
+                # A doc that says "There is no bare `GET /api/runs`" is CORRECT
+                # (runbook.md:51 exists precisely to record that absence, and
+                # the guard would have deleted its own evidence). But scanning
+                # the WHOLE line for a negation silenced a REAL finding at
+                # 01-user-pillar.md:505, whose far-right cell holds the UI copy
+                # "Job no longer available". A false negative is worse than a
+                # false alarm, so the negation must sit just BEFORE the route.
+                if NEGATED_ROUTE.search(line[max(0, m.start() - 60):m.start()]):
+                    continue
+                tail = line[m.end():m.end() + 2]
+                if doc_path.endswith("/") or tail.startswith(("*", "<")):
+                    continue  # a wildcard/placeholder family, not one endpoint
+                stripped = doc_path[len("/api"):].rstrip("/") or "/"
+                norm = re.sub(r"\{[^}]+\}", "{}", stripped)
+                # A concrete id in the doc (/pipeline/42) matches a param route.
+                numeric = re.sub(r"/\d+", "/{}", norm)
+                if (method, norm) in known or (method, numeric) in known:
+                    continue
+                out.append((rel, str(i), f"{method} {doc_path}"))
+    return out
+
+
+def constant_disagreements() -> list[tuple[str, str, str, str]]:
+    """(const, doc:line, claimed, disagrees-with) where two docs give one CONSTANT different values.
+
+    Added 2026-08-25. Every other guard here asks "does this doc match the
+    code?". Only suite-baseline asks "do two docs disagree?" -- and in the
+    cycle that prompted this, SIX of ten findings were internal contradictions:
+
+      02-search-and-match-engine.md:297 called ENRICHMENT_THRESHOLD=60 the
+      enrichment gate, while line 165 OF THE SAME FILE already described the
+      real one (MIN_SCORE 10 + MAX_JOBS 20). glossary.md:91 said ESCO
+      normalisation runs; the flags entry six lines below said it never has.
+
+    Those need no code access to catch. A doc that argues with another doc is
+    wrong somewhere by construction, and cheaper to detect than either half is
+    to verify.
+
+    Scope, deliberately narrow so this cannot become a permanent false alarm:
+      * only ALL_CAPS_UNDERSCORE identifiers -- env vars and module constants,
+        never prose;
+      * only a number within ~40 chars after the name, so "X is unrelated to
+        the 5 sources" does not bind;
+      * a name claimed in ONE place is never reported: this guard is about
+        disagreement, not about correctness. The code-vs-doc guards own that.
+    """
+    # A BINDING TOKEN is required between the name and the number: `=`, `|`
+    # (env table), `(`, or the word "default". The first draft allowed any 40
+    # characters, and immediately produced four false alarms -- `LIMIT 50` in
+    # one SQL example against `LIMIT 20` in another (different queries, both
+    # right), and `PILLAR 1/2/3` (three real pillars). A number that merely
+    # FOLLOWS a word is not a claim about that word's value.
+    pat = re.compile(
+        r"\b([A-Z][A-Z0-9_]{4,})`?\s*(?:=|\||\(|:\s|—\s|defaults? (?:to )?)\s*\*{0,2}(\d{1,6})\b"
+    )
+    # SQL/markdown keywords that are never constants whose value can disagree.
+    NOT_CONSTANTS = {"LIMIT", "OFFSET", "PILLAR", "SELECT", "WHERE", "ORDER", "GROUP", "STEP", "PHASE", "BATCH"}
+    # A line explaining a RETIRED value must name it. "the old
+    # ENRICHMENT_THRESHOLD=60 gate never fired" is correct documentation, not a
+    # contradiction -- exactly the tombstone problem that made a dead-name
+    # guard unshippable earlier: a doc recording an absence has to say what is
+    # absent.
+    # NOTE the absence of bare "was" / "were" / "deleted". The first draft had
+    # them and the drill immediately proved the guard blind: ARCHITECTURE.md:10
+    # reads "keywords.py WAS emptied", so a whole line of live claims was being
+    # skipped. Ordinary past tense is not a historical marker -- it appears in
+    # most prose. Only phrases that specifically flag a RETIRED VALUE qualify.
+    HISTORICAL = re.compile(
+        r"\b(the old|no longer|retired|legacy|back-compat|never fired|"
+        r"superseded|deprecated|formerly|previously|used to be)\b",
+        re.IGNORECASE,
+    )
+    # A CONDITIONAL value is not a claim about the default. "or
+    # `ENRICHMENT_MAX_JOBS=0` — a zero budget selects nothing" documents a
+    # failure mode and is correct; flagging it against the real default (20)
+    # would be the fourth false-positive class this guard has had to learn,
+    # after loose binding, bare "was", and bare "legacy". Same shape as the
+    # retired-value tombstone: a doc describing when something breaks has to
+    # name the value that breaks it.
+    CONDITIONAL = re.compile(
+        r"\b(if |when |unless |never runs|selects nothing|set to|setting|"
+        r"would|could|suppose|e\.g\.|example)\b",
+        re.IGNORECASE,
+    )
+    seen: dict[str, list[tuple[str, str]]] = {}
+    for rel in LIVING_DOCS:
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in pat.finditer(line):
+                name, val = m.group(1), m.group(2)
+                if name in NOT_CONSTANTS:
+                    continue
+                # Scope the historical test to the 40 characters BEFORE this
+                # claim, not the whole line. A line-level filter blinded this
+                # guard twice: ARCHITECTURE.md:10 says "keywords.py was
+                # emptied ... the LEGACY module-level score_job() path" AND
+                # states LOCATIONS (25) — one historical aside was suppressing
+                # a live claim beside it. Third time a line-level filter has
+                # done this (write-verbs on skill paths, bare "was", "legacy").
+                # Look BOTH ways. The qualifier can precede the value ("if
+                # X=0 …") or follow it ("`X=0` — a zero budget selects
+                # nothing"). Checking only the left side left that second shape
+                # firing, which is how this guard learned its fourth
+                # false-positive class.
+                before = line[max(0, m.start() - 40):m.start()]
+                after = line[m.end():m.end() + 40]
+                if HISTORICAL.search(before) or HISTORICAL.search(after):
+                    continue
+                if CONDITIONAL.search(before) or CONDITIONAL.search(after):
+                    continue
+                seen.setdefault(name, []).append((f"{rel}:{i}", val))
+
+    out: list[tuple[str, str, str, str]] = []
+    for name, claims in seen.items():
+        values = {v for _, v in claims}
+        if len(values) < 2:
+            continue
+        winner = max(values, key=lambda v: sum(1 for _, x in claims if x == v))
+        for where, val in claims:
+            if val != winner:
+                others = ", ".join(w for w, x in claims if x == winner)
+                out.append((name, where, val, f"{winner} at {others}"))
+    return out
+
+
 def collected_baseline_claims() -> list[tuple[str, str, int]]:
     """(doc, line, collected-count) for every stated test-suite baseline.
 
@@ -478,6 +777,57 @@ def collected_baseline_claims() -> list[tuple[str, str, int]]:
                     out.append((rel, str(i), int(m.group(1).replace(",", ""))))
                 except ValueError:
                     continue
+    return out
+
+
+def skill_dead_paths() -> list[tuple[str, str, str]]:
+    """(skill file, line, dead path) for repo paths .claude/skills/ names that do not exist.
+
+    Added 2026-08-24. These files are INSTRUCTIONS AGENTS EXECUTE, not prose a
+    human reads and mentally corrects, so a wrong path here is worse than a
+    wrong sentence in a doc: the scout skill told an agent to append its
+    findings to `D:\\dev\\job360\\docs\\maintenance\\MISSIONS.md`, a directory that
+    has not existed since the maintenance docs moved under docs/harness/. Every
+    scout pass following that rule wrote nowhere.
+
+    scout/SKILL.md contradicted ITSELF -- line 9 cited the correct path in
+    prose, line 23 (the operative rule) cited the dead one. Four skills carried
+    the same stale root.
+
+    Deliberately narrow: only `docs/...`-shaped paths, in backticks, and the
+    Windows absolute form the skills actually use. Prose and example paths in
+    other shapes never match.
+    """
+    skills = ROOT / ".claude/skills"
+    if not skills.exists():
+        return []
+    pat = re.compile(
+        r"`(?:D:\\dev\\job360\\)?((?:docs)[\\/][A-Za-z0-9_./\\-]+\.md)`"
+    )
+    # THE TEST IS THE PARENT DIRECTORY, not the file.
+    #
+    # A skill's OUTPUT files do not exist until it first runs -- DOC-HEALTH.md
+    # and SCOUT-NOTES.md are created by the very skills that name them, and
+    # flagging those is a permanent false alarm.
+    #
+    # The first attempt excluded any line containing a write verb. That was
+    # worse than useless: scout/SKILL.md line 23 reads "Your only WRITABLE
+    # files ... MISSIONS.md ... and SCOUT-NOTES.md", so the verb filter skipped
+    # the whole line and took the read-target down with the write-target. The
+    # drill caught it -- pointing MISSIONS.md at a dead directory left the
+    # report green.
+    #
+    # A missing file whose FOLDER exists is a pending write. A path whose
+    # folder does not exist is a real bug: the write fails too. That is exactly
+    # the defect this guard was born for -- docs/maintenance/ no longer exists.
+    out: list[tuple[str, str, str]] = []
+    for p in sorted(skills.rglob("*.md")):
+        rel_skill = p.relative_to(ROOT).as_posix()
+        for i, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in pat.finditer(line):
+                claimed = m.group(1).replace("\\", "/")
+                if not (ROOT / claimed).parent.is_dir():
+                    out.append((rel_skill, str(i), claimed))
     return out
 
 
@@ -853,6 +1203,17 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # Second promotion batch, 2026-08-24, all found by the nightly routine
         # in the pillar docs and glossary -- the densest concentration of
         # countable facts in the repo, and until today none of them watched.
+        # Counted from the CODE, deliberately alongside the doc-vs-doc
+        # `disagree:LOCATIONS` net. That net was green while five LIVING docs
+        # agreed on 25 and the list held 26 -- agreement is not truth.
+        # UPPERCASE only, and that is the whole rule. A looser second pattern
+        # allowing the lowercase word fired on "top 8 titles x top 2 locations"
+        # (ARCHITECTURE.md:474, 01-user-pillar.md:286) -- a search-query fan-out
+        # that has nothing to do with the constant. Same lesson as the SOURCE
+        # guard, opposite direction: there, case-insensitivity hid a real lie;
+        # here, it invented two.
+        ("locations", locations_count(), r"`?LOCATIONS`?\s*\((\d+)\)"),
+        ("locations", locations_count(), r"(\d+)\s+entries in `?LOCATIONS`?\b"),
         ("rate-limits", rate_limit_count(), r"`?RATE_LIMITS`?[^.\n]{0,40}?\((\d+) entries"),
         ("rate-limits", rate_limit_count(), r"`?RATE_LIMITS`? dict in `?settings\.py`? \((\d+) entries"),
         ("subclasses", source_subclass_count(), r"checking all (\d+) subclasses"),
@@ -1015,6 +1376,35 @@ def main() -> int:
         elif type_tag.group(1) != "LIVING":
             drift.append((rel, "-", "doc-type", f"tagged {type_tag.group(1)}", "this file is a LIVING doc"))
 
+    # A doc that never says what it is cannot be checked OR left alone.
+    for rel in unstamped_docs():
+        drift.append((
+            rel, "1", "unstamped-doc", "no <!-- doc: KIND -->",
+            "a doc that never declares LIVING/PLAN/LOG/REFERENCE/FROZEN "
+            "gets re-litigated every cycle and never converges",
+        ))
+
+    # A control byte inside a guard's own regex silently disables it.
+    for gfile, line_no, byte in control_chars_in_guards():
+        drift.append((
+            gfile, line_no, "control-char", byte,
+            "a control byte in a guard's regex makes it unable to ever match",
+        ))
+
+    # A documented endpoint that no router declares is a contract that 404s.
+    for doc, line_no, route in documented_routes_exist():
+        drift.append((
+            doc, line_no, "route-not-found", route,
+            "no @router declares this — a documented endpoint that 404s",
+        ))
+
+    # Do the docs agree with EACH OTHER about each named constant? Six of ten
+    # findings in the 2026-08-25 scout pass were docs contradicting other docs
+    # (and twice, themselves) about ENRICHMENT_THRESHOLD and friends.
+    for const, where, claimed, against in constant_disagreements():
+        doc, _, line_no = where.rpartition(":")
+        drift.append((doc, line_no, f"disagree:{const}", claimed, against))
+
     # Do the docs agree with EACH OTHER about the suite baseline? Every other
     # guard compares a doc to the code; none can see six docs saying 3,297 while
     # two say ~1,409, or README.md contradicting itself on one page.
@@ -1037,6 +1427,14 @@ def main() -> int:
                 "frontend (user-facing copy)", str(line_no), "landing-source-count",
                 str(claimed), str(registry),
             ))
+
+    # Skills are executed, not read. A dead path there sends an agent's whole
+    # output into a directory that does not exist.
+    for skill, line_no, claimed in skill_dead_paths():
+        drift.append((
+            skill, line_no, "skill-dead-path", claimed,
+            "path does not exist — skills are instructions agents ACT on",
+        ))
 
     # The authoritative folder must be watched in full, not file by file.
     for rel in pillars_fully_watched():

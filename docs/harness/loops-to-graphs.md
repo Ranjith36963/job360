@@ -1,4 +1,5 @@
 # Loops -> graphs: where our harness sits (research 2026-08-01)
+<!-- doc: REFERENCE -->
 
 > 4 Sonnet web-researchers + Opus synthesis, on the owner's own source list.
 > VERIFIED = primary source. UNVERIFIED = community claim, named and quarantined.

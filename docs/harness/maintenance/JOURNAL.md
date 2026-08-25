@@ -1,4 +1,5 @@
 # Maintenance Journal (append-only)
+<!-- doc: LOG -->
 
 ## 2026-06-10 ~21:50 — bootstrap (manual, by the orchestrator)
 

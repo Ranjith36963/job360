@@ -1,4 +1,5 @@
 # Job360 — Full End-to-End Sweep Checklist (the loop's contract)
+<!-- doc: LIVING -->
 
 **Purpose:** the authoritative list a complete `/verify-job360` run must cover — every
 feature, page, button, and route, from landing on the site to closing it. A "full sweep"

@@ -1,4 +1,5 @@
 # Step 1.5 — Pre-Step-2 Stabilisation (S1.1 + S1.5 + Step-3-MVP) — Ralph-Loop-Driven Plan
+<!-- doc: FROZEN -->
 
 > **Status:** Approved 2026-04-25. Mirror of `.claude/plans/now-i-ve-got-another-crispy-island.md`. Hand this file to the generator worktree to implement, and to the reviewer worktree to audit.
 >
