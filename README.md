@@ -93,8 +93,8 @@ flowchart TD
 - **Apprise dispatcher** — per-user channels stored in the DB; add one as an Apprise URL, not a Python class
 
 ### CLI (Click)
-- `run` — full pipeline with `--source`, `--dry-run`, `--log-level`, `--db-path`, `--no-email` options
-- `view` — Rich terminal table with `--hours`, `--min-score`, `--source`, `--visa-only`, `--db-path` filters
+- `run` — full pipeline with `--source`, `--dry-run`, `--log-level`, `--no-email` options
+- `view` — Rich terminal table with `--hours`, `--min-score`, `--source`, `--visa-only` filters
 - `setup-profile` — interactive profile wizard with `--cv`, `--linkedin`, `--github` options
 - `api` — start the FastAPI backend server (consumed by the Next.js frontend)
 - `status` — show last run stats from database
@@ -211,9 +211,6 @@ python -m src.cli run --no-email
 # Debug logging
 python -m src.cli run --log-level DEBUG
 
-# Custom database path
-python -m src.cli run --db-path /tmp/test.db
-
 # Combine options
 python -m src.cli run --source greenhouse --dry-run --log-level DEBUG
 
@@ -227,7 +224,6 @@ python -m src.cli setup-profile --linkedin linkedin-profile.pdf --github user
 python -m src.cli view
 python -m src.cli view --hours 24 --min-score 50
 python -m src.cli view --source reed --visa-only
-python -m src.cli view --db-path /tmp/test.db
 
 # Start the FastAPI backend (consumed by the Next.js frontend)
 python -m src.cli api
