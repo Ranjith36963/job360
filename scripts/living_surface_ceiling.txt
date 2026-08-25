@@ -26,4 +26,19 @@
 # generated block. Six lines of WHY bought 65 facts that can never drift,
 # and route lies are the most expensive class in this repo: a wrong endpoint
 # reads like a contract and 404s whoever trusts it.
-8359
+# 8738 (2026-08-25): +379 for docs/decisions/ — six ADRs and an index.
+#
+# This is the raise this escape hatch was built for, and the clearest test
+# of whether the rule is understood. An ADR records WHY: what was decided,
+# what problem it solved, what was rejected, what it costs. None of that is
+# derivable from code -- the code shows the choice and never the alternatives
+# -- so no generator can produce it and no truth-checker can verify it.
+#
+# It is therefore the one kind of prose that CANNOT drift into a lie about
+# the code, because it makes no claim about what the code currently does.
+# Deleting it to make a number go down would be the metric eating the thing
+# it exists to protect.
+#
+# The rule stands for everything else: restatement of code is never a reason
+# to raise this ceiling.
+8738
