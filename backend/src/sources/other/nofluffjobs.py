@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from src.utils.dates import normalize_posted_at
 logger = logging.getLogger("job360.sources.nofluffjobs")
 
 _MAX_RESULTS = 200
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 # NoFluffJobs API endpoints to try (the public API is unofficial and may change)
 _API_URLS = [
@@ -41,8 +43,8 @@ _MAX_DETAIL_FETCHES = 40
 
 
 def _plausible_gbp(val: Any) -> bool:
-    """A loose sanity bound for a GBP annual salary figure — used only when
-    `salary.currency` is absent, to decide whether a bare number is safe to
+    """A loose sanity bound for a GBP annual salary figure -- used only when
+    salary.currency is absent, to decide whether a bare number is safe to
     trust as GBP. Same 10k-500k bound as nhs_jobs._parse_salary."""
     try:
         return 10000 <= float(val) <= 500000
@@ -74,9 +76,9 @@ class NoFluffJobsSource(BaseJobSource):
         detail_budget = _MAX_DETAIL_FETCHES
         for item in postings:
             title = item.get("title", "")
-            # NOTE (live probe 2026-08-08): this used to fall back to `name`
+            # NOTE (live probe 2026-08-08): this used to fall back to name
             # with the comment "some responses use name instead of title".
-            # That is WRONG — `name` is the EMPLOYER, not an alias for the
+            # That is WRONG -- name is the EMPLOYER, not an alias for the
             # title (verified across 20,631 live postings: title="Remote Sales
             # Development Representative", name="LevelUp Leads"). The old
             # fallback would have silently titled a job with its company name.
@@ -100,7 +102,7 @@ class NoFluffJobsSource(BaseJobSource):
             if remote:
                 location = f"{location}, Remote".strip(", ") if location else "Remote"
 
-            # Skip bare "Remote" or empty location — NoFluffJobs is Polish-focused
+            # Skip bare "Remote" or empty location -- NoFluffJobs is Polish-focused
             if not location or location.strip().lower() == "remote":
                 continue
 
@@ -118,13 +120,13 @@ class NoFluffJobsSource(BaseJobSource):
             posted_at, confidence = normalize_posted_at(raw_posted)
 
             # Salary. CURRENCY CORRECTNESS RISK (verified live 2026-08-08):
-            # NoFluffJobs is Polish-focused — 19,229 of 20,631 postings are
-            # priced in PLN, and `salary.currency` is 100% filled. Job has no
+            # NoFluffJobs is Polish-focused -- 19,229 of 20,631 postings are
+            # priced in PLN, and salary.currency is 100% filled. Job has no
             # currency field, so a bare PLN number stored into
             # salary_min/salary_max would silently be compared as GBP
             # downstream (a multi-x overstatement). Only trust the value when
-            # it's GBP, or when currency is entirely absent AND the value is
-            # a plausible GBP figure — never convert here (no FX in this
+            # it is GBP, or when currency is entirely absent AND the value is
+            # a plausible GBP figure -- never convert here (no FX in this
             # source). A missing salary is far better than a wrong one.
             salary_obj = item.get("salary", {})
             salary_min = None
@@ -151,28 +153,82 @@ class NoFluffJobsSource(BaseJobSource):
                         except (ValueError, TypeError):
                             salary_max = None
 
-            # seniority[] (100% fill live, e.g. ["Senior"]) — take the first
+            # seniority[] (100% fill live, e.g. ["Senior"]) -- take the first
             # element. Zero extra HTTP cost, this list is already fetched.
-            seniority = item.get("seniority")
-            if isinstance(seniority, list) and seniority:
-                experience_level = str(seniority[0])
+            # Feeds the legacy free-text `experience_level` (unchanged) AND
+            # -- new -- the closed-enum `seniority` shelf: same raw string,
+            # no interpretation. Verified live 2026-08-17 (1,000-posting
+            # sample): Senior/Mid/Junior match SeniorityLevel exactly
+            # (93.1% of the sample); "Expert" does not map to a single tier
+            # and is deliberately left unmatched by the gate rather than
+            # guessed here.
+            seniority_raw = item.get("seniority")
+            if isinstance(seniority_raw, list) and seniority_raw:
+                experience_level = str(seniority_raw[0])
+                seniority_scalar = str(seniority_raw[0])
             else:
                 experience_level = ""
+                seniority_scalar = None
 
-            # Live probe 2026-08-08: the `company` key does NOT exist in the
-            # posting payload (0 of 20,631 items had it) — the employer name is
-            # carried in `name`. Reading `company` meant every NoFluffJobs job
-            # was stored with an empty company. Prefer `name`, keep `company`
-            # as a fallback in case the upstream schema changes back.
+            # `fullyRemote` (100% fill live) is NoFluffJobs' own boolean.
+            # Only the TRUE case is mapped -- False just means "not tagged
+            # fully remote", not "definitely onsite/hybrid" (rule #29).
+            workplace_mode = "Remote" if item.get("fullyRemote") else None
+
+            # `category` (100% fill live, e.g. "sales", "finance", "backend")
+            # is NoFluffJobs' own function/domain tag -- closest thing to the
+            # JobCategory shelf this listing endpoint exposes. Raw value
+            # only; the gate matches the (small) subset that is an exact
+            # synonym ("sales", "finance") and leaves the rest honestly
+            # unmapped rather than guessing "backend" -> software_engineering.
+            category_raw = item.get("category")
+
+            # Live probe 2026-08-08: the company key does NOT exist in the
+            # posting payload (0 of 20,631 items had it) -- the employer name
+            # is carried in name. Reading company meant every NoFluffJobs job
+            # was stored with an empty company. Prefer name, keep company as
+            # a fallback in case the upstream schema changes back.
             company_name = item.get("name") or item.get("company", "")
 
-            # Issue #334 — the only place body text exists (see _DETAIL_URL).
-            # A failed detail fetch degrades to an empty description, never a
-            # dropped job.
+            # tiles.values[] (100% fill, verified live 2026-08-16 across
+            # 21,739 postings) carries category + skill/requirement tags on
+            # every posting, e.g. [{"value": "HubSpot", "type": "requirement"}].
+            # Raw values only, straight onto source_tags -- the job own
+            # vocabulary, no guessing.
+            tiles = item.get("tiles") or {}
+            tile_values = tiles.get("values") if isinstance(tiles, dict) else None
+            source_tags = [
+                str(v.get("value")) for v in (tile_values or [])
+                if isinstance(v, dict) and v.get("value")
+            ]
+
+            # Issue #334 — the list endpoint above has NO description field at
+            # all, so description was never passed to Job() here, which also
+            # silently disabled visa and deadline extraction downstream (both
+            # read job.description). The prose sits on the per-posting detail
+            # endpoint (see _DETAIL_URL -> requirements.description, 100% hit in
+            # a spot-check), budgeted the same way as smartrecruiters/devitjobs
+            # so an uncapped pass cannot blow the fetch ceiling. A failed detail
+            # fetch degrades to an empty description, never a dropped job.
+            #
+            # ONE fetch, three uses: the raw detail dict is fetched once and
+            # then read for description, skills and deadline. `expiresAt` (100%
+            # hit in spot-checks, ISO "2026-08-19T23:59:59") therefore rides the
+            # SAME response at zero extra HTTP cost. It only covers the
+            # detail_budget subset, not every posting; the rest stay honestly
+            # absent rather than spending a second budget on it (rule #29).
             description = ""
+            deadline = None
+            deadline_source = None
             if posting_id and detail_budget > 0:
                 detail_budget -= 1
-                description = await self._fetch_posting_text(str(posting_id))
+                detail = await self._fetch_posting_detail(str(posting_id))
+                description = self._extract_detail_description(detail)
+                raw_expires = detail.get("expiresAt")
+                expires_iso, expires_confidence = normalize_posted_at(raw_expires)
+                if expires_confidence == "high" and expires_iso:
+                    deadline = expires_iso[:10]
+                    deadline_source = "listing"
 
             jobs.append(Job(
                 title=title,
@@ -185,9 +241,15 @@ class NoFluffJobsSource(BaseJobSource):
                 posted_at=posted_at,
                 date_confidence=confidence,
                 date_posted_raw=raw_posted,
+                deadline=deadline,
+                deadline_source=deadline_source,
                 salary_min=salary_min,
                 salary_max=salary_max,
                 experience_level=experience_level,
+                seniority=seniority_scalar,
+                workplace_mode=workplace_mode,
+                category=category_raw,
+                source_tags=source_tags,
             ))
 
             if len(jobs) >= _MAX_RESULTS:
@@ -197,32 +259,38 @@ class NoFluffJobsSource(BaseJobSource):
         logger.info("NoFluffJobs: found %s relevant jobs", len(jobs))
         return jobs
 
-    async def _fetch_posting_text(self, posting_id: str) -> str:
-        """Fetch one posting's body text from the per-posting detail endpoint.
+    async def _fetch_posting_detail(self, posting_id: str) -> dict:
+        """Fetch one posting's RAW detail JSON. Returns ``{}`` on any failure.
 
-        Kept as its own method (rather than inlined) because
-        ``src/services/description_backfill.py`` calls it directly by name to
-        refill a thin stored row — changing this signature/return type would
-        break that caller. Returns ``""`` on any failure; an absent description
-        is a data gap, not an error.
+        Split from ``_fetch_posting_text`` so the caller can read description,
+        skills AND ``expiresAt`` out of a single response instead of paying for
+        the same fetch twice. Callers treat a missing detail as absent data,
+        never an error.
+        """
+        if not posting_id:
+            return {}
+        detail = await self._get_json(_DETAIL_URL.format(posting_id=posting_id))
+        return detail if isinstance(detail, dict) else {}
+
+    @staticmethod
+    def _extract_detail_description(detail: dict) -> str:
+        """Body text from a raw detail response — prose plus the asked-for skills.
+
+        The prose lives at ``requirements.description`` (HTML) — verified live
+        2026-08-16, 15/15 sampled postings hit.
 
         ``requirements.musts`` / ``.nices`` are appended because they are the
         skills the ad actually asks for, and the 40-point skill component is the
         whole reason an empty description matters. They are genuinely fetched ad
         content, not padding — nothing here writes text the posting did not say.
         """
-        if not posting_id:
-            return ""
-        detail = await self._get_json(_DETAIL_URL.format(posting_id=posting_id))
-        if not isinstance(detail, dict):
-            return ""
         block = detail.get("requirements")
         if not isinstance(block, dict):
             return ""
         parts: list[str] = []
         body = block.get("description")
         if body:
-            parts.append(_HTML_TAG_RE.sub(" ", str(body)))
+            parts.append(_HTML_TAG_RE.sub(" ", html.unescape(str(body))))
         for key, label in (("musts", "Must have"), ("nices", "Nice to have")):
             values = [
                 str(entry.get("value"))
@@ -232,3 +300,17 @@ class NoFluffJobsSource(BaseJobSource):
             if values:
                 parts.append(f"{label}: {', '.join(values)}")
         return " ".join(parts)[:5000].strip()
+
+    async def _fetch_posting_text(self, posting_id: str) -> str:
+        """Fetch one posting's body text from the per-posting detail endpoint.
+
+        Kept as its own method with this exact name because
+        ``src/services/description_backfill.py`` calls it directly to refill a
+        thin stored row — changing this signature or return type would break
+        that caller. Now a thin wrapper over ``_fetch_posting_detail`` +
+        ``_extract_detail_description`` so the backfill path and the fetch path
+        can never drift apart in what they consider "the text".
+        """
+        return self._extract_detail_description(
+            await self._fetch_posting_detail(posting_id)
+        )

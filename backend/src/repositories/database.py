@@ -6,7 +6,12 @@ from typing import Any
 from src.repositories import pg
 
 _VALID_COL_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
-_VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC"}
+# BOOLEAN + JSONB added for migration 0031 (Universal Shelf Step 1):
+# salary_is_estimated is a real 3-state nullable bool, and shelf_provenance
+# is the one JSON column stored as a native Postgres JSONB rather than the
+# JSON-in-TEXT convention every other list/dict column in this file uses —
+# see 0032_universal_shelf.up.sql for why.
+_VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC", "BOOLEAN", "JSONB"}
 
 from src.models import Job  # noqa: E402  # after the regex constants to avoid circular import
 from src.utils.logger import get_logger  # noqa: E402
@@ -196,6 +201,24 @@ class JobDatabase:
             # after MAX_BACKFILL_ATTEMPTS without faking coverage.py's
             # skill-text signal (see 0029's up.sql for the full incident).
             ("description_backfill_attempts", "INTEGER DEFAULT 0"),
+            # Migration 0031 — Universal Shelf Step 1 (docs/pillars/
+            # UNIVERSAL_SHELF.md §1/§6). Mirrored here so init_db()-only test
+            # DBs (that never run the external migration runner) still get
+            # the full schema — see that migration's up.sql for the full
+            # rationale on each column and why shelf_provenance is JSONB
+            # while every other new column here is TEXT.
+            ("employment_type", "TEXT"),
+            ("workplace_mode", "TEXT"),
+            ("seniority", "TEXT"),
+            ("category", "TEXT"),
+            ("source_tags", "TEXT DEFAULT '[]'"),
+            ("visa_status", "TEXT"),
+            ("salary_currency", "TEXT"),
+            ("salary_period", "TEXT"),
+            ("salary_is_estimated", "BOOLEAN"),
+            ("salary_min_gbp_annual", "REAL"),
+            ("salary_max_gbp_annual", "REAL"),
+            ("shelf_provenance", "JSONB NOT NULL DEFAULT '{}'"),
         ]
         run_log_migrations = [
             # Step-0 pre-flight — migration 0010 observability columns.
@@ -207,6 +230,11 @@ class JobDatabase:
             ("total_duration", "REAL"),
             ("user_id", "TEXT"),
             ("matcher_stats", "TEXT DEFAULT '{}'"),  # backlog #9 — LLM judge telemetry
+            # Migration 0032 — JOB SOURCE ENRICHMENT spend counter. Same shape
+            # as matcher_stats: a whole-blob JSON payload written by
+            # services/shelf_enrichment.py so "what did last night cost?" has
+            # an answer at all (docs/pillars/UNIVERSAL_SHELF.md §7).
+            ("enrichment_stats", "TEXT DEFAULT '{}'"),
         ]
 
         applications_migrations = [
@@ -392,9 +420,14 @@ class JobDatabase:
              date_posted_raw,
              role, skill, seniority_score, experience, credentials,
              location_score, recency, semantic, penalty,
-             deadline, deadline_source)
+             deadline, deadline_source,
+             employment_type, workplace_mode, seniority, category, source_tags,
+             visa_status, salary_currency, salary_period, salary_is_estimated,
+             salary_min_gbp_annual, salary_max_gbp_annual,
+             shelf_provenance)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.title,
                 job.company,
@@ -427,23 +460,65 @@ class JobDatabase:
                 job.penalty,
                 job.deadline,
                 job.deadline_source,
+                # Universal Shelf (migration 0031). salary_min_gbp_annual /
+                # salary_max_gbp_annual are DERIVED by
+                # services/shelf_gate.py::_fill_salary — annualised and
+                # converted to GBP from the source's own unit sidecars. They
+                # stay NULL when the gate could not honestly convert (no
+                # amount, or a currency core/fx cannot price), which is the
+                # correct rule #29 state for a value nobody could derive.
+                job.employment_type,
+                job.workplace_mode,
+                job.seniority,
+                job.category,
+                json.dumps(job.source_tags or []),
+                job.visa_status,
+                job.salary_currency,
+                job.salary_period,
+                job.salary_is_estimated,
+                job.salary_min_gbp_annual,
+                job.salary_max_gbp_annual,
+                json.dumps(job.shelf_provenance or {}),
             ),
         )
         inserted = cursor.rowcount > 0
-        # Description backfill on re-fetch (2026-08-06, found by the Pillar-2
-        # simulation). INSERT OR IGNORE means a re-fetched job that NOW carries
-        # a description (the four 0%-desc source fixes) silently kept its old
-        # empty one — the fixes only ever benefited brand-new postings, and
-        # existing rows had to age through the 30-day purge to become readable
-        # (measured: catalog text coverage stuck at 35% the morning after the
-        # fixes shipped). Empty -> non-empty is the only allowed transition, so
-        # an upstream description REMOVAL can never wipe stored text.
+        # DESCRIPTION UPGRADE ON RE-FETCH — the ingest half of the text
+        # recovery work (docs/pillars/UNIVERSAL_SHELF.md §2 DESCRIPTION).
+        #
+        # `INSERT OR IGNORE` means a job we already hold is never updated. The
+        # first version of this guard (2026-08-06) only filled a description
+        # that was EMPTY, which fixed the 0%-description sources but left the
+        # much larger problem untouched: a TEASER is not empty. Reed's list
+        # endpoint ships a 453-char teaser and its detail endpoint the full
+        # ~4,700-char ad; himalayas ships a 187-char `excerpt` beside a 7,299-
+        # char `description`. Under empty-only, the recovered full text could
+        # NEVER replace the teaser on the 10,579 jobs already stored — the
+        # recovery would only ever have helped brand-new postings, and every
+        # existing row would have had to age out through the 30-day purge.
+        #
+        # So: a MATERIALLY LONGER description replaces a shorter one. Both
+        # halves of the threshold are load-bearing:
+        #   * `+200 chars` — the same floor `shelf_gate.is_stub_description`
+        #     uses for "too thin to be a real ad". It stops a re-fetch that
+        #     merely gained a cookie banner or a trailing "Apply now" from
+        #     rewriting the row.
+        #   * `>= 1.2x` — a proportional win, so on an ad that is already
+        #     4,000 chars a 200-char footer is not enough; it needs to be a
+        #     real upgrade.
+        # Together they also stop THRASH: once the long version is stored, the
+        # short one can never satisfy either half, so alternating runs (detail
+        # fetch inside its budget vs. spent) settle instead of flip-flopping.
+        # SHRINKING IS STILL IMPOSSIBLE — an upstream that drops its text can
+        # never wipe what we hold.
         if not inserted and job.description:
+            new_len = len(job.description)
             await self._db.execute(
                 """UPDATE jobs SET description = ?
                    WHERE normalized_company = ? AND normalized_title = ?
-                     AND (description IS NULL OR description = '')""",
-                (job.description, company, title),
+                     AND (description IS NULL OR description = ''
+                          OR (? >= LENGTH(description) + 200
+                              AND ? * 5 >= LENGTH(description) * 6))""",
+                (job.description, company, title, new_len, new_len),
             )
         return inserted
 

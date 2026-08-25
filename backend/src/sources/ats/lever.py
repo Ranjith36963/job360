@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -10,6 +11,33 @@ from src.services.profile.models import SearchConfig
 from src.sources.base import BaseJobSource, _is_uk_or_remote
 
 logger = logging.getLogger("job360.sources.lever")
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _build_description(item: dict) -> str:
+    """Concatenate every text block Lever gives us for a posting.
+
+    Verified live 2026-08-16 (spotify board): `descriptionPlain` alone
+    averages ~1,100 chars — the intro paragraph only. `lists[]` (section
+    headings like "What You'll Do" / "Who You Are" / "Where You'll Be")
+    carries the REQUIREMENTS text, ~4,000 extra chars per posting, and it
+    is NOT a duplicate of descriptionPlain (checked substring-by-substring).
+    `additionalPlain` is a further free-text field some postings use for
+    benefits/EEO text. All three are already inside the one JSON response
+    fetch_jobs() already downloaded — this costs zero extra HTTP calls.
+    """
+    parts = [item.get("descriptionPlain", item.get("description", "")) or ""]
+    for lst in item.get("lists") or []:
+        heading = lst.get("text") or ""
+        content = lst.get("content") or ""
+        plain = _HTML_TAG_RE.sub(" ", content).strip()
+        if plain:
+            parts.append(f"{heading}: {plain}" if heading else plain)
+    additional = item.get("additionalPlain") or ""
+    if additional:
+        parts.append(additional)
+    return "\n\n".join(p.strip() for p in parts if p and p.strip())
 
 
 class LeverSource(BaseJobSource):
@@ -31,7 +59,7 @@ class LeverSource(BaseJobSource):
             company_name = COMPANY_NAME_OVERRIDES.get(slug, slug.replace("-", " ").title())
             for item in data:
                 title = item.get("text", "")
-                desc = item.get("descriptionPlain", item.get("description", ""))
+                desc = _build_description(item)
                 categories = item.get("categories", {})
                 location = categories.get("location", "") if isinstance(categories, dict) else ""
                 # Live API also returns a clean ISO-2 `country` code (GB/US/SE/...)
@@ -67,6 +95,14 @@ class LeverSource(BaseJobSource):
                     posted_at=posted_at,
                     date_confidence=confidence,
                     date_posted_raw=str(created_at) if created_at else None,
+                    # Universal Shelf raw values (docs/pillars/UNIVERSAL_SHELF.md
+                    # §5): `categories.commitment` ("Full-time"/"Permanent"/...)
+                    # and `workplaceType` ("remote"/"hybrid"/"onsite") are copied
+                    # verbatim — services/shelf_gate.py owns normalising them
+                    # against the closed enums, this source just passes the raw
+                    # upstream string through.
+                    employment_type=categories.get("commitment") if isinstance(categories, dict) else None,
+                    workplace_mode=item.get("workplaceType"),
                 ))
         logger.info("Lever: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

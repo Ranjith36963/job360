@@ -67,6 +67,17 @@ class TheMuseSource(BaseJobSource):
                     continue
                 seen_keys.add(dedup_key)
 
+                # `categories` (52% fill live, 31/60 sampled) is TheMuse's
+                # own category taxonomy for the posting -- closest thing to a
+                # skills/tag list this API exposes; `tags` itself is almost
+                # always empty (3/60 sampled) but mapped too since it costs
+                # nothing and a future posting may carry it. No employment-
+                # type or workplace-mode field exists in this payload at all
+                # (checked live: `type` is a listing-source marker like
+                # "external", not an employment type) -- nothing to map.
+                cats = item.get("categories") or []
+                cat_names = [c.get("name") for c in cats if isinstance(c, dict) and c.get("name")]
+                tag_names = [str(t) for t in (item.get("tags") or []) if t]
                 jobs.append(Job(
                     title=title,
                     company=company,
@@ -79,6 +90,15 @@ class TheMuseSource(BaseJobSource):
                     date_confidence=confidence,
                     date_posted_raw=raw_pub,
                     experience_level=experience_level,
+                    source_tags=cat_names + tag_names,
+                    # `categories[0].name` (52% fill live, e.g. "Software
+                    # Engineering", "Sales", "Data and Analytics") is
+                    # TheMuse's own professional-domain taxonomy -- the same
+                    # concept as the 16-way JobCategory shelf, not just a
+                    # keyword tag. Raw first value only; the gate matches it
+                    # against the closed set (exact hits confirmed live:
+                    # "Sales", "Software Engineering").
+                    category=cat_names[0] if cat_names else None,
                 ))
 
         logger.info("TheMuse: found %s relevant jobs", len(jobs))
