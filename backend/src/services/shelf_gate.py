@@ -136,9 +136,12 @@ def is_stub_description(description: Optional[str], title: Optional[str]) -> boo
       - byte-identical to the title once both are trimmed (a known live bug:
         successfactors ships description == title for ~1,800 jobs/run)
 
-    This is the function step 3's LLM sweep must call BEFORE enriching a job
-    — see the module docstring's note on `apply_enrichment` not existing yet.
-    Exported so that caller can reuse it without re-deriving the rule.
+    This is the function the LLM sweep calls BEFORE enriching a job, and it is
+    called for real: `apply_enrichment` is defined in this same module and
+    `services/shelf_enrichment.py` uses both. The line that stood here said
+    `apply_enrichment` did not exist yet — true when step 1 was going to ship
+    alone, false now that steps 1-3 land together. Exported so a caller can
+    reuse the rule without re-deriving it. (CodeRabbit, PR #388.)
     """
     text = (description or "").strip()
     if len(text) < _STUB_DESCRIPTION_MIN_CHARS:
@@ -235,6 +238,15 @@ def _with_squashed(aliases: dict[str, str]) -> dict[str, str]:
 _EMPLOYMENT_TYPE_ALIASES: dict[str, str] = _with_squashed({
     # google_jobs schedule_type, confirmed live 2026-08-17.
     "contractor": "contract",
+    # Pinpoint's own "Contract / Temp" (priorygroup board). The other Pinpoint
+    # spellings already resolve here — "Permanent - Full Time" squashes to
+    # `permanentfulltime`, "Fixed Term - Full Time" to `fixedtermfulltime` —
+    # but this one had no entry, so it was the single value that needed the
+    # source to pre-normalise. Added so pinpoint.py can hand over the RAW
+    # string like every other mapper (§5 point 1: "sources become dumb
+    # mappers"). "Temp" alongside "Contract" is a fixed-term engagement, which
+    # is what `contract` means here. (CodeRabbit, PR #388.)
+    "contract_temp": "contract",
     # Pillar 3 ATS batch (greenhouse/lever/workable/ashby/smartrecruiters/
     # pinpoint/recruitee/workday/personio/successfactors worker) — confirmed
     # live 2026-08-17. "Permanent" (Lever `categories.commitment` 91/102 on

@@ -58,21 +58,28 @@ class UniJobsSource(BaseJobSource):
     DOMAINS = {"academia"}
 
     async def fetch_jobs(self) -> list[Job]:
-        jobs = []
-        listing_urls: dict[int, str] = {}
+        # THE PAIR IS CARRIED, NOT REBUILT FROM `id(job)`.
+        # `_parse_feed` already yields `(job, listing_url)`. Splitting them and
+        # re-joining through `id(job)` — CPython object identity — worked only
+        # because `jobs` happened to keep every object alive, so no id was
+        # reused. Anything that copies or replaces a Job between the filter and
+        # the detail pass would break the lookup silently: `.get(id(job))`
+        # returns None, `continue` fires, the detail pass enriches nothing, and
+        # the log still reports a normal-looking count. A pairing that already
+        # exists should not be reconstructed from an address.
+        # (CodeRabbit, PR #388.)
+        pairs: list[tuple[Job, str]] = []
         for feed in UNIVERSITY_FEEDS:
             xml_text = await self._get_text(feed["url"])
             if not xml_text:
                 continue
-            for job, listing_url in self._parse_feed(xml_text, feed["name"]):
-                listing_urls[id(job)] = listing_url
-                jobs.append(job)
+            pairs.extend(self._parse_feed(xml_text, feed["name"]))
 
-        jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
+        pairs = [(j, url) for j, url in pairs if _is_uk_or_remote(j.location)]
+        jobs = [j for j, _ in pairs]
 
         detailed = 0
-        for job in jobs[:_MAX_DETAIL_FETCHES]:
-            listing_url = listing_urls.get(id(job))
+        for job, listing_url in pairs[:_MAX_DETAIL_FETCHES]:
             if not listing_url:
                 continue
             try:
@@ -148,7 +155,10 @@ class UniJobsSource(BaseJobSource):
             return float(nums[0]), None
         return None, None
 
-    def _parse_feed(self, xml_text: str, university: str) -> list:
+    # The REAL shape, not a bare `list`. It was widened rather than corrected
+    # when the return became pairs, which hides the very coupling the caller
+    # above got wrong. (CodeRabbit, PR #388.)
+    def _parse_feed(self, xml_text: str, university: str) -> list[tuple[Job, str]]:
         jobs = []
         try:
             root = _safe_fromstring(_sanitize_xml(xml_text))

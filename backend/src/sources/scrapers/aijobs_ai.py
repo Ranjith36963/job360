@@ -181,8 +181,19 @@ class AIJobsAISource(BaseJobSource):
         # description: bounded by the next top-level JobPosting key this site
         # emits after it — tolerant of the embedded unescaped quotes above,
         # which strict JSON parsing cannot survive.
+        # NON-GREEDY, AND THE COMMA IS OPTIONAL.
+        # `(.*)` ran to the LAST listed key in the blob, so the captured
+        # "description" swallowed every JSON field in between and stored them as
+        # the job's description text — which then goes to the user, the scorer
+        # and the enrichment prompt. `(.*?)` stops at the FIRST following key,
+        # which is the boundary this pattern was describing all along.
+        #
+        # `,` was also mandatory, so an object missing that one comma lost its
+        # description entirely — and this whole branch exists BECAUSE the blob
+        # is malformed enough that strict JSON parsing cannot survive it.
+        # (CodeRabbit, PR #388.)
         desc = re.search(
-            r'"description"\s*:\s*"(.*)",\s*'
+            r'"description"\s*:\s*"(.*?)",?\s*'
             r'"(?:identifier|datePosted|validThrough|jobLocationType|'
             r'employmentType|hiringOrganization|jobLocation|baseSalary)"',
             raw, re.DOTALL,

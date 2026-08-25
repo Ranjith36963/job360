@@ -94,9 +94,12 @@ class Job:
     # normalises them — sources write whatever upstream calls it ('Full
     # time', 'FULLTIME', 'permanent'...); normalisation is the GATE's job,
     # never the source's (§5 point 1: "sources become dumb mappers"). As of
-    # this step no source mapper writes these yet (that is step 2) and
-    # nothing calls fill_shelves() from the pipeline yet (also step 2) — see
-    # services/shelf_gate.py's module docstring.
+    # 2026-08-25: steps 2 and 3 now ship in the SAME PR as step 1, so this no
+    # longer describes the world. Source mappers DO write these (lever.py,
+    # recruitee.py, smartrecruiters.py and others), and the pipeline DOES call
+    # fill_shelves() — see services/shelf_enrichment.py. The step-1 narrative
+    # was written before the steps were combined and would have told the next
+    # reader these columns are dead. (CodeRabbit, PR #388.)
     #
     # `seniority` is deliberately a DIFFERENT field from `experience_level`
     # above: that one is free-text, filled today only by a title regex; this

@@ -89,8 +89,8 @@ migration — `0000_baseline.up.sql` is a documented no-op, and `0011`'s
 | `title` | text | — | NO | source | CATALOG |
 | `company` | text | — | NO | source | CATALOG |
 | `location` | text | `''` | YES | source | CATALOG |
-| `salary_min` | real | — | YES | source (nulled if <10000, `models.py:92-93`) | CATALOG |
-| `salary_max` | real | — | YES | source (nulled if >500000, `models.py:94-95`) | CATALOG |
+| `salary_min` | real | — | YES | `shelf_gate._fill_salary` (annualised, then clamped) | CATALOG |
+| `salary_max` | real | — | YES | `shelf_gate._fill_salary` (annualised, then clamped) | CATALOG |
 | `description` | text | `''` | YES | source; backfill-UPDATE on re-fetch | CATALOG |
 | `apply_url` | text | — | NO | source | CATALOG |
 | `source` | text | — | NO | source name | CATALOG |
@@ -109,7 +109,7 @@ migration — `0000_baseline.up.sql` is a documented no-op, and `0011`'s
 | `date_posted_raw` | text | — | YES | source (audit-only raw value) | CATALOG |
 | `consecutive_misses` | integer | 0 | YES | ghost detector | CATALOG |
 | `staleness_state` | text | `'active'` | YES | ghost detector | CATALOG |
-| `deadline` | text | — | YES | `extract_deadline`, `main.py:710-716` | CATALOG |
+| `deadline` | text | — | YES | `shelf_gate._fill_deadline` | CATALOG |
 | `deadline_source` | text | — | YES | `'listing'` or `'description'` | CATALOG |
 | `description_backfill_attempts` | integer | 0 | YES | `workers/tasks.py` backfill sweep | CATALOG |
 | `role` | integer | 0 | YES | `ScoreBreakdown.title_score` | **SEARCH** |
@@ -763,3 +763,10 @@ not leave the old number sitting there looking fresh.
 `docs/pillars/02-search-and-match-engine.md` (the SEARCH side, deliberately excluded here),
 `ARCHITECTURE.md` (system overview + env-var table),
 `docs/product_design_rules.md` (owner rules #29 / #30 / #31).*
+
+> **A note on references in this file (2026-08-25).** The salary and deadline
+> rows above used to point at `models.py:92-95` and `main.py:710-716`. Both
+> moved into `services/shelf_gate.py` when the Universal Shelf landed, and the
+> line numbers had already drifted before that. They name SYMBOLS now: a line
+> number that silently goes stale is worse than no reference, because it sends
+> the next reader somewhere specific and wrong. (CodeRabbit, PR #388.)

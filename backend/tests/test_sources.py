@@ -2166,8 +2166,24 @@ def test_pinpoint_maps_workplace_mode_and_translates_compound_employment_type():
                 source = PinpointSource(session, companies=["test"])
                 jobs = await source.fetch_jobs()
                 assert len(jobs) == 1
-                assert jobs[0].employment_type == "full_time"
+                # THE SOURCE HANDS OVER RAW, THE GATE NORMALISES.
+                # This asserted `employment_type == "full_time"` — i.e. that the
+                # SOURCE had already translated — while the line below it
+                # asserted the raw `"Onsite"` for workplace_mode. Two layers,
+                # one test, opposite expectations. The source now passes both
+                # through untouched (§5 point 1) and the gate resolves them, so
+                # the assertion moves to where the behaviour lives.
+                # (CodeRabbit, PR #388.)
+                assert jobs[0].employment_type == "Permanent - Full Time"
                 assert jobs[0].workplace_mode == "Onsite"
+
+                # ...and the compound value really does survive the gate. This
+                # is the half that matters: without it, "the source stopped
+                # translating" would look identical to "the value is now lost".
+                from src.services.shelf_gate import fill_shelves
+
+                gated = fill_shelves(jobs[0])
+                assert gated.employment_type == "full_time"
         finally:
             await session.close()
     _run(_test())

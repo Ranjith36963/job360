@@ -136,7 +136,7 @@ All field names below are from the live harvest of 2026-08-16 unless cited other
 | Source — extra request (budget-cap pattern already exists in smartrecruiters/workday) | reed detail `jobDescription` (453-char teaser → ~4,700 full) · workable detail GET `.../jobs/{shortcode}` (description 2,237 + requirements 2,134 + benefits 1,884 — list endpoint genuinely has none) · nofluffjobs detail `requirements.description` · successfactors job-page JSON-LD `description` (8,876 chars; today description=title for all ~1,800 jobs/run) · nhs detail page (list gives a ~180-char excerpt) · climatebase detail page (list has no description field) |
 | Free derivation | the existing sweep: `workers/tasks.py::_backfill_thin_descriptions`, `DESCRIPTION_BACKFILL_PER_TICK=50` per 30-min cron tick (`settings.py:229-240`) |
 | JOB SOURCE ENRICHMENT | never |
-| ABSENT | `stub` (description==title or <200 chars — blocks the LLM pass for this job, §6) or `source_lacks_field` (hn_jobs, devitjobs structurally have none) |
+| ABSENT | `stub` (description==title or <600 chars — blocks the LLM pass for this job, §6) or `source_lacks_field` (hn_jobs, devitjobs structurally have none) |
 
 ### Remaining shelves, compact
 
@@ -196,7 +196,7 @@ Rule #29 for the catalog side: an empty shelf must never become a guess, a zero,
 |---|---|---|
 | `not_mapped` | Nobody looked — the source handed nothing and no derivation ran (the gate's default stamp for a fresh gap) | free recovery work, next gate pass |
 | `source_lacks_field` | We looked — this source's schema structurally has no such field (e.g. findwork salary, arbeitnow deadline: confirmed absent in full key dumps 2026-08-16) | only a richer fetch (detail call) or the LLM reading the ad |
-| `text_too_thin` | LLM pass was BLOCKED: description is a stub/<200 chars — answering would be fabrication | description recovery, then re-queue |
+| `stub` | LLM pass was BLOCKED: description is a stub/<600 chars — answering would be fabrication | description recovery, then re-queue |
 | `not_stated` | A real description was read (by detector or LLM) and the ad genuinely does not say | nothing — this is a final fact about the job |
 | `implausible` | A value ARRIVED and the gate refused it — today only salary, when the annualised GBP band falls outside £10k–£500k. The original figures are kept in `raw`, so the refusal is auditable | a better unit/currency mapping upstream, or a change to the plausibility band |
 
@@ -208,7 +208,7 @@ Rule #29 for the catalog side: an empty shelf must never become a guess, a zero,
 | Prefilters | Pass the job through. A filter "salary ≥ £50k" excludes NULL-salary jobs ONLY if the user explicitly ticks "only show jobs that state pay" — default keeps them, ranked by everything else |
 | Visa consumers | `unknown` = visible, unbadged, unpenalised (rule #31 — refusal is tested before offer) |
 | Deadline consumers | NULL ≠ expired. Never sort NULL to "closing soon" or "expired"; UI shows the existing fallback |
-| JOB SOURCE ENRICHMENT | Never asked to fill a shelf from a `text_too_thin` job; prompt already mandates explicit `unknown` over invention (`job_enrichment.py:42-46`) |
+| JOB SOURCE ENRICHMENT | Never asked to fill a shelf from a `stub` job; prompt already mandates explicit `unknown` over invention (`job_enrichment.py:42-46`) |
 | Frontend | Show "—" / omit the chip. Never render 0, never a red state |
 | Telemetry | Per-shelf, per-source fill-rate split BY `why` — the empty-shelf-three-causes rule: broken extractor vs merge-dropped vs no front door look identical in a bare NULL; `why` separates them |
 
@@ -223,7 +223,7 @@ Today ~42 hand-written `Job(...)` constructions each fill whatever they happen t
 `src/services/shelf_gate.py` — `fill_shelves(job: Job) -> Job` (sync, no I/O, no await):
 
 1. **Sources become dumb mappers.** A source's only duty is copying upstream keys onto `Job` fields (including the new ones: `employment_type`, `salary_currency`, …). No policy, no normalisation, no defaults in source files.
-2. **The gate owns all policy:** enum-normalise employment/workplace/seniority strings ('Full time', 'FULLTIME', 'permanent' → `full_time` — a CLOSED set, so enumeration is legal under rule #30's bounded-set law, raw value preserved in provenance); annualise+currency-tag salary via `normalize_salary`/`fx` then clamp (moving the unit-blind clamp out of `models.py:91-95`); run `detect_visa_status`; run `extract_deadline` (absorbing the existing pass at `main.py:708-716`); detect stub descriptions (`description == title` or <200 chars → `absent:stub`).
+2. **The gate owns all policy:** enum-normalise employment/workplace/seniority strings ('Full time', 'FULLTIME', 'permanent' → `full_time` — a CLOSED set, so enumeration is legal under rule #30's bounded-set law, raw value preserved in provenance); annualise+currency-tag salary via `normalize_salary`/`fx` then clamp (moving the unit-blind clamp out of `models.py:91-95`); run `detect_visa_status`; run `extract_deadline` (absorbing the existing pass at `main.py:708-716`); detect stub descriptions (`description == title` or <600 chars → `absent:stub`).
 3. **Stamp provenance for EVERY shelf, always** — filled or absent. The invariant is not "every shelf filled" (impossible); it is "every shelf ACCOUNTED FOR."
 4. Two entry points, same core: `fill_shelves(job)` at ingest; `apply_enrichment(job_row, enrichment)` in the sweep write-back — so `how:"llm"` rows get identical normalisation and never overwrite `source`/`derived` fills.
 
@@ -261,7 +261,7 @@ The owner wants shelves and catalog built in parallel. Most of it can be; two ed
 | 1 | **The frame**: migration 0031 + `UNIVERSAL_SHELF` tuple + `shelf_gate.py` + provenance + tests | nothing | FIRST, alone. Small (days). Building recoveries before the frame just re-creates 42 scattered conventions with more fields. |
 | 2a | **Free source-field recoveries** (Appendix A) — per-source mapper edits riding through the gate | 1 | yes — parallelisable per source batch |
 | 2b | **Text recovery** — stub/teaser/empty descriptions: same-response fields + detail-call budget pattern + the existing `_backfill_thin_descriptions` sweep | 1 | yes — parallel with 2a |
-| 3 | **JOB SOURCE ENRICHMENT at scale** (LLM pass) — **BUILT 2026-08-17**, `src/services/shelf_enrichment.py` | 1 + per-job 2b | LAST per job. Global work can overlap: a job whose text is already real can be enriched while another still awaits recovery. The ordering is per-job, enforced by the gate's `text_too_thin` block — not a calendar phase. |
+| 3 | **JOB SOURCE ENRICHMENT at scale** (LLM pass) — **BUILT 2026-08-17**, `src/services/shelf_enrichment.py` | 1 + per-job 2b | LAST per job. Global work can overlap: a job whose text is already real can be enriched while another still awaits recovery. The ordering is per-job, enforced by the gate's `stub` block — not a calendar phase. |
 
 **Step 3 as shipped — the two-pass sweep** (`services/shelf_enrichment.py`, wired into `workers/tasks.refresh_catalog` after the nightly fetch, behind `ENGINE2_ENABLED OR ENRICHMENT_ENABLED`):
 

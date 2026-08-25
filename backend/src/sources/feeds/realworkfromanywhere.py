@@ -68,14 +68,36 @@ class RealWorkFromAnywhereSource(BaseJobSource):
         page = await self._get_text(job.apply_url)
         if not page:
             return False
-        m = _LDJSON_RE.search(page)
-        if not m:
-            return False
-        try:
-            data = json.loads(m.group(1))
-        except (ValueError, TypeError):
-            return False
-        if not isinstance(data, dict) or data.get("@type") != "JobPosting":
+        # EVERY BLOCK, AND THE THREE SHAPES SCHEMA.ORG REALLY EMITS.
+        # `search()` looked at the FIRST `ld+json` block only, and pages
+        # routinely put Organization / WebSite / BreadcrumbList before the
+        # JobPosting. A reorder upstream would return False for every job, and
+        # the only symptom is `detailed=0` in the log — identical to the site
+        # dropping JSON-LD altogether, so nobody could tell the two apart.
+        #
+        # A top-level ARRAY and a `{"@graph": [...]}` wrapper are both standard
+        # output and were both discarded by the bare-dict check.
+        # (CodeRabbit, PR #388.)
+        data = None
+        for block in _LDJSON_RE.findall(page):
+            try:
+                parsed = json.loads(block)
+            except (ValueError, TypeError):
+                continue
+            candidates = (
+                parsed if isinstance(parsed, list)
+                else parsed.get("@graph", [parsed]) if isinstance(parsed, dict)
+                else []
+            )
+            if not isinstance(candidates, list):
+                candidates = [candidates]
+            for candidate in candidates:
+                if isinstance(candidate, dict) and candidate.get("@type") == "JobPosting":
+                    data = candidate
+                    break
+            if data is not None:
+                break
+        if data is None:
             return False
 
         found_any = False
@@ -100,7 +122,14 @@ class RealWorkFromAnywhereSource(BaseJobSource):
                 unit_text = value.get("unitText")
                 if isinstance(unit_text, str) and unit_text:
                     job.salary_period = unit_text
+            # schema.org allows the currency on the MonetaryAmount OR on the
+            # nested QuantitativeValue. Reading only the outer one left
+            # `salary_currency` None for the nested form, and `_annualise_one`
+            # then defaults to GBP — so a USD figure was stored as sterling.
+            # (CodeRabbit, PR #388.)
             currency = base_salary.get("currency")
+            if not (isinstance(currency, str) and currency) and isinstance(value, dict):
+                currency = value.get("currency")
             if isinstance(currency, str) and currency:
                 job.salary_currency = currency
 

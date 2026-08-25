@@ -289,16 +289,20 @@ SHELF_ENRICHMENT_MAX_SPEND_USD = float(os.getenv("SHELF_ENRICHMENT_MAX_SPEND_USD
 # are.
 #
 # Sized from measurement, not taste: `refresh_catalog` runs under ARQ's
-# job_timeout=600s (workers/settings.py:175) and the source fan-out alone took
+# job_timeout=600s (`job_timeout` in workers/settings.py) and the source fan-out alone took
 # ~430s on a real 40-source run (2026-08-17). That leaves ~170s, so 150 is the
 # honest budget with a little headroom for pass 1 and the final ledger write.
 #
 # Why a TIME cap when max_jobs already exists: a healthy LLM call measured 2-4s,
 # but with a dead provider key the retry cascade took ~120s PER JOB — so 500
 # jobs is anywhere from 25 minutes to 16 hours. A job count cannot bound that;
-# a clock can. And overrunning is not a soft failure here: ARQ has retry_jobs
-# on with max_tries=5, so being killed re-runs the WHOLE task — re-fetching
-# every source and re-spending — up to five times.
+# a clock can. And overrunning is not a soft failure here: ARQ retries on
+# `max_tries = 5` (workers/settings.py), so being killed re-runs the WHOLE task
+# — re-fetching every source and re-spending — up to five times. Named by
+# SYMBOL, not by line: the `:175`/`:196` that stood here pointed at neither
+# setting, and there is no explicit `retry_jobs` in that file at all — a
+# reference that has gone stale sends the reader somewhere with confidence.
+# (CodeRabbit, PR #388.)
 SHELF_ENRICHMENT_MAX_SECONDS = float(os.getenv("SHELF_ENRICHMENT_MAX_SECONDS", "150"))
 
 # PASS 1 is FREE (no LLM): it re-runs the gate's own detectors over rows

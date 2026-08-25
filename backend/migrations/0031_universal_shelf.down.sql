@@ -1,10 +1,17 @@
--- Reverse of 0031 — drops all twelve Universal Shelf Step-1 columns. No real
--- data loss beyond the columns themselves: nothing in this step wrote to
--- them (no source mapper, no wired gate — see 0031's up.sql), so on the day
--- this rolls back in prod there is no live data behind these columns to lose.
--- If a later step's data DOES exist when this runs, that data is gone —
--- rolling back step 1 after step 2/3 have shipped needs a fresh plan, not
--- this file.
+-- Reverse of 0031 — drops all twelve Universal Shelf columns.
+--
+-- READ THIS BEFORE RUNNING IT: THIS DESTROYS REAL DATA.
+--
+-- The original text here said nothing wrote to these columns, because step 1
+-- was written before steps 2 and 3 existed. They now ship together: source
+-- mappers populate them (lever.py, recruitee.py, smartrecruiters.py and
+-- others) and services/shelf_enrichment.py calls fill_shelves(), including
+-- LLM-derived values that cost money to produce. Every one of those is gone
+-- the moment this runs, and re-deriving the enriched ones means paying again.
+--
+-- Kept as a real reverse migration because a forward migration without one is
+-- a door that only opens one way — but this is a deliberate act now, not the
+-- free undo the old comment promised. (CodeRabbit, PR #388.)
 ALTER TABLE jobs DROP COLUMN IF EXISTS employment_type;
 ALTER TABLE jobs DROP COLUMN IF EXISTS workplace_mode;
 ALTER TABLE jobs DROP COLUMN IF EXISTS seniority;

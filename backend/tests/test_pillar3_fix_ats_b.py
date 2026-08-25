@@ -74,6 +74,20 @@ def test_workable_uses_published_on_field_for_posted_at():
                           "city": "London", "country": "UK",
                           "published_on": "2026-07-01T09:00:00.000Z",
                       }]})
+                # THE DETAIL CALL IS PART OF THE FLOW, SO IT IS MOCKED.
+                # Both fixtures are in London, so `fetch_jobs` reaches
+                # `_fetch_posting_detail` -> GET /api/v2/accounts/{slug}/jobs/
+                # {shortcode}. With only the widget request registered, that
+                # call failed and the adapter silently fell back to the list
+                # description — so these tests passed over a broken half of the
+                # path they were written to exercise, and would keep passing if
+                # the detail fetch stopped working entirely.
+                # (CodeRabbit, PR #388.)
+                m.get(
+                    re.compile(r"https://apply\.workable\.com/api/v2/accounts/.*"),
+                    payload={"description": "<p>Full posting text from the detail endpoint.</p>"},
+                    repeat=True,
+                )
                 source = WorkableSource(session, companies=["testco"])
                 jobs = await source.fetch_jobs()
                 assert len(jobs) == 1
@@ -99,6 +113,14 @@ def test_workable_never_emits_fabricated_confidence():
                           "shortcode": "NODATE1", "title": "Backend Engineer",
                           "city": "London", "country": "UK",
                       }]})
+                # See the note in the test above: London means the detail call
+                # really happens, so it is registered rather than left to fail
+                # silently into the list-description fallback.
+                m.get(
+                    re.compile(r"https://apply\.workable\.com/api/v2/accounts/.*"),
+                    payload={"description": "<p>Full posting text from the detail endpoint.</p>"},
+                    repeat=True,
+                )
                 source = WorkableSource(session, companies=["testco"])
                 jobs = await source.fetch_jobs()
                 assert len(jobs) == 1

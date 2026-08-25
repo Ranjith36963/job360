@@ -221,11 +221,30 @@ async def enrich_batch(
                 # failures" when the true answer is "0 calls, 3 skipped". The
                 # counter is the thing we bill and alert on, so it has to count
                 # requests, not attempts.
-                result = await enrich_job(
-                    job,
-                    llm_extract_validated_fn=llm_extract_validated_fn,
-                )
-                tel.llm_calls += 1
+                # COUNTED IN `finally`, NOT AFTER A SUCCESSFUL RETURN.
+                # Counting here-on-success missed the other half: a request that
+                # REACHED the provider and then failed — a timeout, a 500, a
+                # response that would not validate — was billed and not counted.
+                # The stub case cannot reach the counter because `enrich_job`
+                # raises `StubDescriptionError` BEFORE the provider call, which
+                # is the same signal the handler below already keys on. So the
+                # `finally` counts exactly the calls that were really sent.
+                # (CodeRabbit, PR #388.)
+                try:
+                    result = await enrich_job(
+                        job,
+                        llm_extract_validated_fn=llm_extract_validated_fn,
+                    )
+                except StubDescriptionError:
+                    # No provider was reached — do not count, and let the
+                    # handler below record it as the refusal it is.
+                    raise
+                except Exception:
+                    # The request WAS sent and then failed. Billed, so counted.
+                    tel.llm_calls += 1
+                    raise
+                else:
+                    tel.llm_calls += 1
                 # B7-1 fix: persist successful enrichments. Without this,
                 # every LLM call's result was discarded — pure cost, no value.
                 if result is not None and conn is not None:

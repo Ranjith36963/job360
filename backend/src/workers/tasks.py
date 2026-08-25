@@ -1899,10 +1899,25 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
                 run_shelf_enrichment_sweep,
             )
 
-            enrichment_sweep_stats = await run_shelf_enrichment_sweep(
-                db,
-                llm_extract_validated_fn=ctx.get("llm_extract_validated"),
-            )
+            # ISOLATED, BECAUSE THIS TASK RETRIES. `max_tries = 5` on the ARQ
+            # worker means an exception escaping here re-runs the ENTIRE
+            # `refresh_catalog` — every source re-fetched, every job re-scored —
+            # to retry a bonus pass that runs after all of that work already
+            # succeeded. Up to four extra full catalog refreshes for one failed
+            # enrichment sweep. The sweep's own value is real but strictly
+            # additive: shelves it does not fill this tick are filled next tick.
+            # (CodeRabbit, PR #388.)
+            try:
+                enrichment_sweep_stats = await run_shelf_enrichment_sweep(
+                    db,
+                    llm_extract_validated_fn=ctx.get("llm_extract_validated"),
+                )
+            except Exception:  # noqa: BLE001 — a bonus pass must not undo the run
+                logging.getLogger(__name__).exception(
+                    "shelf_enrichment_sweep_failed",
+                    extra={"event": "shelf_enrichment_sweep_failed"},
+                )
+                enrichment_sweep_stats = {"error": "sweep raised — see the logged traceback"}
 
     return {
         "sources_queried": stats.get("sources_queried", 0),

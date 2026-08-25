@@ -22,7 +22,11 @@ logger = logging.getLogger("job360.sources.eightykhours")
 # strings are this clean.
 _SALARY_CURRENCY_SYMBOLS = {"$": "USD", "£": "GBP", "€": "EUR"}
 _SALARY_RE = re.compile(
-    r"^([£$€])([\d,]+(?:\.\d+)?)\s*(?:-\s*[£$€]?([\d,]+(?:\.\d+)?))?"
+    # The SECOND symbol is captured, not discarded. `[£$€]?` threw it away, so
+    # "$50 - £100 per hour" parsed as USD 50-100 and the gate then converted a
+    # sterling figure as dollars — a confidently wrong number, which this
+    # function's own docstring says it never produces. (CodeRabbit, PR #388.)
+    r"^([£$€])([\d,]+(?:\.\d+)?)\s*(?:-\s*([£$€]?)([\d,]+(?:\.\d+)?))?"
     r"\s*(per hour|per month|per annum|per year)?$",
     re.IGNORECASE,
 )
@@ -43,7 +47,13 @@ def _parse_clean_salary_text(
     m = _SALARY_RE.match(text.strip())
     if not m:
         return None, None, None, None
-    symbol, first, second, period_raw = m.groups()
+    symbol, first, second_symbol, second, period_raw = m.groups()
+    # A RANGE THAT CROSSES CURRENCIES IS NOT UNAMBIGUOUS. Refuse it whole
+    # rather than keep half: one number in the wrong currency is worse than no
+    # number at all, and the dual-currency shape is exactly what the docstring
+    # above promises to decline.
+    if second_symbol and second_symbol != symbol:
+        return None, None, None, None
     currency = _SALARY_CURRENCY_SYMBOLS[symbol]
     first_val = float(first.replace(",", ""))
     second_val = float(second.replace(",", "")) if second else None
