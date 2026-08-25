@@ -770,6 +770,62 @@ def missing_reader_banner() -> list[str]:
     return bad
 
 
+def unreadable_env_vars() -> list[tuple[str, str, str]]:
+    """(doc, line, NAME) for a row under an env-var heading that no code reads.
+
+    Added 2026-08-25. ARCHITECTURE.md's "Environment Variables (.env)" table
+    listed SEVEN names that are plain constants in `core/settings.py` with no
+    `os.getenv` anywhere: MIN_MATCH_SCORE, MAX_RESULTS_PER_SOURCE,
+    MAX_DAYS_OLD, MAX_RETRIES, RETRY_BACKOFF, REQUEST_TIMEOUT, USER_AGENT.
+
+    This is the actively misleading kind rather than the merely stale kind.
+    Someone sets MAX_DAYS_OLD=30 in .env, restarts, sees no change, and has no
+    way to discover why -- the doc told them it was a knob and the code never
+    looks. All seven were deleted; the fact lives in the code that holds them.
+
+    ONE DIRECTION ONLY, deliberately. "Listed but never read" is decidable from
+    a name search. The reverse -- "read but not documented" -- is not: 105
+    names are read across the tree, most of them incidental (CI, tooling,
+    third-party libraries), and demanding every one appear in a hand-written
+    table would be noise, then an ignored report, then a dead guard.
+    """
+    heading = re.compile(r"^#{2,4}\s+Environment Variables", re.I)
+    row = re.compile(r"^\|\s*`([A-Z][A-Z0-9_]{3,})`")
+    out: list[tuple[str, str, str]] = []
+
+    sources = ""
+    for sub, globs in (("backend/src", ("*.py",)), ("frontend/src", ("*.ts", "*.tsx"))):
+        base = ROOT / sub
+        if not base.exists():
+            continue
+        for g in globs:
+            for f in base.rglob(g):
+                sources += f.read_text(encoding="utf-8", errors="replace")
+    if not sources:
+        return []
+
+    for rel in living_stamped_docs():
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        in_section = False
+        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if line.startswith("#"):
+                in_section = bool(heading.match(line))
+                continue
+            if not in_section:
+                continue
+            m = row.match(line)
+            if not m:
+                continue
+            name = m.group(1)
+            if f'"{name}"' in sources or f"'{name}'" in sources \
+                    or f"process.env.{name}" in sources:
+                continue
+            out.append((rel, str(i), name))
+    return out
+
+
 def doc_tree_dead_paths() -> list[tuple[str, str, str]]:
     """(doc, line, path) for a directory-tree entry naming a file that is gone.
 
@@ -1703,6 +1759,11 @@ def main() -> int:
         rel, _, detail = row.partition(": ")
         drift.append((rel, "1", "line-citation-ratchet", detail,
                       "a line number rots on any edit above it — cite a symbol"))
+
+    # An env var the code never reads is a knob that does nothing.
+    for doc, line_no, name in unreadable_env_vars():
+        drift.append((doc, line_no, "env-var-not-read", name,
+                      "listed as an environment variable, but no code reads it"))
 
     # A tree entry pointing at a file that is gone sends a reader, or an
     # agent, to a path that is not there.

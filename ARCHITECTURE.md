@@ -663,6 +663,8 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 
 ### Environment Variables (.env)
 
+> These are read from the environment. Tuning constants that are NOT env-readable — retry, timeout, page-size and age limits, the display floor — live in `core/settings.py` and changing them in `.env` does nothing; seven were listed here as env vars until 2026-08-25.
+
 > **This table is the canonical env-var reference.** It was moved here verbatim from
 > the root `CLAUDE.md` (2026-08-11) — the root file is auto-loaded by every session
 > and must stay pointers-only. It replaced a shorter, staler table that listed only
@@ -717,14 +719,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `MIN_MATCH_SCORE` | 30 | **Display** floor, applied at READ time — the CLI viewer's `--min-score` default and the dashboard's `min_score`. It does NOT decide what is kept (`settings.py:109-114`) |
 | `MIN_STORE_SCORE` | 1 (env-overridable) | **Catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`) (`settings.py:115-120`, applied at `main.py:729`; re-applied by the backfill at `services/rescore.py:271`). It does **not** gate `user_feed`: `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison (`workers/tasks.py:208-217`) |
-| `MAX_RESULTS_PER_SOURCE` | 100 | Cap per source |
-| `MAX_DAYS_OLD` | 7 | Maximum job age |
-| `MAX_RETRIES` | 3 | HTTP retry attempts |
-| `RETRY_BACKOFF` | [1, 2, 4] | Seconds between retries |
-| `REQUEST_TIMEOUT` | 30 | HTTP timeout in seconds |
-| `USER_AGENT` | "Job360/1.0 ..." | Default User-Agent header |
 
 ### Rate Limits (`settings.py:RATE_LIMITS`)
 

@@ -68,6 +68,20 @@ jobs:
       - name: Generated doc blocks are current (blocking)
         run: python scripts/gen_doc_blocks.py
 
+      # BLOCKING. Fable 5 found this hole 2026-08-25: the mutation test — the
+      # guard OF the guards — was in no workflow at all. It ran only when a
+      # human remembered, which means the 27 guards could silently degrade to
+      # always-green as the code moved beneath them, and the drift report would
+      # keep saying "OK" while watching an empty room. That is the exact failure
+      # this repo already wrote a law about ("every guard must declare its
+      # drill; an undeclared guard in a workflow is a red build") — violated by
+      # the newest guard system in the repo.
+      #
+      # On PRs too, not just the schedule: a PR that breaks a guard's anchor is
+      # the moment to know, not four weeks later.
+      - name: Every guard can still go RED (blocking)
+        run: python scripts/doc_sync_mutation_test.py
+
       - name: Run doc drift check
         id: check
         run: |
