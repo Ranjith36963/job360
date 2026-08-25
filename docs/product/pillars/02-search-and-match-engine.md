@@ -509,11 +509,11 @@ A top-level import would pay the cost on every pytest collection, every CLI invo
 
 ## Environment variables — every var the engine reads
 
+`MIN_MATCH_SCORE` is NOT in this table: it is a plain constant in `core/settings.py`, not read from the environment, so setting it in `.env` does nothing. It is the DISPLAY floor applied at read time; the catalog floor is `MIN_STORE_SCORE`.
 Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goes into the final clamp at 130-max-pre-clamp (rule #23).
 
 | Var | Default | What it controls | Effect of changing |
 | --- | --- | --- | --- |
-| `MIN_MATCH_SCORE` | `30` | **Display** floor, applied at READ time — it removes nothing from storage. A job below 30 is still in the shared `jobs` catalog and still in `user_feed`; it is only hidden from the default view (`api/routes/jobs.py:564-570` fetches with `min_score=0`, then filters in Python; the CLI viewer's `--min-score` defaults to it). It is **not** a write gate anywhere | Raise to be stricter (fewer results shown), lower for a permissive view — nothing is lost either way |
 | `MIN_STORE_SCORE` | `1` | The **catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`, so a job scoring exactly it is kept), judged on the RUN's score, not any one user's (`core/settings.py:115-120`, applied at `main.py:729`); the re-score backfill applies it too (`services/rescore.py:271`). It is **not** a `user_feed` floor — `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison at all (`workers/tasks.py:208-217`), so a job that scores 0 for a given user still gets a row | This is the one that destroys rows; raise it only to cut genuine junk |
 | `MIN_TITLE_GATE` | `0.15` (= 6 pts of 40) | Title-component floor; below it the whole score collapses to suppression | Raise to require closer title matches; lower to admit weaker title alignments |
 | `MIN_SKILL_GATE` | `0.15` (= 6 pts of 40) | Skill-component floor; same collapse behaviour | Same as above for skill alignment |
