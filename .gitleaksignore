@@ -1,0 +1,30 @@
+# Gitleaks findings waived BY FINGERPRINT, one line each, with the reason.
+#
+# THE RULE THIS FILE OBEYS, taken from security.yml's own header: never re-mute
+# a scanner to turn a red build green. The precedent it names is pip-audit —
+# `--ignore-vuln <ID> with a comment saying why`, one CVE at a time, never the
+# whole tool. A fingerprint here is that same shape: it silences exactly one
+# occurrence in one commit and leaves every future finding loud, including a
+# second occurrence of the same rule in the same file.
+#
+# Format: <commit>:<path>:<rule-id>:<line>
+
+# A TEST FIXTURE THAT NEVER HELD A CREDENTIAL.
+#
+# `backend/tests/test_credentials_are_stripped.py` needs a value that survives a
+# round trip unchanged, to prove a clean credential is not mangled by the
+# whitespace stripper. The value chosen was a sixteen-character lowercase-hex
+# run — the exact shape `generic-api-key` exists to catch — so the scanner was
+# right to stop on it, and the file now uses an unmistakably fake string
+# instead (`_CLEAN_FIXTURE_VALUE`).
+#
+# The fix cannot reach BACKWARDS, though: gitleaks runs with `fetch-depth: 0`
+# and scans history, and the commit below still contains the old literal. That
+# commit is on this branch only — never on `main`, and this PR squash-merges, so
+# `main` never receives it. Rewriting the branch's history to erase four
+# characters would be a far larger and riskier act than recording why one dead
+# line is exempt.
+#
+# Deliberately NOT an allowlist rule or a path exclusion: either would blind the
+# scanner to the next REAL key in this file. This waives one line of one commit.
+e495463b43859d3678d3807dbbdf59be208e449e:backend/tests/test_credentials_are_stripped.py:generic-api-key:101

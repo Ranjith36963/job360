@@ -66,6 +66,23 @@ class GreenhouseSource(BaseJobSource):
                 raw_updated_at = item.get("updated_at")
                 raw_published = item.get("first_published")
                 posted_at, confidence = normalize_posted_at(raw_published)
+
+                # `application_deadline` is a real ISO datetime, rarely filled
+                # (verified live 2026-08-16: 1/82 on monzo, 0/578 on stripe —
+                # most companies just don't set one) but never opened before.
+                # Absent/unparseable never fabricates a deadline.
+                deadline = None
+                deadline_source = None
+                raw_deadline = item.get("application_deadline")
+                if raw_deadline:
+                    try:
+                        deadline = datetime.fromisoformat(
+                            str(raw_deadline).replace("Z", "+00:00")
+                        ).date().isoformat()
+                        deadline_source = "listing"
+                    except ValueError:
+                        pass
+
                 jobs.append(Job(
                     title=title,
                     company=company_name,
@@ -77,6 +94,8 @@ class GreenhouseSource(BaseJobSource):
                     posted_at=posted_at,
                     date_confidence=confidence,
                     date_posted_raw=raw_updated_at,
+                    deadline=deadline,
+                    deadline_source=deadline_source,
                 ))
         logger.info("Greenhouse: found %s relevant jobs across %s companies", len(jobs), len(self._companies))
         return jobs

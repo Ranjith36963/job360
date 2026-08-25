@@ -51,6 +51,9 @@ class RemoteOKSource(BaseJobSource):
             raw_location = str(item.get("location") or "").strip().rstrip(", ").strip()
             location = raw_location if raw_location else "Remote"
 
+            # `tags` (94% fill, 94/100 sampled) is RemoteOK's own skill tag
+            # list -- the job's own vocabulary, no guessing. `job_type` was
+            # checked live and is 0% filled (never present) -- not mapped.
             jobs.append(Job(
                 title=item.get("position", ""),
                 company=item.get("company", ""),
@@ -64,6 +67,7 @@ class RemoteOKSource(BaseJobSource):
                 posted_at=posted_at,
                 date_confidence=confidence,
                 date_posted_raw=raw_date,
+                source_tags=item.get("tags") or [],
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("RemoteOK: found %s relevant jobs", len(jobs))

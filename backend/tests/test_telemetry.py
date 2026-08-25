@@ -150,6 +150,19 @@ def test_enrichment_telemetry_counters_increment(monkeypatch):
     """enrich_batch with 3 mocked LLM calls bumps llm_calls by 3."""
     from src.models import Job
     from src.services import job_enrichment as je
+    from src.services.shelf_gate import _STUB_DESCRIPTION_MIN_CHARS
+
+    # A description long enough to be worth reading, derived from the real
+    # threshold so it can never drift under it.
+    _REAL_AD_TEXT = (
+        "We are hiring a machine learning engineer to own our ranking models "
+        "end to end. You will design and train models, ship them to production "
+        "behind an API, and work with product on what to measure. We use "
+        "Python, PyTorch and AWS. Experience with recommender systems or "
+        "search relevance is a strong plus, and you will mentor two junior "
+        "engineers on the team. "
+    ) * 3
+    assert len(_REAL_AD_TEXT.strip()) >= _STUB_DESCRIPTION_MIN_CHARS
     from src.services.job_enrichment_schema import (
         EmploymentType,
         ExperienceLevel,
@@ -196,7 +209,15 @@ def test_enrichment_telemetry_counters_increment(monkeypatch):
             source="greenhouse",
             date_found="2026-04-21T10:00:00+00:00",
             location="London",
-            description="Role.",
+            # A REAL ad, not "Role.". enrich_job refuses a stub description
+            # before it reaches any provider, so a 5-char placeholder made this
+            # test measure the refusal path while claiming to measure the
+            # success path — it asserted llm_calls == 3 against 0 real calls.
+            # Must clear shelf_gate._STUB_DESCRIPTION_MIN_CHARS (600), the
+            # measured teaser band where APIs truncate a real ad into marketing
+            # copy. Built from the constant rather than a hand-counted blob, so
+            # this fixture cannot silently fall under a future threshold.
+            description=_REAL_AD_TEXT,
         )
         for i in range(3)
     ]
@@ -214,6 +235,54 @@ def test_enrichment_telemetry_counters_increment(monkeypatch):
     assert tel.llm_calls == 3, f"expected 3 llm_calls, got {tel.llm_calls}"
     assert tel.cache_hits == 0
     assert tel.validation_failures == 0
+    assert tel.timeouts == 0
+    assert tel.stub_skipped == 0
+
+
+def test_a_stub_ad_costs_no_llm_call_and_is_not_a_validation_failure():
+    """A refusal must not be billed or blamed.
+
+    `enrich_job` rejects a description too thin to read honestly BEFORE any
+    provider is called. The counter used to be incremented before that check
+    and the refusal was caught by the generic handler, so a batch of stubs
+    reported "3 llm_calls, 3 validation_failures" — spend that never happened,
+    blamed on a model that was never asked.
+    """
+    from src.models import Job
+    from src.services import job_enrichment as je
+
+    tel_mod.reset_for_testing()
+
+    async def _never_called(prompt, schema, system):
+        raise AssertionError("no LLM call may be made for a stub description")
+
+    jobs = [
+        Job(
+            title=f"ML Engineer {i}",
+            company="Acme",
+            apply_url=f"https://example.com/{i}",
+            source="greenhouse",
+            date_found="2026-04-21T10:00:00+00:00",
+            location="London",
+            description="Role.",
+        )
+        for i in range(3)
+    ]
+
+    results = asyncio.run(
+        je.enrich_batch(
+            jobs,
+            semaphore_limit=2,
+            skip_existing=False,
+            llm_extract_validated_fn=_never_called,
+        )
+    )
+
+    assert results == [None, None, None], "a stub ad enriches to nothing"
+    tel = tel_mod.enrichment_telemetry()
+    assert tel.llm_calls == 0, f"a refused ad costs no LLM call, got {tel.llm_calls}"
+    assert tel.validation_failures == 0, "a refusal is not the model misbehaving"
+    assert tel.stub_skipped == 3
     assert tel.timeouts == 0
 
 

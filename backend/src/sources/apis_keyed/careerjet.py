@@ -122,6 +122,16 @@ class CareerjetSource(BaseJobSource):
                     date_posted_raw=raw_date,
                     salary_min=salary_min,
                     salary_max=salary_max,
+                    # `salary_type` ('Y'/'H'/'M', all three seen live
+                    # 2026-08-16) is the sibling of salary_min/max, unread
+                    # until now — an hourly rate and an annual salary landed
+                    # in the same column with no unit. Raw code only; the
+                    # gate converts units, never this source.
+                    salary_period=item.get("salary_type"),
+                    # `salary_currency_code` ('GBP' confirmed live
+                    # 2026-08-16) sits on the same item, same free-read
+                    # pattern as salary_type.
+                    salary_currency=item.get("salary_currency_code"),
                 ))
 
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]

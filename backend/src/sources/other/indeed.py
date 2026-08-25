@@ -84,12 +84,35 @@ class JobSpySource(BaseJobSource):
                 location = str(row.get("location", ""))
                 if str(row.get("is_remote", "")).lower() == "true" and "remote" not in location.lower():
                     location = f"{location}, Remote".strip(", ")
+
+                # jobspy's DataFrame carries several columns this source
+                # already receives but never reads (confirmed against
+                # jobspy 1.1.82's desired_order schema, 2026-08-16):
+                # job_type, interval (salary period), currency, job_level
+                # (seniority), skills (comma-joined by jobspy itself). Raw
+                # copy only -- no enum-mapping here, that is the gate's job.
+                job_type = row.get("job_type")
+                interval = row.get("interval")
+                currency = row.get("currency")
+                job_level = row.get("job_level")
+                skills_raw = row.get("skills")
+                source_tags = (
+                    [t.strip() for t in str(skills_raw).split(",") if t.strip()]
+                    if skills_raw and str(skills_raw) != "nan" else []
+                )
+                job_url_direct = row.get("job_url_direct")
+                apply_url = (
+                    str(job_url_direct)
+                    if job_url_direct and str(job_url_direct) != "nan"
+                    else str(row.get("job_url", ""))
+                )
+
                 jobs.append(Job(
                     title=title,
                     company=str(row.get("company", "")),
                     location=location,
                     description=desc[:5000],
-                    apply_url=str(row.get("job_url", "")),
+                    apply_url=apply_url,
                     source=source_name,
                     date_found=now_iso,
                     posted_at=posted_at,
@@ -97,6 +120,11 @@ class JobSpySource(BaseJobSource):
                     date_posted_raw=raw_date,
                     salary_min=salary_min,
                     salary_max=salary_max,
+                    employment_type=str(job_type) if job_type and str(job_type) != "nan" else None,
+                    salary_period=str(interval) if interval and str(interval) != "nan" else None,
+                    salary_currency=str(currency) if currency and str(currency) != "nan" else None,
+                    seniority=str(job_level) if job_level and str(job_level) != "nan" else None,
+                    source_tags=source_tags,
                 ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("JobSpy: found %s relevant jobs from %s", len(jobs), ", ".join(self._sites))

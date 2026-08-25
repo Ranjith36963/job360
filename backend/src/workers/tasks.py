@@ -34,6 +34,7 @@ from src.services.job_enrichment import ENRICHMENT_ENABLED, _build_enrichment_lo
 from src.services.job_signals import signal_backed_lookup
 from src.services.prefilter import FilterProfile, passes_prefilter
 from src.services.profile.models import SearchConfig
+from src.services.query_text import clean_query_text, needs_cleaning
 from src.services.skill_matcher import JobScorer
 from src.utils.logger import get_logger
 
@@ -682,7 +683,7 @@ async def _backfill_thin_descriptions(db: pg.Connection, budget: int) -> dict[st
 
     Selects the ``budget`` highest-value ACTIVE jobs (same
     COALESCE(llm_fit_score, score) value ordering as the other phases) whose
-    ``description`` is under ``MIN_DESCRIPTION_CHARS`` AND whose source is on
+    ``description`` is under ``BACKFILL_SELECT_BELOW_CHARS`` AND whose source is on
     the ``ALLOWED_BACKFILL_SOURCES`` capability list (LinkedIn and
     structurally-textless sources are OUT — pushed into the SQL itself,
     not filtered in Python after the fact, so a 50/tick budget is never
@@ -721,6 +722,7 @@ async def _backfill_thin_descriptions(db: pg.Connection, budget: int) -> dict[st
 
     from src.services.description_backfill import (  # noqa: PLC0415
         ALLOWED_BACKFILL_SOURCES,
+        BACKFILL_SELECT_BELOW_CHARS,
         MAX_BACKFILL_ATTEMPTS,
         MIN_DESCRIPTION_CHARS,
         fetch_description,
@@ -745,7 +747,12 @@ async def _backfill_thin_descriptions(db: pg.Connection, budget: int) -> dict[st
         ORDER BY max(COALESCE(f.llm_fit_score, f.score)) DESC
         LIMIT ?
         """,  # noqa: S608 — source_placeholders is "?"*len(allowed_sources), no user input
-        (MIN_DESCRIPTION_CHARS, MAX_BACKFILL_ATTEMPTS, *allowed_sources, budget),
+        # SELECT below the ENRICHMENT floor (600), not the skill-text floor (200).
+        # The two are different questions and sharing one constant meant the sweep
+        # only ever looked at nearly-empty rows, leaving 5,525 production rows
+        # (32.7% of the catalog) at 200-599 chars permanently un-enrichable and
+        # never retried. See BACKFILL_SELECT_BELOW_CHARS for the measurement.
+        (BACKFILL_SELECT_BELOW_CHARS, MAX_BACKFILL_ATTEMPTS, *allowed_sources, budget),
     )
     rows = [dict(r) for r in await cur.fetchall()]
 
@@ -1009,7 +1016,11 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
         )
         pending = [dict(r) for r in await cur.fetchall()]
     except Exception:  # noqa: BLE001
-        return {"sent": 0, "failed": 0, "jobs_count": 0}
+        # Same trap as notification_tick: a dead query returned the dict that
+        # means "the digest queue is empty". Mark it as an error so the two are
+        # distinguishable in the worker log and in any future alert.
+        _log.exception("send_bundle: digest query failed for user_id=%s", user_id)
+        return {"sent": 0, "failed": 0, "jobs_count": 0, "error": 1}
 
     if not pending:
         return {"sent": 0, "failed": 0, "jobs_count": 0}
@@ -1344,7 +1355,13 @@ async def notification_tick(ctx: dict[str, Any]) -> dict[str, int]:
         )
         rules = [dict(r) for r in await cur.fetchall()]
     except Exception:  # noqa: BLE001
-        return {"checked": 0, "enqueued": 0}
+        # A crashed query used to return the SAME dict as "there are no rules",
+        # with no log line — so `{'checked': 0, 'enqueued': 0}` in the worker log
+        # meant either "idle" or "the notification system is down" and nothing
+        # could tell them apart. Say which. Still never re-raise: an ARQ cron
+        # that throws is retried blindly every 5 minutes.
+        _log.exception("notification_tick: rules query failed")
+        return {"checked": 0, "enqueued": 0, "error": 1}
 
     enqueued = 0
     for rule in rules:
@@ -1795,6 +1812,10 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
     # structurally unreachable.
     union = SearchConfig()
     profiles_used = 0
+    # Profile strings repaired before being sent upstream. Collected so the run
+    # can SAY a profile is carrying undecodable text — repairing it silently
+    # would hide the condition that let a guaranteed-empty query run nightly.
+    repaired_queries: list[str] = []
     for uid in list_profile_user_ids():
         profile = load_profile(uid)
         if not profile or not profile.is_complete:
@@ -1817,6 +1838,17 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
         ):
             merged = getattr(union, attr)
             for item in getattr(cfg, attr):
+                # These strings are sent upstream AS QUERIES. A profile value
+                # carrying U+FFFD (the replacement character a decoder writes
+                # when the original bytes are lost) cannot match any advert, so
+                # it turns a source into a silent zero. Measured live: findwork
+                # returns 9 jobs on a neutral query and 0 on the production one.
+                if isinstance(item, str):
+                    if needs_cleaning(item):
+                        repaired_queries.append(item)
+                    item = clean_query_text(item)
+                    if not item:
+                        continue
                 if item not in merged:
                     merged.append(item)
         union.core_domain_words |= cfg.core_domain_words
@@ -1833,6 +1865,16 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
             "catalog refresh skipped: no complete user profiles found — nothing to fetch for"
         )
         return {"sources_queried": 0, "total_found": 0, "new_jobs": 0, "profiles_used": 0}
+
+    if repaired_queries:
+        logging.getLogger(__name__).warning(
+            "catalog refresh: %d profile string(s) carried undecodable characters "
+            "and were repaired before being sent as queries — a query containing "
+            "U+FFFD matches nothing upstream, so this silently zeroes keyword "
+            "sources. Fix the stored profile to stop repairing it every night: %s",
+            len(repaired_queries),
+            "; ".join(sorted(set(repaired_queries))[:10]),
+        )
 
     logging.getLogger(__name__).info(
         "catalog refresh: union of %s profile(s) — %s titles, %s keywords",
@@ -1921,10 +1963,56 @@ async def refresh_catalog(ctx: dict[str, Any]) -> dict[str, Any]:
             ingested_rows,
         )
 
+    # ---- JOB SOURCE ENRICHMENT — the two-pass catalog sweep ----------------
+    #
+    # An LLM reading the ads we just fetched to fill the shelves no source
+    # states as a field (visa 1.6% filled, seniority 7.5%, category 7.5% —
+    # measured 2026-08-17). It belongs HERE and not in a user search: these
+    # are facts about the JOB, identical for every user, so the cost is paid
+    # once per job by the shared catalog and never scales with user count
+    # (rule #10). It runs AFTER the fan-out so jobs fetched this very tick are
+    # eligible in the same run.
+    #
+    # Gated exactly like every other Engine-2 call site: ENGINE2_ENABLED OR the
+    # legacy ENRICHMENT_ENABLED (rule #18 — BOTH names). Both off ⇒ this block
+    # is never entered, and this cron behaves byte-identically to before it
+    # existed. That is deliberate: merging this must not start spending money.
+    # Its own hard caps (SHELF_ENRICHMENT_MAX_JOBS / _MAX_SPEND_USD) are the
+    # second line, and it writes what it spent into run_log.
+    enrichment_sweep_stats: dict[str, Any] = {}
+    if db is not None:
+        from src.core.settings import ENGINE2_ENABLED  # noqa: PLC0415
+
+        if ENGINE2_ENABLED or ENRICHMENT_ENABLED:
+            from src.services.shelf_enrichment import (  # noqa: PLC0415
+                run_shelf_enrichment_sweep,
+            )
+
+            # ISOLATED, BECAUSE THIS TASK RETRIES. `max_tries = 5` on the ARQ
+            # worker means an exception escaping here re-runs the ENTIRE
+            # `refresh_catalog` — every source re-fetched, every job re-scored —
+            # to retry a bonus pass that runs after all of that work already
+            # succeeded. Up to four extra full catalog refreshes for one failed
+            # enrichment sweep. The sweep's own value is real but strictly
+            # additive: shelves it does not fill this tick are filled next tick.
+            # (CodeRabbit, PR #388.)
+            try:
+                enrichment_sweep_stats = await run_shelf_enrichment_sweep(
+                    db,
+                    llm_extract_validated_fn=ctx.get("llm_extract_validated"),
+                )
+            except Exception:  # noqa: BLE001 — a bonus pass must not undo the run
+                logging.getLogger(__name__).exception(
+                    "shelf_enrichment_sweep_failed",
+                    extra={"event": "shelf_enrichment_sweep_failed"},
+                )
+                enrichment_sweep_stats = {"error": "sweep raised — see the logged traceback"}
+
     return {
         "sources_queried": stats.get("sources_queried", 0),
         "total_found": stats.get("total_found", 0),
         "new_jobs": stats.get("new_jobs", 0),
         "scored_jobs": scored_jobs,
         "ingested_rows": ingested_rows,
+        "shelf_enrichment": enrichment_sweep_stats,
     }

@@ -87,6 +87,14 @@ class RemotiveSource(BaseJobSource):
             posted_at, confidence = normalize_posted_at(raw_pub)
 
             salary_min, salary_max = _parse_remotive_salary(item.get("salary", ""))
+            # `tags` (100% fill live, 14/14 sampled) is Remotive's own
+            # skill/tech tag list -- the job's own vocabulary, no guessing.
+            #
+            # `job_type` (100% fill live, verified 2026-08-17: values are
+            # already the closed tokens "full_time"/"part_time"/"freelance"
+            # -- Remotive's own vocabulary happens to match EmploymentType's
+            # snake_case exactly) sat unread. Raw value only; the gate
+            # normalises/matches it.
             jobs.append(Job(
                 title=title,
                 company=item.get("company_name", ""),
@@ -100,6 +108,16 @@ class RemotiveSource(BaseJobSource):
                 date_posted_raw=raw_pub,
                 salary_min=salary_min,
                 salary_max=salary_max,
+                source_tags=item.get("tags") or [],
+                employment_type=item.get("job_type"),
+                # `category` (100% fill live, verified 2026-08-17: "Software
+                # Development", "Data and Analytics", "Sales", "Design",
+                # "All others"...) is Remotive's OWN closed professional-
+                # domain list -- the same concept as the JobCategory shelf,
+                # and it was sitting unread in a response we already fetch.
+                # Raw value only; the gate decides which ones it can map
+                # honestly.
+                category=item.get("category") or None,
             ))
         jobs = [j for j in jobs if _is_uk_or_remote(j.location)]
         logger.info("Remotive: found %s relevant jobs", len(jobs))

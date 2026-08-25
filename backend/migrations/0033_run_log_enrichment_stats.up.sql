@@ -1,0 +1,18 @@
+-- 0033_run_log_enrichment_stats: the spend counter for JOB SOURCE ENRICHMENT
+-- (docs/pillars/UNIVERSAL_SHELF.md §7 cost).
+--
+-- WHY. JOB SOURCE ENRICHMENT is an LLM reading a job ad — a real, per-token
+-- bill against a pre-revenue product. Before this column, that spend left NO
+-- trace anywhere in the system: nothing could answer "what did last night
+-- cost?". The two-pass sweep (src/services/shelf_enrichment.py) writes one
+-- run_log row per run carrying jobs read, tokens in/out, estimated USD, and
+-- whether a budget cap bit.
+--
+-- Additive and nullable-by-default, exactly like matcher_stats (the LLM-judge
+-- telemetry column) whose shape this mirrors: a JSON blob in a TEXT column,
+-- read and written whole in Python, never queried with a JSON operator, so
+-- translate() (src/repositories/pg.py) needs no new grammar.
+--
+-- run_log is per-run OPERATIONAL metadata. Rule #10 concerns the shared jobs
+-- catalog and is untouched here; no user_id is added.
+ALTER TABLE run_log ADD COLUMN IF NOT EXISTS enrichment_stats TEXT DEFAULT '{}';
