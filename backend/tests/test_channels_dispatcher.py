@@ -168,10 +168,29 @@ async def test_test_send_returns_error_on_exception(channel_db):
     assert "boom" in result.error
 
 
-def test_format_payload_variants():
-    assert dispatcher.format_payload("slack", "T", "B")[1].startswith("*T*")
-    assert dispatcher.format_payload("discord", "T", "B")[1].startswith("**T**")
+def test_format_payload_is_pass_through_for_both_live_channels():
+    """Delivery is email + webhook only, and neither wants markup.
+
+    The chat branches (Slack ``*bold*``, Discord ``**bold**``, Telegram
+    MarkdownV2) died with the channels themselves on 2026-08-24. The function
+    stays as the ONE chokepoint where per-channel templating would live, so the
+    HTML email upgrade is a local change — but today both channels get the
+    payload untouched.
+    """
     assert dispatcher.format_payload("email", "T", "B") == ("T", "B")
+    assert dispatcher.format_payload("webhook", "T", "B") == ("T", "B")
+
+
+def test_format_payload_does_not_resurrect_chat_markup():
+    """A deleted channel type must not silently keep its old formatting.
+
+    Guards the removal: if someone re-adds a ``slack``/``discord``/``telegram``
+    branch, this fails. ``carrier-pigeon`` is a type that never existed at
+    all — it proves the fall-through is genuinely unconditional pass-through,
+    not just a set of hardcoded dead-type cases that happen to still work.
+    """
+    for dead in ("slack", "discord", "telegram", "carrier-pigeon"):
+        assert dispatcher.format_payload(dead, "T", "B") == ("T", "B")
 
 
 @pytest.mark.asyncio

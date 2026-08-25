@@ -1,8 +1,28 @@
 # Runbook — Operational Answers
 
+<!-- doc: LIVING | last-verified: 2026-08-24 by the nightly doc-truth routine -->
+
 > **Audience.** Agents and operators answering "I see a problem — what do I do?" Each section below is a question phrased as a verb; the answer is a command, an SQL query, or a code pointer you can act on without first re-reading the pillar docs.
 >
-> Commands assume `cwd = backend/` and `source venv/bin/activate` unless noted. DB path defaults to `data/jobs.db`.
+> Commands assume `cwd = backend/` and `source venv/bin/activate` unless noted.
+>
+> **The database is Postgres, not a file.** It has been since 2026-07-02. There is no
+> `data/jobs.db` and no sqlite driver in the dependency set (`backend/pyproject.toml`
+> declares `psycopg[binary,pool]>=3.2`). Two ways in:
+>
+> ```bash
+> # Local dev — the docker-compose.dev.yml Postgres on port 5433.
+> # DATABASE_URL defaults to this (backend/src/core/settings.py:25).
+> psql postgresql://job360:job360dev@localhost:5433/job360
+>
+> # Production — see CLAUDE.md. Use DATABASE_PUBLIC_URL: plain
+> # DATABASE_URL only resolves from inside Railway.
+> railway run -s Postgres python <script>
+> ```
+>
+> Every `SQL` block below is meant for one of those two, not for a `sqlite3` shell.
+> `backend/src/repositories/pg.py` is an *aiosqlite-shaped* async driver over Postgres —
+> the shape is why so much of the code still reads like SQLite. The storage is not.
 
 ---
 
@@ -16,13 +36,21 @@ python -m src.cli status
 
 ### See the last 20 runs with per-source timing + errors
 
-```bash
-sqlite3 data/jobs.db \
-  "SELECT timestamp, run_uuid, total_found, new_jobs, total_duration, per_source_errors
-   FROM run_log ORDER BY timestamp DESC LIMIT 20;"
+`run_log` is **per-user** operational metadata — it has a `user_id` column
+(migration `0010`, mirrored at `backend/src/repositories/database.py:208`), and
+rule #12 applies. Scope by it, or you are reading someone else's runs:
+
+```sql
+SELECT timestamp, run_uuid, total_found, new_jobs, total_duration, per_source_errors
+FROM run_log WHERE user_id = '<uuid>' ORDER BY timestamp DESC LIMIT 20;
 ```
 
-Same data is exposed at `GET /api/runs` (auth-gated).
+That is the query `GET /api/runs/recent` (auth-gated) runs — `get_recent_runs(user_id=…)`
+at `backend/src/repositories/database.py:2002-2015`, which also drops legacy rows with a
+NULL `user_id`. `GET /api/runs/source-health` sits beside it
+(`backend/src/api/routes/runs.py:63,150`). There is no bare `GET /api/runs`.
+
+Drop the `WHERE` only when you deliberately want the operator-wide view across all users.
 
 ### List configured sources
 
@@ -44,17 +72,21 @@ python -m src.cli view --visa-only
 ### Open the DB
 
 ```bash
-sqlite3 data/jobs.db
-.headers on
-.mode column
+psql postgresql://job360:job360dev@localhost:5433/job360   # local dev
+railway run -s Postgres sh -c 'psql "$DATABASE_PUBLIC_URL"'   # production
 ```
 
 ### See what migrations have been applied
 
 ```bash
 python -m migrations.runner status
-# or:
-sqlite3 data/jobs.db "SELECT * FROM _schema_migrations ORDER BY version;"
+```
+
+```sql
+-- or straight from psql. The table is (id TEXT PRIMARY KEY, applied_at TEXT)
+-- — backend/migrations/runner.py:53-56. There is no `version` column; `id` is
+-- the zero-padded migration stem, so it sorts correctly as text.
+SELECT * FROM _schema_migrations ORDER BY id;
 ```
 
 ### Apply pending migrations (idempotent, safe to re-run)
@@ -68,20 +100,26 @@ FastAPI boot auto-runs this — but the CLI doesn't. Run it manually before `pyt
 ### Roll a migration back (rare — destructive)
 
 ```bash
-python -m migrations.runner down              # rolls back the latest only
-python -m migrations.runner down data/jobs.db # explicit DB path
+python -m migrations.runner down   # rolls back the latest only
 ```
+
+The runner still accepts an optional second argument and still calls it `db_path`
+(`backend/migrations/runner.py:399`), but it is **not** a database file. It is passed
+to `pg.connect()`, where it selects a *schema* under test and is ignored in production
+(`backend/src/repositories/pg.py:732-737`). Migrations always run against `DATABASE_URL`.
 
 ### Show all tables
 
-```bash
-sqlite3 data/jobs.db ".tables"
+```sql
+\dt                      -- psql meta-command
+-- or portable:
+SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
 ```
 
 ### Inspect a specific table's schema
 
-```bash
-sqlite3 data/jobs.db ".schema user_feed"
+```sql
+\d user_feed             -- psql meta-command
 ```
 
 ---
@@ -134,10 +172,17 @@ FROM sessions WHERE id = '<session_id_before_the_dot>';
 
 Table `user_profiles` (current tip) + `user_profile_versions` (last-10 history).
 
+There is **no `version` column** — the row's `id` *is* the version. `current_profile_version_id()`
+is literally `SELECT MAX(id) FROM user_profile_versions WHERE user_id = ?`
+(`backend/src/services/profile/storage.py:260-271`), and that id is what `user_feed.profile_version`
+stores. Columns are `id, user_id, created_at, source_action, cv_data, preferences`
+(`backend/migrations/0007_user_profile_versions.up.sql:17-25`) plus `snapshot_id`
+(migration `0030`).
+
 ```sql
-SELECT user_id, version, source_action, created_at
+SELECT id AS version, user_id, source_action, created_at
 FROM user_profile_versions WHERE user_id = '<uuid>'
-ORDER BY version DESC;
+ORDER BY id DESC;
 ```
 
 ### Dump a user's current profile
@@ -160,7 +205,7 @@ python -m src.cli setup-profile --cv path/to/cv.pdf --linkedin linkedin.pdf --gi
 
 ### Legacy JSON hydration
 
-If `data/user_profile.json` exists but no `user_profiles` row for `DEFAULT_TENANT_ID`, the first `load_profile()` call auto-imports it. Non-destructive — the JSON file stays.
+If `data/user_profile.json` exists but no `user_profiles` row for `DEFAULT_TENANT_ID` does, the next `load_profile(DEFAULT_TENANT_ID)` imports it and then **DELETES the file** (kept only if that raises). Back it up first. Pinned by `test_profile_storage.py::test_legacy_json_hydrates_to_default_tenant_and_deletes_file`.
 
 ---
 
@@ -287,8 +332,8 @@ python -m src.cli run --source greenhouse --dry-run --log-level DEBUG
    from src.services.circuit_breaker import default_registry
    print(default_registry().snapshot())
    ```
-3. If keyed (Reed/Adzuna/JSearch/Jooble/Google Jobs/Careerjet/Findwork), confirm the env var is set: `echo $REED_API_KEY`. Keyed sources `return []` silently when the key is empty.
-4. For an HTML scraper (LinkedIn/Workday/BCS/AIJobs/JobTensor), the upstream may have changed markup. Open the source file, find the regex, compare against a live response.
+3. If keyed, confirm the env var is set: `echo $REED_API_KEY`. Keyed sources `return []` silently when the key is empty. They are the contents of `apis_keyed/ (8)` under `backend/src/sources/`: Reed, Adzuna, JSearch, Jooble, Google Jobs, Careerjet, Findwork, **gov_apprenticeships**. Don't trust this list over the folder; `ls` it.
+4. For an HTML scraper, the upstream may have changed markup. Open the source file, find the regex, compare against a live response. The scrapers are `scrapers/ (5)` under `backend/src/sources/`, registry keys `linkedin`, `bcs_jobs`, `aijobs_ai`, `climatebase`, `eightykhours`. (**Not** JobTensor — dropped upstream-dead in the 2026-06 M6 rotation, `backend/src/main.py:158`. **Not** Workday either: that is a JSON ATS adapter in `sources/ats/`.)
 
 ### Force a circuit breaker back to CLOSED
 
@@ -320,13 +365,36 @@ FROM jobs WHERE id = <X>;
 
 ### Re-score everything against a new user profile
 
-CLI runs always re-score on each pass. The worker (`score_and_ingest`) re-scores when invoked per `(user, job)`. There's no "re-score all" admin command — re-run the full pipeline or call the worker function directly.
+CLI runs always re-score on each pass. The worker (`score_and_ingest`) re-scores when invoked per `(user, job)`. There **is** a "re-score all" admin command:
+
+```bash
+python -m src.cli rescore-backfill --batch-size 200 --max-users 50 --throttle 0.5
+```
+
+It does no work itself — it enqueues the resumable `rescore_backfill` ARQ task
+(`backend/src/cli.py:233`, `backend/src/workers/tasks.py:1494`) and returns. Watch the
+worker logs for `rescore_backfill_done`.
 
 ### A user updated their profile — when does it take effect?
 
-- **Dashboard reads** use whatever's in `user_feed` *now* — old scores until the next score run.
-- **Worker re-scoring** happens for each new job ingested; existing feed rows aren't recomputed automatically.
-- To force a refresh: `await db.purge_user_feed(user_id)` (if you add such a helper) or run a CLI pass with the new profile.
+Automatically, since migration `0018`. `POST /api/profile` compares the last two
+`user_profile_versions` snapshots; if the content actually changed it enqueues
+`rescore_user_feed_task` on the ARQ queue (`backend/src/api/routes/profile.py:163`).
+Only when Redis is unreachable does it fall back to an in-process `asyncio` task that
+dies with the web process (`profile.py:179-184`).
+
+What `rescore_user_feed` actually does, precisely:
+
+- It reads **up to 50,000** catalog rows — `get_catalog_jobs_for_rescore(limit=50000)`, `backend/src/repositories/database.py:750-777`. The SQL is `SELECT … FROM jobs ORDER BY date_found DESC LIMIT ?` with **no date predicate**. The 30-day horizon people quote is a *consequence* of `purge_old_jobs()` capping the catalog, not a filter in this query — and the limit is deliberately set far above the catalog so a "full re-score" really is one.
+- It clears the user's LLM verdicts **only when `ENGINE4_ENABLED or MATCHER_ENABLED`** (`backend/src/services/rescore.py:589,595-598`). With the judge off — the default — no verdict is touched.
+
+And the part that is easy to get wrong:
+
+- **Ordinary searches do re-score.** `run_search` calls `backfill_feed_from_catalog(user_id, db)` on **every** authenticated search (`backend/src/main.py:1272-1278`), which scores the whole catalog for that user and upserts feed rows. It is not "newly-fetched jobs only".
+- **But an existing row's score still doesn't drift.** `upsert_feed_row` applies a *version-conditional freeze*: on an existing row the score is kept when the incoming `profile_version` **and** `scorer_version` both match what's stored, and overwritten when either differs (`backend/src/services/feed.py:288-303`). So a score moves when the PROFILE changes or `SCORER_VERSION` is bumped — never merely because time passed. `bucket` and both version stamps are always rewritten.
+- The mechanism is that freeze, **not** `skip_existing`. `match_batch(..., skip_existing=True)` (`backend/src/services/llm_matcher.py:436,443`) stops the LLM re-judging a job it already judged for this user — it guards verdicts, not keyword scores.
+- **Dashboard reads** use whatever's in `user_feed` *now* — so a read landing before the worker drains still shows old scores.
+- To force it by hand: `rescore-backfill` above. There is no `db.purge_user_feed()` helper — that name does not exist in `backend/src/`.
 
 ---
 
@@ -356,18 +424,54 @@ from src.services.job_enrichment import enrich_job
 enrichment = await enrich_job(job)  # raises RuntimeError on all-providers-fail
 ```
 
-### ChromaDB persistent dir is corrupt — rebuild
+### Embeddings look wrong / stale — rebuild
 
-```bash
-rm -rf data/chroma/
-# next SEMANTIC_ENABLED run will recreate the collection and re-embed
-```
+**The vectors are in Postgres, not on disk.** Migration `0027` (2026-08-07) added
+`job_embeddings.embedding` (pgvector) and `services/pg_vector_index.py` is the only
+store the pipeline and the API use — `backend/src/main.py:580`, `main.py:1298`,
+`backend/src/api/routes/jobs.py:379`. `rm -rf data/chroma/` clears a directory the
+production pipeline and API never read; it will not fix anything here. (Two
+legacy helpers, `backend/scripts/build_job_embeddings.py` and
+`eval_v2_pool.py`, do still use that store — deleting it costs them their index.)
 
-Embeddings audit rows survive in `job_embeddings`; you'll need to clear that too if you want truly fresh:
+**Check the column exists before the first statement.** Migration `0027` is
+tolerant: on a Postgres without pgvector it skips the column entirely, and then
+`UPDATE … SET embedding = NULL` fails with `column "embedding" does not exist`.
 
 ```sql
+-- 0 rows here means pgvector is absent and 0027 was a no-op. Install the
+-- extension and re-run the migration before the UPDATE below; the DELETE
+-- underneath works either way.
+--
+-- to_regclass, not information_schema.table_name: the UPDATE below is
+-- UNQUALIFIED, so it hits whichever job_embeddings the current search_path
+-- resolves to. Matching on the bare table name can pass on a same-named table
+-- in another schema and still leave the UPDATE erroring.
+SELECT 1 FROM pg_attribute
+ WHERE attrelid = to_regclass('job_embeddings')
+   AND attname = 'embedding' AND NOT attisdropped;
+
+-- Force a re-embed of everything (the vector goes, the audit row stays):
+UPDATE job_embeddings SET embedding = NULL;
+-- Or drop the bookkeeping too, for a truly fresh start:
 DELETE FROM job_embeddings;
 ```
+
+The next `SEMANTIC_ENABLED` run re-fills them: `_embed_backfill_budget`
+(`backend/src/main.py:548`) selects `WHERE e.job_id IS NULL OR e.embedding IS NULL`.
+
+How many jobs actually have a vector:
+
+```sql
+SELECT count(*) FROM job_embeddings WHERE embedding IS NOT NULL;
+```
+
+If that is 0 with `SEMANTIC_ENABLED=true`, check the two structural causes before
+anything else: this Postgres may not have the `vector` extension (migration `0027`
+is deliberately tolerant — it skips the column rather than failing boot, and every
+`PgVectorIndex` method then degrades to empty), or the process doing the ingest may
+not have the `[semantic]` extra installed. `Dockerfile.worker` runs a plain
+`pip install .`, and the worker is what runs the scheduled refresh.
 
 ---
 
@@ -473,7 +577,8 @@ arq src.workers.settings.WorkerSettings
 ### Required env
 
 - `REDIS_URL` (default `redis://localhost:6379`)
-- All the LLM keys you want active (`GEMINI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`)
+- `DATABASE_URL` — the Postgres DSN
+- All the LLM keys you want active. **`OPENAI_API_KEY` first**: OpenAI is the PRIMARY provider and heads the fallback chain (`backend/src/services/profile/llm_provider.py:329-334`). Then `GEMINI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`.
 - `CHANNEL_ENCRYPTION_KEY` (Fernet key) — fail-closed
 - `SESSION_SECRET` — fail-closed
 
@@ -494,11 +599,15 @@ arq src.workers.settings.WorkerSettings
 | `argon2.exceptions.InvalidHash` on login | DB password_hash got corrupted | Re-register the user; old hash is unrecoverable |
 | All 0-score jobs in `user_feed` | No user profile / empty `SearchConfig` | `setup-profile` or check `keywords.py` (empty defaults since 3ba1342) |
 | One source always fails | Likely auth/markup change | See §8 above; in worst case mark `enabled=False` (no such flag yet — comment out of `SOURCE_REGISTRY`) |
-| `ModuleNotFoundError: aiosqlite` | Backend deps not installed in this env | `pip install -e backend/` or `pip install -r backend/requirements.txt` |
+| `ModuleNotFoundError: psycopg` | Backend deps not installed in this env | `pip install -e .` from `backend/` (these commands assume `cwd = backend/`, so a `backend/`-prefixed path would resolve to `backend/backend/`). There is **no `requirements.txt`** — `backend/pyproject.toml` is the only dependency manifest. Note: **`aiosqlite` is not a dependency** — every module does `from src.repositories import pg as aiosqlite`, so the name is a local alias for the Postgres shim, never an installed package |
 | Notification rule fires but no message arrives | Channel credential decrypted wrong, or Apprise URL malformed | `POST /api/settings/channels/{id}/test` to surface the error |
 | Pipeline shows "stalled" too aggressively | Default is 7-day threshold | Hard-coded in `pipeline.py` reminder logic — adjust there |
-| Hybrid retrieval returns 0 results | ChromaDB empty or `SEMANTIC_ENABLED=false` | Check `VectorIndex.count()`; if zero, re-ingest with the flag on |
+| Hybrid retrieval returns 0 results | No row carries a vector, or `SEMANTIC_ENABLED=false` | `SELECT count(*) FROM job_embeddings WHERE embedding IS NOT NULL` (that is exactly what `PgVectorIndex.count()` runs); if zero, see §10 "Embeddings look wrong / stale" — it is usually pgvector missing or the worker lacking `[semantic]`, not an empty run |
 
 ---
 
-*Last updated 2026-05-28. HEAD `cb52eb7`. Commands tested against the layout on `claude/job-logistics-pillars-docs-H9zcw`.*
+*Originally written 2026-05-28 (HEAD `cb52eb7`), against the pre-Postgres SQLite layout.
+Re-verified against code 2026-08-24 by the nightly doc-truth routine: the DB access
+commands, the `/api/runs` paths, the keyed/scraper source lists, the re-score answers and
+the worker env list were all stale and are corrected above. This file is now a LIVING doc —
+if you change one of these facts, change it here too.*

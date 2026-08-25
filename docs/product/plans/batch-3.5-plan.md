@@ -1,4 +1,7 @@
 # Pillar 3 — Batch 3.5 Stabilisation Plan
+<!-- doc: PLAN -->
+
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 > **For agentic workers:** REQUIRED SUB-SKILLS: `superpowers:test-driven-development`, `superpowers:verification-before-completion`. Steps use checkbox syntax.
 

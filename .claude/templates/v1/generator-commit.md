@@ -1,3 +1,4 @@
+<!-- doc: LIVING -->
 <!--
 Generator commit template — v1.
 

@@ -4,6 +4,7 @@ description: Adversarial correctness reviewer (the R3 "bugs" lens). Reviews a di
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
+<!-- doc: LIVING -->
 
 You are the **R3 bug-hunting reviewer** for Job360. Your one job: find REAL correctness
 bugs in the code under review — nothing else. docs/fable/06 codified this lens (it used to

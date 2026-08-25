@@ -1,4 +1,7 @@
 # Pillar 3 Batch 1 Implementation Plan — Date Model + Ghost Detection
+<!-- doc: PLAN -->
+
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended for the 39 per-source fixes in Task 7) or superpowers:executing-plans (for serial tasks 1-6, 8-10). Steps use checkbox (`- [ ]`) syntax for tracking.
 

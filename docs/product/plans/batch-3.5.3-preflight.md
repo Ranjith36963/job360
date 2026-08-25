@@ -1,4 +1,7 @@
 # Batch 3.5.3 — Conditional-Fetch Pre-Flight Report
+<!-- doc: PLAN -->
+
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 **Run:** 2026-04-19 by `scripts/preflight_conditional_cache.py`
 **Log:** `/tmp/preflight_3_5_3.log`

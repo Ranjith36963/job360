@@ -1,4 +1,5 @@
 # STORY.md — the true story of Job360
+<!-- doc: LIVING -->
 
 `CLAUDE.md` tells an agent **how to work**.
 `STORY.md` tells the owner **what is actually true** — the product, in plain words, and then the
@@ -76,7 +77,7 @@ fetched ─► UK door ─► 4-layer dedup ─► scored ─► judged ─► y
 What you get back: a dashboard of scored jobs with filters; a detail page with an 8-axis radar of why
 it scored what it scored; an AI-tailored CV and cover letter per job with each line marked *your fact*
 or *AI-added*; a Kanban tracker where "ghosted" is its own column because silence is not a rejection;
-and alerts over email, Slack, Discord, Telegram or webhook with quiet hours in your timezone.
+and alerts over email (the supported channel) or webhook (a raw-JSON escape hatch for technical users) with quiet hours in your timezone.
 
 Underneath: Argon2 passwords and magic links, encrypted channel credentials, SSRF guards checked
 twice, a GDPR export and a real hard delete, an audit log, circuit breakers per source, 31 migrations.
@@ -136,7 +137,7 @@ message to anyone.**
 ### The evaluation exists, and it is the best work in this repo
 
 I claimed relevance had never been measured. False, twice over. `backend/scripts/accuracy_audit.py`
-plus ten sibling scripts, and **six documented iterations** in `docs/engine_eval_audit_log.md`:
+plus ten sibling scripts, and **six documented iterations** in `harness/eval/engine_eval_audit_log.md`:
 
 - 100 gold-graded jobs, blind, shuffled, scores hidden from the grader
 - 16 engine combinations, bootstrap 95% CIs, paired significance tests

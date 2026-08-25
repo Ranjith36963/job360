@@ -298,14 +298,28 @@ def test_an_open_pr_anchor_is_never_judged_stale(findings):
     assert all(f.anchor == "unknown" for f in open_findings)
     assert all(f.bucket != "stale-and-closeable" for f in open_findings)
 
-    # The sharpest case: an open PR whose file this checkout does not have, so
-    # "judge it against the working tree" and "leave it unknown" give visibly
+    # The sharpest case: an open PR whose file the JUDGING TREE does not have,
+    # so "judge it against the tree" and "leave it unknown" give visibly
     # different answers.
-    absent = [f for f in open_findings if not (REPO / f.path).exists()]
+    #
+    # AGAINST `TREE`, NOT `REPO`, AND THIS LINE HAS ALREADY BEEN WRONG TWICE.
+    # It used to read `not (REPO / f.path).exists()` — the same coupling the
+    # docstring above describes, one layer further down. Every finding here is
+    # parsed against `TREE`, a three-file synthetic tree declared at the top of
+    # this file precisely so that no verdict depends on git state, and then the
+    # EXAMPLE was chosen by asking the real checkout.
+    #
+    # It fired on 2026-08-24: PR #380 created `.github/workflows/auto-merge.yml`
+    # — one of the recorded open-PR paths — and with the last absent path now
+    # present the test refused rather than passing vacuously. That is the guard
+    # working exactly as built; it was simply pointed at the wrong tree. Asking
+    # TREE is both more correct and immune, because TREE is a literal a few
+    # lines up and no commit anywhere can change what it contains.
+    absent = [f for f in open_findings if TREE.line_count(f.path) is None]
     assert absent, (
-        "every open-PR finding in the recording now points at a file that "
-        "EXISTS in this checkout, so this test can no longer tell "
-        "'anchored to the branch' from 'anchored to the worktree'. Re-record "
+        "no open-PR finding in the recording sits on a path outside the "
+        "synthetic TREE, so this test can no longer tell 'anchored to the "
+        "branch' from 'anchored to the judging tree'. Narrow TREE, or re-record "
         "scripts/fixtures/review_threads/ against a PR that is still open."
     )
     assert all(f.anchor == "unknown" for f in absent)

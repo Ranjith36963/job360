@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 };
 
 // A legal document states when it changed; never derive this at render time.
-const LAST_UPDATED = "24 July 2026";
+const LAST_UPDATED = "24 August 2026";
 
 const SUBPROCESSORS: {
   name: string;
@@ -134,8 +134,8 @@ export default function PrivacyPage() {
             </li>
             <li>
               <span className="text-foreground">Consent</span> — sending
-              notifications to channels you connect (email, Slack, Discord,
-              Telegram). You can disconnect a channel at any time.
+              notifications to channels you connect (email or a webhook you
+              control). You can disconnect a channel at any time.
             </li>
             <li>
               <span className="text-foreground">Legitimate interest</span> —

@@ -1,3 +1,4 @@
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 # Glossary — Job360 Vocabulary
 
 A reference for terms used across the three pillar docs. Cross-cutting; not pillar-specific. When in doubt about a word, look here first.
@@ -8,7 +9,7 @@ A reference for terms used across the three pillar docs. Cross-cutting; not pill
 
 ### Apprise
 
-Open-source library that lets one Python call fan out to ~80 notification services (email, Slack, Discord, Telegram, Pushover, SMS providers, …) by passing a URL like `slack://tok/tok/tok`. Job360 uses it as the per-user channel delivery layer.
+Open-source library that lets one Python call fan out to ~80 notification services by passing a URL like `resend://key:from/to/`. Job360 uses it as the per-user channel delivery layer, but deliberately for **only two** of those ~80: `email` (via `resend://` — Railway blocks outbound SMTP ports) and `webhook` (via `json://`). Slack, Discord and Telegram were removed on 2026-08-24; Apprise supporting a service has never been a reason to ship it. See `docs/plans/2026-08-24-email-webhook-only-delivery.md`.
 **Code:** `backend/src/services/channels/dispatcher.py` (lazy-imported per rule #11) · **Pillar 1**
 
 ### Argon2id
@@ -47,12 +48,12 @@ The `jobs`, `job_enrichment`, and `job_embeddings` tables — *no* `user_id` col
 
 ### Channel
 
-A user's configured notification destination — one row in `user_channels` with a Fernet-encrypted Apprise URL. Five types today: `email`, `slack`, `discord`, `telegram`, `webhook`.
+A user's configured notification destination — one row in `user_channels` with a Fernet-encrypted Apprise URL. Two types today: `email` (the supported product surface) and `webhook` (an unsupported raw-JSON escape hatch for technical users).
 **Code:** `backend/src/services/channels/`, table `user_channels` (migration `0005`) · **Pillar 1**
 
-### ChromaDB
+### ChromaDB (legacy — superseded)
 
-The vector database storing job embeddings on disk at `backend/data/chroma/`. Wrapped by `VectorIndex`. Lazy-imported only when `SEMANTIC_ENABLED=true`.
+The on-disk vector database job embeddings USED to live in, at `backend/data/chroma/`, wrapped by `VectorIndex`. Migration `0027` moved the vectors into Postgres on 2026-08-07 and **no production call site constructs `VectorIndex` any more** — the class still builds a real Chroma client when called, and two `backend/scripts/` helpers plus two tests still import it, but the live store is `PgVectorIndex`. See **Vector store** below.
 **Code:** `backend/src/services/vector_index.py` · **Pillar 2**
 
 ### Conditional fetch
@@ -87,14 +88,15 @@ A *batched* notification sent at a scheduled time (e.g. 08:00 in user's timezone
 
 ### ESCO
 
-European Skills, Competences, Qualifications and Occupations — a multilingual standard taxonomy. Job360 uses ESCO URIs to canonicalise CV skills when `SEMANTIC_ENABLED=true`.
+European Skills, Competences, Qualifications and Occupations — a multilingual standard taxonomy. Job360 has the code to canonicalise CV skills to ESCO URIs, but **it has never run**: `_maybe_normalise_skills_via_esco()` needs `SEMANTIC_ENABLED=true` **and** `is_available()` (`cv_parser.py:821,830`), and the index artefacts were never built, so it is an identity transform in every environment (rule #28).
 **Code:** `_maybe_normalise_skills_via_esco()` in `cv_parser.py` · **Pillars 1 + 2**
 
 ### Feature flags
 
-Two env-var booleans that gate Pillar-2's advanced features, both **default off** (rule #18):
-- `ENRICHMENT_ENABLED` — LLM enrichment + DB writes + multi-dim scoring activation
-- `SEMANTIC_ENABLED` — embeddings + ChromaDB + hybrid retrieval + ESCO
+Three legacy toggles gate Pillar-2's advanced engines, each paired with an `ENGINEx_ENABLED` equivalent that opens the same gate — six names, six **defaults off** (rule #18). `ENGINE1_ENABLED` (keyword) is the only engine switch that defaults ON and has no legacy partner. Guard: `backend/tests/test_engine_switches.py::test_engine_switch_defaults` pins E1 true / E2-E4 false.
+- `ENRICHMENT_ENABLED` — LLM enrichment + `job_enrichment` DB writes. All eight E2 call sites read `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`backend/src/main.py:853,1137`; `backend/src/services/rescore.py:85,345,527`; `backend/src/workers/tasks.py:237,876`; `backend/src/api/routes/jobs.py:779`), so either name switches it on. It does **not** activate multi-dim scoring: that path is gated on `user_preferences` alone (`backend/src/services/skill_matcher.py:587`, rule #20) — the flag only decides whether the dims have real data or their neutral halves
+- `SEMANTIC_ENABLED` — writes embeddings into the pgvector store. Hybrid retrieval reads `ENGINE3_ENABLED or SEMANTIC_ENABLED`; ESCO needs this flag AND index artefacts that were never built, so it stays a no-op either way
+- `MATCHER_ENABLED` — the Engine 4 LLM judge. Both call sites read `ENGINE4_ENABLED or MATCHER_ENABLED` (`backend/src/main.py:352`, `backend/src/services/rescore.py:589`); the second decides whether a profile re-score clears the user's stored verdicts (`backend/src/services/rescore.py:595-598`)
 
 ### Feed (user_feed)
 
@@ -118,7 +120,7 @@ Mechanism that finds jobs that have *quietly disappeared* from their source (job
 
 ### Hybrid retrieval
 
-Combination of keyword search (SQL `match_score` rank) + semantic search (ChromaDB k-NN) fused via RRF, optionally reranked by a cross-encoder. The `?mode=hybrid` query param invokes it. Opt-in via `SEMANTIC_ENABLED`.
+Combination of keyword search (SQL `match_score` rank) + semantic search (pgvector k-NN over `job_embeddings.embedding`) fused via RRF, optionally reranked by a cross-encoder. The `?mode=hybrid` query param invokes it. Opt-in via `SEMANTIC_ENABLED`.
 **Code:** `backend/src/services/retrieval.py:retrieve_for_user()` · **Pillar 2**
 
 ### Idempotency key
@@ -191,7 +193,7 @@ The four concentric layers of the User pillar: Identity → Profile → Delivery
 
 ### Run (run_search / run_log)
 
-A single end-to-end pass of the pipeline. Tagged with a `run_uuid` correlation id in a `contextvar`; logged to `run_log` with per-source error counts and durations (migration `0010`). Surfaced via `GET /api/runs`.
+A single end-to-end pass of the pipeline. Tagged with a `run_uuid` correlation id in a `contextvar`; logged to `run_log` with per-source error counts and durations (migration `0010`). Surfaced via `GET /api/runs/recent` and `GET /api/runs/source-health` (`backend/src/api/routes/runs.py:63,150`); there is no bare `GET /api/runs`.
 **Code:** `backend/src/main.py:run_search()` · **Pillar 2**
 
 ### ScoreBreakdown
@@ -234,9 +236,14 @@ Where in the application funnel a user's `applications` row lives: `applied` →
 Polling-cadence bucket for sources. Today: `ats`=60s, `reed`=5min, `workday`=15min, `rss`=15min, `scrapers`=60min, `keyed_api`=60min, `free_json`=60min, `default`=60min. Source's `.category` attribute picks the tier; `NAME_TIER` dict has name-level overrides.
 **Code:** `backend/src/services/scheduler.py:TIER_INTERVALS_SECONDS` · **Pillar 2**
 
+### Vector store (PgVectorIndex)
+
+The live vector store: the `embedding` column on `job_embeddings`, a pgvector `vector` type added by migration `0027` (2026-08-07). The vector sits in the SAME row as its audit stamp, so "we recorded this job as embedded" and "we actually have its vector" cannot disagree. Cosine distance (`<=>`), exact scan, no ANN index yet. On a Postgres without the `vector` extension the migration is a tolerant no-op and every method degrades to empty rather than raising.
+**Code:** `backend/src/services/pg_vector_index.py` · **Pillar 2**
+
 ### Worker (ARQ tasks)
 
-The background process that runs `score_and_ingest`, `send_notification`, `send_daily_digest`, `nightly_ghost_sweep`, `enrich_job_task`. Tests call these as pure async functions; production runs them under ARQ + Redis.
+The background process that runs `score_and_ingest`, `send_notification`, `send_bundle`, `notification_tick`, `nightly_ghost_sweep`, `enrich_job_task`. Tests call these as pure async functions; production runs them under ARQ + Redis.
 **Code:** `backend/src/workers/tasks.py` · **Pillars 1 + 2**
 
 ---

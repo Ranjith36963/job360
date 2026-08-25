@@ -1,4 +1,7 @@
 # M7 — OpenAPI→TS codegen: tool comparison + recommendation
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 **Status: RESEARCH ONLY — awaiting owner approval before any implementation.**
 Researched 2026-06-12 (integrator round, owner-directed). Sources at bottom.

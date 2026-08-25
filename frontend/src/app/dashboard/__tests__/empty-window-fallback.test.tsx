@@ -113,9 +113,21 @@ describe("DashboardPage — F2 empty-window fallback", () => {
     render(<DashboardPage />, { wrapper: makeWrapper() });
 
     // The widened fetch lands and the fallback job renders.
-    await waitFor(() => {
-      expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
-    });
+    //
+    // Explicit 5s timeout, not the 1s default. This assertion waits on TWO
+    // sequential React Query round-trips — the empty 168h window, then the
+    // widened all-time refetch — so it needs roughly double the budget of a
+    // normal one-fetch wait. On an unloaded machine it settles in ~430ms; in
+    // the full 48-file suite it was measured at 2307ms and failed the 1s
+    // default. The assertion is unchanged: the widen must still happen and the
+    // notice must still appear. Only the patience is different, so a busy CI
+    // box or dev machine stops producing a red that says nothing about the code.
+    await waitFor(
+      () => {
+        expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
 
     // The notice is shown above the grid.
     expect(screen.getByText(NOTICE_TEXT)).toBeInTheDocument();
@@ -146,9 +158,15 @@ describe("DashboardPage — F2 empty-window fallback", () => {
 
     render(<DashboardPage />, { wrapper: makeWrapper() });
 
-    await waitFor(() => {
-      expect(screen.getByText("Data Scientist")).toBeInTheDocument();
-    });
+    // Same 5s budget as its sibling above, for the same reason. This one waits
+    // on a single fetch so it is less exposed, but leaving it at the 1s default
+    // would just make it the next test to go red on a loaded machine.
+    await waitFor(
+      () => {
+        expect(screen.getByText("Data Scientist")).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
 
     expect(screen.queryByText(NOTICE_TEXT)).not.toBeInTheDocument();
 

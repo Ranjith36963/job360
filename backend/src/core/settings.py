@@ -105,33 +105,45 @@ SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 
-# Slack / Discord webhooks
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+# NOTE (2026-08-24) — the per-user Slack / Discord / Telegram delivery channels
+# were removed. Nine settings lived here for them: SLACK_WEBHOOK_URL,
+# DISCORD_WEBHOOK_URL (which had ZERO consumers anywhere in the codebase — dead
+# on arrival), SLACK_CLIENT_ID/SECRET, DISCORD_CLIENT_ID/SECRET,
+# TELEGRAM_BOT_TOKEN/USERNAME, and OAUTH_REDIRECT_BASE, which existed solely to
+# build the Slack and Discord OAuth redirect URIs.
+#
+# Delivery is email + webhook only. See
+# docs/plans/2026-08-24-email-webhook-only-delivery.md
+#
+# Do NOT confuse these with the CI/harness alerting secrets of the same family
+# (SLACK_BOT_TOKEN, and the repo-level SLACK_WEBHOOK_URL used by
+# .github/actions/slack). Those page the owner when a build breaks, are
+# configured as GitHub repo secrets rather than app settings, and are untouched.
 
-# Slack OAuth App credentials (one-click connect flow).
-# Register at https://api.slack.com/apps — set OAuth redirect URL to
-# {OAUTH_REDIRECT_BASE}/api/settings/channels/callback/slack
-# Leave blank (default) to disable the /connect/slack endpoint.
-SLACK_CLIENT_ID = os.getenv("SLACK_CLIENT_ID", "")
-SLACK_CLIENT_SECRET = os.getenv("SLACK_CLIENT_SECRET", "")
-# Public-facing base URL of this deployment (no trailing slash).
-# Used to build the OAuth redirect_uri sent to Slack and Discord.
-OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "")
-
-# Discord OAuth App credentials (one-click connect flow).
-# Register at https://discord.com/developers/applications — add the
-# incoming-webhook scope and set the redirect URL to
-# {OAUTH_REDIRECT_BASE}/api/settings/channels/callback/discord
-# Leave blank (default) to disable the /connect/discord endpoint.
-DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
-DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
-
-# Telegram Bot credentials (deep-link + poll connect flow).
-# Create a bot via @BotFather on Telegram to obtain both values.
-# Leave blank (default) to disable the /connect/telegram endpoint.
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")
+# Where a link in a delivered notification points. Every job link in an email
+# is built from this, never from the employer's raw ``apply_url`` — the click
+# has to land on our page so we can (a) attribute it, (b) say "this closed"
+# instead of dumping the reader on a 404, and (c) not look like the scam mail
+# job seekers are drowning in.
+#
+# A PARAMETER, not a hardcode: staging, preview deploys and local dev all need
+# a different origin, and a link that silently points at production from a
+# staging send is a real way to mislead a real person.
+# NORMALISE FIRST, fall back LAST. This got written wrong three times, each a
+# narrower version of the same mistake — every one of which would have shipped
+# job links with no origin ("/jobs/147" in someone's inbox, resolving to
+# nothing):
+#   1. `os.getenv("SITE_BASE_URL", default)` — a getenv default never fires for
+#      a var that is SET BUT EMPTY, which is what a blank Railway variable or a
+#      bare `SITE_BASE_URL=` line in .env produces.
+#   2. `os.getenv(...) or default` — closes (1), but `" "` is truthy, so the
+#      fallback is skipped and the later .strip() empties it again.
+#   3. `(...strip() or default).rstrip("/")` — closes (2), but `"/"` and `"///"`
+#      are truthy AND survive the fallback, then rstrip turns them into "".
+# The fix is to do every transformation the value needs, and only then decide
+# whether what is left is usable. Guard: tests/test_site_base_url.py.
+_SITE_BASE_URL_RAW = os.getenv("SITE_BASE_URL", "").strip().rstrip("/")
+SITE_BASE_URL = _SITE_BASE_URL_RAW or "https://job360.uk"
 
 # Search
 # MIN_MATCH_SCORE is the *display* floor — the default "good enough to show"
@@ -436,10 +448,11 @@ REQUEST_TIMEOUT = 30
 USER_AGENT = "Job360/1.0 (UK Job Search Aggregator)"
 
 # Hard ceiling (seconds) on a single source's whole fetch_jobs() call. The
-# scheduler gathers all ~49 sources at once, so without this one slow/hanging
-# source (a blocked host, a JobSpy scrape, a stuck ATS slug loop) would freeze
-# the entire search — the "Refresh hangs" bug. A source that exceeds this is
-# cancelled and counted as a failure; every other source's results still land.
+# scheduler gathers every registered source at once, so without this one
+# slow/hanging source (a blocked host, a JobSpy scrape, a stuck ATS slug loop)
+# would freeze the entire search — the "Refresh hangs" bug. A source that
+# exceeds this is cancelled and counted as a failure; every other source's
+# results still land.
 # Generous enough for legit multi-request sources (REQUEST_TIMEOUT is per
 # request); since sources run concurrently, total search ~= this value.
 SOURCE_FETCH_TIMEOUT = int(os.getenv("SOURCE_FETCH_TIMEOUT", "60"))

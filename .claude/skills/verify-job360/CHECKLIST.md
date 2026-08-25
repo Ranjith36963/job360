@@ -1,4 +1,5 @@
 # Job360 — Full End-to-End Sweep Checklist (the loop's contract)
+<!-- doc: LIVING -->
 
 **Purpose:** the authoritative list a complete `/verify-job360` run must cover — every
 feature, page, button, and route, from landing on the site to closing it. A "full sweep"
@@ -12,7 +13,7 @@ register a fresh user, then walk the list top to bottom. Prove each with evidenc
 not fired (needs external service or sample data) · `GATED` = needs infra not present.
 
 **Standing gates (note in every report until resolved):**
-- **Real notification delivery (#40)** needs **Redis + the ARQ worker** running. Redis not
+- **Real notification delivery (#38)** needs **Redis + the ARQ worker** running. Redis not
   installed by default → mark GATED unless present (`redis-cli ping`).
 - **LinkedIn enrich (#12)** needs a sample LinkedIn PDF in `test-artifacts/`.
 - **GitHub enrich (#13)** hits **live GitHub** (rate-limited; needs a real handle).
@@ -22,7 +23,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 ---
 
 ## A. Landing & entry
-- [ ] 1. Landing `/` renders — hero, stats card, CTAs. **The card should read 41 sources** (41 registry keys; 40 live instances). ⚠️ As of 2026-08-24 the frontend still hardcodes **47** in four places — `src/app/page.tsx:287`, `src/components/layout/Footer.tsx:49`, `src/app/layout.tsx:37,40,47` (the last two feed the OG/Twitter cards). Until that is fixed this box FAILS; do not "correct" it to 47 to make it pass.
+- [ ] 1. Landing `/` renders — hero, stats card, CTAs. **The card should read 41 sources** (41 registry keys; 40 live instances). The hardcoded **47** that made this box fail through 2026-08-24 is gone: every rendered count — hero, stats card, footer strapline, and the OG/Twitter card metadata — now reads `SOURCE_COUNT` from `frontend/src/lib/catalog.ts` (`page.tsx`, `layout.tsx`, `Footer.tsx`). If the number on screen disagrees with `SOURCE_REGISTRY`, the bug is in that one constant, and `scripts/doc_sync_check.py` (guard `landing-source-count`) should already be red.
 - [ ] 2. Every nav + footer link and the Get-started / Login buttons navigate correctly
 
 ## B. Auth (full lifecycle)
@@ -67,33 +68,31 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 - [ ] 33. Kanban drag — mouse AND keyboard (a11y: Space pick up, arrows move, Enter drop, Esc cancel)
 
 ## G. Channels
-- [ ] 34. Providers status → `GET /providers` (slack/discord/telegram availability)
-- [ ] 35. Channel create / list / delete → CRUD + `DELETE /{channel_id}` (email + webhook work without OAuth)
-- [ ] 36. Test-send → `POST /{channel_id}/test`
-- [ ] 37. OAuth connect flows — Slack/Discord/Telegram (`/connect/*`, `/callback/*`, telegram poll) — CODE unless OAuth creds set
+- [ ] 34. Channel create / list / delete → CRUD + `DELETE /{channel_id}` (email + webhook work without OAuth)
+- [ ] 35. Test-send → `POST /{channel_id}/test`
 
 ## H. Notifications
-- [ ] 38. Notification rules — `POST/GET/PUT /settings/notification-rule`, rule row lands
-- [ ] 39. History + stats → `GET /api/notifications`, `/notifications/stats`
-- [ ] 40. **Actual delivery** (GATED: Redis + ARQ worker) — fire a real send through a configured channel and confirm the ledger row
+- [ ] 36. Notification rules — `POST/GET/PUT /settings/notification-rule`, rule row lands
+- [ ] 37. History + stats → `GET /api/notifications`, `/notifications/stats`
+- [ ] 38. **Actual delivery** (GATED: Redis + ARQ worker) — fire a real send through a configured channel and confirm the ledger row
 
 ## I. Account management
-- [ ] 41. Password change guard — wrong current password → 401 (rule #26), tested non-destructively
-- [ ] 42. Email change → `PATCH /users/me/email` (verify current password first)
-- [ ] 43. Account delete → `DELETE /users/me` soft-delete (sets `deleted_at`; restore after to keep the demo account)
+- [ ] 39. Password change guard — wrong current password → 401 (rule #26), tested non-destructively
+- [ ] 40. Email change → `PATCH /users/me/email` (verify current password first)
+- [ ] 41. Account delete → `DELETE /users/me` soft-delete (sets `deleted_at`; restore after to keep the demo account)
 
 ## J. Ops / admin
-- [ ] 44. Source health → `GET /runs/source-health` 200 (note: no role gate — any logged-in user)
-- [ ] 45. Recent runs → `GET /runs/recent` (feeds the `/admin/runs` UI)
+- [ ] 42. Source health → `GET /runs/source-health` 200 (note: no role gate — any logged-in user)
+- [ ] 43. Recent runs → `GET /runs/recent` (feeds the `/admin/runs` UI)
 
 ## K. Cross-cutting
-- [ ] 46. Every page renders with no console errors: `/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/dashboard`, `/jobs/[id]`, `/pipeline`, `/profile`, `/settings/channels`, `/settings/notifications`, `/settings/account`, `/notifications`
-- [ ] 47. Theme toggle works; spot-click every primary button on every page (no dead buttons)
+- [ ] 44. Every page renders with no console errors: `/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/dashboard`, `/jobs/[id]`, `/pipeline`, `/profile`, `/settings/channels`, `/settings/notifications`, `/settings/account`, `/notifications`
+- [ ] 45. Theme toggle works; spot-click every primary button on every page (no dead buttons)
 
 ---
 
 ## Report format
 Produce a table: `# | item | LIVE/CODE/GATED/FAIL | evidence`. End with:
-- counts (e.g. "42 LIVE, 3 CODE, 1 GATED, 1 FAIL")
+- counts (e.g. "40 LIVE, 3 CODE, 1 GATED, 1 FAIL")
 - the FIRST real FAIL with exact file:line + error (if any)
 - what's needed to close the gates (install Redis; add LinkedIn sample; set OAuth creds)

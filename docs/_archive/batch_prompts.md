@@ -1,4 +1,7 @@
 # Batch Prompts — Pillar 3
+<!-- doc: FROZEN -->
+
+> **FROZEN — closed or superseded.** Kept as evidence of what was true then. Do not act on it. <!-- banner: auto -->
 
 > **Worktrees already exist at absolute paths:**
 > - Generator: `C:\Users\Ranjith\OneDrive\Documents\job360\.claude\worktrees\generator`

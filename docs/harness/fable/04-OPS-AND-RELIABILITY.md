@@ -1,4 +1,7 @@
 # 04 — Ops & Reliability
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 > Source: ops/infra sweep (Sonnet), the top P0 **independently verified by Fable**.
 > Read-only, evidence as `file:line`. **Headline:** your backup engineering and

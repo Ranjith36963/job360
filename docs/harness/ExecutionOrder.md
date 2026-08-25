@@ -1,4 +1,7 @@
 # Job360 Execution Order — End-to-End Sync & Launch Readiness
+<!-- doc: PLAN -->
+
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 > **Status:** Planning doc. No code changes executed. Author: synthesised from 6 parallel audit agents on 2026-04-23 after pausing Pillar 3 Batch 4.
 >

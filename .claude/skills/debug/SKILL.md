@@ -1,4 +1,5 @@
 # /debug — Unified Debugging
+<!-- doc: LIVING -->
 
 **Methodology: CRIIVP** — Capture → Reproduce → Isolate → Implement → Verify → Prevent
 
@@ -31,9 +32,14 @@ from src.services.profile.storage import load_profile
 from src.services.profile.keyword_generator import generate_search_config
 from src.services.skill_matcher import JobScorer
 
-profile = load_profile()
+import sys
+user_id = sys.argv[1] if len(sys.argv) > 1 else ''
+if not user_id:
+    print('ERROR: pass a user_id — load_profile(user_id) is per-user since multi-tenant.')
+    exit(1)
+profile = load_profile(user_id)
 if not profile:
-    print('ERROR: No profile loaded. Run setup-profile first.')
+    print(f'ERROR: no profile for {user_id}. Run setup-profile first.')
     exit(1)
 
 config = generate_search_config(profile)
@@ -175,7 +181,8 @@ If the user provides `[source]` or `[severity]`, filter the output accordingly.
 > (the old `SlackChannel`/`DiscordChannel`/`EmailChannel` are gone). They are now
 > **per-user**: `src/services/channels/dispatcher.py::dispatch()` reads the user's single
 > `notification_rules` row + their Fernet-encrypted `user_channels` and sends via Apprise.
-> There is no standalone "send to slack" — a test-send needs a user context.
+> There is no standalone "send to slack" — and since 2026-08-24 there is no Slack
+> channel at all. Delivery is email + webhook only; a test-send needs a user context.
 
 Verify the notification path is importable and inspect a user's channel config:
 
@@ -201,7 +208,7 @@ async def main():
             'SELECT channel_type, enabled FROM user_channels WHERE user_id = ?', (uid,)
         )).fetchall()
         rule = await (await db.execute(
-            'SELECT notify_mode, min_score FROM notification_rules WHERE user_id = ?', (uid,)
+            'SELECT notify_mode, score_threshold FROM notification_rules WHERE user_id = ?', (uid,)
         )).fetchone()
         print(f'user {uid}: {len(chans)} channel(s)')
         for c in chans:

@@ -41,7 +41,382 @@ CASES: list[tuple[str, str, str, str]] = [
     ("ARCHITECTURE.md", r"across (\d+) `?test_\*\.py`? files", "across 999 test_*.py files", "test-files"),
     ("frontend/CLAUDE.md", r"Next\.js (\d+\.\d+\.\d+)", "Next.js 1.2.3", "nextjs-version"),
     ("frontend/CLAUDE.md", r"React (\d+\.\d+\.\d+)", "React 4.5.6", "react-version"),
+    # Second promotion batch, 2026-08-24.
+    ("docs/product/pillars/03-job-providers.md",
+     r"checking all (\d+) subclasses", "checking all 999 subclasses", "subclasses"),
+    ("docs/product/pillars/glossary.md",
+     r"`RATE_LIMITS` dict in `settings\.py` \((\d+) entries",
+     "`RATE_LIMITS` dict in `settings.py` (999 entries", "rate-limits"),
+    # Third batch, 2026-08-24 — the glossary's remaining countable facts.
+    ("docs/product/pillars/glossary.md",
+     r"\((\d+) slugs across \d+ platforms\)", "(999 slugs across 11 platforms)", "ats-slugs"),
+    ("docs/product/pillars/glossary.md",
+     r"\(\d+ slugs across (\d+) platforms\)", "(302 slugs across 99 platforms)", "ats-platforms"),
+    ("docs/product/pillars/glossary.md",
+     r"every source must produce: (\d+) fields", "every source must produce: 999 fields", "job-fields"),
+    ("docs/product/pillars/glossary.md",
+     r"shape with (\d+) strict-typed fields", "shape with 999 strict-typed fields",
+     "enrichment-fields"),
+    ("docs/product/pillars/glossary.md",
+     r"strict-typed fields, (\d+) enums", "strict-typed fields, 99 enums", "enrichment-enums"),
+    # The only CODE file guarded here. It shipped "47 Job Sources" to every
+    # visitor of job360.uk for a week after the roster dropped to 41.
+    # The only CODE files guarded here. The copy shipped "47 Job Sources" to
+    # every visitor of job360.uk for a week after the roster dropped to 41 --
+    # on the landing page, in the site metadata Google and social cards read,
+    # and in the footer on every page.
+    #
+    # The constant is drilled SEPARATELY and deliberately. The first version of
+    # this guard filtered lines with `"ource" not in line`, which skipped
+    # `SOURCE_COUNT = 41` because that spelling is uppercase: setting it to 99
+    # left the report green. Drilling only the page copy would never have found
+    # that. One capital letter, one blind guard.
+    ("frontend/src/lib/catalog.ts",
+     r"SOURCE_COUNT = (\d+)", "SOURCE_COUNT = 999", "landing-source-count"),
+    # Eighth batch, 2026-08-25. The disagreement guard: does one doc contradict
+    # ANOTHER doc about a named constant? Six of ten findings in the cycle that
+    # prompted it were exactly this, twice within a single file.
+    #
+    # The mutation flips one of the two agreeing ENRICHMENT_MIN_SCORE claims,
+    # which is the only way to make a DISAGREEMENT guard red: with every copy
+    # equal there is nothing to disagree about.
+    # Anchored on UK_LOCATIONS, which README.md and ARCHITECTURE.md both state
+    # as 25. Flipping ONE of an agreeing pair is the only mutation that can
+    # make a DISAGREEMENT guard red: with every copy equal there is nothing to
+    # disagree about.
+    #
+    # The first draft mutated a line reading "the old ENRICHMENT_THRESHOLD=60
+    # gate never fired" -- which this guard deliberately SKIPS, because a doc
+    # explaining a retired value has to name it. The drill reported the guard
+    # blind, correctly: I had pointed it at the one line the guard is designed
+    # not to read.
+    ("ARCHITECTURE.md",
+     r"`LOCATIONS` \((\d+)\) and", "`LOCATIONS` (777) and", "disagree:LOCATIONS"),
+    # Fourth batch, 2026-08-24, from the nightly routine.
+    #
+    # suite-baseline is the odd one out and the point of it: every other guard
+    # asks "does this doc match the code?". This one asks "do two docs disagree
+    # with EACH OTHER?" -- the question none of the others can ask, and the one
+    # that would have caught README.md contradicting itself on a single page
+    # (3,297 collected at :124, ~1,409 at :402) while every check stayed green.
+    # Breaking ONE doc's number is therefore a real mutation: it creates the
+    # disagreement.
+    # Points at CONTRIBUTING.md, not ARCHITECTURE.md, and the move is the
+    # lesson. #393 deleted the collected count from every doc that stated it as
+    # fact -- correctly: a number no guard can check against the code rots
+    # silently, so the fix is NO number, not a better one. That left this drill
+    # mutating a claim that no longer existed, and the drill SAID SO rather
+    # than passing quietly.
+    #
+    # CONTRIBUTING.md keeps it twice on purpose, as the merge-gate ratchet
+    # floor -- a policy threshold, not a claim about current state. Two sites
+    # is exactly what this guard needs: it fires on DISAGREEMENT, so mutating
+    # one of the pair is the only mutation that can make it red.
+    ("CONTRIBUTING.md",
+     r"([\d,]{3,}) collected", "9,999 collected", "suite-baseline"),
+    ("backend/CLAUDE.md",
+     r"(SQLite|Postgres) via psycopg3", "SQLite table via psycopg3", "stale-phrase"),
+    # Seventh batch, 2026-08-24. Skills are INSTRUCTIONS AGENTS EXECUTE, so a
+    # dead path there is worse than a wrong sentence: the scout skill told an
+    # agent to append its findings to `D:\dev\job360\docs\maintenance\MISSIONS.md`,
+    # a directory gone since the maintenance docs moved under docs/harness/.
+    # Every scout pass following that rule wrote nowhere. Four skills carried
+    # the same stale root, and scout/SKILL.md contradicted itself: line 9 had
+    # the correct path in prose, line 23 -- the operative rule -- had the dead one.
+    (".claude/skills/scout/SKILL.md",
+     r"docs\\(harness)\\maintenance\\MISSIONS\.md",
+     # Replacement goes through re.subn, so each literal backslash must be
+     # doubled here or `\n` / `\m` are read as escapes.
+     "docs\\\\nowhere\\\\maintenance\\\\MISSIONS.md", "skill-dead-path"),
+    # Sixth batch, 2026-08-24. The nightly routine found runbook.md still
+    # telling operators to run `sqlite3 data/jobs.db` against a Postgres
+    # database -- five dead COMMANDS, not stale prose. The four SQLite entries
+    # in FORBIDDEN_PHRASES all pin sentences; none matched a shell command.
+    ("docs/product/pillars/runbook.md",
+     # Anchored on `psql ` rather than the longer `railway run -s Postgres psql`
+     # form this drill originally targeted. #396 rewrote the runbook to use bare
+     # SQL blocks with a connect line, so the longer string vanished and the
+     # drill reported "guard watches nothing" -- correctly. Second time a drill
+     # has caught its own target being removed by someone else's fix (the first
+     # was suite-baseline after #393). That is the drill working, not failing.
+     r"(psql) postgresql://", "sqlite3 data/jobs.db postgresql://",
+     "stale-phrase"),
+    # Fifth batch, 2026-08-24. Two "N-thing schema" style guards promoted by the
+    # nightly routine after ARCHITECTURE.md carried "25-migration forward-compat
+    # schema" (real 31) and README.md's source-tree said `ats/ (12)` (real 10).
+    # The migration-head guard could not see either — it watches "0000 → NNNN"
+    # phrasing only — and no per-subfolder count was ever guarded.
+    # RETIRED 2026-08-25 with its guard. The migration count is now produced by
+    # gen_doc_blocks.py into ARCHITECTURE.md's code-facts block and the
+    # hand-written copies are deleted, so there is no claim left to mutate.
+    # The drill said so rather than passing quietly -- the fourth time this
+    # design has caught its own target disappearing, and the first time the
+    # target disappeared ON PURPOSE.
+    ("ARCHITECTURE.md",
+     r"\bats/\s*\((\d+)\)", "ats/ (999)", "subfolder-ats"),
+    # Sixth batch, 2026-08-25. The route guard: a documented endpoint that no
+    # router declares. Cycle 13 found `POST /api/pipeline/applications` in
+    # THREE places (real route: `POST /api/pipeline/{job_id}`, id in the path,
+    # no body) -- a doc lie that reads like a contract and 404s whoever trusts
+    # it. The mutation renames a REAL route to one that has never existed.
+    ("docs/product/pillars/glossary.md",
+     r"`GET (/api/runs/recent)`", "`GET /api/runs/definitely-not-a-route`",
+     "route-not-found"),
+    # The stamp guard. A KIND outside the five is as unreadable as no stamp at
+    # all -- both leave the routine unable to tell a dated record from a live
+    # claim, which is why thirteen cycles could never reach zero.
+    ("STATUS.md",
+     r"<!-- doc: (LIVING)", "<!-- doc: BOGUS", "unstamped-doc"),
+    # Ninth batch, 2026-08-25, and the most instructive promotion so far.
+    # `disagree:LOCATIONS` above was GREEN while FIVE living docs said 25 and
+    # the list held 26 -- because it asks "do two docs agree?", and they all
+    # agreed. Consensus is not verification: a doc-vs-doc check can only find
+    # disagreement, never a shared falsehood, and shared falsehoods are what
+    # docs drift toward because docs are copied from each other. The new guard
+    # counts the SOURCE. Both are kept: one is cheap and needs no extractor,
+    # the other is true.
+    #
+    # Anchored on the BACKTICKED prose form at ARCHITECTURE.md:10, not the
+    # tree-diagram line at :53. The first draft targeted the tree line, whose
+    # `LOCATIONS (26) + VISA_KEYWORDS (8)` carries no backticks, and the drill
+    # said "guard watches nothing" instead of passing quietly -- the third time
+    # a drill has caught its own target being rewritten by someone else's fix.
+    ("ARCHITECTURE.md",
+     r"Only `LOCATIONS` \((\d+)\) and `VISA_KEYWORDS`",
+     "Only `LOCATIONS` (999) and `VISA_KEYWORDS`",
+     "locations"),
 ]
+
+
+def structural_drills() -> list[str]:
+    """Drills for failure paths a TEXT mutation cannot express.
+
+    The CASES above all work by planting a lie in a file and re-running the
+    checker. Two failure modes cannot be reached that way, and CodeRabbit
+    caught both on the PR that added the migration/subfolder guards:
+
+    1. Deleting a source subfolder used to delete its own guard. The checker
+       discovered folders by iterating the directory, so removing ``ats/``
+       removed ``subfolder-ats`` too and left a stale ``ats/ (10)`` green
+       forever. There is no text to mutate here -- the bug is an ABSENT check.
+    2. The migration guard counted every ``*.up.sql`` while documenting the
+       ``NNNN_`` shape, so a gapped or malformed sequence (delete 0020, add
+       ``notes.up.sql``) kept both count and head unchanged and stayed green.
+
+    Both are checked against a THROWAWAY root, never the real tree: renaming a
+    live source package to prove a point is how a drill becomes an outage.
+    """
+    import tempfile  # noqa: PLC0415 — only this drill needs it
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import doc_sync_check as dsc  # noqa: PLC0415
+
+    failures: list[str] = []
+    real_root = dsc.ROOT
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = Path(tmp)
+        try:
+            dsc.ROOT = fake
+
+            # 1. Every expected subfolder must still yield a guard (count 0)
+            #    when backend/src/sources/ is not there at all.
+            counts = dsc.source_subfolder_counts()
+            for name in dsc.EXPECTED_SOURCE_SUBFOLDERS:
+                if name not in counts:
+                    failures.append(
+                        f"subfolder-{name}: guard VANISHES when the folder is missing "
+                        "— a deleted folder would silently retire its own check"
+                    )
+                elif counts[name] != 0:
+                    failures.append(
+                        f"subfolder-{name}: missing folder scored {counts[name]}, expected 0"
+                    )
+
+            # 1b. A C0 control byte planted in a guard file must be REPORTED.
+            #     Text mutation cannot express this: the byte is invisible to
+            #     every text instrument. Writing the route guard I produced a
+            #     0x08 BACKSPACE where `\b` was intended, which killed the
+            #     negation branch outright -- and sed, grep and
+            #     inspect.getsource all rendered it as `\b`, agreeing with the
+            #     mistake. Only the bytes disagreed, so the drill checks bytes.
+            gdir = fake / "scripts"
+            gdir.mkdir(parents=True, exist_ok=True)
+            (gdir / "doc_sync_check.py").write_bytes(
+                b"# planted " + bytes([8]) + b" backspace\n")
+            hits = dsc.control_chars_in_guards()
+            if not any(h[2] == "0x08" for h in hits):
+                failures.append(
+                    "control-char: a planted 0x08 went UNREPORTED — a guard whose "
+                    "regex can never match is indistinguishable from one that passes"
+                )
+            (gdir / "doc_sync_check.py").write_bytes(b"# clean\n")
+            if dsc.control_chars_in_guards():
+                failures.append(
+                    "control-char: fired on a clean file — a guard that cries wolf "
+                    "gets ignored, which kills the loop"
+                )
+
+            # 1c. The line-citation RATCHET must refuse a NEW raw line number.
+            #     Not a text mutation: the guard compares against a baseline
+            #     file, so the drill has to add a citation to the real tree and
+            #     put it back. ~317 exist today, so this guard can never report
+            #     them all without becoming noise nobody reads -- it only ever
+            #     refuses an INCREASE, and that is the branch worth proving.
+            real_status = real_root / "STATUS.md"
+            if real_status.exists():
+                before = real_status.read_bytes()
+                try:
+                    dsc.ROOT = real_root
+                    real_status.write_bytes(
+                        before + b"\n\nSee `backend/src/main.py:999` for details.\n")
+                    if not dsc.line_citation_regressions():
+                        failures.append(
+                            "line-citation-ratchet: a NEW raw line number went "
+                            "unreported — new prose can keep adding the "
+                            "fastest-rotting reference form there is"
+                        )
+                finally:
+                    real_status.write_bytes(before)
+                    dsc.ROOT = fake
+
+            # 1d. The SURFACE ratchet must refuse prose GROWTH. This is the one
+            #     guard that enforces the deletion contract itself: without it,
+            #     "delete, do not reword" is a request in a prompt, and the next
+            #     writer grows the haystack back without anyone noticing.
+            real_status = real_root / "STATUS.md"
+            if real_status.exists() and (real_root / "scripts" / "living_surface_ceiling.txt").exists():
+                before = real_status.read_bytes()
+                try:
+                    dsc.ROOT = real_root
+                    dsc._LIVING_STAMPED_CACHE = None
+                    pad = "\n" + "\n".join(f"padding {i}" for i in range(40)) + "\n"
+                    real_status.write_bytes(before + pad.encode("utf-8"))
+                    if not dsc.surface_regression():
+                        failures.append(
+                            "surface-ratchet: 40 added lines of LIVING prose went "
+                            "unreported — the haystack can grow back and the "
+                            "deletion contract is unenforced"
+                        )
+                finally:
+                    real_status.write_bytes(before)
+                    dsc._LIVING_STAMPED_CACHE = None
+                    dsc.ROOT = fake
+
+            # 1e. A directory-tree entry naming a file that is GONE must be
+            #     reported. Not a text mutation on a fake root: the guard
+            #     resolves against the real repo, so the drill renames one real
+            #     entry (backend/src/cli.py) and restores it.
+            real_arch = real_root / "ARCHITECTURE.md"
+            if real_arch.exists():
+                before = real_arch.read_bytes()
+                try:
+                    dsc.ROOT = real_root
+                    dsc._LIVING_STAMPED_CACHE = None
+                    real_arch.write_bytes(before.replace(b"cli.py", b"cli_GONE.py", 1))
+                    if not any("cli_GONE" in row[2] for row in dsc.doc_tree_dead_paths()):
+                        failures.append(
+                            "tree-dead-path: a tree entry naming a missing file went "
+                            "unreported — a tree can keep sending readers to paths "
+                            "that are not there"
+                        )
+                finally:
+                    real_arch.write_bytes(before)
+                    dsc._LIVING_STAMPED_CACHE = None
+                    dsc.ROOT = fake
+
+            # 2. A gapped migration sequence must RAISE, not count quietly.
+            migs = fake / "backend" / "migrations"
+            migs.mkdir(parents=True)
+            for n in (0, 1, 3):  # deliberate hole at 0002
+                (migs / f"{n:04d}_drill.up.sql").write_text("-- drill\n", encoding="utf-8")
+            try:
+                got = dsc.migration_file_count()
+                failures.append(
+                    f"migrations-schema: a sequence with a hole at 0002 returned {got} "
+                    "instead of raising — a schema that cannot rebuild from 0000 stayed green"
+                )
+            except RuntimeError:
+                pass
+
+            # 3. A file the runner cannot order must RAISE too.
+            (migs / f"{2:04d}_drill.up.sql").write_text("-- drill\n", encoding="utf-8")
+            (migs / "notes.up.sql").write_text("-- not a migration\n", encoding="utf-8")
+            try:
+                got = dsc.migration_file_count()
+                failures.append(
+                    f"migrations-schema: a malformed 'notes.up.sql' counted as a migration "
+                    f"(returned {got}) instead of raising"
+                )
+            except RuntimeError:
+                pass
+
+            # 4. TWO files claiming the same prefix must RAISE. CodeRabbit, on
+            #    PR #394: cases 2 and 3 leave the duplicate-prefix branch
+            #    unexercised, so deleting it would not fail this drill. A
+            #    contiguous 0000..0002 run with 0002 claimed twice is the
+            #    smallest fixture that isolates it from the gap and malformed
+            #    checks above.
+            (migs / "notes.up.sql").unlink()
+            (migs / "0002_duplicate.up.sql").write_text("-- drill\n", encoding="utf-8")
+            try:
+                got = dsc.migration_file_count()
+                failures.append(
+                    f"migrations-schema: two files claiming prefix 0002 returned {got} "
+                    "instead of raising — duplicate-prefix detection is dead code"
+                )
+            except RuntimeError:
+                pass
+        finally:
+            dsc.ROOT = real_root
+
+    # 5. The GENERATED guard, not just the count behind it. CodeRabbit, on
+    #    PR #394: drill 1 proves source_subfolder_counts() keeps a zero entry,
+    #    but a regression that filtered zero-count folders out of
+    #    build_checks() would still pass it -- the count survives while the
+    #    check it feeds disappears. Force ats to 0 and require the emitted
+    #    check list to still carry `subfolder-ats`. Runs against the REAL root
+    #    (build_checks parses main.py, settings.py, companies.py...), with only
+    #    the counts function swapped.
+    real_counts = dsc.source_subfolder_counts
+    try:
+        dsc.source_subfolder_counts = lambda: {**real_counts(), "ats": 0}  # noqa: E731
+        emitted = {name for name, _, _ in dsc.build_checks()[0]}
+        if "subfolder-ats" not in emitted:
+            failures.append(
+                "subfolder-ats: build_checks() DROPS the guard when the folder counts 0 "
+                "— the count survives but the check it feeds does not"
+            )
+    finally:
+        dsc.source_subfolder_counts = real_counts
+
+    # 3. A NEW pillar doc must be caught the day it appears.
+    #
+    # This one cannot use a throwaway root: pillars_fully_watched() compares the
+    # real folder against the real LIVING_DOCS, and the bug it guards is a file
+    # existing that nobody listed. So a real file is created and removed under
+    # try/finally -- a drill that leaves litter in the authoritative folder
+    # would be worse than the bug.
+    probe = ROOT / "docs/product/pillars/_drill_probe.md"
+    try:
+        probe.write_text("# drill probe\n", encoding="utf-8")
+        missing = dsc.pillars_fully_watched()
+        if not any(p.endswith("_drill_probe.md") for p in missing):
+            failures.append(
+                "pillar-unwatched: a new file in docs/product/pillars/ was NOT reported "
+                "— the folder-coverage guard is blind"
+            )
+    finally:
+        probe.unlink(missing_ok=True)
+
+    if probe.exists():  # belt and braces: never leave litter behind
+        failures.append(f"pillar-unwatched: drill failed to clean up {probe}")
+
+    if not failures:
+        print("PASS  structural      missing subfolder (count + emitted guard), "
+              "gapped/malformed/duplicate migrations, unwatched pillar doc, "
+              "control byte in a guard, line-citation ratchet, surface ratchet, dead tree path")
+    return failures
 
 
 def unwatched_claims() -> list[str]:
@@ -130,6 +505,10 @@ def main() -> int:
                 failures.append(f"{fact}: stayed GREEN on a broken {rel} — the guard is blind")
         finally:
             path.write_bytes(original)
+
+    # Failure paths no text mutation can express: an ABSENT check (deleted
+    # source folder) and a structurally broken migration run.
+    failures.extend(structural_drills())
 
     # Second half of the drill: docs that make a guarded claim while sitting
     # outside LIVING_DOCS. Planting a lie proves the LISTED docs are scanned;

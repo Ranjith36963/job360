@@ -1,4 +1,7 @@
 # Batch 3.5.4 — Test Cleanup Investigation
+<!-- doc: PLAN -->
+
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 **Run:** 2026-04-19
 **Baseline run:** `/tmp/pytest_baseline_3_5_4.log` — 24 failed / 578 passed / 3 skipped

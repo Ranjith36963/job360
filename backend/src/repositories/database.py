@@ -675,6 +675,32 @@ class JobDatabase:
         row = await cursor.fetchone()
         return int(row[0])
 
+    async def count_unexpired_jobs_for_source(self, source: str) -> int:
+        """How many of ``source``'s jobs are still being served as live.
+
+        Used only for observability: when a source's fetch fails, the absence
+        sweep is skipped for it (a failed scrape is not evidence that jobs
+        vanished), which means every one of these rows stops ageing and keeps
+        being presented as ``active``. Logging the COUNT turns "a source
+        failed" into "N live listings stopped ageing", which is the thing a
+        user actually feels.
+        """
+        # THE SAME PREDICATE THE APP SERVES BY, not a looser one.
+        # This counted "anything not confirmed_expired", which sweeps in
+        # `possibly_stale` and `likely_stale` — rows `get_recent_jobs` does NOT
+        # serve (it takes `staleness_state IS NULL OR = 'active'`, database.py
+        # :761). So the warning overstated how many LIVE listings had stopped
+        # ageing: an instrument built to say what a user actually feels was
+        # counting rows no user can see. An instrument must count the way its
+        # consumer counts. (CodeRabbit, PR #387.)
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) FROM jobs WHERE source = ? "
+            "AND (staleness_state IS NULL OR staleness_state = 'active')",
+            (source,),
+        )
+        row = await cursor.fetchone()
+        return int(row[0])
+
     async def log_run(
         self,
         stats: dict[str, Any],
@@ -1609,9 +1635,14 @@ class JobDatabase:
     # Table names are internal constants (never user input) — the placeholders
     # below are still parameterized. S608 is a false positive here (ignored for
     # this file in pyproject).
+    # NOTE (2026-08-24): `oauth_states` was removed from this tuple when
+    # migration 0031 dropped the table. Account deletion iterates these names
+    # and issues a DELETE per table — a name here that no longer exists in the
+    # schema turns "delete my account" into an UndefinedTable crash (rule #26).
+    # The list and the schema must move together, in the same commit.
     _PER_USER_TABLES = (
         "application_stage_history", "applications", "email_verifications",
-        "notification_ledger", "notification_rules", "oauth_states",
+        "notification_ledger", "notification_rules",
         "password_resets", "sessions", "tailored_documents", "tailored_usage",
         "user_actions", "user_channels", "user_feed",
         "user_notification_digests", "user_profile_versions", "user_profiles",
@@ -1620,8 +1651,10 @@ class JobDatabase:
     # Tables included in a GDPR Article 20 export (docs/fable/05 C7). This is the
     # user's OWN data — what they authored or what we derived about them.
     # Deliberately EXCLUDED from _PER_USER_TABLES: sessions, password_resets,
-    # email_verifications, oauth_states. Those hold short-lived security tokens,
-    # not portable personal data; exporting them would hand out live credentials.
+    # email_verifications. Those hold short-lived security tokens, not portable
+    # personal data; exporting them would hand out live credentials.
+    # (`oauth_states` used to be on that excluded list too — the table itself is
+    # gone as of migration 0031.)
     _EXPORT_TABLES = (
         "applications", "application_stage_history", "audit_log",
         "notification_ledger", "notification_rules", "tailored_documents",

@@ -1,4 +1,7 @@
 # 06 — Claude Code Harness & Workflow
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 > Source: harness sweep (Opus). How you *run* Claude Code — skills, hooks, settings,
 > loops, CLAUDE.md, memory. **Headline:** your architecture is strong (gate-stamp is

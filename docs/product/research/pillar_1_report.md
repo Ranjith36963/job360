@@ -1,4 +1,7 @@
 # Open-source patterns to supercharge Job360's profile parser
+<!-- doc: REFERENCE -->
+
+> **REFERENCE — pinned to its research date.** External facts move; re-check anything load-bearing. <!-- banner: auto -->
 
 **Job360's Pillar 1 can leap from naive position-based skill extraction to production-grade, domain-agnostic profile parsing by adopting proven patterns from 13 open-source projects and 3 skill taxonomies.** The highest-impact improvements are ESCO-based skill normalization (replacing the position-based thirds split), a strict JSON schema LLM extraction pattern from HiringCafe, and dependency-file parsing for GitHub enrichment. This report maps every relevant repo to concrete, copyable techniques — ranked by impact on engine quality.
 

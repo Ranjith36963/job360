@@ -1,4 +1,7 @@
 # Fable findings — RE-VERIFIED against main, 2026-07-19
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 **This file supersedes `AUDIT-2026-07-17-VERIFIED.md`.** That document's verdicts had
 drifted badly out of date and were actively misleading (details below).

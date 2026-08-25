@@ -7,18 +7,12 @@ cookie-resolved user.
 """
 from __future__ import annotations
 
-import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast
-from urllib.parse import urlencode
+from typing import Optional
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from src.api.auth_deps import CurrentUser, require_user
-from src.core import settings as _settings
 from src.core.settings import DB_PATH
 from src.repositories import pg
 from src.repositories.db_retry import open_db
@@ -30,10 +24,19 @@ from src.utils.logger import get_audit_logger
 
 router = APIRouter(prefix="/settings/channels", tags=["channels"])
 
-_VALID_TYPES = {"email", "slack", "discord", "telegram", "webhook"}
-
-# Chat channel types that must use the Connect flow (not the paste path).
-_CONNECT_ONLY_TYPES = {"slack", "discord", "telegram"}
+# Delivery is EMAIL + WEBHOOK only (2026-08-24). The per-user Slack, Discord
+# and Telegram channels were removed: they were never configured in production,
+# no user ever connected one, and they carried ~450 lines of OAuth for zero
+# delivered notifications. Rationale and evidence:
+# docs/plans/2026-08-24-email-webhook-only-delivery.md
+#
+# `email` is the supported product surface. `webhook` is an unsupported raw-JSON
+# escape hatch for a technical user's own tooling.
+#
+# There is no separate _VALID_TYPES set: the ONE definition of "which channel
+# types exist" is the ChannelIn.channel_type pattern below. The old set was dead
+# code — defined, never referenced — which is exactly how a second source of
+# truth starts.
 
 # _EMAIL_RE is imported from services/channels/email_url.py — ONE definition,
 # shared with the signup seeder, so the route and the seeder can never drift
@@ -42,7 +45,7 @@ _CONNECT_ONLY_TYPES = {"slack", "discord", "telegram"}
 
 
 class ChannelIn(BaseModel):
-    channel_type: str = Field(pattern="^(email|slack|discord|telegram|webhook)$")
+    channel_type: str = Field(pattern="^(email|webhook)$")
     display_name: str = Field(min_length=1, max_length=120)
     # max_length caps the regex/parse work per request — defence in depth behind
     # the ReDoS-safe _EMAIL_RE above. Webhook URLs and bot tokens fit well under 512.
@@ -61,28 +64,6 @@ class ChannelOut(BaseModel):
 class TestSendResult(BaseModel):
     ok: bool
     error: Optional[str] = None
-
-
-class ProvidersOut(BaseModel):
-    """Which OAuth/connect buttons the frontend should display."""
-
-    slack: bool
-    discord: bool
-    telegram: bool
-
-
-class TelegramConnectOut(BaseModel):
-    """Response from GET /connect/telegram."""
-
-    deep_link: str
-    state: str
-
-
-class TelegramPollOut(BaseModel):
-    """Response from GET /connect/telegram/poll."""
-
-    connected: bool
-    target_label: Optional[str] = None
 
 
 @router.get("", response_model=list[ChannelOut])
@@ -115,7 +96,10 @@ async def create_channel(
 ) -> ChannelOut:
     """Create a channel via direct credential input.
 
-    * ``slack``, ``discord``, ``telegram`` must use the Connect flow → 400.
+    Two channel types exist, and ``ChannelIn.channel_type``'s pattern is the
+    only place that fact is written down. Anything else is a 422 before this
+    body runs.
+
     * ``webhook``: ``credential`` must be an http(s) URL; backend converts it
       to the Apprise ``json[s]://`` URL scheme.
     * ``email``: ``credential`` must be a valid email address; the backend
@@ -124,12 +108,6 @@ async def create_channel(
       the local-SMTP fallback — see ``services/channels/email_url.py``).
     """
     ct_type = body.channel_type
-
-    if ct_type in _CONNECT_ONLY_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="use the Connect flow for this channel type",
-        )
 
     if ct_type == "webhook":
         cred = body.credential
@@ -219,7 +197,7 @@ async def create_channel(
     )
 
 
-@router.delete("/{channel_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{channel_id:int}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_channel(
     channel_id: int, user: CurrentUser = Depends(require_user)
 ) -> None:
@@ -240,7 +218,7 @@ async def delete_channel(
     )
 
 
-@router.post("/{channel_id}/test", response_model=TestSendResult)
+@router.post("/{channel_id:int}/test", response_model=TestSendResult)
 async def test_send_channel(
     channel_id: int, user: CurrentUser = Depends(require_user)
 ) -> TestSendResult:
@@ -274,534 +252,3 @@ async def test_send_channel(
         error=result.error or None,
     )
 
-
-@router.get("/providers", response_model=ProvidersOut)
-async def get_providers(user: CurrentUser = Depends(require_user)) -> ProvidersOut:
-    """Return which Connect buttons are configured on this deployment."""
-    return ProvidersOut(
-        slack=_slack_oauth_enabled(),
-        discord=_discord_oauth_enabled(),
-        telegram=_telegram_enabled(),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Shared OAuth-state helper
-# ---------------------------------------------------------------------------
-
-_STATE_TTL_MINUTES = 10
-
-
-async def _consume_oauth_state(
-    db: pg.Connection,
-    state: str,
-    user_id: str,
-    channel_type: str,
-) -> None:
-    """Validate and consume a one-time OAuth state nonce.
-
-    Given an already-open aiosqlite connection (with row_factory set), this
-    function:
-    1. Looks up the state row — raises 400 if missing.
-    2. Checks ``row["user_id"] == user_id`` — raises 400 on mismatch (IDOR).
-    3. Checks ``row["channel_type"] == channel_type`` — raises 400 if a state
-       from a different provider is replayed here.
-    4. Checks age <= _STATE_TTL_MINUTES — deletes the row and raises 400 if
-       expired.
-    5. Deletes the row (one-time use) on success.
-
-    All failure branches raise ``HTTPException(400, "invalid or expired state")``.
-    """
-    cur = await db.execute(
-        "SELECT user_id, channel_type, created_at FROM oauth_states WHERE state = ?",
-        (state,),
-    )
-    row = await cur.fetchone()
-
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid or expired state",
-        )
-
-    if row["user_id"] != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid or expired state",
-        )
-
-    if row["channel_type"] != channel_type:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid or expired state",
-        )
-
-    created_at = datetime.fromisoformat(row["created_at"])
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
-    age = datetime.now(timezone.utc) - created_at
-    if age > timedelta(minutes=_STATE_TTL_MINUTES):
-        await db.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
-        await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid or expired state",
-        )
-
-    # Consume (one-time use).
-    await db.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
-    await db.commit()
-
-
-# ---------------------------------------------------------------------------
-# Slack OAuth one-click connect
-# ---------------------------------------------------------------------------
-
-_SLACK_AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
-_SLACK_TOKEN_URL = "https://slack.com/api/oauth.v2.access"
-
-
-def _slack_oauth_enabled() -> bool:
-    """Return True only when all three Slack OAuth env vars are set."""
-    return bool(
-        _settings.SLACK_CLIENT_ID
-        and _settings.SLACK_CLIENT_SECRET
-        and _settings.OAUTH_REDIRECT_BASE
-    )
-
-
-async def _exchange_slack_code(code: str) -> dict[str, Any]:
-    """POST the authorization code to Slack and return the parsed JSON body.
-
-    This is the ONLY function that makes live HTTP to Slack — isolated here
-    so tests can monkeypatch it without touching httpx internals.
-    """
-    redirect_uri = (
-        f"{_settings.OAUTH_REDIRECT_BASE}/api/settings/channels/callback/slack"
-    )
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            _SLACK_TOKEN_URL,
-            data={
-                "client_id": _settings.SLACK_CLIENT_ID,
-                "client_secret": _settings.SLACK_CLIENT_SECRET,
-                "code": code,
-                "redirect_uri": redirect_uri,
-            },
-        )
-        resp.raise_for_status()
-        return cast("dict[str, Any]", resp.json())
-
-
-@router.get("/connect/slack", include_in_schema=False)
-async def connect_slack(user: CurrentUser = Depends(require_user)) -> RedirectResponse:
-    """Redirect the browser to Slack's OAuth authorization page.
-
-    Generates a one-time CSRF state token, persists it to ``oauth_states``,
-    then returns a 302 to Slack.  The callback validates the state and
-    completes the connection.
-    """
-    if not _slack_oauth_enabled():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Slack connect is not configured",
-        )
-
-    state = secrets.token_urlsafe(32)
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    async with open_db(str(DB_PATH)) as db:
-        await db.execute(
-            "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
-            "VALUES(?, ?, 'slack', ?)",
-            (state, user.id, now_iso),
-        )
-        await db.commit()
-
-    redirect_uri = (
-        f"{_settings.OAUTH_REDIRECT_BASE}/api/settings/channels/callback/slack"
-    )
-    params = urlencode(
-        {
-            "client_id": _settings.SLACK_CLIENT_ID,
-            "scope": "incoming-webhook",
-            "state": state,
-            "redirect_uri": redirect_uri,
-        }
-    )
-    authorize_url = f"{_SLACK_AUTHORIZE_URL}?{params}"
-    return RedirectResponse(authorize_url, status_code=302)
-
-
-@router.get("/callback/slack", include_in_schema=False)
-async def callback_slack(
-    code: str = "",
-    state: str = "",
-    user: CurrentUser = Depends(require_user),
-) -> RedirectResponse:
-    """Handle the redirect back from Slack after user authorizes the app.
-
-    Security checks are delegated to ``_consume_oauth_state`` which validates:
-    1. State exists in ``oauth_states``.
-    2. State belongs to the requesting user (IDOR guard).
-    3. State channel_type matches 'slack' (cross-provider replay guard).
-    4. State is not older than ``_STATE_TTL_MINUTES``.
-    State is always consumed (deleted) on first use past validation.
-    """
-    async with open_db(str(DB_PATH)) as db:
-        db.row_factory = pg.Row
-
-        await _consume_oauth_state(db, state, user.id, "slack")
-
-        # Exchange authorization code for tokens.
-        data = await _exchange_slack_code(code)
-
-        if not data.get("ok") or "incoming_webhook" not in data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="slack authorization failed",
-            )
-
-        webhook = data["incoming_webhook"]
-        webhook_url: str = webhook["url"]
-        channel: str = webhook.get("channel", "")
-
-        # Convert the HTTPS webhook URL to Apprise's slack:// scheme.
-        # Slack URL format: https://hooks.slack.com/services/T111/B222/zzz333
-        # Apprise format:   slack://T111/B222/zzz333
-        try:
-            path = webhook_url.split("/services/", 1)[1]
-            parts = path.rstrip("/").split("/")
-            if len(parts) < 3:
-                raise ValueError("unexpected webhook URL structure")
-            slack_apprise_url = f"slack://{parts[0]}/{parts[1]}/{parts[2]}"
-        except (IndexError, ValueError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="slack authorization failed",
-            ) from exc
-
-        ct = crypto.encrypt(slack_apprise_url)
-        await db.execute(
-            """
-            INSERT INTO user_channels(
-                user_id, channel_type, display_name,
-                credential_encrypted, connection_status, target_label, enabled
-            ) VALUES(?, 'slack', ?, ?, 'connected', ?, 1)
-            """,
-            (user.id, f"Slack: {channel}", ct, channel),
-        )
-        await db.commit()
-
-    settings_url = (
-        f"{_settings.OAUTH_REDIRECT_BASE}/channels?connected=slack"
-    )
-    return RedirectResponse(settings_url, status_code=302)
-
-
-# ---------------------------------------------------------------------------
-# Discord OAuth one-click connect
-# ---------------------------------------------------------------------------
-
-_DISCORD_AUTHORIZE_URL = "https://discord.com/api/oauth2/authorize"
-_DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
-
-
-def _discord_oauth_enabled() -> bool:
-    """Return True only when all three Discord OAuth env vars are set."""
-    return bool(
-        _settings.DISCORD_CLIENT_ID
-        and _settings.DISCORD_CLIENT_SECRET
-        and _settings.OAUTH_REDIRECT_BASE
-    )
-
-
-async def _exchange_discord_code(code: str) -> dict[str, Any]:
-    """POST the authorization code to Discord and return the parsed JSON body.
-
-    This is the ONLY function that makes live HTTP to Discord — isolated here
-    so tests can monkeypatch it without touching httpx internals.
-
-    Discord returns JSON containing a ``webhook`` object with ``url``,
-    ``name``, and ``channel_id`` keys.
-    """
-    redirect_uri = (
-        f"{_settings.OAUTH_REDIRECT_BASE}/api/settings/channels/callback/discord"
-    )
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            _DISCORD_TOKEN_URL,
-            data={
-                "grant_type": "authorization_code",
-                "client_id": _settings.DISCORD_CLIENT_ID,
-                "client_secret": _settings.DISCORD_CLIENT_SECRET,
-                "code": code,
-                "redirect_uri": redirect_uri,
-            },
-        )
-        resp.raise_for_status()
-        return cast("dict[str, Any]", resp.json())
-
-
-@router.get("/connect/discord", include_in_schema=False)
-async def connect_discord(user: CurrentUser = Depends(require_user)) -> RedirectResponse:
-    """Redirect the browser to Discord's OAuth authorization page.
-
-    Generates a one-time CSRF state token, persists it to ``oauth_states``
-    with ``channel_type='discord'``, then returns a 302 to Discord.
-    The callback validates the state and completes the connection.
-    """
-    if not _discord_oauth_enabled():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Discord connect is not configured",
-        )
-
-    state = secrets.token_urlsafe(32)
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    async with open_db(str(DB_PATH)) as db:
-        await db.execute(
-            "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
-            "VALUES(?, ?, 'discord', ?)",
-            (state, user.id, now_iso),
-        )
-        await db.commit()
-
-    redirect_uri = (
-        f"{_settings.OAUTH_REDIRECT_BASE}/api/settings/channels/callback/discord"
-    )
-    params = urlencode(
-        {
-            "client_id": _settings.DISCORD_CLIENT_ID,
-            "scope": "webhook.incoming",
-            "state": state,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-        }
-    )
-    authorize_url = f"{_DISCORD_AUTHORIZE_URL}?{params}"
-    return RedirectResponse(authorize_url, status_code=302)
-
-
-@router.get("/callback/discord", include_in_schema=False)
-async def callback_discord(
-    code: str = "",
-    state: str = "",
-    user: CurrentUser = Depends(require_user),
-) -> RedirectResponse:
-    """Handle the redirect back from Discord after user authorizes the app.
-
-    Security checks are delegated to ``_consume_oauth_state`` which validates:
-    1. State exists in ``oauth_states``.
-    2. State belongs to the requesting user (IDOR guard).
-    3. State channel_type matches 'discord' (cross-provider replay guard).
-    4. State is not older than ``_STATE_TTL_MINUTES``.
-    State is always consumed (deleted) on first use past validation.
-    """
-    async with open_db(str(DB_PATH)) as db:
-        db.row_factory = pg.Row
-
-        await _consume_oauth_state(db, state, user.id, "discord")
-
-        # Exchange authorization code for tokens.
-        data = await _exchange_discord_code(code)
-
-        if "webhook" not in data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="discord authorization failed",
-            )
-
-        webhook = data["webhook"]
-        webhook_url: str = webhook.get("url", "")
-        label: str = webhook.get("name") or webhook.get("channel_id") or "Discord"
-
-        # Convert Discord webhook URL to Apprise's discord:// scheme.
-        # Discord URL format: https://discord.com/api/webhooks/{id}/{token}
-        # Apprise format:     discord://{id}/{token}
-        try:
-            after_webhooks = webhook_url.split("/webhooks/", 1)[1]
-            parts = after_webhooks.rstrip("/").split("/")
-            if len(parts) < 2:
-                raise ValueError("unexpected webhook URL structure")
-            discord_apprise_url = f"discord://{parts[0]}/{parts[1]}"
-        except (IndexError, ValueError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="discord authorization failed",
-            ) from exc
-
-        ct = crypto.encrypt(discord_apprise_url)
-        await db.execute(
-            """
-            INSERT INTO user_channels(
-                user_id, channel_type, display_name,
-                credential_encrypted, connection_status, target_label, enabled
-            ) VALUES(?, 'discord', ?, ?, 'connected', ?, 1)
-            """,
-            (user.id, f"Discord: {label}", ct, label),
-        )
-        await db.commit()
-
-    settings_url = (
-        f"{_settings.OAUTH_REDIRECT_BASE}/channels?connected=discord"
-    )
-    return RedirectResponse(settings_url, status_code=302)
-
-
-# ---------------------------------------------------------------------------
-# Telegram Bot deep-link + poll connect
-# ---------------------------------------------------------------------------
-
-
-def _telegram_enabled() -> bool:
-    """Return True only when both Telegram bot env vars are set."""
-    return bool(_settings.TELEGRAM_BOT_TOKEN and _settings.TELEGRAM_BOT_USERNAME)
-
-
-async def _telegram_get_updates() -> list[dict[str, Any]]:
-    """GET /getUpdates from the Telegram Bot API and return the result list.
-
-    This is the ONLY function that makes live HTTP to Telegram — isolated here
-    so tests can monkeypatch it without touching httpx internals.
-    """
-    token = _settings.TELEGRAM_BOT_TOKEN
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"https://api.telegram.org/bot{token}/getUpdates",
-            timeout=10.0,
-        )
-        resp.raise_for_status()
-        return cast("list[dict[str, Any]]", resp.json().get("result", []))
-
-
-@router.get("/connect/telegram", response_model=TelegramConnectOut)
-async def connect_telegram(
-    user: CurrentUser = Depends(require_user),
-) -> TelegramConnectOut:
-    """Return a Telegram deep-link the user must tap to start the bot.
-
-    The frontend polls ``GET /connect/telegram/poll?state=<state>`` until
-    the user's ``/start <state>`` message arrives in the bot's update queue.
-
-    Returns 404 when TELEGRAM_BOT_TOKEN / TELEGRAM_BOT_USERNAME are not set.
-    """
-    if not _telegram_enabled():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Telegram connect is not configured",
-        )
-
-    state = secrets.token_urlsafe(32)
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    async with open_db(str(DB_PATH)) as db:
-        await db.execute(
-            "INSERT INTO oauth_states(state, user_id, channel_type, created_at) "
-            "VALUES(?, ?, 'telegram', ?)",
-            (state, user.id, now_iso),
-        )
-        await db.commit()
-
-    deep_link = f"https://t.me/{_settings.TELEGRAM_BOT_USERNAME}?start={state}"
-    return TelegramConnectOut(deep_link=deep_link, state=state)
-
-
-@router.get("/connect/telegram/poll", response_model=TelegramPollOut)
-async def poll_telegram(
-    state: str,
-    user: CurrentUser = Depends(require_user),
-) -> TelegramPollOut:
-    """Poll whether the user has tapped the Telegram deep-link.
-
-    The frontend calls this repeatedly until ``connected=true`` or the state
-    expires.  The state row is NOT consumed until a matching Telegram message
-    is found (so callers can safely retry while the user is still tapping).
-
-    Security checks (without consuming the state):
-    - State must exist in ``oauth_states``.
-    - ``user_id`` must match the requesting user (IDOR guard).
-    - ``channel_type`` must be ``'telegram'``.
-    - Age must be ≤ ``_STATE_TTL_MINUTES`` (row is deleted on expiry).
-
-    If Telegram has received ``/start <state>`` from the user's chat, the
-    channel row is created and the state is consumed; returns
-    ``{connected: true, target_label: ...}``.  Otherwise returns
-    ``{connected: false}`` with the state still alive.
-    """
-    async with open_db(str(DB_PATH)) as db:
-        db.row_factory = pg.Row
-        cur = await db.execute(
-            "SELECT user_id, channel_type, created_at FROM oauth_states WHERE state = ?",
-            (state,),
-        )
-        row = await cur.fetchone()
-
-        if row is None:
-            # State never existed or was already consumed — permanent 400.
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="invalid or expired state",
-            )
-
-        if row["user_id"] != user.id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="invalid or expired state",
-            )
-
-        if row["channel_type"] != "telegram":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="invalid or expired state",
-            )
-
-        created_at = datetime.fromisoformat(row["created_at"])
-        if created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
-        age = datetime.now(timezone.utc) - created_at
-        if age > timedelta(minutes=_STATE_TTL_MINUTES):
-            # Expired — clean up and reject.
-            await db.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
-            await db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="invalid or expired state",
-            )
-
-        # State is valid — check Telegram for the matching /start message.
-        updates = await _telegram_get_updates()
-        expected_text = f"/start {state}"
-
-        for update in updates:
-            message = update.get("message", {})
-            if message.get("text") == expected_text:
-                chat = message["chat"]
-                chat_id = chat["id"]
-                label = (
-                    chat.get("title")
-                    or chat.get("username")
-                    or chat.get("first_name")
-                    or str(chat_id)
-                )
-                token = _settings.TELEGRAM_BOT_TOKEN
-                apprise_url = f"tgram://{token}/{chat_id}"
-                encrypted = crypto.encrypt(apprise_url)
-
-                await db.execute(
-                    """
-                    INSERT INTO user_channels(
-                        user_id, channel_type, display_name,
-                        credential_encrypted, connection_status, target_label, enabled
-                    ) VALUES(?, 'telegram', ?, ?, 'connected', ?, 1)
-                    """,
-                    (user.id, f"Telegram: {label}", encrypted, label),
-                )
-                # Consume the state (one-time use).
-                await db.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
-                await db.commit()
-                return TelegramPollOut(connected=True, target_label=label)
-
-    # No matching update yet — return not-connected; state row kept alive.
-    return TelegramPollOut(connected=False)

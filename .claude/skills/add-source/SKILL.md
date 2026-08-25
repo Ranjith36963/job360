@@ -2,6 +2,7 @@
 name: add-source
 description: Job360 recipes for adding or removing a job source (the five load-bearing surfaces), and for adding a notification channel. Use when adding/removing/rewriting a source in backend/src/sources/, changing SOURCE_REGISTRY or RATE_LIMITS, or wiring a new notification/delivery channel.
 ---
+<!-- doc: LIVING -->
 
 # Adding a source or a channel (.claude/skills/add-source/SKILL.md)
 
@@ -73,14 +74,45 @@ assertions treat the **registry key count** as authoritative.
 
 ## Adding a notification channel
 
+### 🛑 First: do not add one
+
+Delivery is **email + webhook, and that is a product decision, not an accident**
+(2026-08-24). Slack, Discord and Telegram were removed — ~450 lines of OAuth, 8
+env vars, 976 lines of tests — because production held **zero** connected
+channels of any type and the `notification_ledger` had **never** recorded a
+single delivery. Evidence and the full argument:
+`docs/plans/2026-08-24-email-webhook-only-delivery.md`.
+
+Adding a sixth channel is addition; it does not compound. If you are here
+because delivery feels weak, the fix is almost certainly in **what the email
+says** (`src/services/delivery/`), not in **where else to say it**. Bring
+evidence that real users asked for a channel before you widen this surface.
+
+If you still need one, the recipe follows.
+
+### The recipe
+
 Work in `backend/src/services/channels/dispatcher.py` (the Apprise dispatcher) —
 that is the **only** delivery path.
 
+**Where "which channel types exist" is defined — ONE place:** the
+`ChannelIn.channel_type` regex in `backend/src/api/routes/channels.py`. There is
+deliberately no second `_VALID_TYPES` set; the old one was dead code (defined,
+never referenced), which is exactly how a second source of truth starts.
+
+**Per-channel formatting** belongs in `dispatcher.format_payload()` and nowhere
+else. It is pass-through today; that is a seam, not dead code.
+
+**Message content** is built by `src/services/delivery/` — `decision_card.py`
+decides what a job *says* (shared with the dashboard so the two cannot drift)
+and `email_body.py` decides how it reads. A new channel renders a
+`DecisionCard`; it must never re-derive a score or re-word a reason.
+
 ⚠️ **Older docs told you to implement a `NotificationChannel` ABC and register it
 in `get_all_channels()` in `src/services/notifications/base.py`. That module and
-both symbols no longer exist** (verified 2026-08-03 and re-verified 2026-08-11 —
-`src/services/notifications/` now holds only `__init__.py` and
-`report_generator.py`). An agent following the old instruction would be writing
+both symbols no longer exist** (verified 2026-08-03, re-verified 2026-08-24 —
+`src/services/notifications/` now holds `__init__.py`, `report_generator.py` and
+`defaults.py`, and no channel classes). An agent following the old instruction would be writing
 against a deleted API.
 
 Respect rules #23 and #24 while you are in there:

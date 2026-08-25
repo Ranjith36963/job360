@@ -28,6 +28,9 @@ verification_commands_run: []
 #   - command: pytest tests/
 #     exit_code: 1
 ---
+<!-- doc: LIVING -->
+
+<!-- doc: LIVING -->
 
 # Reviewer Verdict — <batch name / SHA>
 

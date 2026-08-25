@@ -1,4 +1,7 @@
 # 01 — Security
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 > Source: backend security sweep (Opus). Read-only audit, evidence as `file:line`.
 > **Headline:** backend is well above average for a solo build — clean IDOR/tenant

@@ -1,3 +1,6 @@
+<!-- doc: PLAN -->
+
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 ## Your two questions, simple words first
 
 **Are CV / LinkedIn / GitHub skills merged into one list?**

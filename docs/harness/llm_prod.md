@@ -1,4 +1,7 @@
 # Production LLM — provider choice for Job360
+<!-- doc: REFERENCE -->
+
+> **REFERENCE — pinned to its research date.** External facts move; re-check anything load-bearing. <!-- banner: auto -->
 
 > **One-line answer:** For a *single* provider → **Gemini 2.5 Flash** (GDPR-safe for CV data, does all 4 workloads, reliable). For *cost-optimal* → **Gemini (free, PII/CV work) + DeepSeek (cheap, batch of public job-text)**. The root problem to fix first: **stop running production on free tiers** — their per-minute walls are what cause the 429s.
 

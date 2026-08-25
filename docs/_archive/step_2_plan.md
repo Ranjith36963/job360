@@ -1,4 +1,7 @@
 # Step 2 — API→UI Seam — Ralph-Loop-Driven Execution Plan
+<!-- doc: FROZEN -->
+
+> **FROZEN — closed or superseded.** Kept as evidence of what was true then. Do not act on it. <!-- banner: auto -->
 
 > **For agentic workers:** REQUIRED SUB-SKILLS: `superpowers:test-driven-development`, `superpowers:verification-before-completion`, `superpowers:dispatching-parallel-agents`, `superpowers:executing-plans`. Steps use checkbox syntax.
 >

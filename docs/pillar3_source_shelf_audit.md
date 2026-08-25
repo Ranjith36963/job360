@@ -1,4 +1,7 @@
 # Pillar 3 — what each job source actually gives us
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 **Audited 2026-08-08 against `main` @ `dc9e546`.** Two independent instruments:
 1. **Code audit** — 5 parallel workers read every `fetch_jobs()` in all 46 source files.

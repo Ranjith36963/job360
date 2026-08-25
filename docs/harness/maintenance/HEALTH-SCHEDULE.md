@@ -1,4 +1,24 @@
 # Health schedule — wiring the daily `health` skill to a real cron
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
+> ## ⚠️ NOT RUNNING — measured 2026-08-24
+>
+> This document describes the wiring in the present tense. Nothing is running.
+>
+> `STATUS-DAILY.md` still reads **"Job360 daily status — 2026-06-19 … First
+> report."** It has produced exactly ONE report, 66 days ago. A later commit
+> (#348, 2026-08-21) touched the file, but that was the structure refactor
+> MOVING it — `git log` on a path shows moves, not content, which is how this
+> looked alive from the outside.
+>
+> So the schedule below is a PLAN, not a description. Either register it or
+> delete the skill; what must not continue is a doc that reads as though a
+> watchdog is watching. That is worse than no watchdog, because it stops anyone
+> from looking.
+>
+> This is the repo's own law arriving again: an artifact with no notifier dies.
 
 The `health` skill writes `STATUS-DAILY.md` (a 5-minute three-pillar system check). It is
 only useful if it runs on a schedule. This is how to wire it. The skill is NOT deleted —

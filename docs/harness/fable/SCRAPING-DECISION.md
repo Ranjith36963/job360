@@ -1,4 +1,7 @@
 # Scraping Decision — LinkedIn / Indeed / Glassdoor
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 > **Status: DECISION PENDING — measurement required before acting.**
 > Owner: Ranjith. Written 2026-07-17. Everything below is either verified against

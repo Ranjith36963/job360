@@ -1,4 +1,7 @@
 # Fable findings — FULL re-verification against origin/main, 2026-07-23
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 **This supersedes `AUDIT-2026-07-19-REVERIFIED.md` as the current-state record.**
 Every finding across `docs/harness/FABLE_FINDINGS.md`, `docs/harness/fable/AUDIT-2026-07-17-VERIFIED.md`,

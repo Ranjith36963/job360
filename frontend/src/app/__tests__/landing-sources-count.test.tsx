@@ -1,14 +1,28 @@
 /**
- * Regression guard: the landing page must show "47" for the source count
- * (the live SOURCE_REGISTRY size), not a stale value.
+ * Regression guard: every source count on the landing page agrees with the ONE
+ * constant, and no stale literal survives anywhere in the copy.
  *
- * The page is a server component with no client hooks, so we can render it
- * directly with @testing-library/react. We mock next/link to avoid the
- * App-Router runtime dependency.
+ * WHY THIS TEST WAS REWRITTEN
+ *
+ * The previous version said in its docstring that it guarded "the live
+ * SOURCE_REGISTRY size", then hardcoded `47` and asserted only that the page
+ * did not say `46`. Six sources were pruned on 2026-08-17, the registry became
+ * 41, and this test went on passing — its passing is exactly what kept the
+ * landing page telling every visitor a number that was wrong by six.
+ *
+ * A test that names a literal freezes that literal. So this one names none.
+ * It asserts the rendered numbers are CONSISTENT with `SOURCE_COUNT`, and that
+ * no other 2-digit count is lurking next to the word "source".
+ *
+ * The tie back to the backend registry is not this test's job and cannot be —
+ * jsdom cannot read Python. `scripts/doc_sync_check.py` (guard
+ * `landing-source-count`) compares `SOURCE_COUNT` against `SOURCE_REGISTRY`
+ * and is mutation-tested, so it is known to be able to fail.
  */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import Home from "../page";
+import { SOURCE_COUNT } from "@/lib/catalog";
 
 // Mock next/link — not available in jsdom
 vi.mock("next/link", () => ({
@@ -20,29 +34,38 @@ vi.mock("next/link", () => ({
 }));
 
 describe("Landing page — source count copy", () => {
-  it('stats bar shows "47" for Sources', () => {
+  it("stats bar shows the constant for Sources", () => {
     render(<Home />);
-    // The STATS bar renders value="47" above the label "Sources"
-    const statValue = screen.getByText("47");
-    expect(statValue).toBeInTheDocument();
+    expect(screen.getByText(String(SOURCE_COUNT))).toBeInTheDocument();
   });
 
-  it('feature card title is "47 Job Sources"', () => {
+  it("feature card title uses the constant", () => {
     render(<Home />);
-    expect(screen.getByText("47 Job Sources")).toBeInTheDocument();
-    expect(screen.queryByText("46 Job Sources")).not.toBeInTheDocument();
+    expect(screen.getByText(`${SOURCE_COUNT} Job Sources`)).toBeInTheDocument();
   });
 
-  it('hero heading says "47 Sources."', () => {
+  it("hero heading uses the constant", () => {
     render(<Home />);
-    expect(screen.getByText("47 Sources.")).toBeInTheDocument();
-    expect(screen.queryByText("46 Sources.")).not.toBeInTheDocument();
+    expect(screen.getByText(`${SOURCE_COUNT} Sources.`)).toBeInTheDocument();
   });
 
-  it("hero paragraph mentions 47 job sources", () => {
+  it("hero paragraph uses the constant", () => {
     render(<Home />);
-    // The subtitle paragraph contains "47 job sources."
-    expect(screen.getByText(/47 job sources\./i)).toBeInTheDocument();
-    expect(screen.queryByText(/46 job sources\./i)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(`${SOURCE_COUNT} job sources\\.`, "i")),
+    ).toBeInTheDocument();
+  });
+
+  it("no OTHER two-digit count appears beside the word 'source'", () => {
+    // The real failure was five copies of one number, only some of which any
+    // single assertion looked at. This sweeps the whole rendered document, so
+    // a sixth mention added later cannot quietly disagree with the other five.
+    const { container } = render(<Home />);
+    const text = container.textContent ?? "";
+    const mentions = [...text.matchAll(/(\d{1,3})\s+(?:job\s+)?sources?\b/gi)];
+    expect(mentions.length).toBeGreaterThan(0);
+    for (const m of mentions) {
+      expect(Number(m[1])).toBe(SOURCE_COUNT);
+    }
   });
 });

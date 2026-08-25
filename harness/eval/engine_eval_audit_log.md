@@ -1,4 +1,7 @@
 # Engine-Eval Measurement-Tool Audit Log
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 Running record of every weakness found in the eval ("measurement tool") and how
 it was fixed. The goal: a tool trustworthy enough to decide which engines to

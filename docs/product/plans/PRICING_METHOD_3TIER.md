@@ -1,4 +1,7 @@
 # Pricing Method — 3-Tier Freemium (Free / Pro / Max)
+<!-- doc: PLAN -->
+
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 **Captured 2026-06-25. Research-backed. Status: design captured, not built.**
 

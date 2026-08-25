@@ -1,5 +1,5 @@
 # Job360 Project Status
-<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 
 ## Current State: Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
 
@@ -19,7 +19,10 @@
 > that are not there. Treat every path and commit below as UNVERIFIED unless you have just
 > checked it.
 
-> **In flight (branch `feat/two-pass-profile-extraction`, 2026-06-17):** two-pass
+> **SHIPPED** (verified 2026-08-24: `backend/src/services/profile/two_pass.py:572`
+> `run_two_pass_extraction`). The branch `feat/two-pass-profile-extraction` no
+> longer exists — it merged. This block described it as "in flight" for two
+> months after the work landed. Two-pass
 > profile extraction. Every input (CV / LinkedIn / GitHub / preferences) now gets a
 > deterministic pass **and** an LLM enhance pass, merged into one `CVData`. New
 > `CVData` fields (`linkedin_raw_text`, `github_repos_brief`, `github_llm_skills`,
@@ -41,14 +44,16 @@
 > in a real browser (Playwright manual-tester pass — every button/feature/state).
 > Backend 1392 passed / 3 skipped; frontend type-check+lint clean, 107 unit tests.
 > Full detail in `docs/harness/IMPLEMENTATION_LOG.md`. Only unverified corner: real external
-> delivery to live Slack/Telegram/Gmail (needs provider credentials).
+> delivery to a live inbox. (Historical note: Slack/Telegram/Discord were deleted outright
+> on 2026-08-24 — never configured in production, zero users ever connected one. See
+> `docs/plans/2026-08-24-email-webhook-only-delivery.md`.)
 
 **Last updated:** 2026-08-24 (doc truth check; the phase narratives below are older — see `docs/harness/IMPLEMENTATION_LOG.md` for the current history)
-**Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
-**Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
+**Total tests:** measure it, never quote it — `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1` (2 `live` tests deselected offline; 3 skip on Windows)
+**Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 218 `test_*.py` modules
 **Job sources:** 41 entries in `SOURCE_REGISTRY`; 40 live instances since `indeed` + `glassdoor` share `JobSpySource`; gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 dropped jobtensor, comeet, aijobs_global; the 2026-08-10 rotation dropped 6 more dead upstreams — aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
-**Latest merged head:** `225040e` on `origin/main` — docs audit + cleanup (2026-06-21); all worktree/feature branches merged and deleted.
-**Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
+**Latest merged head:** measure it, never quote it — `git rev-parse origin/main`. This line has been stale twice (it sat on a June commit for two months). **This branch's own work — the 2026-08-24 email/webhook-only channel deletion described above — is NOT on `main` yet**: `feat/delivery-email-webhook-only` has not merged, so `main` does not reflect the Slack/Discord/Telegram removal.
+**Sentinel:** removed 2026-08-24. `.claude/step-3-verified.txt` does not exist and no code reads it — `docs/harness/step_3_plan.md:120` still describes a halt-on-sentinel flow that has nothing to halt on. A pointer to a file that was never written is worse than no pointer: it reads as proof that a check ran.
 
 ---
 
@@ -63,7 +68,7 @@
 | Profile dataclasses | `backend/src/services/profile/models.py` | Done -- CVData, UserPreferences, UserProfile, SearchConfig |
 | CV parser (PDF/DOCX) | `backend/src/services/profile/cv_parser.py` | Done -- pdfplumber + python-docx text extraction, LLM-only skill/title extraction via `llm_provider.py` (KNOWN_SKILLS regex removed in commit 804725c) |
 | Preferences validator | `backend/src/services/profile/preferences.py` | Done -- form validation, CV+prefs merge |
-| Profile storage | `backend/src/services/profile/storage.py` | Done -- JSON at `backend/data/user_profile.json` |
+| Profile storage | `backend/src/services/profile/storage.py` | Done -- `user_profiles` table, one row per user |
 | Keyword generator | `backend/src/services/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
 | JobScorer class | `backend/src/services/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
 | BaseJobSource properties | `backend/src/sources/base.py` | Done -- `self.relevance_keywords`, `self.job_titles`, `self.search_queries` |
@@ -77,7 +82,6 @@
 
 - `keywords.py` is NOT modified -- remains the default keyword source
 - All existing function signatures preserved (`score_job()`, `check_visa_flag()`, etc.)
-- When no `backend/data/user_profile.json` exists, behavior is **identical** to pre-Phase-1
 - `len(SOURCE_REGISTRY) == N` test assertion still in `tests/test_cli.py` (current N = 41; 40 live instances — `indeed`+`glassdoor` alias `JobSpySource`)
 - All original tests pass without modification
 
@@ -150,14 +154,14 @@ Four engines are available, stacked **keyword → dimensions → hybrid → LLM 
 
 | Engine | Service | Flag | Default |
 |--------|---------|------|---------|
-| #1 Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
+| #1 Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | `ENGINE1_ENABLED` — no legacy alias; `skill_matcher.py:480-483` reads it and `:560` gates the keyword half, so it CAN be switched off | **true** |
 | #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace (`skill_matcher.py:582-617`). **The scorer enters the dim path on `user_preferences` alone** (`skill_matcher.py:587`), no flag involved; the flag gates only whether the **enrichment** LLM step (`services/job_enrichment.py`) has produced data for those dims to read (`main.py:853`, `main.py:1137`). Without it they score their neutral halves | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` (enrichment data only) | false |
-| #3 Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` (RRF fuse + cross-encoder rerank) | `SEMANTIC_ENABLED` | false |
-| #4 LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
+| #3 Hybrid | `services/embeddings.py` + `pg_vector_index.py` + `retrieval.py` (RRF fuse + cross-encoder rerank). Vectors live in `job_embeddings.embedding`; `vector_index.py` is the legacy Chroma wrapper with no production caller | reads: `ENGINE3_ENABLED` **or** `SEMANTIC_ENABLED`; embedding writes: `SEMANTIC_ENABLED` alone | false |
+| #4 LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` (`main.py:352`, `rescore.py:395,589`) | false |
 
 Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored on `user_feed` (migration 0017). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Measured: 18/18 judged in 89.8 s at concurrency 3; judge spread 20–92 vs keyword 30–43; 10/10 fit accuracy on labeled sample.
 
-**Profile-version re-score (migration 0018, automatic, no new flags):** every `user_feed` row is now stamped with the profile version that produced its score. When a user saves a new profile (CV / LinkedIn / GitHub / preferences), the system detects whether the content actually changed, clears old LLM verdicts, and re-scores the full 30-day catalog in the background against the new profile. Ordinary searches only score newly-fetched jobs — existing rows keep their scores. A job's score changes only when the profile changes, never just because time passed. Service: `src/services/rescore.py`; trigger: `src/api/routes/profile.py`.
+**Profile-version re-score (migration 0018, automatic, no new flags):** `user_feed` carries a nullable `profile_version` stamping which `user_profile_versions.id` produced the row's score — migration 0018 only ADDs the column, so rows written before it stay `NULL` until something re-visits them (`backend/migrations/0018_user_feed_profile_version.up.sql`). When a user saves a new profile (CV / LinkedIn / GitHub / preferences), the system detects whether the content actually changed and re-scores the catalog in the background against the new profile. Old LLM verdicts are cleared **only when the judge is on** (`ENGINE4_ENABLED or MATCHER_ENABLED` — `backend/src/services/rescore.py:589,595-598`); with it off, the default, no verdict is touched. Ordinary searches do **not** skip existing rows: every authenticated search also runs `backfill_feed_from_catalog(user_id, db)` (`backend/src/main.py:1272-1278`), which re-scores the shared catalog for that user. Their scores hold steady because `upsert_feed_row` freezes the score only when the incoming `profile_version` **and** `scorer_version` both match the stored ones, and overwrites it when either differs (`backend/src/services/feed.py:288-303`). **A `SCORER_VERSION` bump therefore re-scores only the rows a run actually reaches** — the write set is bounded by the `MIN_STORE_SCORE` floor and the `FEED_CANDIDATE_CAP` top-N selection (default 800: `scored[:cap]`, `backend/src/services/rescore.py:293`; `backend/src/core/settings.py:129`), not every `user_feed` row. A job's score changes only when the profile or the scorer changes, never just because time passed. Service: `backend/src/services/rescore.py`; trigger: `backend/src/api/routes/profile.py`.
 
 ---
 
@@ -197,12 +201,15 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - All RSS/XML feeds parse correctly with mocked data
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring activates as soon as `JobScorer(..., user_preferences=...)` is wired — `enrichment_lookup` is optional, and without it each dim scores its NEUTRAL half, not zero (8-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
-- Pillar 2 opt-in features behind flags (OFF by default): `ENRICHMENT_ENABLED` (LLM enrichment pipeline), `SEMANTIC_ENABLED` (sentence-transformers + ChromaDB)
+- Pillar 2 opt-in features behind flags (OFF by default): `ENRICHMENT_ENABLED` (LLM enrichment pipeline), `SEMANTIC_ENABLED` (sentence-transformers + the pgvector store, `job_embeddings.embedding`) — hybrid retrieval also answers to the newer `ENGINE3_ENABLED`, for which `SEMANTIC_ENABLED` is the legacy alias (rule #18); the embedding WRITES read the legacy name alone
 - Postgres database with auto-purge (30 days); shared `jobs` catalog + per-user `user_feed` / `user_actions` / `applications`
-- Email, Slack, Discord, Telegram, webhook — all via the Apprise dispatcher, per-user channels (Batch 2). The old built-in channel classes are REMOVED.
-- CLI commands: run, view, api, status, sources, setup-profile
+- Email (the supported product surface) and webhook (an unsupported raw-JSON escape hatch)
+  — both via the Apprise dispatcher, per-user channels (Batch 2). Slack/Discord/Telegram
+  were removed 2026-08-24 (never configured in production, zero users ever connected one).
+  The old built-in channel classes are REMOVED.
+- CLI commands (7, all in `src/cli.py`): run, status, view, api, sources, setup-profile, rescore-backfill
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- Tests: defer to the runtime collected count (~1,409 collected offline, 2 live deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests), 0 failing
+- Tests: 218 `test_*.py` modules; measure the collected count, never quote it (2 `live` deselected offline); 3 skip on Windows (bash-only `setup.sh` / `cron_setup.sh` tests)
 
 ---
 
@@ -212,9 +219,9 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 |------------------|------|-------|
 | **HTML scrapers** (5) | High | LinkedIn, Climatebase, 80000Hours, BCS Jobs, AIJobs AI all use regex parsing on HTML. Any layout change breaks them silently (returns 0 jobs, no error). |
 | **python-jobspy** (Indeed/Glassdoor) | Medium | Not in backend/pyproject.toml. Optional dependency. If Indeed/Glassdoor change their site, python-jobspy breaks. |
-| **Workday ATS** | Medium | Complex dict-format config (tenant/wd/site). Workday API endpoints change occasionally. 15 companies = 15 potential breakpoints. |
+| **Workday ATS** | Medium | Complex dict-format config (tenant/wd/site). Workday API endpoints change occasionally. 20 companies = 20 potential breakpoints. |
 | **SuccessFactors** | Medium | Parses sitemap.xml files. Only 3 companies. MBDA already removed (DNS failure). |
-| **Personio** | Medium | Uses XML job feed API. 10 companies. Personio may restrict access. |
+| **Personio** | Medium | Uses XML job feed API. 26 companies. Personio may restrict access. |
 | **LinkedIn guest API** | High | Unofficial, can break or get rate-limited at any time. |
 | **HackerNews sources** | Low | Algolia API is stable, but "Who is Hiring" thread format could change. |
 | **CV parser** | Medium | Regex-based section detection. Works for ~80% of CVs. Non-standard formats may miss skills. |
@@ -225,9 +232,9 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
-| 3 tests skip on Windows | Low | bash-only tests for `setup.sh` and `cron_run.sh` — pass on Linux/Mac |
-| ~~`test_main.py` still hits live Indeed~~ RESOLVED (M8 batch) | — | JobSpy stubbed via autouse fixture; `load_profile` patched. Runs offline in ~8 s (14 tests). Now part of canonical suite — `--ignore` removed from Makefile, agent-gate.sh, and CLAUDE.md. |
-| Layer-4 embedding repost dedup not activated | Medium | Scaffolded in `backend/src/services/deduplicator.py` but gated behind `SEMANTIC_ENABLED`; ChromaDB-backed layer is opt-in and not yet wired into the default pipeline path. |
+| 3 tests skip on Windows | Low | bash-only tests for `setup.sh` and `cron_setup.sh` — pass on Linux/Mac |
+| ~~`test_main.py` still hits live Indeed~~ RESOLVED (M8 batch) | — | JobSpy stubbed via autouse fixture; `load_profile` patched. Runs offline (18 `def test_` in `test_main.py` as of 2026-08-25 — measure, don't quote). Now part of canonical suite — `--ignore` removed from Makefile, agent-gate.sh, and CLAUDE.md. |
+| Layer-4 embedding repost dedup not activated | Medium | Scaffolded in `backend/src/services/deduplicator.py` but gated behind `SEMANTIC_ENABLED`; the layer needs an `embedding_lookup` handed in (vectors now come from `job_embeddings.embedding`) and is not yet wired into the default pipeline path. |
 | ~~Batch 2.7 hybrid mode flag not wired to HTTP routes~~ RESOLVED 2026-06-10 | — | `GET /api/jobs?mode=hybrid` consults the retrieval stack and the dashboard requests it by default (a19db65); the LLM judge re-ranks on top via `COALESCE(llm_fit_score, score)`. |
 | No skill inference beyond what the LLM extracts | Medium | Profile system relies on LLM-extracted skills + explicit user additions; implicit skill expansion from titles ("Data Scientist" → Python/SQL) not implemented. Partially mitigated by `skill_synonyms.py` canonicalisation (Batch 2.3). |
 | python-jobspy not in backend/pyproject.toml core deps | Low | Intentionally optional (heavy dependencies). Indeed/Glassdoor source skips with warning if not installed. |
@@ -239,30 +246,23 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 ## Test Coverage by Module
 
-| Test file | Module tested | Tests |
-|-----------|--------------|-------|
-| `test_sources.py` | All 41 registry entries (40 source classes) | 55+ |
-| `test_profile.py` | `backend/src/services/profile/*`, `JobScorer` | 55 |
-| `test_linkedin_github.py` | LinkedIn parser, GitHub enricher | 54 |
-| `test_scorer.py` | `skill_matcher.py` scoring | 53 |
-| `test_time_buckets.py` | `time_buckets.py` | 33 |
-| `test_models.py` | `models.py` Job dataclass | 21 |
-| `test_notifications.py` | Slack + Discord + Email channels | 19 |
-| `test_deduplicator.py` | `deduplicator.py` | 13 |
-| `test_main.py` | `main.py` orchestrator + error paths | 14 |
-| `test_cli.py` | `cli.py` commands + SOURCE_REGISTRY | 11 |
-| `test_database.py` | Postgres database + migration + source history | 9 |
-| `test_api.py` | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) | 9 |
-| `test_llm_provider.py` | Multi-provider LLM client for CV parsing | 8 |
-| `test_notification_base.py` | Channel base + discovery | 7 |
-| `test_reports.py` | Report generation | 6 |
-| `test_setup.py` | setup.sh + requirements | 6 |
-| `test_rate_limiter.py` | `rate_limiter.py` | 5 |
-| `test_cron.py` | cron_run.sh | 5 |
-| `test_cli_view.py` | `cli_view.py` | 5 |
-| `test_csv_export.py` | CSV export | 4 |
-| (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~744 |
-| **Total (current green baseline)** | | defer to runtime count (~1,409 collected offline, 2 live deselected) / 0 failing / 3 skipped on Windows |
+> **The per-file table lives in `README.md` ("Testing") and nowhere else.** It used to be
+> duplicated here, and the copy rotted: it still listed `test_notifications.py` and
+> `test_notification_base.py` (both deleted with the `NotificationChannel` ABC), named
+> `cron_run.sh` for what `test_cron.py` actually exercises (`cron_setup.sh`), and carried
+> per-file counts roughly a third of the real ones. Two copies of a number is one copy too
+> many — README's is the measured one.
+
+**Current green baseline:** 218 `test_*.py` modules, 2 `live` tests deselected offline, 3 skipped
+on Windows. The collected count is deliberately not recorded here — measure it, never quote it:
+`cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`.
+
+Broad coverage beyond the top-20 files: migrations, auth, feed, prefilter, channels, crypto,
+dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker,
+conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims,
+score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep,
+application history, notification rules + tick + bundling, ledger filters, dim-score
+round-trips, harness guards.
 
 ### Not covered or lightly covered
 
@@ -280,16 +280,11 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 python -m pytest backend/tests/ -v
 
 # Profile setup works (all enrichment sources)
-python -m src.cli setup-profile --cv path/to/cv.pdf --linkedin export.zip --github username
+python -m src.cli setup-profile --cv path/to/cv.pdf --github username
 
 # Pipeline with profile
 python -m src.cli run --dry-run --log-level DEBUG
 # Log: "Using dynamic keywords from user profile"
-
-# Pipeline without profile
-rm backend/data/user_profile.json
-python -m src.cli run --dry-run --log-level DEBUG
-# Log: "No user profile found, using default keywords"
 
 # Check source count
 python -c "from src.main import SOURCE_REGISTRY; print(len(SOURCE_REGISTRY))"

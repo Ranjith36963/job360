@@ -1,5 +1,5 @@
 # backend/ — Claude Code pointer
-<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-25 by the nightly doc-truth routine -->
 
 > **This is a thin pointer, not the source of truth.** The load-bearing guidance
 > (the 31 hard rules, `SOURCE_REGISTRY`/five-surfaces, lazy-import rules, scoring
@@ -17,7 +17,10 @@ means in one short line). No walls of text — say what happened, what I did, wh
 
 The Job360 backend: Python 3.9+, FastAPI, Postgres via psycopg3 (`pg.py` — an aiosqlite-shaped shim), ARQ worker.
 Entry points: `main.py` (uvicorn) and `python -m src.cli`. Runtime data (gitignored)
-lives in `data/` (`jobs.db`, `user_profile.json`, `exports/`, `reports/`, `logs/`, `chroma/`).
+lives in `data/` (`exports/`, `reports/`, `logs/`, `chroma/`, and the legacy `user_profile.json` that
+`storage.py` migrates once then deletes). There is **no `data/jobs.db`** — the store is
+Postgres; `DB_PATH` is only a connection selector (`src/core/settings.py:15-20`,
+`src/repositories/pg.py:732-737`).
 
 ## Owner rule #29 — empty user fields stay SILENT
 
@@ -32,7 +35,7 @@ CLAUDE.md rule #29).
 
 ```bash
 # Canonical pre-commit test run — defer to the runtime collected count, not a doc figure
-python -m pytest -q -p no:randomly   # ~3,295 selected of 3,297 collected (2 `live` deselected) — test_main.py included
+python -m pytest -q -p no:randomly   # 2 `live` deselected; test_main.py included. Measure the count, never quote it.
 
 python -m pytest tests/test_scorer.py::test_name -v   # single test
 python -m ruff check .                                # lint (CI gate)
@@ -43,7 +46,8 @@ python -m migrations.runner up                        # apply migrations (non-AP
 
 `test_main.py` is now part of the canonical run. The M8 batch stubbed JobSpy
 (`fetch_jobs → []` via autouse fixture) and patched `load_profile`, making it
-fully offline (~8 s, 14 tests). Do NOT add `--ignore=tests/test_main.py` back.
+fully offline (18 `def test_` as of 2026-08-24 — measure, don't quote). Do NOT
+add `--ignore=tests/test_main.py` back.
 
 ## Backend test-infra notes (hard-won; don't relearn)
 

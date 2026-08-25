@@ -1,4 +1,7 @@
 # Job360 — Product Requirements Document (PRD)
+<!-- doc: PLAN -->
+
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 > **Version:** 1.0  
 > **Date:** 15 April 2026  
@@ -61,13 +64,13 @@ This is the core of Job360. It fetches job listings from all sources, normalises
 | Negative penalty | −30 points | Presence of explicitly excluded keywords in the title |
 | Foreign penalty | −15 points | Job is located outside the UK |
 
-**Quality threshold:** Jobs scoring below 30/100 are silently dropped. Only jobs meeting this bar reach the user.
+**Quality threshold:** ~~Jobs scoring below 30/100 are silently dropped. Only jobs meeting this bar reach the user.~~ **WITHDRAWN 2026-08-25 — never true of the shipped system, and describing a data-loss bug that was deliberately removed.** The store floor is `MIN_STORE_SCORE` (default **1**, `backend/src/core/settings.py:115-120`, applied `backend/src/main.py:729`); `MIN_MATCH_SCORE` (30) is a *display* floor applied at read time, so low-scoring jobs are kept and simply rank last. `main.py:720-728` records why the pre-store drop was torn out: "a job that scored 35 one week scored 25 the next and silently vanished."
 
 **Design constraint:** The engine's quality is the single most important factor in the product. If the engine delivers irrelevant jobs, no amount of features (pipeline tracker, push notifications, beautiful dashboard) will retain users. The engine must be the primary focus of engineering effort until it demonstrably delivers trusted results across multiple professional domains.
 
 ### Layer 3 — Job Provider Data
 
-This layer is responsible for sourcing raw job listings from the web. It operates 47 concurrent async sources spanning keyed APIs, free JSON APIs, ATS board APIs, RSS feeds, HTML scrapers, and specialty sources.
+This layer is responsible for sourcing raw job listings from the web. It operates **40 live source instances** (41 `SOURCE_REGISTRY` keys — `indeed`/`glassdoor` share `JobSpySource`; measured via `python -c "from src.main import SOURCE_REGISTRY as R; print(len(R), len(set(R.values())))"`) spanning keyed APIs, free JSON APIs, ATS board APIs, RSS feeds, HTML scrapers, and specialty sources.
 
 **Coverage categories:**
 
@@ -122,7 +125,7 @@ The pipeline tracker is a Kanban-style board with stages: Applied → Outreach �
 
 ### 4.6 Push Notifications
 
-The user configures their preferred delivery endpoints: email, Slack, Telegram, Discord, or any combination. On each scheduled search run, the platform pushes new results to the user's chosen endpoints. The push contains the same information as the dashboard — scored listings, time-bucketed, with match scores and key details.
+The user configures their delivery endpoint: email (the product) and/or a raw-JSON webhook. On each scheduled search run, the platform pushes new results there. The push carries the SAME information as the dashboard — the same score, the same judge verdict and reason, the same salary — built from one shared definition (`backend/src/services/delivery/decision_card.py`) so the email and the screen cannot drift. (Slack/Telegram/Discord were removed 2026-08-24; see FR-6.1.)
 
 The push notification is the primary differentiator. The user does not need to open the dashboard to discover new matches. Job360 finds jobs for the user and delivers them proactively.
 
@@ -204,9 +207,22 @@ The user can trigger a manual search at any time in addition to the scheduled ru
 
 ### FR-6: Push Notifications
 
-**FR-6.1:** The platform supports push delivery to email (SMTP), Slack (webhook), Discord (webhook), and Telegram (bot API). Additional channels may be added in future.
+**FR-6.1 (revised 2026-08-24):** The platform delivers on **two** channels and no others:
 
-**FR-6.2:** Each user configures their own delivery endpoints. A user may have multiple endpoints active simultaneously (for example, email and Slack).
+| Channel | Status |
+|---|---|
+| **email** | The product. Designed and supported. Sent via Resend (Railway blocks outbound SMTP ports). **Not yet verified end-to-end in production** — `notification_ledger` has recorded zero deliveries to date (measured 2026-08-24), so "it sends a real email a user receives" is still an open claim, not a measured one. Layer-3 verification (a real human, a real inbox) is tracked in `docs/plans/2026-08-24-email-webhook-only-delivery.md` and has not yet run. |
+| **webhook** | An unsupported raw-JSON escape hatch for a technical user's own tooling. No design, no promises. |
+
+Slack, Discord and Telegram were **removed**. The original FR-6.1 listed them as
+requirements; that requirement was met and then measured, and the measurement said
+production held zero connected channels of any type and the delivery ledger had never
+recorded a single send. "Additional channels may be added in future" is explicitly
+withdrawn as a goal: breadth of channels is addition, and this product needs the
+compounding kind. Evidence: `docs/plans/2026-08-24-email-webhook-only-delivery.md`.
+
+**FR-6.2:** Each user configures their own delivery endpoints, and may have more than one
+active at once (for example, email plus a webhook).
 
 **FR-6.3:** Push notifications are triggered by scheduled search runs and contain only genuinely new matches (listings not previously seen by the user).
 
@@ -244,7 +260,7 @@ The user can trigger a manual search at any time in addition to the scheduled ru
 
 **FR-10.1:** New users receive a free tier with a limited number of searches. The exact limit is deferred pending quality validation — higher engine quality allows a tighter free tier.
 
-**FR-10.2:** The paid tier unlocks unlimited (or higher-volume) searches, higher scheduling frequency, and additional delivery channels.
+**FR-10.2 (revised 2026-08-24):** The paid tier unlocks unlimited (or higher-volume) searches and higher scheduling frequency. **"Additional delivery channels" is withdrawn** — it contradicted the revised FR-6.1: delivery is deliberately capped at email + webhook (breadth of channels was cut as addition, not the compounding kind the product needs; see `docs/plans/2026-08-24-email-webhook-only-delivery.md`), and that is not a paywall decision to reverse later.
 
 **FR-10.3:** The payment integration must be seamless and compatible with the chosen authentication provider.
 

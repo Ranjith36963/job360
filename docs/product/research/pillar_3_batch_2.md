@@ -1,4 +1,7 @@
 # Job360 delivery layer: push, scoring, and parity at multi-user scale
+<!-- doc: REFERENCE -->
+
+> **REFERENCE — pinned to its research date.** External facts move; re-check anything load-bearing. <!-- banner: auto -->
 
 **Job360 can ship a production-grade delivery layer — push notifications across Slack, Gmail, Telegram, and Discord with dashboard parity — for under $10/month at 1,000 users.** The architecture rests on three pillars: Apprise as a zero-cost multi-channel sending engine wrapped in a task queue, a pre-filter-first scoring pipeline that reduces compute by 99%, and a single-source-of-truth `user_feed` table that guarantees dashboard and push always show the same data. No existing job search tool offers Slack, Telegram, or webhook-based notifications — this is entirely unserved territory and Job360's genuine differentiator. The critical constraint is honest: LLM-based scoring in the hot path is economically infeasible beyond single-user scale, and SMS delivery costs make it impractical as a default channel.
 

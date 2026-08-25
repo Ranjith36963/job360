@@ -59,6 +59,29 @@ jobs:
       - name: CLAUDE.md size budget (blocking)
         run: python scripts/doc_sync_check.py --budget-only
 
+      # BLOCKING, and the only step here that makes drift IMPOSSIBLE rather
+      # than merely visible. Every other check in this workflow reports a doc
+      # that has already gone wrong; this one fails when a generated block no
+      # longer matches the code that produces it, so the wrong text cannot
+      # reach main at all. Also fails if a marker was deleted -- that is a
+      # block quietly going back to being hand-written.
+      - name: Generated doc blocks are current (blocking)
+        run: python scripts/gen_doc_blocks.py
+
+      # BLOCKING. Fable 5 found this hole 2026-08-25: the mutation test — the
+      # guard OF the guards — was in no workflow at all. It ran only when a
+      # human remembered, which means the 27 guards could silently degrade to
+      # always-green as the code moved beneath them, and the drift report would
+      # keep saying "OK" while watching an empty room. That is the exact failure
+      # this repo already wrote a law about ("every guard must declare its
+      # drill; an undeclared guard in a workflow is a red build") — violated by
+      # the newest guard system in the repo.
+      #
+      # On PRs too, not just the schedule: a PR that breaks a guard's anchor is
+      # the moment to know, not four weeks later.
+      - name: Every guard can still go RED (blocking)
+        run: python scripts/doc_sync_mutation_test.py
+
       - name: Run doc drift check
         id: check
         run: |
@@ -172,7 +195,7 @@ jobs:
 
       - name: Claude edits the docs (edit-only — no git, no gh)
         if: steps.token.outputs.have == 'true'
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50 # v1
+        uses: anthropics/claude-code-action@dcb57747bfceeaa1fa72638cae52295d1d853d4a # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -185,7 +208,15 @@ jobs:
               the checker and captured its report there. Fix EVERY drift row it
               lists (numbers, stale phrases) in the LIVING docs.
             - Add/update the `<!-- doc: LIVING | last-verified: YYYY-MM-DD by /sync -->`
-              stamp on line 2 of all six LIVING docs (today's date, UTC).
+              stamp (today's date, UTC) on every LIVING doc you actually edited.
+              Do NOT re-stamp a doc you did not change — a fresh date on an
+              unread file is a claim nobody made. ("all six LIVING docs" stood
+              here until 2026-08-25, when the real count was 45.)
+            - SCOPE: only a doc stamped `<!-- doc: LIVING -->` can drift. A
+              PLAN, LOG, REFERENCE or FROZEN doc is a record of a moment, so a
+              stale number in one is CORRECT for its date — leave it alone.
+              Before this rule existed, thirteen nightly cycles re-litigated
+              dated records and the finding count could never reach zero.
             - If a doc claims something the code does not do, add the gap to
               docs/harness/maintenance/PARKED.md — and leave that source doc untouched.
             - Edit ONLY *.md files. Never touch code, configs, or workflows.

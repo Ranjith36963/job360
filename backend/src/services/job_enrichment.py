@@ -19,13 +19,14 @@ import json
 import logging
 import os
 from collections.abc import Awaitable
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from src.models import Job
 from src.repositories import pg
 from src.services.job_enrichment_schema import JobEnrichment
 from src.services.profile.llm_provider import llm_extract_validated
 from src.services.shelf_gate import is_stub_description
+from src.utils.loop_guard import cpu_bound
 
 logger = logging.getLogger("job360.services.job_enrichment")
 
@@ -415,6 +416,22 @@ async def _build_enrichment_lookup(
         # Table not yet migrated (e.g. fresh test DB without 0008). Return empty.
         return {}
     rows = await cur.fetchall()
+    # Deserialising every row is pure CPU (19 columns, 5 json.loads + a Pydantic
+    # validation each) and it runs in the SAME frozen window as the catalog
+    # re-score's Phase 1 — on both re-score paths, immediately before it. Table
+    # coverage grows toward 100% of the catalog by design, so this only gets
+    # heavier. Hand it to a worker thread.
+    return await asyncio.to_thread(_parse_enrichment_rows, rows)
+
+
+@cpu_bound
+def _parse_enrichment_rows(rows: list[Any]) -> dict[int, JobEnrichment]:
+    """Turn raw ``job_enrichment`` rows into the ``job_id -> JobEnrichment`` map.
+
+    Split out of ``_build_enrichment_lookup`` purely so the async side can hand
+    it to ``asyncio.to_thread``. The per-row try/except is unchanged, so one
+    malformed row is still skipped rather than crashing the whole lookup.
+    """
     lookup: dict[int, JobEnrichment] = {}
     for row in rows:
         try:

@@ -1,4 +1,7 @@
 # Job360 Missions
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 **CANONICAL COPY: `D:\dev\job360\docs\maintenance\MISSIONS.md` (the MAIN checkout).** Every agent — worker, scout, integrator, health — reads and writes THIS absolute path, never the copy inside its own worktree (worktree copies are stale checkouts, not coordination state).
 

@@ -1,3 +1,4 @@
+<!-- doc: LIVING | last-verified: 2026-08-25 by the nightly doc-truth routine -->
 # Pillar 2 — The Search & Match Engine
 
 > **Audience.** Read this if you want to understand what happens *between* "a job posting exists on the internet" (Pillar 3 fetches it) and "a job appears on a user's dashboard ranked 87/100" (Pillar 1 shows it). The engine is the brain — it takes raw postings, filters out the irrelevant ones, scores the survivors against the user, deduplicates near-duplicate listings, enriches the high-scorers with LLM-extracted structured data, and writes everything to the shared `jobs` catalog.
@@ -8,7 +9,7 @@
 
 ## 1. TL;DR — what the engine does
 
-> *Once per scheduled tick (or once-shot from the CLI), the engine asks every source for new jobs, runs each posting through a 3-stage prefilter that drops ~99% of noise, scores the survivors on up to **9 dimensions** (4 classic + 4 multi-dim + a combined `match_score`) against the user's profile, deduplicates the result through a 4-layer cascade, optionally has an LLM extract 18 structured fields, optionally encodes a semantic embedding, and finally writes each unique row into the shared `jobs` table.*
+> *Once per scheduled tick (or once-shot from the CLI), the engine asks every source for new jobs, runs each posting through a 3-stage prefilter that drops ~99% of noise, scores the survivors on up to **9 dimensions** (4 classic + 4 multi-dim + a combined `match_score`) against the user's profile, deduplicates the result through a 4-layer cascade, optionally has an LLM extract 16 structured fields, optionally encodes a semantic embedding, and finally writes each unique row into the shared `jobs` table.*
 
 The pipeline is a **6-stage straight line**, with the scheduler + circuit breakers wrapped around stage 1:
 
@@ -28,7 +29,7 @@ The pipeline is a **6-stage straight line**, with the scheduler + circuit breake
                   │
 6. STORE         insert into shared catalog `jobs`
                   │
-                  └─→ [opt-in] encode embedding → ChromaDB
+                  └─→ [opt-in] encode embedding → job_embeddings.embedding (pgvector)
 ```
 
 ### The one fact that changes everything (2026-04-09)
@@ -37,7 +38,7 @@ The pipeline is a **6-stage straight line**, with the scheduler + circuit breake
 
 > *"All AI/ML default lists have been removed. The system now requires a user profile (CV upload or manual preferences) — there are no domain-biased defaults to fall back on."*
 
-What survives in `keywords.py`: only `LOCATIONS` (25 UK places) and `VISA_KEYWORDS` (8 phrases) — both genuinely domain-agnostic.
+What survives in `keywords.py`: only `LOCATIONS` (26 entries — 24 UK places plus `Remote` and `Hybrid`, which `_location_score` skips when matching) and `VISA_KEYWORDS` (8 phrases) — both genuinely domain-agnostic.
 
 **Implication:** the legacy module-level `score_job(job)` function in `skill_matcher.py:416` is essentially dead code — it still runs, but it scores against empty lists. Every meaningful scoring path in the live system goes through `JobScorer(config, user_preferences, enrichment_lookup)` (Pillar 2 Batch 2.9), and `run_search()` always instantiates it with all three kwargs (`backend/src/main.py:857`).
 
@@ -86,7 +87,7 @@ UserPreferences(
 
 ### Stage 1 — Fetch
 
-`TieredScheduler.tick()` saw `greenhouse.category="ats"` (60s tier) was due. Breaker `CLOSED` → dispatched. `GreenhouseSource.fetch_jobs()` iterated 80 company slugs, found this one among ~500 results, returned the `Job` above. `breaker.record_success()`.
+`TieredScheduler.tick()` saw `greenhouse.category="ats"` (60s tier) was due. Breaker `CLOSED` → dispatched. `GreenhouseSource.fetch_jobs()` iterated 82 company slugs, found this one among the results, returned the `Job` above. `breaker.record_success()`.
 
 ### Stage 2 — Prefilter (3 gates)
 
@@ -169,7 +170,9 @@ Survives unchanged.
 - New row → returns `True`; the 9 dim columns and `staleness_state='active'` and `first_seen_at=now()` are persisted.
 - Cross-run duplicate → returns `False`; `last_seen_at` is bumped instead.
 
-If `SEMANTIC_ENABLED=true`: `encode_job(job, enrichment)` runs (lazy-imports `sentence_transformers`, splits long description 300/50, max-pools), `VectorIndex.upsert(job_id, vector)` writes to ChromaDB at `data/chroma/`, audit row in `job_embeddings(job_id, model_version, embedding_updated_at)`.
+If `SEMANTIC_ENABLED=true`: `encode_job(job, enrichment)` runs (lazy-imports `sentence_transformers`, splits long description 300/50, max-pools), then `PgVectorIndex().upsert(job_id, vector)` writes the vector AND its audit stamp into the same `job_embeddings` row in one statement — `model_version` is taken from `embeddings.MODEL_NAME` inside the method and `embedding_updated_at` is set to `now()` (`backend/src/main.py:1295-1298`, `services/pg_vector_index.py:99-123`).
+
+> **The store is Postgres, not ChromaDB.** Migration `0027` moved the vector into `job_embeddings.embedding` (`vector` type, pgvector) on 2026-08-07, because the Chroma store sat on the BACKEND container's local disk while the only scheduled pipeline runs on the WORKER — so the scheduled run could never ADD one. Coverage froze: the catalog grew 7,761 → 8,184 overnight while the embedding count stayed at exactly 284. `services/vector_index.py` (the Chroma wrapper) still exists and still builds a `chromadb.PersistentClient` when called (`vector_index.py:39-45`) — but **no production call site constructs it**. Its only remaining callers are two scripts (`backend/scripts/build_job_embeddings.py:73`, `backend/scripts/eval_v2_pool.py:125`) and two tests (`test_embeddings.py:22`, `test_vector_index_path.py:18`).
 
 `db.log_run(stats, run_uuid, per_source_errors={...}, per_source_duration={greenhouse: 12.4}, total_duration=68.2)` writes the run row (migration `0010`).
 
@@ -282,30 +285,30 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
 | **1. Exact normalised key** | — | always on | Group by `(normalized_company, _normalize_title(title))`. `_normalize_title` is *wider* than the DB's `normalized_key()` — strips seniority prefixes, trailing job codes, parentheticals, marketing suffixes. (Per-run dedup is allowed to be more aggressive than cross-run DB uniqueness.) |
 | **2. RapidFuzz fuzzy** | `rapidfuzz` | on | `token_set_ratio(title_a, title_b) ≥ 80` AND `ratio(company_a, company_b) ≥ 85` AND normalised location matches. Skipped silently if `rapidfuzz` not installed. |
 | **3. TF-IDF cosine** | `scikit-learn` | on | Document = `company + title + description[:200]`. Cosine ≥ 0.85 clusters merge via union-find. |
-| **4. Embedding repost** | `sentence_transformers` + `chromadb` | **opt-in** | Within same company, cosine ≥ 0.92 → dedup. Requires an `embedding_lookup: dict[job_id, vector]` to be passed in. Preserves earliest `first_seen_at`. |
+| **4. Embedding repost** | none of its own — `deduplicator.py` imports only `re` / `rapidfuzz` / `sklearn`; the vectors are handed in | **opt-in** | Within same company, cosine ≥ 0.92 → dedup. Requires an `embedding_lookup: dict[job_id, vector]` to be passed in. Preserves earliest `first_seen_at`. |
 
 **Tie-break ranking** (used in every layer):
 1. `match_score` (primary)
 2. **Enrichment bonus** (+5 if the job has a `job_enrichment` row — encourages enriched candidates to win, so structured data survives downstream)
 3. **Completeness** (+10 each for salary_min/max, +5 for location, +min(len(desc), 20) for description)
 
-### Stage 5 — Enrich (opt-in, `ENRICHMENT_ENABLED=true`)
+### Stage 5 — Enrich (opt-in, `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED`)
 
-- Gate: only jobs with `match_score >= ENRICHMENT_THRESHOLD` (default 60) are sent to the LLM.
+- Gate: **a budget, not a threshold** (`main.py:1137-1163`). Jobs must clear a low floor — `match_score >= ENRICHMENT_MIN_SCORE` (default **10**, `settings.py:152`) — and then the best `ENRICHMENT_MAX_JOBS` (default **20**) are sent to the LLM. `ENRICHMENT_THRESHOLD` is not read at this call site — it defaults to `ENRICHMENT_MIN_SCORE` when unset (`settings.py:155`). It is **not** dead weight for old `.env` files, though: the ARQ worker's per-job enqueue path is still gated on it (`workers/tasks.py:237`), so setting it high stops worker-side fan-out while leaving this CLI selection untouched — see the env table at §5. Why the change: the scorer's contract is 0–100, but the highest `match_score` measured across the whole 3,342-row prod feed on 2026-07-28 was **58**, so a threshold of 60 selected nothing and the stage had never run (`main.py:1138-1142` records the measurement). A budget makes no claim about the distribution, so it cannot go stale.
 - `enrich_batch(jobs, semaphore_limit=10, skip_existing=True)` (`job_enrichment.py`) runs asyncio-parallel LLM calls capped at 10 concurrent.
 - Each call goes through `llm_extract_validated(prompt, JobEnrichment, max_retries=2)`:
   - **Provider chain** (`llm_provider.py:329-334`): **OpenAI (`gpt-4o-mini`, PRIMARY)** → Gemini (`gemini-3.7-flash`) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`gpt-oss-120b`). Every model id is env-overridable.
   - **Self-correction loop**: on Pydantic `ValidationError`, the first 5 error messages are appended to the prompt and the call retries up to 2 more times.
   - If all providers fail or retries exhaust → `RuntimeError` (logged, no partial row written — atomicity over best-effort).
-- Output: a `JobEnrichment` row with **18 strict-typed fields** (see §3.3 below).
+- Output: a `JobEnrichment` row with **16 strict-typed fields** (see §3.2 below). The `job_enrichment` TABLE still has 18 enrichment columns — `employer_type` and `locations` were retired from the schema in 2026-08 but never dropped from the DB, so the application neither writes nor reads them — `save_enrichment` excludes both from its column list (`job_enrichment.py:248-254`) and the read paths skip them too (`:329`, `:401`). The columns are not empty, though: `0008_job_enrichment.up.sql:21,29` declares them `NOT NULL DEFAULT '[]'` / `'unknown'`, so every new row still gets those defaults from the database.
 - DB persistence: `INSERT OR REPLACE` into `job_enrichment` table (migration `0008`). **Shared catalog** — no `user_id` column, per CLAUDE.md rule #17 (the same enriched fields apply to every user; per-user scoring against the enrichment happens at read time).
 
 ### Stage 6 — Store + (opt-in) embed
 
 - `db.insert_job(job)` does `INSERT OR IGNORE` on `(normalized_company, normalized_title)` UNIQUE — returns `True` for new rows, `False` for cross-run duplicates already in the catalog. **Never touch `normalized_key()`** without checking the dedup chain (CLAUDE.md rule #1).
-- If `SEMANTIC_ENABLED=true`, lazy-import `embeddings` + `vector_index`, encode each newly-inserted job via `encode_job(job, enrichment)` and `VectorIndex.upsert(job_id, vector)`.
+- If `SEMANTIC_ENABLED=true`, lazy-import `embeddings` + `pg_vector_index`, encode each newly-inserted job via `encode_job(job, enrichment)` and `PgVectorIndex().upsert(job_id, vector)` (`main.py:1292-1298`). This write path reads `SEMANTIC_ENABLED` **alone** — `ENGINE3_ENABLED` does not open it.
 - `db.log_run(stats, run_uuid, per_source_errors, per_source_duration, total_duration)` writes the `run_log` row.
-- Finally: CSV export → Markdown report → channel notifications (the *old* per-source notification system from `services/notifications/`; the per-user `channels/dispatcher` runs only under the ARQ worker, not the CLI).
+- Finally, in this order — **CSV export (`main.py:1374`) → Markdown report (`:1379`) → `db.log_run(...)` (`:1403`)**. The `log_run` bullet is listed above for topical grouping, but it is the *last* write the pipeline makes, not an earlier one. And the pipeline ending is not the same event as the API run being marked done: `POST /api/search` flips its `_runs[run_id]` entry to `status="completed"` only after `run_search()` returns (`api/routes/search.py:219-225`). There is **no** "channel notifications" step after the report, and **no** old per-source notifier left to run one: the pre-Batch-2 env-var webhook modules (`base.py`, `email_notify.py`, `slack_notify.py`, `discord_notify.py`) were deleted on **2026-06-18** by `e0b0ff1` "feat(notifications): single per-user rulebook + scheduler, remove legacy path", and the only substantive modules left under `services/notifications/` are `report_generator.py` (the markdown report, `main.py:49,1379`) and `defaults.py` (the signup rulebook seeder) — the directory also holds an empty `__init__.py` package marker, and nothing else. Notifications are enqueued **earlier**, inside the per-user feed-write block: `_enqueue_notifications` fans out the ordinary per-user `send_notification` ARQ task for above-threshold rows (`main.py:481,1257-1260`). It is a no-op unless the caller passed an `enqueue` hook, and the CLI passes none (`cli.py:34-40`) — so the per-user `channels/dispatcher` still runs only under the ARQ worker, never from `python -m src.cli run`. Same single delivery path as Pillar 1 §"There is only ONE delivery path".
 
 ---
 
@@ -447,7 +450,7 @@ Engine-relevant tables and columns:
 | `jobs` | `(normalized_company, normalized_title) UNIQUE` | Shared catalog (no `user_id`). Score columns (`match_score`, `role`, `skill`, `seniority_score`, …), date columns (`posted_at`, `date_found`, `date_confidence`, `date_posted_raw`), lifecycle (`first_seen_at`, `last_seen_at`, `last_updated_at`, `staleness_state`). |
 | `run_log` | `(timestamp, run_uuid)` | Per-run stats: `total_found`, `new_jobs`, `sources_queried`, `per_source` (JSON), `per_source_errors`, `per_source_duration`, `total_duration` (migration `0010`). |
 | `job_enrichment` | `job_id PK FK → jobs(id)` | 18 enrichment fields + `enriched_at` (migration `0008`). Shared catalog (rule #17). |
-| `job_embeddings` | `job_id PK FK → jobs(id)` | Audit only: `model_version`, `embedding_updated_at`. Actual vectors in ChromaDB at `backend/data/chroma/` (migration `0009`). |
+| `job_embeddings` | `job_id PK FK → jobs(id)` | `model_version`, `embedding_updated_at` **and the vector itself** — `embedding` is a pgvector `vector` column added by migration `0027` (table created by `0009`). It is no longer audit-only, and there is no separate vector store. |
 
 `_migrate()` in `database.py:162-342` is **forward-compat-only** — applies `ALTER TABLE ADD COLUMN` for missing columns so an older DB on disk auto-upgrades. The migration runner in `backend/migrations/runner.py` is the new system (Batch 2+) and applies the numbered `.up.sql` / `.down.sql` files.
 
@@ -457,15 +460,17 @@ Engine-relevant tables and columns:
 
 Both flags default `false` per CLAUDE.md rule #18, and the **no-op path must exactly match pre-Pillar-2 behaviour**. Documented here for completeness.
 
-### 5.1 `ENRICHMENT_ENABLED=true` → LLM enrichment
+### 5.1 `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` → LLM enrichment
+
+Either name opens this surface — every E2 call site reads `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853`, `main.py:1137`, `rescore.py:85`, `api/routes/jobs.py:779`, `workers/tasks.py:237`), rule #18.
 
 When on:
 - Stage 5 runs (see §2).
-- `JobScorer` gains a populated `enrichment_lookup` and the Batch 2.9 dimension scorers actually fire.
+- `JobScorer` gets an `enrichment_lookup` that *can* carry rows, so the Batch 2.9 dimension scorers see real data for any job enrichment has reached. The flag opens the path; it does not guarantee rows — `_build_enrichment_lookup` returns `{}` when the table is empty or absent (`job_enrichment.py:313-328`), which is what happens with a zero `ENRICHMENT_MAX_JOBS` budget, no job above the floor, or every provider failing (the four preconditions in §6). Each unreached job falls back to the same neutral halves as the flag-off case below.
 - Dedup tie-breaker uses the `+5` enrichment bonus.
 
 When off:
-- `enrichment_lookup` is an empty dict → all four dim scorers return 0 → `JobScorer` effectively reverts to the legacy 4-component formula.
+- `enrichment_lookup` is an empty dict, so every lookup returns `None`. The four dim scorers still RUN — the path is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20) — and each returns its documented **neutral half weight**, never a zero: seniority 4 (`scoring_dimensions.py:157`), salary 5 (`:198-200`), workplace 3 (`:278`), visa 3 (`:245`), so **+15** rather than the +30 a fully enriched job can reach (rule #29; `visa_score` is the one exception, returning 0 at `:242` when the user does not need sponsorship). A user with no preferences at all gets the legacy 4-component formula; a user with preferences does not.
 - No LLM API calls, no `job_enrichment` DB writes.
 
 ### 5.2 `SEMANTIC_ENABLED=true` → embeddings + hybrid retrieval
@@ -475,17 +480,17 @@ When on:
   - Model: `sentence-transformers/all-MiniLM-L6-v2` (384-dim, lazy-loaded).
   - Base text: `title | requirements_summary | required_skills_joined`.
   - Long descriptions (>300 words) are chunked 300/50 and max-pooled (the "asymmetric short-query-long-document" pattern).
-- Vector is `VectorIndex.upsert(job_id, vector)` into ChromaDB at `backend/data/chroma/`.
+- Vector is `PgVectorIndex.upsert(job_id, vector)` into `job_embeddings.embedding` in Postgres (pgvector, migration `0027`).
 - API queries can pass `?mode=hybrid` to invoke `retrieve_for_user()` which:
   1. Pulls keyword top-500 from SQL (`JobScorer.match_score` ranking).
-  2. Pulls semantic top-500 from ChromaDB (nearest-neighbour on the encoded profile).
+  2. Pulls semantic top-500 from `job_embeddings.embedding` (cosine distance `<=>`, exact scan — no ANN index yet, see `0027`).
   3. Fuses via **Reciprocal Rank Fusion** with `k=60`: `score(item) = Σ 1 / (k + rank_i + 1)` across all input lists.
   4. Optionally reranks the top-50 with the **cross-encoder** `cross-encoder/ms-marco-MiniLM-L-6-v2` (Batch 2.8).
-- ESCO skill normalisation in CV parsing also flips on (Pillar 1 Ring 2 §3.2).
+- ESCO skill normalisation in CV parsing does **not** flip on. `_maybe_normalise_skills_via_esco()` is double-gated: `SEMANTIC_ENABLED` **and** `is_available()` (`cv_parser.py:821,830`), and the index artefacts have never been built, so it stays an identity transform either way (rule #28; `docs/product/PILLAR1_EXTRACTION_AUDIT.md`).
 
 When off:
 - No `sentence_transformers` import at all (saves ~150 ms–2 s startup).
-- No ChromaDB queries; retrieval is keyword-only.
+- No vector queries; retrieval is keyword-only.
 - `is_hybrid_available(vector_index_count)` returns `False` → API defaults `mode=keyword`.
 
 ### 5.3 The lazy-import rule (CLAUDE.md #16)
@@ -504,27 +509,31 @@ A top-level import would pay the cost on every pytest collection, every CLI invo
 
 ## Environment variables — every var the engine reads
 
+`MIN_MATCH_SCORE` is NOT in this table: it is a plain constant in `core/settings.py`, not read from the environment, so setting it in `.env` does nothing. It is the DISPLAY floor applied at read time; the catalog floor is `MIN_STORE_SCORE`.
 Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goes into the final clamp at 130-max-pre-clamp (rule #23).
 
 | Var | Default | What it controls | Effect of changing |
 | --- | --- | --- | --- |
-| `MIN_MATCH_SCORE` | `30` | Jobs below this score are omitted from the user's feed entirely | Raise to be stricter (fewer results), lower for permissive feed |
+| `MIN_STORE_SCORE` | `1` | The **catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`, so a job scoring exactly it is kept), judged on the RUN's score, not any one user's (`core/settings.py:115-120`, applied at `main.py:729`); the re-score backfill applies it too (`services/rescore.py:271`). It is **not** a `user_feed` floor — `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison at all (`workers/tasks.py:208-217`), so a job that scores 0 for a given user still gets a row | This is the one that destroys rows; raise it only to cut genuine junk |
 | `MIN_TITLE_GATE` | `0.15` (= 6 pts of 40) | Title-component floor; below it the whole score collapses to suppression | Raise to require closer title matches; lower to admit weaker title alignments |
 | `MIN_SKILL_GATE` | `0.15` (= 6 pts of 40) | Skill-component floor; same collapse behaviour | Same as above for skill alignment |
 | `SALARY_WEIGHT` | `10` | Salary dimension max (Batch 2.9) | Raise to weight salary fit more heavily in final score |
 | `SENIORITY_WEIGHT` | `8` | Seniority dimension max | Raise to penalise mismatched levels harder |
 | `VISA_WEIGHT` | `6` | Visa dimension max | Only meaningful when users have `needs_visa=True` |
 | `WORKPLACE_WEIGHT` | `6` | Workplace (remote/hybrid/onsite) dimension max | Raise to make workplace preference more decisive |
-| `ENRICHMENT_THRESHOLD` | `60` | Jobs need to score this high to be sent to the LLM enrichment pipeline | Raise to save LLM cost; lower to enrich more aggressively |
-| `ENRICHMENT_ENABLED` | `false` | Master switch for LLM enrichment + multi-dim activation | Flip on after setting LLM keys — see rule #18 |
-| `SEMANTIC_ENABLED` | `false` | Master switch for embeddings + ChromaDB + hybrid retrieval + ESCO | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
+| `ENRICHMENT_MIN_SCORE` | `10` | The low floor a job must clear to be enrichment-eligible (`settings.py:152`) | Raise only to skip obvious junk — the budget below is the real lever |
+| `ENRICHMENT_MAX_JOBS` | `20` | Per-run budget: the best N eligible jobs are enriched (`settings.py:151`) | Raise to enrich more per run; this is the hard cost ceiling |
+| `ENRICHMENT_THRESHOLD` | `10` | Back-compat name: when unset it **defaults to** `ENRICHMENT_MIN_SCORE`, and when set it takes that value (`settings.py:155`). `run_search`'s selection does **not** read it — that gate is `ENRICHMENT_MIN_SCORE` + `ENRICHMENT_MAX_JOBS` — but the worker's per-job enqueue path still does (`workers/tasks.py:237`) | Not inert — leave it at the default. Raising it silently stops the worker fanning out `enrich_job_task` while the CLI path carries on |
+| `ENRICHMENT_ENABLED` | `false` | Legacy switch for LLM enrichment; `ENGINE2_ENABLED` opens the same gate (`ENGINE2_ENABLED or ENRICHMENT_ENABLED`). It switches the enrichment DATA on, **not** the dim scorers — those run on `user_preferences` alone (rule #20) | Flip on after setting LLM keys — see rule #18 |
+| `SEMANTIC_ENABLED` | `false` | Writes embeddings into the pgvector store (`main.py:1292,1348` read this name ALONE). Hybrid retrieval is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), so `ENGINE3_ENABLED` alone queries an index nothing fills. It does **not** switch ESCO on: that also needs `is_available()` (`cv_parser.py:821,830`) and the index artefacts have never been built | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
 | `TARGET_SALARY_MIN` / `_MAX` | `40000` / `120000` | Salary-range *tiebreaker* (not scoring) for sort order on the dashboard | Display preference only |
-| `GEMINI_API_KEY` | (unset) | First-choice LLM provider | Unset → falls to Groq |
-| `GROQ_API_KEY` | (unset) | Second-choice LLM | Unset → falls to Cerebras |
-| `CEREBRAS_API_KEY` | (unset) | Third-choice LLM | All three unset → enrichment + LLM-CV-parse both raise `RuntimeError` |
-| Source-keyed APIs (`REED_API_KEY`, `ADZUNA_APP_ID`+`ADZUNA_APP_KEY`, `JSEARCH_API_KEY`, `JOOBLE_API_KEY`, `SERPAPI_KEY`, `CAREERJET_AFFID`, `FINDWORK_API_KEY`) | (unset) | The 7 keyed sources from Pillar 3 | Each unset source `return []` silently (logged at INFO) |
+| `OPENAI_API_KEY` | (unset) | **PRIMARY** LLM provider — heads the chain (`llm_provider.py:329-334`) | Unset → falls to Gemini |
+| `GEMINI_API_KEY` | (unset) | Second-choice LLM | Unset → falls to Groq |
+| `GROQ_API_KEY` | (unset) | Third-choice LLM | Unset → falls to Cerebras |
+| `CEREBRAS_API_KEY` | (unset) | Fourth-choice LLM | All four unset → enrichment + LLM-CV-parse both raise `RuntimeError` |
+| Source-keyed APIs (`REED_API_KEY`, `ADZUNA_APP_ID`+`ADZUNA_APP_KEY`, `JSEARCH_API_KEY`, `JOOBLE_API_KEY`, `SERPAPI_KEY`, `CAREERJET_AFFID`, `FINDWORK_API_KEY`, `DFE_APPRENTICESHIPS_API_KEY`) | (unset) | The 8 keyed sources from Pillar 3 (`sources/apis_keyed/`) | Each unset source `return []` silently (logged at INFO) |
 
-> Tuning recipe — *"feed too noisy"*: raise `MIN_MATCH_SCORE` (e.g. 40), or raise `MIN_TITLE_GATE`/`MIN_SKILL_GATE` (e.g. 0.25). *"Feed too sparse"*: lower the same, or expand `additional_skills` on the user profile (cheaper than tuning). *"Want more weight on salary fit"*: bump `SALARY_WEIGHT` to 15, but watch the [0,100] clamp — rule #23.
+> Tuning recipe — *"feed too noisy"*: raise `MIN_MATCH_SCORE` (e.g. 40), or raise `MIN_TITLE_GATE`/`MIN_SKILL_GATE` (e.g. 0.25). *"Feed too sparse"*: lower the same, or expand `additional_skills` on the user profile (cheaper than tuning). *"Want more weight on salary fit"*: bump `SALARY_WEIGHT` to 15, but watch the [0,100] clamp — rule #27.
 
 ---
 
@@ -534,15 +543,15 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | --- | --- | --- | --- |
 | All scores are 0 / suspiciously low | No user profile loaded → `score_job()` legacy path firing against empty `keywords.py` | `match_score` column near 0 for every row | Run `setup-profile`. The "empty keywords.py" inflection from 2026-04-09 means a profile is mandatory now |
 | Dim columns all zero except classic 4 | `user_preferences` was **not** passed at all — that, not the lookup, is the gate (rule #20) | DB inspection of `seniority_score`/`salary_score`/etc all zero despite enrichment rows existing. Note a *neutral half* (e.g. visa 3 of `VISA_WEIGHT=6`) is correct, not a bug — as is a visa `0` when the user does not need sponsorship — only a flat 0 across all four points at a missing `user_preferences` | Confirm the caller passes `user_preferences`; `main.py:857` and `workers/tasks.py::score_and_ingest` show the correct pattern |
-| Enrichment never runs | `ENRICHMENT_ENABLED=false` (default), or all 3 LLM providers unset, or score never crosses `ENRICHMENT_THRESHOLD` | `job_enrichment` table stays empty | Check the three preconditions in that order |
+| Enrichment never runs | Both `ENGINE2_ENABLED` and `ENRICHMENT_ENABLED` false (the default), or all 4 LLM providers unset, or no job clears `ENRICHMENT_MIN_SCORE` (default 10), or `ENRICHMENT_MAX_JOBS=0` — a zero budget selects nothing even when everything else is satisfied (`main.py:1165`) | `job_enrichment` table stays empty | Check those four preconditions in that order. A selected-zero run logs `Enrichment selected 0 jobs …` at WARNING (`main.py:1172`) |
 | Enrichment runs but every row is `category="other"` etc | LLM returning generic enum values; the validation loop converged on weak output | `SELECT category, COUNT(*) FROM job_enrichment GROUP BY category` shows skewed dist | Prompt-engineering territory — see `job_enrichment.py` system prompt; try forcing Gemini-only by unsetting the others |
 | Cross-encoder rerank takes too long | First call on each process initialises the model (~2 s download + load) | API request latency spike | Pre-warm via a startup hook, or accept the cold-start cost once per worker process |
-| ChromaDB query returns 0 even with `SEMANTIC_ENABLED=true` | Collection empty (`VectorIndex.count() == 0`) — embeddings never built | Hybrid retrieval falls back to keyword-only silently | Run a CLI pass with the flag on to populate. To force re-embed: `rm -rf data/chroma/` and re-run |
+| Vector query returns 0 even with `SEMANTIC_ENABLED=true` | No rows carry a vector (`PgVectorIndex().count() == 0`, i.e. `SELECT count(*) FROM job_embeddings WHERE embedding IS NOT NULL` is 0) — embeddings never built, **or** this Postgres has no pgvector so `0027` was a no-op and every method degrades to empty | Hybrid retrieval falls back to keyword-only silently | Run a CLI pass with the flag on to populate (`main._embed_backfill_budget`, `backend/src/main.py:548`, re-fills rows where `e.job_id IS NULL OR e.embedding IS NULL`). To force re-embed: `UPDATE job_embeddings SET embedding = NULL;` and re-run. **Deleting `data/chroma/` does nothing** — that store is not read any more |
 | `nightly_ghost_sweep` marks healthy jobs as `confirmed_expired` | Source returned 0 results for N consecutive runs (e.g. credentials lapsed silently) | Users start getting 410s on real apply links | Check the source's run_log entries; if the source has been failing, the sweep is doing the right thing — fix the source first |
 | Circuit breaker stays OPEN forever | Per-source `failure_threshold` (5) hit; cooldown is per-process | Source skipped on every tick | Breakers are in-memory only — **restart the process** (CLI/API/worker) to reset |
 | Same job re-scored to a different value across two runs | Profile changed between runs (user updated prefs/CV) — expected behaviour | `match_score` differs in `jobs` row between runs | Not a bug. To audit which version of the profile produced a score, cross-reference `user_profile_versions.created_at` with `run_log.timestamp` |
 | Dedup is too aggressive — losing legit different roles | Layer-3 TF-IDF clustering too loose, or Layer-1 `_normalize_title` strips too much | Postings disappear that should appear separately | Inspect `_normalize_title()` regex; consider tightening the 0.85 cosine threshold via env override if exposed (currently hard-coded) |
-| LLM provider chain exhausts mid-batch | All 3 providers' free-tier quotas hit | `enrich_batch` logs per-job errors; `RuntimeError` raised per failing job (caught at batch level) | Wait for the daily quota reset; or top up a paid tier; the engine continues — only the enrichment column is null for those jobs |
+| LLM provider chain exhausts mid-batch | All 4 providers' quotas hit (OpenAI → Gemini → Groq → Cerebras) | `enrich_batch` logs per-job errors; `RuntimeError` raised per failing job (caught at batch level) | Wait for the daily quota reset; or top up a paid tier; the engine continues — only the enrichment column is null for those jobs |
 | Conditional fetch cache grows without bound | `ConditionalCache` is 256-entry FIFO; eviction is automatic | Memory stable around the bound | Not a failure — by design. To see hit/miss rates: `cache.get_metrics()` returns `{hits, misses, size}` |
 | `run_log.total_duration` >> sum of per_source_durations | Time is being spent in scoring/dedup/enrichment/store stages, not fetch | Run log row | Expected — sources run concurrently via `asyncio.gather`; serial post-stages dominate total |
 
@@ -563,7 +572,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Negative-title penalty (-30) only — the foreign-location penalty was deleted 2026-08-12 | ✅ | `REMOTE_TERMS` (4); UK/foreign matching lives in `uk_gate` data |
 | Batch 2.9 multi-dim (seniority / salary / visa / workplace) | ✅ | `scoring_dimensions.py`, env-tunable weights |
 | 9-field `ScoreBreakdown` dataclass | ✅ | replaces flat int return |
-| Skill synonym expansion (529 aliases) | ✅ | `skill_synonyms.py` + `_text_contains_skill` |
+| Skill synonym expansion (493 aliases) | ✅ | `skill_synonyms.py` + `_text_contains_skill` |
 | Word-boundary skill matching | ✅ | prevents "rust" matching "trust" |
 | 5-column date-confidence model for recency | ✅ | Pillar 3 Batch 1 — fabricated dates score 0 |
 | Empty `keywords.py` (user-profile mandatory) | ✅ | architectural inflection 2026-04-09 |
@@ -594,7 +603,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Multi-provider LLM fallback (OpenAI → Gemini → Groq → Cerebras) | ✅ | `llm_provider.llm_extract` (`:329-334`) |
 | Self-correction loop (max 2 retries with appended errors) | ✅ | `llm_extract_validated` |
 | `_build_enrichment_lookup()` bulk-load for scoring | ✅ | graceful empty-dict on missing table |
-| `ENRICHMENT_THRESHOLD=60` gate | ✅ | only high-scoring jobs sent to LLM |
+| Enrichment selection = `ENRICHMENT_MIN_SCORE` floor (10) + `ENRICHMENT_MAX_JOBS` budget (20) | ✅ | a budget, not a threshold — the old `ENRICHMENT_THRESHOLD=60` gate selected nothing against a measured prod maximum of 58 and never fired (`main.py:1137-1163`) |
 | `ENRICHMENT_ENABLED` flag defaults `false` | ✅ | rule #18 |
 | Cost tracking per provider call | ❌ | no `llm_usage` table yet |
 
@@ -603,8 +612,8 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Surface | Status | Notes |
 | --- | --- | --- |
 | `encode_job()` 384-dim with 300/50 chunking | ✅ | `sentence-transformers/all-MiniLM-L6-v2`, lazy |
-| `VectorIndex` ChromaDB wrapper | ✅ | persistent at `backend/data/chroma/` |
-| `job_embeddings` audit table | ✅ | migration `0009` (vectors in ChromaDB, audit in SQLite) |
+| `PgVectorIndex` — the live vector store | ✅ | `job_embeddings.embedding`, pgvector, migration `0027`. The older `VectorIndex` ChromaDB wrapper still works when called — from two scripts and two tests — but no production call site builds it |
+| `job_embeddings` table | ✅ | migration `0009` (row) + `0027` (the `embedding` column). Vector and audit stamp share one row in Postgres — they cannot desync |
 | `reciprocal_rank_fusion(k=60)` | ✅ | pure function, deterministic tiebreaker |
 | `retrieve_for_user()` hybrid orchestrator | ✅ | injectable keyword_fn / semantic_fn for testability |
 | Cross-encoder rerank top-50 | ✅ | `cross-encoder/ms-marco-MiniLM-L-6-v2`, lazy |
@@ -664,22 +673,24 @@ backend/
 │   │   ├── job_enrichment.py                  — enrich_batch() + DB helpers (opt-in)
 │   │   ├── job_enrichment_schema.py           — 16-field Pydantic JobEnrichment
 │   │   ├── embeddings.py                      — encode_job() (opt-in, lazy)
-│   │   ├── vector_index.py                    — ChromaDB wrapper (opt-in, lazy)
+│   │   ├── pg_vector_index.py                 — THE vector store: job_embeddings.embedding (pgvector)
+│   │   ├── vector_index.py                    — legacy ChromaDB wrapper; scripts + tests only, no production caller
 │   │   ├── retrieval.py                       — RRF fusion + cross-encoder rerank (opt-in)
 │   │   ├── scheduler.py                       — TieredScheduler + TIER_INTERVALS_SECONDS
 │   │   ├── circuit_breaker.py                 — 5-fail/300s state machine + BreakerRegistry
 │   │   ├── conditional_cache.py               — 256-entry FIFO for ETag/Last-Modified
-│   │   └── profile/llm_provider.py            — Gemini/Groq/Cerebras chain + llm_extract_validated
+│   │   └── profile/llm_provider.py            — OpenAI (PRIMARY) → Gemini → Groq → Cerebras chain + llm_extract_validated
 │   ├── workers/tasks.py                       — score_and_ingest (per-user worker path)
-│   ├── repositories/database.py               — JobDatabase + 14-migration forward-compat schema
+│   ├── repositories/database.py               — JobDatabase + forward-compat migration schema
 │   └── api/routes/jobs.py                     — exposes match_score + 9-field breakdown to API
 └── migrations/
     ├── 0008_job_enrichment.up.sql             — shared-catalog enrichment table
-    ├── 0009_job_embeddings.up.sql             — audit row (vectors live in ChromaDB)
+    ├── 0009_job_embeddings.up.sql             — the audit row (model_version, embedding_updated_at)
     ├── 0010_run_log_observability.up.sql      — per-source errors/durations, run_uuid
-    └── 0011_score_dimensions.up.sql           — 9 dim columns on jobs table
+    ├── 0011_score_dimensions.up.sql           — 9 dim columns on jobs table
+    └── 0027_job_embedding_vectors.up.sql      — adds job_embeddings.embedding (pgvector); tolerant no-op without the extension
 
-backend/data/chroma/                            — (gitignored) ChromaDB persistent collection
+backend/data/chroma/                            — (gitignored) LEGACY ChromaDB collection; the production pipeline and API never read it (two scripts still can)
 ```
 
 Test coverage (relevant files):
@@ -695,7 +706,8 @@ tests/
 ├── test_skill_normalizer.py                    — ESCO path (SEMANTIC_ENABLED)
 ├── test_job_enrichment.py                      — enrich_batch + DB helpers + mocked LLM
 ├── test_embeddings.py                          — encode_job + chunking + fake encoder factory
-├── test_vector_index.py                        — upsert/query/delete + fake ChromaDB client
+├── test_pg_vector_index.py                     — upsert/query/delete/count against job_embeddings.embedding
+├── test_vector_index_path.py                   — the legacy Chroma wrapper's persist path
 ├── test_retrieval.py                           — RRF + retrieve_for_user + rerank + fallback
 ├── test_retrieval_integration.py               — real scorer + semantics
 ├── test_deduplicator.py                        — all 4 layers + graceful degradation

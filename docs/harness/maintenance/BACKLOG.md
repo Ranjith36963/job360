@@ -1,4 +1,7 @@
 # Job360 Maintenance Backlog
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 Worked by the `/maintain` loop (one item per round, top TODO first).
 Statuses: TODO / DOING / DONE (sha) / BLOCKED(reason) / NEEDS-HUMAN / DEAD.

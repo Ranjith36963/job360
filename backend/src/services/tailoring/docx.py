@@ -7,7 +7,10 @@ is lazy-imported (heavy-dep discipline, root rules #11/#16).
 
 from __future__ import annotations
 
+from src.utils.loop_guard import cpu_bound
 
+
+@cpu_bound
 def render_docx(text: str, title: str = "") -> bytes:
     """Render plain text to a clean, single-column, machine-readable .docx (bytes)."""
     from io import BytesIO

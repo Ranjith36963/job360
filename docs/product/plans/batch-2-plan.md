@@ -1,4 +1,7 @@
 # Batch 2 — Multi-User Delivery Layer — Implementation Plan
+<!-- doc: PLAN -->
+
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 > Output of `superpowers:writing-plans`. Test-driven, one logical commit per phase. Decisions doc: `docs/product/plans/batch-2-decisions.md`. Blueprint: `docs/product/research/pillar_3_batch_2.md`.
 

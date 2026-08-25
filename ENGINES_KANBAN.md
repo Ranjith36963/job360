@@ -1,4 +1,7 @@
 # Engines Kanban — Job360 scoring/search engines
+<!-- doc: LOG -->
+
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
 
 > **Source of truth = the code, not the docs.** Every claim below is proven with a
 > `file:line` you can open. Built from a direct read of the source on 2026-06-16.

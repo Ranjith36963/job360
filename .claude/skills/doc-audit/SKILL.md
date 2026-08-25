@@ -1,4 +1,5 @@
 # /doc-audit — Tier-3 Doc Lifecycle Audit (Loop 3)
+<!-- doc: LIVING -->
 
 Triggered by: `/doc-audit` (optionally `/doc-audit <area>`)
 
@@ -85,7 +86,7 @@ docs is a follow-up task the human prioritizes.
 
 ## Step 5: Health report + one PR
 
-Write/overwrite `docs/maintenance/DOC-HEALTH.md`:
+Write/overwrite `docs/harness/maintenance/DOC-HEALTH.md`:
 
 ```
 # Doc health — <date>

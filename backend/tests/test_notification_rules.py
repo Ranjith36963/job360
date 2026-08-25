@@ -252,7 +252,7 @@ async def test_put_rule_partial_update(authenticated_async_context):
 @pytest.mark.asyncio
 async def test_dispatcher_skips_below_threshold(rules_db):
     """4. score=70, threshold=80 → no Apprise call (skipped=True)."""
-    await _insert_channel(rules_db, "alice", "slack", "slack://a/b/c")
+    await _insert_channel(rules_db, "alice", "email", "resend://k:f@x.io/a@b.co/")
     await _insert_notification_rule(rules_db, "alice", score_threshold=80)
 
     with patch("apprise.Apprise") as mock_app:
@@ -278,7 +278,7 @@ async def test_dispatcher_skips_below_threshold(rules_db):
 @pytest.mark.asyncio
 async def test_dispatcher_fires_above_threshold(rules_db):
     """5. score=85, threshold=80 → dispatches normally."""
-    await _insert_channel(rules_db, "alice", "slack", "slack://a/b/c")
+    await _insert_channel(rules_db, "alice", "email", "resend://k:f@x.io/a@b.co/")
     await _insert_notification_rule(rules_db, "alice", score_threshold=80)
 
     with patch("apprise.Apprise") as mock_app:
@@ -305,7 +305,7 @@ async def test_dispatcher_fires_above_threshold(rules_db):
 @pytest.mark.asyncio
 async def test_dispatcher_quiet_hours_skips(rules_db):
     """6. Within quiet window → queued for digest (not dispatched immediately)."""
-    await _insert_channel(rules_db, "alice", "slack", "slack://a/b/c")
+    await _insert_channel(rules_db, "alice", "email", "resend://k:f@x.io/a@b.co/")
     job_id = await _insert_job(rules_db)
     await _insert_notification_rule(
         rules_db,

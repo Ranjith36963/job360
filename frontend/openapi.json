@@ -312,7 +312,7 @@
       "ChannelIn": {
         "properties": {
           "channel_type": {
-            "pattern": "^(email|slack|discord|telegram|webhook)$",
+            "pattern": "^(email|webhook)$",
             "title": "Channel Type",
             "type": "string"
           },
@@ -1838,30 +1838,6 @@
         "title": "ProvenanceSegment",
         "type": "object"
       },
-      "ProvidersOut": {
-        "description": "Which OAuth/connect buttons the frontend should display.",
-        "properties": {
-          "discord": {
-            "title": "Discord",
-            "type": "boolean"
-          },
-          "slack": {
-            "title": "Slack",
-            "type": "boolean"
-          },
-          "telegram": {
-            "title": "Telegram",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "slack",
-          "discord",
-          "telegram"
-        ],
-        "title": "ProvidersOut",
-        "type": "object"
-      },
       "RegisterRequest": {
         "properties": {
           "email": {
@@ -2377,50 +2353,6 @@
           "ai_draft"
         ],
         "title": "TailoredDocOut",
-        "type": "object"
-      },
-      "TelegramConnectOut": {
-        "description": "Response from GET /connect/telegram.",
-        "properties": {
-          "deep_link": {
-            "title": "Deep Link",
-            "type": "string"
-          },
-          "state": {
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "deep_link",
-          "state"
-        ],
-        "title": "TelegramConnectOut",
-        "type": "object"
-      },
-      "TelegramPollOut": {
-        "description": "Response from GET /connect/telegram/poll.",
-        "properties": {
-          "connected": {
-            "title": "Connected",
-            "type": "boolean"
-          },
-          "target_label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Label"
-          }
-        },
-        "required": [
-          "connected"
-        ],
-        "title": "TelegramPollOut",
         "type": "object"
       },
       "TestSendResult": {
@@ -5554,7 +5486,7 @@
         ]
       },
       "post": {
-        "description": "Create a channel via direct credential input.\n\n* ``slack``, ``discord``, ``telegram`` must use the Connect flow \u2192 400.\n* ``webhook``: ``credential`` must be an http(s) URL; backend converts it\n  to the Apprise ``json[s]://`` URL scheme.\n* ``email``: ``credential`` must be a valid email address; the backend\n  builds the Apprise URL from the platform's own mail credentials\n  (``resend://`` where a Resend key is configured, ``mailtos://`` only as\n  the local-SMTP fallback \u2014 see ``services/channels/email_url.py``).",
+        "description": "Create a channel via direct credential input.\n\nTwo channel types exist, and ``ChannelIn.channel_type``'s pattern is the\nonly place that fact is written down. Anything else is a 422 before this\nbody runs.\n\n* ``webhook``: ``credential`` must be an http(s) URL; backend converts it\n  to the Apprise ``json[s]://`` URL scheme.\n* ``email``: ``credential`` must be a valid email address; the backend\n  builds the Apprise URL from the platform's own mail credentials\n  (``resend://`` where a Resend key is configured, ``mailtos://`` only as\n  the local-SMTP fallback \u2014 see ``services/channels/email_url.py``).",
         "operationId": "create_channel_api_settings_channels_post",
         "parameters": [
           {
@@ -5607,165 +5539,6 @@
           }
         },
         "summary": "Create Channel",
-        "tags": [
-          "channels"
-        ]
-      }
-    },
-    "/api/settings/channels/connect/telegram": {
-      "get": {
-        "description": "Return a Telegram deep-link the user must tap to start the bot.\n\nThe frontend polls ``GET /connect/telegram/poll?state=<state>`` until\nthe user's ``/start <state>`` message arrives in the bot's update queue.\n\nReturns 404 when TELEGRAM_BOT_TOKEN / TELEGRAM_BOT_USERNAME are not set.",
-        "operationId": "connect_telegram_api_settings_channels_connect_telegram_get",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TelegramConnectOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Connect Telegram",
-        "tags": [
-          "channels"
-        ]
-      }
-    },
-    "/api/settings/channels/connect/telegram/poll": {
-      "get": {
-        "description": "Poll whether the user has tapped the Telegram deep-link.\n\nThe frontend calls this repeatedly until ``connected=true`` or the state\nexpires.  The state row is NOT consumed until a matching Telegram message\nis found (so callers can safely retry while the user is still tapping).\n\nSecurity checks (without consuming the state):\n- State must exist in ``oauth_states``.\n- ``user_id`` must match the requesting user (IDOR guard).\n- ``channel_type`` must be ``'telegram'``.\n- Age must be \u2264 ``_STATE_TTL_MINUTES`` (row is deleted on expiry).\n\nIf Telegram has received ``/start <state>`` from the user's chat, the\nchannel row is created and the state is consumed; returns\n``{connected: true, target_label: ...}``.  Otherwise returns\n``{connected: false}`` with the state still alive.",
-        "operationId": "poll_telegram_api_settings_channels_connect_telegram_poll_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "state",
-            "required": true,
-            "schema": {
-              "title": "State",
-              "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TelegramPollOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Poll Telegram",
-        "tags": [
-          "channels"
-        ]
-      }
-    },
-    "/api/settings/channels/providers": {
-      "get": {
-        "description": "Return which Connect buttons are configured on this deployment.",
-        "operationId": "get_providers_api_settings_channels_providers_get",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProvidersOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Providers",
         "tags": [
           "channels"
         ]

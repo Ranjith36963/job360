@@ -16,7 +16,7 @@ of text — say what happened, what I did, what's next.
 
 ## What this is
 
-The Job360 web app: **Next.js 16.3.0 (App Router) + React 19.2.8 + Tailwind 4 +
+The Job360 web app: **Next.js 16.3.2 (App Router) + React 19.2.8 + Tailwind 4 +
 shadcn 4**. Talks to the FastAPI backend on `:8000`. State via **TanStack Query 5**;
 forms via **react-hook-form 7 + zod 4**; Kanban drag via **@dnd-kit**; charts via
 **recharts**; toasts via **sonner**. Auth is cookie-session — guarded in `src/middleware.ts`.
@@ -72,7 +72,10 @@ backend route/response change: run `npm run gen:types`, commit the regenerated
 ## Where things are
 
 - `src/app/` — App Router pages: `(auth)/`, `dashboard/`, `jobs/[id]/`, `pipeline/`,
-  `profile/`, `settings/{layout,channels,notifications,account}/`, `notifications/`.
+  `profile/`, `settings/{notifications,account}/` (+ `layout.tsx`, `page.tsx`, `_tabs.tsx`),
+  `channels/`, `notifications/`. **Channels is a TOP-LEVEL page (`/channels`), not
+  `settings/channels/`** — the Settings gear holds only Notifications + Account (nav IA
+  change, 2026-06-20).
 - `src/components/` — `ui/` (shadcn primitives), `jobs/`, `pipeline/` (KanbanBoard),
   `profile/`, `layout/`, `providers/`.
 - `src/lib/` — `api.ts` (fetch wrapper), `api-types.ts` (generated), `queryKeys.ts`

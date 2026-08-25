@@ -58,8 +58,11 @@ In `BaseJobSource.__init__`:
 ```python
 async def fetch_jobs(self) -> list[Job]:
     jobs = []
-    for slug in GREENHOUSE_COMPANIES:        # ~80 slugs
-        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+    for slug in self._companies:             # GREENHOUSE_COMPANIES by default — 82 slugs
+        # `?content=true` is LOAD-BEARING, not decoration: without it the board
+        # list endpoint returns no `content` field at all, which is why 996 prod
+        # rows carried an empty description until 2026-08-05 (greenhouse.py:31-36).
+        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
         data = await self._get_json(url)     # all retry/rate-limit machinery
         if not data:
             continue
@@ -71,7 +74,7 @@ async def fetch_jobs(self) -> list[Job]:
 
 Each `_get_json(url)` call goes through `_request()`:
 
-1. `await self._rate_limiter.acquire()` — at most 2 concurrent requests across all 80 companies; 1.5 s minimum delay between acquisitions.
+1. `await self._rate_limiter.acquire()` — at most 2 concurrent requests across all 82 companies; 1.5 s minimum delay between acquisitions.
 2. `aiohttp.GET(url, timeout=30)`.
 3. Response handling:
    - `200` → `response.json()`, return.
@@ -90,6 +93,7 @@ For one healthy company (say `acme-corp`), this returns ~6 postings in JSON like
      "location": {"name": "London, UK"},
      "absolute_url": "https://boards.greenhouse.io/acme-corp/jobs/12345",
      "content": "&lt;p&gt;We're hiring...&lt;/p&gt;",
+     "first_published": "2026-05-20T11:30:00Z",
      "updated_at": "2026-05-28T09:00:00Z"},
     ...
   ]
@@ -101,6 +105,15 @@ For one healthy company (say `acme-corp`), this returns ~6 postings in JSON like
 For each upstream posting, the source builds a canonical `Job`:
 
 ```python
+# The date contract, established BEFORE the Job is built (greenhouse.py:64-68).
+# posted_at comes from `first_published`, NOT `updated_at` — the latter tracks
+# edits (a salary tweak) and would bump a stale posting back into the "just
+# posted" bucket. normalize_posted_at() returns the confidence alongside it, so
+# an unparseable value is reported low rather than fabricated as "high".
+raw_updated_at = posting.get("updated_at")          # audit only, never recency
+raw_published = posting.get("first_published")
+posted_at, confidence = normalize_posted_at(raw_published)
+
 job = Job(
     title=posting["title"],
     company="acme-corp",  # or via COMPANY_NAME_OVERRIDES → "Acme Corp"
@@ -109,8 +122,9 @@ job = Job(
     location=posting.get("location", {}).get("name", ""),
     description=_strip_html(posting["content"]),  # raw HTML → text
     date_found=now_iso(),
-    posted_at=posting.get("updated_at"),           # high-confidence date
-    date_confidence="high",
+    posted_at=posted_at,
+    date_confidence=confidence,                    # derived, never hardcoded
+    date_posted_raw=raw_updated_at,
 )
 ```
 
@@ -120,7 +134,10 @@ Two things the `Job.__post_init__` does automatically:
 
 ### T+0 — Return + scheduler post-processing
 
-`await GreenhouseSource.fetch_jobs()` returns a `list[Job]` of ~500 entries across 80 companies.
+`await GreenhouseSource.fetch_jobs()` returns a `list[Job]` gathered across 82 companies.
+Volume is an upstream fact, not a constant, so it is quoted only as a dated measurement:
+**996 greenhouse rows in prod** as of 2026-08-05 (`backend/src/sources/ats/greenhouse.py:34`),
+and `first_published` verified across **928 live jobs** (`greenhouse.py:57-58`).
 
 Back in `TieredScheduler.tick()`:
 
@@ -309,7 +326,7 @@ This tuple is the DB's UNIQUE constraint and the deduplicator's Layer-1 key. **C
 
 ### 4.1 Keyed APIs — `apis_keyed/` (8)
 
-Pattern: accept `api_key` in `__init__`, return `[]` early with an info log if the key is empty (so the source skips gracefully on free installs).
+Pattern: accept `api_key` in `__init__`, return `[]` early if the key is empty (so the source skips gracefully on free installs). The log line is `WARNING` in seven of the eight — `gov_apprenticeships.py:62` is the only `INFO`.
 
 | Source | Upstream | Env var |
 | --- | --- | --- |
@@ -317,7 +334,7 @@ Pattern: accept `api_key` in `__init__`, return `[]` early with an info log if t
 | Adzuna | Adzuna aggregator | `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` |
 | JSearch | RapidAPI JSearch | `JSEARCH_API_KEY` |
 | Jooble | Jooble EU board | `JOOBLE_API_KEY` |
-| Google Jobs | SerpApi → Google Jobs SERP | `SERPAPI_KEY` / `GOOGLE_JOBS_API_KEY` |
+| Google Jobs | SerpApi → Google Jobs SERP | `SERPAPI_KEY` |
 | Careerjet | multi-country search | `CAREERJET_AFFID` |
 | Findwork | remote/freelance (Token auth) | `FINDWORK_API_KEY` |
 | Gov Apprenticeships | DfE Display Advert API v2 (restored 2026-06-16) | `DFE_APPRENTICESHIPS_API_KEY` |
@@ -470,22 +487,22 @@ There are **no** separate `test_ats*.py` / `test_feed*.py` files — all source 
 
 ## Environment variables — every var the Providers pillar reads
 
-Almost all are the keyed-source API credentials. The 43 free sources need no env at all.
+Almost all are the keyed-source API credentials. The other **33** registry keys have no **required** environment variables — 41 keys minus the 8 keyed sources (README's "API Key Setup" states the same split). "Required" is the operative word: `EightyKHoursSource` is not a keyed source, yet the row below lets you override the public Algolia keys it ships with.
 
 | Var | Required by | Default | What changes when you flip it |
 | --- | --- | --- | --- |
-| `REED_API_KEY` | `ReedSource` | (unset) | Reed `return []` silently when unset; logged at INFO |
+| `REED_API_KEY` | `ReedSource` | (unset) | Reed returns `[]` when unset, logging `Reed: no API key, skipping` at **`WARNING`** (`reed.py:45`) — not silent, and not INFO |
 | `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | `AdzunaSource` | (unset) | Both must be set; either unset → return [] |
 | `JSEARCH_API_KEY` | `JSearchSource` | (unset) | RapidAPI key |
 | `JOOBLE_API_KEY` | `JoobleSource` | (unset) | |
-| `SERPAPI_KEY` (also accepted as `GOOGLE_JOBS_API_KEY`) | `GoogleJobsSource` | (unset) | SerpApi → Google Jobs SERP |
+| `SERPAPI_KEY` | `GoogleJobsSource` | (unset) | SerpApi → Google Jobs SERP. **Only this name works** — `settings.py:45` reads `SERPAPI_KEY` alone and `main.py:279` passes it straight in; there is no `GOOGLE_JOBS_API_KEY` alias anywhere. Set the wrong name and the source skips, logging `GoogleJobs: no SERPAPI_KEY, skipping` at WARNING (`google_jobs.py:47`) — visible in the run log, but the run still reports success |
 | `CAREERJET_AFFID` | `CareerjetSource` | (unset) | Affiliate ID |
 | `FINDWORK_API_KEY` | `FindworkSource` | (unset) | Token auth |
 | `GITHUB_TOKEN` | (none directly, but used by `github_enricher` in Pillar 1) | (unset) | Anonymous GitHub API has 60 req/hr; token raises to 5000 |
 | `EIGHTYKHOURS_ALGOLIA_APP_ID` / `EIGHTYKHOURS_ALGOLIA_API_KEY` | `EightyKHoursSource` | hard-coded public keys | Allow override of the (public) Algolia search keys 80,000 Hours embeds in their site |
 | (per-source rate-limit knobs) | All sources | from `RATE_LIMITS` dict in `settings.py` | Not env-configurable; edit code |
 
-> **All sources skip gracefully without their key**: the keyed-source pattern is `if not api_key: return []` with an `INFO` log line. The pipeline never errors — sources just don't contribute.
+> **All sources skip gracefully without their key**: the keyed-source pattern is `if not api_key: return []` with a **`WARNING`** log line — Adzuna, Careerjet, Findwork, GoogleJobs, Jooble, JSearch and Reed all use `logger.warning`; `gov_apprenticeships.py:62` is the lone `INFO`. The pipeline never errors — sources just don't contribute, and **the run still reports success**, so a missing key is only visible in the log.
 
 ---
 
@@ -608,7 +625,7 @@ backend/tests/
 ## 12. Architectural rules touched by this pillar
 
 - **#1** — never touch `normalized_key()` without verifying deduplicator + DB UNIQUE.
-- **#2** — never change `BaseJobSource` (constructor, properties, retry, HTTP helpers) without checking all 49 subclasses.
+- **#2** — never change `BaseJobSource` (constructor, properties, retry, HTTP helpers) without checking all 40 subclasses.
 - **#4** — always mock HTTP in tests (`aioresponses`); the suite runs offline.
 - **#8 / #13** — adding/removing a source touches FIVE surfaces (registry, build list, rate limits, `test_cli.py`, `test_api.py`) plus CLAUDE.md.
 - **#14** — conditional fetch (`_get_json_conditional`) only for upstreams that honour ETag/Last-Modified.
@@ -616,4 +633,4 @@ backend/tests/
 
 ---
 
-*Source roster (post-2026-08-10 rotation): 40 classes / 41 registry keys / 40 instances. Backend test baseline ~1,409 collected (2 live deselected — defer to runtime count).*
+*Source roster (post-2026-08-10 rotation): 40 classes / 41 registry keys / 40 instances. Backend tests: 218 `test_*.py` files; measure the collected count, never quote it (2 `live` deselected offline).*

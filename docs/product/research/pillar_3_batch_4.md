@@ -1,4 +1,7 @@
 # Job360 Batch 4: Risk, Economics, and a Launchable Plan
+<!-- doc: REFERENCE -->
+
+> **REFERENCE — pinned to its research date.** External facts move; re-check anything load-bearing. <!-- banner: auto -->
 
 **Job360 can launch credibly as a solo-founder MVP, but only if it drops the "all UK white-collar domains" claim and prices at £14.99/month with an annual lever at £119/year.** The business is economically viable at ~9,300 paying users (£50K founder salary break-even, realistic in 18–24 months). The legal risk is manageable — £40/year ICO registration, documented legitimate interests, deep-link-only architecture — provided Job360 avoids authenticated LinkedIn scraping and absolutist marketing claims. Partnerships are not a viable MVP foundation: only NHS Jobs Self-Serve API and CV-Library's outbound Traffic Partner programme are realistically achievable pre-launch. All other named partnerships (CV-Library Jobs API, Madgex publishers, HiringCafe, EURAXESS) require either 12+ months of traffic credibility or are structurally unavailable. Three domains — **academia, consulting, and public sector** — have coverage gaps under 50% using free sources alone, and Job360's honest market claim is "~7 of 12 white-collar domains covered well" rather than full sweep. The infrastructure economics are genuinely excellent: **$6/month at 1K users, ~$55/month at 10K, ~$350/month at 100K** using a Hetzner-based zero-cost-first stack — roughly 5–8× cheaper per user than HiringCafe's paid architecture.
 

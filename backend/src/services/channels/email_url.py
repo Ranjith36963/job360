@@ -140,3 +140,67 @@ def build_email_apprise_url(dest: str) -> Optional[str]:
         )
 
     return None
+
+
+def _stored_resend_recipient(url: str) -> Optional[str]:
+    """Return the recipient out of a credential THIS module emitted, else None.
+
+    Accepts only the exact shape ``build_email_apprise_url`` produces --
+    ``resend://<key>:<from>/<to>/``. The recipient has to be read back with
+    certainty or not at all: a loose parser that guessed would eventually hand
+    one user's address to another user's channel, which is a data leak, not a
+    delivery bug. Anything unrecognised returns None.
+    """
+    prefix = "resend://"
+    if not url.startswith(prefix):
+        return None
+    authority, sep, rest = url[len(prefix):].partition("/")
+    # `key:from` -- no colon means this is not our shape.
+    if not sep or ":" not in authority:
+        return None
+    recipient = rest[:-1] if rest.endswith("/") else rest
+    if "/" in recipient:
+        return None
+    # Same predicate the builder validates `dest` with, so a recipient that
+    # round-trips here is guaranteed not to make build_email_apprise_url raise.
+    if not EMAIL_RE.match(recipient) or not _url_safe_address(recipient):
+        return None
+    return recipient
+
+
+def refresh_email_apprise_url(stored: str) -> Optional[str]:
+    """Rebuild a stored email credential against the CURRENT environment.
+
+    Why this exists: the API key lives *inside* the stored credential
+    (``resend://<key>:<from>/<to>/``), encrypted per user in
+    ``user_channels.credential_encrypted``. Nothing ever re-read the
+    environment, so rotating ``RESEND_API_KEY`` staled every copy at once —
+    and Apprise's ``notify()`` returns **False rather than raising** on a
+    rejected key. ``send_bundle`` therefore just counts a failure, and after
+    ``MAX_BUNDLE_RETRIES`` it DELETEs the queued rows: the user's job alerts
+    are gone for good and nobody — user or operator — is told.
+
+    Returns a rebuilt URL only when all three hold:
+
+    * the recipient parses back out of ``stored`` (it is **never** defaulted;
+      see ``_stored_resend_recipient``),
+    * the current environment produces a URL at all, and
+    * that URL is *also* ``resend://``.
+
+    That last clause is load-bearing, not a formality.
+    ``build_email_apprise_url`` falls through to ``mailtos://`` when the key is
+    absent or fails ``_RESEND_KEY_RE``, and ``mailtos://`` is plain SMTP, which
+    Railway blocks (the whole premise of this module). Without the check, an
+    operator pasting a typo'd key would silently swap every email channel onto
+    a transport that cannot deliver at all — causing the exact silent failure
+    this function exists to prevent.
+
+    Returns None otherwise, which the caller reads as "keep what is stored".
+    """
+    recipient = _stored_resend_recipient(stored)
+    if recipient is None:
+        return None
+    rebuilt = build_email_apprise_url(recipient)
+    if rebuilt is None or not rebuilt.startswith("resend://"):
+        return None
+    return rebuilt
