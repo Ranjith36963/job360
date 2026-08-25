@@ -1,6 +1,8 @@
 # UK-first feed — location eligibility plan (5-lens review, 2026-07-26)
 <!-- doc: FROZEN -->
 
+> **FROZEN — closed or superseded.** Kept as evidence of what was true then. Do not act on it. <!-- banner: auto -->
+
 > ## ⚠️ SUPERSEDED — 2026-08-24. Do NOT build from this document.
 >
 > The problem this plan solves was solved a **different way** and is shipped.

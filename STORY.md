@@ -137,7 +137,7 @@ message to anyone.**
 ### The evaluation exists, and it is the best work in this repo
 
 I claimed relevance had never been measured. False, twice over. `backend/scripts/accuracy_audit.py`
-plus ten sibling scripts, and **six documented iterations** in `docs/engine_eval_audit_log.md`:
+plus ten sibling scripts, and **six documented iterations** in `harness/eval/engine_eval_audit_log.md`:
 
 - 100 gold-graded jobs, blind, shuffled, scores hidden from the grader
 - 16 engine combinations, bootstrap 95% CIs, paired significance tests

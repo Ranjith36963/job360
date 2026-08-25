@@ -1,6 +1,8 @@
 # 05 — Compliance & Legal
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 > The compliance sweep hit the session token limit partway; **Fable finished the
 > verification directly** (facts below checked in-code). This is gap analysis against
 > UK-GDPR / PECR and enterprise-sale norms — pragmatic for a solo founder, not

@@ -8,7 +8,7 @@
 ## What the backup is (so restore makes sense)
 The nightly `db-backup` workflow does, in order:
 1. `pg_dump --no-owner --no-privileges "$DATABASE_URL" > dump.sql` (plain SQL).
-2. **Verifies** it by restoring into a throwaway Postgres and asserting `users`/`jobs`/`_schema_migrations` are non-empty — a dump that restores empty fails the job.
+2. **Verifies** it by restoring into a throwaway Postgres. Only two gates are enforced: `users >= 1` and `count(_schema_migrations) >= 20`. **`jobs` is printed, never asserted** — an empty `jobs` table alone does NOT fail the job, though an otherwise-empty restore still trips the two gates above.
 3. `gzip` → `gpg --symmetric --cipher-algo AES256 --passphrase $BACKUP_PASSPHRASE` → `job360-<TIMESTAMP>.sql.gz.gpg`.
 4. `aws s3 cp` the encrypted file to `s3://$R2_BUCKET/` (Cloudflare R2, S3-compatible), keeping the newest ~30.
 
@@ -64,5 +64,5 @@ rm -f "job360-${TS}.sql.gz.gpg"
 - **Restore into a fresh DB first**, verify, then repoint the app — never blind-restore over live prod.
 - The dump is `--no-owner --no-privileges`, so it restores cleanly into a DB with a different role/owner than prod.
 - The pg client must be **≥ the prod server major version** (prod Postgres is 18.x — use psql 18).
-- **Retention is ~30 newest** (nightly ⇒ ~30 days). If you need older, it's already gone — there is no long-term archive. (Gap flagged in `docs/fable/04`: consider a second region + a monthly cold copy.)
+- **Retention is ~30 newest** (nightly ⇒ ~30 days). If you need older, it's already gone — there is no long-term archive. (Gap flagged in `docs/harness/fable/04-OPS-AND-RELIABILITY.md`: consider a second region + a monthly cold copy.)
 - **Do a restore drill quarterly** into a scratch DB so this procedure stays true and you stay practiced.

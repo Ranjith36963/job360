@@ -1,6 +1,8 @@
 # Job360 Execution Order — End-to-End Sync & Launch Readiness
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 > **Status:** Planning doc. No code changes executed. Author: synthesised from 6 parallel audit agents on 2026-04-23 after pausing Pillar 3 Batch 4.
 >
 > **Context:** Pillars 1, 2, 3 are shipped (all 29 batches merged to `origin/main @ 5fb3c07`). Backend engine is ~95% complete, but many capabilities don't flow through to the frontend. Original instinct to "do Pillar 1 → 2 → 3 in order" is incorrect for this state — the gaps are at **integration seams**, not inside pillars.

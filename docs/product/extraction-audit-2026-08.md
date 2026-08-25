@@ -1,6 +1,8 @@
 # Extraction audit — 7 real profiles, 2026-08-03
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 > 7 Sonnet workers (one per person) + Opus synthesis. Names masked in this file;
 > the corpus is gitignored and never leaves the machine.
 

@@ -1,6 +1,8 @@
 # 02 — Data & Database
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 > Source: data-layer sweep (Opus). Read-only, evidence as `file:line`.
 > **Headline:** tenancy isolation is clean (rules #10/#17 hold). The real fragility is
 > the **SQLite→Postgres shim seam** (`src/repositories/pg.py`). Nothing loses data on the

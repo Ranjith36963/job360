@@ -1,6 +1,8 @@
 # Pillar 1 — Profile Extraction: Blockers & Quality Audit
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 **Date:** 2026-06-21 · **Branch:** worktree-tp-final · **Scope:** CV, LinkedIn, GitHub, Preferences extraction
 **Method:** line-by-line code audit + live multi-run testing with two real profiles (Ranjith, Pavan).
 

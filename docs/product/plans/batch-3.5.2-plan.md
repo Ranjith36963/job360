@@ -1,6 +1,8 @@
 # Pillar 3 — Batch 3.5.2 Per-User Profile Storage Plan
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 > **For agentic workers:** REQUIRED SUB-SKILLS: `superpowers:test-driven-development`, `superpowers:verification-before-completion`. Steps use checkbox syntax.
 
 **Goal:** Close the 2026-04-19 re-audit gap (CurrentStatus.md §6 + §13 issue #5). Today, every authenticated user shares one `data/user_profile.json`; user A's CV overwrites user B's silently. This batch rebases profile storage onto a new `user_profiles` table keyed by `user_id`, migrates legacy JSON once on first load, and threads `user.id` through every call site.

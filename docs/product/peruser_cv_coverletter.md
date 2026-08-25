@@ -1,6 +1,8 @@
 # Per-User AI CV & Cover Letter — tailored generation that learns from you
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 > **The feature in one line:** When you apply to a job, the AI takes your existing CV + that job's description and produces a **CV and cover letter tailored to that job** — then it **learns from how you edit them**, per user, so it keeps getting better at writing the way *you* write.
 
 ---

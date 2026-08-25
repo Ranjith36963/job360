@@ -1,6 +1,8 @@
 # Job360 — End-to-End Verification & Audit (merged)
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 > Merges the two prior docs into one source of truth:
 > - **VERIFY_KANBAN** — deep *functional* live pass with **real user data** (real CV/LinkedIn/GitHub,
 >   demo account) on the dev server; found + fixed 6 real bugs.

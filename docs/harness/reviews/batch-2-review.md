@@ -1,6 +1,8 @@
 # Batch 2 Review — 2026-04-18 — commit d877bd6
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 ## Verdict
 
 [ ] APPROVED   [x] CHANGES REQUIRED

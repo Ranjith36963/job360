@@ -1,6 +1,8 @@
 # Pillar 1 — Deep Honest Diagnosis (Profile Extraction)
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 > Date: 2026-06-25 · Model: OpenAI `gpt-4o-mini` (paid, temp 0, JSON mode) PRIMARY,
 > free Gemini/Groq/Cerebras as fallback. Measured live on 5 real CVs + 3 GitHub +
 > 4 LinkedIn PDFs. No assumptions — every number below was run, not estimated.

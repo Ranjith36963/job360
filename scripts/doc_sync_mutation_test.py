@@ -254,6 +254,52 @@ def structural_drills() -> list[str]:
                     "gets ignored, which kills the loop"
                 )
 
+            # 1c. The line-citation RATCHET must refuse a NEW raw line number.
+            #     Not a text mutation: the guard compares against a baseline
+            #     file, so the drill has to add a citation to the real tree and
+            #     put it back. ~317 exist today, so this guard can never report
+            #     them all without becoming noise nobody reads -- it only ever
+            #     refuses an INCREASE, and that is the branch worth proving.
+            real_status = real_root / "STATUS.md"
+            if real_status.exists():
+                before = real_status.read_bytes()
+                try:
+                    dsc.ROOT = real_root
+                    real_status.write_bytes(
+                        before + b"\n\nSee `backend/src/main.py:999` for details.\n")
+                    if not dsc.line_citation_regressions():
+                        failures.append(
+                            "line-citation-ratchet: a NEW raw line number went "
+                            "unreported — new prose can keep adding the "
+                            "fastest-rotting reference form there is"
+                        )
+                finally:
+                    real_status.write_bytes(before)
+                    dsc.ROOT = fake
+
+            # 1d. The SURFACE ratchet must refuse prose GROWTH. This is the one
+            #     guard that enforces the deletion contract itself: without it,
+            #     "delete, do not reword" is a request in a prompt, and the next
+            #     writer grows the haystack back without anyone noticing.
+            real_status = real_root / "STATUS.md"
+            if real_status.exists() and (real_root / "scripts" / "living_surface_ceiling.txt").exists():
+                before = real_status.read_bytes()
+                try:
+                    dsc.ROOT = real_root
+                    dsc._LIVING_STAMPED_CACHE = None
+                    pad = "\n" + "\n".join(f"padding {i}" for i in range(40)) + "\n"
+                    real_status.write_bytes(before + pad.encode("utf-8"))
+                    if not dsc.surface_regression():
+                        failures.append(
+                            "surface-ratchet: 40 added lines of LIVING prose went "
+                            "unreported — the haystack can grow back and the "
+                            "deletion contract is unenforced"
+                        )
+                finally:
+                    real_status.write_bytes(before)
+                    dsc._LIVING_STAMPED_CACHE = None
+                    dsc.ROOT = fake
+
             # 2. A gapped migration sequence must RAISE, not count quietly.
             migs = fake / "backend" / "migrations"
             migs.mkdir(parents=True)
@@ -344,7 +390,7 @@ def structural_drills() -> list[str]:
     if not failures:
         print("PASS  structural      missing subfolder (count + emitted guard), "
               "gapped/malformed/duplicate migrations, unwatched pillar doc, "
-              "control byte in a guard")
+              "control byte in a guard, line-citation ratchet, surface ratchet")
     return failures
 
 

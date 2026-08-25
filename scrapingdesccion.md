@@ -1,6 +1,8 @@
 # Scraping Decision — LinkedIn / Indeed / Glassdoor
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 > **Status: DECISION PENDING — measurement required before acting.**
 > Owner: Ranjith. Written 2026-07-17. Everything below is either verified against
 > code (with file:line) or explicitly labelled as opinion/advice.

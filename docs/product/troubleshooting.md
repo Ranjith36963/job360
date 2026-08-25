@@ -44,7 +44,14 @@ one test writes to schema A while another reads schema B.
 **Fix:**
 
 ```bash
-make redis-up            # from the repo root; brings up the dev containers
+# From the repo root. `make redis-up` starts the redis service ONLY
+# (Makefile:238 → `docker compose ... up -d redis`), so it does NOT fix this
+# symptom — postgres is a separate service in docker-compose.dev.yml:37.
+# `--wait` is load-bearing: plain `up -d` returns as soon as the container is
+# RUNNING, so pytest can start before postgres accepts connections and you get
+# this exact symptom back. `--wait` blocks on the pg_isready healthcheck at
+# docker-compose.dev.yml:50-54.
+docker compose -f docker-compose.dev.yml up -d --wait   # both: postgres + redis
 cd backend && python -m pytest -q -p no:randomly
 ```
 
@@ -61,19 +68,24 @@ isolation, and the symptom looks like unrelated tests failing.
 
 ## 3. CV parse fails / LLM provider unreachable
 
-**Symptom:** `setup-profile --cv ...` errors with `LLMProviderError` or hangs with no output.
+**Symptom:** `setup-profile --cv ...` errors with `LLMKeyMissing`, `LLMRateLimited` or
+`LLMAllProvidersFailed` — all subclasses of `LLMError`
+(`backend/src/services/profile/llm_provider.py:48,53,62,71`;
+there is no `LLMProviderError`) — or hangs with no output.
 
 **Cause:** No LLM API key set, or the first provider in the fallback chain is rate-limited.
 
-**Fix:** At least ONE of these must be set in `.env`:
+**Fix:** At least ONE of these four must be set in `.env` — the same four
+`LLM_KEY_VARS` names the key probe reads (`backend/src/services/profile/llm_provider.py:231-236`):
 
 ```
-GEMINI_API_KEY=...
-GROQ_API_KEY=...
-CEREBRAS_API_KEY=...
+OPENAI_API_KEY=...      # PRIMARY — heads the chain; set this one if you have it
+GEMINI_API_KEY=...      # free tier
+GROQ_API_KEY=...        # free tier
+CEREBRAS_API_KEY=...    # free tier
 ```
 
-Fallback chain (`src/services/profile/llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. If every configured provider fails, `llm_extract` raises `LLMRateLimited` (retry later) or `LLMAllProvidersFailed`; with no key at all it raises `LLMKeyMissing`. Callers must NOT persist an empty result on `LLMRateLimited`.
+Fallback chain (`backend/src/services/profile/llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. If every configured provider fails, `llm_extract` raises `LLMRateLimited` (retry later) or `LLMAllProvidersFailed`; with no key at all it raises `LLMKeyMissing`. Callers must NOT persist an empty result on `LLMRateLimited`.
 
 Debug with:
 
@@ -191,13 +203,36 @@ cd backend && python -m pytest tests\ -v
 
 ```bash
 cd backend
-python -m migrations.runner status        # lists applied + pending
-# If you need to re-apply 0010:
-python -m migrations.runner down 0010
-python -m migrations.runner up
+python -m migrations.runner status        # lists applied + pending — read this FIRST
 ```
 
-Migrations are forward-only by default. `down` is available per-stem and must be explicit — there is no `down --all`.
+`down` pops exactly one migration off the HEAD, so what to do next depends on where
+the stem you want sits:
+
+```bash
+# CASE A — the stem you want re-run IS the head (status lists it last).
+# `down` reverts it, `up` re-applies it. This pair only does what you want here.
+python -m migrations.runner down
+python -m migrations.runner up
+
+# CASE B — the stem is BURIED (e.g. you want 0010 and head is 0030).
+# There is no way to reach it without reverting 0030…0011 first, one `down` at a
+# time, re-reading `status` between each. That is ~20 destructive down-migrations
+# against real data. In dev, rebuilding the database is almost always the right
+# call instead; in prod, do neither without a backup (docs/product/RUNBOOK-backups.md).
+```
+
+> ⚠️ **`down` takes NO migration stem.** It reverts the *last applied* migration and
+> nothing else — `backend/migrations/runner.py:281-297` reads `applied[-1]` and runs
+> that stem's `.down.sql`. The second positional argument is the **db_path**, not a
+> selector (`backend/migrations/runner.py:395,399`: usage is `[up|down|status] [db_path]`,
+> defaulting to `data/jobs.db`). So `python -m migrations.runner down 0010` does **not**
+> target migration 0010 — it swallows `0010` as a connection path and still reverts
+> whatever is at the head. Against a head of `0030` that reverts `0030`, and following
+> it with `up` re-applies `0030`: it looks like it worked and changes nothing about 0010.
+
+Migrations are forward-only by default, and `down` is one step at a time — there is
+no `down <stem>` and no `down --all`.
 
 ---
 

@@ -1,6 +1,8 @@
 # Pillar 3 — Batch 3.5.4 Test Cleanup Plan
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 > **For agentic workers:** REQUIRED SUB-SKILLS: `superpowers:test-driven-development`, `superpowers:verification-before-completion`. Steps use checkbox syntax.
 
 **Goal:** Drive the pytest baseline from `24f/578p/3s` to **0f / +24p / 3s** before Batch 4 launch prep. All 24 failures are test-only fixes per `docs/product/plans/batch-3.5.4-investigation.md` — no production code changes, no feature work, no new test coverage.

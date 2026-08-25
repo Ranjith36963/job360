@@ -111,19 +111,11 @@ job360/
 
 ## Data Flow: Pipeline Run
 
-### 1. Profile Loading (`main.py:run_search`)
+### 1. Profile Loading (`main.run_search`)
 
-```python
-profile = load_profile()                    # backend/data/user_profile.json
-if profile and profile.is_complete:
-    search_config = generate_search_config(profile)  # UserProfile -> SearchConfig
-    scorer = JobScorer(search_config)                 # Dynamic scorer
-else:
-    search_config = None                              # Use defaults
-    scorer = None                                     # Use score_job()
-```
-
-`UserProfile.is_complete` returns `True` if the profile has either `cv_data.raw_text` or any `target_job_titles` / `additional_skills` in preferences.
+`run_search` calls `profile.storage.load_profile`. With no caller-supplied `search_config`,
+a missing or incomplete profile ABORTS the run with `error: "no_profile"` — there is no
+default-keyword fallback.
 
 ### 2. Source Instantiation (`main.py:_build_sources`)
 
@@ -665,7 +657,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 > the source API keys. Runtime source of truth is always `backend/src/core/settings.py`.
 
 - `.env` lives in the repo root (see `.env.example`). **33 of 41 sources work without any keys.**
-- Data outputs go to `backend/data/` (gitignored): `exports/`, `reports/`, `logs/`, `user_profile.json`, `chroma/`.
+- Data outputs go to `backend/data/` (gitignored): `exports/`, `reports/`, `logs/`, `chroma/`.
 
 | Variable | Required | Used by |
 |----------|----------|---------|
@@ -742,15 +734,13 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 
 1. **Async-first design:** All source fetching, database operations, and notifications use async/await. Sources run concurrently via `asyncio.gather`, with per-source rate limiting to avoid bans.
 
-2. **Two scoring paths:** `score_job()` (static, module-level) exists for backward compatibility. `JobScorer(config).score()` (dynamic, instance-based) was added in Phase 1. The orchestrator picks based on whether a user profile exists. Both produce the same 0-100 scale.
+2. **Two scoring paths:** `score_job()` (static, module-level) exists for backward compatibility; `JobScorer(config).score()` (dynamic, instance-based) is what the orchestrator uses. Both produce the same 0-100 scale.
 
 3. **Graceful degradation:** Every source catches its own exceptions. A failing source logs an error and returns `[]` — it never crashes the pipeline. Keyed sources return `[]` when their API key is empty. python-jobspy is imported with try/except.
 
 4. **Normalization for dedup:** Company names are aggressively normalized (strip suffixes, regions, lowercase) to merge "Anthropic Ltd" and "Anthropic" as the same employer. This is deliberately aggressive — false positives (merging different companies) are considered less harmful than false negatives (duplicate listings).
 
-5. **Profile as optional overlay:** The entire profile system is additive. Removing `backend/data/user_profile.json` restores exact pre-Phase-1 behavior. No existing function signatures were changed — new functionality was added alongside existing code.
-
-6. **python-jobspy as optional dependency:** Not listed in backend/pyproject.toml because it has heavy transitive dependencies. Indeed/Glassdoor source gracefully skips if not installed.
+5. **python-jobspy as optional dependency:** the `indeed` extra in `backend/pyproject.toml` — `pip install '.[indeed]'`. Absent, `JobSpySource.fetch_jobs` catches `ImportError` and returns `[]`.
 
 ---
 

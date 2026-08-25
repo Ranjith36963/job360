@@ -1,0 +1,14 @@
+# Maximum lines of LIVING prose. A RATCHET: it may only come DOWN.
+#
+# Every line in a LIVING doc is a claim that must match the code, so every
+# line is a thing that can become false. Fifteen nightly runs found real
+# drift and none found zero, because this number never moved. Cycle 16 was
+# the first to shrink it (8,331 -> 8,317) under the deletion contract.
+#
+# Lower it when prose is removed. Raise it ONLY for content that is
+# genuinely WHY -- a product rule, a reason the code cannot hold -- and say
+# in the commit what was added. A restatement of code is never a reason to
+# raise it: delete the restatement or point at the symbol instead.
+#
+# Set 2026-08-25 at the then-current main.
+8331

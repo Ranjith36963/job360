@@ -18,11 +18,17 @@
 
 ## Where we are (code-verified 2026-06-22)
 
+> **The date above applies to the unannotated cells only.** Percentages and evidence
+> here are the 2026-06-22 reading and have NOT been re-verified since. Where a later
+> check found a cell stale it is ~~struck through~~ with its own date inline — those
+> annotations are 2026-08-25. Do not refresh the heading to today: that would claim a
+> re-audit of the percentages that nobody has done.
+
 | Dimension | % | Evidence |
 |---|---|---|
-| Product (features) | ~90% | engine + API + UI + auth + profiles + 4 scoring engines + control surface; 1,571 tests green |
+| Product (features) | ~90% | engine + API + UI + auth + profiles + 4 scoring engines + control surface; ~~1,571 tests green~~ (that count was the 2026-06-22 reading and is long stale — measure it, never quote it: `cd backend && python -m pytest --collect-only -q \| tail -1`; the merge-gate floor lives only in `CONTRIBUTING.md`) |
 | Launch readiness (ship it live) | ~30% | no CI gate, no Dockerfile/deploy, no prod Redis+ARQ, no SES |
-| **Money layer (charge for it)** | **~5%** | **no Stripe, no billing, no plans, no pricing page, no analytics** |
+| **Money layer (charge for it)** | **~5%** | **no Stripe, no billing, no plans, no pricing page**, ~~no analytics~~ (analytics shipped since — see Tier 3) |
 
 **What already exists (the hard part is done):** the working product (CV → scored jobs → pipeline → notifications), auth/sessions, profiles, `/privacy` + `/terms` pages, GDPR account-delete (password-gated).
 
@@ -50,7 +56,7 @@
 
 | Missing | Why |
 |---|---|
-| **Analytics + funnel** | No signup → activation → paid → churn tracking (no PostHog/GA). Can't optimize money you can't measure. |
+| ~~**Analytics + funnel**~~ **PARTLY SHIPPED** | PostHog **is** wired and consent-gated (`posthog-js` in `frontend/package.json:38`, mounted at `frontend/src/app/layout.tsx:66`, init at `frontend/src/components/providers/PostHogProviderWrapper.tsx:61-80`), and the signup→activation funnel is instrumented: `signup_completed`, `cv_uploaded`, `extraction_completed`, `search_run`, `job_viewed`, `application_created`, `$pageview`. What REMAINS is the **paid → churn** half, which needs the Stripe work in Tier 1 — there is no revenue event to track yet. |
 | **Onboarding** | Get users to the "wow" (CV → first great matches) fast = activation = conversion. |
 | **Subscription management UI** | Upgrade / downgrade / cancel / invoices / billing history. |
 | **Lifecycle emails + support** | Welcome, trial-ending, payment-failed, receipts; a contact/support channel. |

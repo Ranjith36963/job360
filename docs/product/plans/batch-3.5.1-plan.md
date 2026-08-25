@@ -1,6 +1,8 @@
 # Pillar 3 — Batch 3.5.1 Security Patch Plan
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 > **For agentic workers:** REQUIRED SUB-SKILLS: `superpowers:test-driven-development`, `superpowers:verification-before-completion`. Steps use checkbox syntax for tracking.
 
 **Goal:** Close the two IDOR gaps the 2026-04-19 re-audit (`docs/CurrentStatus.md` §7) found on `profile.py` (4 routes) and `search.py` (2 routes) — Batch 3.5's IDOR fix scope missed these.

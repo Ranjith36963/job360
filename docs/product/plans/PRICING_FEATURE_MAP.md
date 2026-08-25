@@ -1,6 +1,8 @@
 # Pricing — Feature Map (what each paid API unlocks)
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 **Researched 2026-06-25** (verified against each API's live docs). Maps the real data
 fields of the two paid providers to concrete Pro/Max features. Companion to
 `PRICING_FINAL_DECISION.md`. Sources at end.

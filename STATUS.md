@@ -68,7 +68,7 @@
 | Profile dataclasses | `backend/src/services/profile/models.py` | Done -- CVData, UserPreferences, UserProfile, SearchConfig |
 | CV parser (PDF/DOCX) | `backend/src/services/profile/cv_parser.py` | Done -- pdfplumber + python-docx text extraction, LLM-only skill/title extraction via `llm_provider.py` (KNOWN_SKILLS regex removed in commit 804725c) |
 | Preferences validator | `backend/src/services/profile/preferences.py` | Done -- form validation, CV+prefs merge |
-| Profile storage | `backend/src/services/profile/storage.py` | Done -- JSON at `backend/data/user_profile.json` |
+| Profile storage | `backend/src/services/profile/storage.py` | Done -- `user_profiles` table, one row per user |
 | Keyword generator | `backend/src/services/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
 | JobScorer class | `backend/src/services/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
 | BaseJobSource properties | `backend/src/sources/base.py` | Done -- `self.relevance_keywords`, `self.job_titles`, `self.search_queries` |
@@ -82,7 +82,6 @@
 
 - `keywords.py` is NOT modified -- remains the default keyword source
 - All existing function signatures preserved (`score_job()`, `check_visa_flag()`, etc.)
-- When no `backend/data/user_profile.json` exists, behavior is **identical** to pre-Phase-1
 - `len(SOURCE_REGISTRY) == N` test assertion still in `tests/test_cli.py` (current N = 41; 40 live instances — `indeed`+`glassdoor` alias `JobSpySource`)
 - All original tests pass without modification
 
@@ -281,16 +280,11 @@ round-trips, harness guards.
 python -m pytest backend/tests/ -v
 
 # Profile setup works (all enrichment sources)
-python -m src.cli setup-profile --cv path/to/cv.pdf --linkedin export.zip --github username
+python -m src.cli setup-profile --cv path/to/cv.pdf --github username
 
 # Pipeline with profile
 python -m src.cli run --dry-run --log-level DEBUG
 # Log: "Using dynamic keywords from user profile"
-
-# Pipeline without profile
-rm backend/data/user_profile.json
-python -m src.cli run --dry-run --log-level DEBUG
-# Log: "No user profile found, using default keywords"
 
 # Check source count
 python -c "from src.main import SOURCE_REGISTRY; print(len(SOURCE_REGISTRY))"

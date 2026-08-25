@@ -1,6 +1,8 @@
 # LAUNCH_PLAN.md — From verified app to live SaaS
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 > Updated 2026-06-21: Phase −2/−1 build+verify items are shipped (see docs/harness/CHECKLIST_KANBAN.md).
 
 > **What this is.** The ordered roadmap from *"the code is written"* (today) to *"the SaaS is operating, serving real users, generating revenue"* (target). Eight phases, with explicit dependencies and exit criteria per phase.

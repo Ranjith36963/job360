@@ -1,6 +1,8 @@
 # Channels & Notifications Overhaul Implementation Plan
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make notifications one shared rulebook per user (instant / daily / every-N-hours), build the scheduler that actually sends bundles, remove the legacy global notification path, and verify all 5 channels deliver.

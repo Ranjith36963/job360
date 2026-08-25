@@ -1,6 +1,8 @@
 # Pillar 3 — Batch 3 Implementation Plan
 <!-- doc: PLAN -->
 
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
+
 > **For agentic workers:** REQUIRED SUB-SKILLS: `superpowers:test-driven-development`, `superpowers:subagent-driven-development` (for the 5 independent new sources), `superpowers:verification-before-completion`. Steps use checkbox syntax for tracking.
 
 **Goal:** Replace broken twice-daily cron with tiered polling, add conditional-fetch, +5/−3 sources (net 48→50), expand ATS slug catalog, replace `newly_empty` with per-source circuit breakers.
