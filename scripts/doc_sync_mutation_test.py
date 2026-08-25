@@ -73,6 +73,25 @@ CASES: list[tuple[str, str, str, str]] = [
     # that. One capital letter, one blind guard.
     ("frontend/src/lib/catalog.ts",
      r"SOURCE_COUNT = (\d+)", "SOURCE_COUNT = 999", "landing-source-count"),
+    # Eighth batch, 2026-08-25. The disagreement guard: does one doc contradict
+    # ANOTHER doc about a named constant? Six of ten findings in the cycle that
+    # prompted it were exactly this, twice within a single file.
+    #
+    # The mutation flips one of the two agreeing ENRICHMENT_MIN_SCORE claims,
+    # which is the only way to make a DISAGREEMENT guard red: with every copy
+    # equal there is nothing to disagree about.
+    # Anchored on UK_LOCATIONS, which README.md and ARCHITECTURE.md both state
+    # as 25. Flipping ONE of an agreeing pair is the only mutation that can
+    # make a DISAGREEMENT guard red: with every copy equal there is nothing to
+    # disagree about.
+    #
+    # The first draft mutated a line reading "the old ENRICHMENT_THRESHOLD=60
+    # gate never fired" -- which this guard deliberately SKIPS, because a doc
+    # explaining a retired value has to name it. The drill reported the guard
+    # blind, correctly: I had pointed it at the one line the guard is designed
+    # not to read.
+    ("ARCHITECTURE.md",
+     r"`LOCATIONS` \((\d+)\) and", "`LOCATIONS` (777) and", "disagree:LOCATIONS"),
     # Fourth batch, 2026-08-24, from the nightly routine.
     #
     # suite-baseline is the odd one out and the point of it: every other guard
