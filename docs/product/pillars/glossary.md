@@ -93,10 +93,10 @@ European Skills, Competences, Qualifications and Occupations — a multilingual 
 
 ### Feature flags
 
-Three legacy toggles gate Pillar-2's advanced engines, each paired with an `ENGINEx_ENABLED` equivalent that opens the same gate — six names, six **defaults off** (rule #18). `ENGINE1_ENABLED` (keyword) is the only engine switch that defaults ON and has no legacy partner. Guard: `tests/test_engine_switches.py::test_engine_switch_defaults` pins E1 true / E2-E4 false.
-- `ENRICHMENT_ENABLED` — LLM enrichment + `job_enrichment` DB writes. All eight E2 call sites read `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853,1137`; `rescore.py:85,345,527`; `workers/tasks.py:237,876`; `api/routes/jobs.py:779`), so either name switches it on. It does **not** activate multi-dim scoring: that path is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20) — the flag only decides whether the dims have real data or their neutral halves
+Three legacy toggles gate Pillar-2's advanced engines, each paired with an `ENGINEx_ENABLED` equivalent that opens the same gate — six names, six **defaults off** (rule #18). `ENGINE1_ENABLED` (keyword) is the only engine switch that defaults ON and has no legacy partner. Guard: `backend/tests/test_engine_switches.py::test_engine_switch_defaults` pins E1 true / E2-E4 false.
+- `ENRICHMENT_ENABLED` — LLM enrichment + `job_enrichment` DB writes. All eight E2 call sites read `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`backend/src/main.py:853,1137`; `backend/src/services/rescore.py:85,345,527`; `backend/src/workers/tasks.py:237,876`; `backend/src/api/routes/jobs.py:779`), so either name switches it on. It does **not** activate multi-dim scoring: that path is gated on `user_preferences` alone (`backend/src/services/skill_matcher.py:587`, rule #20) — the flag only decides whether the dims have real data or their neutral halves
 - `SEMANTIC_ENABLED` — writes embeddings into the pgvector store. Hybrid retrieval reads `ENGINE3_ENABLED or SEMANTIC_ENABLED`; ESCO needs this flag AND index artefacts that were never built, so it stays a no-op either way
-- `MATCHER_ENABLED` — the Engine 4 LLM judge. Both call sites read `ENGINE4_ENABLED or MATCHER_ENABLED` (`main.py:352`, `rescore.py:589`); the second decides whether a profile re-score clears the user's stored verdicts (`rescore.py:595-598`)
+- `MATCHER_ENABLED` — the Engine 4 LLM judge. Both call sites read `ENGINE4_ENABLED or MATCHER_ENABLED` (`backend/src/main.py:352`, `backend/src/services/rescore.py:589`); the second decides whether a profile re-score clears the user's stored verdicts (`backend/src/services/rescore.py:595-598`)
 
 ### Feed (user_feed)
 
