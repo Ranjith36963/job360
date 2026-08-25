@@ -109,9 +109,30 @@ pure gazetteer lookup would **admit** it. The country override runs first.
 
 **Ambiguity is COMPUTED, not typed.** Boston, Cambridge and Perth name real
 places here and abroad. `ambiguous.txt` is derived at build time by comparing
-UK populations against world cities — London survives (London, Ontario is ~4%
-the size); Boston does not. Hand-listing collisions would repeat the original
-sin.
+UK populations against **world cities *and* the closed country / first-level
+admin-division sets** — London survives (London, Ontario is ~4% the size);
+Boston does not. Hand-listing collisions would repeat the original sin.
+
+The country/admin1 half was added for issue #330 (2026-08-19) and it is the
+whole reason the escape below finally holds. The first version compared against
+`cities500` alone — world *city* primary names — and the UK has hamlets called
+New York (pop 0), California (830) and Canada (0). None of those three is a
+cities500 primary name (GeoNames calls NYC "New York City"; California is a US
+state; Canada is a country), so all three scored as *trusted, unambiguous* UK
+places and carried 153 of the 190 live foreign rows straight through the
+dual-site escape. Countries and admin1 divisions were already downloaded and
+already closed sets, so they now feed the same computation at a flat weight —
+`FOREIGN_ADMIN_WEIGHT = 20_000` (`backend/scripts/build_uk_gazetteer.py:95,181-186`).
+The weight is measured, not chosen by taste: the 84 UK names colliding with a
+foreign country or admin1 have exactly one population gap, between Warwick
+(37,267) and Portsmouth (47,350), so a 40,000-effective cut-off keeps
+Manchester, Southampton and Canterbury while dropping the hamlets. No branch
+was added to `check_uk` and no city was typed — the fix is DATA, which is the
+rule. Still admitted on purpose: `"London, Ontario"` — a big UK city beside a
+foreign region is how both a foreign address and a genuine two-site ad get
+written, and `london` never enters `ambiguous.txt`, so the escape still speaks
+for it (`uk_gate.py:367-382`; root CLAUDE.md rule #30 records this as the
+remaining gap).
 
 **Traps found by dry-running over the live catalog** (do this before shipping
 any location rule):
