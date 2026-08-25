@@ -546,13 +546,27 @@ def living_surface() -> tuple[int, int]:
     deleted is a lie that can never be told again; a line reworded is a lie
     with a fresh expiry date. Watch the trend, not any single run.
     """
+    # Swallows the blank line that follows the block too: a generated
+    # region must cost ZERO surface lines, or converting prose into one
+    # still nudges the number up and the incentive breaks at the margin.
+    GENERATED = re.compile(
+        r"<!--\s*generated:.*?-->.*?<!--\s*/generated\s*-->\n?", re.S)
     docs = lines = 0
     for rel in living_stamped_docs():
         path = ROOT / rel
         if not path.exists():
             continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        # Generated regions are EXCLUDED, and the incentive is the point.
+        # This number is meant to count prose that CAN become false; a block
+        # written from the code every build cannot. Counting it would punish
+        # the one fix that ends drift instead of merely reporting it -- adding
+        # a generated table would raise the surface and fail the ratchet, so
+        # nobody would ever do it. Excluded, converting prose into a generated
+        # block makes the number FALL, which is the behaviour worth rewarding.
+        text = GENERATED.sub("", text)
         docs += 1
-        lines += len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+        lines += len(text.splitlines())
     return (docs, lines)
 
 
