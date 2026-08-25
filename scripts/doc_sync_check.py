@@ -482,6 +482,143 @@ def landing_page_source_claims() -> list[tuple[int, int]]:
 
 
 DOC_KINDS = ("LIVING", "PLAN", "LOG", "REFERENCE", "FROZEN")
+_LIVING_STAMPED_CACHE: list[str] | None = None
+
+
+LINE_CITATION_BASELINE = ROOT / "scripts" / "line_citation_baseline.txt"
+
+
+def living_surface() -> tuple[int, int]:
+    """(docs, lines) of prose that MUST be true — the haystack, measured.
+
+    Reported every run, never a failure. Added 2026-08-25 with the deletion
+    contract, because fifteen consecutive nightly runs found real drift and
+    none found zero -- and the reason was not sloppy writing. 46 LIVING docs
+    hold ~8,278 lines restating what code already says, and every one of those
+    lines is a claim that can become false.
+
+    Detection cannot win against a haystack that never shrinks. The number
+    that says whether this is being won is therefore NOT "findings per night"
+    -- that can fall because the scout got lazy -- it is this one. A line
+    deleted is a lie that can never be told again; a line reworded is a lie
+    with a fresh expiry date. Watch the trend, not any single run.
+    """
+    docs = lines = 0
+    for rel in living_stamped_docs():
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        docs += 1
+        lines += len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+    return (docs, lines)
+
+
+def line_number_citations() -> dict[str, int]:
+    """{doc: count} of `file.py:NN` citations in LIVING docs. A RATCHET.
+
+    A raw line number is the fastest-rotting reference form there is: it
+    breaks on any unrelated edit ABOVE it, silently, and nothing about the doc
+    looks wrong afterwards. A symbol name (`services/uk_gate.check_uk`)
+    survives every edit that does not delete the thing itself.
+
+    There are ~107 of these today, so a guard that simply reported them would
+    fire 107 times on day one and be ignored inside a week -- and a guard that
+    cries wolf is worse than no guard, because it teaches everyone to skip the
+    report. So this is a RATCHET, the shape the mypy gate already uses: the
+    current count is a ceiling that may only fall. New line numbers are
+    refused; the existing ones drain as the docs shrink.
+    """
+    pat = re.compile(r"\b[A-Za-z_][A-Za-z0-9_/]*\.(?:py|ts|tsx|yml|sh):\d+")
+    out: dict[str, int] = {}
+    for rel in living_stamped_docs():
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        n = len(pat.findall(path.read_text(encoding="utf-8", errors="replace")))
+        if n:
+            out[rel] = n
+    return out
+
+
+def line_citation_regressions() -> list[str]:
+    """Docs that GAINED line-number citations since the baseline."""
+    if not LINE_CITATION_BASELINE.exists():
+        return []
+    base: dict[str, int] = {}
+    for row in LINE_CITATION_BASELINE.read_text(encoding="utf-8").splitlines():
+        row = row.strip()
+        if not row or row.startswith("#"):
+            continue
+        rel, _, num = row.rpartition(" ")
+        try:
+            base[rel.strip()] = int(num)
+        except ValueError:
+            continue
+
+    out: list[str] = []
+    for rel, n in sorted(line_number_citations().items()):
+        was = base.get(rel, 0)
+        if n > was:
+            out.append(f"{rel}: {was} -> {n} (cite a SYMBOL name — a line "
+                       f"number rots on any edit above it)")
+    return out
+
+
+def living_stamped_docs() -> list[str]:
+    """Every doc that STAMPS itself LIVING — not just the hand-kept list.
+
+    Proposed by cycle 15, which found the hole by measuring: `LIVING_DOCS` has
+    15 entries while 46 docs carry `<!-- doc: LIVING -->`. The route guard's
+    LOGIC was right; its INPUT was narrower than the thing it judged, so
+    `.claude/skills/health/SKILL.md:31` could tell an agent to call a route
+    (`GET /api/me`) that has never existed, and the guard never looked.
+
+    That is the third appearance of one shape today -- a 400-char stamp window
+    that missed stamps below long front matter, a doc-vs-doc check that could
+    only see disagreement, and this. A guard is only as wide as what you feed
+    it, and the width is the part nobody re-reads.
+
+    LIVING_DOCS stays for the COUNTABLE guards: those need a curated list,
+    because a number in an unexpected file is usually a quotation, not a claim.
+    The structural guards take a doc at its word instead -- a file that says it
+    is LIVING is asserting it is checkable.
+
+    Asks git, not the filesystem. The first cut used `ROOT.rglob("*.md")` and
+    filtered `node_modules` out afterwards -- but rglob WALKS a directory
+    before the filter can reject it, and this check runs in the blocking CI
+    step. It went from under a second to over two minutes. `git ls-files`
+    never descends there, and it agrees with `unstamped_docs()` about what
+    "tracked" means, so the two guards cannot disagree about the estate.
+
+    Memoised: three guards call this now, and the answer cannot change inside
+    a run.
+    """
+    global _LIVING_STAMPED_CACHE
+    if _LIVING_STAMPED_CACHE is not None:
+        return _LIVING_STAMPED_CACHE
+
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "*.md"], cwd=ROOT,
+            capture_output=True, encoding="utf-8", check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        _LIVING_STAMPED_CACHE = list(LIVING_DOCS)   # fall back to the curated list
+        return _LIVING_STAMPED_CACHE
+
+    stamp = re.compile(r"<!--\s*doc:\s*LIVING")
+    out: list[str] = []
+    for rel in listing.splitlines():
+        rel = rel.strip()
+        if not rel:
+            continue
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        if stamp.search(path.read_text(encoding="utf-8", errors="replace")[:4000]):
+            out.append(rel)
+    _LIVING_STAMPED_CACHE = out
+    return out
 
 
 def unstamped_docs() -> list[str]:
@@ -649,7 +786,7 @@ def documented_routes_exist() -> list[tuple[str, str, str]]:
         r"was removed|no longer|instead of|not\s+`?[A-Z]{3,6}\s+/api)\b", re.I)
     cited = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE)\s+`?(/api/[A-Za-z0-9_{}/\-]+)")
     out: list[tuple[str, str, str]] = []
-    for rel in LIVING_DOCS:
+    for rel in living_stamped_docs():
         path = ROOT / rel
         if not path.exists():
             continue
@@ -803,14 +940,28 @@ def collected_baseline_claims() -> list[tuple[str, str, int]]:
     Consistency is checkable without a database. One baseline, stated the same
     everywhere, or red.
     """
-    pat = re.compile(r"([\d,]{3,})\s+collected")
+    # "N collected" was the only phrasing watched, and DEPLOY.md:35 wrote
+    # "1608 tests green" -- a test count in a doc that had never been read
+    # against the others, missing this guard twice over: wrong words AND
+    # outside the list it swept. Cycle 15 found it. Both holes closed here.
+    pat = re.compile(r"([\d,]{3,})\s+(?:collected|tests?\s+(?:green|passing))")
+    # ~~struck~~ text is RETRACTED by definition. Widening this guard to catch
+    # "N tests green" made it fire on MONETIZATION_GAPS.md:29, where the old
+    # count is struck through and annotated "long stale" -- a doc doing exactly
+    # the right thing with a number it no longer claims. A guard that punishes
+    # the correct way to retire a fact teaches people to delete the history
+    # instead, which is worse than the drift it was written to catch.
+    struck = re.compile(r"~~.*?~~", re.S)
     out: list[tuple[str, str, int]] = []
-    for rel in LIVING_DOCS:
+    for rel in living_stamped_docs():
         path = ROOT / rel
         if not path.exists():
             continue
         for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            spans = [m.span() for m in struck.finditer(line)]
             for m in pat.finditer(line):
+                if any(a <= m.start() < b for a, b in spans):
+                    continue  # retracted, not claimed
                 try:
                     out.append((rel, str(i), int(m.group(1).replace(",", ""))))
                 except ValueError:
@@ -1422,6 +1573,12 @@ def main() -> int:
             "gets re-litigated every cycle and never converges",
         ))
 
+    # New raw line numbers in LIVING prose are refused (ratchet, may only fall).
+    for row in line_citation_regressions():
+        rel, _, detail = row.partition(": ")
+        drift.append((rel, "1", "line-citation-ratchet", detail,
+                      "a line number rots on any edit above it — cite a symbol"))
+
     # A stamp the reader cannot see does not retire the claim under it.
     for rel in missing_reader_banner():
         drift.append((
@@ -1512,6 +1669,14 @@ def main() -> int:
     print(f"Code facts: SOURCE_REGISTRY entries = **{registry}**, "
           f"unique source classes = **{unique_classes}**, "
           f"migration head = **{mig_head:04d}**\n")
+
+    # The haystack. Never a failure -- a trend line. Findings-per-night can
+    # fall because the scout got lazy; this cannot.
+    surf_docs, surf_lines = living_surface()
+    if surf_docs:
+        print(f"LIVING surface: **{surf_docs}** docs, **{surf_lines:,}** lines of "
+              f"prose that must be true. Deleting a line retires the claim; "
+              f"rewording it renews it.\n")
 
     if not drift:
         print("No drift — every doc claim matches the code, all stamps fresh. OK")
