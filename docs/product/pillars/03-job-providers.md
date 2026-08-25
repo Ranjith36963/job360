@@ -632,4 +632,4 @@ backend/tests/
 
 ---
 
-*Source roster (post-2026-08-10 rotation): the class / registry-key / instance counts are in the table at the top of this document, which is checked against the code on every push. Backend tests: measure the counts, never quote them (2 `live` deselected offline).*
+*Source roster (post-2026-08-10 rotation): the class / registry-key / instance counts are in the table at the top of this document, which is checked against the code on every push. Backend tests: measure the counts, never quote them — `cd backend && python -m pytest --collect-only -q | tail -1`.*
