@@ -44,7 +44,10 @@ one test writes to schema A while another reads schema B.
 **Fix:**
 
 ```bash
-make redis-up            # from the repo root; brings up the dev containers
+# From the repo root. `make redis-up` starts the redis service ONLY
+# (Makefile:238 → `docker compose ... up -d redis`), so it does NOT fix this
+# symptom — postgres is a separate service in docker-compose.dev.yml:37.
+docker compose -f docker-compose.dev.yml up -d      # both: postgres + redis
 cd backend && python -m pytest -q -p no:randomly
 ```
 
@@ -61,7 +64,9 @@ isolation, and the symptom looks like unrelated tests failing.
 
 ## 3. CV parse fails / LLM provider unreachable
 
-**Symptom:** `setup-profile --cv ...` errors with `LLMProviderError` or hangs with no output.
+**Symptom:** `setup-profile --cv ...` errors with `LLMKeyMissing`, `LLMRateLimited` or
+`LLMAllProvidersFailed` — all subclasses of `LLMError` (`llm_provider.py:48,53,62,71`;
+there is no `LLMProviderError`) — or hangs with no output.
 
 **Cause:** No LLM API key set, or the first provider in the fallback chain is rate-limited.
 
@@ -192,12 +197,22 @@ cd backend && python -m pytest tests\ -v
 ```bash
 cd backend
 python -m migrations.runner status        # lists applied + pending
-# If you need to re-apply 0010:
-python -m migrations.runner down 0010
+# `down` reverts ONLY the most recently applied migration — one step, no argument.
+# To get back to 0010 you must step down repeatedly, checking `status` each time.
+python -m migrations.runner down
 python -m migrations.runner up
 ```
 
-Migrations are forward-only by default. `down` is available per-stem and must be explicit — there is no `down --all`.
+> ⚠️ **`down` takes NO migration stem.** It reverts the *last applied* migration and
+> nothing else — `runner.py:281-297` reads `applied[-1]` and runs that stem's
+> `.down.sql`. The second positional argument is the **db_path**, not a selector
+> (`runner.py:395,399`: usage is `[up|down|status] [db_path]`, defaulting to
+> `data/jobs.db`). So `python -m migrations.runner down 0010` does **not** target
+> migration 0010 — it swallows `0010` as a connection path and still reverts
+> whatever is at the head. Against a head of `0030` that reverts `0030`.
+
+Migrations are forward-only by default, and `down` is one step at a time — there is
+no `down <stem>` and no `down --all`.
 
 ---
 

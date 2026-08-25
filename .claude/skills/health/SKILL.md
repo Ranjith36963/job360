@@ -28,7 +28,9 @@ You are the Job360 health checker. You ignore the backlog and missions entirely 
 - RED: ranking ignores the judge, judged coverage 0 on a fresh feed, or any engine throwing.
 
 ### Pillar 3 — Delivery
-- Auth round-trip: register-or-login the test account, GET /api/me.
+- Auth round-trip: register-or-login the test account, GET /api/auth/me. (The route is
+  `/api/auth/me` — `auth.py:39` `APIRouter(prefix="/auth")` + `auth.py:336` `@router.get("/me")`,
+  mounted under `/api`. There is no bare `/api/me`; it 404s.)
 - Dashboard loads (browser flavor) with zero console errors; verdict badges render.
 - Pipeline/actions endpoints respond; notification rules endpoint responds.
 - GREEN: all respond 2xx, console clean. RED: any 5xx on the happy path or auth broken.

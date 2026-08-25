@@ -32,10 +32,12 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 
 ## 🟢 What's already done (no action needed)
 - Backend + frontend **Dockerfiles**, **`docker-compose.prod.yml`** (5 services) — validated.
-- App runs on **Postgres** (1608 tests green).
+- App runs on **Postgres**. (Test count deliberately not quoted here — measure it:
+  `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`. The
+  merge-gate floor lives in one place, `CONTRIBUTING.md`, and only there.)
 - **`/health`, `/livez`, `/readyz`** + **env validation at boot** (fail-fast on missing prod secrets).
 - **DB backup script** (`backend/scripts/backup_db.py`).
-- All prod env values staged in the local `.env` (LLM keys, `SESSION_SECRET`, `CHANNEL_ENCRYPTION_KEY`, `SENTRY_DSN`, `POSTHOG_KEY`).
+- All prod env values staged in the local `.env` (LLM keys, `SESSION_SECRET`, `CHANNEL_ENCRYPTION_KEY`, `SENTRY_DSN`, `NEXT_PUBLIC_POSTHOG_KEY`).
 
 ## First-time provisioning (HISTORICAL — already done 2026-07-02)
 

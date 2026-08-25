@@ -115,7 +115,7 @@ report, but never edits them — memory hygiene is the session's own job.
 
 ## 6. Outputs this framework maintains
 
-- `docs/maintenance/DOC-HEALTH.md` — scorecard from each Tier-3 audit:
+- `docs/harness/maintenance/DOC-HEALTH.md` — scorecard from each Tier-3 audit:
   docs checked, drifts fixed, plans archived, gaps parked, modules undocumented.
 - `docs/harness/maintenance/PARKED.md` — the "code is behind the doc" list: intentions
   found in docs that are not yet implemented, each with source doc + date.
