@@ -9,7 +9,7 @@
 
 ## 1. TL;DR — what the engine does
 
-> *Once per scheduled tick (or once-shot from the CLI), the engine asks every source for new jobs, runs each posting through a 3-stage prefilter that drops ~99% of noise, scores the survivors on up to **9 dimensions** (4 classic + 4 multi-dim + a combined `match_score`) against the user's profile, deduplicates the result through a 4-layer cascade, optionally has an LLM extract 18 structured fields, optionally encodes a semantic embedding, and finally writes each unique row into the shared `jobs` table.*
+> *Once per scheduled tick (or once-shot from the CLI), the engine asks every source for new jobs, runs each posting through a 3-stage prefilter that drops ~99% of noise, scores the survivors on up to **9 dimensions** (4 classic + 4 multi-dim + a combined `match_score`) against the user's profile, deduplicates the result through a 4-layer cascade, optionally has an LLM extract 16 structured fields, optionally encodes a semantic embedding, and finally writes each unique row into the shared `jobs` table.*
 
 The pipeline is a **6-stage straight line**, with the scheduler + circuit breakers wrapped around stage 1:
 
@@ -300,7 +300,7 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
   - **Provider chain** (`llm_provider.py:329-334`): **OpenAI (`gpt-4o-mini`, PRIMARY)** → Gemini (`gemini-3.7-flash`) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`gpt-oss-120b`). Every model id is env-overridable.
   - **Self-correction loop**: on Pydantic `ValidationError`, the first 5 error messages are appended to the prompt and the call retries up to 2 more times.
   - If all providers fail or retries exhaust → `RuntimeError` (logged, no partial row written — atomicity over best-effort).
-- Output: a `JobEnrichment` row with **18 strict-typed fields** (see §3.3 below).
+- Output: a `JobEnrichment` row with **16 strict-typed fields** (see §3.2 below). The `job_enrichment` TABLE still has 18 enrichment columns — `employer_type` and `locations` were retired from the schema in 2026-08 but never dropped from the DB, so nothing writes them.
 - DB persistence: `INSERT OR REPLACE` into `job_enrichment` table (migration `0008`). **Shared catalog** — no `user_id` column, per CLAUDE.md rule #17 (the same enriched fields apply to every user; per-user scoring against the enrichment happens at read time).
 
 ### Stage 6 — Store + (opt-in) embed
@@ -522,7 +522,7 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | `WORKPLACE_WEIGHT` | `6` | Workplace (remote/hybrid/onsite) dimension max | Raise to make workplace preference more decisive |
 | `ENRICHMENT_MIN_SCORE` | `10` | The low floor a job must clear to be enrichment-eligible (`settings.py:152`) | Raise only to skip obvious junk — the budget below is the real lever |
 | `ENRICHMENT_MAX_JOBS` | `20` | Per-run budget: the best N eligible jobs are enriched (`settings.py:151`) | Raise to enrich more per run; this is the hard cost ceiling |
-| `ENRICHMENT_THRESHOLD` | `10` | Back-compat alias that resolves to `ENRICHMENT_MIN_SCORE` (`settings.py:155`). **Not the gate** — the pipeline reads `ENRICHMENT_MIN_SCORE` + `ENRICHMENT_MAX_JOBS` | Left in place so old `.env` files keep working |
+| `ENRICHMENT_THRESHOLD` | `10` | Back-compat alias that resolves to `ENRICHMENT_MIN_SCORE` (`settings.py:155`). **Not the gate in the CLI pipeline** — that reads `ENRICHMENT_MIN_SCORE` + `ENRICHMENT_MAX_JOBS`. It is **not inert**, though: the ARQ worker's per-user ingest is gated on this name alone (`score >= ENRICHMENT_THRESHOLD`, `workers/tasks.py:237`) | Leave at the default. Raising it silently stops the worker fanning out `enrich_job_task` while the CLI path carries on |
 | `ENRICHMENT_ENABLED` | `false` | Legacy switch for LLM enrichment; `ENGINE2_ENABLED` opens the same gate (`ENGINE2_ENABLED or ENRICHMENT_ENABLED`). It switches the enrichment DATA on, **not** the dim scorers — those run on `user_preferences` alone (rule #20) | Flip on after setting LLM keys — see rule #18 |
 | `SEMANTIC_ENABLED` | `false` | Writes embeddings into the pgvector store (`main.py:1292,1348` read this name ALONE). Hybrid retrieval is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), so `ENGINE3_ENABLED` alone queries an index nothing fills. It does **not** switch ESCO on: that also needs `is_available()` (`cv_parser.py:821,830`) and the index artefacts have never been built | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
 | `TARGET_SALARY_MIN` / `_MAX` | `40000` / `120000` | Salary-range *tiebreaker* (not scoring) for sort order on the dashboard | Display preference only |
