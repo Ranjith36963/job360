@@ -3,6 +3,10 @@
 **What this is:** every hop in the Job360 journey where two parts should talk and don't.
 Each item is a checkbox. We fix them one by one and tick them off.
 
+**How each one gets proved:** [`wiring_verification.md`](./wiring_verification.md) — the
+five rungs, the per-item browser walkthroughs, the drills, and the coverage bounds.
+An item is not done until it climbs all five rungs.
+
 **Measured against:** `origin/main` (production). Two multi-agent sweeps, 26 agents,
 2.2M tokens, 2026-08-25. Every claim has a `file:line` for what exists and the exact
 search that found nothing.
