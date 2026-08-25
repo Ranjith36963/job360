@@ -30,6 +30,7 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 from src.workers.tasks import (
+    chase_stale_applications,
     enrich_job_task,
     enrichment_sweep,
     mark_ledger_failed_task,
@@ -160,6 +161,10 @@ class WorkerSettings:
         refresh_catalog,
         # Self-heal enrichment coverage of the candidate pool
         enrichment_sweep,
+        # W-19 — tell users when their OWN applications have gone quiet.
+        # Before this, every message the product could send was about a job
+        # they had not applied to.
+        chase_stale_applications,
         # Issue #271 — a profile save queues this instead of firing a
         # fire-and-forget task in the web process that a deploy then kills.
         rescore_user_feed_task,
@@ -237,6 +242,11 @@ class WorkerSettings:
             # candidates enriched — this cron closes it in ~1-2 days and keeps
             # it closed as new jobs arrive. No-op when E2 flags are off.
             _cron(enrichment_sweep, minute={10, 40}),
+            # W-19 — the chase. Daily at 09:00 UTC: after the 04:00 catalog
+            # refresh, inside UK working hours. Per-user quiet hours and
+            # digest mode are still honoured downstream by dispatch(), which
+            # is why this is a single fixed time and not per-timezone.
+            _cron(chase_stale_applications, hour=9, minute=0),
         ]
         del _cron
     except Exception:  # noqa: BLE001 — arq absent in a minimal env

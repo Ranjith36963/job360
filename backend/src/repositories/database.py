@@ -318,6 +318,11 @@ class JobDatabase:
             "tailored_documents", [("flagged_terms", "TEXT DEFAULT '[]'")]
         )
 
+        # last_chased_at (migration 0032) — the chase cron's cooldown. Mirrored
+        # here so init_db()-only flows (tests, fresh dev DBs) pick it up on boot,
+        # same as flagged_terms above.
+        await self._add_missing_columns("applications", [("last_chased_at", "TEXT")])
+
         # Add timezone column to users table if it was created before migration 0012.
         # users table may not exist in all test DB instances (auth tests create it;
         # non-auth tests skip it).  Guard with table existence check.
@@ -1235,6 +1240,76 @@ class JobDatabase:
             }
             for r in await cursor.fetchall()
         ]
+
+    async def get_applications_to_chase(
+        self, user_id: str, *, days: int = 7, cooldown_days: int = 7
+    ) -> list[dict[str, Any]]:
+        """Applications that have gone quiet and are due a nudge (wiring.md W-19).
+
+        Deliberately NOT the same query as :meth:`get_stale_applications`, which
+        powers the in-app banner. That one answers "what looks stale right now?"
+        and is correct to re-list the same rows every time the page loads. This
+        one answers "who should we INTERRUPT?", which is a different question
+        because sending is not idempotent — the banner can repeat itself for free,
+        an email cannot.
+
+        Two filters, both load-bearing:
+
+        * ``days`` — dormant: ``updated_at`` older than the cutoff. Any stage move,
+          note edit, or advance refreshes ``updated_at``, so acting on an
+          application resets its silence clock, which is what a user expects.
+        * ``cooldown_days`` — not chased recently. Without this the cron re-chases
+          every dormant row on every run: an application quiet for 30 days would
+          produce ~23 emails. ``last_chased_at IS NULL`` means never chased.
+
+        ``offer`` and ``rejected`` are excluded for the same reason the banner
+        excludes them: the conversation already ended, in either direction. Note
+        ``ghosted`` is deliberately NOT excluded here — a user who has already
+        marked something ghosted has told us the silence is real, so we stop
+        chasing it via the cooldown, not by pretending the row does not exist.
+        """
+        now = datetime.now(timezone.utc)
+        dormant_before = (now - timedelta(days=days)).isoformat()
+        chased_before = (now - timedelta(days=cooldown_days)).isoformat()
+        cursor = await self._db.execute(
+            """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
+                      a.last_chased_at, j.title, j.company
+               FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
+               WHERE a.user_id = ?
+                 AND a.updated_at < ?
+                 AND a.stage NOT IN ('offer', 'rejected', 'ghosted')
+                 AND (a.last_chased_at IS NULL OR a.last_chased_at < ?)
+               ORDER BY a.updated_at ASC""",
+            (user_id, dormant_before, chased_before),
+        )
+        return [
+            {
+                "job_id": r[0],
+                "stage": r[1],
+                "created_at": r[2],
+                "updated_at": r[3],
+                "notes": r[4] or "",
+                "last_chased_at": r[5],
+                "title": r[6] or "",
+                "company": r[7] or "",
+            }
+            for r in await cursor.fetchall()
+        ]
+
+    async def mark_application_chased(self, user_id: str, job_id: int) -> None:
+        """Stamp ``last_chased_at`` so the cooldown starts.
+
+        Deliberately does NOT touch ``updated_at``: that column means "the user
+        did something", and us sending an email is not the user doing something.
+        Bumping it would reset the dormancy clock and the application would look
+        freshly active forever — the chase would silence the very signal it exists
+        to report.
+        """
+        await self._db.execute(
+            "UPDATE applications SET last_chased_at = ? WHERE user_id = ? AND job_id = ?",
+            (datetime.now(timezone.utc).isoformat(), user_id, job_id),
+        )
+        await self._db.commit()
 
     async def get_job_by_id(self, job_id: int) -> dict[str, Any] | None:
         cursor = await self._db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))

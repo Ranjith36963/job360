@@ -1372,6 +1372,132 @@ async def notification_tick(ctx: dict[str, Any]) -> dict[str, int]:
     return {"checked": len(rules), "enqueued": enqueued}
 
 
+# Dormancy and cooldown windows for the chase cron. Module-level so tests can
+# monkeypatch them instead of waiting 7 real days.
+CHASE_DORMANT_DAYS = 7
+CHASE_COOLDOWN_DAYS = 7
+# Per-user cap. A user who applied to 200 jobs and then went on holiday should
+# get one useful message, not 200 — and a runaway loop should cost one email,
+# not an inbox. Anything beyond the cap is simply not chased this run; it stays
+# eligible for the next one because we only stamp what we actually sent.
+CHASE_MAX_PER_USER = 5
+
+
+def _chase_message(rows: list[dict[str, Any]]) -> tuple[str, str]:
+    """Build the chase notification. Names the jobs — a count alone is not useful."""
+    if len(rows) == 1:
+        r = rows[0]
+        where = f"{r['title']} at {r['company']}".strip(" at")
+        return (
+            "No reply yet — worth a chase?",
+            f"You applied to {where} and it has been quiet since.\n"
+            f"Worth a follow-up, or mark it ghosted on your Job360 pipeline.",
+        )
+    listed = "\n".join(f"- {r['title']} at {r['company']}".rstrip(" at") for r in rows)
+    return (
+        f"{len(rows)} applications have gone quiet",
+        f"These have had no movement in a while:\n{listed}\n\n"
+        f"Chase them up, or mark them ghosted on your Job360 pipeline.",
+    )
+
+
+@_logged_task
+async def chase_stale_applications(ctx: dict[str, Any]) -> dict[str, int]:
+    """ARQ cron: tell users when their own applications have gone quiet (W-19).
+
+    THE point of this task: before it, every message Job360 could send was about
+    a job the user had NOT applied to. The moment they applied, the product went
+    silent about the thing they now cared about most. The dormancy query already
+    existed (``get_stale_applications``) and was wired to exactly one consumer —
+    an in-app banner the user only saw if they went looking.
+
+    Deliberate choices:
+
+    * ``match_score=None`` into :func:`dispatch` so the score-threshold gate is
+      bypassed. That gate asks "is this job good enough to mention?", which is the
+      wrong question for a job they already applied to.
+    * ``force=False`` so quiet hours and digest mode still apply. A chase is never
+      urgent enough to wake someone at 3am; queueing it is the correct outcome.
+    * ``last_chased_at`` is stamped ONLY after a send is attempted, and per
+      application, so a crash midway does not silently burn the whole batch's
+      cooldown.
+    * Chases are not written to ``notification_ledger``: that table is
+      ``UNIQUE(user_id, job_id, channel)`` and a chase is by definition about a
+      job already in it. KNOWN BOUND — chases therefore do not appear in the
+      in-app notification history yet.
+    """
+    db: pg.Connection = ctx["db"]
+    db.row_factory = pg.Row
+
+    try:
+        cur = await db.execute("SELECT user_id FROM notification_rules WHERE enabled = 1")
+        user_ids = [r[0] for r in await cur.fetchall()]
+    except Exception:  # noqa: BLE001 — a missing table must not kill the worker
+        return {"users": 0, "chased": 0, "sent": 0}
+
+    from src.repositories.database import JobDatabase  # noqa: PLC0415 — avoid import cycle
+
+    # Wrap the worker's already-open connection; the worker owns its lifecycle,
+    # so this must NOT open or close one of its own.
+    jdb = JobDatabase.from_connection("", db)
+
+    # Same test hook as send_notification (tasks.py:365) — ctx['dispatcher']
+    # short-circuits the real Apprise path so tests never touch a network.
+    dispatcher_fn = ctx.get("dispatcher")
+    if dispatcher_fn is None:
+        from src.services.channels.dispatcher import dispatch as real_dispatch  # noqa: PLC0415
+
+        dispatcher_fn = real_dispatch
+
+    import logging  # noqa: PLC0415 — module-local, matching this file's style
+
+    log = logging.getLogger(__name__)
+
+    async def _safely(what: str, user_id: str, coro: Any) -> Any:
+        """Await ``coro``, logging and swallowing any failure.
+
+        One user's broken row (or dead channel) must not stop the cron for
+        everyone else — but a silent swallow is how a broken feature stays broken
+        for months, so every failure is logged with a traceback.
+        """
+        try:
+            return await coro
+        except Exception:  # noqa: BLE001 — deliberate per-user isolation
+            log.warning("chase: %s failed for user=%s", what, user_id, exc_info=True)
+            return None
+
+    chased = 0
+    sent = 0
+    for user_id in user_ids:
+        rows = await _safely(
+            "read applications",
+            user_id,
+            jdb.get_applications_to_chase(
+                user_id, days=CHASE_DORMANT_DAYS, cooldown_days=CHASE_COOLDOWN_DAYS
+            ),
+        )
+        if not rows:
+            continue
+        batch = rows[:CHASE_MAX_PER_USER]
+        title, body = _chase_message(batch)
+        results = await _safely(
+            "dispatch",
+            user_id,
+            dispatcher_fn(db, user_id=user_id, title=title, body=body),
+        )
+        # Stamp only what we actually attempted to deliver, so a user with no
+        # channel configured keeps their cooldown clean and gets chased once a
+        # channel exists.
+        if not results:
+            continue
+        sent += sum(1 for r in results if getattr(r, "ok", False))
+        for row in batch:
+            await jdb.mark_application_chased(user_id, row["job_id"])
+            chased += 1
+
+    return {"users": len(user_ids), "chased": chased, "sent": sent}
+
+
 @_logged_task
 async def enrich_job_task(ctx: dict[str, Any], job_id: int) -> dict[str, bool | str]:
     """Produce a :class:`JobEnrichment` row for ``job_id``.
