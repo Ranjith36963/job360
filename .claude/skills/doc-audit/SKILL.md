@@ -35,7 +35,7 @@ plan docs describing shipped work piled up. The gate is now **per-lane**, per
   PR — never commit to main. Rebase on freshly-fetched `origin/main` right
   before pushing. **Only one doc-writing session (sync or audit) at a time** —
   check for an open `docs:` PR first; if one exists, stop and say so.
-  If `docs/archive/` or `docs/harness/maintenance/PARKED.md` are missing, create them
+  If `docs/_archive/` or `docs/harness/maintenance/PARKED.md` are missing, create them
   first (with a one-line header explaining their purpose).
 
 **AHEAD docs are untouchable (user's rule):** a doc describing something not
@@ -66,7 +66,7 @@ history (not the doc's own claims):
 
 - **IMPLEMENTED** (the code it describes exists and is merged) → stamp the top
   with `> **IMPLEMENTED** in PR #N (<sha>) — archived <date>` and `git mv` it
-  to `docs/archive/`. Do not edit its content. **After EVERY move, grep the
+  to `docs/_archive/`. Do not edit its content. **After EVERY move, grep the
   whole repo for the old path** (`grep -rn "<old path>" --include="*.md"`) and
   update each referrer — `docs/README.md` (the plan index) and CLAUDE.md's
   "Related documentation" section link to plan files; a move without a link

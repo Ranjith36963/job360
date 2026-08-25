@@ -125,7 +125,7 @@ report, but never edits them — memory hygiene is the session's own job.
 | Dedicated technical writers | Loop 3 tooling is the writer; you are the editor who merges |
 | Freshness SLAs + staleness dashboards | Tier-1 daily check + `DOC-HEALTH.md` scorecard |
 | ADRs (architecture decision records) | `docs/product/plans/batch-2-decisions.md` pattern — keep appending |
-| Archive-over-delete retention | `docs/archive/` + stamps, nothing deleted |
+| Archive-over-delete retention | `docs/_archive/` + stamps, nothing deleted |
 | Doc impact required in code review | Rule 5 above |
 
 ## 6. Outputs this framework maintains
@@ -136,4 +136,4 @@ report, but never edits them — memory hygiene is the session's own job.
   docs checked, drifts fixed, plans archived, gaps parked, modules undocumented.
 - `docs/harness/maintenance/PARKED.md` — the "code is behind the doc" list: intentions
   found in docs that are not yet implemented, each with source doc + date.
-- `docs/archive/` — stamped, frozen, implemented/superseded plans.
+- `docs/_archive/` — stamped, frozen, implemented/superseded plans.

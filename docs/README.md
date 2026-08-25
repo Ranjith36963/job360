@@ -126,9 +126,16 @@ Background research that `IMPLEMENTATION_LOG.md` bridges to the shipped code (ke
 
 ## 🗄️ Archive (`_archive/`)
 
-Superseded plans/progress logs from past pillars — **not kept current**, retained only because
-`IMPLEMENTATION_LOG.md` and a few tests link them: completed step plans (Step 0/1/1.5/2),
-Pillar 1/2 progress logs and the `CurrentStatus.md` re-audit. The step plans and `batch_prompts.md` were deleted 2026-08-25 — their output merged, and `docs/harness/IMPLEMENTATION_LOG.md` is the narrative record.
+Superseded plans and progress logs from past pillars — **not kept current**, retained only
+because `IMPLEMENTATION_LOG.md` and a few tests link them.
+
+**Still here** (matches [`archive/README.md`](archive/README.md)):
+`pillar1_progress.md`, `pillar2_progress.md`, `pillar2_implementation_plan.md`,
+`CurrentStatus.md`, `one-shot-scripts/`.
+
+**Deleted 2026-08-25:** the four step plans (Step 0/1/1.5/2) and `batch_prompts.md` — their
+output is merged and `docs/harness/IMPLEMENTATION_LOG.md` is the narrative record.
+Retrievable with `git show d3cbceb:docs/_archive/<name>`.
 
 ---
 

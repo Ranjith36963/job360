@@ -29,7 +29,8 @@ old path is a dead link that nothing will notice.
 
 ## Why this file still exists
 
-`.claude/skills/doc-audit/SKILL.md` and `docs/harness/maintenance/DOC-MAINTENANCE.md`
-still name `docs/archive/`. Deleting this directory before those are repointed
-would turn a misleading signpost into a missing one. It stays until they are
-fixed, and then it should go.
+Both referrers are now repointed — `.claude/skills/doc-audit/SKILL.md` and
+`docs/harness/maintenance/DOC-MAINTENANCE.md` say `docs/_archive/`. What is left
+is a signpost for anyone who still has the old path in their head or in a link,
+so it stays as a tombstone rather than becoming a 404. Deleting the directory is
+now safe and is its own PR.

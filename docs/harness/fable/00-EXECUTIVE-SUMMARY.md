@@ -80,7 +80,8 @@ effort but real in consequence — mostly a handful of well-scoped fixes, not a 
 - The commit-gate stamp mechanism and memory hygiene in the Claude Code harness.
 
 ## How to use this folder
-1. Fix the **4 blockers** above (see `07-ROADMAP.md` for the sequence).
+1. Fix the **4 blockers** above (sequence: `AUDIT-2026-07-23-FULL-REVERIFY.md`; the original
+   `07-ROADMAP.md` was deleted 2026-08-25 — `git show d3cbceb:docs/harness/fable/07-ROADMAP.md`).
 2. Then work the **cross-cutting fixes** — best effort-to-impact ratio.
 3. Then batch the P2 hardening per area doc.
 4. Re-run this audit (same 6-agent sweep) after the blockers land to confirm.
