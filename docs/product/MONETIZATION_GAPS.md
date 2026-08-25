@@ -18,6 +18,12 @@
 
 ## Where we are (code-verified 2026-06-22)
 
+> **The date above applies to the unannotated cells only.** Percentages and evidence
+> here are the 2026-06-22 reading and have NOT been re-verified since. Where a later
+> check found a cell stale it is ~~struck through~~ with its own date inline — those
+> annotations are 2026-08-25. Do not refresh the heading to today: that would claim a
+> re-audit of the percentages that nobody has done.
+
 | Dimension | % | Evidence |
 |---|---|---|
 | Product (features) | ~90% | engine + API + UI + auth + profiles + 4 scoring engines + control surface; ~~1,571 tests green~~ (that count was the 2026-06-22 reading and is long stale — measure it, never quote it: `cd backend && python -m pytest --collect-only -q \| tail -1`; the merge-gate floor lives only in `CONTRIBUTING.md`) |
