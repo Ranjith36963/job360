@@ -8,7 +8,7 @@ _KEY_COMPONENT_MAX = 300
 
 # The fixed set of shelves EVERY job carries, whatever its source
 # (docs/pillars/UNIVERSAL_SHELF.md §1). This tuple is the SINGLE SOURCE OF
-# TRUTH: migrations/0031_universal_shelf, services/shelf_gate.py, and
+# TRUTH: migrations/0032_universal_shelf, services/shelf_gate.py, and
 # tests/test_universal_shelf.py all import it rather than re-typing the list.
 # Add a shelf here without teaching shelf_gate.py to fill it and
 # test_gate_accounts_for_every_shelf fails loudly instead of silently

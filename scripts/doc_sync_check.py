@@ -71,6 +71,13 @@ LIVING_DOCS = [
     "docs/product/pillars/01-user-pillar.md",
     "docs/product/pillars/02-search-and-match-engine.md",
     "docs/product/pillars/glossary.md",
+    # Added 2026-08-25 with the Universal Shelf. `pillar-unwatched` exists
+    # precisely so a new AUTHORITATIVE doc cannot arrive unchecked, and it
+    # fired on all three of these the moment they landed — the guard catching
+    # its own blind spot being widened, which is the point of it.
+    "docs/product/pillars/CATALOG_STATE.md",
+    "docs/product/pillars/SHELF_FILL_MEASURED.md",
+    "docs/product/pillars/UNIVERSAL_SHELF.md",
     # Added 2026-08-24 (third batch) after the nightly routine found
     # runbook.md still telling operators to run `sqlite3 data/jobs.db` against a
     # database that has been Postgres since 2026-07-02 -- five dead commands in

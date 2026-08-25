@@ -1,4 +1,4 @@
--- 0032_run_log_enrichment_stats: the spend counter for JOB SOURCE ENRICHMENT
+-- 0033_run_log_enrichment_stats: the spend counter for JOB SOURCE ENRICHMENT
 -- (docs/pillars/UNIVERSAL_SHELF.md §7 cost).
 --
 -- WHY. JOB SOURCE ENRICHMENT is an LLM reading a job ad — a real, per-token

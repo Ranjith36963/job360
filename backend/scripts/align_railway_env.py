@@ -159,7 +159,13 @@ def main() -> int:
     for name, value in to_write:
         cmd = [railway, "variables", "--service", args.to, "--set", f"{name}={value}"]
         # `cmd` carries the secret; it is never printed. Only the name is.
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        # EXPLICIT ENCODING. `text=True` alone decodes with the machine's
+        # locale — cp1252 on Windows — so one non-ASCII byte in Railway's
+        # output raises UnicodeDecodeError instead of printing. Guarded by
+        # scripts/encoding_guard.py, which caught this one.
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
         if proc.returncode == 0:
             print("  set %-30s ok" % name)
         else:

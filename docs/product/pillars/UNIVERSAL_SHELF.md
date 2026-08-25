@@ -1,4 +1,5 @@
 # The Universal Shelf — Catalog Field Contract
+<!-- doc: LIVING -->
 
 > **Audience.** Read this to understand what fields every job in the shared CATALOG must carry, how each field gets filled, and how we always know *how* it was filled. This is the design the owner asked for: *"You build the shelves, and the catalog is nothing but a combination of N shelves. The shelves should be the right amount of shelves that are relevant, so we do better search, match and score for the users."*
 >

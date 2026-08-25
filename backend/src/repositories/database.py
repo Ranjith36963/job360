@@ -10,7 +10,7 @@ _VALID_COL_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
 # salary_is_estimated is a real 3-state nullable bool, and shelf_provenance
 # is the one JSON column stored as a native Postgres JSONB rather than the
 # JSON-in-TEXT convention every other list/dict column in this file uses —
-# see 0031_universal_shelf.up.sql for why.
+# see 0032_universal_shelf.up.sql for why.
 _VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC", "BOOLEAN", "JSONB"}
 
 from src.models import Job  # noqa: E402  # after the regex constants to avoid circular import

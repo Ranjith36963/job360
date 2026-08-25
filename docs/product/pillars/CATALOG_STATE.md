@@ -1,4 +1,5 @@
 # CATALOG STATE — what is actually true today
+<!-- doc: LIVING -->
 
 **Measured: 2026-08-16.** Every number below carries its date and how it was got.
 A number without provenance is a lie waiting to happen — this repo has been bitten

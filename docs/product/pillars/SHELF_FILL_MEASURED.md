@@ -1,4 +1,5 @@
 # Shelf fill — MEASURED before/after (gate vocabulary batch)
+<!-- doc: LIVING -->
 
 Measured 2026-08-17 by an independent verification session. Re-measure, do not trust.
 

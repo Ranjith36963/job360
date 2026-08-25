@@ -1,4 +1,4 @@
--- Reverse of 0031 — drops all twelve Universal Shelf columns.
+-- Reverse of 0032 — drops all twelve Universal Shelf columns.
 --
 -- READ THIS BEFORE RUNNING IT: THIS DESTROYS REAL DATA.
 --

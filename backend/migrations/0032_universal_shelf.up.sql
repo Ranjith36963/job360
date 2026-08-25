@@ -1,4 +1,4 @@
--- 0031_universal_shelf: STEP 1 ("the frame") of the Universal Shelf design
+-- 0032_universal_shelf: STEP 1 ("the frame") of the Universal Shelf design
 -- (docs/pillars/UNIVERSAL_SHELF.md). Opens the door for four shelves that had
 -- NO catalog column at all before this — employment_type, seniority,
 -- workplace_mode, category, source_tags — plus salary unit metadata
@@ -27,7 +27,7 @@
 -- and services/shelf_enrichment.py calls fill_shelves(). The paragraph that
 -- stood here said the opposite — written when step 1 was going to ship alone —
 -- and it is the paragraph an operator reads before deciding whether the down
--- migration is safe. It is not: see 0031_universal_shelf.down.sql.
+-- migration is safe. It is not: see 0032_universal_shelf.down.sql.
 -- (CodeRabbit, PR #388.)
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS employment_type TEXT;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS workplace_mode TEXT;

@@ -98,12 +98,21 @@ def test_an_unset_credential_is_still_empty_string(name, monkeypatch, reload_set
 
 
 # A VALUE NO SCANNER CAN MISTAKE FOR A SECRET.
-# This was `abcdef0123456789` — sixteen hex characters, which is exactly the
-# shape gitleaks' `generic-api-key` rule exists to catch, so CI went red on a
-# fixture that never held anything real. The fix is NOT an allowlist entry:
-# teaching the scanner to ignore a pattern makes it blind to the next real key
-# of that shape. Make the value unmistakably fake instead. The test only needs
-# a string that survives a round trip unchanged, so the string can say so.
+# This fixture used to be a sixteen-character lowercase-hex run, which is the
+# exact shape gitleaks' `generic-api-key` rule exists to catch — so CI went red
+# over a value that never held anything real.
+#
+# The fix is NOT an allowlist entry: teaching the scanner to ignore a pattern
+# blinds it to the next REAL key of that shape. Make the value unmistakably
+# fake instead. The test only needs a string that survives a round trip
+# unchanged, so the string can say what it is.
+#
+# AND THE OLD VALUE IS DESCRIBED, NOT REPRODUCED. The first version of this
+# comment quoted it verbatim to explain the fix — and gitleaks flagged the
+# COMMENT, at this line, because a scanner reads the whole file and cannot tell
+# an example from a use. A note about a secret-shaped string must not contain
+# one. (Measured: run 32872148944, "File: ...test_credentials_are_stripped.py,
+# Line: 101" — the line that was explaining the fix.)
 _CLEAN_FIXTURE_VALUE = "not-a-real-key-only-a-test-fixture"
 
 
