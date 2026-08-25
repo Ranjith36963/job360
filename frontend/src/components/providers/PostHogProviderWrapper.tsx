@@ -112,11 +112,23 @@ export function PostHogProviderWrapper({
     const alreadyLoaded = posthog.__loaded;
 
     if (consent !== "accepted") {
-      // Declined (or undecided) after having loaded earlier in this session —
-      // stop sending and drop the stored id.
-      if (alreadyLoaded && consent === "declined") {
-        posthog.opt_out_capturing();
+      // Anything that is not "accepted" after having loaded earlier in this
+      // session — stop sending and drop the stored id.
+      //
+      // NOT `consent === "declined"`. Only one non-accepted value opted out, so
+      // any other — a withdrawal, a cleared choice, a value added later — left
+      // capture RUNNING while the app believed consent was absent. The gate
+      // above already says "not accepted"; re-narrowing it underneath is how a
+      // consent check ends up narrower than the consent rule.
+      //
+      // AND `reset()` COMES FIRST. `reset()` clears the SDK's consent state, so
+      // opting out and then resetting undoes the opt-out — with
+      // `opt_out_capturing_by_default: false` the SDK is free to capture again
+      // while the application still reads "declined". Order is the whole fix.
+      // (CodeRabbit, PR #387 — Major, and correct.)
+      if (alreadyLoaded) {
         posthog.reset();
+        posthog.opt_out_capturing();
       }
       return;
     }

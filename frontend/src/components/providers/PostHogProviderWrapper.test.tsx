@@ -72,8 +72,18 @@ describe("PostHogProviderWrapper — $pageview ordering", () => {
   beforeEach(() => {
     calls.length = 0;
     posthogMock.__loaded = false;
+    // EVERY spy, not the two this file happened to assert on first. `init` and
+    // `capture` were cleared and `opt_out_capturing` / `opt_in_capturing` /
+    // `reset` were not, so a call from an earlier test satisfied a later test's
+    // `toHaveBeenCalled()`. Caught by mutation-testing these cases: with the
+    // consent bug deliberately restored, three of them still passed — on
+    // evidence left behind by their predecessor. A test that can be satisfied
+    // by another test is not a test.
     posthogMock.init.mockClear();
     posthogMock.capture.mockClear();
+    posthogMock.opt_in_capturing.mockClear();
+    posthogMock.opt_out_capturing.mockClear();
+    posthogMock.reset.mockClear();
     window.localStorage.clear();
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_KEY", "phc_test_key");
   });
@@ -116,5 +126,79 @@ describe("PostHogProviderWrapper — $pageview ordering", () => {
     // Give any effect a chance to run before asserting absence.
     await waitFor(() => expect(posthogMock.init).not.toHaveBeenCalled());
     expect(posthogMock.capture).not.toHaveBeenCalled();
+  });
+  // ── Consent withdrawal: the ORDER of the two calls is the whole rule ──────
+  //
+  // `reset()` clears the SDK's consent state. So `opt_out_capturing()` followed
+  // by `reset()` UNDOES the opt-out, and with `opt_out_capturing_by_default:
+  // false` the SDK is free to capture again while the application still reads
+  // "declined". Tracking a user who has withdrawn consent is the failure this
+  // guards, and both calls happening is not enough to prevent it — only their
+  // order is. (CodeRabbit, PR #387.)
+  it("opts out AFTER resetting, so the opt-out is not cleared again", async () => {
+    posthogMock.__loaded = true; // loaded earlier in this session
+    window.localStorage.setItem(CONSENT_KEY, "declined");
+
+    render(
+      <PostHogProviderWrapper>
+        <div>child</div>
+      </PostHogProviderWrapper>
+    );
+
+    await waitFor(() => expect(posthogMock.opt_out_capturing).toHaveBeenCalled());
+    const resetAt = calls.indexOf("reset");
+    const optOutAt = calls.indexOf("opt_out");
+    expect(resetAt).toBeGreaterThanOrEqual(0);
+    expect(optOutAt).toBeGreaterThanOrEqual(0);
+    expect(optOutAt).toBeGreaterThan(resetAt);
+  });
+
+  // ── EVERY non-accepted value must opt out, not just the string "declined" ──
+  //
+  // The gate above already means "not accepted"; re-narrowing it underneath to
+  // one exact string left capture RUNNING for any other value — a withdrawal, a
+  // cleared choice, a value added later. A consent check must never be narrower
+  // than the consent rule it implements.
+  it.each(["withdrawn", "unknown-future-value", ""])(
+    "opts out for a non-accepted consent value: %s",
+    async (value) => {
+      posthogMock.__loaded = true;
+      window.localStorage.setItem(CONSENT_KEY, value);
+
+      render(
+        <PostHogProviderWrapper>
+          <div>child</div>
+        </PostHogProviderWrapper>
+      );
+
+      await waitFor(() => expect(posthogMock.opt_out_capturing).toHaveBeenCalled());
+    }
+  );
+
+  // ── accepted -> declined -> accepted, the transition CodeRabbit asked for ──
+  it("re-enables capture when consent is granted again after a decline", async () => {
+    posthogMock.__loaded = true;
+    window.localStorage.setItem(CONSENT_KEY, "declined");
+
+    const { rerender } = render(
+      <PostHogProviderWrapper>
+        <div>child</div>
+      </PostHogProviderWrapper>
+    );
+    await waitFor(() => expect(posthogMock.opt_out_capturing).toHaveBeenCalled());
+
+    // Re-accept: the store is external, so change it and notify like the real
+    // consent banner does.
+    window.localStorage.setItem(CONSENT_KEY, "accepted");
+    window.dispatchEvent(new Event("job360:consent"));
+    rerender(
+      <PostHogProviderWrapper>
+        <div>child</div>
+      </PostHogProviderWrapper>
+    );
+
+    await waitFor(() => expect(posthogMock.opt_in_capturing).toHaveBeenCalled());
+    // ...and the opt-IN must be the LAST word, or the session stays silent.
+    expect(calls.lastIndexOf("opt_in")).toBeGreaterThan(calls.lastIndexOf("opt_out"));
   });
 });

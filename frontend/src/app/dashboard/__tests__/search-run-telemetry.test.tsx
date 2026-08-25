@@ -65,9 +65,26 @@ function makeWrapper() {
   };
 }
 
-/** Find the single search_run capture, or undefined. */
+/**
+ * The single `search_run` capture, or undefined if none was emitted.
+ *
+ * ONE EVENT IS PART OF THE CONTRACT, so it is asserted rather than assumed.
+ * This used to be a bare `.find()`, which returns the FIRST of however many
+ * exist — the docstring said "the single capture" and the code accepted any
+ * number. A duplicate emit (a re-render, a second effect, a retry) would then
+ * pass every test here while doubling every funnel number downstream, which is
+ * exactly the kind of instrument-lying-quietly this PR is about.
+ * (CodeRabbit, PR #387.)
+ */
 function searchRunCall() {
-  return posthogMock.capture.mock.calls.find(([event]) => event === "search_run");
+  const calls = posthogMock.capture.mock.calls.filter(([event]) => event === "search_run");
+  if (calls.length > 1) {
+    throw new Error(
+      `search_run was captured ${calls.length} times; the contract is exactly one per ` +
+        `search. Every count derived from this event would be inflated by the duplicates.`,
+    );
+  }
+  return calls[0];
 }
 
 describe("dashboard search_run telemetry", () => {

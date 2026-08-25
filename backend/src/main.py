@@ -202,10 +202,23 @@ async def _ghost_detection_pass(
         because `consecutive_misses` never reached 2 the nightly ghost sweep
         legitimately reported `transitioned: 0`. Every instrument said fine.
         """
+        # `-1` IS NOT A COUNT. When the count itself failed this logged
+        # "-1 live job(s)" and swallowed the exception whole, so a reader could
+        # not tell a source-FETCH failure from a second failure in the DATABASE,
+        # and had no stack trace for either. A log line that exists to name a
+        # cost must not quietly invent the number. Say so, and record why.
+        # (CodeRabbit, PR #387.)
+        frozen: int | str
         try:
             frozen = await db.count_unexpired_jobs_for_source(source_name)
         except Exception:  # noqa: BLE001 — observability must never break a run
-            frozen = -1
+            frozen = "an unknown number of"
+            logger.warning(
+                "  %s: could not count this source's live jobs either — the "
+                "absence-sweep warning below has no number behind it",
+                source_name,
+                exc_info=True,
+            )
         logger.warning(
             "  %s: absence sweep SKIPPED (%s: %s) — %s live job(s) of this source "
             "stopped ageing and are still served as active",

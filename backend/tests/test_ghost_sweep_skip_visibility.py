@@ -119,3 +119,70 @@ def test_healthy_source_does_not_log_a_freeze_warning(db, caplog):
     assert missed.get("reed") == 0
     text = " ".join(rec.getMessage() for rec in caplog.records)
     assert "froze" not in text and "stopped ageing" not in text
+
+
+# ---------------------------------------------------------------------------
+# The COUNT must mean what the warning says it means
+# ---------------------------------------------------------------------------
+
+
+def test_the_freeze_count_counts_only_jobs_the_app_actually_serves(db):
+    """`possibly_stale` and `likely_stale` rows are NOT live listings.
+
+    The warning above says "N live job(s) ... are still served as active", and
+    the number behind it came from `count_unexpired_jobs_for_source`, which
+    counted everything *not* `confirmed_expired`. But `get_recent_jobs` serves
+    only `staleness_state IS NULL OR = 'active'` — so the two mid-states were
+    counted as live while no user could see them, and the warning overstated
+    the damage.
+
+    That is this repo's recorded failure mode in miniature: an instrument that
+    does not count the way its consumer counts. It is worth pinning here rather
+    than trusting the SQL to stay in step, because the two predicates live in
+    different files and nothing else forces them to agree.
+    """
+    from src.repositories.database import JobDatabase  # noqa: F401 — fixture type
+
+    _seed(db, "reed", 4)
+
+    async def _mark(state: str, apply_url: str) -> None:
+        await db._db.execute(
+            "UPDATE jobs SET staleness_state = ? WHERE apply_url = ?",
+            (state, apply_url),
+        )
+        await db._db.commit()
+
+    # 4 seeded rows: leave one 'active', set one NULL (never classified — still
+    # served, by design), and move the other two into the mid-states.
+    asyncio.run(_mark("active", "https://x/reed/0"))
+    asyncio.run(_mark(None, "https://x/reed/1"))
+    asyncio.run(_mark("possibly_stale", "https://x/reed/2"))
+    asyncio.run(_mark("likely_stale", "https://x/reed/3"))
+
+    counted = asyncio.run(db.count_unexpired_jobs_for_source("reed"))
+    assert counted == 2, (
+        f"counted {counted}, expected 2 (the 'active' row and the NULL row). "
+        f"A count that includes possibly_stale/likely_stale reports listings the "
+        f"app does not serve, so the freeze warning overstates the live damage."
+    )
+
+
+def test_the_freeze_count_still_excludes_expired_rows(db):
+    """The other direction: a confirmed-expired row is not live either.
+
+    Tightening a predicate until it stops over-counting can quietly turn into
+    under-counting, so both edges are pinned.
+    """
+    _seed(db, "adzuna", 2)
+
+    async def _expire(apply_url: str) -> None:
+        await db._db.execute(
+            "UPDATE jobs SET staleness_state = 'confirmed_expired' WHERE apply_url = ?",
+            (apply_url,),
+        )
+        await db._db.commit()
+
+    asyncio.run(_expire("https://x/adzuna/0"))
+
+    counted = asyncio.run(db.count_unexpired_jobs_for_source("adzuna"))
+    assert counted == 1, f"counted {counted}, expected 1 — the expired row must not count"
