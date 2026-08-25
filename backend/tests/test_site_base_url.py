@@ -25,6 +25,24 @@ import importlib
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _restore_settings_module():
+    """Reload settings under the ORIGINAL environ after every test in this file.
+
+    ``importlib.reload`` mutates module-level state that outlives the test:
+    monkeypatch restores the environment, but ``settings.SITE_BASE_URL`` keeps
+    whatever the last reload computed. A later test — in this file or any other
+    that imports the constant — could then read `https://staging.job360.uk` with
+    no environment set, and which one it sees would depend on test ORDER.
+    Reloading again on teardown, after monkeypatch has undone the environ,
+    leaves the module exactly as it was found. (CodeRabbit, PR #381.)
+    """
+    yield
+    import src.core.settings as settings
+
+    importlib.reload(settings)
+
+
 def _reload_site_base_url(monkeypatch: pytest.MonkeyPatch, raw: str | None) -> str:
     """Re-import settings with SITE_BASE_URL set to ``raw`` and return the result."""
     if raw is None:
@@ -44,6 +62,12 @@ def _reload_site_base_url(monkeypatch: pytest.MonkeyPatch, raw: str | None) -> s
         ("", "set but empty"),
         ("   ", "whitespace only"),
         ("\t\n", "tabs and newlines"),
+        # Slash-only values are the third variant of this bug: truthy, so they
+        # survive a fallback applied before normalisation, and then rstrip("/")
+        # turns them into "". Normalise first, fall back last.
+        ("/", "a single slash"),
+        ("///", "several slashes"),
+        ("  //  ", "slashes padded with whitespace"),
     ],
 )
 def test_absent_or_blank_env_falls_back_to_the_real_origin(monkeypatch, raw, label):

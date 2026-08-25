@@ -101,16 +101,21 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 # A PARAMETER, not a hardcode: staging, preview deploys and local dev all need
 # a different origin, and a link that silently points at production from a
 # staging send is a real way to mislead a real person.
-# STRIP FIRST, then fall back. Order matters and got this wrong once already:
-# a getenv default never fires for a var that is SET BUT EMPTY (`SITE_BASE_URL=`
-# in a Railway variable, or a .env line with nothing after the `=`), and
-# `os.getenv(...) or default` still does not save you — `" "` is truthy, so the
-# fallback is skipped and the later .strip() empties it again. Both cases would
-# ship job links with no origin: "/jobs/147" in someone's inbox, resolving to
-# nothing. Stripping before the `or` collapses "", " " and unset to one path.
-SITE_BASE_URL = (
-    os.getenv("SITE_BASE_URL", "").strip() or "https://job360.uk"
-).rstrip("/")
+# NORMALISE FIRST, fall back LAST. This got written wrong three times, each a
+# narrower version of the same mistake — every one of which would have shipped
+# job links with no origin ("/jobs/147" in someone's inbox, resolving to
+# nothing):
+#   1. `os.getenv("SITE_BASE_URL", default)` — a getenv default never fires for
+#      a var that is SET BUT EMPTY, which is what a blank Railway variable or a
+#      bare `SITE_BASE_URL=` line in .env produces.
+#   2. `os.getenv(...) or default` — closes (1), but `" "` is truthy, so the
+#      fallback is skipped and the later .strip() empties it again.
+#   3. `(...strip() or default).rstrip("/")` — closes (2), but `"/"` and `"///"`
+#      are truthy AND survive the fallback, then rstrip turns them into "".
+# The fix is to do every transformation the value needs, and only then decide
+# whether what is left is usable. Guard: tests/test_site_base_url.py.
+_SITE_BASE_URL_RAW = os.getenv("SITE_BASE_URL", "").strip().rstrip("/")
+SITE_BASE_URL = _SITE_BASE_URL_RAW or "https://job360.uk"
 
 # Search
 # MIN_MATCH_SCORE is the *display* floor — the default "good enough to show"
