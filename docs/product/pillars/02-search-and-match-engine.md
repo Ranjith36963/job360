@@ -294,13 +294,13 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
 
 ### Stage 5 — Enrich (opt-in, `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED`)
 
-- Gate: **a budget, not a threshold** (`main.py:1137-1163`). Jobs must clear a low floor — `match_score >= ENRICHMENT_MIN_SCORE` (default **10**, `settings.py:152`) — and then the best `ENRICHMENT_MAX_JOBS` (default **20**) are sent to the LLM. `ENRICHMENT_THRESHOLD` is not read at this call site — it defaults to `ENRICHMENT_MIN_SCORE` when unset (`settings.py:155`) and survives only for old `.env` files. Why the change: the scorer's contract is 0–100, but the highest `match_score` measured across the whole 3,342-row prod feed on 2026-07-28 was **58**, so a threshold of 60 selected nothing and the stage had never run (`main.py:1138-1142` records the measurement). A budget makes no claim about the distribution, so it cannot go stale.
+- Gate: **a budget, not a threshold** (`main.py:1137-1163`). Jobs must clear a low floor — `match_score >= ENRICHMENT_MIN_SCORE` (default **10**, `settings.py:152`) — and then the best `ENRICHMENT_MAX_JOBS` (default **20**) are sent to the LLM. `ENRICHMENT_THRESHOLD` is not read at this call site — it defaults to `ENRICHMENT_MIN_SCORE` when unset (`settings.py:155`). It is **not** dead weight for old `.env` files, though: the ARQ worker's per-job enqueue path is still gated on it (`workers/tasks.py:237`), so setting it high stops worker-side fan-out while leaving this CLI selection untouched — see the env table at §5. Why the change: the scorer's contract is 0–100, but the highest `match_score` measured across the whole 3,342-row prod feed on 2026-07-28 was **58**, so a threshold of 60 selected nothing and the stage had never run (`main.py:1138-1142` records the measurement). A budget makes no claim about the distribution, so it cannot go stale.
 - `enrich_batch(jobs, semaphore_limit=10, skip_existing=True)` (`job_enrichment.py`) runs asyncio-parallel LLM calls capped at 10 concurrent.
 - Each call goes through `llm_extract_validated(prompt, JobEnrichment, max_retries=2)`:
   - **Provider chain** (`llm_provider.py:329-334`): **OpenAI (`gpt-4o-mini`, PRIMARY)** → Gemini (`gemini-3.7-flash`) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`gpt-oss-120b`). Every model id is env-overridable.
   - **Self-correction loop**: on Pydantic `ValidationError`, the first 5 error messages are appended to the prompt and the call retries up to 2 more times.
   - If all providers fail or retries exhaust → `RuntimeError` (logged, no partial row written — atomicity over best-effort).
-- Output: a `JobEnrichment` row with **16 strict-typed fields** (see §3.2 below). The `job_enrichment` TABLE still has 18 enrichment columns — `employer_type` and `locations` were retired from the schema in 2026-08 but never dropped from the DB, so nothing writes them — `save_enrichment` excludes both from its column list (`job_enrichment.py:248-254`), and the read paths skip them too (`:329`, `:401`).
+- Output: a `JobEnrichment` row with **16 strict-typed fields** (see §3.2 below). The `job_enrichment` TABLE still has 18 enrichment columns — `employer_type` and `locations` were retired from the schema in 2026-08 but never dropped from the DB, so the application neither writes nor reads them — `save_enrichment` excludes both from its column list (`job_enrichment.py:248-254`) and the read paths skip them too (`:329`, `:401`). The columns are not empty, though: `0008_job_enrichment.up.sql:21,29` declares them `NOT NULL DEFAULT '[]'` / `'unknown'`, so every new row still gets those defaults from the database.
 - DB persistence: `INSERT OR REPLACE` into `job_enrichment` table (migration `0008`). **Shared catalog** — no `user_id` column, per CLAUDE.md rule #17 (the same enriched fields apply to every user; per-user scoring against the enrichment happens at read time).
 
 ### Stage 6 — Store + (opt-in) embed
@@ -466,7 +466,7 @@ Either name opens this surface — every E2 call site reads `ENGINE2_ENABLED or 
 
 When on:
 - Stage 5 runs (see §2).
-- `JobScorer` gains a populated `enrichment_lookup`, so the Batch 2.9 dimension scorers have real data instead of their neutral halves.
+- `JobScorer` gets an `enrichment_lookup` that *can* carry rows, so the Batch 2.9 dimension scorers see real data for any job enrichment has reached. The flag opens the path; it does not guarantee rows — `_build_enrichment_lookup` returns `{}` when the table is empty or absent (`job_enrichment.py:313-328`), which is what happens with a zero `ENRICHMENT_MAX_JOBS` budget, no job above the floor, or every provider failing (the four preconditions in §6). Each unreached job falls back to the same neutral halves as the flag-off case below.
 - Dedup tie-breaker uses the `+5` enrichment bonus.
 
 When off:
