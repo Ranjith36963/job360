@@ -205,7 +205,7 @@ python -m src.cli setup-profile --cv path/to/cv.pdf --linkedin linkedin.pdf --gi
 
 ### Legacy JSON hydration
 
-If `data/user_profile.json` exists but no `user_profiles` row for `DEFAULT_TENANT_ID`, the first `load_profile()` call auto-imports it. Non-destructive — the JSON file stays.
+The first `load_profile(DEFAULT_TENANT_ID)` call auto-imports `data/user_profile.json`, then **DELETES the file** (it is kept only if the import raises). Back it up before you trigger a load. Pinned by `test_profile_storage.py::test_legacy_json_hydrates_to_default_tenant_and_deletes_file`.
 
 ---
 

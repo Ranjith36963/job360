@@ -273,7 +273,7 @@ Three dataclasses, all serialised to JSON:
 
 - **Live tip**: `user_profiles` table (migration `0006`) — one row per user, latest version.
 - **History**: `user_profile_versions` table (migration `0007`) — every `save_profile()` appends an immutable snapshot. Retention is 10 per user; `restore_profile_version()` rewrites the tip atomically *and* saves the restore as a new snapshot so the history is never destroyed.
-- **Legacy hydration**: if no row exists for `DEFAULT_TENANT_ID` but the old `data/user_profile.json` does, it's auto-imported on first load (non-destructive — the JSON file is left in place).
+- **Legacy hydration**: `storage._maybe_hydrate_legacy_json` imports the old `data/user_profile.json` on first load, then **DELETES it**. Pinned by `test_profile_storage.py::test_legacy_json_hydrates_to_default_tenant_and_deletes_file`.
 
 ### 3.5 Search-config generation — `backend/src/services/profile/keyword_generator.py`
 
@@ -565,7 +565,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | ESCO skill normalisation | ❌ | code path exists but the embedding index it needs (`backend/data/esco/`) was never built or shipped — inert scaffolding, not a flag flip. Root `CLAUDE.md` rule #28 (FACT, verified 2026-08-11). |
 | Multi-tenant profile storage (Postgres) | ✅ | `user_profiles` table (migration `0006`) |
 | Version history + restore (last 10) | ✅ | `user_profile_versions` (`0007`); restore is atomic and preserves history |
-| Legacy `data/user_profile.json` hydration | ✅ | non-destructive, runs on first DB read |
+| Legacy `data/user_profile.json` hydration | ✅ | deletes the JSON on success — `test_legacy_json_hydrates_to_default_tenant_and_deletes_file` |
 | Evidence-based skill tiering | ✅ | `tier_skills_by_evidence()` — frequency × source weight |
 | JSON Resume export | ✅ | `getJsonResume()` API + frontend button |
 | Profile completeness % on dashboard | ✅ | calculated client-side in `/profile/page.tsx` |
