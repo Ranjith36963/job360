@@ -21,10 +21,14 @@ DESIGN_SESSION=<cookie> node tests/design/self-check.mjs
 not import it and re-implemented a simplified version of the measurement
 inline. That is not a check of the checker — a regression inside `audit()`
 passes an independent re-implementation without a murmur, and this audit has
-silently broken twice (the on-screen filter that excluded the very elements
-`CLIPPED_BY_CONTAINER` looks for; the rgb colour parsing that turned 189 real
-contrast failures into noise). The audit now lives alone in `audit-fn.mjs` and
-both callers run the same copy.
+silently broken twice: the on-screen filter that excluded the very elements
+`CLIPPED_BY_CONTAINER` looks for, and the rgb colour parsing that invented **189
+FALSE contrast failures** — the palette is authored in oklch, Chrome returns
+`lab(...)`, and reading that as rgb collapsed every ratio, including
+white-on-black nav text reported at "1.48:1" when it is really about 19:1
+(`audit-fn.mjs`, the `describe`/contrast section). A parser that wrong in one
+direction hides real failures just as easily. The audit now lives alone in
+`audit-fn.mjs` and both callers run the same copy.
 
 Note the honest gap: the audit has **no ragged-height finding**, so the
 self-check's height assertion measures the PAGE, not the checker. It is

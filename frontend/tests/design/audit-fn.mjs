@@ -329,7 +329,14 @@ export function audit() {
         /auto|scroll/.test(ccs.overflowY + ccs.overflowX) &&
         (cur.scrollHeight > cur.clientHeight + 2 || cur.scrollWidth > cur.clientWidth + 2);
       if (scrollable) break;
-      if (ccs.overflow === "hidden" || ccs.overflowX === "hidden") {
+      // overflowY too: a container with `overflow-y: hidden` cuts a child off
+      // below its bottom edge while `overflow` is not exactly "hidden" and
+      // overflowX is not "hidden" either. Checking only those two missed it.
+      if (
+        ccs.overflow === "hidden" ||
+        ccs.overflowX === "hidden" ||
+        ccs.overflowY === "hidden"
+      ) {
         const cr = cur.getBoundingClientRect();
         const r = meta.get(el).r;
         const overRight = r.right - cr.right;

@@ -15,5 +15,6 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 Consult Context7 for the Next.js docs BEFORE reading `node_modules/next/dist/docs/`
 and before writing code (root rule #22). Training data for 14-15 is wrong for 16:
-`params` is a Promise, and `"use client"` on a `page.tsx` silently disables
-`generateMetadata`.
+`params` is a Promise, and `metadata` / `generateMetadata` are Server-Component
+only — a `page.tsx` carrying `"use client"` cannot provide them. Keep the page a
+Server Component and push interactivity into a child Client Component.

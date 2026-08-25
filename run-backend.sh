@@ -31,11 +31,19 @@ done
 
 # Nothing checkout-local: fall back to whatever python is on PATH, and say so
 # rather than failing with an obscure "command not found" later.
-if command -v python >/dev/null 2>&1; then
-  echo "run-backend.sh: no .venv found under $ROOT/backend — using python from PATH" >&2
-  exec python main.py
-fi
+# Try both spellings: many Linux and macOS hosts ship `python3` only, and the
+# old single `python` check exited below while a usable interpreter was on PATH.
+for name in python python3; do
+  if command -v "$name" >/dev/null 2>&1; then
+    echo "run-backend.sh: no .venv found under $ROOT/backend — using $name from PATH" >&2
+    exec "$name" main.py
+  fi
+done
 
+# Anchor the recovery command: the paths below are relative to the repo root, so
+# print the cd too. Copied from a subdirectory it would otherwise build the venv
+# in the wrong place.
 echo "run-backend.sh: no Python interpreter found. Create one with:" >&2
-echo "  python -m venv backend/.venv && backend/.venv/*/pip install -e 'backend[dev]'" >&2
+echo "  cd \"$ROOT\"" >&2
+echo "  python3 -m venv backend/.venv && backend/.venv/*/pip install -e 'backend[dev]'" >&2
 exit 1

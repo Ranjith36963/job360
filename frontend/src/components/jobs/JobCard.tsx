@@ -453,8 +453,10 @@ export function JobCard({ job, onAction }: JobCardProps) {
           <TailorButton jobId={job.id} variant="outline" size="sm" className="h-9 flex-1" />
         </div>
 
-        {/* Row 2 — triage + metadata, deliberately quieter. */}
-        <div className="flex items-center gap-1">
+        {/* Row 2 — triage + metadata, deliberately quieter. flex-wrap for the same
+            reason as the row above: the card is overflow:hidden, so an unwrapped
+            row loses its last control instead of scrolling it. */}
+        <div className="flex flex-wrap items-center gap-1">
         <Button
           size="sm"
           variant={isLiked ? "default" : "ghost"}

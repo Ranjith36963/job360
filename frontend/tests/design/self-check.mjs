@@ -6,8 +6,8 @@
  * stopped working, and this one has quietly stopped working twice already:
  * once when the on-screen filter was added (which excluded the very elements
  * CLIPPED_BY_CONTAINER exists to find), and once when colours were parsed as
- * rgb (which turned 189 real-looking contrast failures into noise and would
- * equally have hidden real ones).
+ * rgb (which invented 189 FALSE contrast failures — all of them — and a parser
+ * that wrong would hide real ones just as easily).
  *
  * So: break the live page on purpose, in the exact way it was broken before,
  * and assert the audit notices. Run it after touching the audit.
@@ -18,6 +18,11 @@
  * and `layout-audit.mjs` now import the one copy from `./audit-fn.mjs`.
  *
  *   DESIGN_SESSION=<cookie> node tests/design/self-check.mjs
+ *
+ * NOT YET RUN against a live dashboard since the "healthy page finds NOTHING"
+ * assertion was tightened — that needs a dev server and a session cookie. If it
+ * fails, read the printed finding types before loosening it: a checker that
+ * cries wolf on a clean page is as dead as one that misses a real defect.
  */
 
 import { chromium } from "@playwright/test";
@@ -98,9 +103,15 @@ const results = [
     detail: `healthy=${clip(healthy)} broken=${clip(broken)}`,
   },
   {
-    name: "audit() stays quiet on a healthy page (no finding type appears from nothing)",
-    ok: healthy.findings.length <= broken.findings.length,
-    detail: `healthy=${healthy.findings.length} broken=${broken.findings.length} findings`,
+    // healthy <= broken is not enough: healthy=8 broken=9 would pass while the
+    // audit was crying wolf on a clean page. A checker with false positives is
+    // as dead as one with false negatives — you stop reading either.
+    name: "audit() finds NOTHING on a healthy page",
+    ok: healthy.findings.length === 0,
+    detail:
+      healthy.findings.length === 0
+        ? "0 findings"
+        : `${healthy.findings.length}: ${[...new Set(healthy.findings.map((f) => f.type))].join(", ")}`,
   },
   {
     // PAGE check, not a checker check — the audit has no ragged-height finding.
