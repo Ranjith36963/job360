@@ -285,7 +285,10 @@ _SECTION_HINT_HEADINGS = (
 # the CALLER remembering, and the whole thesis of `@cpu_bound` (post-mortem §4)
 # is that the guard moved from the caller to the callee precisely because
 # callers forget: the next `await`-less call from async code would push every
-# PDF page through pdfplumber on the loop thread with nothing to stop it.
+# PDF page through pdfplumber on the loop thread. The tag makes that LOUD, not
+# impossible — it raises in tests and dev, but in PRODUCTION it logs an ERROR +
+# one Sentry message and then runs the work anyway (a slow response beats a
+# 500), so `asyncio.to_thread` at the call site is still required.
 # Fixing the one call site and not tagging the function is exactly the
 # half-measure that let this bug class bite three times.
 # (CodeRabbit, PR #386.)

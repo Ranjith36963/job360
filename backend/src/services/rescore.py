@@ -105,7 +105,10 @@ def _score_catalog_rows(
     the wrong code with full confidence. Called inline it froze the single
     FastAPI event loop for the entire catalog scan — every other user's request
     and the ``/api/search/{id}/status`` poll included. ``@cpu_bound`` makes that
-    mistake raise instead of quietly shipping again.
+    mistake LOUD rather than silent: it raises in tests and dev, but in
+    production it logs an ERROR + one Sentry message and runs anyway (a slow
+    response beats a 500). The caller's ``asyncio.to_thread`` is what actually
+    keeps this off the loop.
 
     Args:
         scorer: a prepared ``JobScorer`` (see ``_build_user_scorer``).
