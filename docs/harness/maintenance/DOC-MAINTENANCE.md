@@ -1,5 +1,5 @@
 # Doc-Maintenance Framework (Loop 3)
-<!-- doc: LOG -->
+<!-- doc: LIVING -->
 
 > **One principle: the code is the only truth.** Every document is either
 > (a) synced to the code, (b) archived history, or (c) a parked intention.
