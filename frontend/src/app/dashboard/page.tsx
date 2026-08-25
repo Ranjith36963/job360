@@ -242,9 +242,42 @@ export default function DashboardPage() {
   // count, every part of this screen must say "we could not load them", never
   // "you have none". Declared here rather than inline three times so the three
   // places cannot drift apart.
+  // ...but ONLY when the two queries are actually asking the same question.
+  // allJobsKey carries just min_score + hours:168. The main list can also carry
+  // source, action, visa/seniority/salary/skill narrowing and a shorter window,
+  // and under any of those an empty list is a CORRECT answer while the wider
+  // count query still returns rows. Comparing them regardless would replace a
+  // valid "no matches for this filter" with a false "couldn't load", which is
+  // the same class of lie in the opposite direction.
+  const NARROWING_KEYS = [
+    "source",
+    "bucket",
+    "action",
+    "visa_only",
+    "visa_sponsorship",
+    "seniority",
+    "employment_type",
+    "workplace_type",
+    "salary_min",
+    "salary_max",
+    "required_skills",
+    "title_canonical",
+  ] as const;
+  const listIsComparableToCounts =
+    effectiveFilters.hours === allJobsKey.hours &&
+    (effectiveFilters.min_score ?? DEFAULT_MIN_SCORE) === allJobsKey.min_score &&
+    NARROWING_KEYS.every((k) => {
+      const v = (effectiveFilters as Record<string, unknown>)[k];
+      return v === undefined || v === null || v === "" || v === false;
+    });
+
   const knownAvailable = allJobsData?.total ?? 0;
   const listDisagreesWithCounts =
-    !isLoading && !jobsIsError && total === 0 && knownAvailable > 0;
+    !isLoading &&
+    !jobsIsError &&
+    listIsComparableToCounts &&
+    total === 0 &&
+    knownAvailable > 0;
 
   const allJobs = useMemo(() => allJobsData?.jobs ?? [], [allJobsData?.jobs]);
 

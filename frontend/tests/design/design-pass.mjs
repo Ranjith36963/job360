@@ -34,7 +34,11 @@
  *   DESIGN_OUT        output dir              (default design-shots)
  *   DESIGN_ONLY       comma-separated route names to limit the run
  *   DESIGN_VIEWPORTS  comma-separated viewport names (default all)
- *   DESIGN_THEMES     comma-separated themes  (default dark,light)
+ *   DESIGN_THEMES     comma-separated themes; defaults to THEMES in routes.mjs,
+ *                     which is ["dark"] — this app has no light palette (see
+ *                     the note there)
+ *   DESIGN_MOCK       "1" serves the fixtures in mock-data.mjs for the authed
+ *                     endpoints instead of hitting the real backend
  *
  * Output: <out>/<route>.<viewport>.<theme>.png, report.json, index.html
  */
@@ -282,9 +286,17 @@ async function capture(route, viewport, theme) {
       content: `nextjs-portal, [data-nextjs-toast], #__next-build-watcher { display: none !important; }`,
     });
 
-    const finalPath = new URL(page.url()).pathname + new URL(page.url()).search;
+    const landed = new URL(page.url());
+    const finalPath = landed.pathname + landed.search;
     record.finalPath = finalPath;
-    record.redirected = !finalPath.startsWith(route.resolvedPath);
+    // Compare pathnames EXACTLY. The old `startsWith` test could never fire for
+    // the landing route, because every pathname starts with "/" — so `/` could
+    // redirect anywhere and the report still said redirected:false. It also
+    // missed prefix pairs already in the registry: /settings landing on
+    // /settings/account, and /jobs landing on /jobs/101. `expectRedirect` exists
+    // precisely to describe that last case, so a silent miss is not cosmetic.
+    // A changed query string is not a redirect, so search is excluded.
+    record.redirected = landed.pathname !== new URL(route.resolvedPath, BASE).pathname;
     // The honest answer to "is this the page I asked for?". A route marked
     // auth:true that landed on /login was NOT reviewed, and the sheet says so
     // instead of showing a login screenshot under the dashboard's name.

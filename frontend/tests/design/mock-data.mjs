@@ -139,9 +139,18 @@ export const MOCK_ROUTES = [
     pattern: "**/api/status**",
     body: { jobs_total: MOCK_JOBS.length, sources_total: 47, last_run: iso(2) },
   },
+  // The LIST endpoint only. `**/api/jobs**` on its own also swallows
+  // `/api/jobs/101`, so the job-detail page would receive a list payload and
+  // render as broken for reasons that have nothing to do with its design.
+  // Query strings are what the list actually carries, so match those.
   {
-    pattern: "**/api/jobs**",
+    pattern: /\/api\/jobs(\?|$)/,
     body: { jobs: MOCK_JOBS, total: MOCK_JOBS.length, filters_applied: {} },
+  },
+  // The DETAIL endpoint, answered with the first fixture so /jobs/:id renders.
+  {
+    pattern: /\/api\/jobs\/\d+/,
+    body: MOCK_JOBS[0],
   },
 ];
 
@@ -151,6 +160,9 @@ export const MOCK_ROUTES = [
  * endpoint nobody mocked fails visibly instead of rendering a convincing lie.
  */
 export async function installMocks(page) {
+  // Registered in order, and Playwright checks routes in REVERSE registration
+  // order — so the more specific detail pattern, declared last above, is tried
+  // first. Keep new specific patterns at the END of MOCK_ROUTES.
   for (const { pattern, body } of MOCK_ROUTES) {
     await page.route(pattern, (route) =>
       route.fulfill({

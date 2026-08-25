@@ -512,8 +512,15 @@ export function CVUpload({
                 { category: "education", label: "Education", swatch: "bg-amber-500/25 border-amber-400/50" },
                 { category: "certification", label: "Certifications", swatch: "bg-purple-500/25 border-purple-400/50" },
               ] as const;
+              // Match buildHighlightedCV's own eligibility rule (it drops terms
+              // of 2 characters or fewer, above), otherwise a CV whose only
+              // skill is "Go" would advertise a Skills key with nothing
+              // highlighted — the same "key for a colour that never appears"
+              // problem this block exists to remove, one level down.
               const present = LEGEND.filter((l) =>
-                highlightTerms.some((t) => t.category === l.category)
+                highlightTerms.some(
+                  (t) => t.category === l.category && t.text.trim().length > 2
+                )
               );
               if (present.length === 0) return null;
               return (

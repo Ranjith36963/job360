@@ -23,12 +23,23 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock("@/lib/api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/api")>()),
-  getProfile: vi.fn().mockRejectedValue(
-    Object.assign(new Error("Not Found"), { status: 404 }),
-  ),
-}));
+// Reject with a real ApiError, not a plain Error carrying a status field.
+// ProfilePage only treats a failure as "first visit" when it is
+// `err instanceof ApiError && err.isNotFound` (page.tsx:178); a plain Error
+// takes the GENERIC failure branch instead, so the test could have passed
+// while the page was actually showing an error banner rather than the
+// first-run state it claims to describe.
+// ApiError is imported INSIDE the factory on purpose. vi.mock is hoisted above
+// every import in the file, so a top-level `import { ApiError }` is still in
+// its temporal dead zone when the factory runs — vitest reports "Cannot access
+// '__vi_import_3__' before initialization" and the whole suite fails to load.
+vi.mock("@/lib/api", async (importOriginal) => {
+  const { ApiError } = await import("@/lib/api-error");
+  return {
+    ...(await importOriginal<typeof import("@/lib/api")>()),
+    getProfile: vi.fn().mockRejectedValue(new ApiError(404, "Not Found")),
+  };
+});
 
 describe("ProfilePage — first run, no profile yet", () => {
   it("offers the CV uploader and none of the profile-only actions", async () => {
@@ -47,5 +58,11 @@ describe("ProfilePage — first run, no profile yet", () => {
     // shelf says "empty", it does not hide itself).
     expect(screen.getByText("No profile")).toBeInTheDocument();
     expect(screen.getByText("0%")).toBeInTheDocument();
+
+    // ...and this is the FIRST-VISIT state, not the generic failure banner.
+    // Without this the test would still pass if the 404 fell through to the
+    // error path, which shows an entirely different page.
+    expect(screen.queryByText(/something went wrong/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
   });
 });

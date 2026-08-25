@@ -143,7 +143,11 @@ export function Navbar() {
           )}
         </div>
 
-        {/* Mobile hamburger */}
+        {/* Mobile hamburger — hidden while the session is still resolving, for
+            the same reason the desktop bar shows only the logo then: the drawer
+            has nothing to put in it yet, and opening it would show an empty
+            sheet. */}
+        {!loading && (
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger
             className="md:hidden inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
@@ -229,6 +233,7 @@ export function Navbar() {
             )}
           </SheetContent>
         </Sheet>
+        )}
       </div>
     </header>
   );

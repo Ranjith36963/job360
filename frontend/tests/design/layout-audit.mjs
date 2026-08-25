@@ -29,7 +29,8 @@
  */
 
 import { chromium } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { ROUTES } from "./routes.mjs";
 import { installMocks } from "./mock-data.mjs";
 
@@ -46,6 +47,13 @@ const WIDTHS = (process.env.DESIGN_WIDTHS || "390,768,1440")
   .split(",")
   .map((w) => Number(w.trim()))
   .filter(Boolean);
+
+// Create the output directory BEFORE the walk, not just before the write.
+// design-shots*/ is gitignored, so on a fresh clone or a clean CI checkout it
+// does not exist — and writeFile at the very end would then throw ENOENT after
+// up to 20 routes x 3 widths of work, discarding every finding. Failing in the
+// first second on a bad DESIGN_AUDIT_OUT is the useful behaviour.
+await mkdir(path.dirname(path.resolve(OUT)), { recursive: true });
 
 const browser = await chromium.launch();
 const findings = [];
