@@ -1,5 +1,5 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-25 by the nightly doc-truth routine -->
 
 Automated UK job search system supporting **any professional domain**. Aggregates jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email/Slack/Discord/Telegram/webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
 
@@ -345,7 +345,7 @@ normally a new Apprise URL stored against the user — not a new Python class. R
 **All AI/ML keyword lists were emptied on 2026-04-09 (commit `3ba1342`).** The following lists are now `[]`: `JOB_TITLES`, `PRIMARY_SKILLS`, `SECONDARY_SKILLS`, `TERTIARY_SKILLS`, `RELEVANCE_KEYWORDS`, `NEGATIVE_TITLE_KEYWORDS`. Without a user profile, sources iterate empty lists and return near-zero results — `setup-profile` is a mandatory first step.
 
 What `keywords.py` still contains (domain-agnostic, applies to any profession):
-- **25 UK locations** + Remote/Hybrid (the `LOCATIONS` list)
+- **24 UK place/country names** + `Remote` + `Hybrid` — 26 entries in the `LOCATIONS` list (`backend/src/core/keywords.py:28-55`). `_location_score` skips the two non-places, so only the 24 can score the full 10
 - **8 visa/sponsorship keywords** (the `VISA_KEYWORDS` list: "visa sponsorship", "tier 2", "skilled worker visa", etc.)
 
 **LLM-only CV parsing** is at `backend/src/services/profile/llm_provider.py` (multi-provider: **OpenAI (PRIMARY, `gpt-4o-mini`)** → Gemini → Groq → Cerebras fallback chain — `llm_provider.py:329-334`). The earlier 391-entry `KNOWN_SKILLS` regex set and all keyword defaults were removed in commits `804725c` and `3ba1342`.
@@ -376,7 +376,7 @@ job360/
 ├── backend/
 │   ├── main.py                  # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml           # Deps + [dev] extras; ruff/mypy/pytest config
-│   ├── data/                    # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
+│   ├── data/                    # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — Postgres since 2026-07-02
 │   ├── migrations/              # 31 forward+reverse SQL migration pairs (0000 → 0030) + runner.py
 │   └── src/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (41), _build_sources()
@@ -386,7 +386,7 @@ job360/
 │       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)
-│       │   ├── keywords.py      # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] since 3ba1342
+│       │   ├── keywords.py      # LOCATIONS (26) + VISA_KEYWORDS (8); all other lists [] since 3ba1342
 │       │   ├── companies.py     # ATS company slugs (297 polled across 10 ATS sources; RIPPLING_COMPANIES has slugs but no source class)
 │       │   ├── skill_synonyms.py
 │       │   ├── fx.py

@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-25 by the nightly doc-truth routine -->
 
 > **Current state lives in `docs/product/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/product/pillars/` first.
 
@@ -7,7 +7,7 @@
 
 Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 16-field structured schema, optionally encodes semantic embeddings into Postgres (pgvector), and delivers results through multiple channels (CLI, email, Slack, Discord, Telegram, webhook, CSV, and a Next.js + FastAPI dashboard).
 
-**Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (25) and `VISA_KEYWORDS` (8) remain — both domain-agnostic.
+**Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (26) and `VISA_KEYWORDS` (8) remain — both domain-agnostic. The 26 are 24 UK place/country names plus `Remote` and `Hybrid`; `_location_score` skips those two when matching, so only the 24 can score the full 10 (`core/keywords.py:28-55`).
 
 ```
 User Input                    Pipeline (Pillar 2: 6 stages)          Output
@@ -39,7 +39,7 @@ job360/
 ├── backend/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
-│   ├── data/                         # Runtime (gitignored): jobs.db, user_profile.json, chroma/, exports/, reports/, logs/
+│   ├── data/                         # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — the store is Postgres; DB_PATH is a connection selector, not a file (settings.py:15-20, pg.py:732-737)
 │   ├── migrations/                   # 31 forward/reverse SQL migrations (0000 → 0030) + runner.py
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (41 keys → 40 instances), _build_sources()
@@ -50,7 +50,7 @@ job360/
 │   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (41 entries), thresholds, feature flags
-│   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
+│   │   │   ├── keywords.py           # LOCATIONS (26) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
 │   │   │   ├── companies.py          # ATS company slugs (297 polled across 10 ATS sources; RIPPLING_COMPANIES has slugs but no source class)
 │   │   │   ├── skill_synonyms.py     # 493-entry alias dict (k8s↔kubernetes, ...)
 │   │   │   ├── fx.py                 # 18-currency → GBP rates
@@ -208,11 +208,14 @@ unique = deduplicate(all_jobs)
 ### 8. Output Pipeline
 
 ```python
-# Filter by MIN_MATCH_SCORE (30)
-unique_jobs = [j for j in unique_jobs if j.match_score >= MIN_MATCH_SCORE]
+# Filter by MIN_STORE_SCORE (the STORAGE floor, default 1) — NOT MIN_MATCH_SCORE.
+# MIN_MATCH_SCORE (30) is a DISPLAY floor applied at read time; the pipeline used
+# to drop <30 before persisting, which destroyed rows a thin profile or recency
+# decay had scored low (src/main.py:720-737).
+kept = [j for j in unique_jobs if (j.match_score or 0) >= MIN_STORE_SCORE]
 
 # Check against DB for new-ness
-for job in unique_jobs:
+for job in kept:
     if not await db.is_job_seen(job.normalized_key()):
         await db.insert_job(job)
         new_jobs.append(job)
@@ -238,11 +241,11 @@ In dry-run mode: scoring and dedup still happen, but no DB writes and no notific
 | Component | Max Points | How |
 |-----------|-----------|-----|
 | Title match | 40 | Exact match = 40, substring = 20, partial keyword overlap = 5*core + 3*support (capped at 20) |
-| Skill match | 40 | primary skills = 3 pts each, secondary = 2, tertiary = 1 (capped at 40) |
+| Skill match | 40 | primary skills = 3 pts each, secondary = 2, tertiary = 1, then **length-normalised** (BM25-style: divided by `max(1, (1-b) + b * words / SKILL_LENGTH_BASELINE_WORDS)`, baseline 400 words — a long ad no longer saturates the cap by accident; `skill_matcher.py:107-119`, applied at `:543`), finally capped at 40 |
 | Location | 10 | UK city = 10, remote = 8, unknown = 0 |
 | Recency | 10 | <=1 day = 10, <=3d = 8, <=5d = 6, <=7d = 4, older = 0 |
 | **Penalties** | | |
-| Negative title | -30 | Title contains excluded keywords (60 default entries across 12 categories) |
+| Negative title | -30 | Title contains an excluded keyword. **There are no defaults** — `NEGATIVE_TITLE_KEYWORDS` is `[]` (`core/keywords.py:21`, emptied 2026-04-09) and the live list is whatever the user typed into their own preferences (`keyword_generator.py:546` — `negatives = list(prefs.negative_keywords)`). With no negative keywords on the profile this penalty never fires |
 
 There is **no foreign-location penalty**. It was deleted 2026-08-12 (rule #30): a non-UK job is refused at the door (`services/uk_gate.check_uk`), never docked points.
 
@@ -579,6 +582,8 @@ and must never be imported at module top level.
 
 ## Database Schema
 
+> **The SQL below is SQLite-flavoured, and is never executed as written.** It is the legacy baseline `init_db()` hands to `executescript()`, which pushes every statement through `pg.translate()` first (`repositories/pg.py:670-674`) — `INTEGER PRIMARY KEY AUTOINCREMENT` becomes a Postgres identity column (`pg.py:193-195`), and `?` placeholders, `datetime('now')`, `INSERT OR IGNORE` and FK clauses are rewritten or stripped the same way. Read it as the *shape* of the baseline, not as DDL you could run against Postgres by hand.
+>
 > This section shows the baseline schema. The full schema is built by 31 forward-migrations (0000–0030). Key additions beyond the baseline below: `user_feed` gains `llm_fit_score/llm_verdict/llm_reason/llm_matched_at` (migration 0017) and `profile_version INTEGER` (migration 0018 — stamps the profile snapshot that produced each row's score); `users` gains `email_verified_at` (migration 0016); `password_resets` table (migration 0015); `email_verifications` table (migration 0016).
 
 ```sql
@@ -635,9 +640,9 @@ CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
 CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 ```
 
-**Pragmas:** `journal_mode=WAL`, `busy_timeout=5000`
+**Pragmas:** none. This was a SQLite-era line (`journal_mode=WAL`, `busy_timeout=5000`); the store has been Postgres since 2026-07-02 and sets neither — `database.py:94` says so in as many words, `db_retry.open_db()` accepts `busy_timeout_ms` only for signature compatibility and ignores it (`db_retry.py:30-31`), and the `pg.py` shim turns any remaining `PRAGMA` into a no-op (`pg.py:316-317`).
 
-**Auto-purge:** `purge_old_jobs(days=30)` deletes jobs where `first_seen` is older than 30 days. Runs at the start of every pipeline run.
+**Auto-purge:** `purge_old_jobs(days=30)` deletes jobs by **liveness, not ingestion** — `DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < cutoff` (`repositories/database.py:688,723`). A posting still live after 30 days is KEPT; `first_seen` is only the fallback for legacy rows whose `last_seen_at` is NULL. It also deletes the catalog-derived child rows itself because the shim strips every FK clause, including `ON DELETE CASCADE`. Runs at the start of every pipeline run (`main.py:840`).
 
 **first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a database DEFAULT).
 
@@ -701,7 +706,8 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `MIN_MATCH_SCORE` | 30 | Minimum score to keep a job |
+| `MIN_MATCH_SCORE` | 30 | **Display** floor, applied at READ time — the CLI viewer's `--min-score` default and the dashboard's `min_score`. It does NOT decide what is kept (`settings.py:109-114`) |
+| `MIN_STORE_SCORE` | 1 (env-overridable) | **Catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`) (`settings.py:115-120`, applied at `main.py:729`; re-applied by the backfill at `services/rescore.py:271`). It does **not** gate `user_feed`: `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison (`workers/tasks.py:208-217`) |
 | `MAX_RESULTS_PER_SOURCE` | 100 | Cap per source |
 | `MAX_DAYS_OLD` | 7 | Maximum job age |
 | `MAX_RETRIES` | 3 | HTTP retry attempts |

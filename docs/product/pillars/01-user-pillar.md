@@ -1,4 +1,4 @@
-<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-25 by the nightly doc-truth routine -->
 # Pillar 1 — The User Side
 
 > **Audience.** Read this if you want to understand everything Job360 does *for a human end-user* — sign up, upload a CV, see matched jobs, track applications, get notified. This document covers no source-fetching internals and no scoring math; those are Pillars 2 and 3.
@@ -77,7 +77,7 @@ When the worker tick runs (or CLI `python -m src.cli run` is invoked) — Pillar
 4. Domain-filters sources via `classify_user_domain(alice.profile)` → say `{"tech"}` → keeps tech + general sources, drops healthcare/academia/education/climate-only sources.
 5. Fetches → prefilters → scores → dedups → stores.
 
-For each job that survives the prefilter (Pillar 2 §2 stage 2) and scores ≥ `MIN_MATCH_SCORE` for Alice, the worker `score_and_ingest(job, users=[alice])` calls `FeedService.upsert_feed_row(alice.id, job.id, score, bucket)`.
+For **every** job that survives the prefilter (Pillar 2 §2 stage 2), the worker `score_and_ingest(job, users=[alice])` calls `FeedService.upsert_feed_row(alice.id, job.id, score, bucket)` — the write is **unconditional on the score** (`workers/tasks.py:208-217`). There is no `MIN_MATCH_SCORE` gate here: `MIN_MATCH_SCORE` (30) is a read-time display floor, and the only score comparison in this loop is `score >= threshold` at `tasks.py:220`, where `threshold` is the instant-notify level (80, `tasks.py:164`) and gates the `send_notification` enqueue alone.
 
 ### T+10 — Dashboard shows Alice's ranked feed
 
@@ -563,7 +563,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | GitHub enrichment with temporal weighting | ✅ | `github_enricher.py` — 3× weight for repos pushed in last year |
 | Dependency-file framework inference | ✅ | 7 file types parsed (package.json, requirements.txt, …) |
 | ESCO skill normalisation | ❌ | code path exists but the embedding index it needs (`backend/data/esco/`) was never built or shipped — inert scaffolding, not a flag flip. Root `CLAUDE.md` rule #28 (FACT, verified 2026-08-11). |
-| Multi-tenant SQLite storage | ✅ | `user_profiles` table (migration `0006`) |
+| Multi-tenant profile storage (Postgres) | ✅ | `user_profiles` table (migration `0006`) |
 | Version history + restore (last 10) | ✅ | `user_profile_versions` (`0007`); restore is atomic and preserves history |
 | Legacy `data/user_profile.json` hydration | ✅ | non-destructive, runs on first DB read |
 | Evidence-based skill tiering | ✅ | `tier_skills_by_evidence()` — frequency × source weight |
