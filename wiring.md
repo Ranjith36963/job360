@@ -41,7 +41,7 @@ Work top to bottom. Each block is independently shippable.
 
 | PR | Block | Items | Status | Why this order |
 |---|---|---|---|---|
-| 1 | **The door** | W-01, W-03 | ✅ **shipped** `1b89491` | Own email dead-ended at our own front door; new users hit a wall on minute one. |
+| 1 | **The door** | W-01, W-03 | ⚠️ **code committed on branch, NOT verified, NOT merged** `1b89491` | Own email dead-ended at our own front door; new users hit a wall on minute one. |
 | 2 | **Close the loop** | W-19, W-20 | ready | One cron + one template turns the filing cabinet into a loop. Biggest value, cheapest fix. |
 | 3 | **Fix the default email** | W-17, W-18 | ready | The default mode sends the worst message the system can make, and links away from us. One change closes both. |
 | 4 | **Don't lose the CV he sent** | W-08, W-10 | ready | Data is being destroyed today. Every day we wait, more is gone. |
@@ -49,6 +49,20 @@ Work top to bottom. Each block is independently shippable.
 | 6 | **Close the silent holes** | W-06, W-12, W-28, W-29 | ready | One-liners: an untracked exit, a stale-doc warning, a feed that shows old scores as fresh. |
 | 7 | **Launch gates** | W-23, W-27 | ready | No unsubscribe = cannot email the public. No analytics = the launch teaches nothing. |
 | 8 | **Delete sweep** | D-01…D-05 | ready | Deleting dead code is a real fix. Fan out — 5 unrelated files. |
+
+> **STATUS WORDS MEAN SPECIFIC THINGS HERE. Corrected 2026-08-25.**
+> An earlier version of this table said PR 1 was "✅ shipped". That was false and it
+> was mine. Nothing has been shipped, and no pull request exists (`gh pr list` → `[]`).
+> The only true statement is: *code is committed on the branch `feat/wire-pipeline-page`*.
+>
+> | Word | What it must mean before it is written here |
+> |---|---|
+> | code on branch | committed + pushed. Proves nothing about behaviour. |
+> | verified | all five rungs of `wiring_verification.md` passed, rung 4 (real browser, screenshots) included |
+> | merged | merged to `main` — which auto-deploys to real users |
+> | shipped | merged AND confirmed live in production with a named instrument |
+>
+> Green tests are rung 2. They are not permission to write any of the other three words.
 
 **Blocked on a decision, NOT scheduled:** W-04 (D-A), W-14 (D-B, D-C), W-16's interview half
 (D-D), W-24 / W-25 / W-26 (D-E), W-05's filter-vs-delete call (D-F), W-20's tone (D-G).
@@ -67,7 +81,7 @@ Work top to bottom. Each block is independently shippable.
 This leg is genuinely good: no email enumeration, the confirm-button beats inbox
 scanners, first login seeds notification rules. Three breaks.
 
-### [x] W-01 — The magic link always dumps him on `/dashboard`  ✅ SHIPPED `1b89491`
+### [ ] W-01 — The magic link always dumps him on `/dashboard`  ⚠️ CODE ON BRANCH `1b89491` — rungs 4+5 NOT done
 **Severity:** breaks the loop (it breaks your *own* email leg)
 **What happens:** the emailed link carries only `?token=`. There is no `?next=`. The
 password login form reads `next` and honours it; the magic form — the **default** — never
@@ -101,7 +115,7 @@ account from a 50th visit, and cannot say "12 new since Tuesday".
 **Smallest fix:** add `users.last_login_at`, stamp on login/consume.
 **Verdict: LATER.** Nice, not urgent.
 
-### [x] W-03 — A brand-new user hits a wall on minute one  ✅ SHIPPED `1b89491`
+### [ ] W-03 — A brand-new user hits a wall on minute one  ⚠️ CODE ON BRANCH `1b89491` — rungs 4+5 NOT done
 **Severity:** breaks the loop for every new signup
 **What happens:** new account = zero profile. Dashboard shows `0 jobs` and a generic empty
 state: *"Try adjusting your filters, expanding the time range, or lowering the minimum
