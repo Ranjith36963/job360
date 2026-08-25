@@ -11,9 +11,10 @@ docs at the repo root). Start here to find the right doc fast.
 >
 > This file used to call itself "the map of everything", which is the kind of
 > claim that stops people looking further. It then said "links 49" — that was
-> every unique `.md` link on the page, 8 of which point at ROOT docs like
-> `../CLAUDE.md` and are not among the 105. Count only the links that land
-> under `docs/`.
+> every unique `.md` link on the page, 8 of which resolve OUTSIDE `docs/` and so
+> are not among the 105: four repo-root files (`CLAUDE.md`, `ARCHITECTURE.md`,
+> `CONTRIBUTING.md`, `STATUS.md`) and four under `backend/`, `frontend/` and
+> `harness/eval/`. Count only the links that land under `docs/`.
 
 > **Regenerated 2026-06-21** after a docs audit (dead/stale files removed, drift fixed).
 > **Legend:** 🟢 current ground truth · 📘 stable reference · 🗄️ historical (append-only / not kept current)
