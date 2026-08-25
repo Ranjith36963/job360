@@ -59,6 +59,15 @@ jobs:
       - name: CLAUDE.md size budget (blocking)
         run: python scripts/doc_sync_check.py --budget-only
 
+      # BLOCKING, and the only step here that makes drift IMPOSSIBLE rather
+      # than merely visible. Every other check in this workflow reports a doc
+      # that has already gone wrong; this one fails when a generated block no
+      # longer matches the code that produces it, so the wrong text cannot
+      # reach main at all. Also fails if a marker was deleted -- that is a
+      # block quietly going back to being hand-written.
+      - name: Generated doc blocks are current (blocking)
+        run: python scripts/gen_doc_blocks.py
+
       - name: Run doc drift check
         id: check
         run: |
