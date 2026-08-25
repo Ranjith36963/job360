@@ -462,7 +462,7 @@ Both flags default `false` per CLAUDE.md rule #18, and the **no-op path must exa
 
 ### 5.1 `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` → LLM enrichment
 
-Either name opens this surface — every E2 call site reads `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853`, `main.py:1137`, `rescore.py:85`, `workers/tasks.py:237`), rule #18.
+Either name opens this surface — every E2 call site reads `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853`, `main.py:1137`, `rescore.py:85`, `api/routes/jobs.py:779`, `workers/tasks.py:237`), rule #18.
 
 When on:
 - Stage 5 runs (see §2).
@@ -470,7 +470,7 @@ When on:
 - Dedup tie-breaker uses the `+5` enrichment bonus.
 
 When off:
-- `enrichment_lookup` is an empty dict, so every lookup returns `None`. The four dim scorers still RUN — the path is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20) — and each returns its documented **neutral half weight**, never a zero (rule #29; `visa_score` is the one exception, returning 0 when the user does not need sponsorship). A user with no preferences at all gets the legacy 4-component formula; a user with preferences does not.
+- `enrichment_lookup` is an empty dict, so every lookup returns `None`. The four dim scorers still RUN — the path is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20) — and each returns its documented **neutral half weight**, never a zero: seniority 4 (`scoring_dimensions.py:157`), salary 5 (`:198-200`), workplace 3 (`:278`), visa 3 (`:245`), so **+15** rather than the +30 a fully enriched job can reach (rule #29; `visa_score` is the one exception, returning 0 at `:242` when the user does not need sponsorship). A user with no preferences at all gets the legacy 4-component formula; a user with preferences does not.
 - No LLM API calls, no `job_enrichment` DB writes.
 
 ### 5.2 `SEMANTIC_ENABLED=true` → embeddings + hybrid retrieval
@@ -522,7 +522,7 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | `WORKPLACE_WEIGHT` | `6` | Workplace (remote/hybrid/onsite) dimension max | Raise to make workplace preference more decisive |
 | `ENRICHMENT_MIN_SCORE` | `10` | The low floor a job must clear to be enrichment-eligible (`settings.py:152`) | Raise only to skip obvious junk — the budget below is the real lever |
 | `ENRICHMENT_MAX_JOBS` | `20` | Per-run budget: the best N eligible jobs are enriched (`settings.py:151`) | Raise to enrich more per run; this is the hard cost ceiling |
-| `ENRICHMENT_THRESHOLD` | `10` | Back-compat alias that resolves to `ENRICHMENT_MIN_SCORE` (`settings.py:155`). **Not the gate in the CLI pipeline** — that reads `ENRICHMENT_MIN_SCORE` + `ENRICHMENT_MAX_JOBS`. It is **not inert**, though: the ARQ worker's per-user ingest is gated on this name alone (`score >= ENRICHMENT_THRESHOLD`, `workers/tasks.py:237`) | Leave at the default. Raising it silently stops the worker fanning out `enrich_job_task` while the CLI path carries on |
+| `ENRICHMENT_THRESHOLD` | `10` | Back-compat alias that resolves to `ENRICHMENT_MIN_SCORE` (`settings.py:155`). **Not the gate in the CLI pipeline** — that reads `ENRICHMENT_MIN_SCORE` + `ENRICHMENT_MAX_JOBS`. It is **not inert**, though: on the ARQ worker's per-user ingest the score gate is this name and not `ENRICHMENT_MIN_SCORE` (`score >= ENRICHMENT_THRESHOLD`, `workers/tasks.py:237`, alongside the E2 flag check §5.1 lists) | Leave at the default. Raising it silently stops the worker fanning out `enrich_job_task` while the CLI path carries on |
 | `ENRICHMENT_ENABLED` | `false` | Legacy switch for LLM enrichment; `ENGINE2_ENABLED` opens the same gate (`ENGINE2_ENABLED or ENRICHMENT_ENABLED`). It switches the enrichment DATA on, **not** the dim scorers — those run on `user_preferences` alone (rule #20) | Flip on after setting LLM keys — see rule #18 |
 | `SEMANTIC_ENABLED` | `false` | Writes embeddings into the pgvector store (`main.py:1292,1348` read this name ALONE). Hybrid retrieval is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), so `ENGINE3_ENABLED` alone queries an index nothing fills. It does **not** switch ESCO on: that also needs `is_available()` (`cv_parser.py:821,830`) and the index artefacts have never been built | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
 | `TARGET_SALARY_MIN` / `_MAX` | `40000` / `120000` | Salary-range *tiebreaker* (not scoring) for sort order on the dashboard | Display preference only |
