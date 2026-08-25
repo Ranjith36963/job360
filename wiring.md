@@ -63,6 +63,21 @@ bounces to `/login`, signs in by magic link, and lands on the dashboard. The job
 **Proof missing:** `git grep -n "next" origin/main -- frontend/src/app/auth/magic/page.tsx backend/src/services/auth/magic_link.py backend/src/api/routes/auth.py` → nothing in all three.
 **Smallest fix:** carry `next` from `/login` → request → emailed link → consume redirect. Copy the password path's `safeNext()`.
 
+**Implementation notes (verified by hand 2026-08-25):**
+- The guard already exists and is already unit-tested: `safeNext()` at
+  `frontend/src/app/(auth)/login/page.tsx:22` — rejects anything not starting with `/`,
+  and rejects protocol-relative `//evil.com`. Exported, with tests at
+  `login/__tests__/login-redirect.test.tsx:36`. **Reuse it, do not write a second one.**
+- `MagicLinkForm` (`login/page.tsx:46`) takes only `onUsePassword` and never reads
+  `useSearchParams` — that is the exact line where the note is dropped.
+- **SECURITY — the backend needs its own validation, not just the frontend.** The emailed
+  link is built server-side (`magic_link.py:66-67`), so `next` becomes a server input.
+  Validate it in Python at the request route with the same rule (must start with `/`,
+  must not start with `//`, no scheme, no CRLF) before it is ever interpolated into the
+  email. A frontend-only check is bypassable by calling the API directly, and an
+  unvalidated value here is an open redirect **inside an email we send** — worst possible
+  place for one.
+
 ### [ ] W-02 — No memory of his last visit
 **Severity:** degrades
 **What happens:** no `users.last_login_at` anywhere. The product cannot tell a brand-new
