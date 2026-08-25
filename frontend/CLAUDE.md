@@ -72,7 +72,10 @@ backend route/response change: run `npm run gen:types`, commit the regenerated
 ## Where things are
 
 - `src/app/` — App Router pages: `(auth)/`, `dashboard/`, `jobs/[id]/`, `pipeline/`,
-  `profile/`, `settings/{layout,channels,notifications,account}/`, `notifications/`.
+  `profile/`, `settings/{notifications,account}/` (+ `layout.tsx`, `page.tsx`, `_tabs.tsx`),
+  `channels/`, `notifications/`. **Channels is a TOP-LEVEL page (`/channels`), not
+  `settings/channels/`** — the Settings gear holds only Notifications + Account (nav IA
+  change, 2026-06-20).
 - `src/components/` — `ui/` (shadcn primitives), `jobs/`, `pipeline/` (KanbanBoard),
   `profile/`, `layout/`, `providers/`.
 - `src/lib/` — `api.ts` (fetch wrapper), `api-types.ts` (generated), `queryKeys.ts`
