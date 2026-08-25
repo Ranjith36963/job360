@@ -97,7 +97,7 @@ Click "Apply" → browser opens external `apply_url`. Returning, Alice clicks "M
 Two things this step does **not** do, both worth knowing before you debug the pipeline:
 
 - **No `application_stage_history` row is written on create.** The only INSERT into that table lives in `advance_application` (`repositories/database.py:1136-1141`), so a just-created application has an empty history and `GET /api/pipeline/42/timeline` answers **404** until Alice moves it to a second stage (`routes/pipeline.py:144-145`).
-- **`user_feed.status` is not touched.** The column exists and its comment lists `'applied'` as a legal value (`migrations/0003_user_feed.up.sql:10`), but nothing under `backend/src/` ever writes it — the only `'applied'` literal in the codebase is the `applications.stage` default. The card's applied state is read from `applications`, not from the feed row.
+- **`user_feed.status` is not flipped to `'applied'`.** The column exists and its comment lists `'applied'` as a legal value (`migrations/0003_user_feed.up.sql:10`), but no production path ever puts that value there. Be precise about why, because the obvious grep misleads twice. `FeedService.update_status` (`services/feed.py:189-198`) *would* write any status string, and it has **no caller under `backend/src/`** — only `tests/test_feed_service.py:66,143`. Every other write to the column is a hard-coded `'active'` or `'stale'` (`feed.py:207,245,250,264`, `rescore.py:438`). And the `'applied'` literals that *do* exist belong to two other columns entirely: `user_actions.action` (`routes/actions.py:12,73`, read at `rescore.py:118,182`) and `applications.stage` (`database.py:152,1105`; `routes/pipeline.py:36` validates stage names). The card's applied state is read from `applications`, not from the feed row.
 
 ### T+30 — Alice sets up email notifications
 
@@ -146,7 +146,7 @@ After an interview: `POST /api/pipeline/42/advance {"to_stage": "interview", "no
 | Engine scores for Alice | `user_feed` (write) | 2 → 1 seam |
 | Dashboard view | `user_feed`, `jobs`, `job_enrichment` (read) | 1 |
 | Like | `user_actions` | 1 |
-| Apply | `applications`, `application_stage_history`, `user_feed` (status flip) | 1 |
+| Apply | `applications` only — no history row, no `user_feed` flip (see T+15) | 1 |
 | Channel setup | `user_channels` (Fernet) | 1 |
 | Rule setup | `notification_rules` | 1 |
 | New job notification | `notification_ledger`, optionally `user_notification_digests` | 1 |
