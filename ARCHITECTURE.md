@@ -707,7 +707,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | Constant | Value | Purpose |
 |----------|-------|---------|
 | `MIN_MATCH_SCORE` | 30 | **Display** floor, applied at READ time — the CLI viewer's `--min-score` default and the dashboard's `min_score`. It does NOT decide what is kept (`settings.py:109-114`) |
-| `MIN_STORE_SCORE` | 1 (env-overridable) | **Catalog** floor — the spam cut a job must beat to enter the shared `jobs` table (`settings.py:115-120`, applied at `main.py:729`; re-applied by the backfill at `services/rescore.py:271`). It does **not** gate `user_feed`: `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison (`workers/tasks.py:208-217`) |
+| `MIN_STORE_SCORE` | 1 (env-overridable) | **Catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`) (`settings.py:115-120`, applied at `main.py:729`; re-applied by the backfill at `services/rescore.py:271`). It does **not** gate `user_feed`: `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison (`workers/tasks.py:208-217`) |
 | `MAX_RESULTS_PER_SOURCE` | 100 | Cap per source |
 | `MAX_DAYS_OLD` | 7 | Maximum job age |
 | `MAX_RETRIES` | 3 | HTTP retry attempts |
