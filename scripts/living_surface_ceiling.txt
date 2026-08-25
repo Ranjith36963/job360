@@ -14,4 +14,31 @@
 # Lowered 2026-08-25 to 8317 after cycle 16 (#427) deleted 14 lines --
 # a ceiling left above the real number is slack the haystack grows into.
 # Lowered again 2026-08-25 to 8313 after cycle 17 (#431) deleted 4 more.
-8313
+# Raised 2026-08-25 to 8351. NOT slack: main gained two new LIVING docs
+# (delivery plans, now stamped) and cycle PRs #427/#431/#433 landed while
+# this branch was open. The rule is that a raise must say what was added,
+# and this is what was added.
+# 8353 (2026-08-25): +2 blank lines from moving two stamps BELOW their YAML
+# front matter — placing them above stopped the front matter parsing, which
+# silently unloads a skill. Structural, not new prose.
+# 8359 (2026-08-25): +6 for the 'API Routes' heading and the two lines of
+# prose introducing it. The 65 ROUTES themselves cost zero -- they are a
+# generated block. Six lines of WHY bought 65 facts that can never drift,
+# and route lies are the most expensive class in this repo: a wrong endpoint
+# reads like a contract and 404s whoever trusts it.
+# 8738 (2026-08-25): +379 for docs/decisions/ — six ADRs and an index.
+#
+# This is the raise this escape hatch was built for, and the clearest test
+# of whether the rule is understood. An ADR records WHY: what was decided,
+# what problem it solved, what was rejected, what it costs. None of that is
+# derivable from code -- the code shows the choice and never the alternatives
+# -- so no generator can produce it and no truth-checker can verify it.
+#
+# It is therefore the one kind of prose that CANNOT drift into a lie about
+# the code, because it makes no claim about what the code currently does.
+# Deleting it to make a number go down would be the metric eating the thing
+# it exists to protect.
+#
+# The rule stands for everything else: restatement of code is never a reason
+# to raise this ceiling.
+8738
