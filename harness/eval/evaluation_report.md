@@ -596,7 +596,7 @@ Every concrete gap from the 14 Step-2 audits + the 3 production audits + STATUS.
 
 ## §III.H Frontend / UX gaps (Gate 10)
 
-> **Note:** These overlap with the Step 2 plan (`docs/step_2_plan.md`). Listed here for completeness; closure tracked in Step 2.
+> **Note:** These overlap with the Step 2 plan (`docs/_archive/step_2_plan.md`, deleted 2026-08-25 — `git show d3cbceb:docs/_archive/step_2_plan.md`; the path in this line was already wrong before then). Listed here for completeness; closure tracked in Step 2.
 
 | # | Gap | Severity | Step | Effort |
 |---|---|---|---|---|

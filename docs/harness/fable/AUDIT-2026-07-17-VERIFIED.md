@@ -215,7 +215,7 @@
 - **Area:** OPS & RELIABILITY
 - **Claimed:** PROGRESS 'session update 7' addressed M9 — but as EMAIL masking, not IP/user_id
 - **Proof (current code):** IP + user_id STILL logged plaintext: backend/src/api/middleware.py:103-104 in AccessLogMiddleware: `"user_id": getattr(request.state, "user_id", None),` and `"client": request.client.host if request.client else None,` — no hashing/drop. These flow to data/logs/*.jsonl via utils/logger.py JSONFormatter. What WAS added is email masking only: backend/src/utils/logger.py:164 `def mask_email(...)` (masks addresses, docstring says 'Audit M9') — NOT applied to client IP.
-- **Note:** LOUD: the FABLE_FINDINGS M9 as written (client IP + user_id in the access log) is NOT fixed — middleware.py still writes the raw IP and user_id. PROGRESS.md line 196-216 treats 'M9' as a DIFFERENT leak (plaintext emails in logs, 6 lines) and fixed that with mask_email. The two share a label but are different leaks; the assigned IP/user_id one remains open. Fix suggested ('drop or hash the IP') was not applied.
+- **Note:** LOUD: the FABLE_FINDINGS M9 as written (client IP + user_id in the access log) is NOT fixed — middleware.py still writes the raw IP and user_id. PROGRESS.md (deleted 2026-08-25 — `git show d3cbceb:docs/harness/fable/PROGRESS.md`) line 196-216 treats 'M9' as a DIFFERENT leak (plaintext emails in logs, 6 lines) and fixed that with mask_email. The two share a label but are different leaks; the assigned IP/user_id one remains open. Fix suggested ('drop or hash the IP') was not applied.
 
 ### N4 — /jobs limit/offset/hours unbounded/unvalidated
 - **Area:** SECOND-OPINION FLEET (N1-N9)

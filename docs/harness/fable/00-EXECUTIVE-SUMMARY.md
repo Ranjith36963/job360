@@ -12,7 +12,7 @@
 > ## STATUS AS OF 2026-07-16 — READ THIS FIRST
 > **The audit below is the ORIGINAL findings, preserved as written. Most are now FIXED.**
 > Each finding in `01`–`09` now carries its own **STATUS** line with the commit — trust
-> those, not the prose around them. Full history: `PROGRESS.md`.
+> those, not the prose around them. Full history: `PROGRESS.md`, deleted 2026-08-25 as superseded by `AUDIT-2026-07-23-FULL-REVERIFY.md` (`git show d3cbceb:docs/harness/fable/PROGRESS.md`).
 >
 > **All 4 "blockers" below are fixed.** Of ~45 findings, the only things left are:
 > | Still open | Kind |

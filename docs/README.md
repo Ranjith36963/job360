@@ -128,7 +128,7 @@ Background research that `IMPLEMENTATION_LOG.md` bridges to the shipped code (ke
 
 Superseded plans/progress logs from past pillars — **not kept current**, retained only because
 `IMPLEMENTATION_LOG.md` and a few tests link them: completed step plans (Step 0/1/1.5/2),
-Pillar 1/2 plans + progress, the `CurrentStatus.md` re-audit, and `batch_prompts.md`.
+Pillar 1/2 progress logs and the `CurrentStatus.md` re-audit. The step plans and `batch_prompts.md` were deleted 2026-08-25 — their output merged, and `docs/harness/IMPLEMENTATION_LOG.md` is the narrative record.
 
 ---
 

@@ -41,4 +41,11 @@
 #
 # The rule stands for everything else: restatement of code is never a reason
 # to raise this ceiling.
-8738
+# 8780 (2026-08-25): +42 net. Seven docs DELETED (-2,700 lines of scaffolding,
+# already excluded from this count as FROZEN, so they never showed here) and
+# three rewritten. The +42 is the rewrites: docs/archive/README.md now explains
+# that it describes an EMPTY directory while the real archive is docs/_archive/
+# — an accident that had every archiving run putting files in the wrong place —
+# and DOC-MAINTENANCE.md records which docs may be deleted and which may not,
+# with the reason. Both are WHY, not restatement of code.
+8780

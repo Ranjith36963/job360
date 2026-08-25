@@ -50,7 +50,22 @@ DRAFT ──► ACTIVE ──► IMPLEMENTED ──► ARCHIVED
 
 - A plan whose code has merged gets stamped at the top —
   `> **IMPLEMENTED** in PR #N (`<sha>`) — archived <date>` — and moved to
-  `docs/archive/`. It is never deleted (history) and never updated (honesty).
+  `docs/_archive/` — NOT `docs/archive/`, which holds only a README and is an
+  accident of an unfinished restructure.
+
+  It is never UPDATED (honesty): a stale number in a dated record is correct for
+  its date, and rewriting it falsifies the record.
+
+  "Never deleted" was amended by the owner on 2026-08-25. Scaffolding whose
+  output has merged — step plans, prompt batches — may be deleted, because git
+  history holds the content and `IMPLEMENTATION_LOG.md` holds the narrative.
+  Five were removed that day.
+
+  What may NOT be deleted is anything still cited: `CurrentStatus.md` is
+  hardcoded in `merge_cage.py`, and the two `*_progress.md` logs are cited from
+  backend test docstrings. Before deleting any doc, grep the repo for its
+  filename and repoint every hit to a `git show <sha>:<path>` reference first —
+  a deletion that leaves dangling citations costs more than it saves.
 - A plan that was abandoned or replaced gets a `> **SUPERSEDED by <doc>**` banner.
 - A plan not yet built stays where it is — it is the backlog.
 
