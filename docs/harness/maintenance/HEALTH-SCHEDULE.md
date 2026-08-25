@@ -1,4 +1,5 @@
 # Health schedule — wiring the daily `health` skill to a real cron
+<!-- doc: LOG -->
 
 > ## ⚠️ NOT RUNNING — measured 2026-08-24
 >

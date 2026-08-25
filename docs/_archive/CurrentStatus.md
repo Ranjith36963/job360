@@ -1,4 +1,5 @@
 # CurrentStatus.md — Job360 Codebase Honest Mirror
+<!-- doc: FROZEN -->
 
 > ⚠️ **Snapshot from 2026-04-19.** This document was built by 8 parallel Explore subagents auditing the code-base at commit `13d4305` (Merge Batch 3.5.4). It has **not** been refreshed for the Step 0 → Step 1 → Step 1.5 → Step 2 → Step 3 work that has merged since (notably: migrations `0010`–`0014`, the engine→API multi-dim seam, the four new API routes — `auth` / `channels` / `notifications` / `notification_rules` / `runs` — and the Next.js 16 server/client split). For **current state**, see `docs/product/pillars/README.md` + the three pillar manuals + `glossary.md` + `runbook.md`, plus the project root `STATUS.md`. This file is preserved as a historical "honest-mirror" snapshot because the 8-agent audit methodology produced a different *kind* of evidence (file-anchored claims) than a maintained status doc.
 

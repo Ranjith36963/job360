@@ -1,4 +1,5 @@
 # Step 1 — Batch S1 (Engine→API Seam) — Ralph-Loop-Driven Execution Plan
+<!-- doc: FROZEN -->
 
 > **Status:** Approved 2026-04-24. Mirror of `.claude/plans/now-i-ve-got-another-crispy-island.md`. Hand this file to the generator worktree to implement, and to the reviewer worktree to audit.
 >

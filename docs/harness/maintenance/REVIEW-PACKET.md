@@ -1,4 +1,5 @@
 # Staging review packet — 2026-06-12 (round 15)
+<!-- doc: LOG -->
 
 **New: M3 fully integrated (`25c1b3c`)** — worker-a's settings/account RHF+zod forms + KanbanBoard keyboard a11y (@dnd-kit) + CV upload caps, merged with the integrator's earlier auth-form slice. **risk: low-med** (frontend + the auth-adjacent profile.py upload route; full gate green, account forms live-verified). The V-04 upload validation was reconciled to the best of both versions (memory-safe bounded read + robust extension-only MIME). Also fixed a real gap: the M3-slice's zod/react-hook-form deps weren't declared in package.json (a fresh install would have broken). M3 now fully DONE. Evidence: JOURNAL round 15.
 

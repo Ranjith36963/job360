@@ -1,4 +1,5 @@
 # M7 — OpenAPI→TS codegen: tool comparison + recommendation
+<!-- doc: LOG -->
 
 **Status: RESEARCH ONLY — awaiting owner approval before any implementation.**
 Researched 2026-06-12 (integrator round, owner-directed). Sources at bottom.

@@ -1,4 +1,5 @@
 # 06 — Claude Code Harness & Workflow
+<!-- doc: LOG -->
 
 > Source: harness sweep (Opus). How you *run* Claude Code — skills, hooks, settings,
 > loops, CLAUDE.md, memory. **Headline:** your architecture is strong (gate-stamp is

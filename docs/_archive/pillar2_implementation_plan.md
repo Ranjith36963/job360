@@ -1,4 +1,5 @@
 # Pillar 2 Implementation Plan — Search & Match Engine
+<!-- doc: FROZEN -->
 
 **Target:** Upgrade Job360's scoring/matching layer from a 4-dimension regex scorer to a semantic matching engine with gate-pass thresholds, LLM-enriched structured fields, and hybrid retrieval.
 

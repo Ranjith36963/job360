@@ -1,3 +1,4 @@
+<!-- doc: LIVING -->
 ---
 name: verify-job360
 description: >-

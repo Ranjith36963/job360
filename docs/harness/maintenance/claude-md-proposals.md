@@ -1,4 +1,5 @@
 # CLAUDE.md drift proposals — INBOX (append-only)
+<!-- doc: LOG -->
 
 **What this file is.** A scratch inbox for drift found in `CLAUDE.md`: a stale count, a
 renamed path, a retired system still described as live, a flag whose default moved. Any

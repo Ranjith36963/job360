@@ -1,4 +1,5 @@
 # Job360's freshness promise requires a new data model, honest source tiers, and hard trade-offs
+<!-- doc: REFERENCE -->
 
 **Job360's core product promise — trustworthy time-bucketed delivery of live UK jobs — is architecturally achievable, but only with significant compromises the current system does not make.** Of 47 current sources, only 6–8 can provide real posting dates with sub-24-hour reliability. Fourteen sources fabricate dates outright, three use semantically wrong date fields, and most ATS platforms expose no creation date at all. The HiringCafe model — the most frequently referenced benchmark — depends on paid proxies, GPT-4o-mini extraction, and Elasticsearch, making it unreplicable under zero-cost constraints. The minimum viable freshness architecture requires a multi-column date model with confidence tracking, per-source freshness tiers visible to users, a scrape-and-diff ghost detection pipeline with completeness guards, and an honest reclassification of what "last 24 hours" means per source.
 

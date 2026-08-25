@@ -1,4 +1,5 @@
 # Job360 — Product Requirements Document (PRD)
+<!-- doc: PLAN -->
 
 > **Version:** 1.0  
 > **Date:** 15 April 2026  

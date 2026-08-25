@@ -1,4 +1,5 @@
 # /debug — Unified Debugging
+<!-- doc: LIVING -->
 
 **Methodology: CRIIVP** — Capture → Reproduce → Isolate → Implement → Verify → Prevent
 

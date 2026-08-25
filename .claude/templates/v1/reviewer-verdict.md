@@ -1,3 +1,4 @@
+<!-- doc: LIVING -->
 ---
 # Reviewer verdict — v1.
 #

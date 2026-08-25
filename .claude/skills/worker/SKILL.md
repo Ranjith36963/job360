@@ -1,3 +1,4 @@
+<!-- doc: LIVING -->
 ---
 name: worker
 description: Job360 worker: claim ONE mission from the canonical MISSIONS.md and grind it to done in your own worktree, test-first, gate-stamped commits on your own branch. Use when running as a mission worker in a worker worktree.

@@ -1,4 +1,5 @@
 # Job360 Execution Order — End-to-End Sync & Launch Readiness
+<!-- doc: PLAN -->
 
 > **Status:** Planning doc. No code changes executed. Author: synthesised from 6 parallel audit agents on 2026-04-23 after pausing Pillar 3 Batch 4.
 >
