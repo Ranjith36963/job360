@@ -40,10 +40,21 @@ for name in python python3; do
   fi
 done
 
-# Anchor the recovery command: the paths below are relative to the repo root, so
-# print the cd too. Copied from a subdirectory it would otherwise build the venv
-# in the wrong place.
-echo "run-backend.sh: no Python interpreter found. Create one with:" >&2
-echo "  cd \"$ROOT\"" >&2
-echo "  python3 -m venv backend/.venv && backend/.venv/*/pip install -e 'backend[dev]'" >&2
+# We only reach here when NEITHER `python` nor `python3` is on PATH, so the first
+# line of the advice cannot be a python command — it has to be "install one".
+# The rest is anchored to $ROOT (copied from a subdirectory it would build the
+# venv in the wrong place) and split by platform: the venv puts its interpreter
+# in bin/ on POSIX and Scripts/ on Windows, and there is no `pip` binary to glob
+# for on Windows — it is `pip.exe`. Calling the venv's own python with -m pip
+# sidesteps both.
+echo "run-backend.sh: no Python interpreter found on PATH (tried python, python3)." >&2
+echo "" >&2
+echo "  1. Install Python 3.12 or newer: https://www.python.org/downloads/" >&2
+echo "  2. Then create the venv:" >&2
+echo "" >&2
+echo "     cd \"$ROOT\"" >&2
+echo "     # POSIX" >&2
+echo "     python3 -m venv backend/.venv && backend/.venv/bin/python -m pip install -e 'backend[dev]'" >&2
+echo "     # Windows" >&2
+echo "     py -3 -m venv backend/.venv && backend/.venv/Scripts/python.exe -m pip install -e backend[dev]" >&2
 exit 1
