@@ -300,7 +300,7 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
   - **Provider chain** (`llm_provider.py:329-334`): **OpenAI (`gpt-4o-mini`, PRIMARY)** → Gemini (`gemini-3.7-flash`) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`gpt-oss-120b`). Every model id is env-overridable.
   - **Self-correction loop**: on Pydantic `ValidationError`, the first 5 error messages are appended to the prompt and the call retries up to 2 more times.
   - If all providers fail or retries exhaust → `RuntimeError` (logged, no partial row written — atomicity over best-effort).
-- Output: a `JobEnrichment` row with **16 strict-typed fields** (see §3.2 below). The `job_enrichment` TABLE still has 18 enrichment columns — `employer_type` and `locations` were retired from the schema in 2026-08 but never dropped from the DB, so nothing writes them.
+- Output: a `JobEnrichment` row with **16 strict-typed fields** (see §3.2 below). The `job_enrichment` TABLE still has 18 enrichment columns — `employer_type` and `locations` were retired from the schema in 2026-08 but never dropped from the DB, so nothing writes them — `save_enrichment` excludes both from its column list (`job_enrichment.py:248-254`), and the read paths skip them too (`:329`, `:401`).
 - DB persistence: `INSERT OR REPLACE` into `job_enrichment` table (migration `0008`). **Shared catalog** — no `user_id` column, per CLAUDE.md rule #17 (the same enriched fields apply to every user; per-user scoring against the enrichment happens at read time).
 
 ### Stage 6 — Store + (opt-in) embed
