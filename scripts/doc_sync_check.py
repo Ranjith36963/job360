@@ -486,6 +486,49 @@ _LIVING_STAMPED_CACHE: list[str] | None = None
 
 
 LINE_CITATION_BASELINE = ROOT / "scripts" / "line_citation_baseline.txt"
+SURFACE_CEILING = ROOT / "scripts" / "living_surface_ceiling.txt"
+
+
+def surface_regression() -> list[str]:
+    """The LIVING surface may not GROW. A ratchet on the haystack itself.
+
+    Added 2026-08-25, after cycle 16 became the first run in sixteen to shrink
+    the surface (8,331 -> 8,317). Until then "delete, do not reword" lived only
+    in the routine's prompt, and a prompt is a request, not an enforcement --
+    the next writer, human or model, adds a paragraph and the haystack grows
+    back without anyone noticing.
+
+    The ceiling is the honest number to guard because it is the one that cannot
+    be gamed by the scout: findings-per-night falls if the scout gets lazy, but
+    lines only fall if prose is actually removed.
+
+    Deliberately NOT a hard cap on new prose. A doc explaining WHY -- the
+    product rules, the reasoning code cannot hold -- is the content worth
+    having, and this guard would block it. So the ceiling is raised by editing
+    the file, in a commit that has to say what was added and why. The cost is
+    one deliberate line; the benefit is that growth is never accidental.
+    """
+    docs, lines = living_surface()
+    if not docs or not SURFACE_CEILING.exists():
+        return []
+    for row in SURFACE_CEILING.read_text(encoding="utf-8").splitlines():
+        row = row.strip()
+        if not row or row.startswith("#"):
+            continue
+        try:
+            ceiling = int(row.replace(",", ""))
+        except ValueError:
+            continue
+        if lines > ceiling:
+            return [
+                f"LIVING surface grew to {lines:,} lines, ceiling is {ceiling:,}. "
+                f"Close findings by DELETING prose or pointing at a symbol, not by "
+                f"rewording. If the new lines are genuinely WHY (not a restatement "
+                f"of code), raise the ceiling in scripts/living_surface_ceiling.txt "
+                f"and say what you added."
+            ]
+        return []
+    return []
 
 
 def living_surface() -> tuple[int, int]:
@@ -1572,6 +1615,12 @@ def main() -> int:
             "a doc that never declares LIVING/PLAN/LOG/REFERENCE/FROZEN "
             "gets re-litigated every cycle and never converges",
         ))
+
+    # The haystack itself may not grow. "Delete, do not reword" was only a line
+    # in the routine's prompt until now, and a prompt is a request.
+    for row in surface_regression():
+        drift.append(("scripts/living_surface_ceiling.txt", "1", "surface-ratchet",
+                      f"{living_surface()[1]:,} lines", row))
 
     # New raw line numbers in LIVING prose are refused (ratchet, may only fall).
     for row in line_citation_regressions():
