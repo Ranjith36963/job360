@@ -172,8 +172,15 @@ CASES: list[tuple[str, str, str, str]] = [
     # docs drift toward because docs are copied from each other. The new guard
     # counts the SOURCE. Both are kept: one is cheap and needs no extractor,
     # the other is true.
+    #
+    # Anchored on the BACKTICKED prose form at ARCHITECTURE.md:10, not the
+    # tree-diagram line at :53. The first draft targeted the tree line, whose
+    # `LOCATIONS (26) + VISA_KEYWORDS (8)` carries no backticks, and the drill
+    # said "guard watches nothing" instead of passing quietly -- the third time
+    # a drill has caught its own target being rewritten by someone else's fix.
     ("ARCHITECTURE.md",
-     r"`LOCATIONS` \((\d+)\) \+ `VISA_KEYWORDS`", "`LOCATIONS` (999) + `VISA_KEYWORDS`",
+     r"Only `LOCATIONS` \((\d+)\) and `VISA_KEYWORDS`",
+     "Only `LOCATIONS` (999) and `VISA_KEYWORDS`",
      "locations"),
 ]
 
