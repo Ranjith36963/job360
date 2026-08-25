@@ -219,17 +219,14 @@ python -m migrations.runner up
 # call instead; in prod, do neither without a backup (docs/product/RUNBOOK-backups.md).
 ```
 
-> ⚠️ Running `down` then `up` while the stem you care about is buried undoes and
-> immediately re-applies the HEAD migration and nothing else — it looks like it
-> worked and changes nothing about 0010.
-
 > ⚠️ **`down` takes NO migration stem.** It reverts the *last applied* migration and
-> nothing else — `backend/migrations/runner.py:281-297` reads `applied[-1]` and runs that stem's
-> `.down.sql`. The second positional argument is the **db_path**, not a selector
-> (`backend/migrations/runner.py:395,399`: usage is `[up|down|status] [db_path]`, defaulting to
-> `data/jobs.db`). So `python -m migrations.runner down 0010` does **not** target
-> migration 0010 — it swallows `0010` as a connection path and still reverts
-> whatever is at the head. Against a head of `0030` that reverts `0030`.
+> nothing else — `backend/migrations/runner.py:281-297` reads `applied[-1]` and runs
+> that stem's `.down.sql`. The second positional argument is the **db_path**, not a
+> selector (`backend/migrations/runner.py:395,399`: usage is `[up|down|status] [db_path]`,
+> defaulting to `data/jobs.db`). So `python -m migrations.runner down 0010` does **not**
+> target migration 0010 — it swallows `0010` as a connection path and still reverts
+> whatever is at the head. Against a head of `0030` that reverts `0030`, and following
+> it with `up` re-applies `0030`: it looks like it worked and changes nothing about 0010.
 
 Migrations are forward-only by default, and `down` is one step at a time — there is
 no `down <stem>` and no `down --all`.
