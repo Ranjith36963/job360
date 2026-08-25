@@ -783,8 +783,3 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | pytest-randomly | Random test ordering (disable with `-p no:randomly` for the canonical run) |
 | ruff / pre-commit | Lint + commit hooks |
 
-### Optional (not in backend/pyproject.toml)
-
-| Package | Purpose |
-|---------|---------|
-| python-jobspy | Indeed/Glassdoor scraping (backend/src/sources/other/indeed.py) |
