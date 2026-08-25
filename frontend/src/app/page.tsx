@@ -1,4 +1,7 @@
 import Link from "next/link";
+// One place for the catalog numbers shown to users. The copy said 47 for a
+// week after the registry dropped to 41; see src/lib/catalog.ts.
+import { SOURCE_COUNT, SCORING_DIMENSIONS } from "@/lib/catalog";
 import {
   Radar,
   Globe,
@@ -24,7 +27,7 @@ const FEATURES = [
   },
   {
     icon: Globe,
-    title: "47 Job Sources",
+    title: `${SOURCE_COUNT} Job Sources`,
     description:
       "APIs, ATS boards, RSS feeds, and intelligent scrapers. From Greenhouse to HackerNews, Reed to RemoteOK — all aggregated in real time.",
     stagger: 2,
@@ -62,7 +65,7 @@ const FEATURES = [
 const STATS = [
   {
     icon: Globe,
-    value: "47",
+    value: String(SOURCE_COUNT),
     label: "Sources",
     description: "APIs, ATS, RSS & scrapers",
   },
@@ -140,7 +143,7 @@ export default function Home() {
               Your CV.
             </span>
             <span className="animate-fade-in-up stagger-3 block mt-1">
-              47 Sources.
+              {SOURCE_COUNT} Sources.
             </span>
             <span className="animate-fade-in-up stagger-4 block mt-1">
               One{" "}
@@ -158,7 +161,7 @@ export default function Home() {
               360
             </span>
             &apos;s 8-dimensional scoring engine find your perfect match across
-            47 job sources.
+            {SOURCE_COUNT} job sources.
           </p>
 
           {/* CTAs */}
@@ -284,7 +287,7 @@ export default function Home() {
                 step: "02",
                 title: "We search everywhere",
                 description:
-                  "47 sources queried in parallel — APIs, ATS boards, RSS feeds. Every job scored against your profile in 8 dimensions.",
+                  `${SOURCE_COUNT} sources queried in parallel — APIs, ATS boards, RSS feeds. Every job scored against your profile in ${SCORING_DIMENSIONS} dimensions.`,
                 icon: Zap,
               },
               {

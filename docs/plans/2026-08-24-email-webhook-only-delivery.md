@@ -256,7 +256,27 @@ anyway, because the blast radius grows the moment a reply can trigger a tailored
    minutes forever. The old catalog-only query could not produce this state; the new one can.
    Guarded by `test_send_bundle_drains_queued_jobs_that_have_no_feed_row`.
 
-### A latent outage found but NOT fixed here — do this next
+### Two known-live defects in this area, NOT fixed here — do these next
+
+#### 1. Two webhook channels collide in the ledger
+
+`backend/src/workers/tasks.py:384` keys the ledger on the channel **type**:
+
+```python
+channel_key = result.channel_type or f"channel:{result.channel_id}"
+```
+
+`notification_ledger` is `UNIQUE(user_id, job_id, channel)`, and nothing in `user_channels`
+stops a user configuring two webhooks. So the second result **overwrites the first's status
+and retry count** — one of the two channels has no independent delivery record.
+
+Predates this branch (`git log -S` finds only `f910ea7`; nothing in `origin/main..HEAD`).
+Not fixed here because the obvious change — putting the channel id into the `channel`
+column — silently changes a value that the notifications endpoint filters on, that the
+metrics exporter groups by, and that every existing row already carries. The honest fix is
+a `channel_id` column plus a widened UNIQUE, with its own migration and tests.
+
+#### 2. The Resend API key is baked into every stored credential
 
 `build_email_apprise_url` bakes the **live Resend API key into every user's encrypted
 channel credential** at create/seed time (`services/channels/email_url.py:117`):
@@ -277,7 +297,21 @@ secret, which also shrinks what a database leak exposes. Not done here because i
 the meaning of stored rows and deserves its own migration and its own tests — but it is the
 highest-severity thing this audit found that is still live.
 
-### One parity decision worth stating plainly
+### 🚫 RELEASE GATE — "Phase 4 wired" is not "production rollout cleared"
+
+**Name: the send-time-key-resolution gate.** Phase 4 (the email builder) is marked "wired" in
+the build log below, and that is true of the *code* — but the live Resend API key baked into
+every stored email credential (previous section) means a routine key rotation silently kills
+every existing user's email delivery with no visible error. Shipping "email is the product" to
+real user volume while that is true would mean a security-hygiene action (or a leak response)
+doubles as an outage with no alarm.
+
+**Production rollout of email delivery is blocked until send-time key resolution ships** — i.e.
+until `build_email_apprise_url` stores the address only and resolves `resend://{key}:...` from
+current settings at send time, not at channel-create time. Until then, keep sends to a small,
+manually-watched cohort (the backfill in this doc's earlier section, or smaller).
+
+**Owner: Ranjith.** This is his call to lift, once the fix above lands and is verified.
 
 Salary in the email comes from the **same source and the same parser** as the dashboard —
 the `job_enrichment` blob through `services.salary.normalize_salary` — not from the
@@ -364,8 +398,16 @@ Fields, all sourced from `user_feed` joined to `jobs`/`job_enrichment` (never `j
 | `is_judged` | both `llm_fit_score` and `llm_verdict` present | drives the label wording |
 | `reason` | `user_feed.llm_reason` | omit the line entirely |
 | `salary` | `job_enrichment` → `salary_min_gbp`/`max` | omit |
-| `staleness` | `jobs.staleness_state` | omit |
 | `apply_url` | `jobs.apply_url` | required |
+
+**`staleness` was planned here and never shipped** — this row was removed 2026-08-24
+(CodeRabbit finding on PR #381): `src/services/delivery/decision_card.py`'s `DecisionCard`
+dataclass carries no `staleness` field, and neither `email_body.py` nor the dashboard reads
+one from it. The staleness *guard* is real and enforced elsewhere — `pipeline.py:100-104`
+returns 410 on `confirmed_expired` when a user tries to apply — but the email itself does not
+surface a staleness label today. If this becomes a real requirement, add the field to
+`DecisionCard` first and land a test asserting it, then restore this row; do not re-add the
+row without the code.
 
 Plus the honest header: **considered N, sending M, dropped N−M** with the top drop reasons.
 And the empty-day send: "Nothing good today" — a deliberate feature, not a failure path.
@@ -407,9 +449,18 @@ grep -n 'channel_type: str = Field' src/api/routes/channels.py
 railway run -s Postgres python scripts/check_prod_channels.py
 ```
 
-Expected after the migration: no `slack`/`discord`/`telegram` rows anywhere, and
-`oauth_states` gone. **Take a backup first** — the migration is the one irreversible step
-in this plan.
+Expected after the migration — scoped to **active channel config only**, not history:
+no `slack`/`discord`/`telegram` rows in `user_channels` or `user_notification_digests`, and
+`oauth_states` gone entirely. **Take a backup first** — the migration is the one irreversible
+step in this plan.
+
+Deliberately **NOT** part of this check: `notification_ledger`. Rows there with channel
+`slack`/`telegram`/`discord` are kept on purpose as audit history and as dedup keys
+(`UNIQUE(user, job, channel)`) — see the "Load-bearing — looks deletable, is NOT" section
+above. A check that also expects zero `slack`/`discord`/`telegram` rows in
+`notification_ledger` would fail against this plan's own deliberate decision to preserve them;
+`scripts/check_prod_channels.py`'s `notification_ledger by channel` query is diagnostic
+output, not a pass/fail assertion.
 
 #### Layer 3 — a real human gets a real email (the only proof that matters)
 

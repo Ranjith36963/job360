@@ -99,10 +99,15 @@ describe("ChannelsSettingsPage — channel offering", () => {
   });
 
   it("offers exactly two channel types: email and webhook", async () => {
-    await renderPage();
+    const { container } = await renderPage();
 
-    // The two add-channel cards (CardTitle renders as plain text, not a
-    // semantic heading element, so match on exact text instead of role).
+    // COUNT, don't just check presence. Asserting "email exists AND webhook
+    // exists AND slack does not" stays green the moment someone adds a third
+    // type — which is exactly what this test's name promises to catch.
+    // One <form> per add-channel card, so the count IS the number of types.
+    const addForms = container.querySelectorAll("form");
+    expect(addForms).toHaveLength(2);
+
     expect(screen.getByText(/^email$/i)).toBeInTheDocument();
     expect(screen.getByText(/^webhook$/i)).toBeInTheDocument();
 
@@ -115,9 +120,25 @@ describe("ChannelsSettingsPage — channel offering", () => {
   it("presents email as the primary, recommended option", async () => {
     await renderPage();
 
-    // Email is called out as "Recommended"; webhook is called out as "Advanced".
-    expect(screen.getByText(/recommended/i)).toBeInTheDocument();
-    expect(screen.getByText(/advanced/i)).toBeInTheDocument();
+    // Each badge is BOUND to its own card. The page renders
+    // <div class="flex ..."><CardTitle>Email</CardTitle><Badge>Recommended</Badge></div>
+    // so the badge is a sibling of the title inside one wrapper.
+    //
+    // The old version asserted only that the strings "Recommended" and
+    // "Advanced" existed somewhere on the page — swap the two badges and it
+    // stayed green. A bare /advanced/i match was ambiguous too: the webhook
+    // card's body copy also contains the word "advanced".
+    const emailHeader = screen.getByText(/^email$/i).parentElement;
+    const webhookHeader = screen.getByText(/^webhook$/i).parentElement;
+    expect(emailHeader).not.toBeNull();
+    expect(webhookHeader).not.toBeNull();
+
+    expect(emailHeader).toHaveTextContent(/recommended/i);
+    expect(webhookHeader).toHaveTextContent(/advanced/i);
+
+    // And the labels must not be the other way round.
+    expect(emailHeader).not.toHaveTextContent(/advanced/i);
+    expect(webhookHeader).not.toHaveTextContent(/recommended/i);
   });
 });
 

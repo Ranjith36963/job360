@@ -1,5 +1,5 @@
 # Job360 Project Status
-<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 
 ## Current State: Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
 
@@ -45,11 +45,11 @@
 > on 2026-08-24 — never configured in production, zero users ever connected one. See
 > `docs/plans/2026-08-24-email-webhook-only-delivery.md`.)
 
-**Last updated:** 2026-06-20
-**Total tests:** defer to the runtime collected count (~1,409 collected offline, 2 live deselected; 0 failing, 3 skipped on Windows)
-**Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 60+ test modules
+**Last updated:** 2026-08-24 (doc truth check; the phase narratives below are older — see `docs/harness/IMPLEMENTATION_LOG.md` for the current history)
+**Total tests:** measure it, never quote it — `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1` (2 `live` tests deselected offline; 3 skip on Windows)
+**Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 218 `test_*.py` modules
 **Job sources:** 41 entries in `SOURCE_REGISTRY`; 40 live instances since `indeed` + `glassdoor` share `JobSpySource`; gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 dropped jobtensor, comeet, aijobs_global; the 2026-08-10 rotation dropped 6 more dead upstreams — aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
-**Latest merged head:** `225040e` on `origin/main` — docs audit + cleanup (2026-06-21); all worktree/feature branches merged and deleted.
+**Latest merged head:** `0dd25dc` on `origin/main` (2026-08-24, measured with `git rev-parse origin/main` while fixing this doc's stale metadata — CodeRabbit finding on PR #381). The prior value here (`225040e`, 2026-06-21) was two months stale. **This branch's own work — the 2026-08-24 email/webhook-only channel deletion described above — is NOT itself part of that head**: `feat/delivery-email-webhook-only` has not merged yet, so `main` does not yet reflect the Slack/Discord/Telegram removal. Re-check `git rev-parse origin/main` before trusting this line; it drifts every merge.
 **Sentinel:** `.claude/step-3-verified.txt` → `337fbda19b5ae30d55dba061bc6658a49bcd208d` (post-reviewer-fix SHA).
 
 ---
@@ -69,7 +69,7 @@
 | Keyword generator | `backend/src/services/profile/keyword_generator.py` | Done -- UserProfile -> SearchConfig conversion |
 | JobScorer class | `backend/src/services/skill_matcher.py` | Done -- dynamic scoring using SearchConfig |
 | BaseJobSource properties | `backend/src/sources/base.py` | Done -- `self.relevance_keywords`, `self.job_titles`, `self.search_queries` |
-| 47 source file refactor | `backend/src/sources/*.py` | Done -- all use `self.*` properties instead of direct imports |
+| Source file refactor (every source) | `backend/src/sources/*.py` | Done -- **zero** direct `src.core.keywords` imports remain; the 12 sources that need keywords read them via the inherited `self.*` properties (the other 28 never reference them) |
 | Orchestrator wiring | `backend/src/main.py` | Done -- loads profile, creates scorer, passes config |
 | CLI setup-profile | `backend/src/cli.py` | Done -- interactive profile wizard |
 | Profile tests | `backend/tests/test_profile.py` | Done -- 56 tests covering all profile modules |
@@ -131,7 +131,7 @@
 | Schema migration | `backend/src/repositories/database.py` | Done -- `_migrate()` method uses PRAGMA table_info + ALTER TABLE for future columns |
 | Source health tracking | `backend/src/main.py`, `backend/src/repositories/database.py` | Done -- detects sources returning 0 that previously had jobs, warns in logs |
 | Rate limiter tests | `backend/tests/test_rate_limiter.py` | Done -- 5 tests: acquire/release, context manager, concurrency limit, delay, multi-concurrent |
-| Source category metadata | `backend/src/sources/base.py`, all 46 source files (47 registry entries) | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scraper/other) |
+| Source category metadata | `backend/src/sources/base.py`, every source file (40 classes / 41 registry entries today) | Done -- `category` class attribute (keyed_api/free_json/ats/rss/scrapers/other) |
 | Integration tests | `backend/tests/test_main.py`, `backend/tests/test_database.py` | Done -- SOURCE_INSTANCE_COUNT validation, failed source tracking, migration, source history |
 
 ---
@@ -153,7 +153,7 @@ Four engines are available, stacked **keyword → dimensions → hybrid → LLM 
 | Engine | Service | Flag | Default |
 |--------|---------|------|---------|
 | #1 Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
-| #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace (`skill_matcher.py:519-536`); data from the **enrichment** LLM step (`services/job_enrichment.py`), which the same flag gates | `ENRICHMENT_ENABLED` | false |
+| #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace (`skill_matcher.py:582-617`). **The scorer enters the dim path on `user_preferences` alone** (`skill_matcher.py:587`), no flag involved; the flag gates only whether the **enrichment** LLM step (`services/job_enrichment.py`) has produced data for those dims to read (`main.py:853`, `main.py:1137`). Without it they score their neutral halves | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` (enrichment data only) | false |
 | #3 Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` (RRF fuse + cross-encoder rerank) | `SEMANTIC_ENABLED` | false |
 | #4 LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
 
@@ -190,12 +190,12 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 ## What Is Working Right Now
 
 - Full 41-source pipeline (40 live instances) runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed jobtensor/comeet/aijobs_global; gov_apprenticeships restored 2026-06-16; 2026-08-10 rotation removed 6 dead upstreams)
-- Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback: Gemini / Groq / Cerebras)
+- Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback, in order: **OpenAI `gpt-4o-mini` (PRIMARY)** / Gemini / Groq / Cerebras — `llm_provider.py:330-334`)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
-- Conditional-cache pilot (Batch 3.5.3): `nhs_jobs_xml` confirmed live ETag → 304; `backend/scripts/preflight_conditional_cache.py` for future candidates
-- All 7 keyed APIs skip gracefully when keys are empty
-- All ATS boards iterate over ~264 company slugs (11 platforms; comeet removed in M6 rotation)
+- Conditional-cache machinery (Batch 3.5.3) exists and is tested, but **no source uses it today** — the `nhs_jobs_xml` pilot went with that source in the 2026-08-10 rotation (only `nhs_jobs_xml` was retired — the separate `nhs_jobs` source is still registered, `main.py:142`). Only `backend/tests/test_conditional_fetch.py` calls the helpers; `backend/scripts/preflight_conditional_cache.py` remains for future candidates
+- All 8 keyed APIs skip gracefully when keys are empty
+- All ATS boards iterate over **297** company slugs actually polled — `core/companies.py` holds **302** across 11 platform lists, but `RIPPLING_COMPANIES` (5) has had no source class since the 2026-08-10 rotation, so 10 ATS sources poll the other 297 (comeet was removed in M6)
 - All RSS/XML feeds parse correctly with mocked data
 - All HTML scrapers extract job data with regex
 - Pillar 2 multi-dim scoring activates as soon as `JobScorer(..., user_preferences=...)` is wired — `enrichment_lookup` is optional, and without it each dim scores its NEUTRAL half, not zero (8-dim: title/skill/location/recency + seniority/salary/visa/workplace); legacy 4-component path unchanged by default
@@ -204,7 +204,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 - Email (the supported product surface) and webhook (an unsupported raw-JSON escape hatch) — both via the Apprise dispatcher, per-user channels (Batch 2). Slack/Discord/Telegram were removed 2026-08-24 (never configured in production, zero users). The old built-in channel classes are REMOVED.
 - CLI commands: run, view, api, status, sources, setup-profile
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- Tests: defer to the runtime collected count (~1,409 collected offline, 2 live deselected); 3 skip on Windows (bash-only `setup.sh` / `cron_run.sh` tests), 0 failing
+- Tests: 218 `test_*.py` modules; measure the collected count, never quote it (2 `live` deselected offline); 3 skip on Windows (bash-only `setup.sh` / `cron_setup.sh` tests)
 
 ---
 
@@ -227,7 +227,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 | Issue | Severity | Notes |
 |-------|----------|-------|
-| 3 tests skip on Windows | Low | bash-only tests for `setup.sh` and `cron_run.sh` — pass on Linux/Mac |
+| 3 tests skip on Windows | Low | bash-only tests for `setup.sh` and `cron_setup.sh` — pass on Linux/Mac |
 | ~~`test_main.py` still hits live Indeed~~ RESOLVED (M8 batch) | — | JobSpy stubbed via autouse fixture; `load_profile` patched. Runs offline in ~8 s (14 tests). Now part of canonical suite — `--ignore` removed from Makefile, agent-gate.sh, and CLAUDE.md. |
 | Layer-4 embedding repost dedup not activated | Medium | Scaffolded in `backend/src/services/deduplicator.py` but gated behind `SEMANTIC_ENABLED`; ChromaDB-backed layer is opt-in and not yet wired into the default pipeline path. |
 | ~~Batch 2.7 hybrid mode flag not wired to HTTP routes~~ RESOLVED 2026-06-10 | — | `GET /api/jobs?mode=hybrid` consults the retrieval stack and the dashboard requests it by default (a19db65); the LLM judge re-ranks on top via `COALESCE(llm_fit_score, score)`. |
@@ -241,30 +241,23 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 
 ## Test Coverage by Module
 
-| Test file | Module tested | Tests |
-|-----------|--------------|-------|
-| `test_sources.py` | All 41 registry entries (40 source classes) | 55+ |
-| `test_profile.py` | `backend/src/services/profile/*`, `JobScorer` | 55 |
-| `test_linkedin_github.py` | LinkedIn parser, GitHub enricher | 54 |
-| `test_scorer.py` | `skill_matcher.py` scoring | 53 |
-| `test_time_buckets.py` | `time_buckets.py` | 33 |
-| `test_models.py` | `models.py` Job dataclass | 21 |
-| `test_decision_card.py` + `test_digest_email_body.py` | `services/delivery/` — what a job says, and how the email reads it | 28 |
-| `test_deduplicator.py` | `deduplicator.py` | 13 |
-| `test_main.py` | `main.py` orchestrator + error paths | 14 |
-| `test_cli.py` | `cli.py` commands + SOURCE_REGISTRY | 11 |
-| `test_database.py` | Postgres database + migration + source history | 9 |
-| `test_api.py` | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) | 9 |
-| `test_llm_provider.py` | Multi-provider LLM client for CV parsing | 8 |
-| `test_notification_base.py` | Channel base + discovery | 7 |
-| `test_reports.py` | Report generation | 6 |
-| `test_setup.py` | setup.sh + requirements | 6 |
-| `test_rate_limiter.py` | `rate_limiter.py` | 5 |
-| `test_cron.py` | cron_run.sh | 5 |
-| `test_cli_view.py` | `cli_view.py` | 5 |
-| `test_csv_export.py` | CSV export | 4 |
-| (Plus Pillar-2/-3 + Step-0/1/1.5/2/3 additions) | migrations, auth, feed, prefilter, channels, crypto, dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker, conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims, score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep, application history, notification rules, ledger filters, dim-score round-trips | +~744 |
-| **Total (current green baseline)** | | defer to runtime count (~1,409 collected offline, 2 live deselected) / 0 failing / 3 skipped on Windows |
+> **The per-file table lives in `README.md` ("Testing") and nowhere else.** It used to be
+> duplicated here, and the copy rotted: it still listed `test_notifications.py` and
+> `test_notification_base.py` (both deleted with the `NotificationChannel` ABC), named
+> `cron_run.sh` for what `test_cron.py` actually exercises (`cron_setup.sh`), and carried
+> per-file counts roughly a third of the real ones. Two copies of a number is one copy too
+> many — README's is the measured one.
+
+**Current green baseline:** 218 `test_*.py` modules, 2 `live` tests deselected offline, 3 skipped
+on Windows. The collected count is deliberately not recorded here — measure it, never quote it:
+`cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`.
+
+Broad coverage beyond the top-20 files: migrations, auth, feed, prefilter, channels, crypto,
+dispatcher (rule consultation + timezone-aware quiet hours), scheduler, circuit_breaker,
+conditional_cache, embeddings, retrieval, enrichment, dedup layers, Pillar-2 scoring dims,
+score-dim columns, multi-dim scoring, hybrid retrieval, IDOR, account-mgmt, ghost-sweep,
+application history, notification rules + tick + bundling, ledger filters, dim-score
+round-trips, harness guards.
 
 ### Not covered or lightly covered
 

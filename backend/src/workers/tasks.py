@@ -1081,15 +1081,25 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
             len(_undeliverable),
             user_id,
         )
-    digest_title = render_digest_subject(shown=jobs_count, considered=jobs_count)
-    # `considered` equals `shown` here because this queue only ever holds jobs
-    # that already cleared the score threshold — by the time a row reaches
-    # user_notification_digests the filtering has happened upstream and the
-    # rejected count is no longer in scope. Wiring the true funnel count through
-    # is Phase 5; stating a number we cannot source would be worse than omitting
-    # the line, so render_digest_text prints no "dropped" line at all when the
-    # two are equal.
-    digest_body = render_digest_text(cards, considered=jobs_count, dropped_reasons=[])
+    # `considered` is how many jobs were QUEUED for this user, not how many
+    # survived the join. Passing the survivor count made the arithmetic in
+    # render_digest_text (`dropped = considered - shown`) evaluate to 0 on every
+    # single call, so the "we checked N and dropped M" line could never render —
+    # and the jobs the drain above throws away vanished without a word. That is
+    # exactly the unexplained silence email_body exists to refuse.
+    #
+    # The count still is not the full funnel (jobs filtered out before they were
+    # ever queued are not visible from here); wiring that through is Phase 5.
+    # But queued-minus-shown is a number we can actually source, and it covers
+    # the drop this function itself performs.
+    considered = len(_job_ids)
+    dropped_reasons = (
+        ["no longer in your feed"] if considered > jobs_count else []
+    )
+    digest_title = render_digest_subject(shown=jobs_count, considered=considered)
+    digest_body = render_digest_text(
+        cards, considered=considered, dropped_reasons=dropped_reasons
+    )
 
     dispatcher_fn = ctx.get("dispatcher")
     if dispatcher_fn is None:
@@ -1140,11 +1150,19 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
                 await FeedService(db).mark_notified_for_jobs(user_id, uniq_jids)
             except Exception as exc:  # noqa: BLE001 — telemetry never fails a send
                 _log.warning("mark_notified failed user=%s: %s", user_id, exc)
+            # Scoped to the job ids this send actually CARRIED. Without the
+            # job_id filter this marked every unsent row for the channel —
+            # including jobs deliberately excluded from the email (no user_feed
+            # row), which were then recorded as delivered having never been
+            # mentioned to anyone. It also made the orphan-drain block above
+            # untestable: its effect was indistinguishable from this statement's
+            # overreach. (CodeRabbit, PR #381.)
+            _ph_sent = ",".join("?" for _ in uniq_jids)
             await db.execute(
-                "UPDATE user_notification_digests SET sent=1, "
+                "UPDATE user_notification_digests SET sent=1, "  # noqa: S608 — placeholders only
                 "sent_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') "
-                "WHERE user_id=? AND channel=? AND sent=0",
-                (user_id, channel),
+                f"WHERE user_id=? AND channel=? AND sent=0 AND job_id IN ({_ph_sent})",
+                (user_id, channel, *uniq_jids),
             )
             await db.commit()
             sent += 1

@@ -25,6 +25,7 @@ opposite of what this product sells.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Tuple
 
@@ -130,7 +131,12 @@ def format_salary_range(
     rather than printing an empty one.
     """
     def fmt(n: float) -> str:
-        return f"£{round(n / 1000)}k" if n >= 1000 else f"£{int(n)}"
+        # math.floor(x + 0.5), NOT Python's round(). Python rounds half to EVEN
+        # (banker's rounding): round(70.5) == 70. JavaScript's Math.round — which
+        # the dashboard uses — rounds half UP: Math.round(70.5) === 71. A
+        # £70,500 salary would therefore read "£70k" in the email and "£71k" on
+        # the screen, which is precisely the drift this module exists to stop.
+        return f"£{math.floor(n / 1000 + 0.5)}k" if n >= 1000 else f"£{int(n)}"
 
     if not min_gbp and not max_gbp:
         return None

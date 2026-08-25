@@ -227,6 +227,23 @@ lanes:
       # the owner's product rules — changing the text changes the product
       - "docs/product/product_design_rules.md"   # the canonical text of rules #29-31
       - "docs/product/plans/batch-2-decisions.md"
+      # ── THE WHOLE OF docs/product/, WRITTEN DOWN (2026-08-24) ─────────────
+      # This changes NO verdict. Every file under here already reached the owner
+      # lane — by ESCALATION, because no rule covered it. Measured on PR #379:
+      # `docs/product/pillars/*.md` reported "4 file(s) match no lane ... so they
+      # escalate", which is the right answer given for the wrong reason.
+      #
+      # The reason matters, because the two states behave differently the moment
+      # anyone tidies up. "Nobody classified this" reads like an oversight and
+      # invites exactly one fix — adding `docs/**` to the fast lane — which is
+      # the bug wave 1 spent 109 file moves undoing. "This is the owner's product
+      # thinking" invites none. Recording the intent is what stops the next
+      # reader from helpfully deleting it.
+      #
+      # NOT a widening: the deny list beats allow, these paths were never
+      # auto-mergeable, and the two files above stay named individually because
+      # they are cited by number in CLAUDE.md.
+      - "docs/product/**"
     requires: [ci, review, security, verify, ratchets]
     auto_merge: false          # your hand, always
     watch_minutes: 15          # ...but the watcher still runs after you merge
@@ -294,6 +311,33 @@ lanes:
       # script and not its caller is half a door. (CodeRabbit, PR #357.)
       - ".github/workflows/revert-main.yml"
       - ".github/workflows/post-merge-watch.yml"
+      # ── THE FILES THAT DECIDE WHEN A WRITER STARTS (added 2026-08-24) ──────
+      # Same rule as everything above it -- "the cage may not edit the cage" --
+      # applied to a door nobody had noticed was open. These five are not
+      # ordinary workflows: each one decides WHO GETS AN AGENT POINTED AT THEM,
+      # and every one of them sat under the blanket `.github/workflows/**`
+      # fast-lane rule, i.e. a machine could widen its own authorisation.
+      #
+      #   triage.yml       holds the auto-authorisation whitelist. Widening one
+      #                    `case` pattern there is enough to let a stranger's
+      #                    issue text start a write-capable agent -- the exact
+      #                    thing its own 30-line comment says must never happen.
+      #   repair.yml       the write-capable agent's own path cage.
+      #   pr-repair.yml    the same, plus the test-revert guard that stops an
+      #                    agent editing its own exam.
+      #   finding-watch.yml  the new doorbell: it decides which PRs get a fixer
+      #                    dispatched at them, and holds the attempt ceiling
+      #                    that stops the fix->push->fix loop running forever.
+      #   security-watch.yml raises the issues that triage auto-authorises, so
+      #                    it is the first half of that same wire.
+      #
+      # This costs the owner one hand-merge whenever a loop's own cage changes,
+      # which is the correct price and a rare event.
+      - ".github/workflows/triage.yml"
+      - ".github/workflows/repair.yml"
+      - ".github/workflows/pr-repair.yml"
+      - ".github/workflows/finding-watch.yml"
+      - ".github/workflows/security-watch.yml"
       # the owner's own words
       - "**/CLAUDE.md"
     requires: [ci, review, drill]

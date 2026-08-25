@@ -1,6 +1,9 @@
 """Read-only prod check: what delivery channels do real users actually have?
 
-Run: railway run -s Postgres python check_prod_channels.py
+Run from the REPOSITORY ROOT (the path is what an operator will copy):
+
+    railway run -s Postgres python backend/scripts/check_prod_channels.py
+
 Uses DATABASE_PUBLIC_URL (plain DATABASE_URL only resolves inside Railway).
 Prints COUNTS ONLY - never credential values.
 """
@@ -41,10 +44,10 @@ QUERIES = [
         "SELECT notify_mode, COUNT(*) AS n FROM notification_rules GROUP BY notify_mode",
     ),
     ("total users", "SELECT COUNT(*) AS n FROM users"),
-    (
-        "oauth_states rows",
-        "SELECT COUNT(*) AS n FROM oauth_states",
-    ),
+    # No `oauth_states` probe: migration 0031 drops that table, so after it
+    # applies this would print "ERROR: UndefinedTable" on every run for a table
+    # we deliberately removed. A diagnostic that reports expected errors trains
+    # the operator to ignore its errors.
 ]
 
 with psycopg.connect(dsn) as conn:

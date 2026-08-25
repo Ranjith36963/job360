@@ -19,7 +19,7 @@
 | **Auth** | Custom: argon2 passwords + signed cookies + sessions | — (fine; swap to Supabase/Clerk later if desired) | free |
 | **Payments** | ❌ none | **Stripe** — the money switch | ~2–3% of sales |
 | **Plans / paywall** | ❌ none (design only) | **Free/Premium tiers + usage quota + pricing page** | free |
-| **Email** | Gmail SMTP + apprise | **Resend or AWS SES** — reliable transactional email | ~free at low volume |
+| **Email** | **Resend HTTPS API** (production transport — `services/channels/email_url.py` builds `resend://` when a Resend key is present; Railway blocks outbound SMTP ports 25/465/587, so this is the only transport that actually delivers there) + `mailtos://` SMTP kept only as the local/self-hosted fallback | Separate subdomain + DKIM for alert email (keep `login@job360.uk` low-volume and pristine); bounce/complaint webhook consumption | free tier / ~$ at volume |
 | **Notifications** | apprise (email + webhook) | Deploy Redis + worker so they fire in prod | free |
 | **Encryption / secrets** | Fernet (cryptography), env vars | Secrets manager + boot-time env validation | free |
 | **Logging** | File logs + correlation IDs + `audit.log` | Fill dark zones (workers, DB, auth, notifications) | free |
@@ -31,7 +31,7 @@
 | **CI/CD** | GitHub Actions (`ci-offline`, `live-e2e`) | Full gate (pytest + ruff + mypy + build) + enable on GitHub | free |
 | **Scaling / reliability** | SQLite + busy-timeout retry | Postgres + DB backups + uptime monitor | free tier |
 | **Legal / compliance** | `/privacy` + `/terms` pages, GDPR delete | **ICO registration** + lawyer review of privacy/LIA | £40 once |
-| **Job data sources** | 47 free/keyed sources | Optional: paid aggregator (Fantastic Jobs) for LinkedIn/Indeed | ~$1/1k |
+| **Job data sources** | 41 sources (`SOURCE_REGISTRY` keys; 40 unique classes — `indeed`/`glassdoor` share `JobSpySource`), free + keyed | Optional: paid aggregator (Fantastic Jobs) for LinkedIn/Indeed | ~$1/1k |
 | **Onboarding** | basic register → CV → search | Guided first-run flow (drives activation → paid) | free |
 | **Support** | ❌ none | Contact/support email + help/FAQ | free |
 

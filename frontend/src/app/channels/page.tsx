@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -230,9 +231,20 @@ export default function ChannelsSettingsPage() {
     <div className="mx-auto max-w-3xl space-y-8 py-12">
       <div>
         <h1 className="text-3xl font-semibold">Notification channels</h1>
+        {/* No fixed threshold or cadence here. Both are per-user settings
+            (score_threshold, notify_mode, interval_hours) editable on
+            /settings/notifications, so stating "≥80, daily" would contradict
+            whatever the user has actually saved. */}
         <p className="mt-2 text-muted-foreground">
-          Send matching jobs to your email. High-score matches (&ge;80) arrive
-          instantly; the rest roll into your daily digest.
+          Send matching jobs to your email. When they arrive, and how good a
+          match they have to be, is up to you — set that in{" "}
+          <Link
+            href="/settings/notifications"
+            className="underline underline-offset-4"
+          >
+            notification settings
+          </Link>
+          .
         </p>
       </div>
 

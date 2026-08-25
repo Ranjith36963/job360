@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 };
 
 // A legal document states when it changed; never derive this at render time.
-const LAST_UPDATED = "24 July 2026";
+const LAST_UPDATED = "24 August 2026";
 
 const SUBPROCESSORS: {
   name: string;

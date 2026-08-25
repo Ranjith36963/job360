@@ -49,18 +49,39 @@ Last activity 2026-08-09. Nobody has told us what they want, because nobody is h
 
 ## 2. What users look for (evidence, with its bounds)
 
-Our own data is too small to generalise from. These are external:
+Our own data is too small to generalise from. These are external — each claim below is now
+attributed to where it was actually found (re-checked 2026-08-24 while fixing a CodeRabbit finding
+that these numbers had no citations). Where a number could not be traced to the named source, it
+is marked **UNVERIFIED** rather than left silently attributed.
 
-- **Volume is the killer.** Users of high-volume job-alert products report ~10 emails/day and
-  unsubscribe on the spot. If more than half an alert is irrelevant, the alert is considered broken.
-- **Choice overload is real and large.** 6 options → 30% acted; 24 options → 3%. Every additional
-  10 options in a pension menu cut participation by 2%. This is about *decisions*, not about email.
-- **Ambiguity hurts more than rejection.** Psychologists call unexplained silence *ambiguous
-  rejection*: it produces rumination and self-blame in a way a clear "no" does not. The average
-  seeker takes 6–10 rejections before landing; confidence typically breaks around the fifth.
-  ~32% report exhaustion.
-- **Email is where scams reach them.** 95% of job seekers have met a suspicious offer; email is
-  the number one channel (65%), ahead of text (63%) and recruiter outreach (56%).
+- **Volume is a real risk; the exact "~10/day" figure is UNVERIFIED.** High-volume job-alert
+  aggregators are a known complaint pattern — WhatJobs' own review of a competitor notes users
+  "often report receiving multiple alerts per day" after signing up
+  ([whatjobs.com — Job2Careers review](https://www.whatjobs.com/news/job2careers-review-2026-legit-job-board-or-high-volume-email-engine/)),
+  and Scale.jobs frames its pitch around targeted alerts instead of high-volume ones
+  ([scale.jobs — "8 Ways To Set Up Smart Job Alerts"](https://scale.jobs/blog/smart-job-alerts-setup-methods)).
+  Neither source states "~10 emails/day" or "more than half irrelevant = broken" as a measured
+  figure — treat those two numbers as this document's own estimate, not a citation.
+- **Choice overload is a real, studied effect; the specific numbers below are UNVERIFIED against
+  the sources checked.** UX writing on the paradox of choice
+  ([usertesting.com — "Using Paradox of Choice in UX Design"](https://www.usertesting.com/blog/how-to-use-the-paradox-of-choice-in-ux-design))
+  confirms the *direction* — more options reduce action, e.g. Unbounce cut a form to 3 options and
+  saw conversions rise ~17% — but "6 options → 30% acted; 24 options → 3%" and "10 extra pension
+  options → −2% participation" are the classic Iyengar/Lepper jam study and Iyengar/Huberman/Jiang
+  401(k) study. Neither page found under unbounce.com or usertesting.com states these exact
+  numbers, so they are **UNVERIFIED** here — likely correct as a description of the underlying
+  research, but not confirmed against the two sources this doc names.
+- **Ambiguity hurts more than rejection — confirmed.** The average job seeker takes 6–10
+  rejections before landing a role, with confidence typically wavering after the fifth, and 32.4%
+  report exhaustion —
+  [blog.theinterviewguys.com — "Coping with Job Rejection Fatigue"](https://blog.theinterviewguys.com/coping-with-job-rejection-fatigue/)
+  (citing Huntr's Job Search Trends Report, Q1 2025). The specific psychological cost of
+  unexplained silence (vs. a clear no) is discussed in
+  [staffingbystarboard.com — "The Psychology of Rejection"](https://staffingbystarboard.com/blog/the-psychology-of-rejection-how-to-handle-100-applications-with-no-response/).
+- **Email is where scams reach them — confirmed.** 95% of job seekers report meeting a suspicious
+  offer; email is the top channel (65%), ahead of text (63%) and recruiter outreach (56%) —
+  [monster.com — "Job Scam Statistics 2026"](https://www.monster.com/career-advice/research/job-scam-statistics)
+  (Monster's 2026 Job Scam Report, n=884 U.S. workers).
 
 **What this actually means:** the scarce resource is not the user's inbox. It is the user's
 *decision capacity and their remaining confidence*. Everything below follows from that.
@@ -207,7 +228,9 @@ Do not build 6 or 7 until 1 is feeding them.
 
 - Usage numbers: our PostHog project, last 90 days, read 2026-08-18. Small n — they prove *we*
   have no demand signal, not what the market wants.
-- Psychology and scam figures: external sources, not our users.
+- Psychology and scam figures: external sources, not our users. Citations added 2026-08-24 (see
+  §2) — two of the four bullets carry numbers that could not be traced to a specific source and
+  are marked UNVERIFIED there rather than presented as sourced.
 - Code claims: re-read against `origin/main` (`8facf85`) on 2026-08-18. An earlier pass read a
   stale test branch and got the email-transport claim wrong; that is corrected above. Line numbers
   drift — re-grep before trusting them.

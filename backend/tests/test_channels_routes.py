@@ -165,14 +165,33 @@ def test_list_channels_returns_connection_status_and_target_label(api):
     )
     assert r.status_code == 201, r.text
 
+    # Write NON-DEFAULT values straight into the columns. Asserting the defaults
+    # ('connected' / NULL) proved nothing: a serializer that hardcoded them and
+    # never read user_channels would have passed, so the test guarded key
+    # presence, not the columns it claimed to guard.
+    from src.api.routes import channels as ch
+
+    db_path = str(ch.DB_PATH)
+
+    async def _set_non_defaults():
+        async with pg.connect(db_path) as db:
+            await db.execute(
+                "UPDATE user_channels SET connection_status=?, target_label=? "
+                "WHERE channel_type='webhook'",
+                ("degraded", "#general"),
+            )
+            await db.commit()
+
+    asyncio.run(_set_non_defaults())
+
     rows = api.get("/api/settings/channels").json()
     assert len(rows) == 1
-    # 'connected' is the column default — a manually added channel is live the
-    # moment it is created; there is no handshake left to be pending on.
-    assert rows[0]["connection_status"] == "connected"
-    # NULL for a channel the user typed in themselves: the label only ever came
-    # from an OAuth provider naming its own destination (e.g. "#general").
-    assert rows[0]["target_label"] is None
+    assert rows[0]["connection_status"] == "degraded", (
+        "connection_status must come from the column, not a hardcoded default"
+    )
+    assert rows[0]["target_label"] == "#general", (
+        "target_label must come from the column, not a hardcoded None"
+    )
 
 
 @pytest.mark.parametrize("dead_type", ["slack", "discord", "telegram"])

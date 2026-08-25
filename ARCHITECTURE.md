@@ -1,11 +1,11 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 
-> **Current state lives in `docs/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/pillars/` first.
+> **Current state lives in `docs/product/pillars/`** — three code-verified pillar docs (User, Search & Match Engine, Job Providers) plus a glossary and runbook are the *authoritative* architecture reference today. This file is preserved for historical continuity and gives a higher-level system overview; for any specific claim about the codebase, cross-check `docs/product/pillars/` first.
 
 ## System Overview
 
-Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 18-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through multiple channels (CLI, email, webhook, CSV, and a Next.js + FastAPI dashboard).
+Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`+`glassdoor` share `JobSpySource`), scores them against a per-user profile, deduplicates via a four-layer cascade, optionally enriches the high-scorers with an LLM-extracted 16-field structured schema, optionally encodes semantic embeddings into ChromaDB, and delivers results through CLI, email, webhook, CSV, and a Next.js + FastAPI dashboard.
 
 **Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (25) and `VISA_KEYWORDS` (8) remain — both domain-agnostic.
 
@@ -51,7 +51,7 @@ job360/
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (41 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS (25) + VISA_KEYWORDS (8); all other lists [] post-3ba1342
-│   │   │   ├── companies.py          # ATS company slugs (~264 across 11 platforms)
+│   │   │   ├── companies.py          # ATS company slugs (297 polled across 10 ATS sources; RIPPLING_COMPANIES has slugs but no source class)
 │   │   │   ├── skill_synonyms.py     # 493-entry alias dict (k8s↔kubernetes, ...)
 │   │   │   ├── fx.py                 # 18-currency → GBP rates
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
@@ -69,23 +69,23 @@ job360/
 │   │   │   ├── conditional_cache.py  # 256-entry FIFO for ETag/Last-Modified
 │   │   │   ├── llm_matcher.py        # Engine #4: LLM judge (MATCHER_ENABLED; MatchVerdict persisted onto user_feed)
 │   │   │   ├── job_enrichment.py     # enrich_batch() (opt-in)
-│   │   │   ├── job_enrichment_schema.py  # 18-field Pydantic JobEnrichment + 8 enums
+│   │   │   ├── job_enrichment_schema.py  # 16-field Pydantic JobEnrichment + 7 enums
 │   │   │   ├── embeddings.py         # encode_job() via sentence-transformers (opt-in, lazy)
 │   │   │   ├── vector_index.py       # ChromaDB wrapper (opt-in, lazy)
 │   │   │   ├── retrieval.py          # BM25 + RRF fusion + cross-encoder rerank (opt-in)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
-│   │   │   ├── channels/             # crypto (Fernet), dispatcher (Apprise lazy)
-│   │   │   ├── notifications/        # email / slack / discord / report_generator (legacy CLI summaries)
+│   │   │   ├── channels/             # dispatcher (Apprise lazy), crypto (Fernet), email_url, ssrf_guard
+│   │   │   ├── notifications/        # defaults (signup rulebook seeder), report_generator
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + 25-migration forward-compat schema
+│   │   │   ├── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + 31-migration forward-compat schema (0000 → 0030)
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
 │   │   │   ├── apis_keyed/   (8)     # reed, adzuna, jsearch, jooble, google_jobs, careerjet, findwork, gov_apprenticeships
-│   │   │   ├── apis_free/    (9)     # arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs, landingjobs, aijobs, hn_jobs, teaching_vacancies
-│   │   │   ├── ats/          (11)    # greenhouse, lever, workable, ashby, smartrecruiters, pinpoint, recruitee, workday, personio, successfactors, rippling
-│   │   │   ├── feeds/        (8)     # jobs_ac_uk, nhs_jobs, nhs_jobs_xml, workanywhere, weworkremotely, realworkfromanywhere, biospace, uni_jobs
+│   │   │   ├── apis_free/    (9)     # arbeitnow, remoteok, jobicy, himalayas, remotive, devitjobs, landingjobs, hn_jobs, teaching_vacancies
+│   │   │   ├── ats/          (10)    # greenhouse, lever, workable, ashby, smartrecruiters, pinpoint, recruitee, workday, personio, successfactors
+│   │   │   ├── feeds/        (4)     # nhs_jobs, weworkremotely, realworkfromanywhere, uni_jobs
 │   │   │   ├── scrapers/     (5)     # linkedin, climatebase, eightykhours, bcs_jobs, aijobs_ai
 │   │   │   └── other/        (4)     # indeed (JobSpySource → indeed+glassdoor), hackernews, themuse, nofluffjobs
 │   │   ├── workers/                  # ARQ tasks (lazy arq import; pure-async for tests)
@@ -94,16 +94,16 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # 3,297 collected / 3,295 selected (2 `live` deselected) across 217 test_*.py files (defer to runtime count)
+│   └── tests/                        # across 218 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
 │   └── src/lib/{api.ts,types.ts,utils.ts}
 ├── docs/
-│   ├── pillars/                      # 3 pillar manuals + glossary + runbook (THE current architecture reference)
+│   ├── product/pillars/              # 3 pillar manuals + glossary + runbook (THE current architecture reference)
 │   └── ...                           # IMPLEMENTATION_LOG, plans/, research/, reviews/, step_*_plan.md
 ├── .env.example
-└── CLAUDE.md                         # Canonical AI agent instructions (24 hard rules)
+└── CLAUDE.md                         # Canonical AI agent instructions (31 hard rules)
 ```
 
 ---
@@ -265,14 +265,14 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 | # | Engine | Service | Flag | Default |
 |---|--------|---------|------|---------|
 | 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | always on | ON |
-| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:519-536`; data from the enrichment step `services/job_enrichment.py`) | `ENRICHMENT_ENABLED` | false |
+| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:582-617`; data from the enrichment step `services/job_enrichment.py`) | `ENRICHMENT_ENABLED` | false |
 | 3 | Hybrid | `services/embeddings.py` + `vector_index.py` + `retrieval.py` | `SEMANTIC_ENABLED` | false |
 | 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `MATCHER_ENABLED` | false |
 
 **Engine 4 — LLM judge detail:**
 - Service: `backend/src/services/llm_matcher.py`. `MatchVerdict{fit_score: int 0-100, verdict: str, reason: str}`.
 - `match_batch()` runs with `asyncio.Semaphore(3)`, skips jobs already holding a verdict, per-job errors swallowed.
-- Uses `llm_provider.llm_extract_validated` (Gemini→Groq→Cerebras chain). Test isolation via `llm_extract_validated_fn` kwarg.
+- Uses `llm_provider.llm_extract_validated` (OpenAI (PRIMARY) → Gemini → Groq → Cerebras chain — `llm_provider.py:329-334`). Test isolation via `llm_extract_validated_fn` kwarg.
 - Results stored on `user_feed` (per-user state; rules #10/#17 keep shared catalog tables untouched). Migration 0017 adds `llm_fit_score`, `llm_verdict`, `llm_reason`, `llm_matched_at`.
 - `_run_matcher_stage` in `src/main.py` invokes `match_batch` after the per-user feed write.
 - Feed read path: `SELECT ... ORDER BY COALESCE(llm_fit_score, score) DESC`.
@@ -286,9 +286,9 @@ Every row written to `user_feed` now carries a `profile_version INTEGER` column 
 Two operating modes:
 
 - **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it enqueues `rescore_user_feed_task` on the ARQ worker queue (`src/api/routes/profile.py:163`) — a deploy that kills the web process no longer drops the re-score, and ARQ retries it. Only when the queue is unreachable does it fall back to an in-process `asyncio` task (`profile.py:179-184`). The rescore service (`src/services/rescore.py`) clears the user's LLM verdicts (`clear_user_verdicts` in `llm_matcher.py`) and re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. If `MATCHER_ENABLED` is on, the LLM re-judge also runs for the top candidates.
-- **Mode 2 — ordinary search / refresh.** Newly-fetched jobs get scored and stamped with the current profile version. Existing `user_feed` rows are left untouched — their scores and verdicts stay as-is (`skip_existing` lock in `match_batch`).
+- **Mode 2 — ordinary search / refresh.** Newly-fetched jobs get scored and stamped with the current profile version. Every authenticated search ALSO runs `backfill_feed_from_catalog(user_id, db)` (`src/main.py:1272-1278`), which scores the shared catalog for that user and upserts feed rows — so existing rows are re-visited, not skipped. Their **scores** still hold steady: `upsert_feed_row` freezes the score on an existing row when the incoming `profile_version` **and** `scorer_version` both match the stored ones, and overwrites it when either differs (`src/services/feed.py:288-303`). `bucket` and both version stamps are always rewritten. Verdicts are separately protected by the `skip_existing` lock in `match_batch` (`src/services/llm_matcher.py:436,443`).
 
-**Invariant:** a job's score only changes when the PROFILE changes, never just because time passed. The `jobs` and `job_enrichment` shared catalog tables are not touched (rules #10/#17 still hold).
+**Invariant:** a job's score only changes when the PROFILE changes or `SCORER_VERSION` is bumped — never just because time passed. That is enforced by the version-conditional freeze above, not by skipping the write. The `jobs` and `job_enrichment` shared catalog tables are not touched (rules #10/#17 still hold).
 
 ---
 
@@ -511,7 +511,7 @@ PDF/DOCX -> extract_text() -> raw text
   |
   +-> _find_sections() -> {skills, experience, education, certifications, summary}
   |
-  +-> LLM extraction via llm_provider.py (Gemini/Groq/Cerebras with free-tier fallback)
+  +-> LLM extraction via llm_provider.py (OpenAI PRIMARY, then Gemini/Groq/Cerebras free-tier fallback)
   |     Returns: skills[], job_titles[], education[], certifications[], summary
   |     The regex KNOWN_SKILLS / KNOWN_TITLE_PATTERNS approach was removed in commit 804725c
 ```
@@ -546,8 +546,9 @@ new sources `about_me_llm` (weight 2.0) and `github_llm` (1.5) feed
 > ⚠️ **REMOVED — do not write against it.** The `NotificationChannel` ABC
 > (`src/services/notifications/base.py`), its auto-discovery helpers
 > (`get_all_channels()` / `get_configured_channels()`) and the per-channel classes
-> (`EmailChannel` / `SlackChannel` / `DiscordChannel`) no longer exist. The only modules
-> left under `src/services/notifications/` are `__init__.py` and `report_generator.py`.
+> (`EmailChannel` / `SlackChannel` / `DiscordChannel`) no longer exist. What is left
+> under `src/services/notifications/` is `__init__.py`, `report_generator.py` and
+> `defaults.py` (signup rulebook seeder) — no channel classes, no discovery.
 > Verified 2026-08-19 — `grep -rn "class NotificationChannel\|def get_all_channels" backend/src/`
 > returns nothing.
 
@@ -669,7 +670,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 | `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
 | `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
 | `APP_ENV` / `RAILWAY_ENVIRONMENT` | No | Prod detection for HSTS + required-env validation (`APP_ENV=production` OR any `RAILWAY_ENVIRONMENT`) |
-| ~~`JOB360_ENV`~~ | **DEAD** | No longer read anywhere in `src/` (only a comment at auth.py:120 records that it once was). The session-cookie `Secure` flag now gates on the SAME signal as HSTS/Sentry/CORS — `middleware._is_production()` = `APP_ENV=production` OR `RAILWAY_ENVIRONMENT` set (auth.py:115-121). Railway injects `RAILWAY_ENVIRONMENT` automatically, so prod cookies ARE `Secure`. **This row previously said the opposite and cost a session real time chasing a non-existent hole — do not re-add `JOB360_ENV`.** |
+| ~~`JOB360_ENV`~~ | **DEAD** | No longer read anywhere in `src/` (only a comment at auth.py:130 records that it once was). The session-cookie `Secure` flag now gates on the SAME signal as HSTS/Sentry/CORS — `middleware._is_production()` = `APP_ENV=production` OR `RAILWAY_ENVIRONMENT` set (`_set_session_cookie`, auth.py:125-139; the gate itself is `middleware.py:34`). Railway injects `RAILWAY_ENVIRONMENT` automatically, so prod cookies ARE `Secure`. **This row previously said the opposite and cost a session real time chasing a non-existent hole — do not re-add `JOB360_ENV`.** |
 | `SENTRY_DSN` | No | Sentry error tracking; empty = disabled |
 | `TAILOR_FREE_PER_MONTH` | No (default `10`) | Free-tier cap on AI CV/cover-letter generations per user/month |
 | `PROFILE_EXTRACT_MAX_PER_HOUR` | No (default `12`) | Cost cap on profile re-extraction. EVERY profile change re-runs the full two-pass extraction (4+ paid LLM calls); five routes reach `_extract_save_trigger` and nothing bounded it. Over the limit returns HTTP 429. `0` disables. Uses the shared limiter, so `RATE_LIMIT_REDIS=true` makes the cap hold across replicas |
@@ -769,7 +770,7 @@ Each source has configured `concurrent` (max parallel requests) and `delay` (sec
 | uvicorn[standard] | >=0.30.0 | ASGI server for FastAPI |
 | python-multipart | >=0.0.9 | File upload support |
 | httpx | >=0.27.0 | Async HTTP client (used by API + LLM providers) |
-| openai | >=1.0.0 | **PRIMARY** CV-parsing LLM provider. Was undeclared for months — the import failed in prod and `llm_provider.py:154`'s broad `except` swallowed it as "provider failed", so OpenAI silently never ran |
+| openai | >=1.0.0 | **PRIMARY** CV-parsing LLM provider. Was undeclared for months — the import failed in prod and `llm_provider.py:343`'s broad `except` swallowed it as "provider failed", so OpenAI silently never ran |
 | google-generativeai / groq / cerebras-cloud-sdk | >=0.8.0 / >=0.11.0 / >=1.0.0 | Fallback LLM providers for CV parsing |
 | argon2-cffi / itsdangerous / cryptography / email-validator | >=23.1.0 / >=2.2.0 / >=42.0.0 / >=2.1.0 | Auth + signed sessions + Fernet channel-credential encryption (Batch 2) |
 | apprise | >=1.7.0 | Multi-channel notification dispatch (Batch 2; **lazy-imported**, rule #11) |

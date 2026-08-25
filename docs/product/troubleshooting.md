@@ -60,7 +60,7 @@ GROQ_API_KEY=...
 CEREBRAS_API_KEY=...
 ```
 
-Fallback chain (see `src/services/profile/llm_provider.py`): Gemini → Groq → Cerebras. If all three fail, CV parsing returns empty skill/title lists.
+Fallback chain (`src/services/profile/llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. If every configured provider fails, `llm_extract` raises `LLMRateLimited` (retry later) or `LLMAllProvidersFailed`; with no key at all it raises `LLMKeyMissing`. Callers must NOT persist an empty result on `LLMRateLimited`.
 
 Debug with:
 

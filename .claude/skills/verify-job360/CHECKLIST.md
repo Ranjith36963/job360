@@ -22,7 +22,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 ---
 
 ## A. Landing & entry
-- [ ] 1. Landing `/` renders — hero, stats card (must read **47 sources**), CTAs
+- [ ] 1. Landing `/` renders — hero, stats card, CTAs. **The card should read 41 sources** (41 registry keys; 40 live instances). The hardcoded **47** that made this box fail through 2026-08-24 is gone: every rendered count — hero, stats card, footer strapline, and the OG/Twitter card metadata — now reads `SOURCE_COUNT` from `frontend/src/lib/catalog.ts` (`page.tsx`, `layout.tsx`, `Footer.tsx`). If the number on screen disagrees with `SOURCE_REGISTRY`, the bug is in that one constant, and `scripts/doc_sync_check.py` (guard `landing-source-count`) should already be red.
 - [ ] 2. Every nav + footer link and the Get-started / Login buttons navigate correctly
 
 ## B. Auth (full lifecycle)

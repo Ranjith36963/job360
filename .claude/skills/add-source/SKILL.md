@@ -26,10 +26,10 @@ test suite fails on a hardcoded count:
 
 ```bash
 cd backend && python -c "from src.main import SOURCE_REGISTRY as R; print(len(R), len(set(R.values())))"
-grep -rn "== 47\|sources_total\|len(SOURCE_REGISTRY)" tests/test_cli.py tests/test_api.py
+grep -rn "== 41\|sources_total\|len(SOURCE_REGISTRY)" tests/test_cli.py tests/test_api.py
 ```
 
-At the time of writing that prints `47 46` — 47 registry keys but 46 unique
+At the time of writing that prints `41 40` — 41 registry keys but 40 unique
 classes, because `indeed` and `glassdoor` both alias `JobSpySource`. Test
 assertions treat the **registry key count** as authoritative.
 
@@ -63,7 +63,7 @@ assertions treat the **registry key count** as authoritative.
   slugs from `core/companies.py`.
 - **RSS/XML source:** `_get_text()` → parse with **defusedxml**, not plain
   `ElementTree.fromstring` — these feeds are untrusted input and M18 closed the
-  XXE hole. The in-repo pattern (see `src/sources/feeds/jobs_ac_uk.py:2-7`) is
+  XXE hole. The in-repo pattern (see `backend/src/sources/feeds/nhs_jobs.py:2-8`) is
   `import xml.etree.ElementTree as ET` for the types plus
   `from defusedxml.ElementTree import fromstring as _safe_fromstring  # type: ignore[import-untyped]`
   for the actual parse. Consider `_get_json_conditional` if upstream honours
@@ -109,9 +109,9 @@ and `email_body.py` decides how it reads. A new channel renders a
 
 ⚠️ **Older docs told you to implement a `NotificationChannel` ABC and register it
 in `get_all_channels()` in `src/services/notifications/base.py`. That module and
-both symbols no longer exist** (verified 2026-08-03 and re-verified 2026-08-11 —
-`src/services/notifications/` now holds only `__init__.py` and
-`report_generator.py`). An agent following the old instruction would be writing
+both symbols no longer exist** (verified 2026-08-03, re-verified 2026-08-24 —
+`src/services/notifications/` now holds `__init__.py`, `report_generator.py` and
+`defaults.py`, and no channel classes). An agent following the old instruction would be writing
 against a deleted API.
 
 Respect rules #23 and #24 while you are in there:

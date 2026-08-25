@@ -151,10 +151,23 @@ def test_unjudged_card_does_not_invent_a_reason():
 
     Filling the gap with a generated-sounding sentence would poison the one
     thing that makes the email trustworthy.
+
+    ``primary_score`` and ``keyword_score`` are deliberately DIFFERENT numbers
+    here. The fixture used to set both to 62, which made ``assert "62" in body``
+    unable to fail on the thing it claimed: a renderer that dropped
+    ``primary_score`` and printed only ``keyword_score`` would still have
+    passed. 41 appears nowhere in the rendered output, so the assertion below
+    can only hold if the primary score is what was rendered.
     """
-    card = _card(is_judged=False, verdict=None, reason=None, primary_score=62)
+    card = _card(
+        is_judged=False, verdict=None, reason=None, primary_score=62, keyword_score=41
+    )
     body = render_digest_text([card], considered=1, dropped_reasons=[])
-    assert "62" in body
+    assert "62" in body, "the primary score must be the number shown"
+    assert "41" not in body, (
+        "the keyword score must NOT be rendered for an unjudged card — it IS "
+        "the primary score there, and printing both would show one job two scores"
+    )
     assert "strong" not in body
     assert "None" not in body
 

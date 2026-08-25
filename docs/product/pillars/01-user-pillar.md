@@ -1,3 +1,4 @@
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 # Pillar 1 — The User Side
 
 > **Audience.** Read this if you want to understand everything Job360 does *for a human end-user* — sign up, upload a CV, see matched jobs, track applications, get notified. This document covers no source-fetching internals and no scoring math; those are Pillars 2 and 3.
@@ -10,7 +11,7 @@
 
 In one sentence:
 
-> *Job360 lets a user create an account, describe themselves (CV + LinkedIn + GitHub + preferences), automatically receive a personalised stream of UK jobs ranked 0–100, take action on them (like, apply, dismiss), track their applications through a pipeline, and get notified via email or webhook with per-channel quiet-hours and digest schedules.*
+> *Job360 lets a user create an account, describe themselves (CV + LinkedIn + GitHub + preferences), automatically receive a personalised stream of UK jobs ranked 0–100, take action on them (like, apply, dismiss), track their applications through a pipeline, and get notified via email or webhook, governed by ONE per-user quiet-hours and digest schedule that applies to every channel they've connected (rule #23) — never a separate schedule per channel.*
 
 The user pillar is implemented as **four concentric rings**, each one assuming the previous:
 
@@ -57,7 +58,7 @@ Alice uploads her CV PDF. Frontend `POST /api/profile` with multipart `cv=<file>
 2. Save uploaded file to a temp dir.
 3. `cv_parser.parse_cv_async(temp_path)`:
    - `extract_text_from_pdf()` via `pdfplumber`.
-   - `llm_extract_validated(prompt, CVSchema, max_retries=2)` — Gemini first; on Pydantic `ValidationError`, errors are appended to the prompt and the call retries; falls through to Groq, then Cerebras.
+   - `llm_extract_validated(prompt, CVSchema, max_retries=2)` — **OpenAI (`gpt-4o-mini`) first**, then Gemini; on Pydantic `ValidationError`, errors are appended to the prompt and the call retries; falls through to Groq, then Cerebras.
    - Returns `CVData` (skills, titles, companies, education, …).
 4. `preferences.merge_cv_and_preferences(cv_data, prefs)` → composite skills/titles list with user prefs taking priority.
 5. `UserProfile(cv_data, preferences)` saved via `storage.save_profile(profile, user_id, source_action="upload")` — UPSERTs `user_profiles` (tip) **and** INSERTs `user_profile_versions` (immutable snapshot, retention 10).
@@ -72,7 +73,7 @@ When the worker tick runs (or CLI `python -m src.cli run` is invoked) — Pillar
 
 1. Loads Alice's `UserProfile` via `storage.load_profile(alice.id)`.
 2. Generates `SearchConfig` from it (Pillar 2 §3.1) — the bridge from Pillar 1 to Pillar 2.
-3. Instantiates `JobScorer(search_config, user_preferences=alice.prefs, enrichment_lookup=lookup)` — both kwargs, per rule #20.
+3. Instantiates `JobScorer(search_config, user_preferences=alice.prefs, enrichment_lookup=lookup)`. `user_preferences` is what turns the Batch-2.9 dims on (rule #20); the lookup is optional and only decides whether they read real data or their neutral halves.
 4. Domain-filters sources via `classify_user_domain(alice.profile)` → say `{"tech"}` → keeps tech + general sources, drops healthcare/academia/education/climate-only sources.
 5. Fetches → prefilters → scores → dedups → stores.
 
@@ -105,8 +106,8 @@ On the channels page:
 
 Then a rule:
 
-- `POST /api/settings/notification-rules {channel:"email", score_threshold:80, notify_mode:"instant", quiet_hours_start:"22:00", quiet_hours_end:"07:00"}`
-- UPSERT by `UNIQUE(user_id, channel)`. Stored in `notification_rules`.
+- `PUT /api/settings/notification-rule {score_threshold:80, notify_mode:"instant", quiet_hours_start:"22:00", quiet_hours_end:"07:00"}`
+- UPSERT by `UNIQUE(user_id)`. Stored in `notification_rules`. **One rulebook per user, not one per channel** (CLAUDE.md rule #23) — the rule governs every channel Alice has connected, so there is no `channel` field in the body.
 
 ### T+2h — A fresh job posts, Alice gets notified
 
@@ -118,7 +119,7 @@ Worker fetches a new job, scores it 87 for Alice. `score_and_ingest`:
 `send_notification` worker task:
 
 1. Loads Alice's enabled channels → finds the email channel.
-2. Consults `notification_rules` for `(alice.id, 'email')`: enabled, threshold ≤ 87 ✓.
+2. Consults Alice's single `notification_rules` row (looked up by `user_id` alone): enabled, threshold ≤ 87 ✓.
 3. Current time in Alice's `users.timezone` → outside quiet hours (22:00–07:00) ✓.
 4. Idempotency check on `notification_ledger UNIQUE(user_id, job_id, channel)` — no row → proceed.
 5. `crypto.decrypt()` the channel credential.
@@ -190,7 +191,7 @@ The **shared `jobs` catalog never gets a `user_id`** (rule #10). Every per-user 
 
 ## 3. Ring 2 — Profile (CV + LinkedIn + GitHub + Preferences)
 
-The profile is what turns Job360 from "show me all 47 sources' raw output" into "show me the jobs *I* care about." Every downstream piece of the pillar — what's in the feed, what gets scored highly, what gets notified — depends on a populated profile.
+The profile is what turns Job360 from "show me all 41 sources' raw output" into "show me the jobs *I* care about." Every downstream piece of the pillar — what's in the feed, what gets scored highly, what gets notified — depends on a populated profile.
 
 ### 3.1 What the user experiences
 
@@ -220,7 +221,7 @@ Writes to `DEFAULT_TENANT_ID` (the placeholder user). Used by single-tenant inst
 
 1. **Extract text** with `pdfplumber` (with font-size clustering for layout-aware section splitting — see `layout.segment_sections_from_words`) or `python-docx`.
 2. **Call an LLM** via `llm_extract_validated(prompt, CVSchema)` (`backend/src/services/profile/llm_provider.py`). The schema is enforced with Pydantic; on validation failure the prompt is re-sent up to 2× with the validation error appended so the model can self-correct.
-3. **Provider fallback chain**: Gemini → Groq → Cerebras. Whichever has a working API key wins. If all three fail, `RuntimeError` is raised — the system never silently degrades to regex parsing (the old `KNOWN_SKILLS` / `KNOWN_TITLE_PATTERNS` approach was deliberately removed in commits 804725c and 3ba1342).
+3. **Provider fallback chain** (`llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. Whichever has a working API key wins. If all three fail, `RuntimeError` is raised — the system never silently degrades to regex parsing (the old `KNOWN_SKILLS` / `KNOWN_TITLE_PATTERNS` approach was deliberately removed in commits 804725c and 3ba1342).
 4. **ESCO normalisation code exists but has never run in production.** `_maybe_normalise_skills_via_esco()` (`cv_parser.py:804`) is a real no-op today: it needs both `SEMANTIC_ENABLED=true` AND a prebuilt embedding index at `backend/data/esco/`, and that directory has never been committed or generated (verified: `ls backend/data/esco` → does not exist). Root `CLAUDE.md` rule #28 states this as FACT (verified 2026-08-11): "no ontology is consulted... ESCO is inert scaffolding, never built or shipped." Reviving it means shipping the index artefacts, not flipping a flag.
 
 #### LinkedIn PDF — `backend/src/services/profile/linkedin_parser.py`
@@ -328,29 +329,34 @@ Only the survivors get the full `JobScorer` treatment (Pillar 2).
 
 ### 4.4 Channels — `backend/src/services/channels/`
 
-- **`user_channels` table** (`backend/migrations/0005_user_channels.up.sql`) — per-user channel config. Credentials are encrypted with **Fernet** using `CHANNEL_ENCRYPTION_KEY`. Two `channel_type` values map to Apprise URL schemes:
-  - `email` → `mailtos://user:pass@smtp.gmail.com?to=dest`
+- **`user_channels` table** (`backend/migrations/0005_user_channels.up.sql`) — per-user channel config. Credentials are encrypted with **Fernet** using `CHANNEL_ENCRYPTION_KEY`. Two `channel_type` values:
+  - `email` → built by `services/channels/email_url.py:build_email_apprise_url()`, which **prefers `resend://{apikey}:{from}/{to}/`** whenever a Resend API key is configured (`RESEND_API_KEY`, or `SMTP_PASSWORD` when it carries a `re_` prefix) — Railway blocks outbound SMTP ports 25/465/587, so this is the transport that actually delivers there. It falls back to `mailtos://user:pass@host?to=dest` only when no Resend key is present but real SMTP credentials are (local/self-hosted deployments). Returns `None` (caller decides 503 vs. silent skip) when neither transport is configured.
   - `webhook` → `json://host/path`
 - **`backend/src/services/channels/crypto.py`** — `encrypt(plaintext) → bytes` / `decrypt(ciphertext) → str`. Fails closed if `CHANNEL_ENCRYPTION_KEY` is unset.
-- **`backend/src/services/channels/dispatcher.py`** — thin wrapper around Apprise. Imports `apprise` *lazily inside the function* (CLAUDE.md rule #11 — Apprise pulls ~30 MB of deps; library code must not pay that cost on import). Tests monkeypatch `apprise.Apprise`. The dispatcher runs each notification through four gates before sending: (1) `enabled=0` skip, (2) `match_score < score_threshold` skip, (3) `notify_mode='digest'` route to the digest queue, (4) inside quiet-hours window (evaluated with stdlib `zoneinfo` against `users.timezone`) route to digest or drop.
-- **Dual systems coexist.** The pre-Batch-2 single-tenant notification code in `src/services/notifications/{email_notify,slack_notify,discord_notify}.py` is still active — it reads env vars (`SMTP_EMAIL`, `SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`) and is used by the **CLI batch run** at end-of-run to send a single per-source summary. The new per-user `src/services/channels/dispatcher.py` is only invoked by ARQ worker tasks under an authenticated `user_id`. They never collide because they read different config surfaces.
+- **`backend/src/services/channels/dispatcher.py`** — thin wrapper around Apprise. Imports `apprise` *lazily inside the function* (CLAUDE.md rule #11 — Apprise pulls ~30 MB of deps; library code must not pay that cost on import). Tests monkeypatch `apprise.Apprise`. The dispatcher runs each notification through gates before sending: (1) `enabled=0` skip, (2) `match_score < score_threshold` skip, (3+4) `notify_mode` is a **bundling** mode (`daily` / `every_n_hours`) **or** the moment falls inside the quiet-hours window (evaluated with stdlib `zoneinfo` against `users.timezone`) → queue for the digest instead of sending now (`backend/src/services/channels/dispatcher.py:317`). `force=True` bypasses gate 3+4 and is how `send_bundle` delivers already-queued rows.
+- **There is only ONE delivery path.** The pre-Batch-2 single-tenant notification code (`backend/src/services/notifications/{base,email_notify,slack_notify,discord_notify}.py`, env-var webhooks) was **deleted** — see the removal note in `ARCHITECTURE.md` / `README.md`. Everything user-facing goes through the per-user `backend/src/services/channels/dispatcher.py`, invoked by ARQ worker tasks under an authenticated `user_id`. The CLI batch run no longer sends its own summary: it writes a markdown report via `generate_markdown_report()` from `backend/src/services/notifications/report_generator.py` (`backend/src/main.py:49`) and enqueues the ordinary per-user `send_notification` task for above-threshold feed rows (`backend/src/main.py:481` `_enqueue_notifications`).
 - **API** — `backend/src/api/routes/channels.py`:
   - `GET /api/settings/channels` — list caller's channels
   - `POST /api/settings/channels` — create (encrypts credential server-side)
   - `DELETE /api/settings/channels/{id}` — delete (two-layer ownership check: SELECT in route + dispatcher re-checks `user_id`)
   - `POST /api/settings/channels/{id}/test` — send a "test" message, return ok/error
 
-### 4.5 Notification rules — `backend/migrations/0012_notification_rules.up.sql`
+### 4.5 Notification rules — `backend/migrations/0020_notification_rule_single.up.sql`
+
+Migration `0012` created this table **per channel**. Migration `0020` collapsed it to **one row per user** — the `channel` column and `digest_send_time` are gone, and `notify_mode` gained two bundling modes:
 
 ```sql
-notification_rules(id, user_id FK, channel, score_threshold=60, notify_mode='instant'|'digest',
-                   quiet_hours_start, quiet_hours_end, digest_send_time='08:00', enabled)
-UNIQUE(user_id, channel)
+notification_rules(id, user_id FK, score_threshold=60,
+                   notify_mode='instant'|'daily'|'every_n_hours',
+                   interval_hours=6, daily_send_time='08:00',
+                   quiet_hours_start, quiet_hours_end, last_sent_at, enabled)
+UNIQUE(user_id)
 ```
 
-Lets the user say *"email me only for score ≥ 75, but only between 09:00 and 18:00; webhook as a daily 08:00 digest."* The `users.timezone` column (added in the same migration, default `'UTC'`) is what quiet-hours and digest times are evaluated against.
+One rulebook governs **all** of a user's channels at once (CLAUDE.md rule #23), so the user says *"notify me for score ≥ 75, bundled daily at 08:00, nothing between 22:00 and 07:00"* — not one policy per channel. Since 2026-08-24 "all channels" means email and webhook, and nothing else. The `users.timezone` column (added by `0012`, default `'UTC'`) is what quiet hours and `daily_send_time` are evaluated against.
 
-- API: `backend/src/api/routes/notification_rules.py` — `GET`, `POST` (upsert by user+channel), `PATCH`, `DELETE`. Every endpoint filters by `user_id = current_user.id`.
+- API: `backend/src/api/routes/notification_rules.py` — exactly two endpoints, `GET /api/settings/notification-rule` (returns `null` when unset) and `PUT /api/settings/notification-rule` (upsert, merging unsupplied fields). Both gate on `Depends(require_user)` and key off `user.id`; neither accepts a `user_id` from the request (rule #12).
+- A rulebook is **seeded at signup** (`services/notifications/defaults.py`, master switch `NOTIFY_SEED_DEFAULTS`) — before that, nothing in the product ever created a row, so no user could be alerted at all.
 
 ### 4.6 Notification ledger — `backend/migrations/0004_notification_ledger.up.sql`
 
@@ -365,7 +371,7 @@ This is the **idempotency table**: the UNIQUE constraint *guarantees* a (user, j
 
 ### 4.7 Digest queue — `backend/migrations/0013_user_notification_digests.up.sql`
 
-When `notify_mode='digest'`, individual job matches are queued in `user_notification_digests` rather than sent immediately. A scheduled worker drains the queue at `digest_send_time` in the user's timezone, batches all queued items into one message, and writes the result to the ledger.
+When `notify_mode` is a bundling mode (`daily` / `every_n_hours`) — or when an `instant` match lands inside quiet hours — the match is queued in `user_notification_digests` rather than sent immediately. The `notification_tick` ARQ cron runs **every 5 minutes** (`workers/settings.py:233`), asks `_bundle_due()` per enabled rule (using `daily_send_time` / `interval_hours` in the user's timezone), and enqueues `send_bundle` when due. `send_bundle` batches the queued rows into one Apprise call per channel with `force=True`, marks them `sent`, and writes the ledger — flipping a channel's ledger row to `dlq` after `MAX_BUNDLE_RETRIES` failures. `notification_tick` also flushes an `instant` user's queue once quiet hours end, which nothing else would drain.
 
 ### 4.8 Worker layer — `backend/src/workers/tasks.py`
 
@@ -373,7 +379,8 @@ Pure async functions (no `arq` import at module top level, per CLAUDE.md rule #1
 
 - `score_and_ingest(ctx, job_id, users_override=None)` — Pillar 2's `JobScorer` runs here; on success it `upsert_feed_row()`s into every user whose profile matches, then enqueues `send_notification` for any feed row above each user's threshold. The `users_override` kwarg lets the test suite scope to a single user without seeding others.
 - `send_notification(ctx, user_id, job_id, urgency='instant')` — dispatches to all of the user's enabled channels via `dispatcher.dispatch()`; one ledger row written per channel.
-- `send_daily_digest(ctx, user_id, channel)` — drains queued rows from `user_notification_digests`, batches into one Apprise call, marks rows `sent=1`.
+- `send_bundle(ctx, user_id)` (`tasks.py:971`) — drains queued rows from `user_notification_digests` across **all** the user's channels, batches into one Apprise call per channel, marks rows `sent`. There is no `send_daily_digest`; the per-channel task of that name was removed with the one-rule-per-user collapse.
+- `notification_tick(ctx)` (`tasks.py:1243`) — the 5-minute cron that decides which users are due and enqueues `send_bundle`.
 - `nightly_ghost_sweep(ctx)` — re-evaluates every non-expired job via `evaluate_job_state()`; transitions confirmed-dead postings to `staleness_state='confirmed_expired'` and `cascade_stale()`s them across every user's feed.
 - `enrich_job_task(ctx, job_id)` — idempotent LLM enrichment (skips if a `job_enrichment` row exists). One enrichment per job, not per user — shared catalog (CLAUDE.md rule #10 / #17).
 - `idempotency_key(user_id, job_id, channel)` — deterministic SHA1 ledger key.
@@ -413,7 +420,7 @@ Backed by the `applications` table (also rebuilt in `0002_multi_tenant`) and a s
 
 | URL | File | Server/Client | What the user sees |
 | --- | --- | --- | --- |
-| `/` | `frontend/src/app/page.tsx` | Client | Marketing landing page — "47 sources, 8D scoring, one dashboard". CTAs link to `/profile` and `/dashboard`. |
+| `/` | `frontend/src/app/page.tsx` | Client | Marketing landing page — "41 sources, 8D scoring, one dashboard". CTAs link to `/profile` and `/dashboard`. |
 | `/(auth)/login` | `frontend/src/app/(auth)/login/page.tsx` | Client | Email + password form, `?next` honoured via `safeNext()` |
 | `/(auth)/register` | `frontend/src/app/(auth)/register/page.tsx` | Client | Same shape, redirects to `/profile` on success |
 | `/dashboard` | `frontend/src/app/dashboard/page.tsx` | Client | Job browser. Time-bucket pills (24h / 48h / 3d / 5d / 7d / all), min-score slider, source dropdown, visa toggle, async "Run search" button polling `getSearchStatus()`. Renders `<JobList>` of `<JobCard>`s. |
@@ -470,8 +477,8 @@ Consolidated so you can `grep` once and see them all. Defaults come from `backen
 | `CEREBRAS_API_KEY` | no | (unset) | Last-choice LLM. **All three unset** → CV parse raises `RuntimeError`. |
 | `GITHUB_TOKEN` | no | (unset) | Bumps GitHub API quota from 60 → 5000 req/hr. Anonymous still works for public repos. |
 | `LOG_LEVEL` | no | `INFO` | Python logging level. `DEBUG` exposes request bodies + profile parsing internals. |
-| `SMTP_EMAIL` / `SMTP_PASSWORD` / `NOTIFY_EMAIL` | no | — | **Legacy** notification system (CLI batch summaries only). Per-user emails go through `user_channels` instead. |
-| `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` | no | — | Same — legacy CLI summaries only. |
+| `SMTP_EMAIL` / `SMTP_PASSWORD` / `NOTIFY_EMAIL` | no | — | System email (magic links) and, when `RESEND_API_KEY` is unset, the local/self-hosted SMTP fallback for per-user email channels — see §4.4. `SMTP_PASSWORD` also doubles as a Resend key location when it carries a `re_` prefix. |
+| ~~`SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL`~~ | **DELETED, zero consumers** | — | These were per-user Slack/Discord notification channel settings. Removed 2026-08-24 along with the channels themselves (`core/settings.py:81-91` documents the removal in a comment). **Do not confuse with the unrelated, still-live `SLACK_WEBHOOK_URL` repo secret** used by `.github/actions/slack` for CI build-failure alerting — different system, different owner, not touched by this change. |
 
 ---
 
@@ -528,7 +535,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | --- | --- | --- |
 | CV upload (PDF/DOCX) | ✅ | `cv_parser.py` with `pdfplumber` + `python-docx` |
 | LLM-only skill/title extraction | ✅ | regex `KNOWN_SKILLS` removed in 3ba1342 |
-| LLM provider fallback (Gemini → Groq → Cerebras) | ✅ | `llm_provider.py` |
+| LLM provider fallback (OpenAI → Gemini → Groq → Cerebras) | ✅ | `llm_provider.py:329-334` |
 | LinkedIn "Save to PDF" import | ✅ | `linkedin_parser.py`, 2-of-3 detection heuristic |
 | GitHub enrichment with temporal weighting | ✅ | `github_enricher.py` — 3× weight for repos pushed in last year |
 | Dependency-file framework inference | ✅ | 7 file types parsed (package.json, requirements.txt, …) |
@@ -553,12 +560,12 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | `user_channels` table + Fernet crypto | ✅ | migration `0005`, `crypto.py` |
 | 2 channel types (email/webhook) via Apprise | ✅ | `dispatcher.py`, lazy import |
 | Channel CRUD + test-send endpoint | ✅ | `routes/channels.py`, two-layer ownership check |
-| `notification_rules` per channel (threshold, mode, quiet hours, digest time) | ✅ | migration `0012` |
-| Notification rule CRUD endpoints | ✅ | `routes/notification_rules.py` |
+| `notification_rules` — ONE row per user (threshold, mode, quiet hours, daily send time, interval) | ✅ | migration `0012`, collapsed to `UNIQUE(user_id)` by `0020` |
+| Notification rule endpoints (`GET` / `PUT` on `/api/settings/notification-rule`) | ✅ | `routes/notification_rules.py` |
 | `notification_ledger` idempotency table | ✅ | migration `0004` — `UNIQUE(user_id, job_id, channel)` |
 | Ledger pagination + filters + per-channel stats | ✅ | `routes/notifications.py` |
 | Digest queue (`user_notification_digests`) | ✅ | migration `0013` |
-| ARQ + Redis worker for production | 🟡 | `tasks.py` are async-pure; worker config (`workers/settings.py`) is wired but production deployment is install-dependent |
+| ARQ + Redis worker for production | ✅ | `tasks.py` are async-pure; `workers/settings.py` is wired and `backend/railway.worker.json` deploys it as its own Railway service (`arq src.workers.settings.WorkerSettings`) |
 | Per-user timezone | ✅ | `users.timezone` column added in `0012`, default `'UTC'` |
 | Notification dry-run / preview before save | ❌ | only post-save `/test` endpoint exists |
 | Push notifications (FCM/APN) | ❌ | not in the channel list |
@@ -575,7 +582,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Profile editor (CV, LinkedIn, GitHub, prefs, version history) | ✅ | `app/profile/page.tsx` |
 | Pipeline Kanban with drag-and-drop | ✅ | `KanbanBoard` |
 | Channel management UI | ✅ | `listChannels` / `createChannel` / `testChannel` wired |
-| Notification rules UI | ✅ | `notification_rules.ts` API client functions exist |
+| Notification rules UI | ✅ | `getNotificationRule` / `saveNotificationRule` in `frontend/src/lib/api.ts` (there is no separate `notification_rules.ts`) |
 | Notification ledger UI page | ✅ | API ready (`getNotificationLedger`) — frontend route is wired (Step 2 S4) |
 | Theme toggle (dark/light) | ✅ | in `Navbar.tsx` |
 | Mobile responsive | ✅ | Tailwind v4 + mobile Navbar menu |
@@ -596,9 +603,10 @@ backend/
 │   ├── 0005_user_channels.up.sql              — Fernet-encrypted channels
 │   ├── 0006_user_profiles.up.sql              — multi-tenant profile storage
 │   ├── 0007_user_profile_versions.up.sql      — 10-version history
-│   ├── 0012_notification_rules.up.sql         — per-channel preferences + users.timezone
+│   ├── 0012_notification_rules.up.sql         — notification preferences + users.timezone
 │   ├── 0013_user_notification_digests.up.sql  — digest queue
-│   └── 0014_application_history.up.sql        — pipeline stage history + interview dates
+│   ├── 0014_application_history.up.sql        — pipeline stage history + interview dates
+│   └── 0020_notification_rule_single.up.sql   — collapse to ONE rule row per user
 ├── src/
 │   ├── api/
 │   │   ├── auth_deps.py                       — require_user / optional_user / CurrentUser
@@ -610,7 +618,7 @@ backend/
 │   │       ├── actions.py                     — like / apply / not_interested
 │   │       ├── pipeline.py                    — 5-stage Kanban API
 │   │       ├── channels.py                    — channel CRUD + test
-│   │       ├── notification_rules.py          — per-channel rule CRUD
+│   │       ├── notification_rules.py          — single per-user rule (GET / PUT)
 │   │       └── notifications.py               — ledger pagination + stats
 │   ├── core/
 │   │   └── tenancy.py                         — DEFAULT_TENANT_ID
@@ -626,14 +634,14 @@ backend/
 │   │   └── profile/
 │   │       ├── models.py                      — CVData / UserPreferences / UserProfile / SearchConfig
 │   │       ├── cv_parser.py                   — pdfplumber/python-docx → LLM
-│   │       ├── llm_provider.py                — Gemini/Groq/Cerebras
+│   │       ├── llm_provider.py                — OpenAI (PRIMARY) → Gemini → Groq → Cerebras
 │   │       ├── linkedin_parser.py             — LinkedIn PDF parsing
 │   │       ├── github_enricher.py             — GitHub API + temporal weighting
 │   │       ├── preferences.py                 — form validation + merging
-│   │       ├── storage.py                     — SQLite + legacy JSON hydration
+│   │       ├── storage.py                     — Postgres (sync `pgsync`) + legacy JSON hydration
 │   │       └── keyword_generator.py           — profile → SearchConfig
 │   └── workers/
-│       └── tasks.py                           — score_and_ingest, mark_ledger_sent/failed
+│       └── tasks.py                           — score_and_ingest, send_notification, notification_tick, send_bundle, mark_ledger_sent/failed
 └── tests/                                     — auth (4 files), profile (3 files), feed/channels/notifications (8+ files)
 frontend/
 ├── src/
@@ -659,14 +667,14 @@ frontend/
 For completeness — these belong in the other two pillars and you won't find them here:
 
 - **How a job actually gets scored** — that's `JobScorer` in `src/services/skill_matcher.py` and the 8-dimension scoring stack. → see `02-search-and-match-engine.md` (next document).
-- **Where the 47 sources come from** — that's `src/sources/**`, `SOURCE_REGISTRY`, the tiered scheduler, circuit breakers. → see `03-job-providers.md`.
+- **Where the 41 sources come from** — that's `src/sources/**`, `SOURCE_REGISTRY`, the tiered scheduler, circuit breakers. → see `03-job-providers.md`.
 - **The shared `jobs` catalog table itself** — Pillar 3 (providers) writes it, Pillar 1 (this doc) reads it via `user_feed`.
 
 ---
 
-*Last updated 2026-08-15. HEAD `09727e5` (origin/main, 2026-08-14). Backend suite: 2,854 tests
-collected, 2 deselected (measured `python -m pytest --collect-only -q`, this session —
-per root `CLAUDE.md`: "never quote a test count from a doc, measure it"). Pass/fail count
-NOT verified this session (no local Postgres reachable — the suite needs `docker-compose.dev.yml`
-up on port 5433); do not carry the old "600p/0f/3s" figure forward, it predates this update by
-~2.5 months and was already off by roughly 5x collected-test count alone.*
+*Last updated 2026-08-24. Backend suite: 218 `test_*.py` files (filesystem count, verified).
+The collected-test count and the pass/fail count were **NOT** verified in this session — no
+local Postgres was reachable (the suite needs `docker-compose.dev.yml` up on port 5433) — so
+neither is recorded here. Measure them, never quote them:
+`cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`. Do not carry the
+old "600p/0f/3s" figure forward either; it predates this update by ~2.5 months.*

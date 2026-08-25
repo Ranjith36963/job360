@@ -447,6 +447,47 @@ async def test_send_bundle_drains_queued_jobs_that_have_no_feed_row(tick_db):
 
 
 @pytest.mark.asyncio
+async def test_orphan_drains_even_when_the_send_fails(tick_db):
+    """Isolates the drain from the success path, so only the drain can pass it.
+
+    The success branch marks rows sent; with a FAILED dispatch that branch never
+    runs, so the orphan can only reach ``sent=1`` via the drain block. Delete the
+    drain and this test goes red — which the sibling test above could not do
+    until the success UPDATE was scoped by ``job_id``. (CodeRabbit, PR #381:
+    "the assertion cannot fail on the behaviour the docstring describes".)
+
+    It also pins the other half of the contract: a deliverable job whose send
+    FAILED must stay queued (``sent=0``) so the next tick retries it. Draining
+    everything on failure would silently discard real matches.
+    """
+    good_id = await _seed_job_and_digest(tick_db, tag="-keepme")
+    orphan_id = await _seed_job_and_digest(tick_db, with_feed_row=False, tag="-gone")
+    from src.services.channels.dispatcher import ChannelSendResult
+
+    async def failing_dispatch(db, *, user_id, title, body, force=False, **kw):
+        return [
+            ChannelSendResult(
+                channel_id=1, channel_type="email", ok=False, error="smtp exploded"
+            )
+        ]
+
+    async with pg.connect(tick_db) as db:
+        await send_bundle({"db": db, "dispatcher": failing_dispatch}, "alice")
+        rows = await (await db.execute(
+            "SELECT job_id, sent FROM user_notification_digests WHERE user_id='alice'"
+        )).fetchall()
+
+    sent_by_job = {r[0]: r[1] for r in rows}
+    assert sent_by_job[orphan_id] == 1, (
+        "undeliverable row must drain even when the send failed — only the "
+        "drain block can have done this, the success path did not run"
+    )
+    assert sent_by_job[good_id] == 0, (
+        "a real match whose send failed must stay queued for the next tick"
+    )
+
+
+@pytest.mark.asyncio
 async def test_send_bundle_success_writes_ledger_and_drains(tick_db):
     job_id = await _seed_job_and_digest(tick_db)
     from src.services.channels.dispatcher import ChannelSendResult

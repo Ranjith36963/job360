@@ -101,7 +101,11 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 # A PARAMETER, not a hardcode: staging, preview deploys and local dev all need
 # a different origin, and a link that silently points at production from a
 # staging send is a real way to mislead a real person.
-SITE_BASE_URL = os.getenv("SITE_BASE_URL", "https://job360.uk").rstrip("/")
+# `or` rather than a getenv default: an env var SET BUT EMPTY (`SITE_BASE_URL=`
+# in a Railway variable, a .env line with nothing after the `=`) returns "", and
+# a getenv default never fires for that. Empty here would ship job links with no
+# origin — "/jobs/147" in someone's inbox, which resolves to nothing.
+SITE_BASE_URL = (os.getenv("SITE_BASE_URL") or "https://job360.uk").strip().rstrip("/")
 
 # Search
 # MIN_MATCH_SCORE is the *display* floor — the default "good enough to show"
@@ -342,10 +346,11 @@ REQUEST_TIMEOUT = 30
 USER_AGENT = "Job360/1.0 (UK Job Search Aggregator)"
 
 # Hard ceiling (seconds) on a single source's whole fetch_jobs() call. The
-# scheduler gathers all ~49 sources at once, so without this one slow/hanging
-# source (a blocked host, a JobSpy scrape, a stuck ATS slug loop) would freeze
-# the entire search — the "Refresh hangs" bug. A source that exceeds this is
-# cancelled and counted as a failure; every other source's results still land.
+# scheduler gathers every registered source at once, so without this one
+# slow/hanging source (a blocked host, a JobSpy scrape, a stuck ATS slug loop)
+# would freeze the entire search — the "Refresh hangs" bug. A source that
+# exceeds this is cancelled and counted as a failure; every other source's
+# results still land.
 # Generous enough for legit multi-request sources (REQUEST_TIMEOUT is per
 # request); since sources run concurrently, total search ~= this value.
 SOURCE_FETCH_TIMEOUT = int(os.getenv("SOURCE_FETCH_TIMEOUT", "60"))

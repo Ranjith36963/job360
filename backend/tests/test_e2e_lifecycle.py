@@ -12,7 +12,14 @@ malformed CV) and 4xx-reason logging. Offline + deterministic (root rule #4): th
 LLM and the source-fetching search are mocked, so this runs in the gate every time.
 
 What it does NOT cover (needs infra, documented for honesty):
-  - real notification DELIVERY (needs Redis + SMTP creds) — the dispatch
+  - real notification DELIVERY. The prerequisites differ per channel, and the
+    old blanket "needs Redis + SMTP creds" was wrong for both:
+      * webhook — needs Redis and a RUNNING ARQ worker, because the send is
+        queued, not inline.
+      * email — needs EITHER ``RESEND_API_KEY`` (the production path; Railway
+        blocks outbound SMTP ports 25/465/587) OR real SMTP credentials for a
+        local/self-hosted relay. See ``services/channels/email_url.py``.
+    This text is documentation only — it does not gate pytest. The dispatch
     *logic* is covered by test_dispatch_logging / test_worker_logging.
   - the browser UI — that's the Playwright suite (frontend/tests/e2e).
 """

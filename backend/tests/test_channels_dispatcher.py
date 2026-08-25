@@ -185,10 +185,11 @@ def test_format_payload_does_not_resurrect_chat_markup():
     """A deleted channel type must not silently keep its old formatting.
 
     Guards the removal: if someone re-adds a ``slack``/``discord``/``telegram``
-    branch, this fails. An unknown type falls through to plain pass-through
-    rather than getting markup nobody asked for.
+    branch, this fails. ``carrier-pigeon`` is a type that never existed at
+    all — it proves the fall-through is genuinely unconditional pass-through,
+    not just a set of hardcoded dead-type cases that happen to still work.
     """
-    for dead in ("slack", "discord", "telegram"):
+    for dead in ("slack", "discord", "telegram", "carrier-pigeon"):
         assert dispatcher.format_payload(dead, "T", "B") == ("T", "B")
 
 

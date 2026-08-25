@@ -83,7 +83,7 @@ dev = [
     # — different versions report different error sets, so "clean locally" said
     # nothing about CI. Bump deliberately: raise the pin, run
     # `python scripts/mypy_ratchet.py --update`, review the delta.
-    "mypy==2.3.0",
+    "mypy==2.3.1",
     # Linter — MUST be in dev extras so the CI "Lint (ruff)" blocking gate can run
     # it. Pinned to the 0.x line the backlog was drained against; ruff's rule set
     # changes between releases, so bump deliberately (an unpinned bump flags

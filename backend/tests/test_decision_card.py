@@ -31,6 +31,7 @@ import pytest
 from src.services.delivery.decision_card import (
     DecisionCard,
     build_decision_card,
+    format_salary_range,
     resolve_primary_score,
 )
 
@@ -239,6 +240,35 @@ def test_salary_open_ended_and_sub_thousand_forms_match_the_dashboard():
     assert salary_for(None, None) is None
 
 
+def test_open_ended_salary_branches_match_the_dashboard():
+    """The ``£70k+`` and ``up to £85k`` branches, tested where they are reachable.
+
+    ``build_decision_card`` cannot produce a one-sided band: ``normalize_salary``
+    mirrors a single bound into an equal min/max. So the two open-ended branches
+    in ``format_salary_range`` were never exercised by the end-to-end test above
+    — its name promised coverage the assertions could not deliver. Testing the
+    formatter directly is the only way to reach them, and they still have to
+    match ``formatSalaryRange`` in JobCard.tsx exactly.
+    """
+    assert format_salary_range(70000, None) == "£70k+"
+    assert format_salary_range(None, 85000) == "up to £85k"
+    assert format_salary_range(None, None) is None
+
+
+def test_thousands_rounding_matches_javascript_not_python():
+    """Half-up, like ``Math.round`` — not Python's round-half-to-even.
+
+    ``round(70.5)`` is 70 in Python and 71 in JavaScript. The dashboard uses
+    ``Math.round``, so a £70,500 salary would read £70k in the email and £71k on
+    the screen. This is the single assertion that pins the two together; it fails
+    if anyone "simplifies" the formatter back to ``round()``.
+    """
+    assert format_salary_range(70500, 70500) == "£71k"
+    assert format_salary_range(71500, 71500) == "£72k"
+    # And a value that is NOT a .5 boundary must be unaffected by the change.
+    assert format_salary_range(70400, 70400) == "£70k"
+
+
 def test_unknown_currency_yields_no_salary_rather_than_a_wrong_one():
     """An unconvertible currency must produce silence, not a guess.
 
@@ -277,17 +307,51 @@ def test_structured_salary_wins_over_a_legacy_string():
     assert card.salary == "£70k–£85k"
 
 
-def test_missing_optional_fields_do_not_become_the_string_none():
-    """Absent salary/location must render as absence, not as "None".
+def test_absent_salary_and_location_are_none_not_a_string():
+    """Absent optional fields must be ``None`` so the renderer omits the line.
 
-    The old payload builders used f-strings straight over row values, so a NULL
-    company would have printed the four characters ``None`` into a user's
-    inbox.
+    The two follow-up assertions this test used to carry —
+    ``"None" not in (card.salary or "")`` — were tautologies: the lines above
+    already proved the value was ``None``, so the expression reduced to
+    ``"None" not in ""`` and no implementation change could ever turn it red.
+    Removed rather than reworded.
     """
     card = build_decision_card(
-        _row(salary=None, location=None), site_base_url="https://job360.uk"
+        _row(salary=None, enr_salary=None, location=None),
+        site_base_url="https://job360.uk",
     )
     assert card.salary is None
     assert card.location is None
-    assert "None" not in (card.salary or "")
-    assert "None" not in (card.location or "")
+
+
+def test_missing_required_text_falls_back_instead_of_printing_none():
+    """A NULL title/company must become readable words, not the string "None".
+
+    This is what the previous test's docstring *claimed* to cover and did not:
+    it never set ``company=None``, so the ``"Unknown company"`` fallback had no
+    coverage at all. The old payload builders f-string'd row values straight
+    into the body, so a NULL company really would have put the four characters
+    ``None`` in front of a user.
+    """
+    card = build_decision_card(
+        _row(title=None, company=None), site_base_url="https://job360.uk"
+    )
+    assert card.title == "Untitled role"
+    assert card.company == "Unknown company"
+    assert "None" not in card.title
+    assert "None" not in card.company
+
+
+def test_blank_and_whitespace_text_is_treated_as_absent():
+    """``""`` and ``"   "`` are absence, not content.
+
+    A whitespace-only company would otherwise pass a bare ``is not None`` check
+    and render as an empty gap in the email where a name should be.
+    """
+    card = build_decision_card(
+        _row(title="   ", company="", location="  ", salary=None, enr_salary=None),
+        site_base_url="https://job360.uk",
+    )
+    assert card.title == "Untitled role"
+    assert card.company == "Unknown company"
+    assert card.location is None
