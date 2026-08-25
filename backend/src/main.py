@@ -51,6 +51,7 @@ from src.services.profile.keyword_generator import generate_search_config
 from src.services.profile.models import SearchConfig, UserProfile
 from src.services.profile.storage import current_profile_version_id, load_profile
 from src.services.scheduler import TieredScheduler
+from src.services.shelf_gate import fill_shelves
 from src.services.skill_matcher import (
     SCORER_VERSION,
     JobScorer,
@@ -724,8 +725,8 @@ async def _embed_backfill_budget(db: Any, conn: Any, budget: int) -> int:
 
 @cpu_bound
 def _score_dedup_and_filter(all_jobs: list[Job], scorer: JobScorer) -> list[Job]:
-    """Score every job, extract deadlines, dedup, and score-filter — the whole
-    SYNCHRONOUS, CPU-heavy stage of the pipeline in one place.
+    """Fill every UNIVERSAL SHELF, score every job, dedup, and score-filter —
+    the whole SYNCHRONOUS, CPU-heavy stage of the pipeline in one place.
 
     Invoked from ``run_search`` via ``asyncio.to_thread`` so it runs OFF the
     event loop. Inline (the old code) this same block blocked the single backend
@@ -736,9 +737,24 @@ def _score_dedup_and_filter(all_jobs: list[Job], scorer: JobScorer) -> list[Job]
     the loop free to service those polls. **No scoring behaviour changes** — the
     exact same functions run, just not on the loop.
 
-    Mutates each Job in ``all_jobs`` in place (scores/deadline) and returns the
-    deduplicated, score-filtered subset. Contains no ``await`` — safe to thread.
+    Mutates each Job in ``all_jobs`` in place (shelves/provenance, then
+    scores) and returns the deduplicated, score-filtered subset. Contains no
+    ``await`` — safe to thread.
     """
+    # THE UNIVERSAL SHELF GATE — one door, every job, FIRST
+    # (docs/pillars/UNIVERSAL_SHELF.md §5). It normalises the closed-enum
+    # shelves (employment type / workplace mode / seniority / category),
+    # annualises + converts the salary band to GBP and then clamps it,
+    # derives the deadline from the ad text, runs the visa detector, and
+    # stamps `shelf_provenance` for EVERY shelf — filled or absent, with the
+    # reason. It runs BEFORE scoring so the scorer reads normalised shelves,
+    # and no source can bypass it because sources never call it: the
+    # orchestrator does, downstream of all of them. A source that forgets a
+    # shelf now produces a counted `absent:not_mapped`, not a silent hole.
+    # Synchronous and I/O-free, so it is safe inside this threaded stage.
+    for job in all_jobs:
+        fill_shelves(job)
+
     for job in all_jobs:
         breakdown = scorer.score(job)
         job.match_score = breakdown.match_score
@@ -750,15 +766,11 @@ def _score_dedup_and_filter(all_jobs: list[Job], scorer: JobScorer) -> list[Job]
         job.visa_flag = scorer.check_visa_flag(job)
         job.experience_level = detect_experience_level(job.title)
 
-    # Deadline extraction — fill any job lacking a structured deadline from its
-    # description text. Lazy-imported to keep the top-level import surface small.
-    from src.services.deadline import extract_deadline  # noqa: PLC0415
-
-    for job in all_jobs:
-        if job.deadline is None and job.description:
-            result = extract_deadline(job.description)
-            if result is not None:
-                job.deadline, job.deadline_source = result
+    # (The deadline-extraction pass that used to sit here MOVED INTO THE GATE
+    # above — services/shelf_gate.py::_fill_deadline. Same function, same
+    # regex, same `deadline_source='description'` stamp; it now runs at the
+    # one door every job passes through, and the reason a deadline is missing
+    # is recorded in `shelf_provenance` instead of being inferred from NULL.)
 
     unique_jobs = deduplicate(all_jobs)
     logger.info("After dedup: %s unique jobs", len(unique_jobs))
@@ -925,6 +937,34 @@ async def run_search(
             if not sources:
                 logger.error("No sources matched filter: %s", source_filter)
                 return {"total_found": 0, "new_jobs": 0, "sources_queried": 0, "per_source": {}}
+
+            # A source with no credential returns [] INSTANTLY and logs at INFO,
+            # so in run_log it is byte-identical to a source that ran properly and
+            # found nothing: per_source=0, no exception, ~0.0s duration.
+            #
+            # Measured 2026-08-24 on three consecutive prod runs: seven sources
+            # (careerjet, findwork, google_jobs, gov_apprenticeships, indeed,
+            # jooble, jsearch) sat at 0 jobs / 0.0s / no error. Reading the run log
+            # could not tell "we never asked" from "we asked and there was
+            # nothing", and probing them by hand showed gov_apprenticeships
+            # returning 250 real UK jobs and careerjet 121 the moment they were
+            # invoked with a key. That gap is the bug: the absence was invisible.
+            #
+            # Naming them at WARNING makes the unasked question answerable from the
+            # run itself. It does not fix a missing key — it stops a missing key
+            # from looking like an empty upstream.
+            unconfigured = sorted(
+                s.name for s in sources if not getattr(s, "is_configured", True)
+            )
+            if unconfigured:
+                logger.warning(
+                    "%d of %d sources are NOT CONFIGURED and will self-skip "
+                    "(0 jobs, no error, ~0s — indistinguishable from an empty "
+                    "upstream unless you read this line): %s",
+                    len(unconfigured),
+                    len(sources),
+                    ", ".join(unconfigured),
+                )
 
             # Fetch via TieredScheduler (Batch 3.5 Deliverable E):
             #   * One-shot CLI runs pass force=True so every source dispatches

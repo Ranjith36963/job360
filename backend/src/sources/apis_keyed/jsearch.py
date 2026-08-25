@@ -107,6 +107,13 @@ class JSearchSource(BaseJobSource):
                 raw_posted = item.get("job_posted_at_datetime_utc")
                 posted_at, confidence = normalize_posted_at(raw_posted)
 
+                # `job_is_remote` is a real bool (True/False both seen live
+                # 2026-08-16). True unambiguously means "remote"; False only
+                # means "not exclusively remote" — it could be hybrid or
+                # onsite and JSearch does not say which, so it stays unset
+                # rather than guessing "onsite" (rule #29).
+                workplace_mode = "remote" if item.get("job_is_remote") else None
+
                 jobs.append(Job(
                     title=title,
                     company=item.get("employer_name", ""),
@@ -120,6 +127,11 @@ class JSearchSource(BaseJobSource):
                     posted_at=posted_at,
                     date_confidence=confidence,
                     date_posted_raw=raw_posted,
+                    # `job_employment_type` ("Full–time"/"Contractor",
+                    # confirmed populated live 2026-08-16) sits on the same
+                    # item as job_is_remote, unread until now.
+                    employment_type=item.get("job_employment_type"),
+                    workplace_mode=workplace_mode,
                 ))
         logger.info("JSearch: found %s jobs", len(jobs))
         return jobs

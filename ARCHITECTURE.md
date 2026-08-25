@@ -15,13 +15,13 @@ Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from 
 | Unique source classes | **40** | same dict — `indeed` and `glassdoor` both alias `JobSpySource` |
 | `RATE_LIMITS` entries | **41** | `core/settings.py` `RATE_LIMITS` |
 | `LOCATIONS` entries | **26** | `core/keywords.py` `LOCATIONS` |
-| Migration head | **0031** | `backend/migrations/` |
-| `SCORER_VERSION` | **7** | `services/skill_matcher.SCORER_VERSION` |
+| Migration head | **0033** | `backend/migrations/` |
+| `SCORER_VERSION` | **8** | `services/skill_matcher.SCORER_VERSION` |
 | `BaseJobSource` subclasses | **40** | `src/sources/` |
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
-| Migration files | **32** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **220** | `backend/tests/` |
+| Migration files | **34** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **229** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules in CLAUDE.md | **31** | root `CLAUDE.md` |
 <!-- /generated -->

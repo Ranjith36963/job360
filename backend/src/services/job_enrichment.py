@@ -25,9 +25,20 @@ from src.models import Job
 from src.repositories import pg
 from src.services.job_enrichment_schema import JobEnrichment
 from src.services.profile.llm_provider import llm_extract_validated
+from src.services.shelf_gate import is_stub_description
 from src.utils.loop_guard import cpu_bound
 
 logger = logging.getLogger("job360.services.job_enrichment")
+
+
+class StubDescriptionError(ValueError):
+    """Raised when an ad is too thin for JOB SOURCE ENRICHMENT to read honestly.
+
+    Deliberately its own type rather than a bare ValueError: callers must be
+    able to tell "we refused to read this" (expected, cheap, skip it) apart
+    from "the model failed" (retry-worthy). Conflating them would either
+    retry a refusal forever or silently swallow a real provider outage.
+    """
 
 # Feature flag — plan Appendix B. Default-off behaviour must exactly match
 # pre-Batch-2.5 (no enrichment calls, no DB writes).
@@ -108,11 +119,32 @@ async def enrich_job(
             :func:`llm_extract_validated`.
 
     Raises:
+        StubDescriptionError: if the ad is too thin to read honestly (see below).
         RuntimeError: if all LLM providers fail or the response can't be
         validated into the `JobEnrichment` schema after the default retry
         budget. Callers should catch and log; they should NOT use a partial
         enrichment — the row stays absent rather than polluted.
+
+    THE STUB BLOCK LIVES HERE, at the chokepoint, not in the callers.
+
+    JOB SOURCE ENRICHMENT is CACHED: this function is idempotent per job_id and
+    nothing re-reads a job that already has a row, so a fact invented from a
+    teaser is permanent. Measured live 2026-08-17: a real 452-char Reed teaser
+    that says NOTHING about working arrangements produced
+    workplace_mode="onsite" — a confident fabrication that would have been
+    stored as how:"llm" and never revisited.
+
+    The new sweep checked this before calling; the OLD enrichment_sweep cron did
+    not, so the same cache had two doors and only one was guarded. Putting the
+    predicate here closes both, and any future caller inherits it — the same
+    "one door, every job" reasoning the shelf gate is built on.
     """
+    if is_stub_description(job.description, job.title):
+        raise StubDescriptionError(
+            f"description too thin to read honestly "
+            f"({len((job.description or '').strip())} chars) — "
+            f"recover the real text before enriching"
+        )
     fn = llm_extract_validated_fn or llm_extract_validated
     prompt = _build_prompt(job)
     enrichment = await fn(prompt, JobEnrichment, _SYSTEM_PROMPT)
@@ -183,11 +215,37 @@ async def enrich_batch(
                             e,
                         )
             try:
-                tel.llm_calls += 1
-                result = await enrich_job(
-                    job,
-                    llm_extract_validated_fn=llm_extract_validated_fn,
-                )
+                # NOT counted before the call. `enrich_job` refuses a stub
+                # description BEFORE it reaches any provider, so incrementing
+                # here made the counter report LLM calls that never happened —
+                # a batch of stubs read as "3 calls made, 3 validation
+                # failures" when the true answer is "0 calls, 3 skipped". The
+                # counter is the thing we bill and alert on, so it has to count
+                # requests, not attempts.
+                # COUNTED IN `finally`, NOT AFTER A SUCCESSFUL RETURN.
+                # Counting here-on-success missed the other half: a request that
+                # REACHED the provider and then failed — a timeout, a 500, a
+                # response that would not validate — was billed and not counted.
+                # The stub case cannot reach the counter because `enrich_job`
+                # raises `StubDescriptionError` BEFORE the provider call, which
+                # is the same signal the handler below already keys on. So the
+                # `finally` counts exactly the calls that were really sent.
+                # (CodeRabbit, PR #388.)
+                try:
+                    result = await enrich_job(
+                        job,
+                        llm_extract_validated_fn=llm_extract_validated_fn,
+                    )
+                except StubDescriptionError:
+                    # No provider was reached — do not count, and let the
+                    # handler below record it as the refusal it is.
+                    raise
+                except Exception:
+                    # The request WAS sent and then failed. Billed, so counted.
+                    tel.llm_calls += 1
+                    raise
+                else:
+                    tel.llm_calls += 1
                 # B7-1 fix: persist successful enrichments. Without this,
                 # every LLM call's result was discarded — pure cost, no value.
                 if result is not None and conn is not None:
@@ -207,6 +265,20 @@ async def enrich_batch(
                 logger.warning(
                     "enrich_batch: enrich_job timed out for %s",
                     getattr(job, "id", job.title),
+                )
+                return None
+            except StubDescriptionError as e:
+                # A REFUSAL, not a failure. The ad was too thin to read
+                # honestly, so no provider was called and nothing was
+                # validated. Counting it as a validation failure would blame
+                # the LLM for a decision made before it was asked, and would
+                # hide the thing actually worth alerting on: how much of the
+                # catalog arrives too thin to enrich.
+                tel.stub_skipped += 1
+                logger.info(
+                    "enrich_batch: skipped %s — %s",
+                    getattr(job, "id", job.title),
+                    e,
                 )
                 return None
             except Exception as e:  # noqa: BLE001 — one bad job must not kill the batch

@@ -71,6 +71,12 @@ class NHSJobsSource(BaseJobSource):
             close_date = (vacancy.findtext("closeDate") or "").strip()
             post_date = (vacancy.findtext("postDate") or "").strip()
             vacancy_id = (vacancy.findtext("id") or "").strip()
+            # Real upstream description (confirmed live 2026-08-16: a genuine
+            # ~150-char teaser of the actual advert text, not fabricated).
+            # <type> ("Bank" / "Permanent" / ...) is NHS Jobs' own
+            # employment-type vocabulary -- raw value, gate normalises later.
+            raw_description = (vacancy.findtext("description") or "").strip()
+            employment_type = (vacancy.findtext("type") or "").strip() or None
             # Live tag is <url>; <advertUrl> kept as a fallback for the old
             # shape (same reasoning as the vacancyDetails/vacancy fallback).
             advert_url = (vacancy.findtext("url") or vacancy.findtext("advertUrl") or "").strip()
@@ -106,11 +112,18 @@ class NHSJobsSource(BaseJobSource):
 
             now_iso = datetime.now(timezone.utc).isoformat()
 
+            # FABRICATION FIX (confirmed live 2026-08-16): this used to
+            # synthesise description as f"{title} - {salary}" -- a made-up
+            # string, never what NHS Jobs actually says. The feed carries a
+            # real (if short) <description> teaser; use it, falling back to
+            # the title only when the feed genuinely omits one.
+            description = raw_description or title
+
             jobs.append(Job(
                 title=title,
                 company=employer or "NHS",
                 location=location or "UK",
-                description=f"{title} - {salary}" if salary else title,
+                description=description,
                 apply_url=apply_url,
                 source=self.name,
                 date_found=now_iso,
@@ -121,6 +134,7 @@ class NHSJobsSource(BaseJobSource):
                 deadline_source=deadline_source,
                 salary_min=salary_min,
                 salary_max=salary_max,
+                employment_type=employment_type,
             ))
 
         return jobs

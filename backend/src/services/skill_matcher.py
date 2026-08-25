@@ -70,7 +70,23 @@ from src.services.scoring_dimensions import ScoreBreakdown
 #       those rows must re-score or the old deficit stays frozen in user_feed.
 #       Landed on main as its own "4" before this branch merged; renumbered here
 #       so it is not confused with the title-matching fix above.
-SCORER_VERSION = 7
+#   8 = the UNIVERSAL SHELF GATE went live in the ingest path
+#       (services/shelf_gate.fill_shelves, called first inside
+#       main._score_dedup_and_filter). Two of its effects move real scores:
+#       (a) salary is now annualised + converted to GBP before the
+#       plausibility clamp, so hourly/monthly/EUR/USD jobs keep a salary they
+#       used to lose (or kept wrongly) — and salary presence is part of the
+#       deduplicator's completeness tiebreak, so a different, better-filled
+#       member of a dedup group can now win and be the row that is stored;
+#       (b) the description upgrade in repositories/database.insert_job lets a
+#       materially longer re-fetch REPLACE a stored teaser, and the skill
+#       component (40 of 100) is computed from description text — a job
+#       re-scored after that upgrade scores differently from the same job
+#       scored off the teaser. Existing user_feed rows are frozen per
+#       (profile_version, scorer_version), so without this bump both fixes
+#       would be inert on every row already in the catalog — the PR #224
+#       lesson, again.
+SCORER_VERSION = 8
 
 # Weights for scoring components (total = 100)
 TITLE_WEIGHT = 40

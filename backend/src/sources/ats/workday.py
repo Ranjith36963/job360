@@ -1,5 +1,6 @@
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, cast
 
@@ -22,7 +23,33 @@ _DESC_TAG_RE = re.compile(r"<[^>]+>")
 # nightly union refresh and zeroed the source (537 jobs before). Past-cap jobs
 # keep empty descriptions; the description-backfill-on-refetch (PR #232) fills
 # them across later runs.
-_MAX_DETAIL_FETCHES = 40
+# Raised 40 -> 60 (2026-08-16): measured live, full 20-company run, AI/ML
+# SearchConfig (`fetch_jobs()` timed end to end, real HTTP, no mocks). Old
+# cap (40): 161s wall, 40/176 jobs described. New cap (60): 198s wall,
+# 60/176 jobs described -- ~42s of margin under the 240s ATS ceiling. 70
+# was tried and measured at 218s (~22s margin) -- too thin against real
+# network jitter, so 60 is the shipped value.
+_MAX_DETAIL_FETCHES = 60
+
+# Wall-clock budget, as a fraction of the ATS ceiling this source runs under.
+#
+# The 60-detail cap above was tuned to 198s against ONE profile's SearchConfig.
+# The nightly catalog cron does not use one profile: it sends the UNION of every
+# complete profile's titles, so `search_titles[:8]` grows with the user base and
+# the call count grows with it (20 tenants x up to 8 queries = up to 160 POSTs at
+# concurrent=2 / delay=1.5, before any detail fetch). Production 2026-08-24
+# recorded workday at exactly 240.0s -- the ceiling -- on three consecutive runs.
+#
+# Hitting the ceiling raises, and the raise discards EVERY job already collected:
+# the run logs the source as errored with ZERO, while 542 of its listings sit in
+# the catalog going stale. The upstream is healthy (probed live: HTTP 200 in
+# 0.5-1.6s, correct shape, `total` of 1,245 for a single tenant), so throwing the
+# work away is pure loss.
+#
+# A count cap cannot fix this, because the thing that grows is the number of
+# users, not the number of companies. A clock can: stop fetching near the ceiling
+# and RETURN what is in hand. Partial is strictly better than nothing.
+_FETCH_BUDGET_FRACTION = 0.8
 
 
 def _parse_posted_on(text: str) -> str:
@@ -50,10 +77,39 @@ class WorkdaySource(BaseJobSource):
         self._companies = companies if companies is not None else WORKDAY_COMPANIES
 
     async def fetch_jobs(self) -> list[Job]:
-        jobs = []
+        jobs: list[Job] = []
         seen_keys = set()
         detail_budget = _MAX_DETAIL_FETCHES
+
+        # Read the module, not the name, so a test (or a runtime change) can set
+        # the ceiling without this having bound the value at import.
+        import src.core.settings as _settings  # noqa: PLC0415
+
+        ceiling = getattr(_settings, "SOURCE_FETCH_TIMEOUT_ATS", None) or 0
+        # No ceiling configured => no budget to run out of. `None` here is a real
+        # state, not a bug: the test conftest leaves the timeout unset, and the
+        # first version of this code did `None * 0.8` and crashed the whole
+        # source. A source must never fail because a LIMIT is absent.
+        budget = ceiling * _FETCH_BUDGET_FRACTION if ceiling else 0
+        deadline = (time.monotonic() + budget) if budget else None
+        companies_done = 0
+
         for entry in self._companies:
+            # Stop BEFORE starting another company rather than being killed
+            # mid-flight. Everything already collected is returned.
+            if deadline is not None and time.monotonic() >= deadline:
+                logger.warning(
+                    "Workday: stopping at %d/%d companies — %.0fs budget spent, "
+                    "returning %d jobs already collected rather than losing them "
+                    "to the %ss ceiling",
+                    companies_done,
+                    len(self._companies),
+                    budget,
+                    len(jobs),
+                    ceiling,
+                )
+                break
+            companies_done += 1
             tenant = entry["tenant"]
             wd = entry["wd"]
             site = entry["site"]
@@ -66,6 +122,11 @@ class WorkdaySource(BaseJobSource):
             company_failed = False
             for query in self.search_titles[:8]:
                 if company_failed:
+                    break
+                # Also checked per QUERY: the union of user titles is what grew,
+                # so a single company can now consume a large slice of the budget
+                # on its own.
+                if deadline is not None and time.monotonic() >= deadline:
                     break
                 body = {
                     "appliedFacets": {},
@@ -117,7 +178,15 @@ class WorkdaySource(BaseJobSource):
                     # survivors reach this point, so the request count matches
                     # what we keep. Failure degrades to "", never drops the job.
                     description = ""
-                    deadline = None
+                    # `job_deadline`, NOT `deadline` — the enclosing loop uses
+                    # `deadline` for its TIME BUDGET (a monotonic float, set at
+                    # line 94 and read at 100 and 129). Reusing the name here
+                    # rebound that float to a date string, so the very next
+                    # budget check raised
+                    #     TypeError: '>=' not supported between 'float' and 'str'
+                    # and killed the whole source mid-fetch. Two different
+                    # meanings of "deadline" sharing one name in one function.
+                    job_deadline = None
                     deadline_source = None
                     if detail_budget > 0:
                         detail_budget -= 1
@@ -142,7 +211,7 @@ class WorkdaySource(BaseJobSource):
                         if end_date:
                             deadline_iso, _ = normalize_posted_at(end_date)
                             if deadline_iso:
-                                deadline = deadline_iso[:10]
+                                job_deadline = deadline_iso[:10]
                                 deadline_source = "listing"
                     jobs.append(Job(
                         title=title,
@@ -155,8 +224,13 @@ class WorkdaySource(BaseJobSource):
                         posted_at=parsed_posted_at,
                         date_confidence=confidence,
                         date_posted_raw=posted_on or None,
-                        deadline=deadline,
+                        deadline=job_deadline,
                         deadline_source=deadline_source,
+                        # `timeType` ("Full time") is on every SEARCH-result
+                        # item already — verified live 2026-08-17
+                        # (astrazeneca board: 20/20) — no extra request.
+                        # Raw value; shelf_gate.py owns normalising it.
+                        employment_type=item.get("timeType"),
                     ))
 
         logger.info("Workday: found %s relevant jobs across %s companies", len(jobs), len(self._companies))

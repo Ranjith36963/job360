@@ -6,6 +6,7 @@ from typing import Optional
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
+from src.utils.dates import normalize_posted_at
 
 logger = logging.getLogger("job360.sources.climatebase")
 
@@ -120,6 +121,32 @@ class ClimatebaseSource(BaseJobSource):
                 # isn't a real number rather than guessing.
                 salary_min = _to_number(item.get("salary_from"))
                 salary_max = _to_number(item.get("salary_to"))
+                salary_period = item.get("salary_period") or None
+
+                # activation_date is 100% filled live (2026-08-16) and used to
+                # be thrown away in favour of a hardcoded None/"low" — every
+                # Climatebase job read as undated even though the source
+                # states a real one. Route it through the shared normalizer
+                # so confidence reflects whether it actually parsed.
+                raw_posted = item.get("activation_date")
+                posted_at, confidence = normalize_posted_at(raw_posted)
+
+                # job_types / remote_preferences are 100%-filled lists
+                # ("Full time role", "Hybrid") thrown away today; take the
+                # raw first value — no enum-mapping here, that is the gate's
+                # job (rule per shelf_gate.py). sectors (100% filled, e.g.
+                # "Research & Education") is the job's own topical
+                # vocabulary — same bucket as other sources' tags[].
+                job_types = item.get("job_types")
+                employment_type = (
+                    job_types[0] if isinstance(job_types, list) and job_types else None
+                )
+                remote_prefs = item.get("remote_preferences")
+                workplace_mode = (
+                    remote_prefs[0] if isinstance(remote_prefs, list) and remote_prefs else None
+                )
+                sectors = item.get("sectors")
+                source_tags = sectors if isinstance(sectors, list) else []
 
                 jobs.append(Job(
                     title=title,
@@ -129,11 +156,15 @@ class ClimatebaseSource(BaseJobSource):
                     apply_url=apply_url,
                     source=self.name,
                     date_found=now,
-                    posted_at=None,
-                    date_confidence="low",
-                    date_posted_raw=None,
+                    posted_at=posted_at,
+                    date_confidence=confidence,
+                    date_posted_raw=raw_posted,
                     salary_min=salary_min,
                     salary_max=salary_max,
+                    salary_period=salary_period,
+                    employment_type=employment_type,
+                    workplace_mode=workplace_mode,
+                    source_tags=source_tags,
                 ))
 
             return jobs
