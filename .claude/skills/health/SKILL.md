@@ -33,10 +33,10 @@ You are the Job360 health checker. You ignore the backlog and missions entirely 
   - `/register` deliberately does **not** log you in — `backend/src/api/routes/auth.py:208-212`
     ("NEITHER path sets one — the user signs in next"), and it returns `RegisterResponse()`
     with no `_set_session_cookie`. The only cookie-setter on this flow is `/login`
-    (`auth.py:296`). Skipping the login step gets a 401 from `/me`, which reads as auth
+    (`backend/src/api/routes/auth.py:296`). Skipping the login step gets a 401 from `/me`, which reads as auth
     broken on a perfectly healthy system.
   - The route is `/api/auth/me` — `backend/src/api/routes/auth.py:39` `APIRouter(prefix="/auth")`
-    + `auth.py:336` `@router.get("/me")`, mounted under `/api`. There is no bare `/api/me`; it 404s.
+    + `backend/src/api/routes/auth.py:336` `@router.get("/me")`, mounted under `/api`. There is no bare `/api/me`; it 404s.
 - Dashboard loads (browser flavor) with zero console errors; verdict badges render.
 - Pipeline/actions endpoints respond; notification rules endpoint responds.
 - GREEN: all respond 2xx, console clean. RED: any 5xx on the happy path or auth broken.
