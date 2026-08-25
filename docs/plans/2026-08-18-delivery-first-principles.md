@@ -1,4 +1,7 @@
 # Delivery — first principles
+<!-- doc: PLAN -->
+
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 Date: 2026-08-18. Status: design, not built. Author: Claude, for Ranjith.
 

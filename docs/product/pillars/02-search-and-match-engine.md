@@ -681,7 +681,7 @@ backend/
 │   │   ├── conditional_cache.py               — 256-entry FIFO for ETag/Last-Modified
 │   │   └── profile/llm_provider.py            — OpenAI (PRIMARY) → Gemini → Groq → Cerebras chain + llm_extract_validated
 │   ├── workers/tasks.py                       — score_and_ingest (per-user worker path)
-│   ├── repositories/database.py               — JobDatabase + 31-migration forward-compat schema
+│   ├── repositories/database.py               — JobDatabase + forward-compat migration schema
 │   └── api/routes/jobs.py                     — exposes match_score + 9-field breakdown to API
 └── migrations/
     ├── 0008_job_enrichment.up.sql             — shared-catalog enrichment table

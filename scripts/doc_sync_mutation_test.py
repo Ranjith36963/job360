@@ -146,9 +146,12 @@ CASES: list[tuple[str, str, str, str]] = [
     # schema" (real 31) and README.md's source-tree said `ats/ (12)` (real 10).
     # The migration-head guard could not see either — it watches "0000 → NNNN"
     # phrasing only — and no per-subfolder count was ever guarded.
-    ("ARCHITECTURE.md",
-     r"(\d+)-migration forward-compat schema",
-     "999-migration forward-compat schema", "migrations-schema"),
+    # RETIRED 2026-08-25 with its guard. The migration count is now produced by
+    # gen_doc_blocks.py into ARCHITECTURE.md's code-facts block and the
+    # hand-written copies are deleted, so there is no claim left to mutate.
+    # The drill said so rather than passing quietly -- the fourth time this
+    # design has caught its own target disappearing, and the first time the
+    # target disappeared ON PURPOSE.
     ("ARCHITECTURE.md",
      r"\bats/\s*\((\d+)\)", "ats/ (999)", "subfolder-ats"),
     # Sixth batch, 2026-08-25. The route guard: a documented endpoint that no

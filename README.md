@@ -101,7 +101,7 @@ flowchart TD
 
 ### Frontend (Next.js + FastAPI)
 - Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
-- Talks to FastAPI (`backend/src/api/`) over HTTP — 13 route modules, 72 endpoints (health, jobs, actions, profile, search, pipeline, tailor, channels, notifications, runs)
+- Talks to FastAPI (`backend/src/api/`) over HTTP — 13 route modules, 65 endpoints (health, jobs, actions, profile, search, pipeline, tailor, channels, notifications, runs)
 - Job list with filters, score radar, time buckets
 - Profile setup: CV upload, LinkedIn profile PDF import, GitHub username, preferences form
 - Application pipeline Kanban board
@@ -381,12 +381,12 @@ job360/
 │   ├── main.py                  # FastAPI uvicorn entry (thin)
 │   ├── pyproject.toml           # Deps + [dev] extras; ruff/mypy/pytest config
 │   ├── data/                    # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — Postgres since 2026-07-02
-│   ├── migrations/              # 31 forward+reverse SQL migration pairs (0000 → 0030) + runner.py
+│   ├── migrations/              # forward/reverse SQL migration pairs + runner.py (counts: ARCHITECTURE.md code-facts)
 │   └── src/
 │       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (41), _build_sources()
 │       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile, rescore-backfill
 │       ├── models.py            # Job dataclass + normalized_key()
-│       ├── api/                 # FastAPI app + 13 route modules (72 endpoints)
+│       ├── api/                 # FastAPI app + 13 route modules (65 endpoints)
 │       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │       ├── core/                # (renamed from config/)
 │       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)

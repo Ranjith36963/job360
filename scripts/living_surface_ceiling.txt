@@ -14,4 +14,11 @@
 # Lowered 2026-08-25 to 8317 after cycle 16 (#427) deleted 14 lines --
 # a ceiling left above the real number is slack the haystack grows into.
 # Lowered again 2026-08-25 to 8313 after cycle 17 (#431) deleted 4 more.
-8313
+# Raised 2026-08-25 to 8351. NOT slack: main gained two new LIVING docs
+# (delivery plans, now stamped) and cycle PRs #427/#431/#433 landed while
+# this branch was open. The rule is that a raise must say what was added,
+# and this is what was added.
+# 8353 (2026-08-25): +2 blank lines from moving two stamps BELOW their YAML
+# front matter — placing them above stopped the front matter parsing, which
+# silently unloads a skill. Structural, not new prose.
+8353

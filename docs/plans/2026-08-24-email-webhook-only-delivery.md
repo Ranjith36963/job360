@@ -1,4 +1,7 @@
 # Delivery rebuild — email + webhook only
+<!-- doc: PLAN -->
+
+> **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 Date: 2026-08-24. Owner decision, firm. Branch: `feat/delivery-email-webhook-only`.
 Rationale and evidence: [`2026-08-18-delivery-first-principles.md`](2026-08-18-delivery-first-principles.md).

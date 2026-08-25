@@ -15,13 +15,13 @@ Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from 
 | Unique source classes | **40** | same dict — `indeed` and `glassdoor` both alias `JobSpySource` |
 | `RATE_LIMITS` entries | **41** | `core/settings.py` `RATE_LIMITS` |
 | `LOCATIONS` entries | **26** | `core/keywords.py` `LOCATIONS` |
-| Migration head | **0030** | `backend/migrations/` |
+| Migration head | **0031** | `backend/migrations/` |
 | `SCORER_VERSION` | **7** | `services/skill_matcher.SCORER_VERSION` |
 | `BaseJobSource` subclasses | **40** | `src/sources/` |
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
-| Migration files | **31** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **218** | `backend/tests/` |
+| Migration files | **32** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **220** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules in CLAUDE.md | **31** | root `CLAUDE.md` |
 <!-- /generated -->
@@ -59,13 +59,13 @@ job360/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
 │   ├── data/                         # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — the store is Postgres; DB_PATH is a connection selector, not a file (settings.py:15-20, pg.py:732-737)
-│   ├── migrations/                   # 31 forward/reverse SQL migrations (0000 → 0030) + runner.py
+│   ├── migrations/                   # forward/reverse SQL migration pairs + runner.py (counts: ARCHITECTURE.md code-facts)
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (41 keys → 40 instances), _build_sources()
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile, rescore-backfill
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
-│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 13 route modules (72 endpoints, all per-user routes gated)
+│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 13 route modules (65 endpoints, all per-user routes gated)
 │   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (41 entries), thresholds, feature flags
@@ -98,7 +98,7 @@ job360/
 │   │   │   ├── notifications/        # defaults (signup rulebook seeder), report_generator
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   ├── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + 31-migration forward-compat schema (0000 → 0030)
+│   │   │   ├── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + forward-compat migration schema
 │   │   │   └── csv_export.py
 │   │   ├── sources/                  # (post-Phase-2 split into 6 category subfolders)
 │   │   │   ├── base.py               # BaseJobSource ABC: retry, rate limit, conditional fetch, _is_uk_or_remote
@@ -114,7 +114,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # across 218 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 220 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/

@@ -1520,7 +1520,6 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
     drift apart — which is the exact failure mode this whole file exists for.
     """
     registry, unique_classes = registry_counts()
-    mig_head = migration_head()
     ats_slugs, ats_lists = ats_slug_count()
     job_fields = dataclass_field_count("backend/src/models.py", "Job")
     enr_fields = dataclass_field_count(
@@ -1545,7 +1544,6 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # nothing at all.
         ("registry", registry, r"SOURCE_REGISTRY`?\s+has\s+(\d+)\s+entries"),
         ("unique-classes", unique_classes, r"(\d+) unique source classes"),
-        ("migration-head", mig_head, r"0000 → (\d{4})"),
         # Added 2026-08-03. The checker tracked THREE facts, so every other
         # number in the docs rotted silently — an audit found the rule count,
         # the route/endpoint counts and three mutually-contradictory test counts
@@ -1602,8 +1600,6 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # search-and-match-engine pillar read "14-migration" against 31 actual
         # forward migrations. The existing `migration-head` guard watches only
         # "0000 → NNNN" phrasing, so both stale numbers slid past for weeks.
-        ("migrations-schema", migration_file_count(),
-         r"(\d+)-migration forward-compat schema"),
         # The same COUNT, stated two other ways in the directory trees. Found by
         # CodeRabbit on PR #394: both lines end "(0000 → 0030)", so
         # `migration-head` matched them and they LOOKED guarded -- but that guard
@@ -1611,10 +1607,14 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # correctly force the head to 0031 while "31 forward/reverse SQL
         # migrations" quietly stayed 31. A guard on the same line is not a guard
         # on the same fact.
-        ("migrations-schema", migration_file_count(),
-         r"(\d+) forward/reverse SQL migrations"),
-        ("migrations-schema", migration_file_count(),
-         r"(\d+) forward\+reverse SQL migration pairs"),
+        # RETIRED 2026-08-25, and this is the flywheel arriving. The migration
+        # head and the migration COUNT are both produced by gen_doc_blocks.py
+        # into ARCHITECTURE.md's code-facts block, so they cannot drift at all
+        # -- and the hand-written copies these patterns watched are deleted.
+        # A guard watching a claim nobody writes any more is not free: it is a
+        # green tick asserting nothing, which is the failure this whole file
+        # exists to prevent. Generation retires its own guards; that is the
+        # point of preferring it.
         # Sixth batch, 2026-08-24, at CodeRabbit's request on PR #394.
         # CONFIGURED (302 slugs / 11 lists) was guarded; ACTIVE (10 boards
         # polling 297) was not, though the docs state both. A rotation that
