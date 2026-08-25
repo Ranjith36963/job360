@@ -15,15 +15,15 @@ Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from 
 | Unique source classes | **40** | same dict — `indeed` and `glassdoor` both alias `JobSpySource` |
 | `RATE_LIMITS` entries | **41** | `core/settings.py` `RATE_LIMITS` |
 | `LOCATIONS` entries | **26** | `core/keywords.py` `LOCATIONS` |
-| Migration head | **0031** | `backend/migrations/` |
-| `SCORER_VERSION` | **7** | `services/skill_matcher.SCORER_VERSION` |
+| Migration head | **0033** | `backend/migrations/` |
+| `SCORER_VERSION` | **8** | `services/skill_matcher.SCORER_VERSION` |
 | `BaseJobSource` subclasses | **40** | `src/sources/` |
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
-| Migration files | **32** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **220** | `backend/tests/` |
+| Migration files | **34** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **229** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
-| Hard rules in CLAUDE.md | **31** | root `CLAUDE.md` |
+| Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
 
 **Critical inflection (2026-04-09, commit `3ba1342`):** `backend/src/core/keywords.py` was emptied — every default `JOB_TITLES`/`PRIMARY_SKILLS`/`SECONDARY_SKILLS`/`TERTIARY_SKILLS`/`RELEVANCE_KEYWORDS`/`NEGATIVE_TITLE_KEYWORDS` list is now `[]`. **The system requires a user profile.** Without one, the legacy module-level `score_job()` path scores against empty lists and yields near-zero results. Only `LOCATIONS` (26) and `VISA_KEYWORDS` (8) remain — both domain-agnostic. `_location_score` skips `Remote` and `Hybrid` when matching, so only the place names can score the full 10 (`core/keywords.LOCATIONS`).
@@ -42,7 +42,7 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
                                                   Embed (opt-in) -> job_embeddings.embedding (pgvector)
 ```
 
-Two legacy opt-in feature flags gate the advanced surfaces (both default OFF; CLAUDE.md rule #18). Each is only HALF of its gate — the effective condition is `ENGINEx_ENABLED or <legacy flag>`, so test both names:
+Two legacy opt-in feature flags gate the advanced surfaces (both default OFF; hard rule #18 — `.claude/skills/hard-rules/SKILL.md`). Each is only HALF of its gate — the effective condition is `ENGINEx_ENABLED or <legacy flag>`, so test both names:
 
 - `ENRICHMENT_ENABLED=true` → the LLM **enrichment step** runs, so the Batch-2.9 dimensions read real data instead of their neutral halves. The dimensions themselves are not gated on this flag — they fire on `user_preferences` alone (`skill_matcher.py:587`, rule #20). Effective gate at every call site: `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853,1137`)
 - `SEMANTIC_ENABLED=true` → embeddings into the pgvector store (`job_embeddings.embedding`, migration `0027` — **not** ChromaDB; see `services/pg_vector_index.py`). Hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), while the embedding WRITES are gated on `SEMANTIC_ENABLED` alone (`main.py:1292,1348`) — so `ENGINE3_ENABLED=true` by itself queries an index nothing fills. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
@@ -114,7 +114,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # across 224 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # file count is in the code-facts table above; never quote a count here
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/

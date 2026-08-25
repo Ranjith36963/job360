@@ -37,7 +37,7 @@ Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. **Every merge 
 - **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly`. **Never quote a test count from a doc — measure it** (`python -m pytest --collect-only -q | tail -1`); three docs once disagreed by 400–800 tests. Runs against a **real Postgres** (docker-compose.dev.yml, port 5433) via the `sqlite3`/`aiosqlite` shims in `tests/conftest.py`, schema-per-test. HTTP is mocked with `aioresponses`; the suite must run offline. `test_main.py` is in the canonical run — do **not** re-add `--ignore=tests/test_main.py`.
 - Two deployables: `backend/` (Python 3.9+, FastAPI, Postgres via psycopg3) and `frontend/` (Next.js 16, React 19). Runtime data in `backend/data/`. Live on Railway at job360.uk since 2026-07-02; five services: `backend`, `frontend`, `worker`, `Postgres`, `Redis`.
 - What automation is actually running: the GitHub Actions harness — 30 workflows in `.github/workflows/` (repair, triage, doc-sync, ci, ci-offline, codeql, security, uptime, live-e2e, journey, product-health, db-backup, pr-shepherd…). The old agent loop (`docs/harness/maintenance/MISSIONS.md`) is DORMANT — disabled 2026-06-21. Do not wait on it.
-- What surprises new sessions: `SOURCE_REGISTRY` has 41 entries but 40 unique source classes (`indeed` + `glassdoor` both alias `JobSpySource`) — measure it, never quote it. Heavy deps must be lazy-imported (top-level imports cost every CLI run and every pytest collection). Next.js 16 made `params` async — await it. Adding a source touches five files — see the `add-source` skill. Migrations auto-apply on boot: `api.dependencies.init_db()`, called by `api.main.lifespan`.
+- What surprises new sessions: `SOURCE_REGISTRY` has 41 entries but 40 unique source classes (`indeed` + `glassdoor` both alias `JobSpySource`) — measure it, never quote it. Heavy deps must be lazy-imported (top-level imports cost every CLI run and every pytest collection). Next.js 15 made `params` a Promise and 16 removed synchronous access — await it. Adding a source touches five files — see the `add-source` skill. Migrations auto-apply on boot: `api.dependencies.init_db()`, called by `api.main.lifespan`.
 
 ## Hard Rules
 
@@ -61,7 +61,7 @@ python -m pytest -q -p no:randomly                   # canonical run (needs Post
 python -m pytest tests/test_scorer.py::test_name -v  # single test
 python -m migrations.runner up | status | down       # migrations
 
-# Frontend — run from frontend/  (⚠️ Next.js 16: `params` is async — await it)
+# Frontend — run from frontend/  (⚠️ Next.js 16: `params` is a Promise — async since 15, sync access gone in 16; await it)
 npm run dev | build | lint | type-check | test:unit | test:e2e
 ```
 

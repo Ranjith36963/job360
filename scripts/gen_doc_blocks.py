@@ -76,7 +76,7 @@ def code_facts() -> str:
         f"| Migration files | **{c.migration_file_count()}** | `backend/migrations/*.up.sql` |",
         f"| `test_*.py` files | **{c.test_file_count()}** | `backend/tests/` |",
         f"| GitHub Actions workflows | **{c.workflow_count()}** | `.github/workflows/` |",
-        f"| Hard rules in CLAUDE.md | **{c.hard_rule_count()}** | root `CLAUDE.md` |",
+        f"| Hard rules | **{c.hard_rule_count()}** | `.claude/skills/hard-rules/SKILL.md` |",
     ]
     return "\n".join(rows)
 

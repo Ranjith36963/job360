@@ -29,9 +29,6 @@ verification_commands_run: []
 #     exit_code: 1
 ---
 <!-- doc: LIVING -->
-<!-- doc: LIVING -->
-
-<!-- doc: LIVING -->
 
 # Reviewer Verdict — <batch name / SHA>
 
