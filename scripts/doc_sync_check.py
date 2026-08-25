@@ -446,6 +446,90 @@ def landing_page_source_claims() -> list[tuple[int, int]]:
     return out
 
 
+def constant_disagreements() -> list[tuple[str, str, str, str]]:
+    """(const, doc:line, claimed, disagrees-with) where two docs give one CONSTANT different values.
+
+    Added 2026-08-25. Every other guard here asks "does this doc match the
+    code?". Only suite-baseline asks "do two docs disagree?" -- and in the
+    cycle that prompted this, SIX of ten findings were internal contradictions:
+
+      02-search-and-match-engine.md:297 called ENRICHMENT_THRESHOLD=60 the
+      enrichment gate, while line 165 OF THE SAME FILE already described the
+      real one (MIN_SCORE 10 + MAX_JOBS 20). glossary.md:91 said ESCO
+      normalisation runs; the flags entry six lines below said it never has.
+
+    Those need no code access to catch. A doc that argues with another doc is
+    wrong somewhere by construction, and cheaper to detect than either half is
+    to verify.
+
+    Scope, deliberately narrow so this cannot become a permanent false alarm:
+      * only ALL_CAPS_UNDERSCORE identifiers -- env vars and module constants,
+        never prose;
+      * only a number within ~40 chars after the name, so "X is unrelated to
+        the 5 sources" does not bind;
+      * a name claimed in ONE place is never reported: this guard is about
+        disagreement, not about correctness. The code-vs-doc guards own that.
+    """
+    # A BINDING TOKEN is required between the name and the number: `=`, `|`
+    # (env table), `(`, or the word "default". The first draft allowed any 40
+    # characters, and immediately produced four false alarms -- `LIMIT 50` in
+    # one SQL example against `LIMIT 20` in another (different queries, both
+    # right), and `PILLAR 1/2/3` (three real pillars). A number that merely
+    # FOLLOWS a word is not a claim about that word's value.
+    pat = re.compile(
+        r"\b([A-Z][A-Z0-9_]{4,})`?\s*(?:=|\||\(|:\s|—\s|defaults? (?:to )?)\s*\*{0,2}(\d{1,6})\b"
+    )
+    # SQL/markdown keywords that are never constants whose value can disagree.
+    NOT_CONSTANTS = {"LIMIT", "OFFSET", "PILLAR", "SELECT", "WHERE", "ORDER", "GROUP", "STEP", "PHASE", "BATCH"}
+    # A line explaining a RETIRED value must name it. "the old
+    # ENRICHMENT_THRESHOLD=60 gate never fired" is correct documentation, not a
+    # contradiction -- exactly the tombstone problem that made a dead-name
+    # guard unshippable earlier: a doc recording an absence has to say what is
+    # absent.
+    # NOTE the absence of bare "was" / "were" / "deleted". The first draft had
+    # them and the drill immediately proved the guard blind: ARCHITECTURE.md:10
+    # reads "keywords.py WAS emptied", so a whole line of live claims was being
+    # skipped. Ordinary past tense is not a historical marker -- it appears in
+    # most prose. Only phrases that specifically flag a RETIRED VALUE qualify.
+    HISTORICAL = re.compile(
+        r"\b(the old|no longer|retired|legacy|back-compat|never fired|"
+        r"superseded|deprecated|formerly|previously|used to be)\b",
+        re.IGNORECASE,
+    )
+    seen: dict[str, list[tuple[str, str]]] = {}
+    for rel in LIVING_DOCS:
+        path = ROOT / rel
+        if not path.exists():
+            continue
+        for i, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in pat.finditer(line):
+                name, val = m.group(1), m.group(2)
+                if name in NOT_CONSTANTS:
+                    continue
+                # Scope the historical test to the 40 characters BEFORE this
+                # claim, not the whole line. A line-level filter blinded this
+                # guard twice: ARCHITECTURE.md:10 says "keywords.py was
+                # emptied ... the LEGACY module-level score_job() path" AND
+                # states LOCATIONS (25) — one historical aside was suppressing
+                # a live claim beside it. Third time a line-level filter has
+                # done this (write-verbs on skill paths, bare "was", "legacy").
+                if HISTORICAL.search(line[max(0, m.start() - 40):m.start()]):
+                    continue
+                seen.setdefault(name, []).append((f"{rel}:{i}", val))
+
+    out: list[tuple[str, str, str, str]] = []
+    for name, claims in seen.items():
+        values = {v for _, v in claims}
+        if len(values) < 2:
+            continue
+        winner = max(values, key=lambda v: sum(1 for _, x in claims if x == v))
+        for where, val in claims:
+            if val != winner:
+                others = ", ".join(w for w, x in claims if x == winner)
+                out.append((name, where, val, f"{winner} at {others}"))
+    return out
+
+
 def collected_baseline_claims() -> list[tuple[str, str, int]]:
     """(doc, line, collected-count) for every stated test-suite baseline.
 
@@ -1065,6 +1149,13 @@ def main() -> int:
             drift.append((rel, "-", "doc-type", "no doc-type header", "needs <!-- doc: LIVING ... -->"))
         elif type_tag.group(1) != "LIVING":
             drift.append((rel, "-", "doc-type", f"tagged {type_tag.group(1)}", "this file is a LIVING doc"))
+
+    # Do the docs agree with EACH OTHER about each named constant? Six of ten
+    # findings in the 2026-08-25 scout pass were docs contradicting other docs
+    # (and twice, themselves) about ENRICHMENT_THRESHOLD and friends.
+    for const, where, claimed, against in constant_disagreements():
+        doc, _, line_no = where.rpartition(":")
+        drift.append((doc, line_no, f"disagree:{const}", claimed, against))
 
     # Do the docs agree with EACH OTHER about the suite baseline? Every other
     # guard compares a doc to the code; none can see six docs saying 3,297 while
