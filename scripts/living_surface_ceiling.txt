@@ -41,4 +41,11 @@
 #
 # The rule stands for everything else: restatement of code is never a reason
 # to raise this ceiling.
-8738
+# 8697 (2026-08-25): lowered after the CLAUDE.md diet moved the 31 hard rules
+# into a skill. Left at 8738 it would have been 41 lines of SLACK, and the
+# mutation drill proved it: a planted 40-line regression went UNREPORTED.
+#
+# That is the rule this file already states, broken by the commit that shrank
+# the estate. A ceiling above the real number is not caution, it is a ratchet
+# that has stopped ratcheting. Lower it every time the floor drops.
+8697
