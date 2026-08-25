@@ -1009,7 +1009,11 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
         )
         pending = [dict(r) for r in await cur.fetchall()]
     except Exception:  # noqa: BLE001
-        return {"sent": 0, "failed": 0, "jobs_count": 0}
+        # Same trap as notification_tick: a dead query returned the dict that
+        # means "the digest queue is empty". Mark it as an error so the two are
+        # distinguishable in the worker log and in any future alert.
+        _log.exception("send_bundle: digest query failed for user_id=%s", user_id)
+        return {"sent": 0, "failed": 0, "jobs_count": 0, "error": 1}
 
     if not pending:
         return {"sent": 0, "failed": 0, "jobs_count": 0}
@@ -1344,7 +1348,13 @@ async def notification_tick(ctx: dict[str, Any]) -> dict[str, int]:
         )
         rules = [dict(r) for r in await cur.fetchall()]
     except Exception:  # noqa: BLE001
-        return {"checked": 0, "enqueued": 0}
+        # A crashed query used to return the SAME dict as "there are no rules",
+        # with no log line — so `{'checked': 0, 'enqueued': 0}` in the worker log
+        # meant either "idle" or "the notification system is down" and nothing
+        # could tell them apart. Say which. Still never re-raise: an ARQ cron
+        # that throws is retried blindly every 5 minutes.
+        _log.exception("notification_tick: rules query failed")
+        return {"checked": 0, "enqueued": 0, "error": 1}
 
     enqueued = 0
     for rule in rules:

@@ -189,18 +189,61 @@ async def _ghost_detection_pass(
     Returns {source_name: missed_count} for observability.
     """
     missed_by_source: dict[str, int] = {}
+
+    async def _warn_sweep_skipped(source_name: str, reason: str, detail: str) -> None:
+        """Name the cost of a skipped absence sweep, not just the skip.
+
+        PROD 2026-08-13: adzuna, linkedin and workday raise on EVERY run
+        (run_log.per_source_errors; workday's duration is pinned at the 240s
+        timeout). Skipping them is correct — a failed scrape must never be read
+        as "the jobs disappeared" — but the skip used to be a bare `continue`
+        with no log at all for the failure branch. So their listings stopped
+        ageing and were served as live indefinitely: 140 rows sat in
+        `staleness_state='active'` with `last_seen_at` 3-8 days old, and
+        because `consecutive_misses` never reached 2 the nightly ghost sweep
+        legitimately reported `transitioned: 0`. Every instrument said fine.
+        """
+        # `-1` IS NOT A COUNT. When the count itself failed this logged
+        # "-1 live job(s)" and swallowed the exception whole, so a reader could
+        # not tell a source-FETCH failure from a second failure in the DATABASE,
+        # and had no stack trace for either. A log line that exists to name a
+        # cost must not quietly invent the number. Say so, and record why.
+        # (CodeRabbit, PR #387.)
+        frozen: int | str
+        try:
+            frozen = await db.count_unexpired_jobs_for_source(source_name)
+        except Exception:  # noqa: BLE001 — observability must never break a run
+            frozen = "an unknown number of"
+            logger.warning(
+                "  %s: could not count this source's live jobs either — the "
+                "absence-sweep warning below has no number behind it",
+                source_name,
+                exc_info=True,
+            )
+        logger.warning(
+            "  %s: absence sweep SKIPPED (%s: %s) — %s live job(s) of this source "
+            "stopped ageing and are still served as active",
+            source_name,
+            reason,
+            detail,
+            frozen,
+        )
+
     for source, result in zip(sources, results):
         if isinstance(result, BaseException) or result is None:
+            await _warn_sweep_skipped(
+                source.name,
+                "fetch failed",
+                type(result).__name__ if isinstance(result, BaseException) else "no result",
+            )
             continue
         past = history.get(source.name, [])
         rolling_avg = (sum(past) / len(past)) if past else 0.0
         if rolling_avg > 0 and len(result) < completeness_threshold * rolling_avg:
-            logger.warning(
-                "  %s: result count (%s) below %.0f%% of 7-day avg (%.1f) — " "skipping absence sweep",
+            await _warn_sweep_skipped(
                 source.name,
-                len(result),
-                completeness_threshold * 100,
-                rolling_avg,
+                "incomplete scrape",
+                f"{len(result)} results < {completeness_threshold * 100:.0f}% of 7-day avg {rolling_avg:.1f}",
             )
             continue
         seen: set[tuple[str, str]] = {job.normalized_key() for job in result}
