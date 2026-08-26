@@ -33,12 +33,14 @@ class _RecordingScorer:
     """
 
     def __init__(self):
+        """Start with an empty log of jobs seen."""
         self.seen = []
 
     def score(self, job: Job) -> ScoreBreakdown:
+        """Photograph the job as handed over, then return a fixed breakdown."""
         self.seen.append({
             "employment_type": job.employment_type,
-            "provenance_keys": set(job.shelf_provenance or {}),
+            "provenance": dict(job.shelf_provenance or {}),
         })
         return ScoreBreakdown(
             title_score=40,
@@ -53,6 +55,7 @@ class _RecordingScorer:
         )
 
     def check_visa_flag(self, job: Job) -> bool:
+        """Not under test here; the visa detector has its own coverage."""
         return False
 
 
@@ -95,9 +98,18 @@ def test_every_shelf_is_already_accounted_for_when_the_scorer_runs():
 
     Guards the weaker way this could regress: the gate still runs, but late
     enough that some shelves are unaccounted-for while scoring reads them.
+
+    Asserts the ENTRIES, not just the keys. A key present with a half-built
+    entry behind it would satisfy a key-set check while still meaning the
+    gate had not finished with that shelf when the scorer read it.
     """
     scorer = _RecordingScorer()
 
     _score_dedup_and_filter([_raw_job()], scorer)
 
-    assert scorer.seen[0]["provenance_keys"] == set(UNIVERSAL_SHELF)
+    provenance = scorer.seen[0]["provenance"]
+    assert set(provenance) == set(UNIVERSAL_SHELF)
+    for shelf, entry in provenance.items():
+        assert entry["how"] in ("source", "derived", "llm", "absent"), shelf
+        if entry["how"] == "absent":
+            assert "why" in entry, shelf
