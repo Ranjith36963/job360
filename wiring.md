@@ -46,7 +46,7 @@ Work top to bottom. Each block is independently shippable.
 | 3 | **Fix the default email** | W-17, W-18 | ✅ **rungs 1-4 verified** (real body read off real Postgres) · rung 5 = merge, owner's call | The default mode sends the worst message the system can make, and links away from us. One change closes both. |
 | 4 | **Don't lose the CV he sent** | W-08, W-10 | ✅ **rungs 1-4 verified** (tailor→apply→regenerate walked on real Postgres) · rung 5 = merge, owner's call | Data is being destroyed today. Every day we wait, more is gone. |
 | 5 | **Pipeline card truth** | W-05, W-15, W-16 (deadline half) | ✅ **rungs 1-4 verified** (board read off real Postgres) · rung 5 = merge, owner's call | Cards lie about dead jobs, drop deadlines, and the Applied filter always returns zero. |
-| 6 | **Close the silent holes** | W-06, W-12, W-28, W-29 | ready | One-liners: an untracked exit, a stale-doc warning, a feed that shows old scores as fresh. |
+| 6 | **Close the silent holes** | W-06, W-12, W-28, W-29 | ✅ **rungs 1-4 verified** · rung 5 = merge, owner's call | One-liners: an untracked exit, a stale-doc warning, a feed that shows old scores as fresh. |
 | 7 | **Launch gates** | W-23, W-27 | ready | No unsubscribe = cannot email the public. No analytics = the launch teaches nothing. |
 | 8 | **Delete sweep** | D-01…D-05 | ready | Deleting dead code is a real fix. Fan out — 5 unrelated files. |
 
@@ -177,7 +177,7 @@ list's "My Actions → Applied" filter) never speak. So that filter **always ret
 **Smallest fix:** derive `applied` from the `applications` table (pipeline is the one truth), or delete the filter option. See D-05.
 *(Tests already written for the derive-from-applications approach: `backend/tests/test_pipeline_wiring.py`, 9 tests, currently red.)*
 
-### [ ] W-06 — A second, untracked apply link
+### [x] W-06 — A second, untracked apply link  ✅ FIXED AS A COPY CHANGE, deliberately
 **Severity:** degrades — **one-line fix**
 **What happens:** the job detail page has *two* links to the employer. The Apply button
 tracks. Right above it, "View full description on source website" is a bare anchor with the
@@ -185,6 +185,32 @@ same URL and **no onClick**. It reads like a legitimate apply path. Use it and J
 learns he went.
 **Proof exists:** `JobDetailClient.tsx:494-503` (bare anchor) vs `:641` (tracked ApplyButton).
 **Smallest fix:** route the anchor through the same handler, or remove it.
+
+**W-06 was fixed as a COPY change, not a tracking change — on purpose.** The link
+said "view the complete listing and apply", which made it read as a second apply path
+while writing nothing. The obvious fix — make it create an application — would have
+MANUFACTURED applications for everyone who only wanted to read the description. That is
+a worse lie than the one it replaces. So the link now says "Read the full listing", the
+paragraph points at the Apply button, and exactly one control on the page claims to be
+applying.
+
+**W-29 is half done and the doc should not pretend otherwise.** The three facts
+(`career_domain`, `cv_languages`, `cv_education_details`) now reach `GET /api/profile`
+via `CVDetail`, and `api-types` carries them. **Rendering them on the profile page is
+still owed** — until that lands the user still cannot see or correct what is moving
+their score. Confirmed genuine, not dead weight: `cv_parser.py:901/993` writes
+`career_domain` from real extraction and `llm_matcher.py:249-260` reads all three into
+the judge's prompt.
+
+**W-12 note:** `profile_changed_since` is computed only when BOTH versions are known.
+An unknown version is not evidence of staleness, and warning on it would train the user
+to ignore the warning.
+
+**W-28 note:** `_maybe_trigger_rescore` is called BARE at both new call sites, matching
+the two that already existed. The function documents its own guarantee ("the profile
+save never 500s because of this") and falls back to an in-process task when Redis is
+down. The test breaks the real enqueue door rather than stubbing the function, so it
+exercises the guard that actually ships.
 
 ### [ ] W-07 — No apply link anywhere is click-tracked
 **Severity:** degrades
@@ -260,7 +286,7 @@ field without downloading anything — so `kept_at` cannot even tell you he got 
 **Proof missing:** `git grep -n "download_log|tailored_downloads|doc_download"` → zero.
 **Verdict: LATER / probably DELETE the idea.** `kept_at` is enough for now.
 
-### [ ] W-12 — No staleness warning on a tailored doc
+### [x] W-12 — No staleness warning on a tailored doc  ✅ RUNGS 1-4 VERIFIED
 **Severity:** degrades
 **What happens:** the backend *does* stamp `profile_version` on every doc. The API response
 model drops it before it reaches the browser, so no "this CV was written from an older
@@ -452,12 +478,12 @@ application* going quiet.
 for: moving a card between stages, generating a CV, downloading a CV, adding a channel.
 **Proof missing:** `git grep -l "posthog" origin/main -- frontend/src` → 11 files; `KanbanBoard.tsx`, `pipeline/page.tsx`, `TailorPanel.tsx`, `TailorButton.tsx`, `TailorSection.tsx`, `channels/page.tsx` are all absent. Backend has zero posthog.
 
-### [ ] W-28 — Clearing a profile section or restoring a version never re-scores the feed
+### [x] W-28 — Clearing a profile section or restoring a version never re-scores the feed  ✅ RUNGS 1-4 VERIFIED
 **Severity:** degrades — the app shows a stale number as if it were fresh
 **Proof exists:** `_maybe_trigger_rescore` has exactly 2 callers — `profile.py:696` (`_extract_save_trigger`) and `:885` (`upload_linkedin`). Neither is inside `clear_profile_section` (`:1061-1103`) or `restore_version` (`:1136-1151`).
 **Smallest fix:** two lines.
 
-### [ ] W-29 — Three CV facts feed the score but are never shown
+### [x] W-29 — Three CV facts feed the score but are never shown  ✅ API SURFACE DONE · frontend display still owed
 **Severity:** degrades
 **What happens:** career domain, spoken languages, and education detail are read into the
 scoring prompt. He can never see or correct them.

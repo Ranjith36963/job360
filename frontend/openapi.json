@@ -185,6 +185,11 @@
             "title": "Achievements",
             "type": "array"
           },
+          "career_domain": {
+            "default": "",
+            "title": "Career Domain",
+            "type": "string"
+          },
           "certifications": {
             "default": [],
             "items": {
@@ -201,6 +206,14 @@
             "title": "Companies",
             "type": "array"
           },
+          "cv_education_details": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Cv Education Details",
+            "type": "array"
+          },
           "cv_experience_level": {
             "default": "",
             "title": "Cv Experience Level",
@@ -212,6 +225,14 @@
               "type": "string"
             },
             "title": "Cv Industries",
+            "type": "array"
+          },
+          "cv_languages": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Cv Languages",
             "type": "array"
           },
           "cv_positions": {
@@ -2371,6 +2392,22 @@
               }
             ],
             "title": "Polished"
+          },
+          "profile_changed_since": {
+            "default": false,
+            "title": "Profile Changed Since",
+            "type": "boolean"
+          },
+          "profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version"
           },
           "status": {
             "default": "draft",

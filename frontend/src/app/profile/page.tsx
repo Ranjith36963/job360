@@ -50,6 +50,12 @@ const SECTION_LABEL: Record<ClearSection, string> = {
 // LinkedIn/GitHub sections from being hidden along with it.
 const EMPTY_CV_DETAIL: CVDetail = {
   achievements: [],
+  // W-29 — these three are read into the LLM matcher's prompt, so they move the
+  // score. Empty here means "no CV yet", which is the honest value for a
+  // stand-in; rule #29 says an unfilled field must never be a guess.
+  career_domain: "",
+  cv_education_details: [],
+  cv_languages: [],
   certifications: [],
   companies: [],
   cv_experience_level: "",

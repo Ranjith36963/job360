@@ -487,9 +487,18 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
               <h2 className="font-heading text-sm font-semibold uppercase tracking-wider text-primary/80">
                 About this role
               </h2>
+              {/* W-06 — this used to say "view the complete listing and apply",
+                  which made it read as a second apply path. It is NOT tracked, so
+                  anyone who used it applied without Job360 ever knowing.
+
+                  The fix is deliberately the copy, not the tracking. Making a
+                  "read the description" link create an application would
+                  MANUFACTURE applications for people who only wanted to read —
+                  a worse lie than the one it replaces. So: this is reading, the
+                  Apply button below is applying, and only one of them claims to be. */}
               <p className="text-sm leading-relaxed text-muted-foreground">
-                Full job descriptions are available on the source website. Click
-                the button below to view the complete listing and apply.
+                Full job descriptions live on the source website. Open the listing
+                to read it in full — then use Apply below so we can track it for you.
               </p>
               <a href={safeUrl(job.apply_url)} target="_blank" rel="noopener noreferrer">
                 <Button
@@ -498,7 +507,7 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
                   className="gap-2 border-primary/20 text-primary hover:bg-primary/10"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
-                  View full description on source website
+                  Read the full listing
                 </Button>
               </a>
             </div>
