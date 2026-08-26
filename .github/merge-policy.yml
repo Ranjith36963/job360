@@ -148,7 +148,6 @@ lanes:
       - "2030.md"
       - "PLAN-?-*.md"
       - "anthropic-patterns-upgrade.md"
-      - "fable-harness-plan.md"
       - "scrapingdesccion.md"
       # Repo plumbing. Measured over the last 60 merges, these three alone
       # pushed PRs into the owner lane purely because nobody had ever named

@@ -5044,7 +5044,7 @@ def test_jobspy_default_sites_exclude_glassdoor():
     _run(_test())
 
 
-# ---- S3 fix — _is_uk_or_remote word-boundary matching (FABLE_FINDINGS.md) ----
+# ---- S3 fix — _is_uk_or_remote word-boundary matching (AUDIT-2026-07-23-FULL-REVERIFY.md) ----
 #
 # Before the fix, membership used plain substring `in`, so "uk" (then a
 # hand-typed UK term) matched inside unrelated words like "Milwaukee" or
@@ -5082,7 +5082,7 @@ def test_is_uk_or_remote_unknown_location_defaults_true():
     assert _is_uk_or_remote("Some Town Nobody Has Heard Of") is True
 
 
-# ---- S7 fix — eightykhours must declare a niche DOMAINS (FABLE_FINDINGS.md) ----
+# ---- S7 fix — eightykhours must declare a niche DOMAINS (AUDIT-2026-07-23-FULL-REVERIFY.md) ----
 
 
 def test_eightykhours_declares_niche_domain():

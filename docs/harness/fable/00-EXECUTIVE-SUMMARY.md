@@ -12,7 +12,7 @@
 > ## STATUS AS OF 2026-07-16 — READ THIS FIRST
 > **The audit below is the ORIGINAL findings, preserved as written. Most are now FIXED.**
 > Each finding in `01`–`09` now carries its own **STATUS** line with the commit — trust
-> those, not the prose around them. Full history: `PROGRESS.md`.
+> those, not the prose around them. Full history: `PROGRESS.md`, deleted 2026-08-25 as superseded by `AUDIT-2026-07-23-FULL-REVERIFY.md` (`git show d3cbceb:docs/harness/fable/PROGRESS.md`).
 >
 > **All 4 "blockers" below are fixed.** Of ~45 findings, the only things left are:
 > | Still open | Kind |
@@ -80,7 +80,8 @@ effort but real in consequence — mostly a handful of well-scoped fixes, not a 
 - The commit-gate stamp mechanism and memory hygiene in the Claude Code harness.
 
 ## How to use this folder
-1. Fix the **4 blockers** above (see `07-ROADMAP.md` for the sequence).
+1. Fix the **4 blockers** above (sequence: `AUDIT-2026-07-23-FULL-REVERIFY.md`; the original
+   `07-ROADMAP.md` was deleted 2026-08-25 — `git show d3cbceb:docs/harness/fable/07-ROADMAP.md`).
 2. Then work the **cross-cutting fixes** — best effort-to-impact ratio.
 3. Then batch the P2 hardening per area doc.
 4. Re-run this audit (same 6-agent sweep) after the blockers land to confirm.

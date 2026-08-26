@@ -54,7 +54,7 @@ other five — treat it as "the big rocks," not the full legal review.
 ---
 
 ## What this means for the grade
-The first six docs + the fixes in `PROGRESS.md` get the **code areas** genuinely toward
+The first six docs + the fixes in `PROGRESS.md` (deleted 2026-08-25 — `git show d3cbceb:docs/harness/fable/PROGRESS.md`) get the **code areas** genuinely toward
 A. But a *complete* "solo-dev A" also needs the three GATING dimensions above —
 **performance, cost, and test-quality** — swept and fixed. They're not in the current
 docs because the six agents weren't pointed at them.
