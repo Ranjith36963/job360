@@ -47,8 +47,8 @@ Work top to bottom. Each block is independently shippable.
 | 4 | **Don't lose the CV he sent** | W-08, W-10 | ✅ **rungs 1-4 verified** (tailor→apply→regenerate walked on real Postgres) · rung 5 = merge, owner's call | Data is being destroyed today. Every day we wait, more is gone. |
 | 5 | **Pipeline card truth** | W-05, W-15, W-16 (deadline half) | ✅ **rungs 1-4 verified** (board read off real Postgres) · rung 5 = merge, owner's call | Cards lie about dead jobs, drop deadlines, and the Applied filter always returns zero. |
 | 6 | **Close the silent holes** | W-06, W-12, W-28, W-29 | ✅ **rungs 1-4 verified** · rung 5 = merge, owner's call | One-liners: an untracked exit, a stale-doc warning, a feed that shows old scores as fresh. |
-| 7 | **Launch gates** | W-23, W-27 | ready | No unsubscribe = cannot email the public. No analytics = the launch teaches nothing. |
-| 8 | **Delete sweep** | D-01…D-05 | ready | Deleting dead code is a real fix. Fan out — 5 unrelated files. |
+| 7 | **Launch gates** | W-23, W-27 | ✅ **rungs 1-4 verified** (unsubscribe drill fires on real Postgres) · rung 5 = merge, owner's call | No unsubscribe = cannot email the public. No analytics = the launch teaches nothing. |
+| 8 | **Delete sweep** | D-01…D-05 | ⚠️ **PARTIAL — 2 of 5 done**, 3 blocked on decisions (see below) | Deleting dead code is a real fix. Fan out — 5 unrelated files. |
 
 > **STATUS WORDS MEAN SPECIFIC THINGS HERE. Corrected 2026-08-25.**
 > An earlier version of this table said PR 1 was "✅ shipped". That was false and it
@@ -445,7 +445,7 @@ application* going quiet.
 
 # STEP 6 — Channels, the email, and the click that must come back
 
-### [ ] W-23 — No unsubscribe link. At all.
+### [x] W-23 — No unsubscribe link. At all.  ✅ RUNGS 1-4 VERIFIED
 **Severity:** blocks public launch (deliverability + legal), technically small
 **What happens:** the only way to stop the emails is to log in and delete the channel.
 **Proof exists:** `services/delivery/email_body.py` — full body construction, no unsubscribe line.
@@ -471,7 +471,7 @@ application* going quiet.
 
 # CROSS-CUTTING (found in sweep 1)
 
-### [ ] W-27 — The funnel goes dark right after Apply
+### [x] W-27 — The funnel goes dark right after Apply  ✅ RUNGS 1-4 VERIFIED
 **Severity:** blocks a useful launch — **4 one-line fixes, cheapest item here**
 **What happens:** 6 analytics events exist total: `signup_completed`, `cv_uploaded`,
 `extraction_completed`, `search_run`, `job_viewed`, `application_created`. **Nothing** fires
@@ -505,12 +505,20 @@ scoring prompt. He can never see or correct them.
 Dead schema. Nothing reads or writes it. Delete now; re-add properly when a real user
 reaches an interview. Dead columns lie to future you. *(Conditional on D-D.)*
 
-### [ ] D-02 — "Keep without downloading"
+### [~] D-02 — "Keep without downloading"  ✅ DEAD CLIENT DELETED · backend route KEPT, see note
 Backend route + typed API client wrapper exist; **no button calls them**. Your own code
 comment says download = keep. Delete the route and the wrapper.
 
-### [ ] D-03 — `getActionCounts()` in `lib/api.ts:212`
+### [x] D-03 — `getActionCounts()` in `lib/api.ts:212`  ✅ DELETED
 Defined, exported, **zero callers** anywhere in frontend or backend.
+
+**D-02 was only half-deleted, deliberately.** The frontend `keepTailored` client had
+zero callers and is gone. The BACKEND route is not: it is exercised by
+`tests/test_cv_coverletter.py`, it is public API surface, and PR 4 made
+`keep_tailored_doc` load-bearing — the download path now uses it to bind the document a
+user applied with. Deleting a tested route to tidy up is a bigger and riskier change
+than the note that proposed it assumed, and it earns nothing today. If it goes, it goes
+with its tests, on purpose, as its own change.
 
 ### [ ] D-04 — `applications.notes_history`
 Written on every notes edit (`database.py:1784-1808`), never returned by any model or

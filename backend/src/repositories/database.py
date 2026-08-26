@@ -1333,6 +1333,23 @@ class JobDatabase:
             for r in await cursor.fetchall()
         ]
 
+    async def set_notifications_enabled(self, user_id: str, *, enabled: bool) -> None:
+        """Flip the caller's ONE notification_rules row on or off (W-23).
+
+        Rule #23: exactly one row per user governs every channel, so unsubscribing is
+        a single flag rather than a sweep over channels. Deliberately does NOT delete
+        anything — the user's channels, quiet hours and mode survive, so switching
+        back on restores exactly what they had rather than an empty default.
+
+        Silent when no rule row exists: a user with nothing configured is already as
+        unsubscribed as it is possible to be, and that is a success, not an error.
+        """
+        await self._db.execute(
+            "UPDATE notification_rules SET enabled = ? WHERE user_id = ?",
+            (1 if enabled else 0, user_id),
+        )
+        await self._db.commit()
+
     async def get_applied_job_ids(self, user_id: str) -> set[int]:
         """Job ids this user has an application for — the ONE truth for "applied".
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import posthog from "posthog-js";
 import { Download, Loader2, Sparkles, Eye } from "lucide-react";
 import {
   Dialog,
@@ -134,6 +135,9 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
     setGenerating(true);
     try {
       const b = await generateTailored(jobId);
+      // W-27 — the funnel went dark right after Apply. Tailoring is the most
+      // expensive thing the product does per user and nothing counted it.
+      posthog.capture("tailored_document_generated", { job_id: jobId });
       applyBundle(b);
       toast.success("Tailored CV + cover letter generated");
     } catch (err) {
@@ -176,6 +180,13 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
     setDownloading(true);
     try {
       await downloadTailored(jobId, kind, fmt);
+      // Which KIND and which FORMAT — a bare "downloaded" count cannot tell a
+      // CV from a cover letter, or PDF from DOCX.
+      posthog.capture("tailored_document_downloaded", {
+        job_id: jobId,
+        doc_kind: kind,
+        format: fmt,
+      });
       toast.success(`${fmt.toUpperCase()} download started`);
     } catch (err) {
       toast.apiError(err, "Download failed");

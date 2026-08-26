@@ -305,10 +305,64 @@ async def drill_pipeline_card(db: Any) -> list[str]:
     return failures
 
 
+async def drill_unsubscribe(db: Any) -> list[str]:
+    """W-23 — the exit in every email must actually work."""
+    print("\n=== DRILL: unsubscribe (W-23) ===")
+    failures: list[str] = []
+    from src.services.notifications.unsubscribe import (
+        unsubscribe_line,
+        verify_token,
+    )
+
+    await _seed_user(db)
+    await db.execute(
+        "INSERT INTO notification_rules (user_id, enabled) VALUES (?, 1)", (DRILL_USER,)
+    )
+    await db.commit()
+
+    line = unsubscribe_line(SITE_BASE_URL, DRILL_USER)
+    print("  the line that goes in every email:")
+    print("   ", line)
+    token = line.rsplit("token=", 1)[1]
+
+    jdb = JobDatabase.from_connection("", db)
+    await jdb.set_notifications_enabled(verify_token(token) or "", enabled=False)
+    cur = await db.execute(
+        "SELECT enabled FROM notification_rules WHERE user_id = ?", (DRILL_USER,)
+    )
+    row = await cur.fetchone()
+    enabled_after = row[0] if row else None
+    print(f"  notification_rules.enabled after unsubscribing: {enabled_after}")
+
+    for label, ok in (
+        ("the emitted token verifies to the right user", verify_token(token) == DRILL_USER),
+        ("a forged token is refused", verify_token(f"{DRILL_USER}.{'0' * 32}") is None),
+        ("another user cannot be silenced with this token",
+         verify_token(f"someone-else.{token.rsplit('.', 1)[1]}") is None),
+        ("notifications are actually off", enabled_after in (0, False)),
+    ):
+        print(f"  [{'PASS' if ok else 'FAIL'}] {label}")
+        if not ok:
+            failures.append(f"unsubscribe: {label}")
+
+    # Turning it back on must restore, not recreate.
+    await jdb.set_notifications_enabled(DRILL_USER, enabled=True)
+    cur = await db.execute(
+        "SELECT enabled FROM notification_rules WHERE user_id = ?", (DRILL_USER,)
+    )
+    back = (await cur.fetchone())[0]
+    ok = back in (1, True)
+    print(f"  [{'PASS' if ok else 'FAIL'}] the user can turn them back on")
+    if not ok:
+        failures.append("unsubscribe: could not re-enable")
+    return failures
+
+
 DRILLS = {
     "chase": drill_chase,
     "instant": drill_instant,
     "pipeline": drill_pipeline_card,
+    "unsubscribe": drill_unsubscribe,
 }
 
 

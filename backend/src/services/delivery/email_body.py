@@ -100,15 +100,20 @@ def render_instant_subject(card: DecisionCard) -> str:
     return f"Job360 — {head}"
 
 
-def render_instant_text(card: DecisionCard) -> str:
+def render_instant_text(card: DecisionCard, unsubscribe: str | None = None) -> str:
     """Body for a single-job instant alert — same facts as the digest states.
 
     Rendered from :func:`_card_lines`, so instant and digest cannot drift apart:
     change what a job says in one place and both modes follow.
+
+    ``unsubscribe`` is the one-line exit (W-23). Optional so a caller that has no
+    user context still renders a valid body, but every real send passes it: an email
+    with no way out gets marked as spam instead.
     """
-    return "\n".join(
-        [f"{card.title} — {card.company}", *_card_lines(card, indent=""), ""]
-    )
+    lines = [f"{card.title} — {card.company}", *_card_lines(card, indent=""), ""]
+    if unsubscribe:
+        lines.extend(["—", unsubscribe])
+    return "\n".join(lines)
 
 
 def render_digest_text(
@@ -116,6 +121,7 @@ def render_digest_text(
     *,
     considered: int,
     dropped_reasons: Sequence[str],
+    unsubscribe: str | None = None,
 ) -> str:
     """Render the whole email body.
 
@@ -152,5 +158,13 @@ def render_digest_text(
     else:
         out.append("")
         out.append("We would rather send you nothing than send you noise.")
+
+    # W-23 — every outbound email carries its own exit. A recipient who cannot find
+    # one presses "spam" instead, and that costs the sending domain far more than
+    # the unsubscribe ever would.
+    if unsubscribe:
+        out.append("")
+        out.append("—")
+        out.append(unsubscribe)
 
     return "\n".join(out).rstrip() + "\n"

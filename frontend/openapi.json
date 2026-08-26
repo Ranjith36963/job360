@@ -2514,6 +2514,19 @@
         "title": "TimelineEntry",
         "type": "object"
       },
+      "UnsubscribeRequest": {
+        "properties": {
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "UnsubscribeRequest",
+        "type": "object"
+      },
       "UserResponse": {
         "properties": {
           "email": {
@@ -4150,6 +4163,52 @@
           }
         },
         "summary": "Notification Stats",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/notifications/unsubscribe": {
+      "post": {
+        "description": "Turn ALL notifications off for the user a signed token names (W-23).\n\nNO SESSION REQUIRED, on purpose. Someone who wants the emails to stop is often\nexactly the person who will not log in to make it happen \u2014 and a recipient who\ncannot find the exit presses \"spam\" instead, which is the worst signal a sending\ndomain can collect. The token IS the authorisation.\n\nSafe to expose unauthenticated because of what it can do: the ONLY outcome is\nsilence. It cannot read anything, cannot change an address, and cannot be used to\nreach an account. A leaked token buys an attacker the ability to stop someone's\nemail, which the owner reverses by logging in and switching it back on.\n\nPOST, never GET. Email clients and security scanners prefetch links, and a\nstate-changing GET would unsubscribe people who never clicked \u2014 the same trap the\nmagic-link landing page already solves with a confirm button. The emailed URL\npoints at a frontend page; that page POSTs here when the human presses the button.\n\nIdempotent: unsubscribing twice is a success, not an error. A retry, a double-click\nor a second visit to an old email must not produce a scary failure page.",
+        "operationId": "unsubscribe_api_notifications_unsubscribe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnsubscribeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Unsubscribe Api Notifications Unsubscribe Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unsubscribe",
         "tags": [
           "notifications"
         ]
