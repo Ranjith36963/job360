@@ -414,12 +414,21 @@ def _load_lists() -> tuple[list[str], list[tuple[str, str]]]:
                 f"({type(lane).__name__}), so its paths cannot be read and nothing may "
                 f"merge unattended."
             )
-        paths = lane.get("paths") or []
-        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+        # READ IT WITHOUT `or []`. That idiom turns a MISSING `paths:` and a
+        # `paths: null` into a valid empty lane, so an owner lane could quietly
+        # lose every DENY pattern it has and the policy would still load. A lane
+        # that classifies nothing is not a lane; it is a rule that evaporated.
+        paths = lane.get("paths")
+        if (
+            not isinstance(paths, list)
+            or not paths
+            or not all(isinstance(p, str) and p for p in paths)
+        ):
             raise SystemExit(
-                f"merge_cage: `paths:` for lane `{name}` in {POLICY_PATH.name} must be a list "
-                f"of strings (got {type(paths).__name__}). A bare string would be read one "
-                f"character at a time."
+                f"merge_cage: `paths:` for lane `{name}` in {POLICY_PATH.name} must be a "
+                f"non-empty list of strings (got {type(paths).__name__}). A bare string would "
+                f"be read one character at a time, and a missing or empty list would silently "
+                f"delete every rule in the lane."
             )
         # `auto_merge` DECIDES THE LANE'S DIRECTION, so it may not be merely
         # truthy. YAML quotes are easy to add by accident and `"false"` is a
@@ -2608,6 +2617,11 @@ def _bad_policy_probe() -> list[str]:
         "lanes is a list": "lanes:\n  - harness\n",
         "lane is null": "lanes:\n  harness:\n",
         "paths is a bare string": 'lanes:\n  harness:\n    auto_merge: true\n    paths: "a/**"\n',
+        # An owner lane that loses its rules is the same disaster as one that
+        # never had them, and `paths` read with `or []` made both look valid.
+        "paths key is absent": "lanes:\n  owner_lane:\n    auto_merge: false\n",
+        "paths is null": "lanes:\n  owner_lane:\n    auto_merge: false\n    paths:\n",
+        "paths is empty": "lanes:\n  owner_lane:\n    auto_merge: false\n    paths: []\n",
         "auto_merge is a quoted string": (
             'lanes:\n  owner_lane:\n    auto_merge: "false"\n    paths:\n      - "secret/**"\n'
         ),
@@ -2622,8 +2636,15 @@ def _bad_policy_probe() -> list[str]:
                 POLICY_PATH = probe
                 try:
                     _load_lists()
-                except SystemExit:
-                    continue          # refused as a sentence — correct
+                except SystemExit as exc:
+                    # AN EXIT IS NOT AUTOMATICALLY A REFUSAL. A regression to a
+                    # bare `raise SystemExit()` would leave this drill green
+                    # while the sentence the owner reads had vanished — and the
+                    # sentence IS the deliverable here, not the exit code.
+                    said = str(exc.code or "")
+                    if not said.startswith("merge_cage:"):
+                        survived.append(f"{label} (exited with no diagnostic: {said!r})")
+                    continue
                 except Exception:     # a traceback is NOT a refusal
                     survived.append(f"{label} (raised, did not refuse cleanly)")
                     continue
