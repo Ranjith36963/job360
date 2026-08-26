@@ -224,8 +224,21 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     print("lane.py --drill")
 
     # 1. Pure harness work takes the fast lane.
-    check("harness: a workflow edit",
-          classify([".github/workflows/uptime.yml"], policy)["lane"], "harness")
+    #
+    # THIS TEST USED TO WANT `harness` FOR A WORKFLOW, AND IT WAS NEVER TRUE.
+    # `merge_cage.py` has denied `.github/**` outright since it was written, and
+    # DENY beats ALLOW, so `.github/workflows/uptime.yml` reached the owner every
+    # single time while this line said otherwise. The two files were written down
+    # as one on 2026-08-26 and the blanket deny was kept — changing a security
+    # boundary is not a side effect of a de-duplication. The test now asserts
+    # what the system does.
+    #
+    # The narrower rule is still available and is the owner's to take:
+    # `harness_owner` names the caged workflows individually (auto-merge.yml,
+    # verify-live.yml, revert-main.yml, ...), and deleting the three blanket
+    # lines in merge-policy.yml hands the rest back to this fast lane.
+    check("harness: a workflow edit is the OWNER's (blanket .github/**)",
+          classify([".github/workflows/uptime.yml"], policy)["lane"], "harness_owner")
     check("harness: a doc edit", classify(["docs/README.md"], policy)["lane"], "harness")
 
     # 2. Product code takes the watched lane.
@@ -371,16 +384,38 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #     an outcome check catches any pattern that produces the wrong outcome,
     #     including ones nobody has invented yet.
 
-    # 11a. THE INVARIANT, STATED AS AN OUTCOME. Nothing the owner filed under
-    #      docs/product/ may ever be merged by a machine, at ANY depth. This is
-    #      the entire point of wave 1, so it is asserted directly rather than
-    #      inferred from the shape of the patterns that happen to implement it.
+    # 11a. THE INVARIANT, STATED AS AN OUTCOME — AND NARROWED 2026-08-26.
+    #
+    #      Wave 1 asserted that NOTHING under docs/product/ may be merged by a
+    #      machine, at any depth. The owner has since decided that ordinary
+    #      product prose is prose: it reaches no user, and the `verify` tag —
+    #      watching production for 15 minutes — cannot say anything true about a
+    #      markdown file. `docs/product/**` is in the `harness` lane now.
+    #
+    #      What survives is the part that was always the real invariant: a
+    #      document that IS a decision still goes to a human. Both files are
+    #      named individually in `product_owner`, and both are cited BY NUMBER
+    #      from CLAUDE.md, which is what makes them rules rather than prose.
+    #
+    #      The depth cases stay, because the mechanism they were written to catch
+    #      has not changed: a pattern that fails to cross `/` would classify a
+    #      nested file wrongly, and only a real nested path can prove it does not.
     for depth in ("docs/product/x.md",
                   "docs/product/pillars/README.md",
                   "docs/product/plans/deep/er/still.md",
                   "docs/product/research/nested/notes.md"):
-        check(f"no machine may merge a product document: {depth}",
-              classify([depth], policy)["auto_merge"], False)
+        check(f"ordinary product prose is machine-mergeable at depth: {depth}",
+              classify([depth], policy)["auto_merge"], True)
+
+    # 11b. ...and the two documents that are DECISIONS still are not, at any
+    #      depth and whatever else is in the changeset with them.
+    for decision in ("docs/product/product_design_rules.md",
+                     "docs/product/plans/batch-2-decisions.md"):
+        check(f"a document that IS a decision still needs you: {decision}",
+              classify([decision], policy)["auto_merge"], False)
+        check(f"...even beside ordinary prose: {decision}",
+              classify(["docs/product/pillars/README.md", decision], policy)["auto_merge"],
+              False)
 
     # 11b. EVERY FAST-LANE PATTERN, WITH A REAL NESTED WITNESS.
     #

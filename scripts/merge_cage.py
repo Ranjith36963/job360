@@ -247,120 +247,182 @@ def path_matches(path: str, pattern: str) -> bool:
 
 _OWNER_MERGES = "FIX: nothing an agent can do — this is the owner's call, so he merges it by hand."
 
-DENY: list[tuple[str, str]] = [
+# ─────────────────────────────────────────────────────────────────────────────
+# ONE LIST, TWO READERS  (2026-08-26)
+#
+# ALLOW and DENY used to be typed out HERE, beside `.github/merge-policy.yml`,
+# which classifies the very same paths for `scripts/lane.py`. Two lists
+# answering one question drift, and these had — far past drift, into flat
+# contradiction. Measured on this tree the day before this change:
+#
+#   of the 38 paths the two FAST lanes declared auto-mergeable, SIX could
+#   actually pass this cage.
+#
+#   `backend/src/**` and `frontend/src/**` — the entire product — read as
+#   "no rule covers this path". `scripts/**` and `.claude/**` were declared
+#   fast-lane by the policy and DENIED outright here. The cage won every time,
+#   silently, and the policy read like a promise the machine could not keep.
+#
+# So the policy is now the only place a path is classified, and this file
+# DERIVES its two lists from it:
+#
+#   lane with `auto_merge: true`   ->  ALLOW
+#   lane with `auto_merge: false`  ->  DENY
+#   no lane at all                 ->  refused, exactly as before
+#
+# What stays here is the SENTENCE each refusal prints. A reason is not a
+# classification — it is the thing that makes a refusal actionable at 7am — and
+# the policy is the owner's dial, not a home for twenty paragraphs. Any denied
+# path without a sentence falls back to its lane's own description, so a new
+# entry in the policy is never mute.
+#
+# `check_lists()` now fails the build on BOTH new failure modes: a reason that
+# names a pattern the policy no longer has (dead configuration), and a fast-lane
+# path that a deny pattern swallows whole (the contradiction described above).
+# ─────────────────────────────────────────────────────────────────────────────
+
+POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy.yml"
+
+# pattern -> the sentence printed when it refuses. Keys MUST exist in the policy.
+DENY_REASONS: dict[str, str] = {
     # ── product: anything that changes what a user is shown or how it ranks ──
-    ("backend/src/services/skill_matcher.py",
-     f"changes how jobs are scored — a product decision. {_OWNER_MERGES}"),
-    ("backend/src/services/deduplicator.py",
-     f"changes which jobs are shown at all. {_OWNER_MERGES}"),
-    ("backend/src/services/scoring/**",
-     f"changes how jobs are scored — a product decision. {_OWNER_MERGES}"),
-    ("backend/src/services/uk_gate.py",
-     f"decides which jobs enter the catalogue. {_OWNER_MERGES}"),
-    ("backend/src/services/visa_signal.py",
-     f"changes what the visa spotlight shows. {_OWNER_MERGES}"),
-    ("backend/src/services/profile/**",
-     f"changes what is extracted from a user's CV. {_OWNER_MERGES}"),
-    ("backend/src/models.py",
-     f"normalized_key lives here; wrong dedup = duplicate or lost rows. {_OWNER_MERGES}"),
+    "backend/src/services/skill_matcher.py":
+        f"changes how jobs are scored — a product decision. {_OWNER_MERGES}",
+    "backend/src/services/deduplicator.py":
+        f"changes which jobs are shown at all. {_OWNER_MERGES}",
+    "backend/src/services/scoring/**":
+        f"changes how jobs are scored — a product decision. {_OWNER_MERGES}",
+    "backend/src/services/uk_gate.py":
+        f"decides which jobs enter the catalogue. {_OWNER_MERGES}",
+    "backend/src/services/visa_signal.py":
+        f"changes what the visa spotlight shows. {_OWNER_MERGES}",
+    "backend/src/services/profile/**":
+        f"changes what is extracted from a user's CV. {_OWNER_MERGES}",
+    "backend/src/models.py":
+        f"normalized_key lives here; wrong dedup = duplicate or lost rows. {_OWNER_MERGES}",
     # ── users: identity, sessions, anything that can lock someone out ────────
-    ("backend/src/api/routes/auth.py", f"authentication — a user decision. {_OWNER_MERGES}"),
-    ("backend/src/services/auth/**", f"authentication — a user decision. {_OWNER_MERGES}"),
-    ("backend/src/api/routes/account*.py",
-     f"account management — a user decision. {_OWNER_MERGES}"),
-    ("backend/src/services/notifications/**",
-     f"sends real messages to real people. {_OWNER_MERGES}"),
+    "backend/src/api/routes/auth.py": f"authentication — a user decision. {_OWNER_MERGES}",
+    "backend/src/services/auth/**": f"authentication — a user decision. {_OWNER_MERGES}",
+    "backend/src/api/routes/account*.py":
+        f"account management — a user decision. {_OWNER_MERGES}",
+    "backend/src/services/notifications/**":
+        f"sends real messages to real people. {_OWNER_MERGES}",
     # A per-user API route is denied on its PATH because a path cage cannot tell a
     # logging fix from a deleted `Depends(require_user)`. PR #315 was +45 lines in
     # exactly this file and would have merged on its filename alone; rules #12/#25
     # exist because a review found three real IDORs in these routes.
-    ("backend/src/api/routes/profile.py",
-     "a per-user API route — rules #12/#25. A filename cannot tell a logging fix "
-     f"from a removed `Depends(require_user)`. {_OWNER_MERGES}"),
+    "backend/src/api/routes/profile.py":
+        "a per-user API route — rules #12/#25. A filename cannot tell a logging fix "
+        f"from a removed `Depends(require_user)`. {_OWNER_MERGES}",
     # ── infrastructure ───────────────────────────────────────────────────────
-    ("backend/migrations/**", f"schema change — irreversible against live data. {_OWNER_MERGES}"),
-    ("**/*docker-compose*", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("**/*Dockerfile*", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("**/railway.json", f"infrastructure decision. {_OWNER_MERGES}"),
-    ("**/*.env*", f"secrets and configuration. {_OWNER_MERGES}"),
-    ("backend/src/core/settings.py",
-     f"flags here change production behaviour globally. {_OWNER_MERGES}"),
+    "backend/migrations/**":
+        f"schema change — irreversible against live data. {_OWNER_MERGES}",
+    "**/*docker-compose*": f"infrastructure decision. {_OWNER_MERGES}",
+    "**/*Dockerfile*": f"infrastructure decision. {_OWNER_MERGES}",
+    "**/railway.json": f"infrastructure decision. {_OWNER_MERGES}",
+    "**/*.env*": f"secrets and configuration. {_OWNER_MERGES}",
+    "backend/src/core/settings.py":
+        f"flags here change production behaviour globally. {_OWNER_MERGES}",
     # ── dependency manifests ─────────────────────────────────────────────────
     # THE CAGE MAY NEVER BE MORE PERMISSIVE THAN A GATE ALREADY ON MAIN. These
     # were on the ALLOW list, and the cage has no semver awareness, so it would
     # have waved through PR #291 (motion 12.42.2 -> 13.0.0) which
     # dependabot-auto.yml already routes to a human. Manifests also carry
     # postinstall scripts: allowing one is allowing arbitrary code on the build host.
-    ("**/package.json", "a dependency change — `.github/workflows/dependabot-auto.yml` already "
-                     "owns this decision and sends MAJOR bumps to a human; a manifest also "
-                     "runs postinstall scripts on the build host. "
-                     "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("**/package-lock.json", "a dependency change — see package.json. "
-                          "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("**/pyproject.toml", "a dependency change — see package.json. "
-                       "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
-    ("**/requirements*.txt", "a dependency change — see package.json. "
-                          "FIX: let dependabot-auto decide it, or the owner merges it by hand."),
+    "**/package.json":
+        "a dependency change — `.github/workflows/dependabot-auto.yml` already "
+        "owns this decision and sends MAJOR bumps to a human; a manifest also "
+        "runs postinstall scripts on the build host. "
+        "FIX: let dependabot-auto decide it, or the owner merges it by hand.",
+    "**/package-lock.json": "a dependency change — see package.json. "
+        "FIX: let dependabot-auto decide it, or the owner merges it by hand.",
+    "**/pyproject.toml": "a dependency change — see package.json. "
+        "FIX: let dependabot-auto decide it, or the owner merges it by hand.",
+    "**/requirements*.txt": "a dependency change — see package.json. "
+        "FIX: let dependabot-auto decide it, or the owner merges it by hand.",
     # ── documents that ARE decisions ─────────────────────────────────────────
-    # `docs/**` and `*.md` are allowed, which meant the canonical text of the
-    # owner's product rules could ship unsupervised while CLAUDE.md, which merely
-    # points AT it, was denied. If a denied file delegates its authority to
-    # another file, that file inherits the denial.
-    ("docs/product/product_design_rules.md",
-     f"the canonical text of owner rules #29/#30/#31 — changing it changes the "
-     f"product. {_OWNER_MERGES}"),
-    ("docs/product/plans/batch-2-decisions.md",
-     f"a record of irreversible choices. {_OWNER_MERGES}"),
+    # The rest of `docs/product/` moved to the fast lane on 2026-08-26 (owner's
+    # call: a doc is prose). These two did not, because they are not prose: if a
+    # denied file delegates its authority to another file, that file inherits
+    # the denial.
+    "docs/product/product_design_rules.md":
+        "the canonical text of owner rules #29/#30/#31 — changing it changes the "
+        f"product. {_OWNER_MERGES}",
+    "docs/product/plans/batch-2-decisions.md":
+        f"a record of irreversible choices. {_OWNER_MERGES}",
     # ── the harness must not quietly edit its own cage ───────────────────────
-    (".github/**", "part of the harness that judges this very PR — an agent editing its "
-                   f"own guards is how a cage is escaped. {_OWNER_MERGES}"),
-    ("scripts/**", "part of the harness that judges this very PR — an agent editing its "
-                   f"own guards is how a cage is escaped. {_OWNER_MERGES}"),
-    (".claude/**", "the instructions agents read — editing them unsupervised is circular. "
-                   + _OWNER_MERGES),
-    ("**/CLAUDE.md", "the rules agents read; changing them unsupervised is circular. "
-                  + _OWNER_MERGES),
-]
+    ".github/**": "part of the harness that judges this very PR — an agent editing its "
+                  f"own guards is how a cage is escaped. {_OWNER_MERGES}",
+    "scripts/**": "part of the harness that judges this very PR — an agent editing its "
+                  f"own guards is how a cage is escaped. {_OWNER_MERGES}",
+    ".claude/**": "the instructions agents read — editing them unsupervised is circular. "
+                  + _OWNER_MERGES,
+    "**/CLAUDE.md": "the rules agents read; changing them unsupervised is circular. "
+                    + _OWNER_MERGES,
+}
 
-ALLOW: list[str] = [
-    "backend/tests/**",
-    # Frontend tests are allowed by what they ARE, not by where someone hoped they
-    # would live: 24 of this repo's 43 frontend unit tests sit beside the code they
-    # test, so the old `__tests__/` pattern refused 55% of them as unknown paths.
-    "frontend/src/**/__tests__/**",
-    "frontend/src/**/*.test.ts",
-    "frontend/src/**/*.test.tsx",
-    "frontend/src/**/*.spec.ts",
-    "frontend/src/**/*.spec.tsx",
-    "frontend/tests/**",
-    # ── DOCUMENTS, BY LANE — NOT `docs/**`, AND NEVER `*.md` ─────────────────
-    # Wave 1 moved 109 files so the DIRECTORY carries the lane, and updated the
-    # DENY entries above to the new `docs/product/` paths. It did not touch this
-    # list, so the two classifiers disagreed about the same file: `scripts/lane.py`
-    # escalated `docs/product/PRD.md` to `product_owner` while THIS file — the only
-    # one CI runs, via `pr-advisor.yml` — passed it. Measured on this tree before
-    # the change: of the 45 documents wave 1 moved specifically to protect,
-    # `docs/**` auto-allowed 43. The two the move did protect were protected by
-    # their own DENY lines, not by anything here.
-    #
-    # `*.md` was worse than redundant. `path_matches` treats any SLASH-FREE
-    # pattern as a BASENAME rule at every depth, so `*.md` reached markdown
-    # anywhere in the repo — it is what made those 43 allowable in the first
-    # place, and removing `docs/**` alone would have left them allowed.
-    #
-    # So the lanes are named, and nothing is allowed by being a document:
-    "docs/harness/**",       # the harness's own record. Breaks Ranjith, never a user.
-    # TWO archive spellings, and this is NOT a typo to be collapsed:
-    # `stale_path_check.py:53` already carries both in ARCHIVE_PREFIXES.
-    "docs/_archive/**",
-    "docs/archive/**",
-    "docs/README.md",        # the index over both lanes; `harness` in merge-policy.yml
-    # DELIBERATELY NOT LISTED: `docs/product/**`. Those are the owner's product
-    # decisions, and a document that IS a decision goes to a human. A new document
-    # filed nowhere now matches nothing and escalates, which is the safe direction:
-    # forgetting to classify costs one refusal, never a silent auto-merge.
-    "backend/src/api/routes/client_log.py",  # deliberately public: no user scoping
-]
+
+def _load_lists() -> tuple[list[str], list[tuple[str, str]]]:
+    """Read the lane map and split it into (allow, deny).
+
+    Raises rather than defaulting. A missing, empty or malformed policy must
+    never read as "no restrictions" — that is the `else: allow` bug wearing a
+    different hat, and it is the one this whole file exists to prevent.
+
+    This runs at IMPORT, before argparse, so a broken policy has to fail as a
+    sentence rather than a traceback: `scripts/lane.py` imports this module, and
+    a stack trace at import is the kind of failure people work around.
+    """
+    import yaml
+
+    if not POLICY_PATH.exists():
+        raise SystemExit(f"merge_cage: policy file not found: {POLICY_PATH}")
+    try:
+        loaded = yaml.safe_load(POLICY_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:  # malformed YAML, bad encoding, anything
+        raise SystemExit(
+            f"merge_cage: {POLICY_PATH.name} could not be parsed, so no path is classified "
+            f"and nothing may merge unattended: {exc}"
+        ) from exc
+    lanes = (loaded or {}).get("lanes") or {}
+    if not lanes:
+        raise SystemExit(f"merge_cage: {POLICY_PATH} describes no lanes")
+
+    allow: list[str] = []
+    deny: list[tuple[str, str]] = []
+    for name, lane in lanes.items():
+        paths = lane.get("paths") or []
+        if lane.get("auto_merge"):
+            allow.extend(paths)
+            continue
+        fallback = (
+            f"{(lane.get('description') or name).rstrip('.')} "
+            f"(`{name}` lane in {POLICY_PATH.name}). {_OWNER_MERGES}"
+        )
+        deny.extend((p, DENY_REASONS.get(p, fallback)) for p in paths)
+    return allow, deny
+
+
+ALLOW, DENY = _load_lists()
+
+# THE HAND-TYPED `ALLOW` LIST USED TO SIT HERE. It is gone, not moved: every
+# entry it carried is now reachable through the policy's own fast lanes, and
+# keeping a second copy is the bug this change exists to end.
+#
+# Two lessons from it are worth keeping, because they are about `path_matches`
+# and they outlive the list:
+#
+#   * NEVER ALLOW BY FILE TYPE. `*.md` was once on this list. A slash-free
+#     pattern matched a BASENAME at every depth, so it reached markdown anywhere
+#     in the repo — including 43 of the 45 documents that a 109-file move had
+#     just been performed to protect. Lanes are named by DIRECTORY for this
+#     reason. (The basename rule itself was removed later; the habit it taught
+#     is the thing to avoid.)
+#
+#   * ALLOW BY WHAT A FILE IS, NOT WHERE SOMEONE HOPED IT WOULD LIVE. The old
+#     `frontend/src/**/__tests__/**` refused 55% of this repo's frontend unit
+#     tests, which sit beside the code they test. `frontend/src/**` — one
+#     policy line — covers them without anyone having to guess a convention.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CAGE: RATCHETS
@@ -548,18 +610,46 @@ def page_was_full(n_items: int, per_page: int, what: str) -> list[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _probe_for(pattern: str) -> str:
+    """A concrete path that the given policy pattern would match.
+
+    Only good enough to ask "is this whole lane entry reachable?" — it turns
+    `backend/src/**` into `backend/src/probe`, not into anything real.
+    """
+    return (
+        pattern.replace("**/", "probe/")
+        .replace("/**", "/probe")
+        .replace("**", "probe")
+        .replace("*", "probe")
+        .replace("?", "p")
+    )
+
+
 def check_lists() -> list[str]:
     """The rules must not contradict themselves.
 
-    Two of the twelve ALLOW entries were unreachable for the cage's whole life —
-    shadowed by a DENY glob, and DENY wins. 17% of the allow list read as
-    permission and was not, and the drill was fully green with them dead. Dead
-    configuration is a hard error, not a silent no-op.
+    Three failure modes, all of them things this repo has actually shipped:
 
-    Only LITERAL allow entries are checked: `*.md` overlapping the `CLAUDE.md`
-    deny is the documented precedence rule working as designed.
+    1. AN ALLOW ENTRY SHADOWED WHOLE BY A DENY. Two of the twelve original ALLOW
+       entries were unreachable for the cage's entire life, and the drill was
+       fully green with them dead. Dead configuration is a hard error here.
+
+    2. A FAST LANE THE CAGE SWALLOWS. Since 2026-08-26 both lists come from
+       `.github/merge-policy.yml`, so an entry declared `auto_merge: true` whose
+       own probe is DENIED means the policy is promising something the cage will
+       always refuse. Measured the day before that change: 32 of the 38 declared
+       fast-lane paths were in exactly this state — `scripts/**` and
+       `.claude/**` denied outright, `backend/src/**` and `frontend/src/**`
+       unknown. A specific deny under a broad allow (`backend/src/models.py`
+       inside `backend/src/**`) is the intended precedence and does NOT fire
+       this: the probe for the broad entry is not the specific file.
+
+    3. A REASON FOR A PATH THE POLICY NO LONGER HAS. `DENY_REASONS` annotates
+       patterns; a key that matches nothing is a sentence nobody will ever read,
+       and — worse — it looks like a rule while being none.
     """
     bad: list[str] = []
+
     for a in ALLOW:
         if any(ch in a for ch in "*?"):
             continue
@@ -567,6 +657,27 @@ def check_lists() -> list[str]:
             if path_matches(a, pat):
                 bad.append(f"ALLOW `{a}` is fully shadowed by DENY `{pat}`, so it can never "
                            f"take effect. It reads as a permission and is not.")
+
+    for a in ALLOW:
+        probe = _probe_for(a)
+        hit = next((pat for pat, _ in DENY if path_matches(probe, pat)), None)
+        if hit:
+            bad.append(
+                f"the policy declares `{a}` auto-mergeable, but DENY `{hit}` swallows the "
+                f"whole entry (probe `{probe}`), so nothing under it can ever merge "
+                f"unattended. One of the two is wrong — decide which in "
+                f"{POLICY_PATH.name}."
+            )
+
+    deny_patterns = {pat for pat, _ in DENY}
+    for key in DENY_REASONS:
+        if key not in deny_patterns:
+            bad.append(
+                f"DENY_REASONS carries `{key}`, which no lane in {POLICY_PATH.name} lists any "
+                f"more. It reads as a rule and is only a sentence. Remove it, or put the path "
+                f"back in an `auto_merge: false` lane."
+            )
+
     return bad
 
 
@@ -1502,8 +1613,13 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         check_paths(["docker-compose.prod.yml"]), "infrastructure", P)
     red("the agent editing its own guards is refused",
         check_paths([".github/workflows/ci.yml"]), "cage is escaped", P)
+    # The witness moved on 2026-08-26 and the invariant did not. It used to be
+    # `backend/src/some_new_module.py`, which was only "unrecognised" because
+    # the cage's hand-typed ALLOW list had never heard of `backend/src/**` —
+    # while the policy called that whole tree the fast lane. Now that both read
+    # one list, a genuinely unclassified path is one in no lane at all.
     red("an unrecognised path is refused",
-        check_paths(["backend/src/some_new_module.py"]), "nobody has decided", P)
+        check_paths(["some_new_top_level/thing.py"]), "nobody has decided", P)
 
     # B16 — a per-user API route may not merge on the strength of its filename.
     red("a per-user API route is refused on its path",
@@ -1515,23 +1631,37 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     red("a document that is itself a product decision is refused",
         check_paths(["docs/product/product_design_rules.md"]), "product", P)
 
-    # B12b — THE WHOLE PRODUCT LANE IS REFUSED, not just the two files that
-    #        happen to carry their own DENY line. Wave 1 moved 45 documents into
-    #        `docs/product/` to protect them and updated DENY, but left `docs/**`
-    #        and `*.md` on ALLOW — so the file that actually decides auto-allowed
-    #        43 of those 45. Measured on this tree before the fix, and the reason
-    #        this case exists: a green drill said nothing about it.
+    # B12b — THE TWO DOCUMENTS THAT ARE DECISIONS SURVIVE THEIR OWN DIRECTORY.
     #
-    #        These paths are deliberately NOT the two denied ones. If someone
-    #        restores `docs/**` or `*.md` to ALLOW, every line here goes red,
-    #        which is the only thing stopping this from rotting back.
-    leaked = [f for f in ("docs/product/PRD.md",
-                          "docs/product/plans/uk-first-eligibility.md",
-                          "docs/product/pillars/README.md",
-                          "docs/product/research/anything.md")
-              if check_paths([f]).status == "pass"]
-    ok("no document under docs/product/ can be merged by a machine",
-       not leaked, f"the product lane is auto-allowed again: {leaked}", P)
+    #        This case used to assert that NOTHING under `docs/product/` could be
+    #        machine-merged. The owner reversed that on 2026-08-26: prose is
+    #        prose, and `verify` — fifteen minutes of watching production —
+    #        cannot say anything true about a markdown file.
+    #
+    #        The half that was always the real invariant is kept, and it is now
+    #        HARDER to satisfy than before, not easier. Previously these two
+    #        files sat inside a directory that was denied wholesale, so their own
+    #        DENY lines were belt-and-braces. Now the directory around them is
+    #        the FAST lane and those two lines are the only thing standing up. A
+    #        specific deny beating a broad allow is the precedence rule; this is
+    #        the case that proves it still holds.
+    escaped = [f for f in ("docs/product/product_design_rules.md",
+                           "docs/product/plans/batch-2-decisions.md")
+               if check_paths([f]).status == "pass"]
+    ok("a document that IS a decision is refused inside a fast-lane directory",
+       not escaped, f"a decision document became machine-mergeable: {escaped}", P)
+
+    # B12b-ii — and the reversal really happened: ordinary product prose merges.
+    #           A cage that refuses everything is an off switch, which is the
+    #           failure this file was rewritten to end. Deleting the two lines
+    #           above would leave B12b green and this red only if it is asserted
+    #           separately, so it is.
+    stuck = [f for f in ("docs/product/PRD.md",
+                         "docs/product/pillars/README.md",
+                         "docs/product/research/anything.md")
+             if check_paths([f]).status != "pass"]
+    ok("ordinary product prose takes the fast lane (owner's call, 2026-08-26)",
+       not stuck, f"product prose is still refused: {stuck}", P)
 
     # B12c — and the refusal must not be bought by refusing ALL documents. The
     #        harness lane is Ranjith's own record; breaking it cannot reach a
@@ -1544,14 +1674,16 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     ok("NEGATIVE CONTROL (harness + archived documents still pass the path cage)",
        v_docs.status == "pass", f"the cage refused a harness doc: {v_docs.reasons}", P)
 
-    # B12d — `docs/README.md` is listed WITH ITS SLASH on purpose. A bare
-    #        `README.md` is a basename rule at every depth (see path_matches),
-    #        so it would have re-opened `docs/product/pillars/README.md` — the
-    #        exact leak this change closes, wearing the clothes of a root file.
-    ok("the docs index is allowed by its path, not by its basename at any depth",
-       check_paths(["docs/README.md"]).status == "pass"
-       and check_paths(["docs/product/pillars/README.md"]).status == "fail",
-       "a bare basename rule crept back into ALLOW", P)
+    # B12d — THERE IS NO BASENAME RULE. A slash-free pattern once matched at
+    #        every depth, so `README.md` on the allow list reached a README
+    #        anywhere in the repo. The witness had to move on 2026-08-26 —
+    #        `docs/product/pillars/README.md` is now legitimately allowed by its
+    #        DIRECTORY — but the property is unchanged and still worth pinning:
+    #        an allow entry must never leak to a directory nobody classified.
+    ok("a root file is allowed by its path, and its basename does not leak downward",
+       check_paths(["README.md"]).status == "pass"
+       and check_paths(["unlisted_dir/README.md"]).status == "fail",
+       "a bare basename rule crept back into path_matches", P)
 
     # B13 — `**` really crosses directories now, and `*` really stops at one.
     #        If the rewrite from `x/*` to `x/**` had been botched, this goes red.
