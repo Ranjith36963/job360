@@ -409,7 +409,7 @@ enqueue sites are feed-driven (`main.py:509` enqueues *for feed rows*; `tasks.py
 fires straight after `upsert_feed_row`), so production always has the row. Four existing
 tests encoded the old contract and were updated to seed a feed row, not the code weakened.
 
-### [ ] W-19 — Nothing ever notices "no reply"
+### [x] W-19 — Nothing ever notices "no reply"  ✅ RUNGS 1-4 VERIFIED (PR 2)
 **Severity:** breaks the loop — **THE ONE BREAK**
 **What happens:** the query **already exists** — `get_stale_applications`, 7+ days dormant,
 correctly excludes offer/rejected. It is wired to exactly one consumer: an in-app banner on
@@ -419,13 +419,27 @@ if he remembers to open that page and look.
 **Proof missing:** `git grep -n "get_stale_applications" origin/main -- backend/src` → exactly 2 hits, the definition and that one route. `workers/settings.py:220-241` is the complete cron list — `nightly_ghost_sweep`, `refresh_catalog`, `notification_tick`, `enrichment_sweep` — **none** references applications or pipeline.
 **Smallest fix:** one daily cron next to the existing four → `get_stale_applications` per user → existing dispatcher.
 
-### [ ] W-20 — Every message is about a NEW JOB, never about HIM
+### [~] W-20 — Every message is about a NEW JOB, never about HIM  ⚠️ PARTIAL — see note
 **Severity:** breaks the loop
 **What happens:** email bodies are built from the shared catalog + his feed score + the LLM
 verdict. The engine has **never** read `applications`. There is no "your application moved
 to interview", no "your week: 3 applied, 1 interview, 2 quiet".
 **Proof missing:** `git grep -n "applications" origin/main -- backend/src/services/delivery backend/src/services/notifications` → **zero hits**.
 **Smallest fix:** a "your pipeline" section in the digest build, plus a notify call inside `advance_application`.
+
+**W-20 is PARTIAL and the earlier tick was wrong.** The chase cron (W-19) means the
+product can now say something about the user's OWN applications — that is the half that
+landed. Two halves did NOT:
+
+* the **digest has no "your pipeline" section** ("your week: 3 applied, 1 interview,
+  2 gone quiet"). Blocked on **D-G** — whether the digest should talk about him at all
+  is a tone decision, not an engineering one.
+* **stage transitions notify nobody.** Moving a card to interview/offer/rejected sends
+  nothing. Unblocked, just not built.
+
+`grep "applications" backend/src/services/delivery backend/src/services/notifications`
+still returns zero — the digest builder itself has still never read that table. Only the
+new cron has.
 
 ### [ ] W-21 — No deadline / interview / CV-staleness reminders exist at all
 **Severity:** breaks the loop — **design gap, not a quick wire**
