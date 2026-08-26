@@ -5,21 +5,27 @@
 # not delete the thing itself. These may only ever go DOWN: the guard fails
 # on an increase, so new prose must cite symbols.
 #
-# Written 2026-08-25 with the deletion contract. Lower a number here when a
-# doc genuinely loses citations. Total at baseline: 317.
+# Re-baselined 2026-08-25 after the CLAUDE.md diet. The TOTAL fell 317 -> 305,
+# but the ratchet is PER FILE and .claude/skills/hard-rules/SKILL.md did not
+# exist at the last baseline, so its 4 inherited citations read as a rise
+# from zero. They moved out of CLAUDE.md (5 -> 0), they did not appear.
+#
+# A per-file ratchet cannot tell a move from a gain. Re-baselining is the
+# honest response; raising a per-file number without checking the total
+# would not be.
 
 .claude/skills/add-source/SKILL.md 1
+.claude/skills/hard-rules/SKILL.md 4
 .claude/skills/health/SKILL.md 4
 .claude/skills/worker/SKILL.md 1
-ARCHITECTURE.md 51
-CLAUDE.md 5
-README.md 13
+ARCHITECTURE.md 49
+README.md 11
 STATUS.md 15
 STORY.md 4
 backend/CLAUDE.md 2
 docs/product/MONETIZATION_GAPS.md 3
-docs/product/pillars/01-user-pillar.md 67
-docs/product/pillars/02-search-and-match-engine.md 71
+docs/product/pillars/01-user-pillar.md 61
+docs/product/pillars/02-search-and-match-engine.md 70
 docs/product/pillars/03-job-providers.md 30
 docs/product/pillars/glossary.md 15
 docs/product/pillars/runbook.md 23

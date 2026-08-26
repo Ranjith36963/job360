@@ -1,6 +1,8 @@
 # Post-mortem: the server froze during every search (event-loop blocking, round 2)
 <!-- doc: LOG -->
 
+> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
+
 **Date:** 2026-08-10
 **Bug:** `backfill_feed_from_catalog()` in `backend/src/services/rescore.py` scored up to 50,000 catalog rows in a plain loop, on the event loop, with no `await` and no `asyncio.to_thread`. It ran on every search. While it ran, the whole server was frozen — every user, every request, including the status poll the UI needs.
 **The bad part:** we already fixed this exact class of bug once (PR #123, `main.py`). It came back anyway.
