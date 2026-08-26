@@ -546,39 +546,36 @@ it would erase the user's `liked`.
 
 ---
 
-# DECISIONS ONLY YOU CAN MAKE
+# DECISIONS — ANSWERED BY THE OWNER 2026-08-26
 
-These are product calls, not engineering. Work below them is blocked until you answer.
+All seven are settled. Nothing below is open; each line is now a spec.
 
-### [ ] D-A — What does "applied" mean?
-Clicked the link, or confirmed submitted? Two different products. **Blocks W-04.**
+| # | Decision | ANSWER | What it unblocks |
+|---|---|---|---|
+| D-A | What does "applied" mean? | **Confirm before it counts.** Clicking Apply is not an application until the user says they submitted it. | W-04 |
+| D-B | What does "outreach" mean? | **"I chased them."** Moving a card there RESETS the silence clock, so we stop nagging about a job just followed up on. | W-14 |
+| D-C | Who decides ghosted? | **The user decides. We only suggest — never auto-move a card.** | W-14, chase escalation |
+| D-D | Track interviews? | **Yes — build it.** Moving a card to Interview asks for a date; remind the day before. | W-16 interview half, W-21, D-01 |
+| D-E | Email click tracking? | **Yes — build it.** | W-24, W-25, W-26 |
+| D-F | Keep the "Applied" filter? | **Keep it.** | D-05 (nothing to delete) |
+| D-G | Should the digest talk about him? | **Yes** — add a "your pipeline" section. | W-20's second half |
 
-### [ ] D-B — What does "outreach" mean?
-Today it is a word on a column with no code behind it. Is it "I chased them"? Does entering
-it reset the silence clock? **Blocks W-14.**
+**Two of these went against my recommendation, and that is fine — they are product calls,
+not engineering ones. Recording the trade-off ONCE so it is not re-argued later:**
 
-### [ ] D-C — When is a job ghosted — 14 days? 21? 30?
-And does the product **suggest** ghosted (you confirm) or **decide** it? Recommendation:
-suggest. Never auto-move a card before D-B is answered. **Blocks W-14, W-19.**
+* **D-D (interviews):** I argued to delete the dead column instead, because there is
+  roughly one application in ninety days and nobody has reached an interview yet.
+  Owner says build it. Building it.
+* **D-E (click tracking):** I argued no, strongly. The current emails are plain text
+  with no tracking pixels and no redirect hops, which quietly HELPS them reach the
+  inbox — and the chase cron plus the apply record already show that an email worked.
+  Adding redirects makes the mail look more like marketing to a spam filter. Owner says
+  build it. Building it, and the deliverability cost is stated here rather than
+  re-raised each time.
 
-### [ ] D-D — Do you track interviews at all?
-`interview_dates` is a feature you never decided to build. Wire it with a real date prompt,
-or delete the column. **Blocks W-16, W-21, D-01.**
-
-### [ ] D-E — Do you want click tracking in email at all?
-Privacy and deliverability trade, not an engineering default. **You get ~90% of the value
-free:** the chase cron (W-19) plus the apply row already tell you the email worked.
-**Blocks W-24, W-25, W-26.**
-
-### [ ] D-F — Should the job list have an "Applied" filter at all?
-The pipeline page already shows applied jobs. Either derive the filter from `applications`
-or delete the option. **Blocks W-05, D-05.**
-
-### [ ] D-G — Should the digest talk about *him*?
-"Your week: 3 applied, 1 interview, 2 gone quiet." Tone call first, then a small wire.
-**Shapes W-20.**
-
----
+**An open threshold, not a decision:** D-C settles WHO decides, not WHEN we suggest.
+Using **21 days** of silence as the trigger for the "this looks ghosted" suggestion
+until told otherwise. Changing it is one constant.
 
 # ALREADY FINE — do not rebuild
 
