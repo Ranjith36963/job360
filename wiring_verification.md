@@ -86,7 +86,7 @@ the malicious one is not a fix.
 - [ ] Targeted gate green, real exit code read
 - [ ] `api-types` regenerated if the contract moved
 - [ ] Browser walkthrough done, **happy path AND negative case**, screenshots kept
-- [ ] Drill registered in `scripts/drill_registry.py`
+- [ ] Fired on purpose — a `drill_wiring.py` drill, or a mutation proving the tests have teeth
 - [ ] Coverage bounds stated in the PR description
 - [ ] Verified in prod after merge with a named instrument
 
@@ -137,7 +137,7 @@ carries `next=` and points at `job360.uk`.
 
 ---
 
-## PR 2 — The instant email (W-17, W-18)
+## PR 3 — The instant email (W-17, W-18)
 
 1. Fire one instant notification for a job with a known score and a known LLM reason.
 2. Assert on the **body that was actually sent**, not the function's return value:
@@ -157,7 +157,7 @@ actually left the building.
 
 ---
 
-## PR 3 — The chase cron (W-19, W-20)
+## PR 2 — The chase cron (W-19, W-20)
 
 1. Backdate an application to 8 days ago in the dev DB.
 2. Run the cron **by hand** — do not wait for the schedule.
@@ -175,7 +175,7 @@ actually left the building.
 
 ---
 
-## PR 4 — Pipeline card truth (W-05, W-15, tailored summary)
+## PR 5 — Pipeline card truth (W-05, W-15, W-16 deadline half)
 
 Tests already written: `backend/tests/test_pipeline_wiring.py` (9 tests, currently red).
 
@@ -191,7 +191,7 @@ Tests already written: `backend/tests/test_pipeline_wiring.py` (9 tests, current
 
 ---
 
-## PR 5 — Don't lose the CV he sent (W-08, W-10)
+## PR 4 — Don't lose the CV he sent (W-08, W-10)
 
 **This one is about data that is being destroyed today.** The walkthrough is the point:
 
@@ -231,22 +231,50 @@ Deleting is a change. Same bar:
 
 ---
 
-# DRILLS — every guard declares one
+# DRILLS — fire it on purpose
 
-`scripts/drill_registry.py` makes an undeclared guard a **red build**. This is not
-bureaucracy: two loops on `main` were dead on arrival and only firing them on purpose
-revealed it. A guard nobody fires is a guard nobody knows is broken.
+**Correction (2026-08-25).** An earlier version of this file said to register these in
+`scripts/drill_registry.py`. **That was wrong and doing it would have turned the build
+red.** That registry is keyed on *scripts invoked from `.github/`*, and it fails with
+`STALE ENTRY: REGISTRY declares X but no workflow invokes it`. W-01/W-03/W-19 are
+application behaviours, not CI guard scripts. This is the same naming-vs-running
+confusion `drill_registry.py` documents three times in its own header.
 
-| Item | Drill — the deliberate way to fire it |
+The underlying point still stands, and it is the expensive lesson of this repo: ten
+guards shipped unable to fire, and two CI loops sat dead on `main` until someone fired
+them deliberately. A feature nobody triggers on purpose is one you hear about from a
+user.
+
+**The mechanism for application features is `backend/scripts/drill_wiring.py`** — a
+manual operator drill, like `scripts/observe.py`, deliberately NOT in the registry.
+
+```bash
+DATABASE_URL=postgresql://job360:job360dev@localhost:5433/job360_rung4     python scripts/drill_wiring.py all
+```
+
+It seeds its own rows under a reserved user id, fires the feature, **prints the real
+subject and body** so a human can read what a user would receive, asserts the outcome,
+and deletes what it made.
+
+| Drill | What it fires | Watched go red by |
+|---|---|---|
+| `chase` | W-19 — a 30-day-quiet application must produce a message; a second run must stay silent | re-introducing `strip(" at")`; the drill printed *"You applied to Platform Engineer at **Me**"* and failed `names the company in full` |
+| `instant` | W-17/W-18 — the email must carry score, verdict, reason, salary and link to us, not the employer | covered by the mutation set in `test_instant_notification_content.py` |
+
+**Covered by tests + mutation instead** (no separate drill needed — they are pure
+functions or render branches, fired on every test run):
+
+| Item | Mutation that proved teeth |
 |---|---|
-| W-01 | Request a magic link with `next=//evil.com` → must land on `/dashboard`, never off-site |
-| W-03 | Register a fresh account → the dashboard must render the CV call-to-action |
-| W-15 | Flip a job to `confirmed_expired` → its pipeline card must show **Job closed** |
-| W-17/18 | Fire one instant notification → body must contain the score **and** a `job360.uk/jobs/` link |
-| W-19 | Backdate an application 8 days, run the cron by hand → a chase lands in the ledger |
-| W-23 | Click unsubscribe while logged out → `notification_rules` flips off |
+| W-01 `safeNext` | removed the backslash guard → exactly 2 of 21 tests failed, both backslash cases |
+| W-03 empty state | collapsed the three-state check → exactly 1 test failed, the "don't flash while loading" guard |
+| W-19 cooldown | removed the cooldown filter → 8 tests failed |
+| W-19 ghosted | stopped excluding `ghosted` → exactly 1 test failed |
+| W-08/W-10 | 13 tests watched red first ("regenerating destroyed the old document with no archive") |
 
----
+The precision is the signal. A mutation that kills everything means the tests are
+coupled; one that kills nothing means a hole. Two of 21, and one of five, is what a
+suite of independent assertions looks like.
 
 # ANTI-PATTERNS THAT HAVE ALREADY COST US TIME
 
