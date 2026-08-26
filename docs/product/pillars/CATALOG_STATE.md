@@ -191,7 +191,7 @@ wired to any process (`scheduler.py:194-199` says so explicitly).
 
 | # | Step | Where | What happens |
 |---|---|---|---|
-| 1 | `source.fetch_jobs()` | each source file | Builds raw `Job()` objects. Nearly every source truncates `description[:5000]` at this point. |
+| 1 | `source.fetch_jobs()` | each source file | Builds raw `Job()` objects. |
 | 2 | collect | `main.py:970` | `all_jobs.extend(...)` |
 | 3 | id backfill | `main.py:1021-1028` | Builds a `normalized_key() → id` map over the whole catalog and stamps `job.id` on already-known jobs. (Rule-relevant: dim scoring silently zeroes if `id` is unset.) |
 | 4 | ghost pass | `main.py:1005` | `_ghost_detection_pass` per source, gated behind a 70%-of-7-day-rolling-average completeness check (`main.py:171-216`) so a rate-limited scrape isn't read as "jobs vanished". |
