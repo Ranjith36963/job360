@@ -30,8 +30,6 @@ verification_commands_run: []
 ---
 <!-- doc: LIVING -->
 
-<!-- doc: LIVING -->
-
 # Reviewer Verdict — <batch name / SHA>
 
 ## Summary

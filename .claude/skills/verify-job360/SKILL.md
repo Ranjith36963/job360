@@ -12,8 +12,6 @@ description: >-
 ---
 <!-- doc: LIVING -->
 
-<!-- doc: LIVING -->
-
 # Verify Job360
 
 ## The core idea
