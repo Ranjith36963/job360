@@ -65,4 +65,12 @@
 # — an accident that had every archiving run putting files in the wrong place —
 # and DOC-MAINTENANCE.md records which docs may be deleted and which may not,
 # with the reason. Both are WHY, not restatement of code.
-PLACEHOLDER
+#
+# MERGE NOTE (2026-08-26): this branch keeps main's 8764 and does not move it.
+# The nine documents it deletes were FROZEN, so they never counted here, and the
+# ~42 lines of WHY it adds sit on top of an overshoot that already exists on
+# main -- `doc_sync_check` measures 10,291 against this ceiling on origin/main
+# itself, before this branch touches anything. Raising a ratchet to cover a gap
+# somebody else opened is how a ratchet stops meaning anything; that gap is its
+# own piece of work, and it is not this PR.
+8764
