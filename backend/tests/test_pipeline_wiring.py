@@ -70,6 +70,21 @@ async def _insert_job_row(
     return cur.lastrowid  # type: ignore[return-value]
 
 
+async def _add_to_feed(db: JobDatabase, user_id: str, job_id: int, score: int = 80) -> None:
+    """Put the job in this user's feed.
+
+    NOT optional decoration: for a logged-in caller `GET /api/jobs` reads
+    `get_user_feed_jobs` (routes/jobs.py:564), not the shared catalog. A job with no
+    feed row is invisible to the list no matter what else is true of it — which is
+    also a real bound on the Applied filter, not just a test detail.
+    """
+    await db._conn.execute(
+        "INSERT INTO user_feed (user_id, job_id, score, bucket) VALUES (?, ?, ?, ?)",
+        (user_id, job_id, score, "good"),
+    )
+    await db._conn.commit()
+
+
 async def _expire_job(db: JobDatabase, job_id: int) -> None:
     """Flip a live job to confirmed_expired, the way the ghost detector does."""
     await db._conn.execute(
@@ -105,6 +120,9 @@ async def test_applied_filter_finds_jobs_added_to_the_pipeline(authenticated_asy
     db = await api_deps.get_db()
     applied_id = await _insert_job_row(db, title="Applied Role", company="AppliedCo")
     other_id = await _insert_job_row(db, title="Untouched Role", company="OtherCo")
+    uid = authenticated_async_context.fixture_user_id
+    await _add_to_feed(db, uid, applied_id)
+    await _add_to_feed(db, uid, other_id)
 
     async with authenticated_async_context() as client:
         resp = await client.post(f"/api/pipeline/{applied_id}")
@@ -124,6 +142,9 @@ async def test_applied_flag_is_true_on_the_job_row(authenticated_async_context):
     db = await api_deps.get_db()
     applied_id = await _insert_job_row(db, title="Flagged Role", company="FlagCo")
     other_id = await _insert_job_row(db, title="Unflagged Role", company="PlainCo")
+    uid = authenticated_async_context.fixture_user_id
+    await _add_to_feed(db, uid, applied_id)
+    await _add_to_feed(db, uid, other_id)
 
     async with authenticated_async_context() as client:
         await client.post(f"/api/pipeline/{applied_id}")
@@ -146,6 +167,7 @@ async def test_applying_never_erases_a_like(authenticated_async_context):
     """
     db = await api_deps.get_db()
     job_id = await _insert_job_row(db, title="Liked And Applied", company="BothCo")
+    await _add_to_feed(db, authenticated_async_context.fixture_user_id, job_id)
 
     async with authenticated_async_context() as client:
         resp = await client.post(f"/api/jobs/{job_id}/action", json={"action": "liked"})
@@ -168,6 +190,9 @@ async def test_liked_filter_still_reads_user_actions(authenticated_async_context
     db = await api_deps.get_db()
     liked_id = await _insert_job_row(db, title="Liked Only", company="HeartCo")
     pipelined_id = await _insert_job_row(db, title="Pipelined Only", company="TrackCo")
+    uid = authenticated_async_context.fixture_user_id
+    await _add_to_feed(db, uid, liked_id)
+    await _add_to_feed(db, uid, pipelined_id)
 
     async with authenticated_async_context() as client:
         await client.post(f"/api/jobs/{liked_id}/action", json={"action": "liked"})
@@ -227,6 +252,50 @@ async def test_pipeline_card_of_a_live_job_is_not_expired(authenticated_async_co
         card = next(a for a in resp.json()["applications"] if a["job_id"] == job_id)
 
     assert card["expired"] is False
+
+
+# ── wire 2b: the closing date survives becoming an application (W-16) ────────
+
+
+@pytest.mark.asyncio
+async def test_the_closing_date_survives_becoming_an_application(
+    authenticated_async_context,
+):
+    """Before applying the card says "Apply by 30 June". After, it said nothing.
+
+    The date was never lost from the database — the pipeline query simply did not
+    select it and the response model had nowhere to put it. So a deadline you could
+    still act on became invisible the moment you started acting on it.
+    """
+    db = await api_deps.get_db()
+    job_id = await _insert_job_row(db, title="Closing Role", company="DeadlineCo")
+    await db._conn.execute(
+        "UPDATE jobs SET deadline = ? WHERE id = ?", ("2026-09-30", job_id)
+    )
+    await db._conn.commit()
+
+    async with authenticated_async_context() as client:
+        await client.post(f"/api/pipeline/{job_id}")
+        resp = await client.get("/api/pipeline")
+        card = next(a for a in resp.json()["applications"] if a["job_id"] == job_id)
+
+    assert card["deadline"] == "2026-09-30", "the closing date vanished on applying"
+
+
+@pytest.mark.asyncio
+async def test_a_job_with_no_deadline_reports_none_rather_than_a_guess(
+    authenticated_async_context,
+):
+    """Most ads state no closing date. None must mean "unknown", never a made-up one."""
+    db = await api_deps.get_db()
+    job_id = await _insert_job_row(db, title="Open Ended Role", company="NoDateCo")
+
+    async with authenticated_async_context() as client:
+        await client.post(f"/api/pipeline/{job_id}")
+        resp = await client.get("/api/pipeline")
+        card = next(a for a in resp.json()["applications"] if a["job_id"] == job_id)
+
+    assert card["deadline"] is None
 
 
 # ── wire 3: the Kanban card knows which documents exist ──────────────────────

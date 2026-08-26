@@ -101,6 +101,11 @@ class JobResponse(BaseModel):
     missing_required: list[str] = []
     transferable_skills: list[str] = []
     action: Optional[str] = None
+    # W-05 — derived from the ``applications`` table, NOT from ``user_actions``.
+    # Kept separate from ``action`` on purpose: a job can be both liked AND applied
+    # to, and ``user_actions`` holds one value per (user, job), so folding "applied"
+    # into ``action`` would erase the like.
+    applied: bool = False
     bucket: str = ""
     # Step-1 B6 — date-model fields (Pillar 3 Batch 1). Persisted on the
     # `jobs` table; `posted_at` is None when no trustworthy source field
@@ -397,6 +402,18 @@ class PipelineApplication(BaseModel):
     notes: str = ""
     title: str = ""
     company: str = ""
+    # W-15 — has this job since closed? Only ``confirmed_expired`` counts: that
+    # comes from a direct URL check, while possibly_stale/likely_stale are guesses
+    # from absence (ghost_detection.py:31). Telling someone to stop chasing a live
+    # job is worse than saying nothing.
+    expired: bool = False
+    # W-16 — the closing date was on the job card and vanished the moment the job
+    # became an application. None means no deadline was ever known.
+    deadline: Optional[str] = None
+    # {doc_kind: status}, e.g. {"cv": "kept"}. From ``get_tailored_summary_for_jobs``,
+    # which was written for this board and then never called — leaving the CV/Letter
+    # button unable to say whether a document already exists. Empty = nothing tailored.
+    tailored: dict[str, str] = {}
 
 
 class PipelineListResponse(BaseModel):

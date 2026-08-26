@@ -1676,6 +1676,11 @@ export interface components {
         JobResponse: {
             /** Action */
             action?: string | null;
+            /**
+             * Applied
+             * @default false
+             */
+            applied: boolean;
             /** Apply Url */
             apply_url: string;
             /**
@@ -2033,6 +2038,13 @@ export interface components {
             company: string;
             /** Created At */
             created_at: string;
+            /** Deadline */
+            deadline?: string | null;
+            /**
+             * Expired
+             * @default false
+             */
+            expired: boolean;
             /** Job Id */
             job_id: number;
             /**
@@ -2042,6 +2054,13 @@ export interface components {
             notes: string;
             /** Stage */
             stage: string;
+            /**
+             * Tailored
+             * @default {}
+             */
+            tailored: {
+                [key: string]: string;
+            };
             /**
              * Title
              * @default

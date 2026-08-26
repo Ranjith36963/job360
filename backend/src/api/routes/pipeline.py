@@ -36,7 +36,9 @@ router = APIRouter(tags=["pipeline"])
 _VALID_STAGES = {"applied", "outreach", "interview", "offer", "rejected", "ghosted"}
 
 
-def _to_pipeline_application(row: dict[str, Any]) -> PipelineApplication:
+def _to_pipeline_application(
+    row: dict[str, Any], tailored: dict[str, str] | None = None
+) -> PipelineApplication:
     return PipelineApplication(
         job_id=row["job_id"],
         stage=row["stage"],
@@ -45,6 +47,12 @@ def _to_pipeline_application(row: dict[str, Any]) -> PipelineApplication:
         notes=row.get("notes", ""),
         title=row.get("title", ""),
         company=row.get("company", ""),
+        # ONLY confirmed_expired. `possibly_stale` / `likely_stale` are inferred
+        # from absence, and telling someone their live application is dead is a
+        # worse error than staying quiet (ghost_detection.py:31).
+        expired=row.get("staleness_state") == "confirmed_expired",
+        deadline=row.get("deadline"),
+        tailored=tailored or {},
     )
 
 
@@ -56,7 +64,18 @@ async def list_pipeline(
 ) -> PipelineListResponse:
     """List caller's tracked job applications, optionally filtered by stage."""
     rows = await db.get_applications(user.id, stage)
-    return PipelineListResponse(applications=[_to_pipeline_application(r) for r in rows])
+    # ONE extra query for the whole board, not one per card. This is the call
+    # `get_tailored_summary_for_jobs` was written for and never got — its docstring
+    # says "for the Kanban attach" and it had zero callers, so the CV/Letter button
+    # could never say whether a document already existed.
+    summary = await db.get_tailored_summary_for_jobs(
+        user.id, [int(r["job_id"]) for r in rows]
+    )
+    return PipelineListResponse(
+        applications=[
+            _to_pipeline_application(r, summary.get(int(r["job_id"]), {})) for r in rows
+        ]
+    )
 
 
 @router.get("/pipeline/counts")

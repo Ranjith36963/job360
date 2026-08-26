@@ -565,6 +565,11 @@
             ],
             "title": "Action"
           },
+          "applied": {
+            "default": false,
+            "title": "Applied",
+            "type": "boolean"
+          },
           "apply_url": {
             "title": "Apply Url",
             "type": "string"
@@ -1487,6 +1492,22 @@
             "title": "Created At",
             "type": "string"
           },
+          "deadline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline"
+          },
+          "expired": {
+            "default": false,
+            "title": "Expired",
+            "type": "boolean"
+          },
           "job_id": {
             "title": "Job Id",
             "type": "integer"
@@ -1499,6 +1520,14 @@
           "stage": {
             "title": "Stage",
             "type": "string"
+          },
+          "tailored": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "title": "Tailored",
+            "type": "object"
           },
           "title": {
             "default": "",
