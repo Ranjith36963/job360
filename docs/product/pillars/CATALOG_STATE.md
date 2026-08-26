@@ -191,11 +191,11 @@ wired to any process (`scheduler.py:194-199` says so explicitly).
 
 | # | Step | Where | What happens |
 |---|---|---|---|
-| 1 | `source.fetch_jobs()` | each source file | Builds raw `Job()` objects. **No shared normalization** — `BaseJobSource.fetch_jobs` is abstract. Nearly every source truncates `description[:5000]` at this point. |
+| 1 | `source.fetch_jobs()` | each source file | Builds raw `Job()` objects. Nearly every source truncates `description[:5000]` at this point. |
 | 2 | collect | `main.py:970` | `all_jobs.extend(...)` |
 | 3 | id backfill | `main.py:1021-1028` | Builds a `normalized_key() → id` map over the whole catalog and stamps `job.id` on already-known jobs. (Rule-relevant: dim scoring silently zeroes if `id` is unset.) |
 | 4 | ghost pass | `main.py:1005` | `_ghost_detection_pass` per source, gated behind a 70%-of-7-day-rolling-average completeness check (`main.py:171-216`) so a rate-limited scrape isn't read as "jobs vanished". |
-| 5 | score + enrich fields | `asyncio.to_thread(_score_dedup_and_filter)` | `scorer.score()` (SEARCH), then CATALOG-side: `visa_flag` (`:705`), `experience_level` (`:706`), `extract_deadline` (`:710-716`, only `if job.deadline is None and job.description`). |
+| 5 | shelf gate, then score | `asyncio.to_thread(_score_dedup_and_filter)` | `services/shelf_gate.fill_shelves` runs FIRST on every job (the one door — deadline, salary units, visa, closed-enum shelves, provenance), then `scorer.score()` (SEARCH). |
 | 6 | dedup **within the run** | `services/deduplicator.py` | 4 layers: exact key → RapidFuzz → TF-IDF → optional embedding-repost. |
 | 7 | score floor | same thread | `MIN_STORE_SCORE` drop. |
 | 8 | **UK gate** | `services/uk_gate.check_uk`, `main.py:1040` | THE single chokepoint that refuses foreign jobs (hard rule #30). Not per-source, not a penalty. |
