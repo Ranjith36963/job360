@@ -384,7 +384,18 @@ def _load_lists() -> tuple[list[str], list[tuple[str, str]]]:
             f"merge_cage: {POLICY_PATH.name} could not be parsed, so no path is classified "
             f"and nothing may merge unattended: {exc}"
         ) from exc
-    lanes = (loaded or {}).get("lanes") or {}
+    if not isinstance(loaded, dict):
+        raise SystemExit(
+            f"merge_cage: {POLICY_PATH.name} is not a mapping at its root "
+            f"({type(loaded).__name__}), so no lane can be read and nothing may merge "
+            f"unattended."
+        )
+    lanes = loaded.get("lanes") or {}
+    if not isinstance(lanes, dict):
+        raise SystemExit(
+            f"merge_cage: `lanes:` in {POLICY_PATH.name} is a {type(lanes).__name__}, not a "
+            f"mapping of lane name to lane."
+        )
     if not lanes:
         raise SystemExit(f"merge_cage: {POLICY_PATH} describes no lanes")
 
@@ -410,7 +421,19 @@ def _load_lists() -> tuple[list[str], list[tuple[str, str]]]:
                 f"of strings (got {type(paths).__name__}). A bare string would be read one "
                 f"character at a time."
             )
-        if lane.get("auto_merge"):
+        # `auto_merge` DECIDES THE LANE'S DIRECTION, so it may not be merely
+        # truthy. YAML quotes are easy to add by accident and `"false"` is a
+        # non-empty string: read loosely, an OWNER lane would hand every one of
+        # its paths to ALLOW. That is fail-OPEN on the one field that separates
+        # "a machine may decide this" from "only Ranjith may".
+        auto = lane.get("auto_merge")
+        if not isinstance(auto, bool):
+            raise SystemExit(
+                f"merge_cage: `auto_merge` for lane `{name}` in {POLICY_PATH.name} is "
+                f"{auto!r} ({type(auto).__name__}), not a bool. Write `true` or `false` "
+                f"unquoted — a quoted \"false\" is a non-empty string and would read as YES."
+            )
+        if auto:
             allow.extend(paths)
             continue
         fallback = (
@@ -2018,6 +2041,17 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        "check_lists cannot see a reason whose pattern no lane lists any more",
        ["check_lists"])
 
+    # B09d — A MALFORMED POLICY MUST REFUSE AS A SENTENCE, AND `auto_merge` MUST
+    #        BE A BOOL. The last one is the only shape whose failure is
+    #        fail-OPEN: `auto_merge: "false"` is a non-empty string, so a loose
+    #        read hands every path in an OWNER lane to ALLOW. One stray pair of
+    #        YAML quotes would have made the whole owner lane machine-mergeable.
+    survived = _bad_policy_probe()
+    ok("a malformed policy refuses as a sentence, and a quoted auto_merge cannot open a lane",
+       not survived,
+       f"these broken policies were accepted instead of refused: {survived}",
+       ["_load_lists"])
+
     # B03 — the exit codes must be four different numbers, or the caller's crash
     #       arm is unreachable dead code, which is how this repo got here.
     codes = [EXIT_ALLOW, EXIT_REFUSE, EXIT_CANNOT_TELL_OWNER, EXIT_CAGE_BROKE, EXIT_USAGE]
@@ -2558,6 +2592,45 @@ def _swallowed_lane_probe() -> list[str]:
         return check_lists()
     finally:
         ALLOW[:] = saved
+
+
+def _bad_policy_probe() -> list[str]:
+    """Feed `_load_lists()` broken policies; return the ones it did NOT refuse.
+
+    Every shape here is a real YAML accident, and the last is the dangerous one:
+    a quoted `"false"` is a non-empty string, so a truthy read would hand an
+    OWNER lane's paths straight to ALLOW.
+    """
+    import tempfile
+
+    cases = {
+        "root is a list": "- not\n- a mapping\n",
+        "lanes is a list": "lanes:\n  - harness\n",
+        "lane is null": "lanes:\n  harness:\n",
+        "paths is a bare string": 'lanes:\n  harness:\n    auto_merge: true\n    paths: "a/**"\n',
+        "auto_merge is a quoted string": (
+            'lanes:\n  owner_lane:\n    auto_merge: "false"\n    paths:\n      - "secret/**"\n'
+        ),
+    }
+    global POLICY_PATH
+    saved_path, survived = POLICY_PATH, []
+    try:
+        for label, text in cases.items():
+            with tempfile.TemporaryDirectory() as d:
+                probe = Path(d) / "merge-policy.yml"
+                probe.write_text(text, encoding="utf-8")
+                POLICY_PATH = probe
+                try:
+                    _load_lists()
+                except SystemExit:
+                    continue          # refused as a sentence — correct
+                except Exception:     # a traceback is NOT a refusal
+                    survived.append(f"{label} (raised, did not refuse cleanly)")
+                    continue
+                survived.append(label)
+    finally:
+        POLICY_PATH = saved_path
+    return survived
 
 
 def _stale_reason_probe() -> list[str]:
