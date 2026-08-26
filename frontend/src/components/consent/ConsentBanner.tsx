@@ -14,7 +14,7 @@
  *   - The choice is remembered so we don't nag on every page.
  */
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 
 import { Button } from "@/components/ui/button";
 import { getConsent, setConsent, subscribeConsent } from "@/lib/consent";
@@ -33,11 +33,54 @@ export function ConsentBanner() {
     () => UNHYDRATED,
   );
 
+  // The banner is position:fixed, so it sits ON TOP of the page instead of
+  // pushing it. Nothing reserved room for it, and at 390x844 its ~200px height
+  // landed squarely on the landing page's only call to action — a first-time
+  // mobile visitor could not see or tap "Get Started" until they dismissed it.
+  //
+  // Reserving the height on <body> keeps the banner pinned (which is correct)
+  // while guaranteeing the last of the page can always be scrolled clear of it.
+  // Measured rather than hardcoded because the copy wraps to a different number
+  // of lines at every width.
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const visible = consent === null;
+
+  useEffect(() => {
+    if (!visible) return;
+    const el = bannerRef.current;
+    if (!el) return;
+
+    const apply = () => {
+      document.body.style.paddingBottom = `${el.offsetHeight}px`;
+    };
+    apply();
+
+    // The height changes on rotate/resize as the paragraph reflows. Feature-
+    // detected: jsdom (the unit-test environment) has no ResizeObserver, and an
+    // unguarded `new ResizeObserver` throws during mount and takes the whole
+    // component down with it.
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", apply);
+      return () => {
+        window.removeEventListener("resize", apply);
+        document.body.style.paddingBottom = "";
+      };
+    }
+
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      document.body.style.paddingBottom = "";
+    };
+  }, [visible]);
+
   // Show only to a hydrated visitor with NO choice yet.
-  if (consent !== null) return null;
+  if (!visible) return null;
 
   return (
     <div
+      ref={bannerRef}
       role="dialog"
       aria-modal="false"
       aria-label="Analytics cookie consent"

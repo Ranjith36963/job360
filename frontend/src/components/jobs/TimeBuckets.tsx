@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 import { cn } from "@/lib/utils";
 
 interface TimeBucketsProps {
@@ -22,6 +24,19 @@ export function TimeBuckets({
   onBucketChange,
   counts,
 }: TimeBucketsProps) {
+  // Keep the SELECTED bucket on screen: this row scrolls with no visible
+  // scrollbar, and the default bucket is the last one, so on a phone the active
+  // filter opened off-screen with no hint it existed.
+  // Feature-detected because jsdom has no layout and no scrollIntoView; calling
+  // it unguarded threw during mount and took the whole page down.
+  // Numbers: tests/design/README.md.
+  const activeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const el = activeRef.current;
+    if (typeof el?.scrollIntoView !== "function") return;
+    el.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+  }, [activeBucket]);
+
   return (
     <div
       className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none"
@@ -35,6 +50,7 @@ export function TimeBuckets({
         return (
           <button
             key={key}
+            ref={isActive ? activeRef : undefined}
             onClick={() => onBucketChange(key)}
             aria-pressed={isActive}
             aria-label={`${label} — ${count} job${count !== 1 ? "s" : ""}`}

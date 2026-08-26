@@ -40,6 +40,12 @@ STALE_DAYS = 45
 # LIVING docs (DOC-MAINTENANCE.md §1): must match code AND carry a fresh stamp.
 LIVING_DOCS = [
     "CLAUDE.md",
+    # Added 2026-08-25 with the CLAUDE.md diet: the 31 hard rules moved here
+    # so they load on demand instead of before every session. They carry
+    # guarded facts (SCORER_VERSION, the registry counts), so the checker has
+    # to follow them -- the checker reported "claim not found in any doc" the
+    # moment they moved, which is the guard-watches-nothing alarm working.
+    ".claude/skills/hard-rules/SKILL.md",
     "README.md",
     "ARCHITECTURE.md",
     "STATUS.md",
@@ -1398,7 +1404,14 @@ def hard_rule_count() -> int:
     pointer doc quietly disagreeing with the thing it points at. Cheap to check,
     and exactly the class of number that rots every time a rule is added.
     """
-    text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8", errors="replace")
+    # Moved 2026-08-25: the rules now live in a SKILL, which loads on demand.
+    # They were 42% of a file that loads before every session, and Anthropic's
+    # own guidance is that a bloated CLAUDE.md is why rules get ignored. The
+    # count is still guarded — it just reads the file that now holds them.
+    rules_file = ROOT / ".claude/skills/hard-rules/SKILL.md"
+    if not rules_file.exists():
+        rules_file = ROOT / "CLAUDE.md"
+    text = rules_file.read_text(encoding="utf-8", errors="replace")
     # Count distinct rule NUMBERS, not list lines. Two rules that share one entry
     # ("11 + 16. **Never import ...") are still two rules to the agent reading them,
     # and the agent is this number's consumer. Counting lines made the checker

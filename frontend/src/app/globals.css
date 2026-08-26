@@ -141,6 +141,76 @@
 }
 
 /* ═══════════════════════════════════════════
+   TOUCH TARGETS — only where the pointer is coarse
+   ═══════════════════════════════════════════
+
+   Measured with tests/design/layout-audit.mjs across /profile and /dashboard:
+   104 interactive elements fell below the 44px WCAG 2.5.5 minimum on a phone.
+   They were not 104 separate mistakes — the heights clustered on the shared
+   primitives. Every `Button size="sm"` was 28px, every `Input` 32px, the
+   dashboard time buckets 34px, icon buttons 36px, and the visa consent
+   checkbox was 16x16.
+
+   Fixing 43 call sites would have been the wrong move twice over: it would
+   miss the next one written, and it would bloat the desktop UI, whose density
+   is deliberate and correct with a mouse. `pointer: coarse` applies this
+   only on touch devices, so the design keeps its tight desktop rhythm and
+   becomes reliably tappable on a phone.
+
+   Buttons and inputs get min-height rather than a fixed height so a control
+   that is already taller — or that wraps to two lines — is left alone. */
+@media (pointer: coarse) {
+  button,
+  [role="button"],
+  select,
+  textarea,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]) {
+    min-height: 44px;
+  }
+
+  /* Width matters as much as height, and icon-only controls are where it
+     bites: the hamburger, Refresh, Export, the settings gear and logout were
+     all 36px wide inside an otherwise 44px-tall box. */
+  button,
+  [role="button"] {
+    min-width: 44px;
+  }
+
+  /* Links only when they are already a flex/grid box — i.e. a nav item or a
+     button-shaped link. Inflating an inline link inside a sentence would blow
+     the line height of body copy apart. */
+  a:where(.flex, .inline-flex, .grid, .inline-grid) {
+    min-height: 44px;
+    /* Icon-only links carry a fixed w-9 (36px); min-width raises the hit area
+       without widening the icon itself. */
+    min-width: 44px;
+  }
+
+  /* The footer's Privacy / Terms / Contact / GitHub links are plain inline
+     anchors, so the rule above skipped them and they stayed 16px tall.
+     inline-flex keeps them flowing on one line while giving them a real
+     height to aim at. */
+  footer a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    /* "Terms" is only 34px of text. The link needs the width even though the
+       word does not, so the hit area matches the other footer items. */
+    min-width: 44px;
+  }
+
+  /* WCAG 2.5.8 sets 24px as the floor for small controls; a 16px checkbox is
+     the single hardest thing to hit on the profile form. The label beside it
+     stays the larger target. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    min-width: 24px;
+    min-height: 24px;
+  }
+}
+
+/* ═══════════════════════════════════════════
    ATMOSPHERE — dot grid + ambient glow
    ═══════════════════════════════════════════ */
 

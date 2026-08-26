@@ -320,7 +320,14 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* Actions row */}
+            {/* Actions row — every control here acts ON an existing profile, so
+                none of them belong on a first visit. Before this, a brand-new
+                account's most prominent buttons were "Export JSON Resume" (of a
+                resume that does not exist) and "History" (of a profile that has
+                never been saved), sitting ABOVE the one thing a new user should
+                do: upload a CV. ClearButton below was already gated on
+                `profile`; Export and History simply got missed. */}
+            {profile && (
             <div className="flex flex-wrap items-center gap-2">
               <JsonResumeExportButton />
               <Button
@@ -336,23 +343,27 @@ export default function ProfilePage() {
                   A profile you can empty in one click is what makes "upload a
                   CV and see exactly what came out" a clean experiment instead
                   of a reading of everything ever uploaded. */}
-              {profile && (
-                <ClearButton
-                  label="Clear profile"
-                  confirmLabel="Click again to clear everything"
-                  onConfirm={() => handleClear("all")}
-                />
-              )}
+              <ClearButton
+                label="Clear profile"
+                confirmLabel="Click again to clear everything"
+                onConfirm={() => handleClear("all")}
+              />
             </div>
+            )}
 
             {/* Completeness badge */}
-            <div className="flex items-center gap-3">
+            <div className="flex w-full items-center gap-3 sm:w-auto">
               {percent >= 100 ? (
                 <CheckCircle className="h-5 w-5 text-score-high" />
               ) : (
-                <AlertCircle className="h-5 w-5 text-muted-foreground" />
+                <AlertCircle className="h-5 w-5 shrink-0 text-muted-foreground" />
               )}
-              <div className="min-w-[160px]">
+              {/* w-full below sm: the parent stacks on a phone, so a bare
+                  min-w-[160px] left the track floating at 160px against
+                  full-width text — at 0% that reads as a broken progress bar
+                  rather than an empty one. From sm up the row is horizontal and
+                  160px is the intended compact width. */}
+              <div className="w-full sm:w-auto sm:min-w-[160px]">
                 <div className="flex items-baseline justify-between mb-1">
                   <span className="text-xs font-medium text-muted-foreground">
                     {label}
@@ -505,6 +516,27 @@ export default function ProfilePage() {
               // the preferences form. This panel shows skills the user HAS, so
               // with none of those there is nothing to show.
               if (total === 0) return null;
+
+              // The whole point of this panel is telling sources APART. With a
+              // CV as the only source there is nothing to tell apart, and
+              // CVViewer directly above has already listed exactly these
+              // skills — so a CV-only profile printed the same six chips three
+              // times down one page (highlighted in the CV preview, again under
+              // "What we extracted", again here), costing a full card of height
+              // to repeat itself.
+              //
+              // Only the cv+CVViewer combination is suppressed: skills the user
+              // typed themselves can be the sole group while CVViewer is not
+              // rendered at all (it is gated on CV/LinkedIn/GitHub content), and
+              // that case still needs somewhere to appear.
+              const activeGroups = GROUPS.filter(
+                (g) => (bySource[g.key] ?? []).length > 0
+              );
+              const alreadyShownByCVViewer =
+                activeGroups.length === 1 &&
+                activeGroups[0].key === "cv" &&
+                Boolean(profile?.cv_detail);
+              if (alreadyShownByCVViewer) return null;
               return (
                 <div className="animate-fade-in-up glass-card rounded-xl p-6">
                   <h2 className="font-heading text-base font-semibold mb-1 text-foreground">
