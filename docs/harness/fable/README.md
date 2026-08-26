@@ -1,62 +1,39 @@
+# Fable audit — index
 <!-- doc: LOG -->
 
-> **DATED RECORD — true on the day it was written.** Numbers and statuses here are historical. Do not read as current state. <!-- banner: auto -->
-> **⚠️ CLOSED / SUPERSEDED (2026-07-23).** This is a historical snapshot. The
-> current verified status of every finding lives in **[AUDIT-2026-07-23-FULL-REVERIFY.md](AUDIT-2026-07-23-FULL-REVERIFY.md)** — the fable backlog
-> is closed there (92 of 106 fixed; the rest are owner decisions or scheduled audit
-> areas). Do NOT treat any item below as still-open without checking that doc first.
+> **DATED RECORDS.** Everything in this folder is a snapshot of what was true on
+> the day it was written. Numbers and statuses are historical — do not read any
+> of them as current state, and do not "fix" them: a stale number in a dated
+> record is correct for its date, and rewriting it destroys the evidence. <!-- banner: auto -->
 
-# Fable Docs — Job360 Enterprise Production-Grade Audit & Plan
+**Start here:** [`AUDIT-2026-07-23-FULL-REVERIFY.md`](AUDIT-2026-07-23-FULL-REVERIFY.md)
+— the last full re-verification, and the only file here whose verdicts were
+checked against live `main` code rather than against earlier docs. It closes 92
+of 106 findings; the rest are owner decisions or scheduled audit areas.
 
-> **🔎 VERIFIED STATUS (2026-07-17): [`AUDIT-2026-07-17-VERIFIED.md`](AUDIT-2026-07-17-VERIFIED.md)** —
-> every one of the 101 findings across all three Fable locations was re-checked against the
-> live `main` code (real file:line, not the docs' stale numbers). That file is the source of
-> truth for what is actually fixed in production vs still open.
+It is also **load-bearing**: four comments in `backend/` cite it as the reason
+that code is shaped the way it is (the S3, S6 and S7 fixes). Do not move or
+rename it without repointing those.
 
-> Orchestrated by Claude (Fable 5) on 2026-07-11. Six specialist sub-agents (Opus +
-> Sonnet) swept every corner of the codebase, ops, compliance, and the Claude Code
-> harness. Fable judged their findings, cut the noise, and wrote this folder.
->
-> **Purpose:** one place that tells a solo founder — honestly — what is *missing* to be
-> enterprise production-grade, and exactly how to fix it, across the full lifecycle.
-> Not bureaucracy. Only what genuinely makes the app strong and sellable.
+## The files
 
-## How to read this folder
-
-Read **`00-EXECUTIVE-SUMMARY.md` first.** It has the top blockers and the one-page
-scorecard. Then go to the area doc you care about. Each doc follows the same shape:
-
-- **What I saw** — the real finding, with `file:line` evidence.
-- **Why it matters** — the concrete failure / attack / legal scenario.
-- **The fix** — specific and minimal, sized for a solo founder.
-- **Priority** — P0 (blocker, do now) · P1 (serious, weeks) · P2 (hardening, later).
-
-## The documents
-
-| File | Covers |
+| File | What it is |
 |---|---|
-| `00-EXECUTIVE-SUMMARY.md` | Top blockers, scorecard, the order to fix things in. Start here. |
-| `01-SECURITY.md` | Auth, sessions, IDOR/multi-tenant, injection, secrets, CV-upload safety. |
-| `02-DATA-AND-DB.md` | Migrations, dedup, purge/retention, tenant isolation, SQLite↔Postgres drift. |
-| `03-FRONTEND-AND-AUTH-UI.md` | Next.js 16 traps, middleware guard, E2E bypass prod-safety, XSS, secret leakage. |
-| `04-OPS-AND-RELIABILITY.md` | CI/CD, backups, monitoring/alerting, worker/scheduler, timeouts, deploy safety. |
-| `05-COMPLIANCE-AND-LEGAL.md` | UK-GDPR, PII, data-subject rights, subprocessors, the scraping legal risk. |
-| `06-HARNESS-AND-WORKFLOW.md` | Skills, hooks, workflows, loops, CLAUDE.md, memory — how you run Claude Code. |
-| `07-ROADMAP.md` | The sequenced 30/60/90-day plan that turns the fixes into a path, not a pile. |
-| `08-GAPS-NOT-YET-AUDITED.md` | The honest boundary — dimensions NOT swept (performance, cost, test-quality, …) that a true A still needs. |
-| `09-PRODUCTION-SIGNALS.md` | What your REAL live Sentry + PostHog show — worker invisible to Sentry, funnel not instrumented, launch-day bug already fixed. |
-| `PROGRESS.md` | Live tracker: fixes shipped (coded + verified) vs pending vs "needs you". |
+| `AUDIT-2026-07-23-FULL-REVERIFY.md` | **The current one.** Final re-verify, every verdict against live code. |
+| `AUDIT-2026-07-19-REVERIFIED.md` | Earlier re-verify. Superseded by the above. |
+| `AUDIT-2026-07-17-VERIFIED.md` | First pass that checked findings against real `file:line` instead of trusting the original write-up. |
+| `00-EXECUTIVE-SUMMARY.md` | The original audit's summary. |
+| `01-SECURITY.md` … `06-HARNESS-AND-WORKFLOW.md` | The original findings, by area. |
+| `08-GAPS-NOT-YET-AUDITED.md` | What the audit deliberately did not cover — still the honest list of blind spots. |
+| `09-PRODUCTION-SIGNALS.md` | What production was showing at the time. |
+| `SCRAPING-DECISION.md` | A decision record: whether to scrape, and why. |
 
-## Priority legend
+## Deleted 2026-08-25
 
-- **P0** — a blocker. Security hole, data-loss risk, legal exposure, or it stops an
-  enterprise customer / triggers a regulator today. Fix before anything else.
-- **P1** — serious gap. Won't sink you this week, but a real customer or incident exposes it.
-- **P2** — hardening / polish. Do it once P0/P1 are clear.
+`PROGRESS.md` and `07-ROADMAP.md` — a live tracker and a 30/60/90-day plan, both
+superseded by the full re-verify above and referenced from nowhere outside this
+folder. Retrievable: `git show d3cbceb:docs/harness/fable/PROGRESS.md`.
 
-## The one principle behind all of it
-
-> Enterprise-grade isn't more features. It's **fewer surprises**: nothing irreversible
-> happens without a guardrail, no PII moves without a reason you can defend, and every
-> failure is caught by a machine before a customer feels it. Solo founders win this by
-> automating the guardrails — not by working harder.
+`FABLE_FINDINGS.md` and the root `fable-harness-plan.md` went the same day; both
+said "CLOSED / SUPERSEDED" in their own first line. The four backend comments
+that cited `FABLE_FINDINGS.md` now cite the re-verify instead.

@@ -50,7 +50,23 @@ DRAFT ──► ACTIVE ──► IMPLEMENTED ──► ARCHIVED
 
 - A plan whose code has merged gets stamped at the top —
   `> **IMPLEMENTED** in PR #N (`<sha>`) — archived <date>` — and moved to
-  `docs/archive/`. It is never deleted (history) and never updated (honesty).
+  `docs/_archive/` — NOT `docs/archive/`, which holds only a README and is an
+  accident of an unfinished restructure.
+
+  It is never UPDATED (honesty): a stale number in a dated record is correct for
+  its date, and rewriting it falsifies the record.
+
+  "Never deleted" was amended by the owner on 2026-08-25. Scaffolding whose
+  output has merged — step plans, prompt batches — may be deleted, because git
+  history holds the content and `IMPLEMENTATION_LOG.md` holds the narrative.
+  Five scaffolding docs went that day, alongside four superseded audit
+  records — nine files, 3,123 lines in total.
+
+  What may NOT be deleted is anything still cited: `CurrentStatus.md` is
+  hardcoded in `merge_cage.py`, and the two `*_progress.md` logs are cited from
+  backend test docstrings. Before deleting any doc, grep the repo for its
+  filename and repoint every hit to a `git show <sha>:<path>` reference first —
+  a deletion that leaves dangling citations costs more than it saves.
 - A plan that was abandoned or replaced gets a `> **SUPERSEDED by <doc>**` banner.
 - A plan not yet built stays where it is — it is the backlog.
 
@@ -110,7 +126,7 @@ report, but never edits them — memory hygiene is the session's own job.
 | Dedicated technical writers | Loop 3 tooling is the writer; you are the editor who merges |
 | Freshness SLAs + staleness dashboards | Tier-1 daily check + `DOC-HEALTH.md` scorecard |
 | ADRs (architecture decision records) | `docs/product/plans/batch-2-decisions.md` pattern — keep appending |
-| Archive-over-delete retention | `docs/archive/` + stamps, nothing deleted |
+| Archive-over-delete retention | `docs/_archive/` + stamps. Nothing deleted EXCEPT merged scaffolding, per the 2026-08-25 amendment in §2 |
 | Doc impact required in code review | Rule 5 above |
 
 ## 6. Outputs this framework maintains
@@ -121,4 +137,4 @@ report, but never edits them — memory hygiene is the session's own job.
   docs checked, drifts fixed, plans archived, gaps parked, modules undocumented.
 - `docs/harness/maintenance/PARKED.md` — the "code is behind the doc" list: intentions
   found in docs that are not yet implemented, each with source doc + date.
-- `docs/archive/` — stamped, frozen, implemented/superseded plans.
+- `docs/_archive/` — stamped, frozen, implemented/superseded plans.

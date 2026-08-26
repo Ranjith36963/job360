@@ -58,4 +58,19 @@
 # before every single session into one that loads on demand is a large win,
 # and this number scores it as slightly worse. Volume and context cost are
 # different things and only one of them has a meter.
+# (this branch, 2026-08-25): +42 net. Nine docs DELETED (-3,123 lines of scaffolding,
+# already excluded from this count as FROZEN, so they never showed here) and
+# three rewritten. The +42 is the rewrites: docs/archive/README.md now explains
+# that it describes an EMPTY directory while the real archive is docs/_archive/
+# — an accident that had every archiving run putting files in the wrong place —
+# and DOC-MAINTENANCE.md records which docs may be deleted and which may not,
+# with the reason. Both are WHY, not restatement of code.
+#
+# MERGE NOTE (2026-08-26): this branch keeps main's 8764 and does not move it.
+# The nine documents it deletes were FROZEN, so they never counted here, and the
+# ~42 lines of WHY it adds sit on top of an overshoot that already exists on
+# main -- `doc_sync_check` measures 10,291 against this ceiling on origin/main
+# itself, before this branch touches anything. Raising a ratchet to cover a gap
+# somebody else opened is how a ratchet stops meaning anything; that gap is its
+# own piece of work, and it is not this PR.
 8764
