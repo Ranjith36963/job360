@@ -92,6 +92,16 @@ async def db_ctx():
             ("AI Engineer", "Acme", "https://acme.test/a", now,
              "acme", "ai engineer", now),
         )
+        # W-17/W-18: send_notification now reads the SAME user_feed join the
+        # digest uses, so it can state the score and the reason instead of
+        # shipping a bare link. Production always has this row — both enqueue
+        # sites are feed-driven (main.py:509 enqueues *for feed rows*;
+        # tasks.py:229 fires straight after upsert_feed_row) — so seeding it
+        # here makes the fixture match reality rather than weakening the code.
+        await db.execute(
+            "INSERT INTO user_feed (user_id, job_id, score, bucket) VALUES (?, ?, ?, ?)",
+            ("alice", 1, 77, "good"),
+        )
         await db.commit()
     conn = await pg.connect(path)
     conn.row_factory = pg.Row
