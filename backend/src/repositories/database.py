@@ -321,7 +321,34 @@ class JobDatabase:
         # last_chased_at (migration 0032) — the chase cron's cooldown. Mirrored
         # here so init_db()-only flows (tests, fresh dev DBs) pick it up on boot,
         # same as flagged_terms above.
-        await self._add_missing_columns("applications", [("last_chased_at", "TEXT")])
+        # cv_version_id / cover_letter_version_id (migration 0033) — which documents
+        # the user actually applied with.
+        await self._add_missing_columns(
+            "applications",
+            [
+                ("last_chased_at", "TEXT"),
+                ("cv_version_id", "INTEGER"),
+                ("cover_letter_version_id", "INTEGER"),
+            ],
+        )
+
+        # Append-only document history (migration 0033). Mirrors
+        # 0033_tailored_document_versions.up.sql so init_db()-only flows get it too.
+        await self._db.executescript("""
+            CREATE TABLE IF NOT EXISTS tailored_document_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                job_id INTEGER NOT NULL,
+                doc_kind TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL,
+                model TEXT,
+                profile_version INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_tailored_versions_user_job
+                ON tailored_document_versions(user_id, job_id, doc_kind);
+        """)
 
         # Add timezone column to users table if it was created before migration 0012.
         # users table may not exist in all test DB instances (auth tests create it;
@@ -912,6 +939,60 @@ class JobDatabase:
             "flagged_terms": flagged,
         }
 
+    async def snapshot_tailored_doc(
+        self, user_id: str, job_id: int, doc_kind: str, source: str
+    ) -> int | None:
+        """Copy the CURRENT document's text into the append-only version log.
+
+        Returns the new version id, or None when there is no document to snapshot
+        (which is a normal state — applying before tailoring anything).
+
+        Stores the TEXT rather than a reference, deliberately: the entire purpose is
+        to survive the deletion of the ``tailored_documents`` row, and a pointer to a
+        deleted row answers nothing. What gets stored is what the user would actually
+        have sent — their polished edit when they made one, otherwise the AI draft.
+        """
+        cursor = await self._db.execute(
+            """SELECT ai_draft, polished, model, profile_version
+               FROM tailored_documents
+               WHERE user_id = ? AND job_id = ? AND doc_kind = ?""",
+            (user_id, job_id, doc_kind),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        ai_draft, polished, model, profile_version = row
+        content = polished if polished else (ai_draft or "")
+        now = datetime.now(timezone.utc).isoformat()
+        cur = await self._db.execute(
+            """INSERT INTO tailored_document_versions
+               (user_id, job_id, doc_kind, content, source, model, profile_version, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               RETURNING id""",
+            (user_id, job_id, doc_kind, content, source, model, profile_version, now),
+        )
+        new_row = await cur.fetchone()
+        await self._db.commit()
+        return int(new_row[0]) if new_row else None
+
+    async def bind_application_document(
+        self, user_id: str, job_id: int, doc_kind: str, version_id: int
+    ) -> None:
+        """Point the application at the snapshot that was in hand.
+
+        ``IS NULL`` in the WHERE clause makes the FIRST binding win. That is
+        deliberate: the earliest snapshot is the one closest to the moment of
+        applying, and a later download should not rewrite history to claim the user
+        sent something they wrote afterwards.
+        """
+        column = "cv_version_id" if doc_kind == "cv" else "cover_letter_version_id"
+        await self._db.execute(
+            f"UPDATE applications SET {column} = ? "  # noqa: S608 — column is a literal, chosen above
+            f"WHERE user_id = ? AND job_id = ? AND {column} IS NULL",
+            (version_id, user_id, job_id),
+        )
+        await self._db.commit()
+
     async def upsert_tailored_doc(
         self, user_id: str, job_id: int, doc_kind: str, ai_draft: str,
         *, model: str | None = None, profile_version: int | None = None,
@@ -925,6 +1006,15 @@ class JobDatabase:
         """
         now = datetime.now(timezone.utc).isoformat()
         import json as _json
+
+        # W-10 — archive BEFORE the delete. Without this, regenerating destroyed the
+        # document permanently: generate, apply, regenerate months later, and the file
+        # actually sent to the employer was gone with no way to recover or even prove
+        # it existed. Snapshotting outside the transaction below is intentional — the
+        # archive must survive even if the regenerate itself then fails, since the
+        # whole point is that this text is never lost.
+        await self.snapshot_tailored_doc(user_id, job_id, doc_kind, "superseded")
+
         # DELETE + INSERT (not `INSERT OR REPLACE` — the Postgres shim doesn't
         # translate `OR REPLACE`, only `OR IGNORE`). A regenerate is a fresh draft.
         # Both statements run in ONE explicit transaction: if the INSERT fails
@@ -989,7 +1079,25 @@ class JobDatabase:
             (now, now, user_id, job_id, doc_kind),
         )
         await self._db.commit()
+
+        # W-08, the common real order: people apply first, then tailor and download.
+        # Binding only here would miss everyone who tailors first; binding only at
+        # apply time would miss everyone who does it this way round. `bind_...` is a
+        # no-op when the application already has a version, so the earliest snapshot
+        # keeps its claim, and this is skipped entirely when no application exists.
+        if await self._has_application(user_id, job_id):
+            version_id = await self.snapshot_tailored_doc(user_id, job_id, doc_kind, "kept")
+            if version_id is not None:
+                await self.bind_application_document(user_id, job_id, doc_kind, version_id)
+
         return await self.get_tailored_doc(user_id, job_id, doc_kind)
+
+    async def _has_application(self, user_id: str, job_id: int) -> bool:
+        cursor = await self._db.execute(
+            "SELECT 1 FROM applications WHERE user_id = ? AND job_id = ?",
+            (user_id, job_id),
+        )
+        return await cursor.fetchone() is not None
 
     async def count_tailored_usage_month(self, user_id: str) -> int:
         """Generations this calendar month — the quota gate counter (guardrail #1)."""
@@ -1111,6 +1219,17 @@ class JobDatabase:
             (user_id, job_id, now, now),
         )
         await self._db.commit()
+
+        # W-08 — record WHICH documents were in hand at the moment of applying, so
+        # "which CV did I send for this job?" has an answer that a later regenerate
+        # cannot change. No document yet is the normal case (people apply first and
+        # tailor afterwards) and is left as NULL rather than guessed at; the download
+        # path binds it later instead.
+        for doc_kind in ("cv", "cover_letter"):
+            version_id = await self.snapshot_tailored_doc(user_id, job_id, doc_kind, "applied")
+            if version_id is not None:
+                await self.bind_application_document(user_id, job_id, doc_kind, version_id)
+
         return await self._get_application(job_id, user_id)
 
     async def advance_application(self, job_id: int, stage: str, user_id: str) -> dict[str, Any]:
