@@ -36,7 +36,11 @@ if hasattr(sys.stdout, "reconfigure"):
 CASES: list[tuple[str, str, str, str]] = [
     ("CLAUDE.md", r"SOURCE_REGISTRY`? has (\d+) entries", "SOURCE_REGISTRY` has 999 entries", "registry"),
     ("CLAUDE.md", r"(\d+) unique source classes", "999 unique source classes", "unique-classes"),
-    ("CLAUDE.md", r"SCORER_VERSION`?\s*=\s*\*{0,2}(\d+)", "SCORER_VERSION` = **999", "scorer-version"),
+    # Moved to the hard-rules SKILL 2026-08-25 with the CLAUDE.md diet. The
+    # drill said "guard watches nothing" the moment it moved, which is the
+    # design working: a drill whose target relocates must not pass quietly.
+    (".claude/skills/hard-rules/SKILL.md",
+     r"SCORER_VERSION`?\s*=\s*\*{0,2}(\d+)", "SCORER_VERSION` = **999", "scorer-version"),
     ("CLAUDE.md", r"(\d+) workflows in", "999 workflows in", "workflows"),
     ("ARCHITECTURE.md", r"across (\d+) `?test_\*\.py`? files", "across 999 test_*.py files", "test-files"),
     ("frontend/CLAUDE.md", r"Next\.js (\d+\.\d+\.\d+)", "Next.js 1.2.3", "nextjs-version"),

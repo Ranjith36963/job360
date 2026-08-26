@@ -210,6 +210,8 @@ export default function DashboardPage() {
   const totalUnfiltered = jobsData?.total_unfiltered ?? 0;
   const hiddenByFilters = Math.max(0, totalUnfiltered - total);
 
+
+
   // ---------------------------------------------------------------------------
   // TanStack Query — unfiltered list for accurate bucket counts
   // ---------------------------------------------------------------------------
@@ -229,6 +231,53 @@ export default function DashboardPage() {
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
+
+  // ONE signal, used by the subtitle, the Total Matches tile and the list.
+  //
+  // The list and the bucket counts are two separate requests, so they can
+  // disagree — and on production they did: the counts came back in 799ms
+  // while the list took 30.7s and arrived empty, leaving the page announcing
+  // "No jobs found" and "0 Total Matches" beneath its own badge reading 100,
+  // with 226 jobs available. Whenever an empty list contradicts a non-zero
+  // count, every part of this screen must say "we could not load them", never
+  // "you have none". Declared here rather than inline three times so the three
+  // places cannot drift apart.
+  // ...but ONLY when the two queries are actually asking the same question.
+  // allJobsKey carries just min_score + hours:168. The main list can also carry
+  // source, action, visa/seniority/salary/skill narrowing and a shorter window,
+  // and under any of those an empty list is a CORRECT answer while the wider
+  // count query still returns rows. Comparing them regardless would replace a
+  // valid "no matches for this filter" with a false "couldn't load", which is
+  // the same class of lie in the opposite direction.
+  const NARROWING_KEYS = [
+    "source",
+    "bucket",
+    "action",
+    "visa_only",
+    "visa_sponsorship",
+    "seniority",
+    "employment_type",
+    "workplace_type",
+    "salary_min",
+    "salary_max",
+    "required_skills",
+    "title_canonical",
+  ] as const;
+  const listIsComparableToCounts =
+    effectiveFilters.hours === allJobsKey.hours &&
+    (effectiveFilters.min_score ?? DEFAULT_MIN_SCORE) === allJobsKey.min_score &&
+    NARROWING_KEYS.every((k) => {
+      const v = (effectiveFilters as Record<string, unknown>)[k];
+      return v === undefined || v === null || v === "" || v === false;
+    });
+
+  const knownAvailable = allJobsData?.total ?? 0;
+  const listDisagreesWithCounts =
+    !isLoading &&
+    !jobsIsError &&
+    listIsComparableToCounts &&
+    total === 0 &&
+    knownAvailable > 0;
 
   const allJobs = useMemo(() => allJobsData?.jobs ?? [], [allJobsData?.jobs]);
 
@@ -557,6 +606,10 @@ export default function DashboardPage() {
                 </>
               ) : isLoading ? (
                 "Loading jobs..."
+              ) : listDisagreesWithCounts ? (
+                // Same rule as the list below: never announce zero while the
+                // page is holding a count that says otherwise.
+                "Couldn't load your matches — try again"
               ) : (
                 "No jobs found yet"
               )}
@@ -632,7 +685,18 @@ export default function DashboardPage() {
         <div className="animate-fade-in-up stagger-1 glass-card rounded-xl p-4">
           <div className="relative z-10 grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
-              { label: "Total Matches", value: total, icon: Briefcase },
+              // `total` comes from the main list query. Until that query has
+              // answered it is 0, and a hard 0 in a tile labelled "Total
+              // Matches" is not a placeholder — it is a factual claim that the
+              // product found the user nothing. On production this sat next to
+              // "57 New Today / 100 This Week" for the 30s the list took to
+              // fail, which is exactly the wrong thing to tell someone with 226
+              // matches. An em dash says "not known yet" and cannot be misread.
+              {
+                label: "Total Matches",
+                value: isLoading || listDisagreesWithCounts ? "—" : total,
+                icon: Briefcase,
+              },
               { label: "New Today", value: counts["24h"] || 0, icon: Sparkles },
               { label: "This Week", value: counts["7d"] || 0, icon: TrendingUp },
               { label: `Active (${activeBucket.toUpperCase()})`, value: counts[activeBucket] ?? 0, icon: Globe },
@@ -709,7 +773,19 @@ export default function DashboardPage() {
                 Refreshing…
               </p>
             )}
-            <JobList jobs={jobs} loading={isLoading} onAction={handleAction} />
+            {/* knownAvailable lets the list tell "you have no matches" apart
+                from "the list failed to arrive". The bucket-counts query is a
+                separate request, so it routinely succeeds when the main list
+                does not — on production the counts said 100 while the list
+                came back empty after 30.7s, and the page announced "No jobs
+                found" over its own badge reading 100. */}
+            <JobList
+              jobs={jobs}
+              loading={isLoading}
+              onAction={handleAction}
+              knownAvailable={knownAvailable}
+              onRetry={() => void refetchJobs()}
+            />
           </div>
         )}
       </div>

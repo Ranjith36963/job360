@@ -119,7 +119,7 @@ flowchart TD
 - **Split requirements** — prod deps in `backend/pyproject.toml` `[project.dependencies]`, dev/test in the same file's `[project.optional-dependencies] dev` extra (`pip install -e ".[dev]"`). There is no `requirements*.txt` in the repo
 - **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
 
-### Testing (218 `test_*.py` files; 2 `live` tests deselected offline)
+### Testing (2 `live` tests deselected offline)
 
 > **The collected-test count is not written down anywhere on purpose.** Measure it:
 > `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`.
@@ -156,7 +156,7 @@ flowchart TD
 | `test_cron.py` | 5 | cron_setup.sh validation |
 | `test_setup.py` | 4 | setup.sh validation |
 | `test_csv_export.py` | 4 | CSV export format |
-| (the other 198 `test_*.py` files) | measure it | auth, feed, prefilter, channels, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, application history, llm_matcher, uk_gate, visa_signal, shelf registry, harness guards |
+| (every other `test_*.py` file) | measure it | auth, feed, prefilter, channels, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, application history, llm_matcher, uk_gate, visa_signal, shelf registry, harness guards |
 
 ## Quick Start
 
@@ -425,7 +425,7 @@ job360/
 │       │   └── other/       (4 classes / 5 keys)   # indeed+glassdoor share JobSpySource
 │       ├── workers/             # ARQ tasks + WorkerSettings
 │       └── utils/
-├── backend/tests/               # 218 test_*.py files (collected-test count: measure it, never quote it)
+├── backend/tests/               # counts live in ARCHITECTURE.md — measure them, never quote them
 ├── frontend/                    # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
 │   └── src/
 │       ├── app/                 # App Router pages

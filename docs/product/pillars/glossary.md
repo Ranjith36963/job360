@@ -135,7 +135,7 @@ The canonical posting shape every source must produce: 31 fields including `titl
 
 ### JobEnrichment
 
-LLM-extracted structured shape with 16 strict-typed fields, 7 enums, nested `SalaryBand`. One row per `job_id` in the `job_enrichment` table — **shared catalog** (no `user_id`).
+LLM-extracted structured shape with 16 strict-typed fields, 99 enums, nested `SalaryBand`. One row per `job_id` in the `job_enrichment` table — **shared catalog** (no `user_id`).
 **Code:** `backend/src/services/job_enrichment_schema.py`, migration `0008` · **Pillar 2**
 
 ### JobScorer

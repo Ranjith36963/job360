@@ -7,12 +7,6 @@
 > read that first. This file only adds backend-local essentials so they're at hand
 > when you're working in this directory. Keep it thin; do not duplicate the root.
 
-## How to talk to me (STRICT — always follow)
-
-**Explain everything in simple, plain English.** This is a strict rule, never skip it.
-Short sentences, easy words, no jargon (if a technical word is needed, say what it
-means in one short line). No walls of text — say what happened, what I did, what's next.
-
 ## What this is
 
 The Job360 backend: Python 3.9+, FastAPI, Postgres via psycopg3 (`pg.py` — an aiosqlite-shaped shim), ARQ worker.

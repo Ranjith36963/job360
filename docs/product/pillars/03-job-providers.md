@@ -574,7 +574,6 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | ATS catalog is hand-curated | 🟡 | no auto-discovery of new company boards |
 | Conditional fetch used by **no** source | 🔴 | tests are the only callers; rule #14 — opportunity to reduce upstream load |
 | University Jobs — only Cambridge feed confirmed valid | ⚠️ | other uni feeds may silently return nothing |
-| `python-jobspy` not in `requirements.txt` | ✅-by-design | optional; Indeed/Glassdoor skip if absent |
 | Per-source health/uptime dashboard | ❌ | breaker state is logged per-run but not surfaced in UI |
 | Source-level dedup of overlapping aggregators | ✅ | handled downstream by the 4-layer deduplicator (Pillar 2 §4) |
 
@@ -633,4 +632,4 @@ backend/tests/
 
 ---
 
-*Source roster (post-2026-08-10 rotation): 40 classes / 41 registry keys / 40 instances. Backend tests: 218 `test_*.py` files; measure the collected count, never quote it (2 `live` deselected offline).*
+*Source roster (post-2026-08-10 rotation): the class / registry-key / instance counts are in the table at the top of this document, which is checked against the code on every push. Backend tests: measure the counts, never quote them — `cd backend && python -m pytest --collect-only -q | tail -1`.*
