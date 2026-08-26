@@ -391,7 +391,25 @@ def _load_lists() -> tuple[list[str], list[tuple[str, str]]]:
     allow: list[str] = []
     deny: list[tuple[str, str]] = []
     for name, lane in lanes.items():
+        # SHAPE FIRST, ALWAYS. A `null` lane makes `.get` raise AttributeError
+        # at import — a traceback, from inside a module `lane.py` imports, which
+        # is precisely the failure the SystemExit above exists to avoid. Worse,
+        # a `paths:` written as a bare string would `extend` CHARACTER BY
+        # CHARACTER: `"backend/src/**"` becomes 14 one-letter patterns, the real
+        # pattern silently disappears, and on the ALLOW side that is fail-OPEN.
+        if not isinstance(lane, dict):
+            raise SystemExit(
+                f"merge_cage: lane `{name}` in {POLICY_PATH.name} is not a mapping "
+                f"({type(lane).__name__}), so its paths cannot be read and nothing may "
+                f"merge unattended."
+            )
         paths = lane.get("paths") or []
+        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+            raise SystemExit(
+                f"merge_cage: `paths:` for lane `{name}` in {POLICY_PATH.name} must be a list "
+                f"of strings (got {type(paths).__name__}). A bare string would be read one "
+                f"character at a time."
+            )
         if lane.get("auto_merge"):
             allow.extend(paths)
             continue
@@ -695,9 +713,10 @@ def check_paths(files: list[str]) -> Verdict:
             # now says what would end the refusal.
             reasons.append(
                 f"`{f}` — no rule covers this path, so nobody has decided it is safe to ship "
-                f"unattended. FIX: either take this file out of the PR, or the owner adds a "
-                f"matching pattern to ALLOW/DENY in scripts/merge_cage.py (that addition is "
-                f"itself his decision, not an agent's)."
+                f"unattended. FIX: either take this file out of the PR, or the owner adds it "
+                f"to a lane in {POLICY_PATH.name} (that addition is itself his decision, not "
+                f"an agent's). Editing scripts/merge_cage.py cannot classify a path any more "
+                f"— since 2026-08-26 it derives both lists from that file."
             )
     return Verdict(
         "PATH", "fail" if reasons else "pass", reasons,
@@ -1980,6 +1999,25 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
        else "check_lists cannot see a shadowed allow entry",
        ["check_lists"])
 
+    # B09b — A FAST LANE THE CAGE SWALLOWS WHOLE. This is the state the repo was
+    #        actually in: 32 of 38 declared fast-lane paths unreachable, and the
+    #        drill fully green the entire time, because nothing asked. A guard
+    #        with no witness is a guard nobody has watched fail — the same law
+    #        `drill_registry.py` applies to every other guard here.
+    ok("a fast lane a deny pattern swallows whole stops the cage dead",
+       bool(_swallowed_lane_probe()),
+       "check_lists cannot see a fast-lane path that is denied outright — the exact "
+       "contradiction this change was written to end could come straight back",
+       ["check_lists"])
+
+    # B09c — ...and a reason for a path the policy no longer classifies. Deleting
+    #        the third loop must not leave the drill green: a stale DENY_REASONS
+    #        key reads like a rule and is only a sentence.
+    ok("a DENY_REASONS key the policy dropped stops the cage dead",
+       bool(_stale_reason_probe()),
+       "check_lists cannot see a reason whose pattern no lane lists any more",
+       ["check_lists"])
+
     # B03 — the exit codes must be four different numbers, or the caller's crash
     #       arm is unreachable dead code, which is how this repo got here.
     codes = [EXIT_ALLOW, EXIT_REFUSE, EXIT_CANNOT_TELL_OWNER, EXIT_CAGE_BROKE, EXIT_USAGE]
@@ -2505,6 +2543,31 @@ def _shadow_probe() -> list[str]:
         return check_lists()
     finally:
         ALLOW[:] = saved
+
+
+def _swallowed_lane_probe() -> list[str]:
+    """Re-create the state main was actually in: a fast lane denied outright.
+
+    `scripts/**` sat in the `harness` lane as auto-mergeable while the cage
+    denied every path under it. Nothing went red for the cage's whole life, so
+    the guard that now catches it needs a witness of its own.
+    """
+    saved = list(ALLOW)
+    try:
+        ALLOW.append("scripts/**")   # the real historic contradiction, verbatim
+        return check_lists()
+    finally:
+        ALLOW[:] = saved
+
+
+def _stale_reason_probe() -> list[str]:
+    """A refusal sentence whose pattern no lane lists any more."""
+    key = "backend/src/this/path/is/in/no/lane/at/all.py"
+    try:
+        DENY_REASONS[key] = "a rule that no longer exists"
+        return check_lists()
+    finally:
+        DENY_REASONS.pop(key, None)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

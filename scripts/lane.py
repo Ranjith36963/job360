@@ -400,22 +400,35 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #      The depth cases stay, because the mechanism they were written to catch
     #      has not changed: a pattern that fails to cross `/` would classify a
     #      nested file wrongly, and only a real nested path can prove it does not.
+    #      ASSERT THE LANE, NOT `auto_merge` — §11c below found this the hard way
+    #      and these checks were written breaking its rule. The concrete miss:
+    #      delete BOTH `docs/product/**` from `harness` and
+    #      `product_design_rules.md` from `product_owner`, and the file matches
+    #      nothing, escalates to `product_owner`, and reports auto_merge False.
+    #      An auto_merge assertion goes GREEN over two deleted rules. Escalation
+    #      can fake that answer; it cannot fake the lane NAME.
     for depth in ("docs/product/x.md",
                   "docs/product/pillars/README.md",
                   "docs/product/plans/deep/er/still.md",
                   "docs/product/research/nested/notes.md"):
-        check(f"ordinary product prose is machine-mergeable at depth: {depth}",
-              classify([depth], policy)["auto_merge"], True)
+        check(f"ordinary product prose is in the harness lane at depth: {depth}",
+              classify([depth], policy)["lane"], "harness")
 
     # 11b. ...and the two documents that are DECISIONS still are not, at any
-    #      depth and whatever else is in the changeset with them.
+    #      depth and whatever else is in the changeset with them. Same rule:
+    #      the lane name, because `product_owner` reached by ESCALATION and
+    #      `product_owner` reached by the RULE are different facts that
+    #      `auto_merge` renders identically.
     for decision in ("docs/product/product_design_rules.md",
                      "docs/product/plans/batch-2-decisions.md"):
+        verdict = classify([decision], policy)
         check(f"a document that IS a decision still needs you: {decision}",
-              classify([decision], policy)["auto_merge"], False)
+              verdict["lane"], "product_owner")
+        check(f"...by the RULE, not by escalation: {decision}",
+              decision in (verdict.get("by_lane") or {}).get("product_owner", []), True)
         check(f"...even beside ordinary prose: {decision}",
-              classify(["docs/product/pillars/README.md", decision], policy)["auto_merge"],
-              False)
+              classify(["docs/product/pillars/README.md", decision], policy)["lane"],
+              "product_owner")
 
     # 11b. EVERY FAST-LANE PATTERN, WITH A REAL NESTED WITNESS.
     #
