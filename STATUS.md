@@ -50,7 +50,7 @@
 
 **Last updated:** 2026-08-24 (doc truth check; the phase narratives below are older — see `docs/harness/IMPLEMENTATION_LOG.md` for the current history)
 **Total tests:** measure it, never quote it — `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1` (2 `live` tests deselected offline; 3 skip on Windows)
-**Source files:** 40 source files in `backend/src/sources/` (excluding `__init__.py` and `base.py`) split into 6 category subfolders | **Test files:** 218 `test_*.py` modules
+**Source & test file counts:** measure, never quote — `git ls-files 'backend/src/sources/**/*.py' | grep -vE '__init__\.py|/base\.py' | wc -l` and `git ls-files 'backend/tests/test_*.py' | wc -l`. The authoritative figures live in `ARCHITECTURE.md`'s counts table, which is guarded against the code.
 **Job sources:** 41 entries in `SOURCE_REGISTRY`; 40 live instances since `indeed` + `glassdoor` share `JobSpySource`; gov_apprenticeships restored 2026-06-16 on DfE Display Advert API v2 (M6 2026-06 dropped jobtensor, comeet, aijobs_global; the 2026-08-10 rotation dropped 6 more dead upstreams — aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml). See CLAUDE.md rule #13 for the five load-bearing surfaces that move together on a registry change.
 **Latest merged head:** measure it, never quote it — `git rev-parse origin/main`. This line has been stale twice (it sat on a June commit for two months). **This branch's own work — the 2026-08-24 email/webhook-only channel deletion described above — is NOT on `main` yet**: `feat/delivery-email-webhook-only` has not merged, so `main` does not reflect the Slack/Discord/Telegram removal.
 **Sentinel:** removed 2026-08-24. `.claude/step-3-verified.txt` does not exist and no code reads it — `docs/harness/step_3_plan.md:120` still describes a halt-on-sentinel flow that has nothing to halt on. A pointer to a file that was never written is worse than no pointer: it reads as proof that a check ran.
@@ -209,7 +209,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
   The old built-in channel classes are REMOVED.
 - CLI commands (7, all in `src/cli.py`): run, status, view, api, sources, setup-profile, rescore-backfill
 - Next.js frontend (at `frontend/`) + FastAPI backend (at `backend/src/api/`) deliver the interactive UI
-- Tests: 218 `test_*.py` modules; measure the collected count, never quote it (2 `live` deselected offline); 3 skip on Windows (bash-only `setup.sh` / `cron_setup.sh` tests)
+- Tests: measure both the module and collected counts, never quote them (2 `live` deselected offline); 3 skip on Windows (bash-only `setup.sh` / `cron_setup.sh` tests)
 
 ---
 
@@ -218,7 +218,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 | Source/Component | Risk | Notes |
 |------------------|------|-------|
 | **HTML scrapers** (5) | High | LinkedIn, Climatebase, 80000Hours, BCS Jobs, AIJobs AI all use regex parsing on HTML. Any layout change breaks them silently (returns 0 jobs, no error). |
-| **python-jobspy** (Indeed/Glassdoor) | Medium | Not in backend/pyproject.toml. Optional dependency. If Indeed/Glassdoor change their site, python-jobspy breaks. |
+| **python-jobspy** (Indeed/Glassdoor) | Medium | If Indeed/Glassdoor change their site, python-jobspy breaks. |
 | **Workday ATS** | Medium | Complex dict-format config (tenant/wd/site). Workday API endpoints change occasionally. 20 companies = 20 potential breakpoints. |
 | **SuccessFactors** | Medium | Parses sitemap.xml files. Only 3 companies. MBDA already removed (DNS failure). |
 | **Personio** | Medium | Uses XML job feed API. 26 companies. Personio may restrict access. |
@@ -253,7 +253,7 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 > per-file counts roughly a third of the real ones. Two copies of a number is one copy too
 > many — README's is the measured one.
 
-**Current green baseline:** 218 `test_*.py` modules, 2 `live` tests deselected offline, 3 skipped
+**Current green baseline:** 2 `live` tests deselected offline, 3 skipped
 on Windows. The collected count is deliberately not recorded here — measure it, never quote it:
 `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`.
 

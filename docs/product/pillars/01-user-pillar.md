@@ -694,7 +694,7 @@ For completeness — these belong in the other two pillars and you won't find th
 
 ---
 
-*Last updated 2026-08-24. Backend suite: 218 `test_*.py` files (filesystem count, verified).
+*Last updated 2026-08-24.
 The collected-test count and the pass/fail count were **NOT** verified in this session — no
 local Postgres was reachable (the suite needs `docker-compose.dev.yml` up on port 5433) — so
 neither is recorded here. Measure them, never quote them:
