@@ -283,6 +283,19 @@ _OWNER_MERGES = "FIX: nothing an agent can do — this is the owner's call, so h
 
 POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy.yml"
 
+# THE LANE SET, AND WHY IT IS PINNED RATHER THAN DISCOVERED.
+#
+# Most restrictive first — the order IS the precedence rule, and `scripts/lane.py`
+# imports this tuple rather than keeping its own copy. That is not tidiness: the
+# two files reading DIFFERENT lane sets is the exact bug this whole change
+# exists to kill, one level up. If the policy grew a fifth lane with
+# `auto_merge: true` and a broad path, THIS file would put it on ALLOW while
+# `lane.py` — which walks a fixed tuple — would not see it at all, classify the
+# same file `unknown`, and escalate. One reader permits, the other refuses, and
+# whichever runs decides. Adding a lane is therefore a deliberate edit to BOTH
+# readers, made here, once.
+LANES: tuple[str, ...] = ("product_owner", "harness_owner", "product", "harness")
+
 # pattern -> the sentence printed when it refuses. Keys MUST exist in the policy.
 DENY_REASONS: dict[str, str] = {
     # ── product: anything that changes what a user is shown or how it ranks ──
@@ -398,6 +411,16 @@ def _load_lists() -> tuple[list[str], list[tuple[str, str]]]:
         )
     if not lanes:
         raise SystemExit(f"merge_cage: {POLICY_PATH} describes no lanes")
+    if set(lanes) != set(LANES):
+        extra = sorted(set(lanes) - set(LANES))
+        missing = sorted(set(LANES) - set(lanes))
+        raise SystemExit(
+            f"merge_cage: {POLICY_PATH.name} must describe exactly these lanes: "
+            f"{', '.join(LANES)}."
+            + (f" Unknown: {', '.join(extra)} — this file would honour it and scripts/lane.py "
+               f"would not, so one reader would permit what the other refuses." if extra else "")
+            + (f" Missing: {', '.join(missing)}." if missing else "")
+        )
 
     allow: list[str] = []
     deny: list[tuple[str, str]] = []
@@ -2622,6 +2645,12 @@ def _bad_policy_probe() -> list[str]:
         "paths key is absent": "lanes:\n  owner_lane:\n    auto_merge: false\n",
         "paths is null": "lanes:\n  owner_lane:\n    auto_merge: false\n    paths:\n",
         "paths is empty": "lanes:\n  owner_lane:\n    auto_merge: false\n    paths: []\n",
+        # A FIFTH LANE IS THE ORIGINAL BUG WEARING A NEW HAT: this file would
+        # honour it, `lane.py` walks a fixed tuple and would not, so one reader
+        # permits what the other refuses.
+        "an unknown lane name": (
+            'lanes:\n  smuggler:\n    auto_merge: true\n    paths:\n      - "**"\n'
+        ),
         "auto_merge is a quoted string": (
             'lanes:\n  owner_lane:\n    auto_merge: "false"\n    paths:\n      - "secret/**"\n'
         ),

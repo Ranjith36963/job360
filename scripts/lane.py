@@ -57,7 +57,7 @@ import yaml
 # implementations of "does this path match" is two answers to the same question,
 # and the day they disagree is the day the cage means nothing.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from merge_cage import path_matches  # noqa: E402
+from merge_cage import LANES, path_matches  # noqa: E402
 
 POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy.yml"
 
@@ -67,7 +67,11 @@ POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy
 # questions; a single `owner` bucket collapsed them and quietly left hand-merged
 # migrations with no post-merge watcher at all. product_owner outranks
 # harness_owner because a user is downstream of it.
-PRECEDENCE: tuple[str, ...] = ("product_owner", "harness_owner", "product", "harness")
+# IMPORTED, NOT RETYPED. `merge_cage.LANES` is the one definition; this file
+# used to keep its own copy, and a lane in one list but not the other is the
+# same "two readers, two answers" bug the ALLOW/DENY merge was written to end.
+# merge_cage also REFUSES a policy whose lane set is not exactly this.
+PRECEDENCE: tuple[str, ...] = LANES
 
 
 class PolicyError(RuntimeError):
