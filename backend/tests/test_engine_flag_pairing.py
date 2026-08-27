@@ -35,6 +35,22 @@ PARTNER = {
 }
 
 
+def _flag_name(node: ast.AST) -> str | None:
+    """The flag this node reads, whether bare or attribute-style, else None.
+
+    `ENRICHMENT_ENABLED` and `settings.ENRICHMENT_ENABLED` are the same read.
+    Matching only `ast.Name` would let the second form evade the rule entirely:
+    no such read exists today, but a refactor to `from src.core import settings`
+    would silently take every call site out of this guard's sight while leaving
+    it green — the way a guard stops guarding without anyone noticing.
+    """
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+        return node.id
+    if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+        return node.attr
+    return None
+
+
 def _or_operand_names(node: ast.AST) -> set[str]:
     """Names reachable from `node` as top-level operands of an `or`.
 
@@ -47,8 +63,9 @@ def _or_operand_names(node: ast.AST) -> set[str]:
     is the BoolOp's PARENT, which the ancestor walk reaches without recursing
     through it here.
     """
-    if isinstance(node, ast.Name):
-        return {node.id}
+    name = _flag_name(node)
+    if name is not None:
+        return {name}
     if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
         names: set[str] = set()
         for value in node.values:
@@ -84,11 +101,13 @@ def _unpaired_reads_in_source(source: str) -> list[tuple[int, str]]:
 
     bad: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        # ast.Name/Load excludes imports (ast.alias), the flag's own
-        # assignment (ast.Store) and anything inside a comment or docstring.
-        if not isinstance(node, ast.Name) or not isinstance(node.ctx, ast.Load):
+        # Load-context only, which structurally excludes imports (ast.alias),
+        # the flag's own assignment (ast.Store), and anything inside a comment
+        # or docstring — no regex filtering required.
+        flag = _flag_name(node)
+        if flag is None:
             continue
-        partner = PARTNER.get(node.id)
+        partner = PARTNER.get(flag)
         if partner is None:
             continue
         paired = False
@@ -96,12 +115,12 @@ def _unpaired_reads_in_source(source: str) -> list[tuple[int, str]]:
         while cur is not None and not paired:
             if isinstance(cur, ast.BoolOp) and isinstance(cur.op, ast.Or):
                 names = _or_operand_names(cur)
-                # `node.id in names` matters: an ancestor `or` may reach the
+                # `flag in names` matters: an ancestor `or` may reach the
                 # partner down a branch this read does not live on.
-                paired = node.id in names and partner in names
+                paired = flag in names and partner in names
             cur = parent.get(cur)
         if not paired:
-            bad.append((node.lineno, node.id))
+            bad.append((node.lineno, flag))
     return bad
 
 
@@ -123,6 +142,7 @@ ACCEPTED = [
     "if (ENGINE2_ENABLED or ENRICHMENT_ENABLED) and selected: pass",
     "x = ENGINE2_ENABLED or ENRICHMENT_ENABLED",
     "if ENGINE4_ENABLED or MATCHER_ENABLED: pass",
+    "if settings.ENGINE2_ENABLED or settings.ENRICHMENT_ENABLED: pass",
 ]
 
 REJECTED = [
@@ -131,6 +151,7 @@ REJECTED = [
     "if not ENGINE2_ENABLED or ENRICHMENT_ENABLED: pass",
     "if ENGINE2_ENABLED and ENRICHMENT_ENABLED: pass",
     "if ENGINE2_ENABLED or SOMETHING_ELSE: pass\nif ENRICHMENT_ENABLED: pass",
+    "if settings.ENRICHMENT_ENABLED: pass",
 ]
 
 
