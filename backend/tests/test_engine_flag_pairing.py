@@ -40,6 +40,12 @@ def _or_operand_names(node: ast.AST) -> set[str]:
 
     `A or B`, `not (A or B)` and `(A or B) and C` all count as pairing A with B;
     `A and B` does not, because that is a different gate.
+
+    A name under its OWN `not` does not count: `A or not B` is not the rule-#18
+    gate — it is on whenever B is off — so it must not satisfy the pairing.
+    `not (A or B)` still does, because there the `not` wraps the whole `or` and
+    is the BoolOp's PARENT, which the ancestor walk reaches without recursing
+    through it here.
     """
     if isinstance(node, ast.Name):
         return {node.id}
@@ -48,12 +54,15 @@ def _or_operand_names(node: ast.AST) -> set[str]:
         for value in node.values:
             names |= _or_operand_names(value)
         return names
-    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
-        return _or_operand_names(node.operand)
     return set()
 
 
 def _unpaired_reads(path: Path) -> list[tuple[int, str]]:
+    """Return (lineno, flag) for every read of a legacy flag with no partner."""
+    return _unpaired_reads_in_source(path.read_text(encoding="utf-8"))
+
+
+def _unpaired_reads_in_source(source: str) -> list[tuple[int, str]]:
     """Return (lineno, flag) for every read of a legacy flag with no partner.
 
     Each read is bound to ITS OWN enclosing `or` expression, walking up the
@@ -61,8 +70,12 @@ def _unpaired_reads(path: Path) -> list[tuple[int, str]]:
     them united the two names would pass an unpaired read in any file that
     happens to contain a paired one elsewhere — `main.py` has two E2 gates, so
     deleting the partner from one would have left this green.
+
+    Split from `_unpaired_reads` so the pairing rules can be asserted against
+    small snippets below, instead of only against whatever the tree happens to
+    contain today.
     """
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = ast.parse(source)
 
     parent: dict[ast.AST, ast.AST] = {}
     for node in ast.walk(tree):
@@ -94,6 +107,40 @@ def _unpaired_reads(path: Path) -> list[tuple[int, str]]:
 
 def _src_files() -> list[Path]:
     return sorted(p for p in SRC.rglob("*.py") if "__pycache__" not in p.parts)
+
+
+# --- the pairing rule itself, asserted on snippets --------------------------
+#
+# These pin what "paired" means, so the rule cannot quietly widen. The
+# `or not` case is the one that slipped: `_or_operand_names` used to recurse
+# through any `not`, so `ENRICHMENT_ENABLED or not ENGINE2_ENABLED` counted as
+# a valid gate — it is on whenever ENGINE2 is OFF, the opposite of rule #18.
+
+ACCEPTED = [
+    "if ENGINE2_ENABLED or ENRICHMENT_ENABLED: pass",
+    "if not (ENGINE2_ENABLED or ENRICHMENT_ENABLED): pass",
+    "if (ENGINE2_ENABLED or ENRICHMENT_ENABLED) and selected: pass",
+    "x = ENGINE2_ENABLED or ENRICHMENT_ENABLED",
+    "if ENGINE4_ENABLED or MATCHER_ENABLED: pass",
+]
+
+REJECTED = [
+    "if ENRICHMENT_ENABLED: pass",
+    "if ENRICHMENT_ENABLED or not ENGINE2_ENABLED: pass",
+    "if not ENGINE2_ENABLED or ENRICHMENT_ENABLED: pass",
+    "if ENGINE2_ENABLED and ENRICHMENT_ENABLED: pass",
+    "if ENGINE2_ENABLED or SOMETHING_ELSE: pass\nif ENRICHMENT_ENABLED: pass",
+]
+
+
+@pytest.mark.parametrize("source", ACCEPTED)
+def test_valid_gates_are_accepted(source: str):
+    assert _unpaired_reads_in_source(source) == []
+
+
+@pytest.mark.parametrize("source", REJECTED)
+def test_invalid_gates_are_rejected(source: str):
+    assert _unpaired_reads_in_source(source), f"should have been rejected: {source!r}"
 
 
 def test_source_tree_is_discoverable():
