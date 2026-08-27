@@ -54,15 +54,20 @@ def _or_operand_names(node: ast.AST) -> set[str]:
 
 
 def _unpaired_reads(path: Path) -> list[tuple[int, str]]:
-    """Return (lineno, flag) for every read of a legacy flag with no partner."""
+    """Return (lineno, flag) for every read of a legacy flag with no partner.
+
+    Each read is bound to ITS OWN enclosing `or` expression, walking up the
+    ancestor chain. Collecting every `or` in the file and asking whether any of
+    them united the two names would pass an unpaired read in any file that
+    happens to contain a paired one elsewhere — `main.py` has two E2 gates, so
+    deleting the partner from one would have left this green.
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"))
 
-    # Every `or`-expression in the file, mapped to the names it unites.
-    or_groups = [
-        _or_operand_names(node)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or)
-    ]
+    parent: dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parent[child] = node
 
     bad: list[tuple[int, str]] = []
     for node in ast.walk(tree):
@@ -73,7 +78,16 @@ def _unpaired_reads(path: Path) -> list[tuple[int, str]]:
         partner = PARTNER.get(node.id)
         if partner is None:
             continue
-        if not any(node.id in g and partner in g for g in or_groups):
+        paired = False
+        cur: ast.AST | None = node
+        while cur is not None and not paired:
+            if isinstance(cur, ast.BoolOp) and isinstance(cur.op, ast.Or):
+                names = _or_operand_names(cur)
+                # `node.id in names` matters: an ancestor `or` may reach the
+                # partner down a branch this read does not live on.
+                paired = node.id in names and partner in names
+            cur = parent.get(cur)
+        if not paired:
             bad.append((node.lineno, node.id))
     return bad
 
