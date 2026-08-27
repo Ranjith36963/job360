@@ -46,25 +46,69 @@ def render_digest_subject(*, shown: int, considered: int) -> str:
     return f"Job360 — {_plural(shown, 'job')} worth a look"
 
 
-def _render_card(card: DecisionCard, index: int) -> str:
-    """One job, as a small block. Numbered so a reply can name it later."""
-    lines = [f"{index}. {card.title} — {card.company}"]
+def _card_lines(card: DecisionCard, *, indent: str) -> list[str]:
+    """What one job SAYS — the single definition both send modes render from.
+
+    Split out of ``_render_card`` for wiring.md W-17: the instant path used to
+    hand-roll its own body (``"Job360 match: {title}\\n{apply_url}"``), so the
+    default notify mode shipped no score, no verdict, no reason and a link
+    straight to the employer, while the digest said all four. Two users on
+    different settings received different products.
+
+    Everything after the heading line is indented by ``indent`` so the digest can
+    keep its numbered layout while a single-job email reads flat.
+    """
+    lines: list[str] = []
 
     where = " · ".join(p for p in (card.location, card.salary) if p)
     if where:
-        lines.append(f"   {where}")
+        lines.append(f"{indent}{where}")
 
     if card.is_judged:
         # The score AND the words that justify it, never the number alone.
-        lines.append(f"   Fit {card.primary_score}/100 ({card.verdict})")
+        lines.append(f"{indent}Fit {card.primary_score}/100 ({card.verdict})")
         if card.reason:
-            lines.append(f"   Why: {card.reason}")
+            lines.append(f"{indent}Why: {card.reason}")
     else:
         # Honest about which engine spoke. No invented reason.
-        lines.append(f"   Keyword match {card.primary_score}/100 — not yet reviewed")
+        lines.append(f"{indent}Keyword match {card.primary_score}/100 — not yet reviewed")
 
-    lines.append(f"   {card.url}")
-    return "\n".join(lines)
+    # ALWAYS our own page, never the employer's apply_url (W-18). The click has
+    # to be able to come back: attribution, the staleness guard and the
+    # "this one closed" message all live on that page.
+    lines.append(f"{indent}{card.url}")
+    return lines
+
+
+def _render_card(card: DecisionCard, index: int) -> str:
+    """One job, as a small block. Numbered so a reply can name it later."""
+    return "\n".join(
+        [f"{index}. {card.title} — {card.company}", *_card_lines(card, indent="   ")]
+    )
+
+
+def render_instant_subject(card: DecisionCard) -> str:
+    """Subject for a single-job instant alert.
+
+    Leads with the role, because that is what makes someone open it. The score
+    rides along only when the job was actually judged — putting a keyword number
+    in the subject would dress a guess up as an assessment.
+    """
+    head = f"{card.title} at {card.company}"
+    if card.is_judged:
+        return f"Job360 — {head} ({card.primary_score}/100)"
+    return f"Job360 — {head}"
+
+
+def render_instant_text(card: DecisionCard) -> str:
+    """Body for a single-job instant alert — same facts as the digest states.
+
+    Rendered from :func:`_card_lines`, so instant and digest cannot drift apart:
+    change what a job says in one place and both modes follow.
+    """
+    return "\n".join(
+        [f"{card.title} — {card.company}", *_card_lines(card, indent=""), ""]
+    )
 
 
 def render_digest_text(

@@ -350,14 +350,40 @@ async def send_notification(
     db: pg.Connection = ctx["db"]
     db.row_factory = pg.Row
 
-    # Fetch job context for the notification body
-    cur = await db.execute("SELECT title, company, apply_url FROM jobs WHERE id = ?", (job_id,))
+    # W-17/W-18 — the SAME join send_bundle uses (tasks.py, the digest path), for
+    # one job. The old query read three columns off the shared catalog
+    # (`title, company, apply_url`) and hand-rolled the body, which meant the
+    # DEFAULT notify mode structurally could not say what the dashboard says: no
+    # score, no verdict, no reason, no salary, and a link straight to the
+    # employer so the click could never come back.
+    #
+    # INNER on user_feed, deliberately, and for the reason the digest already
+    # states: a job with no feed row for this user is one we can neither score
+    # nor explain, so we do not send it. An unexplainable alert is precisely the
+    # spam this product exists not to be.
+    cur = await db.execute(
+        "SELECT j.id AS job_id, j.title, j.company, j.location, "
+        "       e.salary AS enr_salary, "
+        "       f.score, f.llm_fit_score, f.llm_verdict, f.llm_reason "
+        "FROM jobs j "
+        "JOIN user_feed f ON f.job_id = j.id AND f.user_id = ? "
+        "LEFT JOIN job_enrichment e ON e.job_id = j.id "
+        "WHERE j.id = ?",
+        (user_id, job_id),
+    )
     job_row = await cur.fetchone()
     if job_row is None:
         return {"sent": 0, "queued": 0, "failed": 0}
 
-    title = f"{job_row['title']} @ {job_row['company']}"
-    body = f"Job360 match: {job_row['title']}\n{job_row['apply_url']}"
+    from src.services.delivery.decision_card import build_decision_card  # noqa: PLC0415
+    from src.services.delivery.email_body import (  # noqa: PLC0415
+        render_instant_subject,
+        render_instant_text,
+    )
+
+    card = build_decision_card(dict(job_row), site_base_url=SITE_BASE_URL)
+    title = render_instant_subject(card)
+    body = render_instant_text(card)
 
     # Test hook: ctx['dispatcher'] short-circuits the real Apprise path.
     # In production, we import lazily to dodge Apprise's ~30MB dep chain
@@ -372,9 +398,15 @@ async def send_notification(
     # job_id, `dispatcher._queue_digest` returns immediately without writing a
     # row -- so a `daily` rule produced NO digest AND no send, while the code
     # below still counted it. (CodeRabbit, PR #352.)
+    # `match_score` feeds dispatch()'s score-threshold gate. It used to read
+    # `job_row.get("match_score")` from a SELECT that never fetched that column,
+    # so it was ALWAYS None and the gate could never gate anything. The card's
+    # primary_score is the right value anyway: it is the number the user is
+    # actually ranked by (the judge's fit score when judged, the keyword score
+    # otherwise) — the same one their threshold setting is expressed against.
     results = await dispatcher_fn(
         db, user_id=user_id, title=title, body=body,
-        job_id=job_id, match_score=job_row.get("match_score"),
+        job_id=job_id, match_score=card.primary_score,
     )
 
     sent = 0

@@ -43,7 +43,7 @@ Work top to bottom. Each block is independently shippable.
 |---|---|---|---|---|
 | 1 | **The door** | W-01, W-03 | ✅ **rungs 1-4 verified** (browser evidence in `test-artifacts/rung4/`) · rung 5 = merge, owner's call | Own email dead-ended at our own front door; new users hit a wall on minute one. |
 | 2 | **Close the loop** | W-19, W-20 | ✅ **rungs 1-4 verified** (cron driven against real migrated Postgres) · rung 5 = merge, owner's call | One cron + one template turns the filing cabinet into a loop. Biggest value, cheapest fix. |
-| 3 | **Fix the default email** | W-17, W-18 | ready | The default mode sends the worst message the system can make, and links away from us. One change closes both. |
+| 3 | **Fix the default email** | W-17, W-18 | ✅ **rungs 1-4 verified** (real body read off real Postgres) · rung 5 = merge, owner's call | The default mode sends the worst message the system can make, and links away from us. One change closes both. |
 | 4 | **Don't lose the CV he sent** | W-08, W-10 | ready | Data is being destroyed today. Every day we wait, more is gone. |
 | 5 | **Pipeline card truth** | W-05, W-15, W-16 (deadline half) | tests already written | Cards lie about dead jobs, drop deadlines, and the Applied filter always returns zero. |
 | 6 | **Close the silent holes** | W-06, W-12, W-28, W-29 | ready | One-liners: an untracked exit, a stale-doc warning, a feed that shows old scores as fresh. |
@@ -287,7 +287,7 @@ reminder is impossible.
 quiet hours, digest, retries, a notifications history page. Nothing pipeline-shaped ever
 enters it.
 
-### [ ] W-17 — The instant email strips the score, the reason, and the salary
+### [x] W-17 — The instant email strips the score, the reason, and the salary  ✅ RUNGS 1-4 VERIFIED
 **Severity:** breaks the loop — **instant is the DEFAULT mode**
 **What happens:** the digest joins `user_feed` + `job_enrichment` and calls
 `build_decision_card`. The instant path runs `SELECT title, company, apply_url` and builds
@@ -297,7 +297,7 @@ default one is the poor one.
 **Side effect:** `job_row.get("match_score")` passed to `dispatch()` is therefore **always `None`** — it is used only as a threshold gate (`dispatcher.py:330`), never in the text.
 **Smallest fix:** make `send_notification` reuse the digest's join + `build_decision_card`.
 
-### [ ] W-18 — The instant email links **straight to the employer**, not to us
+### [x] W-18 — The instant email links **straight to the employer**, not to us  ✅ RUNGS 1-4 VERIFIED
 **Severity:** breaks the loop — **your explicit requirement, and this is the hard blocker on it**
 **What happens:** the digest link is `job360.uk/jobs/{id}` — correct, the click *can* come
 back. The instant email sends the **raw employer `apply_url`**. In the default mode the
@@ -305,6 +305,27 @@ click physically cannot return. Your two notification modes ship opposite design
 **Proof exists:** `services/delivery/decision_card.py:205` → `f"{site_base_url.rstrip('/')}/jobs/{job_id}"` (good) vs `workers/tasks.py:360` → `body = f"Job360 match: {title}\n{apply_url}"` (raw employer link). Also `services/notifications/report_generator.py:87` → `[Apply]({apply_url})`, same raw link.
 *(Verified by hand, not just by agent — this corrects an earlier report that said all email links point at our own page.)*
 **Smallest fix:** same fix as W-17. One change closes both.
+
+**Fixed together (one change closed both), 2026-08-25.** `send_notification` now runs
+the SAME `user_feed` + `job_enrichment` join `send_bundle` uses and renders through
+`build_decision_card`, so the two modes cannot drift apart again — `_card_lines()` in
+`email_body.py` is the single definition of what a job says.
+
+Before: `Job360 match: {title}` + the raw employer `apply_url`.
+After: subject `Job360 — Staff Site Reliability Engineer at Monzo (88/100)`; body with
+location, `£95k–£115k`, `Fit 88/100 (strong fit)`, the reason, and a `/jobs/{id}` link.
+
+**A third bug fell out of the same query:** `job_row.get("match_score")` fed dispatch's
+score-threshold gate from a SELECT that never fetched that column, so it was ALWAYS
+`None` and the gate could never gate anything. Now passes the card's `primary_score` —
+the number the user is actually ranked by.
+
+**Deliberate behaviour change:** the join is INNER on `user_feed`, so a job with no feed
+row is not sent. Same rule the digest already states — we cannot score or explain it, and
+an unexplainable alert is the spam this product exists not to be. Verified safe: both
+enqueue sites are feed-driven (`main.py:509` enqueues *for feed rows*; `tasks.py:229`
+fires straight after `upsert_feed_row`), so production always has the row. Four existing
+tests encoded the old contract and were updated to seed a feed row, not the code weakened.
 
 ### [ ] W-19 — Nothing ever notices "no reply"
 **Severity:** breaks the loop — **THE ONE BREAK**
