@@ -47,8 +47,8 @@ Work top to bottom. Each block is independently shippable.
 | 4 | **Don't lose the CV he sent** | W-08, W-10 | ✅ **rungs 1-4 verified** (tailor→apply→regenerate walked on real Postgres) · rung 5 = merge, owner's call | Data is being destroyed today. Every day we wait, more is gone. |
 | 5 | **Pipeline card truth** | W-05, W-15, W-16 (deadline half) | ✅ **rungs 1-4 verified** (board read off real Postgres) · rung 5 = merge, owner's call | Cards lie about dead jobs, drop deadlines, and the Applied filter always returns zero. |
 | 6 | **Close the silent holes** | W-06, W-12, W-28, W-29 | ✅ **rungs 1-4 verified** · rung 5 = merge, owner's call | One-liners: an untracked exit, a stale-doc warning, a feed that shows old scores as fresh. |
-| 7 | **Launch gates** | W-23, W-27 | ready | No unsubscribe = cannot email the public. No analytics = the launch teaches nothing. |
-| 8 | **Delete sweep** | D-01…D-05 | ready | Deleting dead code is a real fix. Fan out — 5 unrelated files. |
+| 7 | **Launch gates** | W-23, W-27 | ✅ **rungs 1-4 verified** (unsubscribe drill fires on real Postgres) · rung 5 = merge, owner's call | No unsubscribe = cannot email the public. No analytics = the launch teaches nothing. |
+| 8 | **Delete sweep** | D-01…D-05 | ⚠️ **PARTIAL — 2 of 5 done**, 3 blocked on decisions (see below) | Deleting dead code is a real fix. Fan out — 5 unrelated files. |
 
 > **STATUS WORDS MEAN SPECIFIC THINGS HERE. Corrected 2026-08-25.**
 > An earlier version of this table said PR 1 was "✅ shipped". That was false and it
@@ -409,7 +409,7 @@ enqueue sites are feed-driven (`main.py:509` enqueues *for feed rows*; `tasks.py
 fires straight after `upsert_feed_row`), so production always has the row. Four existing
 tests encoded the old contract and were updated to seed a feed row, not the code weakened.
 
-### [ ] W-19 — Nothing ever notices "no reply"
+### [x] W-19 — Nothing ever notices "no reply"  ✅ RUNGS 1-4 VERIFIED (PR 2)
 **Severity:** breaks the loop — **THE ONE BREAK**
 **What happens:** the query **already exists** — `get_stale_applications`, 7+ days dormant,
 correctly excludes offer/rejected. It is wired to exactly one consumer: an in-app banner on
@@ -419,13 +419,27 @@ if he remembers to open that page and look.
 **Proof missing:** `git grep -n "get_stale_applications" origin/main -- backend/src` → exactly 2 hits, the definition and that one route. `workers/settings.py:220-241` is the complete cron list — `nightly_ghost_sweep`, `refresh_catalog`, `notification_tick`, `enrichment_sweep` — **none** references applications or pipeline.
 **Smallest fix:** one daily cron next to the existing four → `get_stale_applications` per user → existing dispatcher.
 
-### [ ] W-20 — Every message is about a NEW JOB, never about HIM
+### [~] W-20 — Every message is about a NEW JOB, never about HIM  ⚠️ PARTIAL — see note
 **Severity:** breaks the loop
 **What happens:** email bodies are built from the shared catalog + his feed score + the LLM
 verdict. The engine has **never** read `applications`. There is no "your application moved
 to interview", no "your week: 3 applied, 1 interview, 2 quiet".
 **Proof missing:** `git grep -n "applications" origin/main -- backend/src/services/delivery backend/src/services/notifications` → **zero hits**.
 **Smallest fix:** a "your pipeline" section in the digest build, plus a notify call inside `advance_application`.
+
+**W-20 is PARTIAL and the earlier tick was wrong.** The chase cron (W-19) means the
+product can now say something about the user's OWN applications — that is the half that
+landed. Two halves did NOT:
+
+* the **digest has no "your pipeline" section** ("your week: 3 applied, 1 interview,
+  2 gone quiet"). Blocked on **D-G** — whether the digest should talk about him at all
+  is a tone decision, not an engineering one.
+* **stage transitions notify nobody.** Moving a card to interview/offer/rejected sends
+  nothing. Unblocked, just not built.
+
+`grep "applications" backend/src/services/delivery backend/src/services/notifications`
+still returns zero — the digest builder itself has still never read that table. Only the
+new cron has.
 
 ### [ ] W-21 — No deadline / interview / CV-staleness reminders exist at all
 **Severity:** breaks the loop — **design gap, not a quick wire**
@@ -445,7 +459,7 @@ application* going quiet.
 
 # STEP 6 — Channels, the email, and the click that must come back
 
-### [ ] W-23 — No unsubscribe link. At all.
+### [x] W-23 — No unsubscribe link. At all.  ✅ RUNGS 1-4 VERIFIED
 **Severity:** blocks public launch (deliverability + legal), technically small
 **What happens:** the only way to stop the emails is to log in and delete the channel.
 **Proof exists:** `services/delivery/email_body.py` — full body construction, no unsubscribe line.
@@ -471,7 +485,7 @@ application* going quiet.
 
 # CROSS-CUTTING (found in sweep 1)
 
-### [ ] W-27 — The funnel goes dark right after Apply
+### [x] W-27 — The funnel goes dark right after Apply  ✅ RUNGS 1-4 VERIFIED
 **Severity:** blocks a useful launch — **4 one-line fixes, cheapest item here**
 **What happens:** 6 analytics events exist total: `signup_completed`, `cv_uploaded`,
 `extraction_completed`, `search_run`, `job_viewed`, `application_created`. **Nothing** fires
@@ -505,12 +519,20 @@ scoring prompt. He can never see or correct them.
 Dead schema. Nothing reads or writes it. Delete now; re-add properly when a real user
 reaches an interview. Dead columns lie to future you. *(Conditional on D-D.)*
 
-### [ ] D-02 — "Keep without downloading"
+### [~] D-02 — "Keep without downloading"  ✅ DEAD CLIENT DELETED · backend route KEPT, see note
 Backend route + typed API client wrapper exist; **no button calls them**. Your own code
 comment says download = keep. Delete the route and the wrapper.
 
-### [ ] D-03 — `getActionCounts()` in `lib/api.ts:212`
+### [x] D-03 — `getActionCounts()` in `lib/api.ts:212`  ✅ DELETED
 Defined, exported, **zero callers** anywhere in frontend or backend.
+
+**D-02 was only half-deleted, deliberately.** The frontend `keepTailored` client had
+zero callers and is gone. The BACKEND route is not: it is exercised by
+`tests/test_cv_coverletter.py`, it is public API surface, and PR 4 made
+`keep_tailored_doc` load-bearing — the download path now uses it to bind the document a
+user applied with. Deleting a tested route to tidy up is a bigger and riskier change
+than the note that proposed it assumed, and it earns nothing today. If it goes, it goes
+with its tests, on purpose, as its own change.
 
 ### [ ] D-04 — `applications.notes_history`
 Written on every notes edit (`database.py:1784-1808`), never returned by any model or
@@ -524,39 +546,36 @@ it would erase the user's `liked`.
 
 ---
 
-# DECISIONS ONLY YOU CAN MAKE
+# DECISIONS — ANSWERED BY THE OWNER 2026-08-26
 
-These are product calls, not engineering. Work below them is blocked until you answer.
+All seven are settled. Nothing below is open; each line is now a spec.
 
-### [ ] D-A — What does "applied" mean?
-Clicked the link, or confirmed submitted? Two different products. **Blocks W-04.**
+| # | Decision | ANSWER | What it unblocks |
+|---|---|---|---|
+| D-A | What does "applied" mean? | **Confirm before it counts.** Clicking Apply is not an application until the user says they submitted it. | W-04 |
+| D-B | What does "outreach" mean? | **"I chased them."** Moving a card there RESETS the silence clock, so we stop nagging about a job just followed up on. | W-14 |
+| D-C | Who decides ghosted? | **The user decides. We only suggest — never auto-move a card.** | W-14, chase escalation |
+| D-D | Track interviews? | **Yes — build it.** Moving a card to Interview asks for a date; remind the day before. | W-16 interview half, W-21, D-01 |
+| D-E | Email click tracking? | **Yes — build it.** | W-24, W-25, W-26 |
+| D-F | Keep the "Applied" filter? | **Keep it.** | D-05 (nothing to delete) |
+| D-G | Should the digest talk about him? | **Yes** — add a "your pipeline" section. | W-20's second half |
 
-### [ ] D-B — What does "outreach" mean?
-Today it is a word on a column with no code behind it. Is it "I chased them"? Does entering
-it reset the silence clock? **Blocks W-14.**
+**Two of these went against my recommendation, and that is fine — they are product calls,
+not engineering ones. Recording the trade-off ONCE so it is not re-argued later:**
 
-### [ ] D-C — When is a job ghosted — 14 days? 21? 30?
-And does the product **suggest** ghosted (you confirm) or **decide** it? Recommendation:
-suggest. Never auto-move a card before D-B is answered. **Blocks W-14, W-19.**
+* **D-D (interviews):** I argued to delete the dead column instead, because there is
+  roughly one application in ninety days and nobody has reached an interview yet.
+  Owner says build it. Building it.
+* **D-E (click tracking):** I argued no, strongly. The current emails are plain text
+  with no tracking pixels and no redirect hops, which quietly HELPS them reach the
+  inbox — and the chase cron plus the apply record already show that an email worked.
+  Adding redirects makes the mail look more like marketing to a spam filter. Owner says
+  build it. Building it, and the deliverability cost is stated here rather than
+  re-raised each time.
 
-### [ ] D-D — Do you track interviews at all?
-`interview_dates` is a feature you never decided to build. Wire it with a real date prompt,
-or delete the column. **Blocks W-16, W-21, D-01.**
-
-### [ ] D-E — Do you want click tracking in email at all?
-Privacy and deliverability trade, not an engineering default. **You get ~90% of the value
-free:** the chase cron (W-19) plus the apply row already tell you the email worked.
-**Blocks W-24, W-25, W-26.**
-
-### [ ] D-F — Should the job list have an "Applied" filter at all?
-The pipeline page already shows applied jobs. Either derive the filter from `applications`
-or delete the option. **Blocks W-05, D-05.**
-
-### [ ] D-G — Should the digest talk about *him*?
-"Your week: 3 applied, 1 interview, 2 gone quiet." Tone call first, then a small wire.
-**Shapes W-20.**
-
----
+**An open threshold, not a decision:** D-C settles WHO decides, not WHEN we suggest.
+Using **21 days** of silence as the trigger for the "this looks ghosted" suggestion
+until told otherwise. Changing it is one constant.
 
 # ALREADY FINE — do not rebuild
 

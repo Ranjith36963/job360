@@ -588,6 +588,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications/unsubscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unsubscribe
+         * @description Turn ALL notifications off for the user a signed token names (W-23).
+         *
+         *     NO SESSION REQUIRED, on purpose. Someone who wants the emails to stop is often
+         *     exactly the person who will not log in to make it happen — and a recipient who
+         *     cannot find the exit presses "spam" instead, which is the worst signal a sending
+         *     domain can collect. The token IS the authorisation.
+         *
+         *     Safe to expose unauthenticated because of what it can do: the ONLY outcome is
+         *     silence. It cannot read anything, cannot change an address, and cannot be used to
+         *     reach an account. A leaked token buys an attacker the ability to stop someone's
+         *     email, which the owner reverses by logging in and switching it back on.
+         *
+         *     POST, never GET. Email clients and security scanners prefetch links, and a
+         *     state-changing GET would unsubscribe people who never clicked — the same trap the
+         *     magic-link landing page already solves with a confirm button. The emailed URL
+         *     points at a frontend page; that page POSTs here when the human presses the button.
+         *
+         *     Idempotent: unsubscribing twice is a success, not an error. A retry, a double-click
+         *     or a second visit to an old email must not produce a scary failure page.
+         */
+        post: operations["unsubscribe_api_notifications_unsubscribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipeline": {
         parameters: {
             query?: never;
@@ -2480,6 +2518,11 @@ export interface components {
             /** User Id */
             user_id: string;
         };
+        /** UnsubscribeRequest */
+        UnsubscribeRequest: {
+            /** Token */
+            token: string;
+        };
         /** UserResponse */
         UserResponse: {
             /** Email */
@@ -3400,6 +3443,41 @@ export interface operations {
                         [key: string]: {
                             [key: string]: number;
                         };
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unsubscribe_api_notifications_unsubscribe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnsubscribeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
                     };
                 };
             };

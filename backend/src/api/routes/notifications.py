@@ -18,12 +18,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_request_db
 from src.api.models import NotificationLedgerEntry, NotificationLedgerListResponse
 from src.repositories.database import JobDatabase
+from src.services.notifications.unsubscribe import verify_token
 
 router = APIRouter(tags=["notifications"])
 
@@ -88,3 +90,40 @@ async def notification_stats(
     Always 200 — empty dict when no ledger rows exist yet.
     """
     return await db.get_notification_ledger_stats(user_id=user.id)
+
+class UnsubscribeRequest(BaseModel):
+    token: str
+
+
+@router.post("/notifications/unsubscribe")
+async def unsubscribe(
+    body: UnsubscribeRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI DI idiom
+) -> dict[str, bool]:
+    """Turn ALL notifications off for the user a signed token names (W-23).
+
+    NO SESSION REQUIRED, on purpose. Someone who wants the emails to stop is often
+    exactly the person who will not log in to make it happen — and a recipient who
+    cannot find the exit presses "spam" instead, which is the worst signal a sending
+    domain can collect. The token IS the authorisation.
+
+    Safe to expose unauthenticated because of what it can do: the ONLY outcome is
+    silence. It cannot read anything, cannot change an address, and cannot be used to
+    reach an account. A leaked token buys an attacker the ability to stop someone's
+    email, which the owner reverses by logging in and switching it back on.
+
+    POST, never GET. Email clients and security scanners prefetch links, and a
+    state-changing GET would unsubscribe people who never clicked — the same trap the
+    magic-link landing page already solves with a confirm button. The emailed URL
+    points at a frontend page; that page POSTs here when the human presses the button.
+
+    Idempotent: unsubscribing twice is a success, not an error. A retry, a double-click
+    or a second visit to an old email must not produce a scary failure page.
+    """
+    user_id = verify_token(body.token)
+    if user_id is None:
+        # One message for forged AND malformed. Distinguishing them would let
+        # someone probe which user ids exist.
+        raise HTTPException(status_code=400, detail="This unsubscribe link is not valid.")
+    await db.set_notifications_enabled(user_id, enabled=False)
+    return {"unsubscribed": True}

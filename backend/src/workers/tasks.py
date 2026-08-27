@@ -383,7 +383,9 @@ async def send_notification(
 
     card = build_decision_card(dict(job_row), site_base_url=SITE_BASE_URL)
     title = render_instant_subject(card)
-    body = render_instant_text(card)
+    from src.services.notifications.unsubscribe import unsubscribe_line  # noqa: PLC0415
+
+    body = render_instant_text(card, unsubscribe_line(SITE_BASE_URL, user_id))
 
     # Test hook: ctx['dispatcher'] short-circuits the real Apprise path.
     # In production, we import lazily to dodge Apprise's ~30MB dep chain
@@ -1129,8 +1131,17 @@ async def send_bundle(ctx: dict[str, Any], user_id: str) -> dict[str, int]:
         ["no longer in your feed"] if considered > jobs_count else []
     )
     digest_title = render_digest_subject(shown=jobs_count, considered=considered)
+    from src.services.notifications.unsubscribe import unsubscribe_line  # noqa: PLC0415
+
     digest_body = render_digest_text(
-        cards, considered=considered, dropped_reasons=dropped_reasons
+        cards,
+        considered=considered,
+        dropped_reasons=dropped_reasons,
+        # W-23 — the exit rides in the body itself. Apprise's mailto transport
+        # carries no custom headers, so a List-Unsubscribe header is not
+        # available on this path; an in-body link is what actually reaches
+        # the recipient.
+        unsubscribe=unsubscribe_line(SITE_BASE_URL, user_id),
     )
 
     dispatcher_fn = ctx.get("dispatcher")

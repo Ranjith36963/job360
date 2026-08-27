@@ -209,10 +209,6 @@ export async function getActions(): Promise<{ actions: ActionResponse[] }> {
   return request<{ actions: ActionResponse[] }>("/api/actions");
 }
 
-export async function getActionCounts(): Promise<Record<string, number>> {
-  return request<Record<string, number>>("/api/actions/counts");
-}
-
 // ---------------------------------------------------------------------------
 // Profile
 // ---------------------------------------------------------------------------
@@ -427,6 +423,21 @@ export async function requestMagicLink(
   await request<void>("/api/auth/magic-link/request", {
     method: "POST",
     body: JSON.stringify(next ? { email, next } : { email }),
+  });
+}
+
+/**
+ * Turn ALL notifications off, authorised by a signed token from an email (W-23).
+ *
+ * No session needed — someone who wants the emails to stop is often exactly the
+ * person who will not log in to make it happen, and a recipient who cannot find the
+ * exit presses "spam" instead.
+ */
+export async function unsubscribeFromNotifications(token: string): Promise<void> {
+  await request<void>("/api/notifications/unsubscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
   });
 }
 
@@ -710,15 +721,6 @@ export async function saveTailored(
   return request<TailoredDocOut>(`/api/tailor/${jobId}/${kind}`, {
     method: "PATCH",
     body: JSON.stringify({ text }),
-  });
-}
-
-export async function keepTailored(
-  jobId: number,
-  kind: TailorDocKind
-): Promise<TailoredDocOut> {
-  return request<TailoredDocOut>(`/api/tailor/${jobId}/${kind}/keep`, {
-    method: "POST",
   });
 }
 

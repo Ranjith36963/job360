@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import posthog from "posthog-js";
 import { toast } from "sonner";
 import {
   Kanban,
@@ -117,6 +118,10 @@ export default function PipelinePage() {
   async function handleAdvance(jobId: number, stage: string) {
     try {
       const updated = await advancePipelineStage(jobId, { stage });
+      // W-27 — captured AFTER the call succeeds, never on the attempt. An event
+      // fired on intent counts moves that failed, which is how a funnel quietly
+      // starts lying about itself.
+      posthog.capture("application_stage_changed", { job_id: jobId, stage });
       // Optimistic update: replace the app in local state
       setApplications((prev) =>
         prev.map((a) => (a.job_id === jobId ? { ...a, ...updated } : a))

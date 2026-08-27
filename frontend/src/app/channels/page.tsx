@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import posthog from "posthog-js";
 import { toast } from "sonner";
 
 import {
@@ -55,6 +56,10 @@ function EmailAddForm({ onRefresh }: { onRefresh: () => void }) {
         display_name: email,
         credential: email,
       });
+      // W-27 — setting up a delivery channel is the moment a user opts INTO
+      // being reached. Nothing counted it, so the one action that turns a
+      // signup into a reachable person was invisible.
+      posthog.capture("channel_added", { channel_type: "email" });
       setEmail("");
       await onRefresh();
       toast.success("Email channel added");
@@ -120,6 +125,7 @@ function WebhookAddForm({ onRefresh }: { onRefresh: () => void }) {
         display_name: "Webhook",
         credential: url,
       });
+      posthog.capture("channel_added", { channel_type: "webhook" });
       setUrl("");
       await onRefresh();
       toast.success("Webhook added");

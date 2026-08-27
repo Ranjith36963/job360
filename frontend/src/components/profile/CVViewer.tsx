@@ -534,6 +534,49 @@ export function CVViewer({
           </div>
         )}
 
+        {/* W-29 — these three MOVE THE SCORE. They are read into the LLM
+            matcher's prompt (backend llm_matcher.py:249-260), and until now the
+            user could never see them, so could never correct a wrong one. Each
+            section stays silent when empty (rule #29: unfilled means "don't
+            care", never a guess). */}
+        {(cv.career_domain ||
+          (cv.cv_languages?.length ?? 0) > 0 ||
+          (cv.cv_education_details?.length ?? 0) > 0) && (
+          <div className="mb-5">
+            <div className="flex items-center gap-2 mb-2">
+              <Languages className="h-3.5 w-3.5 text-primary" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Used for matching
+              </span>
+            </div>
+            <p className="mb-2 text-xs text-muted-foreground/80">
+              We use these when scoring how well a job fits you. If one looks
+              wrong, re-upload your CV to correct it.
+            </p>
+            {cv.career_domain && (
+              <p className="text-sm text-foreground/80">
+                <span className="text-muted-foreground">Career field: </span>
+                {cv.career_domain}
+              </p>
+            )}
+            {(cv.cv_languages?.length ?? 0) > 0 && (
+              <p className="text-sm text-foreground/80">
+                <span className="text-muted-foreground">Languages: </span>
+                {cv.cv_languages.join(", ")}
+              </p>
+            )}
+            {(cv.cv_education_details?.length ?? 0) > 0 && (
+              <ul className="mt-1 space-y-1 pl-5 text-sm text-foreground/80">
+                {cv.cv_education_details.map((detail, i) => (
+                  <li key={i} className="leading-relaxed">
+                    {detail}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {/* Certifications */}
         {cv.certifications.length > 0 && (
           <div className="mb-5">
