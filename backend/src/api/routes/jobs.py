@@ -121,7 +121,9 @@ def _compute_bucket(date_found: str) -> str:
         return "7d"
 
 
-def _row_to_job_response(row: dict[str, Any], action: str | None = None) -> JobResponse:
+def _row_to_job_response(
+    row: dict[str, Any], action: str | None = None, *, applied: bool = False
+) -> JobResponse:
     """Build a `JobResponse` from a single LEFT-JOIN row.
 
     Step-1 B6: ``row`` may carry both ``jobs.*`` columns and ``enr_*``-prefixed
@@ -192,6 +194,9 @@ def _row_to_job_response(row: dict[str, Any], action: str | None = None) -> JobR
         semantic=row.get("semantic", 0) or 0,
         penalty=row.get("penalty", 0) or 0,
         action=action,
+        # Separate from `action` on purpose — a job can be liked AND applied to,
+        # and `user_actions` holds only one value per (user, job) (W-05).
+        applied=applied,
         bucket=_compute_bucket(row.get("date_found", "")),
         # Date-model fields (jobs table columns; Pillar 3 Batch 1).
         posted_at=row.get("posted_at"),
@@ -651,16 +656,31 @@ async def list_jobs(
     if user is not None:
         action_rows = await db.get_actions(user.id)
         action_map: dict[int, str] = {row["job_id"]: row["action"] for row in action_rows}
+        # W-05 — "applied" lives in `applications`, written by the Apply button.
+        # `user_actions` never receives it, which is why ?action=applied returned an
+        # empty list for everyone, forever. Read the truth instead of writing a
+        # duplicate: `user_actions` is one row per (user, job), so an 'applied' write
+        # there would erase a 'liked'.
+        applied_ids = await db.get_applied_job_ids(user.id)
     else:
         action_map = {}
+        applied_ids = set()
 
     if action is not None:
-        all_rows = [r for r in all_rows if action_map.get(r["id"]) == action]
+        if action == "applied":
+            all_rows = [r for r in all_rows if r["id"] in applied_ids]
+        else:
+            all_rows = [r for r in all_rows if action_map.get(r["id"]) == action]
 
     total = len(all_rows)
     page = all_rows[offset : offset + limit]
 
-    jobs = [_row_to_job_response(row, action_map.get(row["id"])) for row in page]
+    jobs = [
+        _row_to_job_response(
+            row, action_map.get(row["id"]), applied=row["id"] in applied_ids
+        )
+        for row in page
+    ]
 
     filters_applied: dict[str, Any] = {}
     if hours is not None:

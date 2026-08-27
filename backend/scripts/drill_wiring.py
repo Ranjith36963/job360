@@ -244,7 +244,72 @@ async def drill_instant(db: Any) -> list[str]:
     return failures
 
 
-DRILLS = {"chase": drill_chase, "instant": drill_instant}
+async def drill_pipeline_card(db: Any) -> list[str]:
+    """W-05/W-15/W-16 — the board must tell the truth about each application."""
+    print("\n=== DRILL: pipeline card truth (W-05, W-15, W-16) ===")
+    failures: list[str] = []
+    jdb = JobDatabase.from_connection("", db)
+    await _seed_user(db)
+    job_id = await _seed_job(db, "Backend Engineer", "Wise")
+    await db.execute(
+        "UPDATE jobs SET deadline = ? WHERE id = ?", ("2026-09-30", job_id)
+    )
+    await db.execute(
+        "INSERT INTO applications (user_id, job_id, stage, created_at, updated_at) "
+        "VALUES (?, ?, 'applied', ?, ?)",
+        (DRILL_USER, job_id, _iso(3), _iso(3)),
+    )
+    await db.execute(
+        "INSERT INTO tailored_documents (user_id, job_id, doc_kind, ai_draft, status, "
+        "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (DRILL_USER, job_id, "cv", "draft", "kept", _iso(3), _iso(3)),
+    )
+    await db.commit()
+
+    rows = await jdb.get_applications(DRILL_USER)
+    summary = await jdb.get_tailored_summary_for_jobs(DRILL_USER, [job_id])
+    applied_ids = await jdb.get_applied_job_ids(DRILL_USER)
+    card = next((r for r in rows if r["job_id"] == job_id), None)
+    if card is None:
+        failures.append("pipeline: the application did not come back at all")
+        return failures
+
+    print(f"  card: {card['title']} at {card['company']}")
+    print(f"    deadline        : {card.get('deadline')}")
+    print(f"    staleness_state : {card.get('staleness_state')}")
+    print(f"    tailored        : {summary.get(job_id)}")
+    print(f"    in applied set  : {job_id in applied_ids}")
+
+    for label, ok in (
+        ("the closing date survived (W-16)", card.get("deadline") == "2026-09-30"),
+        ("a live job is not flagged expired (W-15)",
+         card.get("staleness_state") != "confirmed_expired"),
+        ("the CV shows on the card", summary.get(job_id, {}).get("cv") == "kept"),
+        ("the applied set drives the filter (W-05)", job_id in applied_ids),
+    ):
+        print(f"  [{'PASS' if ok else 'FAIL'}] {label}")
+        if not ok:
+            failures.append(f"pipeline: {label}")
+
+    # Now the job closes underneath the application.
+    await db.execute(
+        "UPDATE jobs SET staleness_state = 'confirmed_expired' WHERE id = ?", (job_id,)
+    )
+    await db.commit()
+    rows = await jdb.get_applications(DRILL_USER)
+    card = next(r for r in rows if r["job_id"] == job_id)
+    ok = card.get("staleness_state") == "confirmed_expired"
+    print(f"  [{'PASS' if ok else 'FAIL'}] the card notices the job closed (W-15)")
+    if not ok:
+        failures.append("pipeline: the card never learned the job closed")
+    return failures
+
+
+DRILLS = {
+    "chase": drill_chase,
+    "instant": drill_instant,
+    "pipeline": drill_pipeline_card,
+}
 
 
 async def main_async(which: str) -> int:

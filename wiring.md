@@ -45,7 +45,7 @@ Work top to bottom. Each block is independently shippable.
 | 2 | **Close the loop** | W-19, W-20 | ✅ **rungs 1-4 verified** (cron driven against real migrated Postgres) · rung 5 = merge, owner's call | One cron + one template turns the filing cabinet into a loop. Biggest value, cheapest fix. |
 | 3 | **Fix the default email** | W-17, W-18 | ✅ **rungs 1-4 verified** (real body read off real Postgres) · rung 5 = merge, owner's call | The default mode sends the worst message the system can make, and links away from us. One change closes both. |
 | 4 | **Don't lose the CV he sent** | W-08, W-10 | ✅ **rungs 1-4 verified** (tailor→apply→regenerate walked on real Postgres) · rung 5 = merge, owner's call | Data is being destroyed today. Every day we wait, more is gone. |
-| 5 | **Pipeline card truth** | W-05, W-15, W-16 (deadline half) | tests already written | Cards lie about dead jobs, drop deadlines, and the Applied filter always returns zero. |
+| 5 | **Pipeline card truth** | W-05, W-15, W-16 (deadline half) | ✅ **rungs 1-4 verified** (board read off real Postgres) · rung 5 = merge, owner's call | Cards lie about dead jobs, drop deadlines, and the Applied filter always returns zero. |
 | 6 | **Close the silent holes** | W-06, W-12, W-28, W-29 | ready | One-liners: an untracked exit, a stale-doc warning, a feed that shows old scores as fresh. |
 | 7 | **Launch gates** | W-23, W-27 | ready | No unsubscribe = cannot email the public. No analytics = the launch teaches nothing. |
 | 8 | **Delete sweep** | D-01…D-05 | ready | Deleting dead code is a real fix. Fan out — 5 unrelated files. |
@@ -168,7 +168,7 @@ Same row. There is no button anywhere to say "I actually submitted it".
 **Proof missing:** `git grep -n "confirm.*submit|mark.*submitted|confirmed_applied"` → one unrelated hit (the magic-link confirm page).
 **Smallest fix:** decide D-A first. Then at most a "submitted?" tick on the pipeline card.
 
-### [ ] W-05 — Two different truths for "applied"
+### [x] W-05 — Two different truths for "applied"  ✅ RUNGS 1-4 VERIFIED
 **Severity:** degrades — **resolved by D-05, see delete list**
 **What happens:** `applications` (written by Apply) and `user_actions` (read by the job
 list's "My Actions → Applied" filter) never speak. So that filter **always returns zero**.
@@ -291,14 +291,14 @@ There is no rule anywhere that says "21 days of silence = ghosted".
 **Proof exists:** all 5 `ghosted` hits in the codebase are: `pipeline.py:29-36` (a comment saying it's deliberately user-confirmed), `pipeline/page.tsx:154-162` (`handleMarkGhosted`, the only writer), `KanbanBoard.tsx:121,142` (column definitions).
 **Proof missing:** none of those 5 is a cron, worker, or scheduled writer.
 
-### [ ] W-15 — A pipeline card never learns its job died
+### [x] W-15 — A pipeline card never learns its job died  ✅ RUNGS 1-4 VERIFIED
 **Severity:** degrades
 **What happens:** staleness is checked **once**, at the moment the row is created. Never
 again. The card looks alive forever.
 **Proof exists:** `pipeline.py:108` is the only check. The 3 write statements to `applications` (`database.py:1103, 1130, 1802`) never touch `staleness_state`.
 **Smallest fix:** select `j.staleness_state` in `get_applications`; flag `expired` on the card. *(Tests written.)*
 
-### [ ] W-16 — Deadlines vanish, interview dates were never captured
+### [~] W-16 — Deadlines vanish, interview dates were never captured  ✅ DEADLINE HALF VERIFIED · interview half still blocked on D-D
 **Severity:** degrades — **DECISION REQUIRED (D-D)**
 **What happens:** before applying, the card shows "Apply by 30 June". The second it becomes
 an application, the date is gone — the pipeline query never selects it and the model has no
@@ -316,6 +316,32 @@ reminder is impossible.
 **This is the heart of the problem.** The plumbing is genuinely good — dispatcher, ledger,
 quiet hours, digest, retries, a notifications history page. Nothing pipeline-shaped ever
 enters it.
+
+**PR 5 landed the deadline half, 2026-08-25.** `get_applications` now selects
+`j.staleness_state` and `j.deadline`; `PipelineApplication` carries `expired`,
+`deadline` and `tailored`. The interview half is untouched and still waits on D-D —
+`interview_dates` remains a dead column, and wiring it is a product decision.
+
+`expired` is true ONLY for `confirmed_expired`. `possibly_stale`/`likely_stale` are
+inferred from absence, and telling someone to stop chasing a live job is a worse error
+than staying quiet.
+
+W-05 is fixed by DERIVING, not duplicating: `get_applied_job_ids` reads the
+`applications` table. Writing 'applied' into `user_actions` would have erased the user's
+'liked', since that table holds one value per (user, job). So `applied` is its own field
+on `JobResponse`, separate from `action`.
+
+The dead `get_tailored_summary_for_jobs` is now called — once per board, not per card.
+
+**A real constraint found while testing:** for a logged-in caller `GET /api/jobs` reads
+`get_user_feed_jobs` (routes/jobs.py:564), NOT the shared catalog. A job with no
+`user_feed` row is invisible to the list — so the Applied filter cannot show an
+application whose feed row has been purged. A genuine bound on the feature, not a test
+detail.
+
+**D-F is still open** — whether the Applied filter should exist at all, given the
+pipeline page already lists applications. Making it work is the reversible choice;
+deleting it later is easy, and meanwhile it is no longer a broken feature.
 
 ### [x] W-17 — The instant email strips the score, the reason, and the salary  ✅ RUNGS 1-4 VERIFIED
 **Severity:** breaks the loop — **instant is the DEFAULT mode**

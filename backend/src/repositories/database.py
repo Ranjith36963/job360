@@ -1299,7 +1299,7 @@ class JobDatabase:
         if stage:
             cursor = await self._db.execute(
                 """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
-                          j.title, j.company
+                          j.title, j.company, j.staleness_state, j.deadline
                    FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
                    WHERE a.user_id = ? AND a.stage = ?
                    ORDER BY a.updated_at DESC""",
@@ -1308,7 +1308,7 @@ class JobDatabase:
         else:
             cursor = await self._db.execute(
                 """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
-                          j.title, j.company
+                          j.title, j.company, j.staleness_state, j.deadline
                    FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
                    WHERE a.user_id = ?
                    ORDER BY a.updated_at DESC""",
@@ -1323,9 +1323,32 @@ class JobDatabase:
                 "notes": r[4] or "",
                 "title": r[5] or "",
                 "company": r[6] or "",
+                # W-15: staleness was checked ONCE, when the row was created, and
+                # never again — so a card kept looking live for a job that closed
+                # months ago. W-16: the deadline was on the job card right up until
+                # the moment it became an application, then vanished.
+                "staleness_state": r[7],
+                "deadline": r[8],
             }
             for r in await cursor.fetchall()
         ]
+
+    async def get_applied_job_ids(self, user_id: str) -> set[int]:
+        """Job ids this user has an application for — the ONE truth for "applied".
+
+        W-05: the job list's ``?action=applied`` filter read ``user_actions``, which
+        the Apply button never writes, so it always returned an empty list. It reads
+        this instead.
+
+        Deliberately NOT solved by writing 'applied' into ``user_actions``: that table
+        is one row per (user, job) with ``ON CONFLICT DO UPDATE`` (see
+        :meth:`insert_action`), so an applied write would silently ERASE a 'liked' and
+        the heart would vanish from the card. Two facts, two homes.
+        """
+        cursor = await self._db.execute(
+            "SELECT job_id FROM applications WHERE user_id = ?", (user_id,)
+        )
+        return {int(r[0]) for r in await cursor.fetchall()}
 
     async def get_application_counts(self, user_id: str) -> dict[str, int]:
         cursor = await self._db.execute(
