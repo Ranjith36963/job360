@@ -169,7 +169,14 @@ def test_legacy_flag_is_actually_read_somewhere(flag: str, partner: str):
 
 
 def test_legacy_engine_flags_are_never_read_without_their_partner():
-    """Rule #18: `ENGINEx_ENABLED OR <legacy>` at EVERY call site."""
+    """Rule #18: `ENGINEx_ENABLED OR <legacy>` at every call site in `backend/src`.
+
+    Scope is deliberate, and saying "EVERY call site" without it was an
+    overclaim. `backend/scripts/engine_ablation.py` reads `ENRICHMENT_ENABLED`
+    alone — correctly, because ablating one engine at a time is the whole point
+    of that script. Rule #18 governs what the running system does, so the sweep
+    covers `backend/src` and diagnostic tooling stays out of it.
+    """
     offenders: list[str] = []
     for path in _src_files():
         for lineno, flag in _unpaired_reads(path):
