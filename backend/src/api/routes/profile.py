@@ -230,6 +230,13 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         location=getattr(cv, "location", ""),
         achievements=getattr(cv, "achievements", []),
         cv_positions=getattr(cv, "cv_positions", []) or [],
+        # W-29 — the three facts that feed the judge's prompt. getattr-with-default
+        # so an older stored profile that predates these fields degrades to empty
+        # rather than 500ing, and rule #29 keeps empty meaning "we don't know",
+        # never a guess.
+        career_domain=getattr(cv, "career_domain", "") or "",
+        cv_languages=getattr(cv, "cv_languages", []) or [],
+        cv_education_details=getattr(cv, "cv_education_details", []) or [],
         cv_projects=getattr(cv, "cv_projects", []) or [],
         cv_experience_level=getattr(cv, "cv_experience_level", "") or "",
         cv_right_to_work=getattr(cv, "cv_right_to_work", "") or "",
@@ -1104,6 +1111,15 @@ async def clear_profile_section(
     logger.info(
         "profile_cleared", extra={"event": "profile_cleared", "section": section}
     )
+    # W-28 — the feed was scored against the profile that just got emptied. Every
+    # OTHER way of changing a profile already queues this; clearing did not, so the
+    # user kept seeing scores derived from data they had deleted, presented as
+    # current. Showing a stale number as if it were fresh is the app lying.
+    # Called bare, exactly like the other two call sites: the function already
+    # guarantees "the profile save never 500s because of this" and falls back to an
+    # in-process task when Redis is down. A second guard here would just hide that
+    # documented behaviour behind a different one.
+    await _maybe_trigger_rescore(user.id)
     return _build_profile_response(profile, user.id)
 
 
@@ -1147,6 +1163,10 @@ async def restore_version(
     restored = restore_profile_version(user.id, version_id)
     if restored is None:
         raise HTTPException(status_code=404, detail="Version not found")
+    # W-28 — rolling the profile back must roll the scores back with it. Without
+    # this the feed kept every score computed from the version the user just
+    # abandoned, which is the one state they explicitly said they did not want.
+    await _maybe_trigger_rescore(user.id)
     return _build_profile_response(restored, user.id)
 
 

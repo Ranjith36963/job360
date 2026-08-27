@@ -218,6 +218,14 @@ class CVDetail(BaseModel):
     # never SEE their parsed experience — only a "Roles: N" count. Part of
     # the "stored but not shown" gap closed 2026-08-08.
     cv_positions: list[dict[str, Any]] = []
+    # W-29 — these THREE are NOT display-only. They are read straight into the LLM
+    # matcher's prompt (services/llm_matcher.py:249-260), so they move the score.
+    # They were stored and never exposed, which meant a user could be ranked on a
+    # career domain or a language list they had no way to see, let alone correct.
+    # Same "stored but not shown" class as cv_positions above.
+    career_domain: str = ""
+    cv_languages: list[str] = []
+    cv_education_details: list[str] = []
     # Projects stated on the CV. A Projects heading was already used as a
     # section boundary and then discarded — for a junior or career-changing
     # candidate it is often the strongest evidence on the document.

@@ -47,6 +47,16 @@ class TailoredDocOut(BaseModel):
     # Proper nouns in the draft that match nothing in the source CV/job — possible
     # fabrications for the user to review before applying (guardrail #2). Usually empty.
     flagged_terms: list[str] = []
+    # W-12 — which profile snapshot produced this draft. The column was written on
+    # every generation and then dropped here, so no "written from an older version
+    # of your profile" warning could ever be built. None for rows generated before
+    # the stamp existed.
+    profile_version: int | None = None
+    # Computed at read time by comparing the above against the caller's CURRENT
+    # profile version. True means the CV was written from a profile the user has
+    # since changed — the document is not wrong, it is just out of date, and only
+    # the user can decide whether that matters.
+    profile_changed_since: bool = False
 
 
 class TailorBundle(BaseModel):
@@ -67,7 +77,8 @@ class ProvenanceSegment(BaseModel):
     grounded: bool  # True = grounded in the user's CV/job (their fact); False = AI-added
 
 
-def _doc_out(row: dict[str, Any]) -> TailoredDocOut:
+def _doc_out(row: dict[str, Any], current_version: int | None = None) -> TailoredDocOut:
+    doc_version = row.get("profile_version")
     return TailoredDocOut(
         doc_kind=row["doc_kind"],
         ai_draft=row.get("ai_draft", ""),
@@ -76,6 +87,15 @@ def _doc_out(row: dict[str, Any]) -> TailoredDocOut:
         model=row.get("model"),
         updated_at=row.get("updated_at"),
         flagged_terms=row.get("flagged_terms", []) or [],
+        profile_version=doc_version,
+        # Only claim staleness when BOTH numbers are known. An unknown version is
+        # not evidence of anything, and warning on it would train the user to
+        # ignore the warning (W-12).
+        profile_changed_since=(
+            doc_version is not None
+            and current_version is not None
+            and doc_version < current_version
+        ),
     )
 
 
@@ -87,9 +107,18 @@ def _check_kind(doc_kind: str) -> None:
 async def _bundle(db: JobDatabase, user_id: str, job_id: int) -> TailorBundle:
     rows = await db.get_tailored_docs(user_id, job_id)
     used = await db.count_tailored_usage_month(user_id)
+    # W-12 — read once for the whole bundle, not per document. A failure here must
+    # not break the panel: not knowing the current version simply means we cannot
+    # claim a document is stale, which is the honest default.
+    try:
+        from src.services.profile.storage import current_profile_version_id  # noqa: PLC0415
+
+        current_version = current_profile_version_id(user_id)
+    except Exception:  # noqa: BLE001 — a staleness hint is never worth a 500
+        current_version = None
     return TailorBundle(
         job_id=job_id,
-        documents=[_doc_out(r) for r in rows],
+        documents=[_doc_out(r, current_version) for r in rows],
         quota_used=used,
         quota_limit=TAILOR_FREE_PER_MONTH,
     )

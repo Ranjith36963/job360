@@ -1483,6 +1483,11 @@ export interface components {
              */
             achievements: string[];
             /**
+             * Career Domain
+             * @default
+             */
+            career_domain: string;
+            /**
              * Certifications
              * @default []
              */
@@ -1493,6 +1498,11 @@ export interface components {
              */
             companies: string[];
             /**
+             * Cv Education Details
+             * @default []
+             */
+            cv_education_details: string[];
+            /**
              * Cv Experience Level
              * @default
              */
@@ -1502,6 +1512,11 @@ export interface components {
              * @default []
              */
             cv_industries: string[];
+            /**
+             * Cv Languages
+             * @default []
+             */
+            cv_languages: string[];
             /**
              * Cv Positions
              * @default []
@@ -2426,6 +2441,13 @@ export interface components {
             model?: string | null;
             /** Polished */
             polished?: string | null;
+            /**
+             * Profile Changed Since
+             * @default false
+             */
+            profile_changed_since: boolean;
+            /** Profile Version */
+            profile_version?: number | null;
             /**
              * Status
              * @default draft
