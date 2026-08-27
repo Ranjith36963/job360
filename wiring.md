@@ -44,7 +44,7 @@ Work top to bottom. Each block is independently shippable.
 | 1 | **The door** | W-01, W-03 | ✅ **rungs 1-4 verified** (browser evidence in `test-artifacts/rung4/`) · rung 5 = merge, owner's call | Own email dead-ended at our own front door; new users hit a wall on minute one. |
 | 2 | **Close the loop** | W-19, W-20 | ✅ **rungs 1-4 verified** (cron driven against real migrated Postgres) · rung 5 = merge, owner's call | One cron + one template turns the filing cabinet into a loop. Biggest value, cheapest fix. |
 | 3 | **Fix the default email** | W-17, W-18 | ✅ **rungs 1-4 verified** (real body read off real Postgres) · rung 5 = merge, owner's call | The default mode sends the worst message the system can make, and links away from us. One change closes both. |
-| 4 | **Don't lose the CV he sent** | W-08, W-10 | ready | Data is being destroyed today. Every day we wait, more is gone. |
+| 4 | **Don't lose the CV he sent** | W-08, W-10 | ✅ **rungs 1-4 verified** (tailor→apply→regenerate walked on real Postgres) · rung 5 = merge, owner's call | Data is being destroyed today. Every day we wait, more is gone. |
 | 5 | **Pipeline card truth** | W-05, W-15, W-16 (deadline half) | tests already written | Cards lie about dead jobs, drop deadlines, and the Applied filter always returns zero. |
 | 6 | **Close the silent holes** | W-06, W-12, W-28, W-29 | ready | One-liners: an untracked exit, a stale-doc warning, a feed that shows old scores as fresh. |
 | 7 | **Launch gates** | W-23, W-27 | ready | No unsubscribe = cannot email the public. No analytics = the launch teaches nothing. |
@@ -199,7 +199,7 @@ learns he went.
 and the Kanban CV/Letter button already reaches it. The danger is not ambiguity — it is
 destruction.
 
-### [ ] W-08 — No document is bound to the application row
+### [x] W-08 — No document is bound to the application row  ✅ RUNGS 1-4 VERIFIED
 **Severity:** breaks the loop — **your explicit requirement**
 **What happens:** applying stores `job_id` + `user_id` only. Tailored docs live in a
 separate table keyed by `job_id`. Nothing ties "this application" to "this document".
@@ -211,7 +211,7 @@ separate table keyed by `job_id`. Nothing ties "this application" to "this docum
 **Severity:** degrades (same root as W-08)
 **Proof exists:** `api.ts:337` `createPipelineApplication(jobId)` — one parameter. `pipeline.py:85` takes no body.
 
-### [ ] W-10 — Regenerating a CV **destroys** the one he applied with
+### [x] W-10 — Regenerating a CV **destroys** the one he applied with  ✅ RUNGS 1-4 VERIFIED
 **Severity:** breaks the loop — **data loss happening today**
 **What happens:** `upsert_tailored_doc` is an explicit `DELETE` then `INSERT`. There is no
 v1 and v2 — only "the current one". Generate → apply → regenerate later, and the CV he
@@ -220,6 +220,36 @@ with no proof it existed.
 **Proof exists:** `database.py:910-943`, with its own comment: *"Regenerating a doc is a fresh draft — old polished/kept state for THIS (user, job, kind) is superseded."*
 **Proof missing:** `git grep -n "version" origin/main -- backend/migrations/0023_tailored_documents.up.sql backend/migrations/0024_tailored_flagged_terms.up.sql` → only the unrelated `profile_version` column. No doc-version column, no history table.
 **Smallest fix:** snapshot the doc text/id onto the application at apply time (cheap), **or** make `tailored_documents` append-only and versioned (proper).
+
+**Fixed together (migration 0033), 2026-08-25.** One append-only table,
+`tailored_document_versions`, plus two nullable columns on `applications`
+(`cv_version_id`, `cover_letter_version_id`).
+
+* `upsert_tailored_doc` now snapshots the outgoing text **before** the DELETE, so a
+  regenerate can no longer destroy anything.
+* `create_application` snapshots whatever documents were in hand and binds them —
+  that is the answer to "which CV did I send for this job?".
+* `keep_tailored_doc` binds too, because the common real order is apply first, tailor
+  and download afterwards. Binding only at apply time would miss those people entirely.
+  First binding wins, so a later rewrite cannot claim to be what was sent.
+
+It stores the TEXT, not a foreign key: the whole point is surviving the deletion of the
+`tailored_documents` row, and a pointer to a deleted row answers nothing. What is stored
+is what the user would actually have sent — their polished edit when they made one,
+otherwise the AI draft.
+
+The live-document contract is deliberately untouched: `tailored_documents` still holds
+exactly one current row per (user, job, kind), so no existing reader changed.
+
+Walked on real Postgres — tailor → apply → regenerate:
+```
+THE QUESTION: which CV did I apply with?
+ANSWER: 'CV VERSION ONE — this is the file that went to the employer' (source=applied)
+```
+
+**Known cosmetic:** applying and then regenerating leaves two rows with identical
+content (`applied` and `superseded`). They mean different things and `source`
+distinguishes them, so this is kept rather than deduped — the audit trail is the point.
 
 ### [ ] W-11 — A download is not an event
 **Severity:** degrades
