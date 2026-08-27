@@ -257,13 +257,18 @@ export default function DashboardPage() {
   // not an error worth showing. `search_titles` is served by the same
   // `generate_search_config` call the pipeline runs, so this line reports what
   // the boards were really asked, not a re-derivation that could drift.
-  const { data: profileData } = useQuery<ProfileResponse>({
+  const { data: profileData, isPending: profileIsPending } = useQuery<ProfileResponse>({
     queryKey: queryKeys.profile(),
     queryFn: getProfile,
     staleTime: 5 * 60_000,
     retry: false,
   });
   const searchTitles = profileData?.search_titles;
+  // W-03: three states, not two. `undefined` while the query is in flight, then a
+  // definite true/false. A 404 here is the normal "no profile yet" case (see the
+  // comment above), which `isError` reports — so both a success with no data and
+  // an outright 404 resolve to false, and only the in-flight moment stays unknown.
+  const hasProfile = profileIsPending ? undefined : Boolean(profileData);
 
   // ---------------------------------------------------------------------------
   // Bucket changes
@@ -679,7 +684,12 @@ export default function DashboardPage() {
                 Refreshing…
               </p>
             )}
-            <JobList jobs={jobs} loading={isLoading} onAction={handleAction} />
+            <JobList
+              jobs={jobs}
+              loading={isLoading}
+              onAction={handleAction}
+              hasProfile={hasProfile}
+            />
           </div>
         )}
       </div>

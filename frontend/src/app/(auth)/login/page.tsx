@@ -15,14 +15,14 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 // ---------------------------------------------------------------------------
-// safeNext — validates the ?next param to prevent open-redirect attacks.
-// Only allows paths that start with "/" but not "//" (protocol-relative).
+// safeNext now lives in @/lib/safe-next so BOTH sign-in paths and the
+// /auth/magic landing page share one definition (wiring.md W-01). It is
+// re-exported here so existing imports (and their tests) keep working.
 // ---------------------------------------------------------------------------
 
-export function safeNext(p: string | null): string {
-  if (!p || !p.startsWith("/") || p.startsWith("//")) return "/dashboard";
-  return p;
-}
+import { DEFAULT_NEXT, safeNext } from "@/lib/safe-next";
+
+export { safeNext };
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -46,6 +46,11 @@ type LoginSchema = z.infer<typeof loginSchema>;
 function MagicLinkForm({ onUsePassword }: { onUsePassword: () => void }) {
   const [serverError, setServerError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  // W-01: carry the "come back here after" note into the emailed link. The
+  // password form below already did this; the magic form — the DEFAULT path —
+  // used to drop it, so our own emails dead-ended on the dashboard.
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next");
 
   const {
     register,
@@ -56,7 +61,10 @@ function MagicLinkForm({ onUsePassword }: { onUsePassword: () => void }) {
   const onSubmit = handleSubmit(async (data) => {
     setServerError(null);
     try {
-      await requestMagicLink(data.email);
+      // safeNext here too: never send a hostile destination to the API in the
+      // first place. The backend re-validates regardless (defence in depth).
+      const dest = safeNext(next);
+      await requestMagicLink(data.email, dest === DEFAULT_NEXT ? null : dest);
       setSent(true);
     } catch (err) {
       setServerError(friendlyAuthError(err, "Could not send the link. Please try again."));

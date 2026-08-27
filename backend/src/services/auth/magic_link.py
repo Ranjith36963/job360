@@ -53,16 +53,70 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Cap on ``next``. Long enough for any real route + query string, short enough
+# that nobody can pad an email with kilobytes of attacker-chosen text.
+MAX_NEXT_LENGTH = 512
+
+
+def safe_next_path(raw: str | None) -> str | None:
+    """Return ``raw`` if it is a safe same-site path, else ``None``.
+
+    This is the SERVER-SIDE half of the open-redirect guard (wiring.md W-01). The
+    browser has its own copy in ``frontend/src/lib/safe-next.ts``, but that one is
+    bypassed by POSTing this API directly — and the value ends up inside an email
+    WE send, so a bad one is an open redirect carrying our own From: address. It
+    must be re-validated here.
+
+    Rejected, and why each matters:
+
+    * anything not starting with ``/`` — an absolute URL or a bare scheme
+      (``https://evil.com``, ``javascript:``) leaves the site outright.
+    * ``//evil.com`` — protocol-relative: the browser supplies the scheme and
+      treats the rest as a HOST, so this is off-site despite the leading slash.
+    * any backslash — WHATWG URL parsing folds ``\\`` into ``/``, so ``/\\evil.com``
+      becomes ``//evil.com`` in the browser while passing a naive ``startswith("//")``
+      check. This is the escape the frontend guard originally missed.
+    * control characters (CR, LF, NUL, tab) — header and URL injection into the
+      outgoing email.
+    * anything over :data:`MAX_NEXT_LENGTH`.
+
+    Returns ``None`` rather than raising: a hostile ``next`` must degrade to an
+    ordinary sign-in link, never break the user's ability to log in.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    if len(raw) > MAX_NEXT_LENGTH:
+        return None
+    # Control chars anywhere (not just at the edges) — \r \n \0 \t and friends.
+    if any(ch < " " or ch == "\x7f" for ch in raw):
+        return None
+    if "\\" in raw:
+        return None
+    if not raw.startswith("/") or raw.startswith("//"):
+        return None
+    return raw
+
+
 def _build_magic_link_email(
-    *, to_email: str, raw_token: str, frontend_origin: str
+    *, to_email: str, raw_token: str, frontend_origin: str, next_path: str | None = None
 ) -> tuple[str, str, str]:
     """Return ``(subject, text_body, html_body)`` for the sign-in email.
+
+    ``next_path`` is where to send the user AFTER sign-in — it is run through
+    :func:`safe_next_path` here rather than at the call site, so no caller can
+    route around the guard. An unsafe value is dropped and the link degrades to
+    a plain sign-in.
 
     Defense-in-depth HTML escaping mirrors the sibling helpers in
     ``password_reset.py`` / ``email_verification.py``.
     """
     safe_token = urlquote(raw_token, safe="")
     link = f"{frontend_origin}/auth/magic?token={safe_token}"
+    checked_next = safe_next_path(next_path)
+    if checked_next:
+        # safe="" so the path's own slashes are encoded and cannot break out of
+        # the query string.
+        link = f"{link}&next={urlquote(checked_next, safe='')}"
     subject = "Sign in to Job360"
     text = (
         f"Hi,\n\n"
@@ -87,8 +141,15 @@ async def request_magic_link(
     db_path: str,
     email: str,
     frontend_origin: str,
+    next_path: str | None = None,
 ) -> bool:
     """Issue + email a magic-link sign-in token for ``email``.
+
+    ``next_path`` is where the user was heading before we asked him to sign in —
+    it rides along in the emailed link so the round trip lands him back there
+    instead of on the dashboard (wiring.md W-01). It is validated by
+    :func:`safe_next_path` inside the email builder, so an unsafe value silently
+    degrades to a plain sign-in link rather than failing the login.
 
     Returns True if the email was actually sent, False otherwise. Never
     raises — the route returns 204 regardless (no-enumeration contract).
@@ -112,7 +173,10 @@ async def request_magic_link(
             await db.commit()
 
         subject, text, html_body = _build_magic_link_email(
-            to_email=email, raw_token=raw, frontend_origin=frontend_origin
+            to_email=email,
+            raw_token=raw,
+            frontend_origin=frontend_origin,
+            next_path=next_path,
         )
         return await send_system_email(
             to_email=email, subject=subject, body_text=text, body_html=html_body

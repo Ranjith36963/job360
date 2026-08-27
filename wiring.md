@@ -36,19 +36,29 @@ applied to.
 
 Work top to bottom. Each block is independently shippable.
 
-| # | Block | Items | Why this order |
-|---|---|---|---|
-| 1 | **Close the loop** | W-19, W-20 | One cron + one template turns the filing cabinet into a loop. Biggest value, cheapest fix. |
-| 2 | **Fix the default email** | W-17, W-18 | The default mode sends the worst message the system can make, and links away from us. |
-| 3 | **Don't lose the CV he sent** | W-10, W-11 | Data is being destroyed today. Every day we wait, more is gone. |
-| 4 | **Close the silent holes** | W-06, W-07, W-01 | One-liners. Untracked exits and a dead-end front door. |
-| 5 | **First-run experience** | W-03 | Nobody can start today without knowing where to click. |
-| 6 | **Legal before public** | W-22 | No unsubscribe link = cannot email the public. |
-| 7 | **Pipeline card truth** | W-13, W-14, W-15 | Cards lie about dead jobs and drop deadlines. |
-| 8 | **Stop flying blind** | W-25 | 4 PostHog lines. Do before launch or the launch teaches nothing. |
-| 9 | **Delete list** | D-01..D-05 | Deleting dead code is a real fix. |
+**8 PRs. One per block.** Not one big PR: `main` is production, every merge ships, and a
+30-item diff is unreviewable — if something breaks you cannot tell which item did it.
 
-Everything below block 9 is **later** — see the LATER section.
+| PR | Block | Items | Status | Why this order |
+|---|---|---|---|---|
+| 1 | **The door** | W-01, W-03 | ✅ **shipped** `1b89491` | Own email dead-ended at our own front door; new users hit a wall on minute one. |
+| 2 | **Close the loop** | W-19, W-20 | ready | One cron + one template turns the filing cabinet into a loop. Biggest value, cheapest fix. |
+| 3 | **Fix the default email** | W-17, W-18 | ready | The default mode sends the worst message the system can make, and links away from us. One change closes both. |
+| 4 | **Don't lose the CV he sent** | W-08, W-10 | ready | Data is being destroyed today. Every day we wait, more is gone. |
+| 5 | **Pipeline card truth** | W-05, W-15, W-16 (deadline half) | tests already written | Cards lie about dead jobs, drop deadlines, and the Applied filter always returns zero. |
+| 6 | **Close the silent holes** | W-06, W-12, W-28, W-29 | ready | One-liners: an untracked exit, a stale-doc warning, a feed that shows old scores as fresh. |
+| 7 | **Launch gates** | W-23, W-27 | ready | No unsubscribe = cannot email the public. No analytics = the launch teaches nothing. |
+| 8 | **Delete sweep** | D-01…D-05 | ready | Deleting dead code is a real fix. Fan out — 5 unrelated files. |
+
+**Blocked on a decision, NOT scheduled:** W-04 (D-A), W-14 (D-B, D-C), W-16's interview half
+(D-D), W-24 / W-25 / W-26 (D-E), W-05's filter-vs-delete call (D-F), W-20's tone (D-G).
+
+**Parked as LATER:** W-02, W-07, W-09, W-11, W-13, W-21, W-22, W-30.
+
+> The IDs in this table are the authority. An earlier draft of it named four wrong items
+> (W-11 for W-08, W-22 for W-23, W-13 for W-05/W-16, W-25 for W-27) — three of which would
+> have sent us to build a LATER item instead of the real one. Cross-check any ID here
+> against its own `### W-xx` section before starting work.
 
 ---
 
@@ -57,7 +67,7 @@ Everything below block 9 is **later** — see the LATER section.
 This leg is genuinely good: no email enumeration, the confirm-button beats inbox
 scanners, first login seeds notification rules. Three breaks.
 
-### [ ] W-01 — The magic link always dumps him on `/dashboard`
+### [x] W-01 — The magic link always dumps him on `/dashboard`  ✅ SHIPPED `1b89491`
 **Severity:** breaks the loop (it breaks your *own* email leg)
 **What happens:** the emailed link carries only `?token=`. There is no `?next=`. The
 password login form reads `next` and honours it; the magic form — the **default** — never
@@ -91,7 +101,7 @@ account from a 50th visit, and cannot say "12 new since Tuesday".
 **Smallest fix:** add `users.last_login_at`, stamp on login/consume.
 **Verdict: LATER.** Nice, not urgent.
 
-### [ ] W-03 — A brand-new user hits a wall on minute one
+### [x] W-03 — A brand-new user hits a wall on minute one  ✅ SHIPPED `1b89491`
 **Severity:** breaks the loop for every new signup
 **What happens:** new account = zero profile. Dashboard shows `0 jobs` and a generic empty
 state: *"Try adjusting your filters, expanding the time range, or lowering the minimum
