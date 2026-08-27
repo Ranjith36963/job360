@@ -124,7 +124,76 @@ already exists.
 
 ---
 
-## 6. How to use this file
+## 6. What Job360 actually is, in one line
+
+**A CRM for your job search.** More precisely: a **career operations orchestrator**.
+
+Salesforce does not generate leads. It is where the pipeline lives, where every touch is
+logged, and where the next action comes from. Job360 is that, for job applications.
+**Job boards are lead sources, not competitors.** Job search is one feature inside career
+ops — never the whole product.
+
+## 7. The two operating modes
+
+Full detail in `docs/product/OPERATING_MODES.md`. The short version:
+
+- **Box 2 — inside an AI client.** The user connects Job360, Gmail, Apollo and their job
+  sources *in Claude / ChatGPT / Gemini / Grok*. That client is both the intelligence and
+  the wiring. **Their subscription pays for the thinking; we pay nothing.**
+- **Box 1 — inside our own SaaS.** No AI client in the picture. Job360 connects Gmail,
+  Apollo and job data itself, and routes intelligence: our keys, the user's keys, or their
+  local open-source model.
+
+**The same connections are required either way.** What differs is who orchestrates and who
+pays for thinking. Both must work. Neither is a fallback for the other.
+
+## 8. Intelligence is a parameter, not a dependency
+
+The owner's words: *"LLM is like electricity."* It keeps the system running; it is not the
+system.
+
+- **Per-user setting**: our model / their API key / their local model. Exactly like country
+  (§4.4). Never hardcode a provider.
+- **In Box 2 it is free** — the host client's model reads our tool results and reasons.
+- **In Box 1 someone pays** — us or them.
+- **Hard limit, verified:** MCP's `sampling` (server borrows the client's model) was
+  **deprecated** in spec revision `2026-07-28` (SEP-2577). We cannot borrow a user's Claude
+  from inside our SaaS. Box 2 is the only place BYO intelligence is free.
+
+**Flexibility here is a selling point, not an implementation detail.**
+
+## 9. What plugs in
+
+Full map, roles and priority in `docs/product/CONNECTORS.md`. The owner's three:
+
+- **Gmail — the eyes.** Send and receive. Sees replies, interview invites, rejections, and
+  silence. **Silence is a signal**: no reply for N days is what makes the system proactive.
+- **Apollo — the contacts.** Given a company and role, find the right humans to reach.
+- **Job providers (Indeed, Apify, our 47 sources) — the raw data.** Premium supplies them;
+  Light does not.
+
+## 10. How value is priced (shape only — not yet built)
+
+- **Light** — the full application lifecycle. The user brings the job (pastes a description,
+  or connects their own job source). Connects Gmail and Apollo. Supplies or pays for
+  intelligence.
+- **Premium** — Job360 finds and scores relevant jobs. The 47 sources, the scoring and the
+  LLM judging are the paid part, because they are the part that costs us money.
+
+The split is honest: **what costs us, costs them.** See `project_free_tier_first_then_pricing`
+— free tier is hardened before pricing is built.
+
+## 11. The B2B direction (later, but design for it now)
+
+Once the record is rich, Job360 can work the other way: proactively tell a recruiter
+*"this candidate fits — here is their GitHub, their history, their ambitions."* Two-sided:
+B2C and B2B off the same data.
+
+**Consent is part of the product, not paperwork.** Sharing a candidate needs explicit,
+per-user, per-share opt-in, revocable, with a record of what was shared and when. Under
+UK/EU rules it must be real, not buried. Cheap to design in now, expensive to retrofit.
+
+## 12. How to use this file
 
 - **Before any design decision**, check it against §3 and §4.
 - **If a proposed feature makes us more like a job board, stop.** That is the wrong

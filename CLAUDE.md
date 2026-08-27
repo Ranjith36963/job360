@@ -13,12 +13,13 @@
 
 ## 🧭 READ `INTENTION.md` FIRST — before designing anything
 
-**`INTENTION.md` is the why.** Job360 is **not a job board** — it is the memory and
-operations layer for a job search, driven equally by a human or an agent, from any
-client. Check every design decision against it; when it and a ticket disagree, **it
-wins**. Three rules it enforces everywhere: nothing is overwritten (history *is* the
-product), every operation gets an API before a screen, and anything that varies by
-country/tenant/plan/client is a **parameter**, never a hardcode.
+**Job360 is a CRM for your job search — career ops, not a job board.** `INTENTION.md`
+is the why, and it wins over any ticket that disagrees. Two modes, both required:
+**Box 2** (inside Claude/ChatGPT — their model pays for thinking) and **Box 1** (our
+SaaS, our routing) — `docs/product/OPERATING_MODES.md`. What plugs in and why —
+`docs/product/CONNECTORS.md`. Rules enforced everywhere: nothing is overwritten
+(history *is* the product), every operation gets an API before a screen, and anything
+varying by country/tenant/plan/client/LLM is a **parameter**.
 
 ## 🔴 `main` IS PRODUCTION. MERGING SHIPS TO REAL USERS.
 
