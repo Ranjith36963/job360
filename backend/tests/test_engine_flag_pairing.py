@@ -1,10 +1,13 @@
 """Hard rule #18, made testable: the legacy engine flags are never read alone.
 
-Rule #18 says the gate is ``ENGINEx_ENABLED OR <legacy flag>`` and ends with
-"Test BOTH names". Nothing tested it. The claim lived instead as hand-typed
-lists of ``file.py:line`` call sites in five LIVING docs — and by 2026-08-27
-every one of those line numbers pointed at a blank line or an unrelated
-statement, because line numbers move whenever anything above them is edited.
+Rule #18 says the gate is ``ENGINEx_ENABLED OR <legacy flag>`` and required
+that both names be tested. Nothing tested it. The claim lived instead as
+hand-typed lists of ``file.py:line`` call sites in five LIVING docs — and by
+2026-08-27 every one of those line numbers pointed at a blank line or an
+unrelated statement, because line numbers move whenever anything above them is
+edited. Rule #18 now cites this file as its guard instead of asking a reader to
+remember, so do not re-add a quoted phrase here: quoting the rule verbatim is
+what made this docstring go stale the first time.
 
 An enumeration that rots is worse than no enumeration: it reads as verified.
 So the enumeration is deleted from the docs and the invariant is pinned here,
@@ -179,13 +182,10 @@ def test_legacy_flag_is_actually_read_somewhere(flag: str, partner: str):
     reads = 0
     for path in _src_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        reads += sum(
-            1
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Name)
-            and isinstance(n.ctx, ast.Load)
-            and n.id == flag
-        )
+        # `_flag_name`, not a bare ast.Name check: otherwise a refactor to
+        # `settings.<FLAG>` everywhere would trip this guard as "never read"
+        # while the sweep above still saw every site.
+        reads += sum(1 for n in ast.walk(tree) if _flag_name(n) == flag)
     assert reads > 0, f"{flag} is no longer read anywhere — delete it or its partner {partner}"
 
 
