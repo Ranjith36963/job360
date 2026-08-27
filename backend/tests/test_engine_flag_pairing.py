@@ -36,7 +36,7 @@ PARTNER = {
 
 
 def _or_operand_names(node: ast.AST) -> set[str]:
-    """Names reachable from `node` through `or`/`not`/parentheses only.
+    """Names reachable from `node` as top-level operands of an `or`.
 
     `A or B`, `not (A or B)` and `(A or B) and C` all count as pairing A with B;
     `A and B` does not, because that is a different gate.
@@ -106,6 +106,7 @@ def _unpaired_reads_in_source(source: str) -> list[tuple[int, str]]:
 
 
 def _src_files() -> list[Path]:
+    """Every backend source file the sweep reads, in a stable order."""
     return sorted(p for p in SRC.rglob("*.py") if "__pycache__" not in p.parts)
 
 
@@ -135,11 +136,13 @@ REJECTED = [
 
 @pytest.mark.parametrize("source", ACCEPTED)
 def test_valid_gates_are_accepted(source: str):
+    """Every shape that IS the rule-#18 gate must pass."""
     assert _unpaired_reads_in_source(source) == []
 
 
 @pytest.mark.parametrize("source", REJECTED)
 def test_invalid_gates_are_rejected(source: str):
+    """Every shape that is NOT the gate must fail, negations included."""
     assert _unpaired_reads_in_source(source), f"should have been rejected: {source!r}"
 
 
