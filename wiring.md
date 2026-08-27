@@ -41,14 +41,53 @@ Work top to bottom. Each block is independently shippable.
 
 | PR | Block | Items | Status | Why this order |
 |---|---|---|---|---|
-| 1 | **The door** | W-01, W-03 | ✅ **shipped** `1b89491` | Own email dead-ended at our own front door; new users hit a wall on minute one. |
-| 2 | **Close the loop** | W-19, W-20 | ready | One cron + one template turns the filing cabinet into a loop. Biggest value, cheapest fix. |
+| 1 | **The door** | W-01, W-03 | ✅ **rungs 1-4 verified** (browser evidence in `test-artifacts/rung4/`) · rung 5 = merge, owner's call | Own email dead-ended at our own front door; new users hit a wall on minute one. |
+| 2 | **Close the loop** | W-19, W-20 | ✅ **rungs 1-4 verified** (cron driven against real migrated Postgres) · rung 5 = merge, owner's call | One cron + one template turns the filing cabinet into a loop. Biggest value, cheapest fix. |
 | 3 | **Fix the default email** | W-17, W-18 | ready | The default mode sends the worst message the system can make, and links away from us. One change closes both. |
 | 4 | **Don't lose the CV he sent** | W-08, W-10 | ready | Data is being destroyed today. Every day we wait, more is gone. |
 | 5 | **Pipeline card truth** | W-05, W-15, W-16 (deadline half) | tests already written | Cards lie about dead jobs, drop deadlines, and the Applied filter always returns zero. |
 | 6 | **Close the silent holes** | W-06, W-12, W-28, W-29 | ready | One-liners: an untracked exit, a stale-doc warning, a feed that shows old scores as fresh. |
 | 7 | **Launch gates** | W-23, W-27 | ready | No unsubscribe = cannot email the public. No analytics = the launch teaches nothing. |
 | 8 | **Delete sweep** | D-01…D-05 | ready | Deleting dead code is a real fix. Fan out — 5 unrelated files. |
+
+> **STATUS WORDS MEAN SPECIFIC THINGS HERE. Corrected 2026-08-25.**
+> An earlier version of this table said PR 1 was "✅ shipped". That was false and it
+> was mine. Nothing has been shipped, and no pull request exists (`gh pr list` → `[]`).
+> The only true statement is: *code is committed on the branch `feat/wire-pipeline-page`*.
+>
+> | Word | What it must mean before it is written here |
+> |---|---|
+> | code on branch | committed + pushed. Proves nothing about behaviour. |
+> | verified | all five rungs of `wiring_verification.md` passed, rung 4 (real browser, screenshots) included |
+> | merged | merged to `main` — which auto-deploys to real users |
+> | shipped | merged AND confirmed live in production with a named instrument |
+>
+> Green tests are rung 2. They are not permission to write any of the other three words.
+
+### Rung 4 evidence (2026-08-25) — driven in a real browser, not asserted
+
+| Claim | How it was proved |
+|---|---|
+| W-01 carries `next` | Requested a link from the real login form. Server log emitted `…/auth/magic?token=…&next=%2Fpipeline`. On `main` that URL has only `?token=`. |
+| W-01 lands you back | Clicked the real link, pressed Sign in, browser URL became **`/pipeline`**, not `/dashboard`. `test-artifacts/rung4/rung4-w01-lands-on-pipeline.png` |
+| W-01 refuses hostile redirects | Posted 4 hostile values **straight to the API**, bypassing the browser guard: `https://evil.com`, `//evil.com`, `/\evil.com`, CRLF. All dropped from the emitted link; the control `/pipeline` kept. Link stayed usable every time. |
+| W-03 new account | Fresh account's dashboard reads "Let's find your jobs / Upload your CV" with **no** "adjust your filters". `test-artifacts/rung4/rung4-w03-new-account-cta.png` |
+| W-03 CTA is real | Clicked it; browser navigated to **`/profile`**. |
+| W-19 chase cron | Seeded a 30-day-quiet application in the **real migrated Postgres**, ran the cron: message named "Platform Engineer at Meta", `last_chased_at` stamped, second run silent (cooldown), `offer` stage skipped. |
+
+**Bounds — what rung 4 did NOT prove:** no real email left the building (no `RESEND_API_KEY`
+locally), so deliverability, spam placement and `List-Unsubscribe` remain unproven. The
+Apprise boundary was stubbed via the supported `ctx['dispatcher']` hook. Those are rung 5
+questions and need production.
+
+**Two things rung 4 caught that rungs 1-3 could not:**
+1. The dev DB's `applications` table has **no `user_id`** while its own ledger claims
+   `0002_multi_tenant` applied — the shared dev database contradicts itself, so the app
+   could not boot against it at all. Verified on a clean database instead; all 32
+   migrations including `0032` apply correctly in a full ordered run.
+2. Two different migrations both numbered **0031** are applied to the shared dev DB
+   (`0031_universal_shelf` from another worktree, `0031_delivery_email_webhook_only` from
+   main). A numbering collision is already live, and `0032` sits right behind it.
 
 **Blocked on a decision, NOT scheduled:** W-04 (D-A), W-14 (D-B, D-C), W-16's interview half
 (D-D), W-24 / W-25 / W-26 (D-E), W-05's filter-vs-delete call (D-F), W-20's tone (D-G).
@@ -67,7 +106,7 @@ Work top to bottom. Each block is independently shippable.
 This leg is genuinely good: no email enumeration, the confirm-button beats inbox
 scanners, first login seeds notification rules. Three breaks.
 
-### [x] W-01 — The magic link always dumps him on `/dashboard`  ✅ SHIPPED `1b89491`
+### [x] W-01 — The magic link always dumps him on `/dashboard`  ✅ RUNGS 1-4 VERIFIED `1b89491`
 **Severity:** breaks the loop (it breaks your *own* email leg)
 **What happens:** the emailed link carries only `?token=`. There is no `?next=`. The
 password login form reads `next` and honours it; the magic form — the **default** — never
@@ -101,7 +140,7 @@ account from a 50th visit, and cannot say "12 new since Tuesday".
 **Smallest fix:** add `users.last_login_at`, stamp on login/consume.
 **Verdict: LATER.** Nice, not urgent.
 
-### [x] W-03 — A brand-new user hits a wall on minute one  ✅ SHIPPED `1b89491`
+### [x] W-03 — A brand-new user hits a wall on minute one  ✅ RUNGS 1-4 VERIFIED `1b89491`
 **Severity:** breaks the loop for every new signup
 **What happens:** new account = zero profile. Dashboard shows `0 jobs` and a generic empty
 state: *"Try adjusting your filters, expanding the time range, or lowering the minimum

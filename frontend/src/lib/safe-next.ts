@@ -40,7 +40,8 @@ const MAX_NEXT_LENGTH = 512;
 export function safeNext(p: string | null | undefined): string {
   if (!p || typeof p !== "string") return DEFAULT_NEXT;
   if (p.length > MAX_NEXT_LENGTH) return DEFAULT_NEXT;
-  // eslint-disable-next-line no-control-regex -- matching control chars is the point
+  // Control chars anywhere: CR/LF/NUL/tab. They matter doubly here because the
+  // backend interpolates this value into the sign-in email it sends.
   if (/[\u0000-\u001f\u007f]/.test(p)) return DEFAULT_NEXT;
   if (p.includes("\\")) return DEFAULT_NEXT;
   if (!p.startsWith("/") || p.startsWith("//")) return DEFAULT_NEXT;

@@ -124,6 +124,43 @@ def test_link_is_unchanged_when_no_next_is_given() -> None:
     assert link == f"{ORIGIN}/auth/magic?token=tok_abc123"
 
 
+# ── the dev-only link echo ───────────────────────────────────────────────────
+
+
+def test_dev_echo_is_silent_unless_explicitly_switched_on(monkeypatch, caplog) -> None:
+    """The default must be OFF. A sign-in link in a log file IS a login.
+
+    This is the test that matters: the failure mode is not "it does not work",
+    it is "it works in production", so the guard is what gets tested.
+    """
+    from src.services.auth.magic_link import _dev_echo_link
+
+    monkeypatch.delenv("MAGIC_LINK_DEV_ECHO", raising=False)
+    with caplog.at_level("WARNING"):
+        _dev_echo_link(f"Click this:\n\n{ORIGIN}/auth/magic?token=secret123\n")
+    assert "secret123" not in caplog.text, "sign-in token leaked into the log by default"
+
+
+@pytest.mark.parametrize("value", ["0", "true", "yes", "", "TRUE", "1 "])
+def test_dev_echo_only_accepts_exactly_one(monkeypatch, caplog, value: str) -> None:
+    """Anything other than exactly "1" leaves it off — no truthy-string surprises."""
+    from src.services.auth.magic_link import _dev_echo_link
+
+    monkeypatch.setenv("MAGIC_LINK_DEV_ECHO", value)
+    with caplog.at_level("WARNING"):
+        _dev_echo_link(f"Click this:\n\n{ORIGIN}/auth/magic?token=secret123\n")
+    assert "secret123" not in caplog.text, f"echo fired for MAGIC_LINK_DEV_ECHO={value!r}"
+
+
+def test_dev_echo_prints_the_link_when_switched_on(monkeypatch, caplog) -> None:
+    from src.services.auth.magic_link import _dev_echo_link
+
+    monkeypatch.setenv("MAGIC_LINK_DEV_ECHO", "1")
+    with caplog.at_level("WARNING"):
+        _dev_echo_link(f"Click this:\n\n{ORIGIN}/auth/magic?token=secret123&next=%2Fjobs%2F9\n")
+    assert f"{ORIGIN}/auth/magic?token=secret123&next=%2Fjobs%2F9" in caplog.text
+
+
 def test_crlf_in_next_never_reaches_the_email() -> None:
     """Guard on the specific injection this file exists to stop."""
     _subject, text, html_body = _build_magic_link_email(

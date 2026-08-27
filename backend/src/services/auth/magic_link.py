@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import html
 import logging
+import os
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -95,6 +96,34 @@ def safe_next_path(raw: str | None) -> str | None:
     if not raw.startswith("/") or raw.startswith("//"):
         return None
     return raw
+
+
+def _dev_echo_link(text_body: str) -> None:
+    """Log the sign-in link to the server log — LOCAL DEVELOPMENT ONLY.
+
+    Why this exists: the sign-in token is stored HASHED, so the raw link exists in
+    exactly one place — the email. With no email backend configured (a fresh
+    checkout, a git worktree with no .env) there is no way to click a magic link,
+    which makes the login journey untestable in a real browser. That is what
+    blocked rung 4 of wiring_verification.md.
+
+    Why it is safe: it requires an EXPLICIT opt-in env var. It cannot fire from a
+    missing variable, a bad default, or a deploy that forgot something — someone
+    has to set ``MAGIC_LINK_DEV_ECHO=1`` on purpose. It is additionally only
+    reached when the email failed to send, which never happens in production
+    (Railway has RESEND_API_KEY set).
+
+    NEVER set this in production: a sign-in link in a log file is a login for
+    anyone who can read that log.
+    """
+    if os.environ.get("MAGIC_LINK_DEV_ECHO") != "1":
+        return
+    link = next(
+        (ln.strip() for ln in text_body.splitlines() if ln.strip().startswith("http")),
+        "",
+    )
+    if link:
+        logger.warning("DEV ECHO (MAGIC_LINK_DEV_ECHO=1) sign-in link: %s", link)
 
 
 def _build_magic_link_email(
@@ -178,9 +207,12 @@ async def request_magic_link(
             frontend_origin=frontend_origin,
             next_path=next_path,
         )
-        return await send_system_email(
+        sent = await send_system_email(
             to_email=email, subject=subject, body_text=text, body_html=html_body
         )
+        if not sent:
+            _dev_echo_link(text)
+        return sent
     except Exception as exc:  # noqa: BLE001 — never raise to the auth flow
         logger.warning("request_magic_link failed: email=%s err=%s", mask_email(email), exc)
         return False
