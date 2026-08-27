@@ -11,6 +11,15 @@
 <!-- Tone rules live in ~/.claude/CLAUDE.md (loads in every project);
      duplicating them here cost a paragraph per session for nothing. -->
 
+## 🧭 READ `INTENTION.md` FIRST — before designing anything
+
+**`INTENTION.md` is the why.** Job360 is **not a job board** — it is the memory and
+operations layer for a job search, driven equally by a human or an agent, from any
+client. Check every design decision against it; when it and a ticket disagree, **it
+wins**. Three rules it enforces everywhere: nothing is overwritten (history *is* the
+product), every operation gets an API before a screen, and anything that varies by
+country/tenant/plan/client is a **parameter**, never a hardcode.
+
 ## 🔴 `main` IS PRODUCTION. MERGING SHIPS TO REAL USERS.
 
 Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. **Every merge auto-deploys** — no manual step, no staging gate. Re-provable any time with `railway deployment list --service backend --json` (read `meta.commitHash`). `/api/health` is **useless** here — it returns a hardcoded `"version": "1.0.0"`, so the deploy API is the only trustworthy source.
