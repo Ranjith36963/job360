@@ -46,11 +46,11 @@ one test writes to schema A while another reads schema B.
 ```bash
 # From the repo root. `make redis-up` starts the redis service ONLY
 # (Makefile:238 → `docker compose ... up -d redis`), so it does NOT fix this
-# symptom — postgres is a separate service in docker-compose.dev.yml:37.
+# symptom — postgres is a separate service in docker-compose.dev.yml.
 # `--wait` is load-bearing: plain `up -d` returns as soon as the container is
 # RUNNING, so pytest can start before postgres accepts connections and you get
 # this exact symptom back. `--wait` blocks on the pg_isready healthcheck at
-# docker-compose.dev.yml:50-54.
+# docker-compose.dev.yml.
 docker compose -f docker-compose.dev.yml up -d --wait   # both: postgres + redis
 cd backend && python -m pytest -q -p no:randomly
 ```
@@ -70,13 +70,13 @@ isolation, and the symptom looks like unrelated tests failing.
 
 **Symptom:** `setup-profile --cv ...` errors with `LLMKeyMissing`, `LLMRateLimited` or
 `LLMAllProvidersFailed` — all subclasses of `LLMError`
-(`backend/src/services/profile/llm_provider.py:48,53,62,71`;
+(`backend/src/services/profile/llm_provider.py`;
 there is no `LLMProviderError`) — or hangs with no output.
 
 **Cause:** No LLM API key set, or the first provider in the fallback chain is rate-limited.
 
 **Fix:** At least ONE of these four must be set in `.env` — the same four
-`LLM_KEY_VARS` names the key probe reads (`backend/src/services/profile/llm_provider.py:231-236`):
+`LLM_KEY_VARS` names the key probe reads (`backend/src/services/profile/llm_provider.py`):
 
 ```
 OPENAI_API_KEY=...      # PRIMARY — heads the chain; set this one if you have it
@@ -85,7 +85,7 @@ GROQ_API_KEY=...        # free tier
 CEREBRAS_API_KEY=...    # free tier
 ```
 
-Fallback chain (`backend/src/services/profile/llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. If every configured provider fails, `llm_extract` raises `LLMRateLimited` (retry later) or `LLMAllProvidersFailed`; with no key at all it raises `LLMKeyMissing`. Callers must NOT persist an empty result on `LLMRateLimited`.
+Fallback chain (`backend/src/services/profile/llm_provider.py`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. If every configured provider fails, `llm_extract` raises `LLMRateLimited` (retry later) or `LLMAllProvidersFailed`; with no key at all it raises `LLMKeyMissing`. Callers must NOT persist an empty result on `LLMRateLimited`.
 
 Debug with:
 
@@ -223,9 +223,9 @@ python -m migrations.runner up
 ```
 
 > ⚠️ **`down` takes NO migration stem.** It reverts the *last applied* migration and
-> nothing else — `backend/migrations/runner.py:281-297` reads `applied[-1]` and runs
+> nothing else — `backend/migrations/runner.py` reads `applied[-1]` and runs
 > that stem's `.down.sql`. The second positional argument is the **db_path**, not a
-> selector (`backend/migrations/runner.py:395,399`: usage is `[up|down|status] [db_path]`,
+> selector (`backend/migrations/runner.py`: usage is `[up|down|status] [db_path]`,
 > defaulting to `data/jobs.db`). So `python -m migrations.runner down 0010` does **not**
 > target migration 0010 — it swallows `0010` as a connection path and still reverts
 > whatever is at the head. Against a head of `0030` that reverts `0030`, and following

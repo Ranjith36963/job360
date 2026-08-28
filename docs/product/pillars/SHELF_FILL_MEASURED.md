@@ -308,7 +308,7 @@ so the baseline DB holds no raws for the replay to act on.
   `logistics_and_transportation` buckets, nofluffjobs `game_dev`/`hr`/`law`, DfE route
   `education_and_childcare`. One dead row: `marketing_and_pr_jobs` is NOT in Adzuna's
   official 30-category GB taxonomy (probed live) — harmless (never fires), prune or cite.
-- **POLICY LEAK (must fix): `backend/src/sources/ats/pinpoint.py:47-65`** —
+- **POLICY LEAK (must fix): `backend/src/sources/ats/pinpoint.py`** —
   `_EMPLOYMENT_TYPE_MAP` translates Pinpoint's vocabulary to target enum values INSIDE the
   source. Beyond violating the one-chokepoint rule, it destroys provenance: 351/371
   pinpoint rows in the after DB have `raw=NULL` on employment_type because the string was

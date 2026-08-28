@@ -30,7 +30,7 @@ An index, one line each. Where a test guards a rule, the test is named — that 
 
 ### Sources (recipes: `.claude/skills/add-source/SKILL.md`)
 2. **Never change `BaseJobSource`** (constructor, properties, retry, `_get_json`/`_post_json`/`_get_text`) without checking every source file that inherits it.
-8 + 13. **Adding/removing a source = FIVE surfaces:** `SOURCE_REGISTRY`, `_build_sources()`, `RATE_LIMITS`, `backend/tests/test_cli.py`, `backend/tests/test_api.py`. Guards (hardcoded counts that must move together): `backend/tests/test_cli.py:55`, `backend/tests/test_api.py:43,58,160,165`.
+8 + 13. **Adding/removing a source = FIVE surfaces:** `SOURCE_REGISTRY`, `_build_sources()`, `RATE_LIMITS`, `backend/tests/test_cli.py`, `backend/tests/test_api.py`. Guards (hardcoded counts that must move together): `backend/tests/test_cli.py`, `backend/tests/test_api.py`.
 14. **Conditional fetch is opt-in** — only call `_get_json_conditional()` when the upstream really honours ETag/Last-Modified.
 15. **New sources MUST set `.category`** (`ats`/`rss`/`keyed_api`/`free_json`/`scrapers`/`other`) or a `NAME_TIER` override in `scheduler.py`; untagged falls to the 60-min tier. Folder ≠ tier (`teaching_vacancies` is in `apis_free/` but is `rss`).
 

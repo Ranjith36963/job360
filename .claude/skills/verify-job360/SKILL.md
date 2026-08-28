@@ -132,9 +132,8 @@ Run **both** servers, then walk the real journey with the browser and watch the 
    (no profile? all filtered by score? a source returned nothing?) — that diagnosis is the finding.
 5. Spot-check downstream: job detail (`/jobs/[id]`), bookmark/apply → pipeline, notifications.
 
-A good E2E run produces a short report: what works, what's broken (with the exact file:line
-and the DB/log evidence), severity, and the fix. See `E2E_TEST_REPORT.md` at the repo root
-for the format and the two real bugs this methodology already caught.
+A good E2E run produces a short report: what works, what's broken (with the failing symbol
+and the DB/log evidence), severity, and the fix.
 
 ---
 
@@ -156,16 +155,12 @@ These cost real time the first time. Reading them here saves the next run.
   `CHANNEL_ENCRYPTION_KEY` (a Fernet key) must be set. Generate: `SESSION_SECRET` =
   `python -c "import secrets;print(secrets.token_urlsafe(64))"`; `CHANNEL_ENCRYPTION_KEY` =
   `python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"`.
-- **Web profile vs pipeline profile mismatch (a real bug found).** The web app saves profiles
-  per-user in the `user_profiles` DB table, but `run_search` (`src/main.py`) loads
-  `load_profile(DEFAULT_TENANT_ID)`. So a logged-in user's "New Search" runs profile-less.
-  When verifying search, check *which* profile the run actually loaded.
 - **Editable install (`pip install -e`) may resolve `import src` to a git worktree** under
   `.claude/worktrees/…`, not the main checkout. If a standalone script imports the wrong
   copy, force it: `sys.path.insert(0, r'D:\dev\job360\backend')` and `os.chdir` to backend.
 - **Playwright screenshots save to the repo root** by default. Read them from there, and
   tidy them into `test-artifacts/` afterward so they don't clutter the tree.
-- **`test_main.py` is offline now** — the M8 batch stubbed JobSpy (`fetch_jobs → []`) and patched `load_profile`, so its 14 E2E tests run in ~8s with no network. It is part of the canonical suite (no `--ignore` anymore). Do NOT re-add `--ignore=tests/test_main.py`.
+- **`test_main.py` is offline now** — JobSpy is stubbed and `load_profile` patched, so it needs no network. It is part of the canonical suite. Do NOT re-add `--ignore=tests/test_main.py`.
 - **Frontend uses Base UI (`@base-ui/react`), NOT Radix/shadcn.** Compose via the
   `render` prop (`<Button render={<Link href=.. />}>text</Button>`), never `asChild`
   (that's a Radix-ism and fails `tsc`). After frontend edits, run BOTH gates:
