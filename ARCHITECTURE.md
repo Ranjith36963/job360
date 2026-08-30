@@ -770,9 +770,9 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `PROFILE_EXTRACT_MAX_PER_HOUR` | No (default `12`) | Cost cap on profile re-extraction. EVERY profile change re-runs the full two-pass extraction (4+ paid LLM calls); five routes reach `_extract_save_trigger` and nothing bounded it. Over the limit returns HTTP 429. `0` disables. Uses the shared limiter, so `RATE_LIMIT_REDIS=true` makes the cap hold across replicas |
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS` | No (default `5` / `900`) | Brute-force login lockout (in-memory) |
 | `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user cap on concurrent `POST /search` (429 over cap) |
-| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:155) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
-| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:152) |
-| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py:151) — in practice the REAL selection lever, not the threshold |
+| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE`) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
+| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from |
+| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment — in practice the REAL selection lever, not the threshold |
 | Slack/Discord/Telegram OAuth (`SLACK_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`, `TELEGRAM_BOT_TOKEN`/`_USERNAME`, `OAUTH_REDIRECT_BASE`) | No | One-click channel connect flows (skip endpoint when blank) |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |

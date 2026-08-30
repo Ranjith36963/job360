@@ -162,7 +162,7 @@ Survives unchanged.
 
 ### Stage 5 — Enrich (opt-in, `ENRICHMENT_ENABLED=true`)
 
-`match_score=93 ≥ ENRICHMENT_THRESHOLD=10` → eligible (the default is **10**, inherited from `ENRICHMENT_MIN_SCORE` at `settings.py:152-155`; the docs said 60 for months and the code has never used it — and `ENRICHMENT_MAX_JOBS=20` is the real selection lever). The enrichment dict already had a row from a prior run (`skip_existing=True`), so no new LLM call this pass. If it were a fresh job: `llm_extract_validated(prompt, JobEnrichment, max_retries=2)` would have produced the structured object via the OpenAI → Gemini → Groq → Cerebras chain. Stored to `job_enrichment` table (shared catalog, no `user_id`).
+`match_score=93 ≥ ENRICHMENT_THRESHOLD=10` → eligible (the default is **10**, inherited from `ENRICHMENT_MIN_SCORE`; the docs said 60 for months and the code has never used it — and `ENRICHMENT_MAX_JOBS=20` is the real selection lever). The enrichment dict already had a row from a prior run (`skip_existing=True`), so no new LLM call this pass. If it were a fresh job: `llm_extract_validated(prompt, JobEnrichment, max_retries=2)` would have produced the structured object via the OpenAI → Gemini → Groq → Cerebras chain. Stored to `job_enrichment` table (shared catalog, no `user_id`).
 
 ### Stage 6 — Store
 
@@ -521,8 +521,8 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | `SENIORITY_WEIGHT` | `8` | Seniority dimension max | Raise to penalise mismatched levels harder |
 | `VISA_WEIGHT` | `6` | Visa dimension max | Only meaningful when users have `needs_visa=True` |
 | `WORKPLACE_WEIGHT` | `6` | Workplace (remote/hybrid/onsite) dimension max | Raise to make workplace preference more decisive |
-| `ENRICHMENT_MIN_SCORE` | `10` | The low floor a job must clear to be enrichment-eligible (`settings.py:152`) | Raise only to skip obvious junk — the budget below is the real lever |
-| `ENRICHMENT_MAX_JOBS` | `20` | Per-run budget: the best N eligible jobs are enriched (`settings.py:151`) | Raise to enrich more per run; this is the hard cost ceiling |
+| `ENRICHMENT_MIN_SCORE` | `10` | The low floor a job must clear to be enrichment-eligible | Raise only to skip obvious junk — the budget below is the real lever |
+| `ENRICHMENT_MAX_JOBS` | `20` | Per-run budget: the best N eligible jobs are enriched | Raise to enrich more per run; this is the hard cost ceiling |
 | `ENRICHMENT_THRESHOLD` | `10` | Back-compat name: when unset it **defaults to** `ENRICHMENT_MIN_SCORE`, and when set it takes that value. `run_search`'s selection does **not** read it — that gate is `ENRICHMENT_MIN_SCORE` + `ENRICHMENT_MAX_JOBS` — but the worker's per-job enqueue path still does | Not inert — leave it at the default. Raising it silently stops the worker fanning out `enrich_job_task` while the CLI path carries on |
 | `ENRICHMENT_ENABLED` | `false` | Legacy switch for LLM enrichment; `ENGINE2_ENABLED` opens the same gate (`ENGINE2_ENABLED or ENRICHMENT_ENABLED`). It switches the enrichment DATA on, **not** the dim scorers — those run on `user_preferences` alone (rule #20) | Flip on after setting LLM keys — see rule #18 |
 | `SEMANTIC_ENABLED` | `false` | Writes embeddings into the pgvector store (the embedding-write sites read this name ALONE). Hybrid retrieval is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), so `ENGINE3_ENABLED` alone queries an index nothing fills. It does **not** switch ESCO on: that also needs `is_available()` (`cv_parser.py:821,830`) and the index artefacts have never been built | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
