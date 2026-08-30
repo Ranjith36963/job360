@@ -3,7 +3,7 @@
 
 > **Audience.** Read this if you want to understand what happens *between* "a job posting exists on the internet" (Pillar 3 fetches it) and "a job appears on a user's dashboard ranked 87/100" (Pillar 1 shows it). The engine is the brain — it takes raw postings, filters out the irrelevant ones, scores the survivors against the user, deduplicates near-duplicate listings, enriches the high-scorers with LLM-extracted structured data, and writes everything to the shared `jobs` catalog.
 >
-> **Scope.** Covers code on `main` as of 2026-05-28 (HEAD `a7a2268`). The engine ships with two opt-in feature flags (`ENRICHMENT_ENABLED`, `SEMANTIC_ENABLED`) that gate the LLM enrichment and embedding/semantic-retrieval paths. **Both default OFF** (CLAUDE.md rule #18) — the doc treats them as "advanced surfaces" and clearly labels what's on/off by default.
+> **Scope.** Covers code on `main` as of 2026-05-28 (HEAD `a7a2268`). The engine ships with two opt-in feature flags (`ENRICHMENT_ENABLED`, `SEMANTIC_ENABLED`) that gate the LLM enrichment and embedding/semantic-retrieval paths. **Both default OFF** (hard rule #18) — the doc treats them as "advanced surfaces" and clearly labels what's on/off by default.
 
 ---
 
@@ -162,7 +162,7 @@ Survives unchanged.
 
 ### Stage 5 — Enrich (opt-in, `ENRICHMENT_ENABLED=true`)
 
-`match_score=93 ≥ ENRICHMENT_THRESHOLD=10` → eligible (the default is **10**, inherited from `ENRICHMENT_MIN_SCORE` at `settings.py:152-155`; the docs said 60 for months and the code has never used it — and `ENRICHMENT_MAX_JOBS=20` is the real selection lever). The enrichment dict already had a row from a prior run (`skip_existing=True`), so no new LLM call this pass. If it were a fresh job: `llm_extract_validated(prompt, JobEnrichment, max_retries=2)` would have produced the structured object via the OpenAI → Gemini → Groq → Cerebras chain. Stored to `job_enrichment` table (shared catalog, no `user_id`).
+`match_score=93 ≥ ENRICHMENT_THRESHOLD=10` → eligible (the default is **10**, inherited from `ENRICHMENT_MIN_SCORE` at `settings.py`; the docs said 60 for months and the code has never used it — and `ENRICHMENT_MAX_JOBS=20` is the real selection lever). The enrichment dict already had a row from a prior run (`skip_existing=True`), so no new LLM call this pass. If it were a fresh job: `llm_extract_validated(prompt, JobEnrichment, max_retries=2)` would have produced the structured object via the OpenAI → Gemini → Groq → Cerebras chain. Stored to `job_enrichment` table (shared catalog, no `user_id`).
 
 ### Stage 6 — Store
 
@@ -203,7 +203,7 @@ The 6 stages live inside one async function (`main.py:741-1450`). Walking it fro
 
 ### Stage 1 — Fetch (`main.py:840-1036`)
 
-- **Auto-purge** jobs older than 30 days via `db.purge_old_jobs(days=30)` (CLAUDE.md rule #3 — never change this without confirmation).
+- **Auto-purge** jobs older than 30 days via `db.purge_old_jobs(days=30)` (hard rule #3 — never change this without confirmation).
 - **Instantiate the scorer once**: `scorer = JobScorer(search_config, user_preferences, enrichment_lookup)` (`main.py:857`). All three kwargs — satisfies rule #20.
 - **Build sources** via `_build_sources(search_config, ...)` (`main.py:233-315`):
   - Domain-filtered: `classify_user_domain(profile)` returns a set like `{"tech"}` or `{"healthcare", "academia"}`; sources whose `DOMAINS` don't overlap are skipped. Sources marked `"general"` are always included.
@@ -278,7 +278,7 @@ The 8 dimensions can sum above 100 (max raw is 40+40+10+10 + 8+10+6+6 = **130**)
 
 ### Stage 4 — Dedup (`backend/src/services/deduplicator.py`)
 
-Four layers run in sequence; each layer collapses near-duplicates into the highest-ranked survivor. Lazy imports per CLAUDE.md rule #16 — none of the heavy deps load unless their layer fires.
+Four layers run in sequence; each layer collapses near-duplicates into the highest-ranked survivor. Lazy imports per hard rule #16 — none of the heavy deps load unless their layer fires.
 
 | Layer | Heavy dep | Default | Threshold / rule |
 | --- | --- | --- | --- |
@@ -294,18 +294,18 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
 
 ### Stage 5 — Enrich (opt-in, `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED`)
 
-- Gate: **a budget, not a threshold** (`main.py:1137-1163`). Jobs must clear a low floor — `match_score >= ENRICHMENT_MIN_SCORE` (default **10**, `settings.py:152`) — and then the best `ENRICHMENT_MAX_JOBS` (default **20**) are sent to the LLM. `ENRICHMENT_THRESHOLD` is not read at this call site — it defaults to `ENRICHMENT_MIN_SCORE` when unset (`settings.py:155`). It is **not** dead weight for old `.env` files, though: the ARQ worker's per-job enqueue path is still gated on it (`workers/tasks.py:237`), so setting it high stops worker-side fan-out while leaving this CLI selection untouched — see the env table at §5. Why the change: the scorer's contract is 0–100, but the highest `match_score` measured across the whole 3,342-row prod feed on 2026-07-28 was **58**, so a threshold of 60 selected nothing and the stage had never run (`main.py:1138-1142` records the measurement). A budget makes no claim about the distribution, so it cannot go stale.
+- Gate: **a budget, not a threshold** (`main.py:1137-1163`). Jobs must clear a low floor — `match_score >= ENRICHMENT_MIN_SCORE` (default **10**, `settings.py`) — and then the best `ENRICHMENT_MAX_JOBS` (default **20**) are sent to the LLM. `ENRICHMENT_THRESHOLD` is not read at this call site — it defaults to `ENRICHMENT_MIN_SCORE` when unset (`settings.py`). It is **not** dead weight for old `.env` files, though: the ARQ worker's per-job enqueue path is still gated on it (`workers/tasks.py:237`), so setting it high stops worker-side fan-out while leaving this CLI selection untouched — see the env table at §5. Why the change: the scorer's contract is 0–100, but the highest `match_score` measured across the whole 3,342-row prod feed on 2026-07-28 was **58**, so a threshold of 60 selected nothing and the stage had never run (`main.py:1138-1142` records the measurement). A budget makes no claim about the distribution, so it cannot go stale.
 - `enrich_batch(jobs, semaphore_limit=10, skip_existing=True)` (`job_enrichment.py`) runs asyncio-parallel LLM calls capped at 10 concurrent.
 - Each call goes through `llm_extract_validated(prompt, JobEnrichment, max_retries=2)`:
   - **Provider chain** (`llm_provider.py:329-334`): **OpenAI (`gpt-4o-mini`, PRIMARY)** → Gemini (`gemini-3.7-flash`) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`gpt-oss-120b`). Every model id is env-overridable.
   - **Self-correction loop**: on Pydantic `ValidationError`, the first 5 error messages are appended to the prompt and the call retries up to 2 more times.
   - If all providers fail or retries exhaust → `RuntimeError` (logged, no partial row written — atomicity over best-effort).
 - Output: a `JobEnrichment` row with **16 strict-typed fields** (see §3.2 below). The `job_enrichment` TABLE still has 18 enrichment columns — `employer_type` and `locations` were retired from the schema in 2026-08 but never dropped from the DB, so the application neither writes nor reads them — `save_enrichment` excludes both from its column list (`job_enrichment.py:248-254`) and the read paths skip them too (`:329`, `:401`). The columns are not empty, though: `0008_job_enrichment.up.sql:21,29` declares them `NOT NULL DEFAULT '[]'` / `'unknown'`, so every new row still gets those defaults from the database.
-- DB persistence: `INSERT OR REPLACE` into `job_enrichment` table (migration `0008`). **Shared catalog** — no `user_id` column, per CLAUDE.md rule #17 (the same enriched fields apply to every user; per-user scoring against the enrichment happens at read time).
+- DB persistence: `INSERT OR REPLACE` into `job_enrichment` table (migration `0008`). **Shared catalog** — no `user_id` column, per hard rule #17 (the same enriched fields apply to every user; per-user scoring against the enrichment happens at read time).
 
 ### Stage 6 — Store + (opt-in) embed
 
-- `db.insert_job(job)` does `INSERT OR IGNORE` on `(normalized_company, normalized_title)` UNIQUE — returns `True` for new rows, `False` for cross-run duplicates already in the catalog. **Never touch `normalized_key()`** without checking the dedup chain (CLAUDE.md rule #1).
+- `db.insert_job(job)` does `INSERT OR IGNORE` on `(normalized_company, normalized_title)` UNIQUE — returns `True` for new rows, `False` for cross-run duplicates already in the catalog. **Never touch `normalized_key()`** without checking the dedup chain (hard rule #1).
 - If `SEMANTIC_ENABLED=true`, lazy-import `embeddings` + `pg_vector_index`, encode each newly-inserted job via `encode_job(job, enrichment)` and `PgVectorIndex().upsert(job_id, vector)` (`main.py:1292-1298`). This write path reads `SEMANTIC_ENABLED` **alone** — `ENGINE3_ENABLED` does not open it.
 - `db.log_run(stats, run_uuid, per_source_errors, per_source_duration, total_duration)` writes the `run_log` row.
 - Finally, in this order — **CSV export (`main.py:1374`) → Markdown report (`:1379`) → `db.log_run(...)` (`:1403`)**. The `log_run` bullet is listed above for topical grouping, but it is the *last* write the pipeline makes, not an earlier one. And the pipeline ending is not the same event as the API run being marked done: `POST /api/search` flips its `_runs[run_id]` entry to `status="completed"` only after `run_search()` returns (`api/routes/search.py:219-225`). There is **no** "channel notifications" step after the report, and **no** old per-source notifier left to run one: the pre-Batch-2 env-var webhook modules (`base.py`, `email_notify.py`, `slack_notify.py`, `discord_notify.py`) were deleted on **2026-06-18** by `e0b0ff1` "feat(notifications): single per-user rulebook + scheduler, remove legacy path", and the only substantive modules left under `services/notifications/` are `report_generator.py` (the markdown report, `main.py:49,1379`) and `defaults.py` (the signup rulebook seeder) — the directory also holds an empty `__init__.py` package marker, and nothing else. Notifications are enqueued **earlier**, inside the per-user feed-write block: `_enqueue_notifications` fans out the ordinary per-user `send_notification` ARQ task for above-threshold rows (`main.py:481,1257-1260`). It is a no-op unless the caller passed an `enqueue` hook, and the CLI passes none (`cli.py:34-40`) — so the per-user `channels/dispatcher` still runs only under the ARQ worker, never from `python -m src.cli run`. Same single delivery path as Pillar 1 §"There is only ONE delivery path".
@@ -437,7 +437,7 @@ CLOSED ─ 5 consecutive failures ──▶ OPEN ─ 300 s cooldown ──▶ HA
 
 ### 4.3 Conditional cache — `backend/src/services/conditional_cache.py`
 
-A 256-entry FIFO `OrderedDict` keyed by `(url, params_tuple)` storing `(body, etag, last_modified)`. Sources opt in by calling `self._get_json_conditional(url)` instead of `self._get_json(url)` (CLAUDE.md rule #14). On a hit with a matching validator the upstream returns 304 and the cached body is replayed; a miss falls through to a normal GET with all retry/backoff machinery intact.
+A 256-entry FIFO `OrderedDict` keyed by `(url, params_tuple)` storing `(body, etag, last_modified)`. Sources opt in by calling `self._get_json_conditional(url)` instead of `self._get_json(url)` (hard rule #14). On a hit with a matching validator the upstream returns 304 and the cached body is replayed; a miss falls through to a normal GET with all retry/backoff machinery intact.
 
 > **Use sparingly**: only worth it for upstreams that honour ETag/Last-Modified (ATS boards with CDN fronts, well-behaved RSS feeds). A source polling 60 s on an endpoint without validators will just thrash the cache.
 
@@ -452,13 +452,13 @@ Engine-relevant tables and columns:
 | `job_enrichment` | `job_id PK FK → jobs(id)` | 18 enrichment fields + `enriched_at` (migration `0008`). Shared catalog (rule #17). |
 | `job_embeddings` | `job_id PK FK → jobs(id)` | `model_version`, `embedding_updated_at` **and the vector itself** — `embedding` is a pgvector `vector` column added by migration `0027` (table created by `0009`). It is no longer audit-only, and there is no separate vector store. |
 
-`_migrate()` in `database.py:162-342` is **forward-compat-only** — applies `ALTER TABLE ADD COLUMN` for missing columns so an older DB on disk auto-upgrades. The migration runner in `backend/migrations/runner.py` is the new system (Batch 2+) and applies the numbered `.up.sql` / `.down.sql` files.
+`_migrate()` in `database.py` is **forward-compat-only** — applies `ALTER TABLE ADD COLUMN` for missing columns so an older DB on disk auto-upgrades. The migration runner in `backend/migrations/runner.py` is the new system (Batch 2+) and applies the numbered `.up.sql` / `.down.sql` files.
 
 ---
 
 ## 5. The opt-in advanced surfaces (off by default)
 
-Both flags default `false` per CLAUDE.md rule #18, and the **no-op path must exactly match pre-Pillar-2 behaviour**. Documented here for completeness.
+Both flags default `false` per hard rule #18, and the **no-op path must exactly match pre-Pillar-2 behaviour**. Documented here for completeness.
 
 ### 5.1 `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` → LLM enrichment
 
@@ -514,16 +514,16 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 
 | Var | Default | What it controls | Effect of changing |
 | --- | --- | --- | --- |
-| `MIN_STORE_SCORE` | `1` | The **catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`, so a job scoring exactly it is kept), judged on the RUN's score, not any one user's (`core/settings.py:115-120`, applied at `main.py:729`); the re-score backfill applies it too (`services/rescore.py:271`). It is **not** a `user_feed` floor — `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison at all (`workers/tasks.py:208-217`), so a job that scores 0 for a given user still gets a row | This is the one that destroys rows; raise it only to cut genuine junk |
+| `MIN_STORE_SCORE` | `1` | The **catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`, so a job scoring exactly it is kept), judged on the RUN's score, not any one user's (`core/settings.py`, applied at `main.py:729`); the re-score backfill applies it too (`services/rescore.py:271`). It is **not** a `user_feed` floor — `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison at all (`workers/tasks.py:208-217`), so a job that scores 0 for a given user still gets a row | This is the one that destroys rows; raise it only to cut genuine junk |
 | `MIN_TITLE_GATE` | `0.15` (= 6 pts of 40) | Title-component floor; below it the whole score collapses to suppression | Raise to require closer title matches; lower to admit weaker title alignments |
 | `MIN_SKILL_GATE` | `0.15` (= 6 pts of 40) | Skill-component floor; same collapse behaviour | Same as above for skill alignment |
 | `SALARY_WEIGHT` | `10` | Salary dimension max (Batch 2.9) | Raise to weight salary fit more heavily in final score |
 | `SENIORITY_WEIGHT` | `8` | Seniority dimension max | Raise to penalise mismatched levels harder |
 | `VISA_WEIGHT` | `6` | Visa dimension max | Only meaningful when users have `needs_visa=True` |
 | `WORKPLACE_WEIGHT` | `6` | Workplace (remote/hybrid/onsite) dimension max | Raise to make workplace preference more decisive |
-| `ENRICHMENT_MIN_SCORE` | `10` | The low floor a job must clear to be enrichment-eligible (`settings.py:152`) | Raise only to skip obvious junk — the budget below is the real lever |
-| `ENRICHMENT_MAX_JOBS` | `20` | Per-run budget: the best N eligible jobs are enriched (`settings.py:151`) | Raise to enrich more per run; this is the hard cost ceiling |
-| `ENRICHMENT_THRESHOLD` | `10` | Back-compat name: when unset it **defaults to** `ENRICHMENT_MIN_SCORE`, and when set it takes that value (`settings.py:155`). `run_search`'s selection does **not** read it — that gate is `ENRICHMENT_MIN_SCORE` + `ENRICHMENT_MAX_JOBS` — but the worker's per-job enqueue path still does (`workers/tasks.py:237`) | Not inert — leave it at the default. Raising it silently stops the worker fanning out `enrich_job_task` while the CLI path carries on |
+| `ENRICHMENT_MIN_SCORE` | `10` | The low floor a job must clear to be enrichment-eligible (`settings.py`) | Raise only to skip obvious junk — the budget below is the real lever |
+| `ENRICHMENT_MAX_JOBS` | `20` | Per-run budget: the best N eligible jobs are enriched (`settings.py`) | Raise to enrich more per run; this is the hard cost ceiling |
+| `ENRICHMENT_THRESHOLD` | `10` | Back-compat name: when unset it **defaults to** `ENRICHMENT_MIN_SCORE`, and when set it takes that value (`settings.py`). `run_search`'s selection does **not** read it — that gate is `ENRICHMENT_MIN_SCORE` + `ENRICHMENT_MAX_JOBS` — but the worker's per-job enqueue path still does (`workers/tasks.py:237`) | Not inert — leave it at the default. Raising it silently stops the worker fanning out `enrich_job_task` while the CLI path carries on |
 | `ENRICHMENT_ENABLED` | `false` | Legacy switch for LLM enrichment; `ENGINE2_ENABLED` opens the same gate (`ENGINE2_ENABLED or ENRICHMENT_ENABLED`). It switches the enrichment DATA on, **not** the dim scorers — those run on `user_preferences` alone (rule #20) | Flip on after setting LLM keys — see rule #18 |
 | `SEMANTIC_ENABLED` | `false` | Writes embeddings into the pgvector store (`main.py:1292,1348` read this name ALONE). Hybrid retrieval is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), so `ENGINE3_ENABLED` alone queries an index nothing fills. It does **not** switch ESCO on: that also needs `is_available()` (`cv_parser.py:821,830`) and the index artefacts have never been built | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
 | `TARGET_SALARY_MIN` / `_MAX` | `40000` / `120000` | Salary-range *tiebreaker* (not scoring) for sort order on the dashboard | Display preference only |
@@ -637,7 +637,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Per-run `run_uuid` correlation in contextvar | ✅ | every log line + DB write tagged |
 | Ghost-detection (`last_seen_at` + `staleness_state='missed'`) | ✅ | per-run pass + `nightly_ghost_sweep` worker task |
 | Auto-purge >30 days via `purge_old_jobs(days=30)` | ✅ | rule #3 — never touch without confirmation |
-| `forward-compat` `_migrate()` for ALTER ADD COLUMN | ✅ | `database.py:162-342` |
+| `forward-compat` `_migrate()` for ALTER ADD COLUMN | ✅ | `database.py` |
 | `run_log` observability columns (errors, durations) | ✅ | migration `0010` |
 
 ### 6.6 Worker path

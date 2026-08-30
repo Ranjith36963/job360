@@ -13,7 +13,7 @@ be re-specified inline in the worker/integrator skills every time).
 ## What to hunt
 - Logic errors, off-by-one, wrong operators, inverted conditions.
 - Unhandled edge cases: empty/None, missing keys, first-run, concurrent access.
-- Security: IDOR (a per-user route not scoped by `user.id` — CLAUDE.md rules #12/#25), SQL
+- Security: IDOR (a per-user route not scoped by `user.id` — hard rules #12/#25), SQL
   built from user input, secrets in logs/errors, missing auth.
 - Data integrity: anything touching `normalized_key()` (rule #1), purge (rule #3),
   the shared `jobs`/`job_enrichment`/`job_embeddings` catalog gaining `user_id` (rules #10/#17).

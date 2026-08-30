@@ -21,7 +21,7 @@ Three numbers float around the codebase and they're all correct because they cou
 | **41** | *Registry keys* in `SOURCE_REGISTRY` | `main.py` — `"glassdoor"` is a second key that aliases `JobSpySource` |
 | **40** | Live *instances* built per run | `SOURCE_INSTANCE_COUNT = 40` (`main.py:168`) — `indeed`+`glassdoor` collapse to one `JobSpySource` |
 
-So: **40 classes → 41 registry keys → 40 instances.** The single fork is Indeed/Glassdoor, both handled by `JobSpySource` in `other/indeed.py`. The test suite pins all of this — `test_cli.py:55` asserts `len(SOURCE_REGISTRY) == 41`, `test_api.py` asserts `sources_total == 41` at `:43` and `:160` (CLAUDE.md rule #13). Measure these, never quote them: six sources were pruned on 2026-08-10 (`main.py:161`) and this table said 46/47/46 for a week afterwards.
+So: **40 classes → 41 registry keys → 40 instances.** The single fork is Indeed/Glassdoor, both handled by `JobSpySource` in `other/indeed.py`. The test suite pins all of this — `test_cli.py:55` asserts `len(SOURCE_REGISTRY) == 41`, `test_api.py` asserts `sources_total == 41` at `:43` and `:160` (hard rule #13). Measure these, never quote them: six sources were pruned on 2026-08-10 (`main.py:161`) and this table said 46/47/46 for a week afterwards.
 
 ---
 
@@ -181,7 +181,7 @@ If LinkedIn's HTML regex breaks because they changed markup:
 
 ## 2. The base class — `backend/src/sources/base.py`
 
-Every source extends `BaseJobSource`. **Never change this class without checking all 40 subclasses** (CLAUDE.md rule #2) — every change propagates to every source.
+Every source extends `BaseJobSource`. **Never change this class without checking all 40 subclasses** (hard rule #2) — every change propagates to every source.
 
 ### 2.1 Constructor (`base.py:98-105`)
 
@@ -240,7 +240,7 @@ This is why individual source files are so short — all the resilience lives he
 
 `_conditional_fetch()` stores `ETag` and `Last-Modified` per `(url, params)` in the `ConditionalCache` (256-entry FIFO). On a repeat call it sends `If-None-Match` / `If-Modified-Since`; a `304 Not Modified` replays the cached body at zero parse cost. If the upstream provides no validators, it transparently degrades to a normal GET.
 
-**Today NO source opts in.** The only callers of `_get_json_conditional` / `_get_text_conditional` anywhere are `backend/tests/test_conditional_fetch.py` — the Batch-3.5.3 `nhs_jobs` pilot was reverted to a plain `_get_text` (`feeds/nhs_jobs.py:34`), and there is no `nhs_jobs_xml.py`. Per CLAUDE.md rule #14, sources should only opt in when their upstream honours validators (CDN-fronted ATS boards, honest RSS feeds); polling a validator-less endpoint every 60 s just thrashes the cache.
+**Today NO source opts in.** The only callers of `_get_json_conditional` / `_get_text_conditional` anywhere are `backend/tests/test_conditional_fetch.py` — the Batch-3.5.3 `nhs_jobs` pilot was reverted to a plain `_get_text` (`feeds/nhs_jobs.py:34`), and there is no `nhs_jobs_xml.py`. Per hard rule #14, sources should only opt in when their upstream honours validators (CDN-fronted ATS boards, honest RSS feeds); polling a validator-less endpoint every 60 s just thrashes the cache.
 
 ### 2.5 Location filter (`base.py:39-81`)
 
@@ -251,7 +251,7 @@ This is why individual source files are so short — all the resilience lives he
 - `uk_gate.names_foreign_place` says the whole trimmed value NAMES a foreign country/admin division → `False`
 - Anything else (UK, remote, unknown) → `True`; the door (`uk_gate.check_uk`) decides at ingestion
 
-`base.py` imports `names_foreign_place` straight from `src.services.uk_gate` (`base.py:16`) — it holds **no term list of its own**, and it no longer imports anything from `skill_matcher.py`. There is also no scorer penalty to fall back on: the −15 foreign penalty was deleted 2026-08-12 (CLAUDE.md rule #30). One gate, one data set.
+`base.py` imports `names_foreign_place` straight from `src.services.uk_gate` (`base.py:16`) — it holds **no term list of its own**, and it no longer imports anything from `skill_matcher.py`. There is also no scorer penalty to fall back on: the −15 foreign penalty was deleted 2026-08-12 (hard rule #30). One gate, one data set.
 
 ### 2.6 The class attributes the rest of the engine reads
 
@@ -316,7 +316,7 @@ def normalized_key(self) -> tuple[str, str]:
 - Strips region suffixes: `UK|US|USA|DE|SG|EU|EMEA|APAC|Global|International`
 - Lowercases + trims both fields
 
-This tuple is the DB's UNIQUE constraint and the deduplicator's Layer-1 key. **CLAUDE.md rule #1: never touch this without verifying the deduplicator and DB UNIQUE still align** — a change can cause duplicate rows or missed dedup. (`__post_init__` also HTML-unescapes title + company, so `&amp;` → `&`.)
+This tuple is the DB's UNIQUE constraint and the deduplicator's Layer-1 key. **hard rule #1: never touch this without verifying the deduplicator and DB UNIQUE still align** — a change can cause duplicate rows or missed dedup. (`__post_init__` also HTML-unescapes title + company, so `&amp;` → `&`.)
 
 ---
 
@@ -406,7 +406,7 @@ A `COMPANY_NAME_OVERRIDES` dict (55 entries) maps ugly slugs (`darktracelimited`
 
 ## 6. Cross-cutting: rate limits & the async limiter
 
-### 6.1 `RATE_LIMITS` — `backend/src/core/settings.py:279-336`
+### 6.1 `RATE_LIMITS` — `backend/src/core/settings.py`
 
 41 entries (one per registry key), each `{source: {concurrent: int, delay: float}}`. Representative tuning:
 
@@ -460,7 +460,7 @@ Batch 3 rotated the roster: **−3 dropped, +5 added**, net 48 → 50 registry k
 | ~~`rippling`~~ | ats/ | `ats.rippling.com/api/board/{slug}/jobs` | ats (60 s) — **dropped 2026-08-10**, upstream dead |
 | `comeet` | ats/ | `comeet.co/careers-api/2.0/company/{slug}/positions` | ats (60 s) — **later dropped in M6** |
 
-### The five load-bearing surfaces (CLAUDE.md rule #13)
+### The five load-bearing surfaces (hard rule #13)
 
 Adding/removing a source means moving **all five** together, or tests break:
 
@@ -495,7 +495,7 @@ Almost all are the keyed-source API credentials. The other **33** registry keys 
 | `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | `AdzunaSource` | (unset) | Both must be set; either unset → return [] |
 | `JSEARCH_API_KEY` | `JSearchSource` | (unset) | RapidAPI key |
 | `JOOBLE_API_KEY` | `JoobleSource` | (unset) | |
-| `SERPAPI_KEY` | `GoogleJobsSource` | (unset) | SerpApi → Google Jobs SERP. **Only this name works** — `settings.py:45` reads `SERPAPI_KEY` alone and `main.py:279` passes it straight in; there is no `GOOGLE_JOBS_API_KEY` alias anywhere. Set the wrong name and the source skips, logging `GoogleJobs: no SERPAPI_KEY, skipping` at WARNING (`google_jobs.py:47`) — visible in the run log, but the run still reports success |
+| `SERPAPI_KEY` | `GoogleJobsSource` | (unset) | SerpApi → Google Jobs SERP. **Only this name works** — `settings.py` reads `SERPAPI_KEY` alone and `main.py:279` passes it straight in; there is no `GOOGLE_JOBS_API_KEY` alias anywhere. Set the wrong name and the source skips, logging `GoogleJobs: no SERPAPI_KEY, skipping` at WARNING (`google_jobs.py:47`) — visible in the run log, but the run still reports success |
 | `CAREERJET_AFFID` | `CareerjetSource` | (unset) | Affiliate ID |
 | `FINDWORK_API_KEY` | `FindworkSource` | (unset) | Token auth |
 | `GITHUB_TOKEN` | (none directly, but used by `github_enricher` in Pillar 1) | (unset) | Anonymous GitHub API has 60 req/hr; token raises to 5000 |
@@ -599,7 +599,7 @@ backend/src/
 ├── main.py                         — SOURCE_REGISTRY (41 keys) + _build_sources() + domain filter
 ├── core/
 │   ├── companies.py                — 302 ATS slugs across 11 platform lists + name overrides
-│   ├── settings.py:279-336         — RATE_LIMITS (41 entries)
+│   ├── settings.py         — RATE_LIMITS (41 entries)
 │   └── keywords.py                 — LOCATIONS + VISA_KEYWORDS (the rest emptied 2026-04-09)
 └── utils/rate_limiter.py           — async semaphore + delay
 

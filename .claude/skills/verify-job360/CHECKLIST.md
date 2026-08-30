@@ -83,10 +83,10 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 
 ## J. Ops / admin
 - [ ] 42. Source health → `GET /runs/source-health` 200 (note: no role gate — any logged-in user)
-- [ ] 43. Recent runs → `GET /runs/recent` (feeds the `/admin/runs` UI)
+- [ ] 43. Recent runs → `GET /runs/recent`
 
 ## K. Cross-cutting
-- [ ] 44. Every page renders with no console errors: `/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/dashboard`, `/jobs/[id]`, `/pipeline`, `/profile`, `/settings/channels`, `/settings/notifications`, `/settings/account`, `/notifications`
+- [ ] 44. Every page renders with no console errors. Enumerate the pages from the code — `find frontend/src/app -name page.tsx` — never from a list written here; the list that used to live on this line still sent runs to `/settings/channels` months after Channels moved to top-level `/channels`.
 - [ ] 45. Theme toggle works; spot-click every primary button on every page (no dead buttons)
 
 ---
