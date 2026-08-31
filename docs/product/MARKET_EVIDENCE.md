@@ -288,3 +288,63 @@ multi-channel dispatcher. The primitives exist; nothing joins them into a loop.
 
 Box 2's *cost* argument (the host client's model pays for thinking) survives all of this
 untouched. It is the *distribution* argument that has nothing behind it.
+
+
+---
+
+## 13. Nobody on Earth monetises job seekers at scale — checked, not assumed
+
+The question "why has nobody won the seeker side?" has a factual answer, and it is worse
+than a hard-market story. **No company anywhere runs primarily on job seekers paying.**
+Checked across US, China, India, Germany, Japan and Korea.
+
+| Company | Money raised | Status 2026-08-31 |
+|---|---|---|
+| **CareerBuilder + Monster** | Randstad paid $429M for Monster (2016) | **Chapter 11, 2025-06-24.** $50–100M assets vs $100–500M debt; sold off piecemeal |
+| **ZipRecruiter** (NASDAQ: ZIP) | Public | Revenue **$905M (2022) → $449M (2025)**, halved. Seekers pay $0 — 100% employer-funded |
+| **Indeed / Glassdoor** (Recruit) | — | Employer revenue-per-job **+35% YoY on falling posting volume** — squeezing the paying side harder. 1,300 laid off Jul 2025 |
+| **LinkedIn** (Microsoft) | — | Growing, but on **ads**; Talent Solutions is the weak line. ~875 cut May 2026 despite record revenue |
+| **Sonara** | undisclosed | **Shut down 2024-02-01**, users locked out without notice |
+| **Teal** | $19M | Operating, ~2.8M visits/mo *(Similarweb est.)* |
+| **Simplify** | $4.35M (YC, Craft) | Operating, 124 staff, traffic **+19% MoM** — best growth signal of the set |
+| **Careerflow** | $800K (Techstars) | Traffic **−11.7% MoM** despite a self-reported $5.6M ARR |
+| **Huntr** | ~$620K *(contested — founder says bootstrapped)* | Operating, **claims profitable** |
+| **Jobscan** | **$0 — self-funded since 2013** | Operating, profitable, ~$2M rev *(third-party est.)* |
+| **LazyApply** | $0, bootstrapped, <10 staff | Operating; Trustpilot 2.1–2.4/5 |
+
+**The two "counter-examples" collapse when you read the filings:**
+
+- **BOSS Zhipin (China)** — the model people point to as proof seekers will pay. Its own
+  SEC 20-F shows the job-seeker VIP tier is **~1.15% of revenue**. ~99% is enterprise.
+  <https://www.sec.gov/Archives/edgar/data/1842827/000141057825000682/bz-20241231x20f.htm>
+- **Naukri (India)** — the best-documented working seeker-pay product on Earth:
+  FastForward + Resume Display, **₹176cr FY26, 57% operating margin, +19% YoY**. Real,
+  profitable, growing. And still **1/13th** the size of Naukri's employer business
+  (₹2,256cr). A good upsell on an employer-pay business, not a seeker-pay business.
+
+**Category funding collapsed**: job boards fell from the #1 VC investment category
+(2017–19) to **#11 by 2024 — $2.4B down to $220M**.
+<https://1worktech.com/the-job-board-isnt-dead-the-business-model-is/>
+
+### The pattern that actually matters to a solo founder
+
+Sort the table by who raised money. **Every venture-scaled seeker-side attempt died or
+shrank. The ones still standing and profitable — Jobscan ($0 raised, profitable since
+2013), Huntr (bootstrapped, claims profitable) — are small.**
+
+So the honest conclusion is not "this cannot work." It is:
+
+> **A large seeker-pay business has never existed. A small profitable one demonstrably
+> has.** Naukri's 57% operating margin on a seeker product proves the unit economics can
+> be excellent. It just never gets big.
+
+That is a statement about the *ceiling*, not the *floor* — and a solo founder needs the
+floor. It also means `INTENTION.md` §11 (the B2B direction) is pointed exactly where all
+the money on Earth actually is, in every market checked.
+
+### Could not verify
+
+Sonara's status today (sources conflict); Liepin's revenue split; the job-seeker-only
+slice of LinkedIn's $2B Premium line; whether Indeed Premium ($9.99/mo) earns anything at
+all — never mentioned in any Recruit investor material. Several Crunchbase/SEC fetches
+returned 403, so Huntr's and Careerflow's funding figures come via secondary coverage.
