@@ -162,7 +162,7 @@ Survives unchanged.
 
 ### Stage 5 — Enrich (opt-in, `ENRICHMENT_ENABLED=true`)
 
-`match_score=93 ≥ ENRICHMENT_THRESHOLD=10` → eligible (the default is **10**, inherited from `ENRICHMENT_MIN_SCORE` at `settings.py:152-155`; the docs said 60 for months and the code has never used it — and `ENRICHMENT_MAX_JOBS=20` is the real selection lever). The enrichment dict already had a row from a prior run (`skip_existing=True`), so no new LLM call this pass. If it were a fresh job: `llm_extract_validated(prompt, JobEnrichment, max_retries=2)` would have produced the structured object via the OpenAI → Gemini → Groq → Cerebras chain. Stored to `job_enrichment` table (shared catalog, no `user_id`).
+`match_score=93 ≥ ENRICHMENT_THRESHOLD=10` → eligible (the default is **10**, inherited from `ENRICHMENT_MIN_SCORE`; the docs said 60 for months and the code has never used it — and `ENRICHMENT_MAX_JOBS=20` is the real selection lever). The enrichment dict already had a row from a prior run (`skip_existing=True`), so no new LLM call this pass. If it were a fresh job: `llm_extract_validated(prompt, JobEnrichment, max_retries=2)` would have produced the structured object via the OpenAI → Gemini → Groq → Cerebras chain. Stored to `job_enrichment` table (shared catalog, no `user_id`).
 
 ### Stage 6 — Store
 
@@ -294,7 +294,7 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
 
 ### Stage 5 — Enrich (opt-in, `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED`)
 
-- Gate: **a budget, not a threshold** (`main.py:1137-1163`). Jobs must clear a low floor — `match_score >= ENRICHMENT_MIN_SCORE` (default **10**, `settings.py:152`) — and then the best `ENRICHMENT_MAX_JOBS` (default **20**) are sent to the LLM. `ENRICHMENT_THRESHOLD` is not read at this call site — it defaults to `ENRICHMENT_MIN_SCORE` when unset (`settings.py:155`). It is **not** dead weight for old `.env` files, though: the ARQ worker's per-job enqueue path is still gated on it (`workers/tasks.py:237`), so setting it high stops worker-side fan-out while leaving this CLI selection untouched — see the env table at §5. Why the change: the scorer's contract is 0–100, but the highest `match_score` measured across the whole 3,342-row prod feed on 2026-07-28 was **58**, so a threshold of 60 selected nothing and the stage had never run (`main.py:1138-1142` records the measurement). A budget makes no claim about the distribution, so it cannot go stale.
+- Gate: **a budget, not a threshold**, applied in `main.run_search`. Jobs must clear a low floor — `match_score >= ENRICHMENT_MIN_SCORE` (default **10**) — and then the best `ENRICHMENT_MAX_JOBS` (default **20**) are sent to the LLM. `ENRICHMENT_THRESHOLD` is not read at this call site — it defaults to `ENRICHMENT_MIN_SCORE` when unset. It is **not** dead weight for old `.env` files, though: the ARQ worker's per-job enqueue path is still gated on it, so setting it high stops worker-side fan-out while leaving this CLI selection untouched — see the env table at §5. Why the change: the scorer's contract is 0–100, but the highest `match_score` measured across the whole 3,342-row prod feed on 2026-07-28 was **58**, so a threshold of 60 selected nothing and the stage had never run. A budget makes no claim about the distribution, so it cannot go stale.
 - `enrich_batch(jobs, semaphore_limit=10, skip_existing=True)` (`job_enrichment.py`) runs asyncio-parallel LLM calls capped at 10 concurrent.
 - Each call goes through `llm_extract_validated(prompt, JobEnrichment, max_retries=2)`:
   - **Provider chain** (`llm_provider.py:329-334`): **OpenAI (`gpt-4o-mini`, PRIMARY)** → Gemini (`gemini-3.7-flash`) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`gpt-oss-120b`). Every model id is env-overridable.
@@ -306,7 +306,7 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
 ### Stage 6 — Store + (opt-in) embed
 
 - `db.insert_job(job)` does `INSERT OR IGNORE` on `(normalized_company, normalized_title)` UNIQUE — returns `True` for new rows, `False` for cross-run duplicates already in the catalog. **Never touch `normalized_key()`** without checking the dedup chain (CLAUDE.md rule #1).
-- If `SEMANTIC_ENABLED=true`, lazy-import `embeddings` + `pg_vector_index`, encode each newly-inserted job via `encode_job(job, enrichment)` and `PgVectorIndex().upsert(job_id, vector)` (`main.py:1292-1298`). This write path reads `SEMANTIC_ENABLED` **alone** — `ENGINE3_ENABLED` does not open it.
+- If `SEMANTIC_ENABLED=true`, lazy-import `embeddings` + `pg_vector_index`, encode each newly-inserted job via `encode_job(job, enrichment)` and `PgVectorIndex().upsert(job_id, vector)`. This write path reads `SEMANTIC_ENABLED` **alone** — `ENGINE3_ENABLED` does not open it.
 - `db.log_run(stats, run_uuid, per_source_errors, per_source_duration, total_duration)` writes the `run_log` row.
 - Finally, in this order — **CSV export (`main.py:1374`) → Markdown report (`:1379`) → `db.log_run(...)` (`:1403`)**. The `log_run` bullet is listed above for topical grouping, but it is the *last* write the pipeline makes, not an earlier one. And the pipeline ending is not the same event as the API run being marked done: `POST /api/search` flips its `_runs[run_id]` entry to `status="completed"` only after `run_search()` returns (`api/routes/search.py:219-225`). There is **no** "channel notifications" step after the report, and **no** old per-source notifier left to run one: the pre-Batch-2 env-var webhook modules (`base.py`, `email_notify.py`, `slack_notify.py`, `discord_notify.py`) were deleted on **2026-06-18** by `e0b0ff1` "feat(notifications): single per-user rulebook + scheduler, remove legacy path", and the only substantive modules left under `services/notifications/` are `report_generator.py` (the markdown report, `main.py:49,1379`) and `defaults.py` (the signup rulebook seeder) — the directory also holds an empty `__init__.py` package marker, and nothing else. Notifications are enqueued **earlier**, inside the per-user feed-write block: `_enqueue_notifications` fans out the ordinary per-user `send_notification` ARQ task for above-threshold rows (`main.py:481,1257-1260`). It is a no-op unless the caller passed an `enqueue` hook, and the CLI passes none (`cli.py:34-40`) — so the per-user `channels/dispatcher` still runs only under the ARQ worker, never from `python -m src.cli run`. Same single delivery path as Pillar 1 §"There is only ONE delivery path".
 
@@ -330,7 +330,7 @@ breakdown = scorer.score(job)
 # All 9 fields populated from real data
 ```
 
-**Rule #20, as the code actually behaves** (`skill_matcher.py:587`): the multi-dim path is gated on `user_preferences` **alone**. `enrichment_lookup` is optional — pass `user_preferences` without it and every dim function is still called, each returning its documented NEUTRAL half-weight rather than a zero (the one exception is `visa_score` with `needs_visa=False`, which is a deliberate 0) (rule #29: an absent input is never a per-job penalty). That was a real bug fix: the old `if enrichment is not None:` gate left all four dims at 0 for any job the enrichment pipeline had not reached yet, so a fresh, correctly-un-enriched job scored 30 points below an identical enriched one. Guard: `tests/test_scorer.py::test_dims_neutral_not_zero_when_enrichment_missing`.
+**Rule #20, as the code actually behaves**: the multi-dim path is gated on `user_preferences` **alone**. `enrichment_lookup` is optional — pass `user_preferences` without it and every dim function is still called, each returning its documented NEUTRAL half-weight rather than a zero (the one exception is `visa_score` with `needs_visa=False`, which is a deliberate 0) (rule #29: an absent input is never a per-job penalty). That was a real bug fix: the old `if enrichment is not None:` gate left all four dims at 0 for any job the enrichment pipeline had not reached yet, so a fresh, correctly-un-enriched job scored 30 points below an identical enriched one. Guard: `tests/test_scorer.py::test_dims_neutral_not_zero_when_enrichment_missing`.
 
 ### 3.2 The 16-field `JobEnrichment` schema — `backend/src/services/job_enrichment_schema.py`
 
@@ -462,7 +462,7 @@ Both flags default `false` per CLAUDE.md rule #18, and the **no-op path must exa
 
 ### 5.1 `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` → LLM enrichment
 
-Either name opens this surface — every E2 call site reads `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853`, `main.py:1137`, `rescore.py:85`, `api/routes/jobs.py:779`, `workers/tasks.py:237`), rule #18.
+Either name opens this surface — every E2 call site reads `ENGINE2_ENABLED or ENRICHMENT_ENABLED`, rule #18 (guard: `backend/tests/test_engine_flag_pairing.py`).
 
 When on:
 - Stage 5 runs (see §2).
@@ -470,7 +470,7 @@ When on:
 - Dedup tie-breaker uses the `+5` enrichment bonus.
 
 When off:
-- `enrichment_lookup` is an empty dict, so every lookup returns `None`. The four dim scorers still RUN — the path is gated on `user_preferences` alone (`skill_matcher.py:587`, rule #20) — and each returns its documented **neutral half weight**, never a zero: seniority 4 (`scoring_dimensions.py:157`), salary 5 (`:198-200`), workplace 3 (`:278`), visa 3 (`:245`), so **+15** rather than the +30 a fully enriched job can reach (rule #29; `visa_score` is the one exception, returning 0 at `:242` when the user does not need sponsorship). A user with no preferences at all gets the legacy 4-component formula; a user with preferences does not.
+- `enrichment_lookup` is an empty dict, so every lookup returns `None`. The four dim scorers still RUN — the path is gated on `user_preferences` alone (rule #20) — and each lands on its neutral half weight, never a zero (rule #29; `visa_score` with `needs_visa=False` is the one deliberate 0). The exact numbers are asserted by `test_scorer.py::test_dims_neutral_not_zero_when_enrichment_missing` rather than restated here. A user with no preferences at all gets the legacy 4-component formula; a user with preferences does not.
 - No LLM API calls, no `job_enrichment` DB writes.
 
 ### 5.2 `SEMANTIC_ENABLED=true` → embeddings + hybrid retrieval
@@ -521,11 +521,11 @@ Defaults in `backend/src/core/settings.py`. Anything below labelled "weight" goe
 | `SENIORITY_WEIGHT` | `8` | Seniority dimension max | Raise to penalise mismatched levels harder |
 | `VISA_WEIGHT` | `6` | Visa dimension max | Only meaningful when users have `needs_visa=True` |
 | `WORKPLACE_WEIGHT` | `6` | Workplace (remote/hybrid/onsite) dimension max | Raise to make workplace preference more decisive |
-| `ENRICHMENT_MIN_SCORE` | `10` | The low floor a job must clear to be enrichment-eligible (`settings.py:152`) | Raise only to skip obvious junk — the budget below is the real lever |
-| `ENRICHMENT_MAX_JOBS` | `20` | Per-run budget: the best N eligible jobs are enriched (`settings.py:151`) | Raise to enrich more per run; this is the hard cost ceiling |
-| `ENRICHMENT_THRESHOLD` | `10` | Back-compat name: when unset it **defaults to** `ENRICHMENT_MIN_SCORE`, and when set it takes that value (`settings.py:155`). `run_search`'s selection does **not** read it — that gate is `ENRICHMENT_MIN_SCORE` + `ENRICHMENT_MAX_JOBS` — but the worker's per-job enqueue path still does (`workers/tasks.py:237`) | Not inert — leave it at the default. Raising it silently stops the worker fanning out `enrich_job_task` while the CLI path carries on |
+| `ENRICHMENT_MIN_SCORE` | `10` | The low floor a job must clear to be enrichment-eligible | Raise only to skip obvious junk — the budget below is the real lever |
+| `ENRICHMENT_MAX_JOBS` | `20` | Per-run budget: the best N eligible jobs are enriched | Raise to enrich more per run; this is the hard cost ceiling |
+| `ENRICHMENT_THRESHOLD` | `10` | Back-compat name: when unset it **defaults to** `ENRICHMENT_MIN_SCORE`, and when set it takes that value. `run_search`'s selection does **not** read it — that gate is `ENRICHMENT_MIN_SCORE` + `ENRICHMENT_MAX_JOBS` — but the worker's per-job enqueue path still does | Not inert — leave it at the default. Raising it silently stops the worker fanning out `enrich_job_task` while the CLI path carries on |
 | `ENRICHMENT_ENABLED` | `false` | Legacy switch for LLM enrichment; `ENGINE2_ENABLED` opens the same gate (`ENGINE2_ENABLED or ENRICHMENT_ENABLED`). It switches the enrichment DATA on, **not** the dim scorers — those run on `user_preferences` alone (rule #20) | Flip on after setting LLM keys — see rule #18 |
-| `SEMANTIC_ENABLED` | `false` | Writes embeddings into the pgvector store (`main.py:1292,1348` read this name ALONE). Hybrid retrieval is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), so `ENGINE3_ENABLED` alone queries an index nothing fills. It does **not** switch ESCO on: that also needs `is_available()` (`cv_parser.py:821,830`) and the index artefacts have never been built | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
+| `SEMANTIC_ENABLED` | `false` | Writes embeddings into the pgvector store (the embedding-write sites read this name ALONE). Hybrid retrieval is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), so `ENGINE3_ENABLED` alone queries an index nothing fills. It does **not** switch ESCO on: that also needs `is_available()` (`cv_parser.py:821,830`) and the index artefacts have never been built | Flip on after `pip install ".[semantic]"`; ~300 MB of deps |
 | `TARGET_SALARY_MIN` / `_MAX` | `40000` / `120000` | Salary-range *tiebreaker* (not scoring) for sort order on the dashboard | Display preference only |
 | `OPENAI_API_KEY` | (unset) | **PRIMARY** LLM provider — heads the chain (`llm_provider.py:329-334`) | Unset → falls to Gemini |
 | `GEMINI_API_KEY` | (unset) | Second-choice LLM | Unset → falls to Groq |
@@ -579,7 +579,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Legacy `score_job()` still callable | ⚠️ | scores against empty lists → near-zero. Dead in practice but not removed for back-compat with old imports |
 | Per-dimension weights configurable via env vars | ✅ | `SALARY_WEIGHT`, `SENIORITY_WEIGHT`, `VISA_WEIGHT`, `WORKPLACE_WEIGHT` |
 | Step-1.5 DB round-trip + HTTP value-presence tests for dim columns | ✅ | rule #21 — `test_database.py::test_dim_columns_round_trip` + `test_api.py::test_jobs_response_includes_score_dim_breakdown` |
-| Multi-dim gated on `user_preferences` alone; missing `enrichment_lookup` → neutral halves, never zeros (rule #20 + #29) | ✅ | `skill_matcher.py:587`; guard `test_scorer.py::test_dims_neutral_not_zero_when_enrichment_missing` |
+| Multi-dim gated on `user_preferences` alone; missing `enrichment_lookup` → neutral halves, never zeros (rule #20 + #29) | ✅ | guard `test_scorer.py::test_dims_neutral_not_zero_when_enrichment_missing` |
 
 ### 6.2 Prefilter + Dedup
 
@@ -603,7 +603,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Multi-provider LLM fallback (OpenAI → Gemini → Groq → Cerebras) | ✅ | `llm_provider.llm_extract` (`:329-334`) |
 | Self-correction loop (max 2 retries with appended errors) | ✅ | `llm_extract_validated` |
 | `_build_enrichment_lookup()` bulk-load for scoring | ✅ | graceful empty-dict on missing table |
-| Enrichment selection = `ENRICHMENT_MIN_SCORE` floor (10) + `ENRICHMENT_MAX_JOBS` budget (20) | ✅ | a budget, not a threshold — the old `ENRICHMENT_THRESHOLD=60` gate selected nothing against a measured prod maximum of 58 and never fired (`main.py:1137-1163`) |
+| Enrichment selection = `ENRICHMENT_MIN_SCORE` floor (10) + `ENRICHMENT_MAX_JOBS` budget (20) | ✅ | a budget, not a threshold — the old `ENRICHMENT_THRESHOLD=60` gate selected nothing against a measured prod maximum of 58 and never fired |
 | `ENRICHMENT_ENABLED` flag defaults `false` | ✅ | rule #18 |
 | Cost tracking per provider call | ❌ | no `llm_usage` table yet |
 
