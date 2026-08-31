@@ -348,3 +348,56 @@ Sonara's status today (sources conflict); Liepin's revenue split; the job-seeker
 slice of LinkedIn's $2B Premium line; whether Indeed Premium ($9.99/mo) earns anything at
 all — never mentioned in any Recruit investor material. Several Crunchbase/SEC fetches
 returned 403, so Huntr's and Careerflow's funding figures come via secondary coverage.
+
+
+---
+
+## 14. Tsenta (YC S26) — the competitor that already built our design
+
+Found 2026-08-31. <https://tsenta.com> · <https://www.ycombinator.com/companies/tsenta>
+
+**What they claim:** "AI career agent that finds matching jobs, tailors your resume, and
+applies on your behalf… more than **70,000 job seekers** use Tsenta." YC **Summer 2026**
+batch, San Francisco, listed Active. *(Self-reported on a YC profile — not audited.)*
+
+**What they have shipped that we have only designed:**
+
+| Job360 design doc | Tsenta status |
+|---|---|
+| MCP server for Box 2 (`docs/plans/2026-08-26-mcp-server-design.md`) | **Shipped** — "A Tsenta MCP server and CLI for Claude Code, OpenClaw, and any agent that speaks tools" |
+| Gmail as the sensor — "silence is a signal" (`INTENTION.md` §9) | **Shipped** — reads confirmations, recruiter replies, interview invites and rejections so "your tracker updates itself"; drafts recruiter replies to your drafts folder; explicitly never sends on its own |
+| "Which exact CV did I submit" — our founding pain (`INTENTION.md` §2) | **Shipped** — a per-application **receipt** with submitted fields, open-ended answers, résumé, cover letter and confirmation details |
+| Paste-a-job Light tier (`INTENTION.md` §10) — *not buildable in our schema today* | **Shipped** — "you can paste a job URL to add a role to your application workflow" |
+| Eligibility/visa as a parameter (§4.4) | **Shipped** — surfaces sponsorship signals, answers work-authorisation questions |
+| Multi-channel reach (our `services/channels/`) | **Shipped** — iMessage, email, push, web, Chrome extension, iOS + Android |
+
+**Their pricing is the model our own §8 research recommended, and we do not have it:**
+$19/mo = 600 applications, $39 = 1,500, $99 = 4,500, 25 free to start. Framed as
+*"Pay for the applications. Not the tool."* — a usage-metered hybrid, not a flat seat.
+
+### Where their bet contradicts the evidence in this file
+
+Their entire promise is **speed and volume** — "Be the first to apply to every job that
+fits you", "Hundreds of applications a week", "you're already in the top 100 applicants."
+
+§1 of this file says that is precisely the losing strategy: interview rate falls from
+**9.25%** at 11–20 applications to **2.58%** at 100+, and their cheapest tier starts at
+600 per month. §2 says only **20%** of job seekers will let AI submit at all. §3 says
+employers are actively building the counter-weapon — Greenhouse's one-application-a-month
+lane hires at **5x**, Ashby ships fraud detection, 72.4% of recruiters are back to
+in-person interviews. Their own FAQ concedes it: *"Tsenta does not promise that automated
+assistance is undetectable."*
+
+**So the honest read is two-sided.** They have out-executed us on every surface we have
+only written down, and they have YC distribution and a claimed 70,000 users. But they are
+selling the thing the outcome data says destroys the user's odds — and they are selling it
+to the 20% of the market that is willing to hand over the send button.
+
+That is not a reason to feel safe. It is the only remaining gap: **they own "apply for
+me." Nobody owns "get me ready and tell me what worked."**
+
+### Could not verify
+
+The 70,000-user figure (self-reported, YC profile). Revenue, funding amount, retention, or
+whether any of the logos shown under "where Tsenta users have been hired" are attributable
+to Tsenta. Batch S26 means the company is roughly three months old at time of writing.
