@@ -51,7 +51,7 @@ Turns "I applied into a void" into "I applied and messaged the hiring manager." 
 input to the outreach log — the gap identified in `INTENTION.md` §5 as the biggest hole.
 
 ### Job providers — the raw data
-**Job:** the jobs themselves. Our 47 sources, plus the user's own (Indeed, Apify, whatever
+**Job:** the jobs themselves. Our 40 live sources, plus the user's own (Indeed, Apify, whatever
 they already pay for).
 
 **Premium supplies these. Light does not** — Light users paste a job description or bring

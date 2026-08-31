@@ -104,7 +104,7 @@ One application, end to end. **This list is the roadmap.** Status verified again
 
 | Stage | Stored today? | Where |
 |---|---|---|
-| Job found, scored, deduped | **Yes** | `jobs`, `user_feed`, 47 sources |
+| Job found, scored, deduped | **Yes** | `jobs`, `user_feed`, 40 live sources |
 | Why it fits me / skill gaps | **Yes** | `user_feed.llm_verdict`, fit reason, `skill_gap` |
 | CV + cover letter tailored | **Yes** | `tailored_documents` — `ai_draft`, `polished`, `model`, `profile_version`, `kept_at` |
 | The draft→final diff (learning signal) | **Yes** | same table, by design (migration 0023) |
@@ -169,7 +169,7 @@ Full map, roles and priority in `docs/product/CONNECTORS.md`. The owner's three:
 - **Gmail — the eyes.** Send and receive. Sees replies, interview invites, rejections, and
   silence. **Silence is a signal**: no reply for N days is what makes the system proactive.
 - **Apollo — the contacts.** Given a company and role, find the right humans to reach.
-- **Job providers (Indeed, Apify, our 47 sources) — the raw data.** Premium supplies them;
+- **Job providers (Indeed, Apify, our 40 live sources) — the raw data.** Premium supplies them;
   Light does not.
 
 ## 10. How value is priced (shape only — not yet built)
@@ -177,7 +177,7 @@ Full map, roles and priority in `docs/product/CONNECTORS.md`. The owner's three:
 - **Light** — the full application lifecycle. The user brings the job (pastes a description,
   or connects their own job source). Connects Gmail and Apollo. Supplies or pays for
   intelligence.
-- **Premium** — Job360 finds and scores relevant jobs. The 47 sources, the scoring and the
+- **Premium** — Job360 finds and scores relevant jobs. The 40 live sources, the scoring and the
   LLM judging are the paid part, because they are the part that costs us money.
 
 The split is honest: **what costs us, costs them.** See `project_free_tier_first_then_pricing`

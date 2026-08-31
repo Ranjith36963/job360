@@ -32,7 +32,7 @@ nothing on tokens.** This is the cheapest mode for us to run and the one with bu
 distribution.
 
 **Jobs in Box 2:**
-- **Premium** — we supply jobs from our 47 sources, scored against their profile.
+- **Premium** — we supply jobs from our 40 live sources, scored against their profile.
 - **Light** — we do not. The user pastes a job description, or connects their own job
   source (they pay Apify/Indeed directly). We still give them the **full lifecycle**.
 
@@ -62,7 +62,7 @@ a local open-source model they run. Some users will *want* local models; that fl
 is a selling point.
 
 **Jobs in Box 1:**
-- **Premium** — required if they want us to find jobs. Searching 47 sources and LLM-judging
+- **Premium** — required if they want us to find jobs. Searching 40 live sources and LLM-judging
   costs us real money.
 - **Light** — no job searching. They paste a description or bring their own source.
 
