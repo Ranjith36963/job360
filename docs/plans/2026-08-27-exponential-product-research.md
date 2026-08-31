@@ -152,3 +152,63 @@ build.**
   path: free intelligence, free distribution.
 - The first number to watch is **applications recorded per week**, not jobs in catalog.
 - Reddit voices unverified this session (see coverage bound).
+
+---
+
+## 6. The plate — gaps neither side can close (added same day)
+
+Owner's analogy: rice = every job board, curry = every LLM, **Job360 = the plate** the
+seeker eats from. Neither ingredient can be the plate. Each line: gap -> why they
+structurally cannot close it -> why the plate can. Numbers from §1; incentives are
+reasoning, not survey.
+
+### 6.1 Job boards, providers and AI-apply tools
+1. Paid by the employer, not the seeker -> every design serves the poster -> causes 2–6.
+2. Will never flag a ghost job (18–22% of Greenhouse listings) -> it accuses the payer ->
+   plate makes ghost detection outcome-backed across users.
+3. Will never score the employer's response rate -> rating the payer is suicide -> plate
+   rates the application experience, which nobody rates.
+4. Memory dies at the board's edge -> no board stores a rival's applications -> plate
+   stores the whole search regardless of source.
+5. Nothing after the click -> they are paid at "submitted" -> plate starts there.
+6. Their agents are for recruiters (Hiring Assistant, agentic ATS) -> that is the revenue ->
+   the candidate has no agent with memory; be it.
+7. No feedback loop -> the outcome lives in the seeker's inbox, not on the board -> plate
+   sees it via Gmail + record.
+8. Auto-apply halves conversion (5.75% vs 2.68%) and gets vendors banned; Indeed paused
+   its own -> volume is their pitch -> plate never submits; it remembers and improves.
+9. Trackers (Teal, Huntr) are spreadsheets with a UI -> manual, no agent door, no
+   outcomes -> plate is API-first, agent-native.
+10. Cannot be vendor-neutral on intelligence -> Indeed's AI is Indeed's -> "LLM is
+    electricity", per-user provider.
+11. Cannot see silence -> they do not watch the inbox -> silence timer.
+12. Hold data hostage -> lock-in is retention -> full export/delete; trust is the product.
+Acquisition test: a board owning this must publish ghost rates against its own customers
+and store rivals' applications. It survives only as a neutral.
+
+### 6.2 LLM assistants (Claude, ChatGPT, Gemini, Grok, Perplexity, Copilot)
+1. Memory is a scratchpad, not a ledger -> unstructured, unversioned, no receipts -> typed
+   immutable application record.
+2. Memory is locked to one vendor -> no vendor builds memory that works in a rival ->
+   client-neutral record from any assistant.
+3. No outcomes -> writes the application, never learns the reply -> loop closes where the
+   record lives.
+4. No durable state across sessions -> no pipeline, no reminders that fire later -> server
+   job (MCP).
+5. Cannot submit reliably and are retreating (OpenAI removed Agent mode Aug 2026; Indeed
+   paused auto-submit) -> hostile surfaces -> be what is written to after the human clicks.
+6. No cross-user data -> one user per conversation -> aggregate outcomes = network effect.
+7. No domain schema (stages, staleness, visa precedence, deadlines) -> plate has them.
+8. No consent/portability layer for sharing with recruiter agents -> plate owns consent.
+9. Not proactive -> answers only when asked -> server + eyes + record.
+10. Will not run an employer-ghosting index (liability) -> neutral domain product will.
+11. Their job features are search-only and delegated (Indeed/ZipRecruiter apps in ChatGPT;
+    Indeed in Claude) -> they mount job data rather than own it -> the door to walk through.
+12. Incentive is the conversation, not the hire -> plate is measured on outcomes.
+Acquisition test: value is neutrality; it evaporates the day one vendor owns it (Zapier,
+Plaid, Stripe logic).
+
+**Honest weakness:** an assistant could ship a structured job-search memory for its own
+users tomorrow. It cannot make it work in a rival, watch Gmail outside a chat, aggregate
+across users, or publish employer scores. The defence is neutral + durable +
+outcome-backed + cross-user, together — not "they can't build memory".
