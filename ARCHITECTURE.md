@@ -44,7 +44,7 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
 
 Three legacy opt-in feature flags gate the advanced surfaces — `ENRICHMENT_ENABLED`, `SEMANTIC_ENABLED`, and Engine 4's `MATCHER_ENABLED` (covered in the engine table below). All three default OFF; hard rule #18 — `.claude/skills/hard-rules/SKILL.md`. For Engine 2 and Engine 4 each flag is only HALF of its gate — the effective condition is `ENGINEx_ENABLED or <legacy flag>`, so test both names. Engine 3 is asymmetric, as the `SEMANTIC_ENABLED` entry below spells out:
 
-- `ENRICHMENT_ENABLED=true` → the LLM **enrichment step** runs, so the Batch-2.9 dimensions read real data instead of their neutral halves. The dimensions themselves are not gated on this flag — they fire on `user_preferences` alone (rule #20). Effective gate at every call site: `ENGINE2_ENABLED or ENRICHMENT_ENABLED`, re-measured by `backend/tests/test_engine_flag_pairing.py`
+- `ENRICHMENT_ENABLED=true` → the LLM **enrichment step** runs, so the Batch-2.9 dimensions read real data instead of their neutral halves. The dimensions themselves are not gated on this flag — they fire on `user_preferences` alone (rule #20). Effective gate: `ENGINE2_ENABLED or ENRICHMENT_ENABLED`, re-measured by `backend/tests/test_engine_flag_pairing.py`
 - `SEMANTIC_ENABLED=true` → embeddings into the pgvector store (`job_embeddings.embedding`, migration `0027` — **not** ChromaDB; see `services/pg_vector_index.py`). Hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED`, while the embedding WRITES are gated on `SEMANTIC_ENABLED` alone — so `ENGINE3_ENABLED=true` by itself queries an index nothing fills. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
 
 ---
@@ -280,9 +280,9 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 | # | Engine | Service | Flag | Default |
 |---|--------|---------|------|---------|
 | 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | `ENGINE1_ENABLED` (no legacy alias; read in `JobScorer.__init__`, gates the keyword half of `JobScorer.score`) | **true** |
-| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, applied in `JobScorer.score`; data from the enrichment step `services/job_enrichment.py`) | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` at every call site (guard: `backend/tests/test_engine_flag_pairing.py`) — this gates the enrichment DATA, not the dim path: the dims fire on `user_preferences` alone (rule #20) | false |
+| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, applied in `JobScorer.score`; data from the enrichment step `services/job_enrichment.py`) | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` (guard: `backend/tests/test_engine_flag_pairing.py`) — this gates the enrichment DATA, not the dim path: the dims fire on `user_preferences` alone (rule #20) | false |
 | 3 | Hybrid | `services/embeddings.py` + `pg_vector_index.py` + `retrieval.py` (`vector_index.py` is the legacy Chroma wrapper, no production caller) | reads: `ENGINE3_ENABLED` **or** `SEMANTIC_ENABLED`; embedding writes: `SEMANTIC_ENABLED` alone | false |
-| 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` at every call site (same guard) | false |
+| 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` (same guard) | false |
 
 **Engine 4 — LLM judge detail:**
 - Service: `backend/src/services/llm_matcher.py`. `MatchVerdict{fit_score: int 0-100, verdict: str, reason: str}`.
