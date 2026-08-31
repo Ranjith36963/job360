@@ -19,9 +19,9 @@ Three numbers float around the codebase and they're all correct because they cou
 | --- | --- | --- |
 | **40** | Source *class files* on disk | `find backend/src/sources -name '*.py'` minus `__init__`/`base` |
 | **41** | *Registry keys* in `SOURCE_REGISTRY` | `main.py` — `"glassdoor"` is a second key that aliases `JobSpySource` |
-| **40** | Live *instances* built per run | `SOURCE_INSTANCE_COUNT = 40` (`main.py:168`) — `indeed`+`glassdoor` collapse to one `JobSpySource` |
+| **40** | Live *instances* built per run | `SOURCE_INSTANCE_COUNT = 40` (`main.py`) — `indeed`+`glassdoor` collapse to one `JobSpySource` |
 
-So: **40 classes → 41 registry keys → 40 instances.** The single fork is Indeed/Glassdoor, both handled by `JobSpySource` in `other/indeed.py`. The test suite pins all of this — `test_cli.py:55` asserts `len(SOURCE_REGISTRY) == 41`, `test_api.py` asserts `sources_total == 41` at `:43` and `:160` (CLAUDE.md rule #13). Measure these, never quote them: six sources were pruned on 2026-08-10 (`main.py:161`) and this table said 46/47/46 for a week afterwards.
+So: **40 classes → 41 registry keys → 40 instances.** The single fork is Indeed/Glassdoor, both handled by `JobSpySource` in `other/indeed.py`. The test suite pins all of this — `test_cli.py` asserts `len(SOURCE_REGISTRY) == 41`, `test_api.py` asserts `sources_total == 41` at  and  (CLAUDE.md rule #13). Measure these, never quote them: six sources were pruned on 2026-08-10 (`main.py`) and this table said 46/47/46 for a week afterwards.
 
 ---
 
@@ -61,7 +61,7 @@ async def fetch_jobs(self) -> list[Job]:
     for slug in self._companies:             # GREENHOUSE_COMPANIES by default — 82 slugs
         # `?content=true` is LOAD-BEARING, not decoration: without it the board
         # list endpoint returns no `content` field at all, which is why 996 prod
-        # rows carried an empty description until 2026-08-05 (greenhouse.py:31-36).
+        # rows carried an empty description until 2026-08-05 (greenhouse.py).
         url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
         data = await self._get_json(url)     # all retry/rate-limit machinery
         if not data:
@@ -105,7 +105,7 @@ For one healthy company (say `acme-corp`), this returns ~6 postings in JSON like
 For each upstream posting, the source builds a canonical `Job`:
 
 ```python
-# The date contract, established BEFORE the Job is built (greenhouse.py:64-68).
+# The date contract, established BEFORE the Job is built (greenhouse.py).
 # posted_at comes from `first_published`, NOT `updated_at` — the latter tracks
 # edits (a salary tweak) and would bump a stale posting back into the "just
 # posted" bucket. normalize_posted_at() returns the confidence alongside it, so
@@ -136,8 +136,8 @@ Two things the `Job.__post_init__` does automatically:
 
 `await GreenhouseSource.fetch_jobs()` returns a `list[Job]` gathered across 82 companies.
 Volume is an upstream fact, not a constant, so it is quoted only as a dated measurement:
-**996 greenhouse rows in prod** as of 2026-08-05 (`backend/src/sources/ats/greenhouse.py:34`),
-and `first_published` verified across **928 live jobs** (`greenhouse.py:57-58`).
+**996 greenhouse rows in prod** as of 2026-08-05 (`backend/src/sources/ats/greenhouse.py`),
+and `first_published` verified across **928 live jobs** (`greenhouse.py`).
 
 Back in `TieredScheduler.tick()`:
 
@@ -183,7 +183,7 @@ If LinkedIn's HTML regex breaks because they changed markup:
 
 Every source extends `BaseJobSource`. **Never change this class without checking all 40 subclasses** (CLAUDE.md rule #2) — every change propagates to every source.
 
-### 2.1 Constructor (`base.py:98-105`)
+### 2.1 Constructor (`base.py`)
 
 ```python
 def __init__(self, session: aiohttp.ClientSession, search_config=None):
@@ -198,7 +198,7 @@ def __init__(self, session: aiohttp.ClientSession, search_config=None):
 - `search_config=None` — when present, the source uses the user's dynamic keywords; when `None`, it falls back to the (now-empty) hard-coded defaults from `keywords.py`.
 - Rate limiter is pulled per-source from `RATE_LIMITS` (41 entries) with a safe `{concurrent:2, delay:1.0}` default.
 
-### 2.2 The four dynamic properties (`base.py:107-137`)
+### 2.2 The four dynamic properties (`base.py`)
 
 This is how a single source body serves both "profile loaded" and "no profile" cases without branching:
 
@@ -213,9 +213,9 @@ This is how a single source body serves both "profile loaded" and "no profile" c
 
 > Sources MUST access keywords through these properties — never `from src.core.keywords import ...` directly. This is what makes the system domain-agnostic (CLAUDE.md "Dynamic keywords" pattern).
 
-### 2.3 HTTP helpers + retry machinery (`base.py:150-266`)
+### 2.3 HTTP helpers + retry machinery (`base.py`)
 
-The core is `_request()` (`base.py:150-216`). Everything else is a thin wrapper:
+The core is `_request()` (`base.py`). Everything else is a thin wrapper:
 
 - `_get_json(url, params, headers)` → JSON dict/list
 - `_post_json(url, body, headers)` → JSON dict/list
@@ -236,13 +236,13 @@ The core is `_request()` (`base.py:150-216`). Everything else is a thin wrapper:
 
 This is why individual source files are so short — all the resilience lives here.
 
-### 2.4 Conditional fetch (`base.py:244-331`)
+### 2.4 Conditional fetch (`base.py`)
 
 `_conditional_fetch()` stores `ETag` and `Last-Modified` per `(url, params)` in the `ConditionalCache` (256-entry FIFO). On a repeat call it sends `If-None-Match` / `If-Modified-Since`; a `304 Not Modified` replays the cached body at zero parse cost. If the upstream provides no validators, it transparently degrades to a normal GET.
 
-**Today NO source opts in.** The only callers of `_get_json_conditional` / `_get_text_conditional` anywhere are `backend/tests/test_conditional_fetch.py` — the Batch-3.5.3 `nhs_jobs` pilot was reverted to a plain `_get_text` (`feeds/nhs_jobs.py:34`), and there is no `nhs_jobs_xml.py`. Per CLAUDE.md rule #14, sources should only opt in when their upstream honours validators (CDN-fronted ATS boards, honest RSS feeds); polling a validator-less endpoint every 60 s just thrashes the cache.
+**Today NO source opts in.** The only callers of `_get_json_conditional` / `_get_text_conditional` anywhere are `backend/tests/test_conditional_fetch.py` — the Batch-3.5.3 `nhs_jobs` pilot was reverted to a plain `_get_text` (`feeds/nhs_jobs.py`), and there is no `nhs_jobs_xml.py`. Per CLAUDE.md rule #14, sources should only opt in when their upstream honours validators (CDN-fronted ATS boards, honest RSS feeds); polling a validator-less endpoint every 60 s just thrashes the cache.
 
-### 2.5 Location filter (`base.py:39-81`)
+### 2.5 Location filter (`base.py`)
 
 `_is_uk_or_remote(location)` is the free UK-relevance gate every source can call:
 
@@ -251,7 +251,7 @@ This is why individual source files are so short — all the resilience lives he
 - `uk_gate.names_foreign_place` says the whole trimmed value NAMES a foreign country/admin division → `False`
 - Anything else (UK, remote, unknown) → `True`; the door (`uk_gate.check_uk`) decides at ingestion
 
-`base.py` imports `names_foreign_place` straight from `src.services.uk_gate` (`base.py:16`) — it holds **no term list of its own**, and it no longer imports anything from `skill_matcher.py`. There is also no scorer penalty to fall back on: the −15 foreign penalty was deleted 2026-08-12 (CLAUDE.md rule #30). One gate, one data set.
+`base.py` imports `names_foreign_place` straight from `src.services.uk_gate` (`base.py`) — it holds **no term list of its own**, and it no longer imports anything from `skill_matcher.py`. There is also no scorer penalty to fall back on: the −15 foreign penalty was deleted 2026-08-12 (CLAUDE.md rule #30). One gate, one data set.
 
 ### 2.6 The class attributes the rest of the engine reads
 
@@ -261,7 +261,7 @@ This is why individual source files are so short — all the resilience lives he
 | `category` | `"unknown"` | `scheduler.py` | Tier key (`ats`/`rss`/`keyed_api`/`free_json`/`scrapers`/`other`) → polling cadence |
 | `DOMAINS` | `{"general"}` | `domain_classifier.py` via `_build_sources()` | Which user domains this source serves; `{"general"}` = everyone |
 
-### 2.7 The abstract contract (`base.py:146-148`)
+### 2.7 The abstract contract (`base.py`)
 
 ```python
 @abstractmethod
@@ -296,7 +296,7 @@ The canonical shape every source produces. ~27 fields:
 
 `role`, `skill`, `seniority_score`, `experience`, `credentials`, `location_score`, `recency`, `semantic`, `penalty` — the per-dimension scores written by `JobScorer` (Pillar 2 §3).
 
-### 3.4 `normalized_key()` — the dedup key (`models.py:106-127`)
+### 3.4 `normalized_key()` — the dedup key (`models.py`)
 
 ```python
 def normalized_key(self) -> tuple[str, str]:
@@ -326,7 +326,7 @@ This tuple is the DB's UNIQUE constraint and the deduplicator's Layer-1 key. **C
 
 ### 4.1 Keyed APIs — `apis_keyed/` (8)
 
-Pattern: accept `api_key` in `__init__`, return `[]` early if the key is empty (so the source skips gracefully on free installs). The log line is `WARNING` in seven of the eight — `gov_apprenticeships.py:62` is the only `INFO`.
+Pattern: accept `api_key` in `__init__`, return `[]` early if the key is empty (so the source skips gracefully on free installs). The log line is `WARNING` in seven of the eight — `gov_apprenticeships.py` is the only `INFO`.
 
 | Source | Upstream | Env var |
 | --- | --- | --- |
@@ -406,7 +406,7 @@ A `COMPANY_NAME_OVERRIDES` dict (55 entries) maps ugly slugs (`darktracelimited`
 
 ## 6. Cross-cutting: rate limits & the async limiter
 
-### 6.1 `RATE_LIMITS` — `backend/src/core/settings.py:279-336`
+### 6.1 `RATE_LIMITS` — `backend/src/core/settings.py`
 
 41 entries (one per registry key), each `{source: {concurrent: int, delay: float}}`. Representative tuning:
 
@@ -440,7 +440,7 @@ Effect: at most `concurrent` parallel requests, with a minimum `delay` between a
 
 ## 7. Source rotations (Batch 3, then M6)
 
-Batch 3 rotated the roster: **−3 dropped, +5 added**, net 48 → 50 registry keys. The later **M6 rotation (2026-06)** then dropped 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global), taking the registry **50 → 46** — gov_apprenticeships was later restored 2026-06-16 on the DfE Display Advert API v2, bringing it back to **47**. A further prune on **2026-08-10** dropped six upstream-dead sources — aijobs, jobs_ac_uk, biospace, rippling, nhs_jobs_xml, workanywhere — taking the registry **47 → 41** (`main.py:158-165` records each reason). Note `nhs_jobs_xml` was retired but the separate **`nhs_jobs` source is still alive** and registered at `main.py:142`. The Batch-3 tables below are kept as history; the M6 drops are flagged inline.
+Batch 3 rotated the roster: **−3 dropped, +5 added**, net 48 → 50 registry keys. The later **M6 rotation (2026-06)** then dropped 4 upstream-dead sources (jobtensor, comeet, gov_apprenticeships, aijobs_global), taking the registry **50 → 46** — gov_apprenticeships was later restored 2026-06-16 on the DfE Display Advert API v2, bringing it back to **47**. A further prune on **2026-08-10** dropped six upstream-dead sources — aijobs, jobs_ac_uk, biospace, rippling, nhs_jobs_xml, workanywhere — taking the registry **47 → 41** (`main.py` records each reason). Note `nhs_jobs_xml` was retired but the separate **`nhs_jobs` source is still alive** and registered at `main.py`. The Batch-3 tables below are kept as history; the M6 drops are flagged inline.
 
 ### Dropped (verified absent from disk)
 
@@ -467,7 +467,7 @@ Adding/removing a source means moving **all five** together, or tests break:
 1. `src/main.py` — `SOURCE_REGISTRY` dict + `_build_sources()` list
 2. `src/core/settings.py` — `RATE_LIMITS` dict
 3. `tests/test_cli.py` — `len(SOURCE_REGISTRY) == 41` + the expected set
-4. `tests/test_api.py` — two `== 41` checks (`:43`, `:160`)
+4. `tests/test_api.py` — two `== 41` checks
 5. `CLAUDE.md` — the documented count
 
 All five are currently aligned at **41**.
@@ -476,7 +476,7 @@ All five are currently aligned at **41**.
 
 ## 8. Testing — `backend/tests/test_sources.py` + friends
 
-- **`test_sources.py`** — 110 test functions covering all 41 keys. All HTTP mocked with `aioresponses` (rule #4 — the suite must run offline). A typical source test asserts: returns `list[Job]`, parses fields into the `Job` model, filters non-UK locations, handles an empty response (`jobs == []`), and (keyed sources) returns `[]` when the API key is `""`. Newer sources follow a 3-test shape: parse / empty / http-error. (The old `test_sources.py:1561-1688` citation is dropped — that range is Greenhouse's tests today; the file has grown to 3,196 lines and any fixed range here rots within weeks.)
+- **`test_sources.py`** — 110 test functions covering all 41 keys. All HTTP mocked with `aioresponses` (rule #4 — the suite must run offline). A typical source test asserts: returns `list[Job]`, parses fields into the `Job` model, filters non-UK locations, handles an empty response (`jobs == []`), and (keyed sources) returns `[]` when the API key is `""`. Newer sources follow a 3-test shape: parse / empty / http-error. (The old `test_sources.py` citation is dropped — that range is Greenhouse's tests today; the file has grown to 3,196 lines and any fixed range here rots within weeks.)
 - **`test_conditional_fetch.py`** — 13 tests for the shared ETag/Last-Modified/304 machinery and FIFO eviction at 256 entries. They drive a throwaway `BaseJobSource` subclass, not a real source: these tests are the **only** callers of the conditional helpers in the repo.
 - **`test_cli.py`** — `len(SOURCE_REGISTRY) == 41` + exact expected set.
 - **`test_api.py`** — the two hardcoded `== 41` assertions.
@@ -491,18 +491,18 @@ Almost all are the keyed-source API credentials. The other **33** registry keys 
 
 | Var | Required by | Default | What changes when you flip it |
 | --- | --- | --- | --- |
-| `REED_API_KEY` | `ReedSource` | (unset) | Reed returns `[]` when unset, logging `Reed: no API key, skipping` at **`WARNING`** (`reed.py:45`) — not silent, and not INFO |
+| `REED_API_KEY` | `ReedSource` | (unset) | Reed returns `[]` when unset, logging `Reed: no API key, skipping` at **`WARNING`** (`reed.py`) — not silent, and not INFO |
 | `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` | `AdzunaSource` | (unset) | Both must be set; either unset → return [] |
 | `JSEARCH_API_KEY` | `JSearchSource` | (unset) | RapidAPI key |
 | `JOOBLE_API_KEY` | `JoobleSource` | (unset) | |
-| `SERPAPI_KEY` | `GoogleJobsSource` | (unset) | SerpApi → Google Jobs SERP. **Only this name works** — `settings.py:45` reads `SERPAPI_KEY` alone and `main.py:279` passes it straight in; there is no `GOOGLE_JOBS_API_KEY` alias anywhere. Set the wrong name and the source skips, logging `GoogleJobs: no SERPAPI_KEY, skipping` at WARNING (`google_jobs.py:47`) — visible in the run log, but the run still reports success |
+| `SERPAPI_KEY` | `GoogleJobsSource` | (unset) | SerpApi → Google Jobs SERP. **Only this name works** — `settings.py` reads `SERPAPI_KEY` alone and `main.py` passes it straight in; there is no `GOOGLE_JOBS_API_KEY` alias anywhere. Set the wrong name and the source skips, logging `GoogleJobs: no SERPAPI_KEY, skipping` at WARNING (`google_jobs.py`) — visible in the run log, but the run still reports success |
 | `CAREERJET_AFFID` | `CareerjetSource` | (unset) | Affiliate ID |
 | `FINDWORK_API_KEY` | `FindworkSource` | (unset) | Token auth |
 | `GITHUB_TOKEN` | (none directly, but used by `github_enricher` in Pillar 1) | (unset) | Anonymous GitHub API has 60 req/hr; token raises to 5000 |
 | `EIGHTYKHOURS_ALGOLIA_APP_ID` / `EIGHTYKHOURS_ALGOLIA_API_KEY` | `EightyKHoursSource` | hard-coded public keys | Allow override of the (public) Algolia search keys 80,000 Hours embeds in their site |
 | (per-source rate-limit knobs) | All sources | from `RATE_LIMITS` dict in `settings.py` | Not env-configurable; edit code |
 
-> **All sources skip gracefully without their key**: the keyed-source pattern is `if not api_key: return []` with a **`WARNING`** log line — Adzuna, Careerjet, Findwork, GoogleJobs, Jooble, JSearch and Reed all use `logger.warning`; `gov_apprenticeships.py:62` is the lone `INFO`. The pipeline never errors — sources just don't contribute, and **the run still reports success**, so a missing key is only visible in the log.
+> **All sources skip gracefully without their key**: the keyed-source pattern is `if not api_key: return []` with a **`WARNING`** log line — Adzuna, Careerjet, Findwork, GoogleJobs, Jooble, JSearch and Reed all use `logger.warning`; `gov_apprenticeships.py` is the lone `INFO`. The pipeline never errors — sources just don't contribute, and **the run still reports success**, so a missing key is only visible in the log.
 
 ---
 
@@ -537,7 +537,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 
 | Surface | Status | Notes |
 | --- | --- | --- |
-| `BaseJobSource` retry (3×, backoff 1/2/4) | ✅ | `base.py:150-216` |
+| `BaseJobSource` retry (3×, backoff 1/2/4) | ✅ | `base.py` |
 | Per-source rate limiting via `RATE_LIMITS` | ✅ | 41 entries, all sources covered |
 | 429 `Retry-After` honouring (cap 60 s) | ✅ | |
 | No-retry on 401/403/404/422 | ✅ | |
@@ -546,7 +546,7 @@ Legend: ✅ done & wired · 🟡 partial · ❌ planned but not built · ⚠️ 
 | Dynamic-keyword properties (config/fallback) | ✅ | but fallback defaults are now empty (`keywords.py`) |
 | `_is_uk_or_remote()` location gate | ✅ | delegates to `uk_gate.names_foreign_place`; holds no term list, and there is no scorer penalty behind it (rule #30) |
 | `Job.normalized_key()` dedup key | ✅ | rule #1 protected |
-| Salary sanitisation (<10k / >500k → None) | ✅ | `models.py:91-95` |
+| Salary sanitisation (<10k / >500k → None) | ✅ | `models.py` |
 | HTML entity unescape in title/company | ✅ | `__post_init__` |
 
 ### 9.2 Source roster
@@ -599,7 +599,7 @@ backend/src/
 ├── main.py                         — SOURCE_REGISTRY (41 keys) + _build_sources() + domain filter
 ├── core/
 │   ├── companies.py                — 302 ATS slugs across 11 platform lists + name overrides
-│   ├── settings.py:279-336         — RATE_LIMITS (41 entries)
+│   ├── settings.py         — RATE_LIMITS (41 entries)
 │   └── keywords.py                 — LOCATIONS + VISA_KEYWORDS (the rest emptied 2026-04-09)
 └── utils/rate_limiter.py           — async semaphore + delay
 
