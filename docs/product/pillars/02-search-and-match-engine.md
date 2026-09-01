@@ -300,7 +300,7 @@ Four layers run in sequence; each layer collapses near-duplicates into the highe
   - **Provider chain** (`llm_provider.py:329-334`): **OpenAI (`gpt-4o-mini`, PRIMARY)** → Gemini (`gemini-3.7-flash`) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`gpt-oss-120b`). Every model id is env-overridable.
   - **Self-correction loop**: on Pydantic `ValidationError`, the first 5 error messages are appended to the prompt and the call retries up to 2 more times.
   - If all providers fail or retries exhaust → `RuntimeError` (logged, no partial row written — atomicity over best-effort).
-- Output: a `JobEnrichment` row with **16 strict-typed fields** (see §3.2 below). The `job_enrichment` TABLE still has 18 enrichment columns — `employer_type` and `locations` were retired from the schema in 2026-08 but never dropped from the DB, so the application neither writes nor reads them — `save_enrichment` excludes both from its column list (`job_enrichment.py:248-254`) and the read paths skip them too (`:329`, `:401`). The columns are not empty, though: `0008_job_enrichment.up.sql:21,29` declares them `NOT NULL DEFAULT '[]'` / `'unknown'`, so every new row still gets those defaults from the database.
+- Output: a `JobEnrichment` row with **16 strict-typed fields** (see §3.2 below). The `job_enrichment` TABLE still has 18 enrichment columns — `employer_type` and `locations` were retired in 2026-08 but never dropped from the DB, so the application neither writes nor reads them — `services/job_enrichment.save_enrichment` excludes both, and its module docstring records why. The columns are not empty, though: migration `0008_job_enrichment` declares them `NOT NULL DEFAULT '[]'` / `'unknown'`, so every new row still gets those defaults from the database.
 - DB persistence: `INSERT OR REPLACE` into `job_enrichment` table (migration `0008`). **Shared catalog** — no `user_id` column, per CLAUDE.md rule #17 (the same enriched fields apply to every user; per-user scoring against the enrichment happens at read time).
 
 ### Stage 6 — Store + (opt-in) embed
@@ -466,7 +466,7 @@ Either name opens this surface — every E2 call site reads `ENGINE2_ENABLED or 
 
 When on:
 - Stage 5 runs (see §2).
-- `JobScorer` gets an `enrichment_lookup` that *can* carry rows, so the Batch 2.9 dimension scorers see real data for any job enrichment has reached. The flag opens the path; it does not guarantee rows — `_build_enrichment_lookup` returns `{}` when the table is empty or absent (`job_enrichment.py:313-328`), which is what happens with a zero `ENRICHMENT_MAX_JOBS` budget, no job above the floor, or every provider failing (the four preconditions in §6). Each unreached job falls back to the same neutral halves as the flag-off case below.
+- `JobScorer` gets an `enrichment_lookup` that *can* carry rows, so the Batch 2.9 dimension scorers see real data for any job enrichment has reached. The flag opens the path; it does not guarantee rows — `services/job_enrichment._build_enrichment_lookup` returns `{}` when the table is empty or absent, which is what happens with a zero `ENRICHMENT_MAX_JOBS` budget, no job above the floor, or every provider failing (the four preconditions in §6). Each unreached job falls back to the same neutral halves as the flag-off case below.
 - Dedup tie-breaker uses the `+5` enrichment bonus.
 
 When off:
@@ -486,7 +486,6 @@ When on:
   2. Pulls semantic top-500 from `job_embeddings.embedding` (cosine distance `<=>`, exact scan — no ANN index yet, see `0027`).
   3. Fuses via **Reciprocal Rank Fusion** with `k=60`: `score(item) = Σ 1 / (k + rank_i + 1)` across all input lists.
   4. Optionally reranks the top-50 with the **cross-encoder** `cross-encoder/ms-marco-MiniLM-L-6-v2` (Batch 2.8).
-- ESCO skill normalisation in CV parsing does **not** flip on. `_maybe_normalise_skills_via_esco()` is double-gated: `SEMANTIC_ENABLED` **and** `is_available()` (`cv_parser.py:821,830`), and the index artefacts have never been built, so it stays an identity transform either way (rule #28; `docs/product/PILLAR1_EXTRACTION_AUDIT.md`).
 
 When off:
 - No `sentence_transformers` import at all (saves ~150 ms–2 s startup).

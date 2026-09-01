@@ -88,7 +88,7 @@ A *batched* notification sent at a scheduled time (e.g. 08:00 in user's timezone
 
 ### ESCO
 
-European Skills, Competences, Qualifications and Occupations — a multilingual standard taxonomy. Job360 has the code to canonicalise CV skills to ESCO URIs, but **it has never run**: `_maybe_normalise_skills_via_esco()` needs `SEMANTIC_ENABLED=true` **and** `is_available()` (`cv_parser.py:821,830`), and the index artefacts were never built, so it is an identity transform in every environment (rule #28).
+European Skills, Competences, Qualifications and Occupations — a multilingual standard taxonomy. Job360 has the code to canonicalise CV skills to ESCO URIs, but **it has never run**: the index artefacts were never built, so it is an identity transform in every environment (ADR-0005).
 **Code:** `_maybe_normalise_skills_via_esco()` in `cv_parser.py` · **Pillars 1 + 2**
 
 ### Feature flags

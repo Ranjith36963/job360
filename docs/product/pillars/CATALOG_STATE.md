@@ -157,7 +157,7 @@ Its own comment records why: the worker container had no `[semantic]` extra and 
 disk from backend, so the nightly refresh could never embed anything.
 **That Dockerfile gap is still open today** — see §7.
 
-What text gets embedded (`backend/src/services/embeddings.py:303-361`, `encode_job`):
+What text gets embedded (`services/embeddings.encode_job`):
 
 | Job has a `job_enrichment` row? | Text embedded |
 |---|---|
@@ -199,7 +199,7 @@ wired to any process (`scheduler.py:194-199` says so explicitly).
 | 6 | dedup **within the run** | `services/deduplicator.py` | 4 layers: exact key → RapidFuzz → TF-IDF → optional embedding-repost. |
 | 7 | score floor | same thread | `MIN_STORE_SCORE` drop. |
 | 8 | **UK gate** | `services/uk_gate.check_uk`, `main.py:1040` | THE single chokepoint that refuses foreign jobs (hard rule #30). Not per-source, not a penalty. |
-| 9 | insert | `database.py:372-448` `insert_job()` | `INSERT OR IGNORE` on the UNIQUE key. Duplicate silently no-ops (`rowcount=0`). **One exception:** if duplicate AND incoming description is non-empty while stored one is empty, a separate UPDATE backfills the description. Empty→non-empty is the only allowed transition. Each insert is in its own try/except so one poison row never aborts the run. |
+| 9 | insert | `repositories/database.Database.insert_job` | `INSERT OR IGNORE` on the UNIQUE key. Duplicate silently no-ops (`rowcount=0`). **One exception:** if duplicate AND incoming description is non-empty while stored one is empty, a separate UPDATE backfills the description. Empty→non-empty is the only allowed transition. Each insert is in its own try/except so one poison row never aborts the run. |
 
 ### 3.1 The only normalization that exists
 
@@ -250,9 +250,9 @@ Short answer: **it mostly doesn't.**
 
 ### 4.1 Removal — the only real DELETE
 
-`purge_old_jobs()`, `backend/src/repositories/database.py:674-730`.
-Deletes where `COALESCE(last_seen_at, first_seen) < now - 30 days`.
-Keyed on **LIVENESS**, not age — a job re-scraped daily never ages out, ever.
+`repositories/database.Database.purge_old_jobs` — keyed on **LIVENESS**, not age: a job
+re-scraped daily never ages out, ever. Pinned by
+`tests/test_db_purge_logging.py::test_purge_keeps_still_live_jobs`.
 
 It is **not its own cron**. It runs inline inside `run_search()` (`main.py:839-842`),
 so it fires on the 04:00 UTC `refresh_catalog` cron and on any user search.
@@ -624,8 +624,8 @@ No other source carries a documented hard external quota.
 
 | # | Problem | Evidence | Impact |
 |---|---|---|---|
-| **B1** | **Embedding backfill can never run.** `backend/Dockerfile` installs `.[semantic]` + torch (line 20); `backend/Dockerfile.worker` installs plain `.` (line 17) — no sentence-transformers. The ARQ worker is exactly where `refresh_catalog` + the embedding backfill run (`workers/tasks.py:1293-1330`). | `job_embeddings` = 687 rows on both 2026-08-15 and 2026-08-16 while `jobs` grew 9,977 → 10,579. `EMBED_BACKFILL_PER_RUN=300` (`settings.py:227`) means it *should* be attempting 300/run. | 95.7% of the catalog is invisible to semantic retrieval. Structural, not budget. |
-| **B2** | **JOB SOURCE ENRICHMENT has been stalled since 2026-08-08.** Cron `enrichment_sweep` fires every 30 min (`workers/settings.py:229`, budget `ENRICHMENT_MAX_JOBS=20`) and lands nothing. | `max(enriched_at)` = `2026-08-08T14:38:24Z`, measured live 2026-08-16. 0 rows in 24h, 0 in 7d. | Coverage frozen at 62% while the catalog grows. Root cause NOT diagnosed. |
+| **B1** | **Embedding backfill can never run.** `backend/Dockerfile` installs `.[semantic]` + torch (line 20); `backend/Dockerfile.worker` installs plain `.` (line 17) — no sentence-transformers. The ARQ worker is exactly where `workers/tasks.refresh_catalog` + the embedding backfill run. | `job_embeddings` = 687 rows on both 2026-08-15 and 2026-08-16 while `jobs` grew 9,977 → 10,579. `core/settings.EMBED_BACKFILL_PER_RUN` (default 300) means it *should* be attempting 300/run. | 95.7% of the catalog is invisible to semantic retrieval. Structural, not budget. |
+| **B2** | **JOB SOURCE ENRICHMENT has been stalled since 2026-08-08.** Cron `enrichment_sweep` fires every 30 min (registered in `workers/settings`, budget `ENRICHMENT_MAX_JOBS=20`) and lands nothing. | `max(enriched_at)` = `2026-08-08T14:38:24Z`, measured live 2026-08-16. 0 rows in 24h, 0 in 7d. | Coverage frozen at 62% while the catalog grows. Root cause NOT diagnosed. |
 | **B3** | **No job-liveness check exists.** The `apply_url` is never re-fetched. `CONFIRMED_EXPIRED`'s docstring promises "a later direct-URL verification step" that was never built. | Zero grep hits in `backend/src/`. The 242 `confirmed_expired` rows have `min(consecutive_misses)=0` — set by `scripts/uk_sweep.py`, not by absence. | Dead links stay in the catalog indefinitely. |
 | **B4** | **`likely_stale` does nothing.** 5,060 jobs (47.8%) flagged probably-dead remain fully present and searchable; the flag's only consumer is `should_exclude_from_24h()` (`ghost_detection.py:48-50`). | State counts, §4.2 | Half the catalog may be dead and users still see it. |
 | **B5** | **Deadline is 1.3% filled and the structured path is 0%.** 8 source files can set `deadline_source='listing'`; that value appears 0 times in prod. 24 jobs are past their own deadline and still shown. | §4.4 | Expired postings shown as live. |

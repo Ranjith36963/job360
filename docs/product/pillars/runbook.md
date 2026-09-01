@@ -385,12 +385,12 @@ dies with the web process (`profile.py:179-184`).
 
 What `rescore_user_feed` actually does, precisely:
 
-- It reads **up to 50,000** catalog rows — `get_catalog_jobs_for_rescore(limit=50000)`, `backend/src/repositories/database.py:750-777`. The SQL is `SELECT … FROM jobs ORDER BY date_found DESC LIMIT ?` with **no date predicate**. The 30-day horizon people quote is a *consequence* of `purge_old_jobs()` capping the catalog, not a filter in this query — and the limit is deliberately set far above the catalog so a "full re-score" really is one.
+- It reads the catalog via `repositories/database.Database.get_catalog_jobs_for_rescore`, which has **no date predicate**. The 30-day horizon people quote is a *consequence* of `purge_old_jobs()` capping the catalog, not a filter in this query — and the row limit is deliberately set far above the catalog so a "full re-score" really is one.
 - It clears the user's LLM verdicts **only when `ENGINE4_ENABLED or MATCHER_ENABLED`** (`backend/src/services/rescore.py:589,595-598`). With the judge off — the default — no verdict is touched.
 
 And the part that is easy to get wrong:
 
-- **Ordinary searches do re-score.** `run_search` calls `backfill_feed_from_catalog(user_id, db)` on **every** authenticated search (`backend/src/main.py:1272-1278`), which scores the whole catalog for that user and upserts feed rows. It is not "newly-fetched jobs only".
+- **Ordinary searches do re-score.** `src/main.run_search` calls `services/rescore.backfill_feed_from_catalog` on **every** authenticated search — even one that fetched nothing — which scores the whole catalog for that user and upserts feed rows. It is not "newly-fetched jobs only". The call is best-effort: it is wrapped so a failure logs a warning and never fails the run.
 - **But an existing row's score still doesn't drift.** `upsert_feed_row` applies a *version-conditional freeze*: on an existing row the score is kept when the incoming `profile_version` **and** `scorer_version` both match what's stored, and overwritten when either differs (`backend/src/services/feed.py:288-303`). So a score moves when the PROFILE changes or `SCORER_VERSION` is bumped — never merely because time passed. `bucket` and both version stamps are always rewritten.
 - The mechanism is that freeze, **not** `skip_existing`. `match_batch(..., skip_existing=True)` (`backend/src/services/llm_matcher.py:436,443`) stops the LLM re-judging a job it already judged for this user — it guards verdicts, not keyword scores.
 - **Dashboard reads** use whatever's in `user_feed` *now* — so a read landing before the worker drains still shows old scores.
