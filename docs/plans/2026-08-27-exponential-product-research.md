@@ -212,3 +212,45 @@ Plaid, Stripe logic).
 users tomorrow. It cannot make it work in a rival, watch Gmail outside a chat, aggregate
 across users, or publish employer scores. The defence is neutral + durable +
 outcome-backed + cross-user, together — not "they can't build memory".
+
+---
+
+## 7. Tsenta — the closest competitor (read 2026-09-01)
+
+**Verified:** YC S26, two student founders (Rose-Hulman), launched June 2026, SF.
+Self-reported 45k–70k users, "70% of paid users landed interviews"; no independent
+reviews, GitHub org empty (MCP server is a landing-page claim, unverified).
+https://tsenta.com/ · https://www.ycombinator.com/companies/tsenta ·
+https://www.loopcv.pro/directory/tsenta/
+
+**What they do:** watch 50,000+ career pages across 19 ATSes directly (bypass boards);
+auto-apply a tailored CV the moment a role posts ("applicant #4 of 312"); review queue +
+diff view; **receipt per application** (fields, answers, CV, cover letter, confirmation,
+"flag for next time"); **Gmail connected** — reads replies/invites/rejections, updates
+tracker, drafts recruiter replies to Drafts (never sends), enters emailed verification
+codes; surfaces: web, iOS, Android, Chrome, iMessage, WhatsApp, MCP (Claude + Codex), CLI.
+**Priced per application:** $19/600, $39/1,500, $99/4,500 per month.
+
+**Read:**
+- Closest thing to §3's roadmap that exists: Tier 0, half of Tier 1, Tier 2 — in one
+  summer. That is the bar for speed.
+- Core bet is the opposite of ours: an apply machine priced by volume. Revenue scales with
+  submissions; data says volume halves conversion; platforms are fighting the surface.
+  Their FAQ: "does not promise that automated assistance is undetectable."
+- Their receipt is a spoon, not the plate: it records only what Tsenta submitted. Not
+  neutral; boards and employers see a flood. Vendor-locked memory at startup scale.
+- The danger is their data, not their product: 70k users × volume × Gmail accumulates
+  outcome data faster than 0 users. If they pivot from apply-machine to record, they are
+  the plate with a head start. Cannot be out-waited.
+- Our thesis survives only in the parts they cannot do: neutral record across every source
+  (including Tsenta), outcome-backed cross-user truth layer (they cannot indict the
+  applications they are paid to send), no submission (nothing to ban), MCP both ways, no
+  per-application pricing incentive.
+
+**Take from them now:** the receipt shape (copy exactly; ours overwrites); Gmail
+drafts-not-sends; diff view before approval; queue position as a freshness metric; one
+agent on every surface.
+
+**The move:** be the plate *under* Tsenta. In Box 2 their MCP and ours sit in the same
+client: they apply, we remember — their applications, LinkedIn's, the recruiter's email.
+A position they structurally cannot take; a competitor becomes a source.
