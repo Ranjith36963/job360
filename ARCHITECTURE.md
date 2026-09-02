@@ -22,7 +22,7 @@ Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from 
 | Enrichment enum values | **7** | `services/enrichment` schema |
 | Migration files | **34** | `backend/migrations/*.up.sql` |
 | `test_*.py` files | **229** | `backend/tests/` |
-| GitHub Actions workflows | **30** | `.github/workflows/` |
+| GitHub Actions workflows | **31** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
 
