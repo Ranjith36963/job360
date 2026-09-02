@@ -158,6 +158,11 @@ MIN_MATCH_SCORE = 30
 # profile (or a job that simply aged past the recency bands) lost jobs forever
 # with no way to get them back. Store broadly, filter at read time.
 MIN_STORE_SCORE = int(os.getenv("MIN_STORE_SCORE", "1"))
+# USER_BROUGHT_SOURCE — the `jobs.source` value for an ad the user pasted
+# (POST /jobs/bring). Not a scraper: it is outside SOURCE_REGISTRY and the
+# five-surface contract on purpose. Selection treats such rows as protected —
+# the user chose them, so no cap or score floor may evict them.
+USER_BROUGHT_SOURCE = "user_brought"
 # FEED_CANDIDATE_CAP — the User-Level candidate bound (funnel Stage-1,
 # 2026-08-05). user_feed is a bounded per-user CANDIDATE SET, not a mirror of
 # the shared catalog: only the user's top-N jobs by score enter/stay in it

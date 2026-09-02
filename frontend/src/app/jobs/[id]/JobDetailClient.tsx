@@ -35,6 +35,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScoreRadar } from "@/components/jobs/ScoreRadar";
 import { ScoreCounter } from "@/components/jobs/ScoreCounter";
 import { ApplyButton } from "@/components/jobs/ApplyButton";
+import { ReceiptButton } from "@/components/jobs/ReceiptButton";
 import { TailorSection } from "@/components/tailor/TailorSection";
 
 // ---------------------------------------------------------------------------
@@ -487,20 +488,35 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
               <h2 className="font-heading text-sm font-semibold uppercase tracking-wider text-primary/80">
                 About this role
               </h2>
-              <p className="text-sm leading-relaxed text-muted-foreground">
-                Full job descriptions are available on the source website. Click
-                the button below to view the complete listing and apply.
-              </p>
-              <a href={safeUrl(job.apply_url)} target="_blank" rel="noopener noreferrer">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 border-primary/20 text-primary hover:bg-primary/10"
+              {job.source === "user_brought" && job.description ? (
+                // The user pasted this ad (there may be no source website to
+                // read it on), so show it as written.
+                <p
+                  data-testid="brought-description"
+                  className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground"
                 >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  View full description on source website
-                </Button>
-              </a>
+                  {job.description}
+                </p>
+              ) : (
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  Full job descriptions are available on the source website. Click
+                  the button below to view the complete listing and apply.
+                </p>
+              )}
+              {job.apply_url && (
+                <a href={safeUrl(job.apply_url)} target="_blank" rel="noopener noreferrer">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 border-primary/20 text-primary hover:bg-primary/10"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    {job.source === "user_brought"
+                      ? "Open the ad"
+                      : "View full description on source website"}
+                  </Button>
+                </a>
+              )}
             </div>
 
             {/* Tailor with AI — prominent section (spec §3.5): CV + cover letter,
@@ -637,8 +653,17 @@ export function JobDetailClient({ jobId }: { jobId: number }) {
 
             {/* Action buttons */}
             <div className="glass-card flex flex-col gap-3 rounded-2xl p-6 animate-fade-in-up stagger-4">
-              {/* Apply Now — opens URL + tracks in pipeline */}
-              <ApplyButton job={job} fullWidth />
+              {/* Apply Now — opens URL + tracks in pipeline. Hidden when the
+                  user brought the ad without a link: there is nothing to open. */}
+              {job.apply_url && <ApplyButton job={job} fullWidth />}
+
+              {/* I applied — freezes the receipt (what was sent, forever). */}
+              <ReceiptButton
+                job={job}
+                onApplied={() =>
+                  setJob((prev) => (prev ? { ...prev, action: "applied" } : prev))
+                }
+              />
 
               <div className="flex gap-3">
                 {/* Like toggle */}

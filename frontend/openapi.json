@@ -174,6 +174,69 @@
         "title": "Body_upsert_profile_api_profile_post",
         "type": "object"
       },
+      "BringJobRequest": {
+        "properties": {
+          "apply_url": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Apply Url",
+            "type": "string"
+          },
+          "company": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Company",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 40000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "location": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Location",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "company",
+          "description"
+        ],
+        "title": "BringJobRequest",
+        "type": "object"
+      },
+      "BringJobResponse": {
+        "properties": {
+          "existing": {
+            "title": "Existing",
+            "type": "boolean"
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobResponse"
+          },
+          "scored": {
+            "title": "Scored",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job",
+          "existing",
+          "scored"
+        ],
+        "title": "BringJobResponse",
+        "type": "object"
+      },
       "CVDetail": {
         "description": "Full extracted CV data for transparent display.",
         "properties": {
@@ -437,6 +500,24 @@
         "title": "ClientLogRequest",
         "type": "object"
       },
+      "CreateReceiptRequest": {
+        "properties": {
+          "channel": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Channel",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "title": "CreateReceiptRequest",
+        "type": "object"
+      },
       "EmailChangeRequest": {
         "properties": {
           "current_password": {
@@ -633,6 +714,17 @@
               }
             ],
             "title": "Dedup Group Ids"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "dims_active": {
             "default": false,
@@ -1836,6 +1928,214 @@
           "grounded"
         ],
         "title": "ProvenanceSegment",
+        "type": "object"
+      },
+      "Receipt": {
+        "properties": {
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "cover_letter_origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter Origin"
+          },
+          "cover_letter_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter Text"
+          },
+          "cv_origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Origin"
+          },
+          "cv_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Text"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_apply_url": {
+            "title": "Job Apply Url",
+            "type": "string"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_description": {
+            "title": "Job Description",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "job_location": {
+            "title": "Job Location",
+            "type": "string"
+          },
+          "job_source": {
+            "title": "Job Source",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version"
+          },
+          "sent_at": {
+            "title": "Sent At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "job_id",
+          "sent_at",
+          "job_title",
+          "job_company",
+          "job_location",
+          "job_apply_url",
+          "job_source",
+          "job_description",
+          "cv_text",
+          "cv_origin",
+          "cover_letter_text",
+          "cover_letter_origin",
+          "profile_version",
+          "channel",
+          "note"
+        ],
+        "title": "Receipt",
+        "type": "object"
+      },
+      "ReceiptListResponse": {
+        "properties": {
+          "receipts": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptSummary"
+            },
+            "title": "Receipts",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "receipts",
+          "total"
+        ],
+        "title": "ReceiptListResponse",
+        "type": "object"
+      },
+      "ReceiptSummary": {
+        "description": "List row: everything but the three long bodies.",
+        "properties": {
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "has_cover_letter": {
+            "title": "Has Cover Letter",
+            "type": "boolean"
+          },
+          "has_cv": {
+            "title": "Has Cv",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_apply_url": {
+            "title": "Job Apply Url",
+            "type": "string"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "job_location": {
+            "title": "Job Location",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "sent_at": {
+            "title": "Sent At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "job_id",
+          "sent_at",
+          "job_title",
+          "job_company",
+          "job_location",
+          "job_apply_url",
+          "has_cv",
+          "has_cover_letter",
+          "channel",
+          "note"
+        ],
+        "title": "ReceiptSummary",
         "type": "object"
       },
       "RegisterRequest": {
@@ -3544,6 +3844,66 @@
         ]
       }
     },
+    "/api/jobs/bring": {
+      "post": {
+        "description": "Store the pasted ad, score it against the caller's profile, put it in\ntheir feed. Returns the job exactly as GET /jobs/{id} would, so the\nfrontend can route straight to the detail page.",
+        "operationId": "bring_job_api_jobs_bring_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BringJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BringJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bring Job",
+        "tags": [
+          "bring"
+        ]
+      }
+    },
     "/api/jobs/export": {
       "get": {
         "description": "Download the caller's own recent matches as CSV.",
@@ -5168,6 +5528,221 @@
         "summary": "Readyz",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/receipts": {
+      "get": {
+        "operationId": "list_receipts_api_receipts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Receipts",
+        "tags": [
+          "receipts"
+        ]
+      }
+    },
+    "/api/receipts/{job_id}": {
+      "post": {
+        "description": "\"I applied\": freeze the receipt, then mark the job applied in BOTH\nexisting per-user tables (`user_actions` for the card, `applications` for\nthe pipeline) so every surface agrees.",
+        "operationId": "create_receipt_api_receipts__job_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReceiptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Receipt",
+        "tags": [
+          "receipts"
+        ]
+      }
+    },
+    "/api/receipts/{receipt_id}": {
+      "get": {
+        "operationId": "get_receipt_api_receipts__receipt_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receipt_id",
+            "required": true,
+            "schema": {
+              "title": "Receipt Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Receipt",
+        "tags": [
+          "receipts"
         ]
       }
     },

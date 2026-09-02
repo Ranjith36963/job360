@@ -437,6 +437,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/bring": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bring Job
+         * @description Store the pasted ad, score it against the caller's profile, put it in
+         *     their feed. Returns the job exactly as GET /jobs/{id} would, so the
+         *     frontend can route straight to the detail page.
+         */
+        post: operations["bring_job_api_jobs_bring_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/export": {
         parameters: {
             query?: never;
@@ -1025,6 +1047,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Receipts */
+        get: operations["list_receipts_api_receipts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/receipts/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Receipt
+         * @description "I applied": freeze the receipt, then mark the job applied in BOTH
+         *     existing per-user tables (`user_actions` for the card, `applications` for
+         *     the pipeline) so every surface agrees.
+         */
+        post: operations["create_receipt_api_receipts__job_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/receipts/{receipt_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Receipt */
+        get: operations["get_receipt_api_receipts__receipt_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/recent": {
         parameters: {
             query?: never;
@@ -1472,6 +1550,33 @@ export interface components {
             /** Preferences */
             preferences?: string;
         };
+        /** BringJobRequest */
+        BringJobRequest: {
+            /**
+             * Apply Url
+             * @default
+             */
+            apply_url: string;
+            /** Company */
+            company: string;
+            /** Description */
+            description: string;
+            /**
+             * Location
+             * @default
+             */
+            location: string;
+            /** Title */
+            title: string;
+        };
+        /** BringJobResponse */
+        BringJobResponse: {
+            /** Existing */
+            existing: boolean;
+            job: components["schemas"]["JobResponse"];
+            /** Scored */
+            scored: boolean;
+        };
         /**
          * CVDetail
          * @description Full extracted CV data for transparent display.
@@ -1622,6 +1727,19 @@ export interface components {
             /** Url */
             url?: string | null;
         };
+        /** CreateReceiptRequest */
+        CreateReceiptRequest: {
+            /**
+             * Channel
+             * @default
+             */
+            channel: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
         /** EmailChangeRequest */
         EmailChangeRequest: {
             /** Current Password */
@@ -1700,6 +1818,8 @@ export interface components {
             deadline_source?: string | null;
             /** Dedup Group Ids */
             dedup_group_ids?: number[] | null;
+            /** Description */
+            description?: string | null;
             /**
              * Dims Active
              * @default false
@@ -2227,6 +2347,76 @@ export interface components {
             grounded: boolean;
             /** Text */
             text: string;
+        };
+        /** Receipt */
+        Receipt: {
+            /** Channel */
+            channel: string;
+            /** Cover Letter Origin */
+            cover_letter_origin: string | null;
+            /** Cover Letter Text */
+            cover_letter_text: string | null;
+            /** Cv Origin */
+            cv_origin: string | null;
+            /** Cv Text */
+            cv_text: string | null;
+            /** Id */
+            id: number;
+            /** Job Apply Url */
+            job_apply_url: string;
+            /** Job Company */
+            job_company: string;
+            /** Job Description */
+            job_description: string;
+            /** Job Id */
+            job_id: number;
+            /** Job Location */
+            job_location: string;
+            /** Job Source */
+            job_source: string;
+            /** Job Title */
+            job_title: string;
+            /** Note */
+            note: string;
+            /** Profile Version */
+            profile_version: number | null;
+            /** Sent At */
+            sent_at: string;
+        };
+        /** ReceiptListResponse */
+        ReceiptListResponse: {
+            /** Receipts */
+            receipts: components["schemas"]["ReceiptSummary"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ReceiptSummary
+         * @description List row: everything but the three long bodies.
+         */
+        ReceiptSummary: {
+            /** Channel */
+            channel: string;
+            /** Has Cover Letter */
+            has_cover_letter: boolean;
+            /** Has Cv */
+            has_cv: boolean;
+            /** Id */
+            id: number;
+            /** Job Apply Url */
+            job_apply_url: string;
+            /** Job Company */
+            job_company: string;
+            /** Job Id */
+            job_id: number;
+            /** Job Location */
+            job_location: string;
+            /** Job Title */
+            job_title: string;
+            /** Note */
+            note: string;
+            /** Sent At */
+            sent_at: string;
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -3090,6 +3280,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bring_job_api_jobs_bring_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BringJobRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BringJobResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3998,6 +4223,111 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_receipts_api_receipts_get: {
+        parameters: {
+            query?: {
+                job_id?: number | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_receipt_api_receipts__job_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateReceiptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Receipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_receipt_api_receipts__receipt_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                receipt_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Receipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
