@@ -254,3 +254,56 @@ agent on every surface.
 **The move:** be the plate *under* Tsenta. In Box 2 their MCP and ours sit in the same
 client: they apply, we remember — their applications, LinkedIn's, the recruiter's email.
 A position they structurally cannot take; a competitor becomes a source.
+
+---
+
+## 8. THE PIVOT — owner's decision, 2026-09-02. This section supersedes where they conflict.
+
+The 2026-09-01 park is lifted. The project restarts as a **career-ops ecosystem that
+fills only the gaps** — it never rebuilds what already works elsewhere.
+
+**The five rules:**
+1. **Never source, never recommend jobs.** Matching runs ONLY on a job the user brings —
+   a pasted link or description, from any board, any country, or their own AI assistant.
+   A fit verdict + skill gaps on *that* job is in scope; "here are jobs for you" is not.
+   (Also kills the weakest part of Tsenta — its 3.3–3.6-star store reviews complain about
+   the recommendation engine, not the ops.)
+2. **Everything after the click is the product.** Receipt, tracker, outreach log,
+   interview record, outcome capture, silence-as-signal, improvement loop — the seven
+   stages nobody fills (see the map below).
+3. **No volume auto-submit.** Single, user-initiated, assisted applications only.
+4. **Free for seekers AND recruiters until value is proven.** "The experience becomes the
+   product." Monetisation is decided later, on evidence. Recruiter-side revenue only ever
+   consent-first per INTENTION.md §11 — verified 2026-09-02: Hired.com (once $500M) shut
+   down May 2024 and Triplebyte died 2024 selling candidate access; the surviving version
+   is the candidate approving each introduction.
+5. **The catalog stays parked.** 40 sources, scrapers, scheduler, country/gazetteer work —
+   all of it. Bring-your-own-job makes the product global on day 1 with zero country work.
+
+**The gaps-only map** (build only the right column):
+
+| Stage | Solved elsewhere — leave it | The gap — ours |
+|---|---|---|
+| Find jobs | boards + assistants | nothing |
+| Decide | nobody | fit verdict + gaps + red flags on the job the user brings |
+| Prepare | assistants write CVs | versioned tailoring with a diff, tied to job + profile version |
+| Apply | the human / their agent | **the receipt** — exact CV, letter, answers, moment; immutable |
+| Outreach | Apollo, Gmail | the log: who, what, when (no table exists today) |
+| Wait | nobody | silence-as-signal from the watched inbox |
+| Interview | prep content everywhere | the per-round record: prepared, asked |
+| Outcome | nobody | offer/rejection/reason captured |
+| Learn | nobody | the loop: what worked, what to change |
+| Next search | zero everywhere | the exportable career file |
+
+**Surfaces: two.** Web app + MCP server (any agent: Claude, Codex, ChatGPT, Gemini). Every
+capability in both or it is unfinished (INTENTION.md §3.3).
+
+**Slice one:** bring-a-job + the receipt. Paste URL/description → pipeline + fit verdict →
+tailor with diff → approve → mark applied → receipt frozen (fixes the
+`UNIQUE(user_id, job_id, doc_kind)` overwrite in `tailored_documents`) →
+"what did I send X?" answered in the UI and as MCP tool #1. First test: the owner uses it
+for his own next real application.
+
+INTENTION.md (branch `worktree-feat+mcp-server-design`) remains the constitution; its §5
+lifecycle table is this same roadmap. This pivot narrows the build order, it does not
+change the convictions.
