@@ -58,7 +58,14 @@ FP_START="$(tree_fingerprint)"
 # with the connection, so a hard-killed gate can never leave a stale lockfile.
 LOCK_HELD=""
 if command -v python >/dev/null 2>&1; then
-  LOCK_OUT="$(cd backend 2>/dev/null && python - <<'PYLOCK' 2>/dev/null || true
+  # `|| true` must sit AFTER the closing `)`, not on the heredoc opener line.
+  # Bash 5.2 re-parses a command substitution properly instead of scanning for
+  # the matching paren; with `|| true` inside, the heredoc body is consumed and
+  # the leftover ` || true)"` is re-parsed on its own -> "syntax error near
+  # unexpected token `||'", and the gate aborts before running a single test.
+  # `bash -n` does NOT catch it (the commit-gate hook's own syntax check passes),
+  # so the gate looked healthy while being dead on every bash >= 5.2.
+  LOCK_OUT="$(cd backend 2>/dev/null && python - <<'PYLOCK' 2>/dev/null
 import sys
 try:
     import psycopg
@@ -79,7 +86,7 @@ try:
 except Exception:
     print("UNKNOWN")
 PYLOCK
-)"
+)" || true
   if [ "$LOCK_OUT" = "BUSY" ]; then
     echo "[gate] ABORT: another gate is already running against this Postgres." >&2
     echo "[gate] Wait for it — do NOT run a second gate. Concurrent suites share" >&2

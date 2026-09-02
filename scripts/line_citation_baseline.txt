@@ -15,19 +15,18 @@
 # would not be.
 
 .claude/skills/add-source/SKILL.md 1
-.claude/skills/hard-rules/SKILL.md 4
+.claude/skills/hard-rules/SKILL.md 2
 .claude/skills/health/SKILL.md 4
-.claude/skills/worker/SKILL.md 1
-ARCHITECTURE.md 49
-README.md 11
-STATUS.md 15
+ARCHITECTURE.md 31
+README.md 3
+STATUS.md 3
 STORY.md 4
 backend/CLAUDE.md 2
 docs/product/MONETIZATION_GAPS.md 3
 docs/product/pillars/01-user-pillar.md 61
-docs/product/pillars/02-search-and-match-engine.md 70
+docs/product/pillars/02-search-and-match-engine.md 46
 docs/product/pillars/03-job-providers.md 30
-docs/product/pillars/glossary.md 15
-docs/product/pillars/runbook.md 23
+docs/product/pillars/glossary.md 6
+docs/product/pillars/runbook.md 22
 docs/product/product_design_rules.md 5
 docs/product/troubleshooting.md 7
