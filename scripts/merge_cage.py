@@ -2565,6 +2565,50 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     ok("...and it squashes, matching the one merge shape this repo already uses",
        "--squash" in _argv, f"the command was {_argv}", ["request_auto_merge"])
 
+    # B21 — THE CAGE CAN TAKE A YES BACK. `--auto` waits on eleven required
+    #       contexts and none of them is "no unresolved review threads", so a
+    #       Critical finding posted after queueing produces no red check and the
+    #       merge lands. The withdrawal is what makes the queue revisitable.
+    _seen_out: list[list[str]] = []
+
+    class _FakeOut:
+        returncode = 0
+        stdout = "auto-merge disabled"
+        stderr = ""
+
+    def _spy_out(cmd, *_a, **_k):  # noqa: ANN001
+        _seen_out.append(list(cmd))
+        return _FakeOut()
+
+    _saved2 = subprocess.run
+    try:
+        subprocess.run = _spy_out  # type: ignore[assignment]
+        withdraw_auto_merge(1)
+    finally:
+        subprocess.run = _saved2  # type: ignore[assignment]
+    _out_argv = _seen_out[0] if _seen_out else []
+    ok("a refusal can take a PR back OUT of the queue",
+       "--disable-auto" in _out_argv,
+       f"the command was {_out_argv} — without `--disable-auto` a PR queued while it "
+       f"looked clean stays queued after the cage changes its mind, and GitHub merges it",
+       ["withdraw_auto_merge"])
+
+    # ...and "it was never queued" must read as SUCCESS. A cleanup that fails
+    # loudly when the thing is already clean is a cleanup people switch off.
+    class _NotQueued:
+        returncode = 1
+        stdout = ""
+        stderr = "X Pull request #1 auto-merge is not enabled"
+
+    _saved3 = subprocess.run
+    try:
+        subprocess.run = lambda *_a, **_k: _NotQueued()  # type: ignore[assignment]
+        _ok_nq, _detail_nq = withdraw_auto_merge(1)
+    finally:
+        subprocess.run = _saved3  # type: ignore[assignment]
+    ok("...and withdrawing a PR that was never queued is a no-op, not an error",
+       _ok_nq, f"it reported failure with: {_detail_nq}", ["withdraw_auto_merge"])
+
     # ── COVERAGE + THE BLOCKER LOG ───────────────────────────────────────────
     missing = [f for f in DECISION_PATH if f not in touched]
     ok("COVERAGE (every function on the decision path is drilled)",
@@ -2754,6 +2798,45 @@ def request_auto_merge(pr: int) -> tuple[bool, str]:
     return False, (proc.stderr or proc.stdout or "no output").strip()[:300]
 
 
+def withdraw_auto_merge(pr: int) -> tuple[bool, str]:
+    """Take a PR OUT of GitHub's auto-merge queue. Returns (ok, detail).
+
+    THE GAP THIS CLOSES, AND WHY IT WAS THE LAST FAIL-OPEN IN THE CHAIN.
+
+    Queueing is a POINT-IN-TIME judgement. `--auto` then waits on GitHub's
+    ruleset, and none of its eleven required contexts is "no unresolved review
+    threads" — CodeRabbit runs with `fail_commit_status: false` deliberately, so
+    a finding never becomes a red check. So between the moment this cage says
+    yes and the moment GitHub lands the merge, a reviewer can post a Critical
+    finding and nothing stops it: REVIEW already ran, it does not run again, and
+    the queue does not care.
+
+    The arm re-judges a queued PR anyway — it wakes on `check_suite`,
+    `pull_request_review` and a 20-minute sweep, and it never skips a PR for
+    being queued (verified: `auto-merge.yml` has no `autoMergeRequest` filter).
+    Until now that re-judgement could only ever say YES again; a refusal was
+    printed and thrown away. This is the missing half. A cage that can queue and
+    cannot unqueue is a decision it is not allowed to revisit.
+
+    Deliberately symmetric with `request_auto_merge`: same triggers, same sweep,
+    opposite direction. And idempotent — withdrawing a PR that is not queued is
+    the state we were trying to reach, so it reports success rather than an
+    error. A cleanup that fails loudly when the thing is already clean gets
+    switched off.
+    """
+    proc = subprocess.run(
+        ["gh", "pr", "merge", str(pr), "--disable-auto"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+    )
+    if proc.returncode == 0:
+        return True, (proc.stdout or "auto-merge disabled").strip()[:300]
+    said = (proc.stderr or proc.stdout or "no output").strip()
+    low = said.lower()
+    if "auto-merge is not enabled" in low or "does not have auto-merge" in low:
+        return True, "was not queued — nothing to withdraw"
+    return False, said[:300]
+
+
 class _Parser(argparse.ArgumentParser):
     """argparse exits 2 on a usage error, which the caller reads as 'could not
     reach Slack — stop the sweep'. A bad flag must not be reported as an outage."""
@@ -2906,6 +2989,32 @@ def main(argv: list[str] | None = None) -> int:
         # THE ACT COMES BEFORE THE ANNOUNCEMENT, ALWAYS.
         queued = False
         queue_failed = False
+        # A REFUSAL MUST BE ABLE TO UNDO AN EARLIER YES (2026-08-27).
+        #
+        # This branch is the other half of the queue. `--auto` waits on GitHub's
+        # eleven required contexts and NONE of them is "no unresolved review
+        # threads" — CodeRabbit is configured `fail_commit_status: false`, so a
+        # Critical finding posted after queueing produces no red check and the
+        # merge lands anyway. The arm re-judges queued PRs on every sweep and
+        # every review event; it simply had no way to act on a No.
+        #
+        # Runs BEFORE the allowed branch and unconditionally on refusal, so the
+        # window between "the cage changed its mind" and "the PR is out of the
+        # queue" is one sweep at most, and a review event usually makes it
+        # seconds. Withdrawing something not queued is a no-op that says so.
+        if args.queue and not allowed:
+            ok_out, detail_out = withdraw_auto_merge(args.pr)
+            if ok_out:
+                print(f"WITHDRAWN: PR #{args.pr} is not allowed, so it is out of GitHub's "
+                      f"auto-merge queue — {detail_out}")
+            else:
+                print(f"COULD NOT WITHDRAW PR #{args.pr} from the auto-merge queue: "
+                      f"{detail_out}\n"
+                      f"  This is the dangerous direction: the cage now refuses this PR and "
+                      f"GitHub may still be holding it to merge. Disable it by hand: "
+                      f"`gh pr merge {args.pr} --disable-auto`.", file=sys.stderr)
+                print(f"::error::could not withdraw PR #{args.pr} from the auto-merge queue "
+                      f"after the cage refused it")
         if args.queue and allowed:
             ok_queue, detail = request_auto_merge(args.pr)
             if ok_queue:

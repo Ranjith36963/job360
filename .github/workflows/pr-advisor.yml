@@ -398,6 +398,45 @@ jobs:
           # this job cannot verify one is to withhold it.
           python scripts/lane.py --json verdict.json $(tr '\n' ' ' < changed.txt)
 
+      # ── THE LANE, WHERE THE OWNER CAN SEE IT (2026-08-27) ─────────────────
+      # The lane decided everything and appeared nowhere he looks. It was
+      # computed here, written into a comment, and that was all — so the PR
+      # LIST, the one screen you actually scan, showed no hint of who owned
+      # what. Four PRs sat for a day and a half and the reason was a lane
+      # nobody could see without opening a comment and reading it.
+      #
+      # Exactly one `lane:*` label at a time, so the label cannot say two
+      # things. Failure here is loud but not fatal: a missing label must not
+      # stop the advice from being posted.
+      - name: Stamp the lane on the PR
+        id: lanelabel
+        if: steps.rules.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pick.outputs.pr }}
+        run: |
+          set -euo pipefail
+          lane=$(python -c "import json;print(json.load(open('verdict.json')).get('lane',''))")
+          case "$lane" in
+            product)                    want="lane:product" ;;
+            harness)                    want="lane:harness" ;;
+            product_owner|harness_owner) want="lane:owner"  ;;
+            *)
+              echo "::warning::lane.py returned '$lane' — no label stamped"
+              exit 0 ;;
+          esac
+          for l in lane:product lane:harness lane:owner; do
+            [ "$l" = "$want" ] && continue
+            gh pr edit "$PR" --remove-label "$l" 2>/dev/null || true
+          done
+          if gh pr edit "$PR" --add-label "$want"; then
+            echo "lane label: \`$want\` (lane.py said \`$lane\`)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::could not add $want to PR #$PR — the lane is still only in the comment"
+          fi
+          echo "lane=$lane" >> "$GITHUB_OUTPUT"
+
       # RUN THE RULES' COPY OF THE SCRIPT, AGAINST THE PR'S TREE. Both halves
       # matter. Pointing `--repo` at the default-branch checkout instead would
       # compare that branch to itself, find zero renames, print "no stale
