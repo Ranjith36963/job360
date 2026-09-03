@@ -1777,6 +1777,7 @@ class JobDatabase:
     # schema turns "delete my account" into an UndefinedTable crash (rule #26).
     # The list and the schema must move together, in the same commit.
     _PER_USER_TABLES = (
+        "application_receipts",
         "application_stage_history", "applications", "email_verifications",
         "notification_ledger", "notification_rules",
         "password_resets", "sessions", "tailored_documents", "tailored_usage",
@@ -1792,7 +1793,7 @@ class JobDatabase:
     # (`oauth_states` used to be on that excluded list too — the table itself is
     # gone as of migration 0031.)
     _EXPORT_TABLES = (
-        "applications", "application_stage_history", "audit_log",
+        "application_receipts", "applications", "application_stage_history", "audit_log",
         "notification_ledger", "notification_rules", "tailored_documents",
         "tailored_usage", "user_actions", "user_channels", "user_feed",
         "user_profile_versions", "user_profiles",
