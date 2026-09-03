@@ -1,6 +1,8 @@
 # LAUNCH_PLAN.md — From verified app to live SaaS
 <!-- doc: PLAN -->
 
+> **⚠️ SOURCING ERA — superseded 2026-09-03.** Job360 no longer sources, ranks or recommends jobs. The seeker's own AI agent does that; Job360 is the agent's memory (profile, artifact versions, typed events, receipts). Read [`docs/product/VISION.md`](docs/product/VISION.md) first — it wins over anything below. This file is kept as history only. Phases that assume the ARQ worker, Redis, or the scorer/enrichment rollout are dead — those services were deleted 2026-09-02.
+
 > **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 > Updated 2026-06-21: Phase −2/−1 build+verify items are shipped (see docs/harness/CHECKLIST_KANBAN.md).

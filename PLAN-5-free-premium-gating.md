@@ -1,6 +1,8 @@
 # PLAN 5 — Free/Premium plan gating, Phase 1 (no payments)
 <!-- doc: PLAN -->
 
+> **⚠️ SOURCING ERA — superseded 2026-09-03.** Job360 no longer sources, ranks or recommends jobs. The seeker's own AI agent does that; Job360 is the agent's memory (profile, artifact versions, typed events, receipts). Read [`docs/product/VISION.md`](docs/product/VISION.md) first — it wins over anything below. This file is kept as history only. Job360 is free for seekers until value is proven (rule 6); no plan/paywall work is planned.
+
 > **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
