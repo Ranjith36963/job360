@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 
 logger = logging.getLogger("job360.profile.deps")
 
@@ -115,13 +116,17 @@ def _parse_pyproject_via_tomllib(content: str) -> set[str] | None:
     fall back to the regex path. Returns an empty set if parsing
     succeeds but finds no deps.
     """
+    # The stdlib module only exists on 3.11+; `tomli` is the same parser
+    # backported. Written as a version check rather than a try/except-import
+    # chain because that chain re-binds one name from two modules, which is a
+    # redefinition to a type checker (and left a stale ignore behind).
     try:
-        import tomllib  # type: ignore[import-not-found]
+        if sys.version_info >= (3, 11):
+            import tomllib
+        else:
+            import tomli as tomllib
     except ImportError:
-        try:
-            import tomli as tomllib  # type: ignore[import-not-found, unused-ignore]
-        except ImportError:
-            return None
+        return None
     try:
         data = tomllib.loads(content)
     except Exception:  # noqa: BLE001

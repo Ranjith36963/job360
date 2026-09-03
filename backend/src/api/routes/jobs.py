@@ -628,7 +628,7 @@ async def list_jobs(
             ) is VisaStatus.SPONSORS
         ]
     elif visa_only:
-        def _visa_rank(r: dict) -> int:
+        def _visa_rank(r: dict[str, Any]) -> int:
             st = detect_visa_status(
                 r.get("description", ""), r.get("title", ""),
                 enrichment_value=r.get("visa_sponsorship"),
