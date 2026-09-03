@@ -15,13 +15,13 @@ Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from 
 | Unique source classes | **40** | same dict — `indeed` and `glassdoor` both alias `JobSpySource` |
 | `RATE_LIMITS` entries | **41** | `core/settings.py` `RATE_LIMITS` |
 | `LOCATIONS` entries | **26** | `core/keywords.py` `LOCATIONS` |
-| Migration head | **0034** | `backend/migrations/` |
+| Migration head | **0035** | `backend/migrations/` |
 | `SCORER_VERSION` | **8** | `services/skill_matcher.SCORER_VERSION` |
 | `BaseJobSource` subclasses | **40** | `src/sources/` |
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
-| Migration files | **35** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **232** | `backend/tests/` |
+| Migration files | **36** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **235** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -738,8 +738,11 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/tailor/{job_id}/{doc_kind}/download` | `tailor.py` |
 | `POST` | `/api/tailor/{job_id}/{doc_kind}/keep` | `tailor.py` |
 | `GET` | `/api/tailor/{job_id}/{doc_kind}/provenance` | `tailor.py` |
+| `GET` | `/api/tokens` | `tokens.py` |
+| `POST` | `/api/tokens` | `tokens.py` |
+| `DELETE` | `/api/tokens/{token_id}` | `tokens.py` |
 
-**69 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + `include_router(prefix="/api")`.
+**72 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + `include_router(prefix="/api")`.
 <!-- /generated -->
 
 ## Configuration
