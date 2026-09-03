@@ -260,6 +260,18 @@ TAILOR_FREE_PER_MONTH = int(os.getenv("TAILOR_FREE_PER_MONTH", "10"))
 # Set 0 to disable the cap entirely.
 PROFILE_EXTRACT_MAX_PER_HOUR = int(os.getenv("PROFILE_EXTRACT_MAX_PER_HOUR", "12"))
 
+# Personal API tokens + MCP (docs/plans/2026-09-03-mcp-server). Read through
+# `settings.X` at call time, never bound at import — tests monkeypatch them.
+# Active (unrevoked) tokens one user may hold. 10 = one per client/machine.
+API_TOKENS_PER_USER = int(os.getenv("API_TOKENS_PER_USER", "10"))
+# Failed bearer attempts per client IP per minute before 429 (brute-force brake;
+# the token itself is 256-bit random, this just makes guessing loud and slow).
+API_TOKEN_FAIL_MAX_PER_MIN = int(os.getenv("API_TOKEN_FAIL_MAX_PER_MIN", "30"))
+# Comma-separated Host values the MCP transport accepts (DNS-rebinding guard).
+# Empty = off: the backend sits behind the Next rewrite, so the Host header is
+# Railway's internal name, not job360.uk. The bearer token is the real guard.
+MCP_ALLOWED_HOSTS = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+
 # Pillar 2 Batch 2.6 — semantic stack feature flag.
 # When false (default), embeddings + ChromaDB + ESCO normalisation all skip.
 # When true, callers that check this flag activate the semantic retrieval path.
