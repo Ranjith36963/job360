@@ -87,19 +87,27 @@ async def _current_user_from_bearer(request: Request, token: str) -> CurrentUser
 
     Failed attempts are rate-limited per client IP (``API_TOKEN_FAIL_MAX_PER_MIN``):
     a 256-bit token cannot be guessed, but a guesser should be slow and loud.
+
+    The token is resolved FIRST and the throttle consulted only on failure: a
+    credential that verifies is never brute force, so it must never be refused
+    because of someone else's junk. Behind the Next.js rewrite every agent
+    shares the proxy's IP (unless ``JOB360_TRUST_PROXY=1``), so a lock checked
+    before the lookup would let one bad client 429 every valid token. The cost
+    is one indexed hash lookup per junk attempt — cheap, and bounded by 429.
     """
-    limit = settings.API_TOKEN_FAIL_MAX_PER_MIN
-    ip = _client_ip(request)
-    fail_key = f"api_token_fail:{ip}"
-    if limit > 0 and auth_rate_limit.is_locked(fail_key, max_failures=limit, window_seconds=60):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="too many failed token attempts",
-            headers=_BEARER_CHALLENGE,
-        )
     owner = await auth_api_tokens.resolve(str(DB_PATH), token)
     if owner is None:
+        limit = settings.API_TOKEN_FAIL_MAX_PER_MIN
         if limit > 0:
+            fail_key = f"api_token_fail:{_client_ip(request)}"
+            # is_locked prunes the window; checking it before recording keeps
+            # the bucket bounded (same order the login route uses).
+            if auth_rate_limit.is_locked(fail_key, max_failures=limit, window_seconds=60):
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="too many failed token attempts",
+                    headers=_BEARER_CHALLENGE,
+                )
             auth_rate_limit.record_failure(fail_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

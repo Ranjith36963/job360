@@ -33,7 +33,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from src.api.auth_deps import CurrentUser, resolve_current_user
+from src.api.auth_deps import CurrentUser, require_verified_user, resolve_current_user
 from src.utils.logger import get_audit_logger, get_logger
 
 if TYPE_CHECKING:  # pragma: no cover — type-only; the SDK is lazy-imported at runtime
@@ -70,6 +70,17 @@ def _user() -> CurrentUser:
     if user is None:  # pragma: no cover — the shim refuses unauthenticated requests
         raise RuntimeError("MCP tool called with no authenticated user")
     return user
+
+
+async def _verified_user() -> CurrentUser:
+    """``_user()`` plus the email gate the HTTP route puts in ``Depends``.
+
+    Tools call route *functions* directly, so a route's ``Depends(...)`` chain
+    never runs here — every gate the route declares has to be re-applied by
+    hand. Use this for any tool whose route is ``Depends(require_verified_user)``
+    (``tests/test_mcp_gate_parity.py`` pins the mapping).
+    """
+    return await require_verified_user(_user())
 
 
 def _request_db() -> AbstractAsyncContextManager[JobDatabase]:
@@ -296,7 +307,7 @@ def build_server() -> MCPServer:
         check before applying."""
         try:
             async with _request_db() as db:
-                resp = await tailor_route.generate(job_id, db, _user())
+                resp = await tailor_route.generate(job_id, db, await _verified_user())
         except HTTPException as exc:
             _audit("tailor_documents", "error", job_id=job_id, http_status=exc.status_code)
             raise _tool_error(exc) from None
@@ -309,7 +320,7 @@ def build_server() -> MCPServer:
         404 if none exist yet — call tailor_documents first."""
         try:
             async with _request_db() as db:
-                resp = await tailor_route.get_tailored(job_id, db, _user())
+                resp = await tailor_route.get_tailored(job_id, db, await _verified_user())
         except HTTPException as exc:
             _audit("get_tailored_documents", "error", job_id=job_id, http_status=exc.status_code)
             raise _tool_error(exc) from None

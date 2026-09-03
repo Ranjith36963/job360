@@ -54,4 +54,34 @@ Docs
 - Verifier report + screenshots on the PR; a real Claude Code `bring_job` call in the PR body.
 
 ## Diff vs plan
-(filled before the PR is opened)
+
+What changed between the plan and what shipped, and why:
+
+- **`/api/mcp` is a `Route`, not a `Mount`.** A Mount answers the slash-less
+  path with a 307 that MCP clients do not follow. A callable *instance* on
+  `add_route` gets the raw ASGI triple the SDK transport needs.
+- **Data export is flattened** (`{"exported_at", **data}`), no `.data` nesting —
+  nothing consumed the nested shape.
+- **Review pass (bugs lens) found two Important bugs, both fixed + pinned**
+  (`tests/test_mcp_gate_parity.py`): (1) tools call route *functions*, so a
+  route's `Depends(require_verified_user)` never ran on the agent surface —
+  the two tailor tools now go through `_verified_user()`, and a parity test
+  reads each route's gate off its signature; (2) the failed-bearer throttle
+  was checked before the lookup and keyed by IP only — behind the Next rewrite
+  every agent shares one IP, so one junk client could 429 every valid token.
+  Now: resolve first, throttle failures only. A Minor read-then-write race on
+  the per-user token cap (self-inflicted, session-only) is left as is.
+- **Conventions pass:** `tokens` added to the route-auth guard, three env vars
+  documented in ARCHITECTURE.md, README says Python 3.10+ (`mcp` needs it).
+  The two "Python 3.9+" lines in root/backend CLAUDE.md are the owner's.
+- **The mypy ratchet was dead in CI** — since at least 2026-08-14 the step took
+  1s: mypy exited 2 (numpy's stubs use PEP 695 `type` under a 3.10 target),
+  zero errors parsed, "OK". `check_mypy_ran` now refuses a crashed run,
+  `python_version` is 3.12 (what CI/prod run), and the 96 errors that
+  accrued while nobody was looking are banked in `mypy_baseline.txt` — all in
+  parked source/profile modules, none in this slice. Tracked as a follow-up
+  issue; the ratchet bites again from this commit on.
+- **Local dev Postgres `public` schema is stale** (pre-multi-tenant
+  `applications`, no migration table). The verifier boots with
+  `pg.TEST_MODE = True` to get a fresh, fully-migrated schema.
+- **Playwright reuses whatever owns :3000** — the e2e run must set `E2E_PORT`.

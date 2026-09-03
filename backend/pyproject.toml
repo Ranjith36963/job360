@@ -267,13 +267,16 @@ ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904",
 "src/services/profile/github_enricher.py" = ["E402"]
 
 [tool.mypy]
-# Step-0 pre-flight (Tier C) — mypy strict gate. We set python_version to
-# 3.10 here (not 3.9 despite requires-python) because the codebase already
-# uses 3.10+ union syntax (X | Y) pervasively; setting 3.9 produced 62
-# bogus "syntax requires 3.10" errors. Runtime support for 3.9 is preserved
-# by `from __future__ import annotations` at the top of modules that need
-# to run on 3.9 — that's a runtime concern, not a static-check one.
-python_version = "3.10"
+# Step-0 pre-flight (Tier C) — mypy strict gate. python_version is the
+# interpreter CI and the prod image actually run (3.12), not requires-python
+# (3.10): third-party stubs are written for the installed interpreter, and
+# numpy's now use PEP 695 `type X = ...` statements, which mypy rejects as a
+# SYNTAX error under a 3.10 target — exit 2, zero errors parsed. That is how
+# the ratchet "passed" in CI for weeks while mypy never ran (fixed by
+# `check_mypy_ran` in scripts/mypy_ratchet.py). Cost: mypy will not flag
+# 3.11/3.12-only syntax in our own code; 3.10 compatibility is a runtime
+# concern covered by requires-python, not a static-check one.
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
