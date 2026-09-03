@@ -21,13 +21,13 @@ Job360 *was* a UK-focused multi-domain job search aggregator. This path fetches 
 | Unique source classes | **40** | same dict — `indeed` and `glassdoor` both alias `JobSpySource` |
 | `RATE_LIMITS` entries | **41** | `core/settings.py` `RATE_LIMITS` |
 | `LOCATIONS` entries | **26** | `core/keywords.py` `LOCATIONS` |
-| Migration head | **0035** | `backend/migrations/` |
+| Migration head | **0036** | `backend/migrations/` |
 | `SCORER_VERSION` | **8** | `services/skill_matcher.SCORER_VERSION` |
 | `BaseJobSource` subclasses | **40** | `src/sources/` |
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
-| Migration files | **36** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **236** | `backend/tests/` |
+| Migration files | **37** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **237** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -71,8 +71,8 @@ job360/
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile, rescore-backfill
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
-│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 13 route modules (65 endpoints, all per-user routes gated)
-│   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
+│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 18 route modules (83 endpoints, all per-user routes gated)
+│   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log, tokens, bring, receipts, oauth, well_known (root-mounted)
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (41 entries), thresholds, feature flags
 │   │   │   ├── keywords.py           # LOCATIONS + VISA_KEYWORDS; all other lists [] post-3ba1342
@@ -120,7 +120,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # across 229 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 237 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -713,6 +713,14 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `PUT` | `/api/settings/notification-rule` | `notification_rules.py` |
 | `GET` | `/api/notifications` | `notifications.py` |
 | `GET` | `/api/notifications/stats` | `notifications.py` |
+| `GET` | `/api/oauth/authorize` | `oauth.py` |
+| `GET` | `/api/oauth/authorize/{rid}` | `oauth.py` |
+| `POST` | `/api/oauth/authorize/{rid}/decision` | `oauth.py` |
+| `GET` | `/api/oauth/grants` | `oauth.py` |
+| `DELETE` | `/api/oauth/grants/{grant_id}` | `oauth.py` |
+| `POST` | `/api/oauth/register` | `oauth.py` |
+| `POST` | `/api/oauth/revoke` | `oauth.py` |
+| `POST` | `/api/oauth/token` | `oauth.py` |
 | `GET` | `/api/pipeline` | `pipeline.py` |
 | `GET` | `/api/pipeline/counts` | `pipeline.py` |
 | `GET` | `/api/pipeline/reminders` | `pipeline.py` |
@@ -747,8 +755,11 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/api/tokens` | `tokens.py` |
 | `POST` | `/api/tokens` | `tokens.py` |
 | `DELETE` | `/api/tokens/{token_id}` | `tokens.py` |
+| `GET` | `/.well-known/oauth-authorization-server` | `well_known.py` |
+| `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
+| `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**72 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + `include_router(prefix="/api")`.
+**83 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->
 
 ## Configuration
@@ -785,6 +796,16 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `API_TOKENS_PER_USER` | No (default `10`) | Active personal API tokens one user may hold (one per agent/machine). Minting past the cap returns HTTP 409 |
 | `API_TOKEN_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `Authorization: Bearer j360_…` attempts per client IP per minute before 429 — a brute-force brake on the token door (`api/auth_deps.py`) |
 | `MCP_ALLOWED_HOSTS` | No (default empty = off) | Comma-separated `Host` values the MCP transport at `/api/mcp` accepts (DNS-rebinding guard). Off in prod because the backend sits behind the Next rewrite and sees Railway's internal host; the bearer token is the real guard |
+| `OAUTH_REDIRECT_ALLOWLIST` | No (default: Claude.ai + ChatGPT callbacks) | Comma-separated redirect URIs a registering OAuth client may use — exact scheme/host/port, path equal or (entry ending in `/`) prefix. Anything else → 400 `invalid_redirect_uri`. Add a new MCP client here, never in code (`services/auth/oauth_clients.py`) |
+| `OAUTH_ALLOW_LOOPBACK_REDIRECTS` | No (default `0`) | `1` also allows RFC 8252 loopback redirects (`http://127.0.0.1`, `::1`, `localhost`, any port) for desktop clients. Off in prod |
+| `OAUTH_ACCESS_TOKEN_TTL_SECONDS` / `OAUTH_REFRESH_TOKEN_TTL_SECONDS` | No (default `3600` / `2592000`) | Access-token life and the **absolute** refresh life of a grant (counted from the grant, not the last refresh). After the second, the user consents again |
+| `OAUTH_CODE_TTL_SECONDS` / `OAUTH_AUTHORIZE_TTL_SECONDS` | No (default `60` / `1800`) | Authorization-code life, and how long a pending consent request (`/oauth/consent/[rid]`) survives — long enough for the magic-link email round-trip |
+| `OAUTH_REUSE_GRACE_SECONDS` | No (default `10`) | A code or refresh token presented twice inside this window is a client retry → `invalid_grant`; after it → the whole grant is revoked (OAuth 2.1 §4.1.2) |
+| `OAUTH_REGISTER_MAX_PER_HOUR` / `OAUTH_REGISTER_MAX_PER_HOUR_GLOBAL` | No (default `60` / `600`) | Dynamic-registration caps per IP and across all IPs (429 over cap) |
+| `OAUTH_AUTHORIZE_MAX_PER_MIN` | No (default `60`) | Per-IP cap on `GET /api/oauth/authorize` |
+| `OAUTH_TOKEN_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `/api/oauth/token` exchanges per IP (and per IP+client) per minute before 429 |
+| `OAUTH_BEARER_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `Authorization: Bearer j360a_…` attempts per IP per minute — its own bucket, only a hash matching **no** row counts (an expired token is normal, not an attack) |
+| `OAUTH_CLIENT_PRUNE_DAYS` / `OAUTH_MAX_CLIENTS` / `OAUTH_PRUNE_SAMPLE` | No (default `7` / `10000` / `20`) | Housekeeping: a registered client with no grant ever is dropped after N days; the client table is capped (prune-at-ceiling, then 503); the prune runs after 1-in-N `/token` calls, in its own transaction, never delaying the exchange |
 | `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user cap on concurrent `POST /search` (429 over cap) |
 | `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:155) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
 | `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:152) |
