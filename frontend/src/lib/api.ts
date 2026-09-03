@@ -8,6 +8,9 @@ import type {
   ActionRequest,
   ActionResponse,
   ApplicationTimelineResponse,
+  BringJobRequest,
+  BringJobResponse,
+  CreateReceiptRequest,
   DuplicateJobsResponse,
   HealthResponse,
   JobFilters,
@@ -23,6 +26,8 @@ import type {
   ProfileResponse,
   ProfileVersionDiff,
   ProfileVersionsListResponse,
+  Receipt,
+  ReceiptListResponse,
   RecentRunsResponse,
   SearchStartResponse,
   SearchStatusResponse,
@@ -756,4 +761,38 @@ export async function downloadTailored(
   a.download = `${kind}_${jobId}.${fmt}`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// Bring a job + application receipts (career-ops pivot, slice one)
+// ---------------------------------------------------------------------------
+
+/** The user pastes the ad; the backend stores, scores and feeds it. */
+export async function bringJob(body: BringJobRequest): Promise<BringJobResponse> {
+  return request<BringJobResponse>(`/api/jobs/bring`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** "I applied": freeze the job + the CV/cover letter as sent. Append-only. */
+export async function createReceipt(
+  jobId: number,
+  // Both fields have backend defaults; the generated type marks them required.
+  body: Partial<CreateReceiptRequest> = {}
+): Promise<Receipt> {
+  return request<Receipt>(`/api/receipts/${jobId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listReceipts(jobId?: number): Promise<ReceiptListResponse> {
+  return request<ReceiptListResponse>(`/api/receipts${qs({ job_id: jobId })}`);
+}
+
+export async function getReceipt(receiptId: number): Promise<Receipt> {
+  return request<Receipt>(`/api/receipts/${receiptId}`);
 }

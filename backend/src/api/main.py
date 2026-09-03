@@ -29,6 +29,7 @@ from src.api.middleware import (
 from src.api.routes import (
     actions,
     auth,
+    bring,
     channels,
     client_log,
     health,
@@ -37,6 +38,7 @@ from src.api.routes import (
     notifications,
     pipeline,
     profile,
+    receipts,
     runs,
     search,
     tailor,
@@ -193,6 +195,9 @@ app.include_router(actions.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(pipeline.router, prefix="/api")
+# Career-ops pivot (plan §8, slice one) — bring-a-job + application receipts
+app.include_router(bring.router, prefix="/api")
+app.include_router(receipts.router, prefix="/api")
 # Batch 2 — auth + channel config
 app.include_router(auth.router, prefix="/api")
 app.include_router(channels.router, prefix="/api")

@@ -102,6 +102,11 @@ class JobResponse(BaseModel):
     transferable_skills: list[str] = []
     action: Optional[str] = None
     bucket: str = ""
+    # The stored ad text. Filled by the single-job read and by POST /jobs/bring
+    # only — never by the list route, where N × 8k chars would dwarf the cards.
+    # A user-brought job has no source website to read the ad on, so the detail
+    # page must be able to show what they pasted.
+    description: Optional[str] = None
     # Step-1 B6 — date-model fields (Pillar 3 Batch 1). Persisted on the
     # `jobs` table; `posted_at` is None when no trustworthy source field
     # was found, `staleness_state` flips to 'stale' / 'expired' as the

@@ -15,13 +15,13 @@ Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from 
 | Unique source classes | **40** | same dict — `indeed` and `glassdoor` both alias `JobSpySource` |
 | `RATE_LIMITS` entries | **41** | `core/settings.py` `RATE_LIMITS` |
 | `LOCATIONS` entries | **26** | `core/keywords.py` `LOCATIONS` |
-| Migration head | **0033** | `backend/migrations/` |
+| Migration head | **0034** | `backend/migrations/` |
 | `SCORER_VERSION` | **8** | `services/skill_matcher.SCORER_VERSION` |
 | `BaseJobSource` subclasses | **40** | `src/sources/` |
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
-| Migration files | **34** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **229** | `backend/tests/` |
+| Migration files | **35** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **232** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -688,6 +688,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `PATCH` | `/api/auth/users/me/password` | `auth.py` |
 | `POST` | `/api/auth/verify-email/confirm` | `auth.py` |
 | `POST` | `/api/auth/verify-email/request` | `auth.py` |
+| `POST` | `/api/jobs/bring` | `bring.py` |
 | `GET` | `/api/settings/channels` | `channels.py` |
 | `POST` | `/api/settings/channels` | `channels.py` |
 | `DELETE` | `/api/settings/channels/{channel_id:int}` | `channels.py` |
@@ -724,6 +725,9 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/api/profile/versions` | `profile.py` |
 | `GET` | `/api/profile/versions/{version_id1}/diff/{version_id2}` | `profile.py` |
 | `POST` | `/api/profile/versions/{version_id}/restore` | `profile.py` |
+| `GET` | `/api/receipts` | `receipts.py` |
+| `POST` | `/api/receipts/{job_id}` | `receipts.py` |
+| `GET` | `/api/receipts/{receipt_id}` | `receipts.py` |
 | `GET` | `/api/runs/recent` | `runs.py` |
 | `GET` | `/api/runs/source-health` | `runs.py` |
 | `POST` | `/api/search` | `search.py` |
@@ -735,7 +739,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/tailor/{job_id}/{doc_kind}/keep` | `tailor.py` |
 | `GET` | `/api/tailor/{job_id}/{doc_kind}/provenance` | `tailor.py` |
 
-**65 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + `include_router(prefix="/api")`.
+**69 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + `include_router(prefix="/api")`.
 <!-- /generated -->
 
 ## Configuration
