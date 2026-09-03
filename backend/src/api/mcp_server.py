@@ -34,6 +34,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from src.api.auth_deps import CurrentUser, require_verified_user, resolve_current_user
+from src.core import settings
+from src.services.auth.oauth_flow import SUPPORTED_SCOPE, resource_matches_canonical
 from src.utils.logger import get_audit_logger, get_logger
 
 if TYPE_CHECKING:  # pragma: no cover — type-only; the SDK is lazy-imported at runtime
@@ -438,31 +440,58 @@ async def _send_json(
     await JSONResponse(payload, status_code=status, headers=headers)(scope, receive, send)
 
 
+def _mcp_challenge_headers() -> dict[str, str]:
+    """R7 — the 401 challenge every ``/api/mcp`` failure carries.
+
+    Points a discovering OAuth client at the protected-resource metadata
+    document (RFC 9728); the ``scope`` hint is SHOULD, not MUST, but costs
+    nothing to include. Deliberately stamped ONLY here, not in
+    ``auth_deps._BEARER_CHALLENGE`` — every other ``/api/*`` route shares
+    that constant and has no OAuth discovery story.
+    """
+    resource_metadata = f"{settings.SITE_BASE_URL}/.well-known/oauth-protected-resource/api/mcp"
+    return {
+        "WWW-Authenticate": (
+            f'Bearer realm="job360", resource_metadata="{resource_metadata}", scope="{SUPPORTED_SCOPE}"'
+        )
+    }
+
+
 async def _mcp_asgi(scope: Scope, receive: Receive, send: Send) -> None:
     """The ``/api/mcp`` endpoint: bearer check → contextvar → SDK handler.
 
     Bearer ONLY. A session cookie is deliberately not accepted here: MCP is a
     cross-origin JSON endpoint and a cookie would make it CSRF-able. Every
     failure is a JSON body with the right status; the runtime missing is 503.
+
+    Every 401 (no bearer, bad/expired/revoked bearer, wrong audience) carries
+    the R7 challenge. The bearer-throttle 429 keeps its plain ``Bearer``
+    challenge (spec R7: "The 429 keeps Bearer") — it isn't part of the
+    discovery contract, just a retry hint.
     """
     if scope["type"] != "http":
         return
     request = Request(scope)
     authorization = request.headers.get("authorization")
     if not authorization or not authorization.lower().startswith("bearer "):
-        await _send_json(
-            scope, receive, send, 401,
-            {"detail": "bearer token required"}, {"WWW-Authenticate": 'Bearer realm="job360"'},
-        )
+        await _send_json(scope, receive, send, 401, {"detail": "bearer token required"}, _mcp_challenge_headers())
         return
     try:
         user = await resolve_current_user(request, None, authorization)
     except HTTPException as exc:
-        await _send_json(scope, receive, send, exc.status_code, {"detail": exc.detail}, exc.headers)
+        headers = _mcp_challenge_headers() if exc.status_code == 401 else exc.headers
+        await _send_json(scope, receive, send, exc.status_code, {"detail": exc.detail}, headers)
         return
     if user is None:  # pragma: no cover — bearer path raises rather than returning None
+        await _send_json(scope, receive, send, 401, {"detail": "invalid or revoked token"}, _mcp_challenge_headers())
+        return
+    # S13 — an OAuth token must carry the canonical MCP audience here; a
+    # personal token (auth_via != "oauth") is unaffected, matching "same
+    # routes, same rules" everywhere else (spec S13's stated deviation).
+    if user.auth_via == "oauth" and not resource_matches_canonical(user.audience or ""):
         await _send_json(
-            scope, receive, send, 401, {"detail": "invalid or revoked token"}, {"WWW-Authenticate": "Bearer"}
+            scope, receive, send, 401,
+            {"detail": "token audience does not match this resource"}, _mcp_challenge_headers(),
         )
         return
     handler = _handler

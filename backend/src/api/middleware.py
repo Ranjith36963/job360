@@ -166,14 +166,24 @@ class OriginCheckMiddleware(BaseHTTPMiddleware):
     cross-site state-changing request. So this blocks the browser CSRF vector
     without breaking non-browser API clients. Allowlist = ``FRONTEND_ORIGIN``
     (same source as CORS).
+
+    Exemption (docs/plans/2026-09-03-oauth-mcp/spec.md §Design "CSRF"):
+    ``/api/oauth/register``, ``/api/oauth/token`` and ``/api/oauth/revoke``
+    carry no cookie at all — an arbitrary OAuth client (ChatGPT, Claude.ai)
+    calls them cross-origin with a credential (PKCE / an opaque code/token)
+    that this check cannot see, so CSRF does not apply and a foreign
+    ``Origin`` must not be rejected. ``/authorize`` (GET) is safe by method;
+    ``/authorize/{rid}(/decision)`` and ``/grants`` use the session cookie and
+    stay checked.
     """
 
     _UNSAFE = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+    _EXEMPT_PATHS = frozenset({"/api/oauth/register", "/api/oauth/token", "/api/oauth/revoke"})
 
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        if request.method in self._UNSAFE:
+        if request.method in self._UNSAFE and request.url.path not in self._EXEMPT_PATHS:
             origin = request.headers.get("origin")
             if origin:
                 allowed = {

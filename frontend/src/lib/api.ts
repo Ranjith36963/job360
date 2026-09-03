@@ -417,10 +417,10 @@ export async function me(): Promise<User | null> {
 // on consume). consume returns the signed-in user (and sets the session
 // cookie) on success, or throws on an invalid / expired / used token.
 
-export async function requestMagicLink(email: string): Promise<void> {
+export async function requestMagicLink(email: string, next?: string): Promise<void> {
   await request<void>("/api/auth/magic-link/request", {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify(next ? { email, next } : { email }),
   });
 }
 
@@ -822,4 +822,49 @@ export async function listTokens(): Promise<TokenSummary[]> {
 
 export async function revokeToken(tokenId: number): Promise<void> {
   await request<void>(`/api/tokens/${tokenId}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// OAuth 2.1 authorization server — consent screen + connected apps
+// (docs/plans/2026-09-03-oauth-mcp/spec.md R4, R8, R9). Shapes come from the
+// generated api-types (the routes carry `response_model`), so the drift gate
+// catches a backend rename.
+// ---------------------------------------------------------------------------
+
+/** GET /api/oauth/authorize/{rid} — what the consent screen shows. */
+export type ConsentRequest = _Schemas["ConsentRequestResponse"];
+
+export type ConsentDecisionResult = _Schemas["ConsentDecisionResponse"];
+
+/**
+ * Load one authorization request for the consent screen. Throws a 404
+ * `ApiError` when the request is unknown, already consumed, or expired —
+ * callers show the "this request has expired" copy for that case.
+ */
+export async function getConsentRequest(rid: string): Promise<ConsentRequest> {
+  return request<ConsentRequest>(`/api/oauth/authorize/${rid}`);
+}
+
+/** Approve or deny the request; `redirect_to` is where the browser goes next. */
+export async function decideConsent(
+  rid: string,
+  approve: boolean
+): Promise<ConsentDecisionResult> {
+  return request<ConsentDecisionResult>(`/api/oauth/authorize/${rid}/decision`, {
+    method: "POST",
+    body: JSON.stringify({ approve }),
+  });
+}
+
+/** A connected app (one active grant per client), shown under Settings → Connect. */
+export type OAuthGrant = _Schemas["OAuthGrantOut"];
+
+export async function listGrants(): Promise<OAuthGrant[]> {
+  const res = await request<_Schemas["GrantListResponse"]>("/api/oauth/grants");
+  return res.grants;
+}
+
+/** Revoking kills every token under the grant on the next request (spec S5). */
+export async function revokeGrant(id: number): Promise<void> {
+  await request<void>(`/api/oauth/grants/${id}`, { method: "DELETE" });
 }

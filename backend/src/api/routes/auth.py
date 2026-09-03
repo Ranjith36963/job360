@@ -650,6 +650,10 @@ async def verify_email_confirm(req: EmailVerificationConfirmRequest) -> Response
 
 class MagicLinkRequest(BaseModel):
     email: EmailStr
+    # Optional post-login redirect PATH (spec 2026-09-03-oauth-mcp R9) — lets
+    # `/oauth/consent/{rid}` survive a login bounce. Validated server-side by
+    # `magic_link.safe_next`; anything else is silently ignored, never a 400.
+    next: str | None = Field(default=None, max_length=512)
 
 
 class MagicLinkConsumeRequest(BaseModel):
@@ -687,6 +691,7 @@ async def magic_link_request(
         db_path=str(DB_PATH),
         email=str(req.email),
         frontend_origin=_frontend_origin(),
+        next_path=req.next,
     )
     get_audit_logger().info(
         "auth",

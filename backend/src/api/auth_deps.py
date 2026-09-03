@@ -28,6 +28,7 @@ from src.core import settings
 from src.core.settings import DB_PATH
 from src.repositories import pg
 from src.services.auth import api_tokens as auth_api_tokens
+from src.services.auth import oauth_flow as auth_oauth_flow
 from src.services.auth import rate_limit as auth_rate_limit
 from src.services.auth import sessions as auth_sessions
 
@@ -59,7 +60,11 @@ class CurrentUser:
     id: str
     email: str
     email_verified: bool = False
-    auth_via: Literal["session", "token"] = "session"
+    auth_via: Literal["session", "token", "oauth"] = "session"
+    # RFC 8707 audience the OAuth access token was issued for (spec
+    # 2026-09-03-oauth-mcp R6/S13). None for a session or a personal token —
+    # only an OAuth bearer ever carries one, and only `/api/mcp` checks it.
+    audience: Optional[str] = None
 
 
 def _client_ip(request: Request) -> str:
@@ -84,6 +89,19 @@ def _bearer_from_header(authorization: Optional[str]) -> Optional[str]:
 
 async def _current_user_from_bearer(request: Request, token: str) -> CurrentUser:
     """Resolve a presented bearer or raise. Never falls back to the cookie.
+
+    Prefix dispatch (spec 2026-09-03-oauth-mcp, R6): ``j360a_`` -> an OAuth
+    access token (its own throttle, below); anything else -> a personal
+    ``j360_`` token (unchanged). ``"j360a_".startswith("j360_")`` is False,
+    so nothing overlaps.
+    """
+    if token.startswith(auth_oauth_flow.ACCESS_TOKEN_PREFIX):
+        return await _current_user_from_oauth_bearer(request, token)
+    return await _current_user_from_personal_bearer(request, token)
+
+
+async def _current_user_from_personal_bearer(request: Request, token: str) -> CurrentUser:
+    """Resolve a ``j360_...`` personal API token or raise.
 
     Failed attempts are rate-limited per client IP (``API_TOKEN_FAIL_MAX_PER_MIN``):
     a 256-bit token cannot be guessed, but a guesser should be slow and loud.
@@ -119,6 +137,43 @@ async def _current_user_from_bearer(request: Request, token: str) -> CurrentUser
         email=owner.email,
         email_verified=owner.email_verified,
         auth_via="token",
+    )
+
+
+async def _current_user_from_oauth_bearer(request: Request, token: str) -> CurrentUser:
+    """Resolve a ``j360a_...`` OAuth access token or raise (spec R6).
+
+    Its own throttle key (``oauth_bearer_fail:{ip}``) — never ``api_token_fail``,
+    so a guesser against one credential kind can never spend the other's
+    budget. Only a hash that matches NO row counts as a failure; an
+    expired/revoked token (``hash_known=True``) is the normal hourly state of
+    every connected client, not an attack, so it never touches the counter.
+    """
+    resolution = await auth_oauth_flow.resolve_access_token(str(DB_PATH), token)
+    if resolution.owner is None:
+        if not resolution.hash_known:
+            limit = settings.OAUTH_BEARER_FAIL_MAX_PER_MIN
+            if limit > 0:
+                fail_key = f"oauth_bearer_fail:{_client_ip(request)}"
+                if auth_rate_limit.is_locked(fail_key, max_failures=limit, window_seconds=60):
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail="too many failed token attempts",
+                        headers=_BEARER_CHALLENGE,
+                    )
+                auth_rate_limit.record_failure(fail_key)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or revoked token",
+            headers=_BEARER_CHALLENGE,
+        )
+    owner = resolution.owner
+    return CurrentUser(
+        id=owner.user_id,
+        email=owner.email,
+        email_verified=owner.email_verified,
+        auth_via="oauth",
+        audience=owner.audience,
     )
 
 

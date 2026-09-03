@@ -167,6 +167,77 @@ def test_request_mints_token_and_returns_204(client, monkeypatch, temp_db):
     assert row["used_at"] is None
 
 
+def _request_capture_email(client, monkeypatch, email, **body_extra):
+    """Like `_request_capture_token` but also returns the emailed link text
+    (spec 2026-09-03-oauth-mcp R9: the `next` param rides in that link)."""
+    captured = {"raws": [], "bodies": []}
+    orig = tokens.generate_token
+
+    def _spy():
+        raw, h = orig()
+        captured["raws"].append(raw)
+        return raw, h
+
+    async def _fake_send(**send_kwargs):
+        captured["bodies"].append(send_kwargs.get("body_text", ""))
+        return True
+
+    monkeypatch.setattr(tokens, "generate_token", _spy)
+    monkeypatch.setattr("src.services.auth.magic_link.send_system_email", _fake_send)
+    r = client.post("/api/auth/magic-link/request", json={"email": email, **body_extra})
+    assert r.status_code == 204, r.text
+    assert len(captured["raws"]) == 1, captured["raws"]
+    return captured["raws"][0], captured["bodies"][0]
+
+
+def test_request_with_next_appends_it_to_the_emailed_link(client, monkeypatch, temp_db):
+    """R9 — the `next` path (e.g. `/oauth/consent/{rid}`) must survive the
+    magic-link round trip so `/auth/magic` can redirect there after consume."""
+    _raw, body = _request_capture_email(
+        client, monkeypatch, "withnext@example.com", next="/oauth/consent/abc123"
+    )
+    assert "next=%2Foauth%2Fconsent%2Fabc123" in body
+
+
+def test_request_with_unsafe_next_drops_it(client, monkeypatch, temp_db):
+    """`//evil.com` is protocol-relative — safe_next must refuse it, silently
+    (the no-enumeration contract still returns 204), never surfacing in the link."""
+    _raw, body = _request_capture_email(client, monkeypatch, "unsafe@example.com", next="//evil.com")
+    assert "next=" not in body
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "/\\evil.com",  # WHATWG: backslash is a slash for http(s) → https://evil.com/
+        "/\t/evil.com",  # WHATWG strips tab before parsing → https://evil.com/
+        "/\n/evil.com",
+        "/\r/evil.com",
+        "/ok\\evil.com",
+        "https://evil.com",
+        "javascript:alert(1)",
+        "dashboard",
+        "",
+        None,
+        "/" + "a" * 512,
+    ],
+)
+def test_safe_next_refuses_url_parser_tricks(value):
+    """The browser's URL parser is the real judge. Anything it could turn into a
+    different origin is refused — a leading-slash check alone is not enough
+    (bugs review 2026-09-03, P1)."""
+    from src.services.auth.magic_link import safe_next
+
+    assert safe_next(value) is None
+
+
+@pytest.mark.parametrize("value", ["/dashboard", "/oauth/consent/abc-123_XYZ", "/jobs/1?tab=x&y=2"])
+def test_safe_next_accepts_plain_paths(value):
+    from src.services.auth.magic_link import safe_next
+
+    assert safe_next(value) == value
+
+
 def test_request_rate_limited_after_cap(client, temp_db):
     email = "spammer@example.com"
     # Cap is 3 per 5 min. First three allowed, fourth suppressed.
