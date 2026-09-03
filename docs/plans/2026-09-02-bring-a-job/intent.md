@@ -1,5 +1,10 @@
 # Intent: bring a job, keep the receipt
-Author: Ranjith (owner), captured from chat 2026-09-02 by Claude. Status: draft — owner approves by merging.
+Author: Ranjith (owner), captured from chat 2026-09-02 by Claude. Status: shipped as PR #469 (slice one).
+
+> **Superseded in part by [`docs/product/VISION.md`](../../product/VISION.md) (2026-09-03):** "we score it
+> and tailor the CV" is now the *agent's* job — Job360 stores the verdict and the versions (rule 5).
+> The receipt, append-only, and the constraints below still hold. URL fetch is no longer deferred:
+> link and text must both work on the web (decision 16), paste is the fallback.
 
 ## Problem
 Job360 spent a year sourcing jobs. Nobody needed that — every board already does it. What nobody does well is
