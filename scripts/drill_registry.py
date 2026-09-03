@@ -168,6 +168,20 @@ REGISTRY: dict[str, Guard] = {
         # adding the tempting `**/README.md` one-liner all turn it red.
         drill=[sys.executable, "scripts/lane.py", "--drill"],
     ),
+    "scripts/repairable.py": Guard(
+        status="drilled",
+        # Answers "may the auto-fixer edit this file?" for `pr-repair.yml`,
+        # which used to answer it with the hardcoded regex `^(backend|frontend)/`.
+        # Watched RED four times while being written, every time for a real
+        # reason: against `main` before #444 it called
+        # `backend/src/api/routes/auth.py` REPAIRABLE (that deny lived only in
+        # merge_cage.py, not in the policy), and an adversarial review found
+        # `pyrightconfig.json`, `.coderabbit.yaml` and `backend/scripts/` still
+        # open — three ways to go green by moving the line instead of fixing the
+        # code. Delete the SELF list and the CI definition becomes editable by
+        # the very agent CI is judging.
+        drill=[sys.executable, "scripts/repairable.py", "--drill"],
+    ),
     "scripts/stale_path_check.py": Guard(
         status="drilled",
         # Asks git which paths a change renamed and fails if any tracked file

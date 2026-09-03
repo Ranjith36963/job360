@@ -26,6 +26,7 @@ docs at the repo root). Start here to find the right doc fast.
 
 | I want to… | Read |
 |---|---|
+| **Know what we are building (and not)** | [`product/VISION.md`](product/VISION.md) — the 2026-09-03 decisions; wins over every older product doc |
 | **Understand the project fast** | [`../CLAUDE.md`](../CLAUDE.md) → [`../STATUS.md`](../STATUS.md) |
 | **Pick up where work left off** | [`IMPLEMENTATION_LOG.md`](harness/IMPLEMENTATION_LOG.md) (read first) → [`../STATUS.md`](../STATUS.md) |
 | **Run it locally** | [`../backend/README.md`](../backend/README.md) · [`../frontend/README.md`](../frontend/README.md) |

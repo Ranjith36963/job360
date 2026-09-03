@@ -53,7 +53,7 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 BACKEND = pathlib.Path(__file__).resolve().parent.parent
 BASELINE = BACKEND / "mypy_baseline.txt"
@@ -67,8 +67,12 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 Signature = Tuple[str, str, str]  # (file, code, message)
 
 
-def run_mypy() -> str:
-    """Run mypy and return its raw output (mypy exits non-zero when it finds errors)."""
+def run_mypy() -> Tuple[int, str]:
+    """Run mypy and return (exit code, raw output).
+
+    mypy's exit code is part of the answer: 0 = clean, 1 = type errors found,
+    2 = mypy itself failed (bad config, crash, unreadable source, no files).
+    """
     proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
         [sys.executable, "-m", "mypy", "src/", "--no-color-output", "--no-error-summary"],
         cwd=BACKEND,
@@ -77,7 +81,31 @@ def run_mypy() -> str:
         encoding="utf-8",
         errors="replace",
     )
-    return proc.stdout + proc.stderr
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def check_mypy_ran(returncode: int, parsed_errors: int) -> Optional[str]:
+    """Return a reason the run must NOT be trusted, or None when it is sound.
+
+    The ratchet only counts lines shaped like ``file:line: error: ... [code]``.
+    A mypy that crashes, is not installed, or rejects its config prints none of
+    those — and a blind count would read that as "0 errors", i.e. a PASS. That
+    is exactly what happened on main: the CI step finished in under a second
+    and reported "OK — 0 errors" while the same source had dozens of real
+    errors locally. A guard that cannot tell "clean" from "never ran" is not a
+    guard. The rules: exit 2 is always mypy failing; exit 1 with nothing parsed
+    means it printed errors we could not read (or was not mypy at all); exit 0
+    with parsed errors cannot happen and means the parser drifted.
+    """
+    if returncode >= 2:
+        return f"mypy exited {returncode} (crash / config / usage error)"
+    if returncode == 1 and parsed_errors == 0:
+        return "mypy exited 1 but no error lines were parsed"
+    if returncode == 0 and parsed_errors > 0:
+        return "mypy exited 0 but error lines were parsed — parser drift"
+    if returncode not in (0, 1):
+        return f"unexpected mypy exit code {returncode}"
+    return None
 
 
 def parse(output: str) -> Dict[Signature, int]:
@@ -160,8 +188,16 @@ def main() -> int:
         print(sum(load_baseline().values()))
         return 0
 
-    current = parse(run_mypy())
+    returncode, output = run_mypy()
+    current = parse(output)
     total = sum(current.values())
+
+    unsound = check_mypy_ran(returncode, total)
+    if unsound:
+        tail = "\n".join(output.strip().splitlines()[-25:])
+        print(f"mypy ratchet FAILED — the mypy run cannot be trusted: {unsound}", file=sys.stderr)
+        print("last lines of mypy output:\n" + tail, file=sys.stderr)
+        return 1
 
     if args.update:
         old = sum(load_baseline().values())

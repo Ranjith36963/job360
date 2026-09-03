@@ -555,15 +555,15 @@ def signal_backed_lookup(
 
         wp = getattr(enrichment, "workplace_type", None)
         if _is_unknown(wp):
-            detected = detect_workplace(
+            detected_wp = detect_workplace(
                 desc, title, location=loc, enrichment_value=None
             )
-            _apply(enrichment, "workplace_type", detected)
+            _apply(enrichment, "workplace_type", detected_wp)
 
         sn = getattr(enrichment, "seniority", None)
         if _is_unknown(sn):
-            detected = detect_seniority(title, desc, enrichment_value=None)
-            _apply(enrichment, "seniority", detected)
+            detected_sn = detect_seniority(title, desc, enrichment_value=None)
+            _apply(enrichment, "seniority", detected_sn)
 
         return enrichment
 
@@ -593,10 +593,6 @@ def _apply(enrichment: Any, field: str, detected: Any) -> None:
         setattr(enrichment, field, raw)
     except Exception:  # noqa: BLE001 — never let a detector break scoring
         pass
-
-
-
-    return SenioritySignal(SeniorityLevel.UNKNOWN, "no_signal")
 
 
 def _all_seniority_phrases() -> tuple[str, ...]:

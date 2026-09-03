@@ -35,7 +35,7 @@ def _coerce_salary(value: Any) -> Optional[float]:
         return None
 
 
-def _workplace_mode_from_offer(item: dict) -> Optional[str]:
+def _workplace_mode_from_offer(item: dict[str, Any]) -> Optional[str]:
     """Recruitee's own `remote`/`hybrid`/`on_site` booleans (confirmed live
     2026-08-17, transperfect board: 81 remote / 109 hybrid / 436 on_site out
     of 591) form a genuine closed 3-state field the source itself defines —

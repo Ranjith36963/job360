@@ -50,7 +50,7 @@ def _extract_salary(compensation: Any) -> tuple[Optional[float], Optional[float]
     return None, None, None, None
 
 
-def _passes_uk_filter(item: dict) -> bool:
+def _passes_uk_filter(item: dict[str, Any]) -> bool:
     """UK-or-remote check across BOTH the primary location and Ashby's
     `secondaryLocations` list.
 

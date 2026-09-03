@@ -16,9 +16,11 @@ if sys.platform == "win32":
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.routing import Route
 
 from src.api.dependencies import close_db, init_db
 from src.api.errors import register_exception_logging
+from src.api.mcp_server import mcp_asgi, mcp_runtime
 from src.api.middleware import (
     AccessLogMiddleware,
     OriginCheckMiddleware,
@@ -29,6 +31,7 @@ from src.api.middleware import (
 from src.api.routes import (
     actions,
     auth,
+    bring,
     channels,
     client_log,
     health,
@@ -37,9 +40,11 @@ from src.api.routes import (
     notifications,
     pipeline,
     profile,
+    receipts,
     runs,
     search,
     tailor,
+    tokens,
 )
 from src.core.settings import LOG_LEVEL, validate_required_env
 from src.repositories import pg, pool
@@ -130,8 +135,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # LOOP_WATCHDOG_ENABLED (default on); forced OFF under pytest, where the
     # instant-asyncio.sleep fixture would turn the sampler into a busy-spin.
     watchdog = start_loop_watchdog()
+    # MCP: the SDK session manager needs a running task group for the life of
+    # the process (src/api/mcp_server.py). Tests enter mcp_runtime() themselves
+    # because the auth fixture replaces this lifespan with a no-op.
     try:
-        yield
+        async with mcp_runtime():
+            yield
     finally:
         if watchdog is not None:
             watchdog.cancel()
@@ -193,6 +202,9 @@ app.include_router(actions.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(pipeline.router, prefix="/api")
+# Career-ops pivot (plan §8, slice one) — bring-a-job + application receipts
+app.include_router(bring.router, prefix="/api")
+app.include_router(receipts.router, prefix="/api")
 # Batch 2 — auth + channel config
 app.include_router(auth.router, prefix="/api")
 app.include_router(channels.router, prefix="/api")
@@ -204,3 +216,9 @@ app.include_router(notification_rules.router, prefix="/api")
 app.include_router(runs.router, prefix="/api")
 # Per-User AI CV & Cover Letter (docs/product/peruser_cv_coverletter.md)
 app.include_router(tailor.router, prefix="/api")
+# Career-ops pivot, slice two (docs/plans/2026-09-03-mcp-server) — personal
+# tokens + the MCP endpoint. A Route (not a Mount — that 307s the slash-less
+# path) with a raw ASGI callable: the SDK owns the JSON-RPC transport, our shim
+# owns auth (bearer only, never the cookie).
+app.include_router(tokens.router, prefix="/api")
+app.router.routes.append(Route("/api/mcp", endpoint=mcp_asgi, methods=["GET", "POST", "DELETE"], name="mcp"))
