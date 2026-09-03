@@ -62,6 +62,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("email_verifications", "user_id"),
     ("password_resets", "user_id"),
     ("oauth_states", "user_id"),
+    ("oauth_grants", "user_id"),
     ("audit_log", "user_id"),
     # `run_log` is a pipeline record, but it carries a user_id (whose search it
     # was), so it is owned data and belongs in the orphan sweep.

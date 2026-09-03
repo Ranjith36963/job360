@@ -5,8 +5,11 @@ import { toast } from "sonner";
 
 import {
   createToken,
+  listGrants,
   listTokens,
+  revokeGrant,
   revokeToken,
+  type OAuthGrant,
   type TokenCreated,
   type TokenSummary,
 } from "@/lib/api";
@@ -48,6 +51,15 @@ function fmtDate(iso: string | null): string {
   if (!iso) return "never";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+/** Just the host, so the row reads "chatgpt.com" not the full callback URL. */
+function redirectHost(uri: string): string {
+  try {
+    return new URL(uri).host;
+  } catch {
+    return uri;
+  }
 }
 
 async function copyText(text: string, what: string) {
@@ -127,6 +139,108 @@ function NewTokenReveal({
         <Button type="button" onClick={onDismiss} data-testid="token-reveal-done">
           I have saved it
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Connected apps — OAuth grants (ChatGPT, Claude.ai, any spec-following MCP
+// client that signed in through the consent screen at /oauth/consent/[rid]).
+// One active grant per (user, client); Revoke kills every token under it on
+// the client's very next request (spec R8/S5).
+// ---------------------------------------------------------------------------
+
+function GrantRow({
+  grant,
+  onRevoke,
+}: {
+  grant: OAuthGrant;
+  onRevoke: (g: OAuthGrant) => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+
+  return (
+    <li
+      className="flex items-center justify-between gap-4 py-3"
+      data-testid="grant-row"
+    >
+      <div className="min-w-0">
+        <p className="truncate font-medium">{grant.client_name}</p>
+        <p className="text-xs text-muted-foreground">
+          <span className="font-mono">{redirectHost(grant.redirect_uri)}</span>{" "}
+          · connected {fmtDate(grant.created_at)} · last used{" "}
+          {fmtDate(grant.last_used_at)}
+        </p>
+      </div>
+      {confirming ? (
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            onClick={() => onRevoke(grant)}
+            data-testid={`grant-revoke-confirm-${grant.id}`}
+          >
+            Confirm revoke
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setConfirming(false)}
+          >
+            Cancel
+          </Button>
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          onClick={() => setConfirming(true)}
+          aria-label={`Revoke access for ${grant.client_name}`}
+          data-testid={`grant-revoke-${grant.id}`}
+        >
+          Revoke
+        </Button>
+      )}
+    </li>
+  );
+}
+
+function ConnectedAppsCard({
+  grants,
+  loading,
+  onRevoke,
+}: {
+  grants: OAuthGrant[];
+  loading: boolean;
+  onRevoke: (g: OAuthGrant) => void;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Connected apps</CardTitle>
+        <CardDescription>
+          Apps you signed in through — ChatGPT, Claude.ai, or any app that
+          asked to connect. Revoking cuts that app off right away.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : grants.length === 0 ? (
+          <p className="text-sm text-muted-foreground" data-testid="grants-empty">
+            No connected apps yet.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border/40" data-testid="grant-list">
+            {grants.map((g) => (
+              <GrantRow key={g.id} grant={g} onRevoke={onRevoke} />
+            ))}
+          </ul>
+        )}
       </CardContent>
     </Card>
   );
@@ -276,6 +390,9 @@ export default function ConnectAgentPage() {
   const [loading, setLoading] = useState(true);
   const [created, setCreated] = useState<TokenCreated | null>(null);
 
+  const [grants, setGrants] = useState<OAuthGrant[]>([]);
+  const [grantsLoading, setGrantsLoading] = useState(true);
+
   const refresh = useCallback(async () => {
     try {
       setTokens(await listTokens());
@@ -286,9 +403,20 @@ export default function ConnectAgentPage() {
     }
   }, []);
 
+  const refreshGrants = useCallback(async () => {
+    try {
+      setGrants(await listGrants());
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Failed to load connected apps."));
+    } finally {
+      setGrantsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     refresh();
-  }, [refresh]);
+    refreshGrants();
+  }, [refresh, refreshGrants]);
 
   async function onCreated(t: TokenCreated) {
     setCreated(t);
@@ -306,6 +434,16 @@ export default function ConnectAgentPage() {
     }
   }
 
+  async function onRevokeGrant(g: OAuthGrant) {
+    try {
+      await revokeGrant(g.id);
+      await refreshGrants();
+      toast.success("Access revoked");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Failed to revoke access."));
+    }
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-8 py-12">
       <div>
@@ -316,6 +454,11 @@ export default function ConnectAgentPage() {
           applied. A personal token is the key; you can revoke it any time.
         </p>
       </div>
+      <ConnectedAppsCard
+        grants={grants}
+        loading={grantsLoading}
+        onRevoke={onRevokeGrant}
+      />
       {created && (
         <NewTokenReveal created={created} onDismiss={() => setCreated(null)} />
       )}

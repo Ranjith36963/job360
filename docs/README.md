@@ -78,6 +78,7 @@ docs at the repo root). Start here to find the right doc fast.
 | [`peruser_cv_coverletter.md`](product/peruser_cv_coverletter.md) | Design: per-job AI-tailored CV + cover letter that learns from your edits (per-user 2-layer learning + guardrails). ~80% built. |
 | [`post_application.md`](product/post_application.md) | Design: the "after you apply" co-pilot — interview prep, mock interview, skill-gap, follow-up email, outreach (offer/salary deliberately out). |
 | [`plans/2026-06-21-free-premium-plans.md`](product/plans/2026-06-21-free-premium-plans.md) | Free/Premium tier design (not yet built). |
+| [`plans/2026-09-03-oauth-mcp/`](plans/2026-09-03-oauth-mcp/) | Slice 1 of the pivot: OAuth 2.1 authorization server for MCP clients (intent / spec with security section / plan + diff-vs-plan). |
 | [`References.md`](harness/References.md) | Source-of-truth list of external references and research links. |
 
 ## 📘 Engine evaluation

@@ -19,6 +19,7 @@ import Link from "next/link";
 
 import { consumeMagicLink } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
+import { safeNext } from "@/lib/safe-next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -28,6 +29,9 @@ function MagicBody() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
+  // Where to land after sign-in — e.g. back on an OAuth consent page (spec
+  // R9). safeNext() falls back to /dashboard for anything external/malformed.
+  const next = searchParams.get("next");
   const [state, setState] = useState<State>(token ? "confirm" : "error");
   const [error, setError] = useState<string | null>(
     token ? null : "Sign-in token missing from the URL. Use the link from your email."
@@ -37,7 +41,7 @@ function MagicBody() {
     setState("submitting");
     try {
       await consumeMagicLink(token);
-      router.replace("/dashboard");
+      router.replace(safeNext(next));
     } catch (err) {
       setState("error");
       setError(

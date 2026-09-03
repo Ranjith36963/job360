@@ -38,6 +38,7 @@ from src.api.routes import (
     jobs,
     notification_rules,
     notifications,
+    oauth,
     pipeline,
     profile,
     receipts,
@@ -45,7 +46,9 @@ from src.api.routes import (
     search,
     tailor,
     tokens,
+    well_known,
 )
+from src.core import settings
 from src.core.settings import LOG_LEVEL, validate_required_env
 from src.repositories import pg, pool
 from src.utils.logger import setup_audit_logger, setup_logging
@@ -118,6 +121,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logging.getLogger().setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
     # Fail fast in production when required env vars are absent (no-op in dev).
     validate_required_env()
+    # OAuth R1: the discovery documents advertise SITE_BASE_URL as the issuer.
+    # The default is production's URL — wrong for every other instance, and a
+    # wrong issuer makes every MCP client refuse the metadata. Warn once here,
+    # not at import (routes/well_known.py used to, on every pytest collection).
+    if not settings.SITE_BASE_URL_IS_EXPLICIT:
+        logging.getLogger("job360.oauth").warning(
+            "oauth: SITE_BASE_URL is not set — discovery documents will advertise %s, "
+            "which is wrong for anything but production", settings.SITE_BASE_URL,
+        )
     await init_db()
     # Open the request-path connection pool at boot (production only). Doing it
     # here surfaces a bad DSN / unreachable DB at startup instead of on the first
@@ -222,3 +234,9 @@ app.include_router(tailor.router, prefix="/api")
 # owns auth (bearer only, never the cookie).
 app.include_router(tokens.router, prefix="/api")
 app.router.routes.append(Route("/api/mcp", endpoint=mcp_asgi, methods=["GET", "POST", "DELETE"], name="mcp"))
+# OAuth 2.1 authorization server for MCP clients (docs/plans/2026-09-03-oauth-mcp).
+# `well_known` is mounted at the site ROOT — no `/api` prefix — because a
+# client resolves `/.well-known/...` against the bare origin it was given
+# (`https://job360.uk/api/mcp`), never under the API's own path.
+app.include_router(well_known.router)
+app.include_router(oauth.router, prefix="/api")

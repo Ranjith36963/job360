@@ -1779,7 +1779,7 @@ class JobDatabase:
     _PER_USER_TABLES = (
         "api_tokens", "application_receipts",
         "application_stage_history", "applications", "email_verifications",
-        "notification_ledger", "notification_rules",
+        "notification_ledger", "notification_rules", "oauth_grants",
         "password_resets", "sessions", "tailored_documents", "tailored_usage",
         "user_actions", "user_channels", "user_feed",
         "user_notification_digests", "user_profile_versions", "user_profiles",
@@ -1797,7 +1797,7 @@ class JobDatabase:
     # stored, so the export can hand out nothing usable as a credential.
     _EXPORT_TABLES = (
         "api_tokens", "application_receipts", "applications", "application_stage_history", "audit_log",
-        "notification_ledger", "notification_rules", "tailored_documents",
+        "notification_ledger", "notification_rules", "oauth_grants", "tailored_documents",
         "tailored_usage", "user_actions", "user_channels", "user_feed",
         "user_profile_versions", "user_profiles",
     )
@@ -1913,6 +1913,29 @@ class JobDatabase:
                 erasable.append(tbl)
 
         deletion_errors: list[str] = []
+
+        # oauth_tokens / oauth_authorization_codes reference grant_id, not
+        # user_id directly, so the generic "has a user_id column" sweep below
+        # can never reach them. Migration 0036's DDL declares
+        # `ON DELETE CASCADE` for documentation, but `pg.py`'s translate()
+        # strips EVERY FK clause before Postgres ever sees it (see that
+        # migration's header comment) — so nothing here is cascade-deleted at
+        # the database level. Delete them explicitly, via the user's grants,
+        # BEFORE oauth_grants itself is erased by the sweep below.
+        try:
+            await self._db.execute(
+                "DELETE FROM oauth_tokens WHERE grant_id IN "  # noqa: S608 — static SQL, no user input
+                "(SELECT id FROM oauth_grants WHERE user_id = ?)",
+                (user_id,),
+            )
+            await self._db.execute(
+                "DELETE FROM oauth_authorization_codes WHERE grant_id IN "  # noqa: S608
+                "(SELECT id FROM oauth_grants WHERE user_id = ?)",
+                (user_id,),
+            )
+        except Exception as exc:  # noqa: BLE001 — a schema without oauth tables yet (partial test DBs)
+            deletion_errors.append(f"oauth_tokens/oauth_authorization_codes: {type(exc).__name__}: {exc}")
+
         for tbl in erasable:
             try:
                 await self._db.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
