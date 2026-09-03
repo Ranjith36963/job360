@@ -88,15 +88,15 @@ A *batched* notification sent at a scheduled time (e.g. 08:00 in user's timezone
 
 ### ESCO
 
-European Skills, Competences, Qualifications and Occupations — a multilingual standard taxonomy. Job360 has the code to canonicalise CV skills to ESCO URIs, but **it has never run**: `_maybe_normalise_skills_via_esco()` needs `SEMANTIC_ENABLED=true` **and** `is_available()` (`cv_parser.py:821,830`), and the index artefacts were never built, so it is an identity transform in every environment (rule #28).
+European Skills, Competences, Qualifications and Occupations — a multilingual standard taxonomy. Job360 has the code to canonicalise CV skills to ESCO URIs, but **it has never run**: `_maybe_normalise_skills_via_esco()` needs `SEMANTIC_ENABLED=true` **and** `is_available()` (`cv_parser.py`), and the index artefacts were never built, so it is an identity transform in every environment (rule #28).
 **Code:** `_maybe_normalise_skills_via_esco()` in `cv_parser.py` · **Pillars 1 + 2**
 
 ### Feature flags
 
 Three legacy toggles gate Pillar-2's advanced engines, each paired with an `ENGINEx_ENABLED` equivalent that opens the same gate — six names, six **defaults off** (rule #18). `ENGINE1_ENABLED` (keyword) is the only engine switch that defaults ON and has no legacy partner. Guard: `backend/tests/test_engine_switches.py::test_engine_switch_defaults` pins E1 true / E2-E4 false.
-- `ENRICHMENT_ENABLED` — LLM enrichment + `job_enrichment` DB writes. All eight E2 call sites read `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`backend/src/main.py:853,1137`; `backend/src/services/rescore.py:85,345,527`; `backend/src/workers/tasks.py:237,876`; `backend/src/api/routes/jobs.py:779`), so either name switches it on. It does **not** activate multi-dim scoring: that path is gated on `user_preferences` alone (`backend/src/services/skill_matcher.py:587`, rule #20) — the flag only decides whether the dims have real data or their neutral halves
+- `ENRICHMENT_ENABLED` — LLM enrichment + `job_enrichment` DB writes. All eight E2 call sites read `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`backend/src/main.py`; `backend/src/services/rescore.py`; `backend/src/workers/tasks.py`; `backend/src/api/routes/jobs.py`), so either name switches it on. It does **not** activate multi-dim scoring: that path is gated on `user_preferences` alone (`backend/src/services/skill_matcher.py`, rule #20) — the flag only decides whether the dims have real data or their neutral halves
 - `SEMANTIC_ENABLED` — writes embeddings into the pgvector store. Hybrid retrieval reads `ENGINE3_ENABLED or SEMANTIC_ENABLED`; ESCO needs this flag AND index artefacts that were never built, so it stays a no-op either way
-- `MATCHER_ENABLED` — the Engine 4 LLM judge. Both call sites read `ENGINE4_ENABLED or MATCHER_ENABLED` (`backend/src/main.py:352`, `backend/src/services/rescore.py:589`); the second decides whether a profile re-score clears the user's stored verdicts (`backend/src/services/rescore.py:595-598`)
+- `MATCHER_ENABLED` — the Engine 4 LLM judge. Both call sites read `ENGINE4_ENABLED or MATCHER_ENABLED` (`backend/src/main.py`, `backend/src/services/rescore.py`); the second decides whether a profile re-score clears the user's stored verdicts (`backend/src/services/rescore.py`)
 
 ### Feed (user_feed)
 
@@ -141,7 +141,7 @@ LLM-extracted structured shape with 16 strict-typed fields, 99 enums, nested `Sa
 ### JobScorer
 
 The Pillar-2 scoring class. Two call signatures: `JobScorer(config)` (legacy 4-component) vs `JobScorer(config, user_preferences, ...)` (9-field `ScoreBreakdown` with Batch-2.9 multi-dim). The multi-dim path is gated on `user_preferences` **alone** (rule #20) — `enrichment_lookup` is optional, and a missing one gives every dim its documented NEUTRAL half, never a zero (rule #29).
-**Code:** `backend/src/services/skill_matcher.py:440-643` · **Pillar 2**
+**Code:** `backend/src/services/skill_matcher.py` · **Pillar 2**
 
 ### Ledger (notification_ledger)
 
@@ -156,7 +156,7 @@ Job360's CV-parsing / enrichment chain, tried in this order: **OpenAI** (`gpt-4o
 ### normalized_key
 
 `(normalized_company, normalized_title)` tuple — strips legal suffixes (Ltd/Inc/PLC/…), region suffixes (UK/US/EMEA/…), lowercases. The DB UNIQUE constraint on `jobs` + the dedup Layer-1 key. **Never change without checking both** (rule #1).
-**Code:** `backend/src/models.py:106-127` · **Pillar 3**
+**Code:** `backend/src/models.py` · **Pillar 3**
 
 ### Pillar
 
@@ -180,7 +180,7 @@ Per-source `asyncio.Semaphore(concurrent) + sleep(delay)` pair. Configured by `R
 ### Recency scoring
 
 Job-freshness component (0–10 pts) driven by the 5-column date model (`posted_at`, `date_found`, `date_confidence`, `date_posted_raw`). Fabricated/negative dates score 0; low-confidence falls to 60% of band. Anti-staleness signal.
-**Code:** `backend/src/services/skill_matcher.py:284-318` · **Pillar 2**
+**Code:** `backend/src/services/skill_matcher.py` · **Pillar 2**
 
 ### RRF (Reciprocal Rank Fusion)
 
@@ -193,13 +193,13 @@ The four concentric layers of the User pillar: Identity → Profile → Delivery
 
 ### Run (run_search / run_log)
 
-A single end-to-end pass of the pipeline. Tagged with a `run_uuid` correlation id in a `contextvar`; logged to `run_log` with per-source error counts and durations (migration `0010`). Surfaced via `GET /api/runs/recent` and `GET /api/runs/source-health` (`backend/src/api/routes/runs.py:63,150`); there is no bare `GET /api/runs`.
+A single end-to-end pass of the pipeline. Tagged with a `run_uuid` correlation id in a `contextvar`; logged to `run_log` with per-source error counts and durations (migration `0010`). Surfaced via `GET /api/runs/recent` and `GET /api/runs/source-health` (`backend/src/api/routes/runs.py`); there is no bare `GET /api/runs`.
 **Code:** `backend/src/main.py:run_search()` · **Pillar 2**
 
 ### ScoreBreakdown
 
 9-field frozen dataclass returned by `JobScorer.score()`: title, skill, location, recency (classic 4) + seniority, salary, visa, workplace (Batch-2.9 multi-dim) + the clamped `match_score` total.
-**Code:** `backend/src/services/scoring_dimensions.py:49-73` · **Pillar 2**
+**Code:** `backend/src/services/scoring_dimensions.py` · **Pillar 2**
 
 ### SearchConfig
 
@@ -219,7 +219,7 @@ The auth artefact set after login: cookie value is `<session_id>.<hmac>` signed 
 ### SOURCE_REGISTRY
 
 The 41-key dict in `main.py` mapping source-name to class. Builds 40 instances (indeed+glassdoor share `JobSpySource`). The *test* assertion `len(SOURCE_REGISTRY) == 41` in `test_cli.py` is one of five load-bearing surfaces (rule #13).
-**Code:** `backend/src/main.py:110-154` · **Pillar 3**
+**Code:** `backend/src/main.py` · **Pillar 3**
 
 ### Stale (vs Confirmed Expired)
 

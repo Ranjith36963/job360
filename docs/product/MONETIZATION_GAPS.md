@@ -50,13 +50,13 @@
 | **Notifications firing in prod** (Redis + ARQ deployed) | The core pitch is "works while you sleep" — dead in prod until the worker runs. |
 | **Email backbone (SES)** | Gmail SMTP won't send receipts / resets / alerts at scale. |
 | **LLM cost control + per-user quota** | Every search burns paid LLM calls. No caps = a few heavy/free users (or abuse) drain the wallet. No cost tracking exists. |
-| **Scale + reliability** — *partly shipped* | Postgres via psycopg3 since 2026-07-02 (the SQLite lock problem is gone), Sentry wired at `backend/src/api/main.py:82-98`, nightly `db-backup` workflow. What REMAINS: load testing, and alerting anyone actually reads. |
+| **Scale + reliability** — *partly shipped* | Postgres via psycopg3 since 2026-07-02 (the SQLite lock problem is gone), Sentry wired at `backend/src/api/main.py`, nightly `db-backup` workflow. What REMAINS: load testing, and alerting anyone actually reads. |
 
 ## 🟡 Tier 3 — Grow revenue (flying blind without these)
 
 | Missing | Why |
 |---|---|
-| ~~**Analytics + funnel**~~ **PARTLY SHIPPED** | PostHog **is** wired and consent-gated (`posthog-js` in `frontend/package.json:38`, mounted at `frontend/src/app/layout.tsx:66`, init at `frontend/src/components/providers/PostHogProviderWrapper.tsx:61-80`), and the signup→activation funnel is instrumented: `signup_completed`, `cv_uploaded`, `extraction_completed`, `search_run`, `job_viewed`, `application_created`, `$pageview`. What REMAINS is the **paid → churn** half, which needs the Stripe work in Tier 1 — there is no revenue event to track yet. |
+| ~~**Analytics + funnel**~~ **PARTLY SHIPPED** | PostHog **is** wired and consent-gated (`posthog-js` in `frontend/package.json:38`, mounted at `frontend/src/app/layout.tsx`, init at `frontend/src/components/providers/PostHogProviderWrapper.tsx`), and the signup→activation funnel is instrumented: `signup_completed`, `cv_uploaded`, `extraction_completed`, `search_run`, `job_viewed`, `application_created`, `$pageview`. What REMAINS is the **paid → churn** half, which needs the Stripe work in Tier 1 — there is no revenue event to track yet. |
 | **Onboarding** | Get users to the "wow" (CV → first great matches) fast = activation = conversion. |
 | **Subscription management UI** | Upgrade / downgrade / cancel / invoices / billing history. |
 | **Lifecycle emails + support** | Welcome, trial-ending, payment-failed, receipts; a contact/support channel. |

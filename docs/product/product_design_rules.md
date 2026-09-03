@@ -123,14 +123,14 @@ state; Canada is a country), so all three scored as *trusted, unambiguous* UK
 places and carried 153 of the 190 live foreign rows straight through the
 dual-site escape. Countries and admin1 divisions were already downloaded and
 already closed sets, so they now feed the same computation at a flat weight —
-`FOREIGN_ADMIN_WEIGHT = 20_000` (`backend/scripts/build_uk_gazetteer.py:95,181-186`).
+`FOREIGN_ADMIN_WEIGHT = 20_000` (`backend/scripts/build_uk_gazetteer.py`).
 The weight is measured, not chosen by taste: the 84 UK names colliding with a
 foreign country or admin1 have exactly one population gap, between Warwick
 (37,267) and Portsmouth (47,350), so a 40,000-effective cut-off keeps
 Manchester, Southampton and Canterbury while dropping the hamlets. **Those
 figures are a dated measurement, not something you can re-derive from this
 repo:** they were taken on 2026-08-19 and are recorded in the builder's own
-comment (`backend/scripts/build_uk_gazetteer.py:90-95`); the GeoNames snapshot
+comment (`backend/scripts/build_uk_gazetteer.py`); the GeoNames snapshot
 they came from is fetched at build time and never checked in, so `--check`
 validates file counts and canaries, not these populations. Treat them as the
 recorded basis for the threshold, and re-measure rather than re-cite if the
@@ -139,10 +139,10 @@ was added to `check_uk` and no city was typed — the fix is DATA, which is the
 rule. Still admitted on purpose: `"London, Ontario"` — a big UK city beside a
 foreign region is how both a foreign address and a genuine two-site ad get
 written, and `london` never enters `ambiguous.txt`, so the escape still speaks
-for it (`backend/src/services/uk_gate.py:367-382`; root `CLAUDE.md:57` rule #30
+for it (`backend/src/services/uk_gate.py`; root `CLAUDE.md:57` rule #30
 records this as the remaining gap). **No test pins that exact input** —
-`backend/tests/test_uk_gate.py:161` asserts only bare `check_uk("London", …)`,
-and `backend/tests/test_scorer.py:673-679` names "London, Ontario" expressly to say it is
+`backend/tests/test_uk_gate.py` asserts only bare `check_uk("London", …)`,
+and `backend/tests/test_scorer.py` names "London, Ontario" expressly to say it is
 *not* asserted there. The behaviour above is read off the gate logic and the
 shipped gazetteer data (`ontario` in `foreign_admin.txt`, absent from
 `uk_places.txt`; `london` in neither ambiguity list), so treat it as

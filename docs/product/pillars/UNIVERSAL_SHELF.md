@@ -15,7 +15,7 @@
 
 Discipline rule: a shelf earns its place only if (a) at least one real source can fill it and (b) a named consumer reads it. A shelf nobody fills or nothing consumes is dead weight — see the rejected list below.
 
-The three owner-named shelves are **DEADLINE**, **SALARY**, **VISA SPONSORSHIP**. Four shelves (salary, seniority, visa, workplace) already have paid-for consumers waiting: the multi-dim scorer weights SALARY 10 / SENIORITY 8 / VISA 6 / WORKPLACE 6 points (`core/settings.py:195-198`) — today those dims run mostly on empty inputs.
+The three owner-named shelves are **DEADLINE**, **SALARY**, **VISA SPONSORSHIP**. Four shelves (salary, seniority, visa, workplace) already have paid-for consumers waiting: the multi-dim scorer weights SALARY 10 / SENIORITY 8 / VISA 6 / WORKPLACE 6 points (`core/settings.py`) — today those dims run mostly on empty inputs.
 
 ### Identity block (not matchable shelves, but every row needs them)
 
@@ -23,7 +23,7 @@ The three owner-named shelves are **DEADLINE**, **SALARY**, **VISA SPONSORSHIP**
 |---|---|---|---|
 | `source` | text | Which fetcher produced the row | exists |
 | `apply_url` | text | Where the user applies; part of dedup | exists — upgrade candidates: reed detail `externalUrl` (real employer link), google `source_link`/`apply_options[]`, indeed `job_url_direct` (harvest 2026-08-16) |
-| `first_seen_at` / `last_seen_at` / `staleness_state` | timestamps + enum | Lifecycle + ghost detection | exists (`models.py:50-52`) |
+| `first_seen_at` / `last_seen_at` / `staleness_state` | timestamps + enum | Lifecycle + ghost detection | exists (`models.py`) |
 | (recommended) `source_job_id` | text | Stable upstream id (reed `jobId`, jsearch `job_id`, google `job_id`, ashby `id`…) — stronger dedup than `(company,title)` | does not exist; harvest flagged google dedup as weaker without it |
 
 ### The 13 universal shelves
@@ -33,16 +33,16 @@ The three owner-named shelves are **DEADLINE**, **SALARY**, **VISA SPONSORSHIP**
 | 1 | **title** | text | Primary role match — Title component is 40 of 100 legacy points | `JobScorer` title component | exists, filled |
 | 2 | **company** | text | Identity, dedup key half, display trust | dedup (`normalized_key`), UI | exists, filled |
 | 3 | **location** | text (raw) | UK door (rule #30) + location score 10 pts | `uk_gate.check_uk`, location component | exists; known leak: aijobs_ai drops the card's own location text so a "United States" job slipped the gate (harvest 2026-08-16) |
-| 4 | **description** | text | Raw material for skill match (40 pts), JOB SOURCE ENRICHMENT, and embeddings. Everything downstream eats this. | skill matcher, enrichment, embeddings | exists; 24% of catalog empty, 16/39 sources stub it (harvest 2026-08-16); prod 2026-08-07: 30% of active jobs <200 chars and enriched-field coverage tracks description length almost perfectly (`settings.py:234-236`) |
-| 5 | **posted_at** (+ `date_confidence`, `date_posted_raw`) | timestamp + enum | Recency score 10 pts; honesty about date trust | recency component, UI | exists (5-column date model, `models.py:35-41`); free fixes owed: climatebase `activation_date` (100% fill, code hardcodes None), eightykhours reads nonexistent `date_published` instead of `posted_at` |
+| 4 | **description** | text | Raw material for skill match (40 pts), JOB SOURCE ENRICHMENT, and embeddings. Everything downstream eats this. | skill matcher, enrichment, embeddings | exists; 24% of catalog empty, 16/39 sources stub it (harvest 2026-08-16); prod 2026-08-07: 30% of active jobs <200 chars and enriched-field coverage tracks description length almost perfectly (`settings.py`) |
+| 5 | **posted_at** (+ `date_confidence`, `date_posted_raw`) | timestamp + enum | Recency score 10 pts; honesty about date trust | recency component, UI | exists (5-column date model, `models.py`); free fixes owed: climatebase `activation_date` (100% fill, code hardcodes None), eightykhours reads nonexistent `date_published` instead of `posted_at` |
 | 6 | **deadline** (+ `deadline_source`) | date + enum | OWNER-NAMED. "Closing soon" urgency, expired-job removal — an application after the deadline is wasted user effort | UI, feed ordering (unblocks §9) | exists, partially fed (8 sources read it; 4+ more carry it unread) |
-| 7 | **salary** = `salary_min`, `salary_max`, + NEW `salary_currency`, `salary_period`, `salary_is_estimated`, + derived `salary_min_gbp_annual`/`salary_max_gbp_annual` | numeric ×2, text ×2, bool, numeric ×2 | OWNER-NAMED. Salary dim is 10 pts; salary filter is a top-3 job-board filter. Without currency+period the numbers are lies: landingjobs live 2026-08-16 = 0/50 jobs GBP (46 EUR, 3 BRL, 1 USD) yet all stored as GBP; careerjet stores hourly and annual in the same field | salary dim (`salary.py`), display (`api/routes/jobs.py:43-49`) | min/max exist; currency/period/estimated DO NOT — the model clamp `models.py:91-95` silently assumes GBP-annual |
-| 8 | **visa_status** | text enum: `sponsors` / `no_sponsorship` / `unknown` | OWNER-NAMED. Rule #31: visa is a SPOTLIGHT, not a wall — sponsors ranked up + badged, catalog never shrinks. The bool `visa_flag` conflates "says no" with "never mentioned" | visa dim (6 pts), badge UI | 3-state exists only at read time (`visa_signal.py:33-36`); catalog column is still the conflating bool |
-| 9 | **employment_type** | text enum: `full_time` / `part_time` / `contract` / `internship` / `temporary` / `apprenticeship` / `freelance` (from `job_enrichment_schema.py:53-61`) | Contract vs permanent is a hard user constraint, not a preference. Widest free coverage of any missing shelf: ~25 sources already send it | new search filter + prefilter (§9) | NO column exists at all (harvest note, 2026-08-16) — every source's value is thrown away |
-| 10 | **seniority** | text enum: `intern`…`director` (`job_enrichment_schema.py:77-85`) | Seniority dim is 8 pts; entry-level users drown in senior roles and vice versa | seniority dim, prefilter | free-text `experience_level` exists, filled only from title regex (`main.py:706`); 6+ sources' structured values unread |
-| 11 | **workplace_mode** | text enum: `remote` / `onsite` / `hybrid` (`job_enrichment_schema.py:64-68`) | Remote/hybrid/onsite is a hard constraint for most users; today it's inferred from the word "remote" in a location string | workplace dim (6 pts), filter | NO column; ~14 sources send it (ashby, workable, pinpoint, climatebase 100% fill, indeed, …) |
+| 7 | **salary** = `salary_min`, `salary_max`, + NEW `salary_currency`, `salary_period`, `salary_is_estimated`, + derived `salary_min_gbp_annual`/`salary_max_gbp_annual` | numeric ×2, text ×2, bool, numeric ×2 | OWNER-NAMED. Salary dim is 10 pts; salary filter is a top-3 job-board filter. Without currency+period the numbers are lies: landingjobs live 2026-08-16 = 0/50 jobs GBP (46 EUR, 3 BRL, 1 USD) yet all stored as GBP; careerjet stores hourly and annual in the same field | salary dim (`salary.py`), display (`api/routes/jobs.py`) | min/max exist; currency/period/estimated DO NOT — the model clamp `models.py` silently assumes GBP-annual |
+| 8 | **visa_status** | text enum: `sponsors` / `no_sponsorship` / `unknown` | OWNER-NAMED. Rule #31: visa is a SPOTLIGHT, not a wall — sponsors ranked up + badged, catalog never shrinks. The bool `visa_flag` conflates "says no" with "never mentioned" | visa dim (6 pts), badge UI | 3-state exists only at read time (`visa_signal.py`); catalog column is still the conflating bool |
+| 9 | **employment_type** | text enum: `full_time` / `part_time` / `contract` / `internship` / `temporary` / `apprenticeship` / `freelance` (from `job_enrichment_schema.py`) | Contract vs permanent is a hard user constraint, not a preference. Widest free coverage of any missing shelf: ~25 sources already send it | new search filter + prefilter (§9) | NO column exists at all (harvest note, 2026-08-16) — every source's value is thrown away |
+| 10 | **seniority** | text enum: `intern`…`director` (`job_enrichment_schema.py`) | Seniority dim is 8 pts; entry-level users drown in senior roles and vice versa | seniority dim, prefilter | free-text `experience_level` exists, filled only from title regex (`main.py`); 6+ sources' structured values unread |
+| 11 | **workplace_mode** | text enum: `remote` / `onsite` / `hybrid` (`job_enrichment_schema.py`) | Remote/hybrid/onsite is a hard constraint for most users; today it's inferred from the word "remote" in a location string | workplace dim (6 pts), filter | NO column; ~14 sources send it (ashby, workable, pinpoint, climatebase 100% fill, indeed, …) |
 | 12 | **skills** = `source_tags` (catalog) + LLM `required_skills`/`preferred_skills` (in `job_enrichment`) | JSON list + enrichment columns | Direct fodder for the 40-pt skill component and embeddings; source tags are the job's own vocabulary, no guessing | skill matcher via `enrichment_lookup`, embeddings | NO catalog column; arbeitnow tags 93% fill, remotive 100%, nofluffjobs `tiles.values[]` 100% of 21,795 postings — all discarded today (harvest 2026-08-16) |
-| 13 | **category** | text enum (16-way, `job_enrichment_schema.py:33-50`) | Domain facet ("IT vs teaching vs healthcare") for retrieval prefilter and dashboard facets; free deriver already exists (`services/domain_classifier.py`) | retrieval prefilter, facets | in LLM contract only; adzuna `category.label`, smartrecruiters `industry`/`function`, teaching `occupationalCategory` unread |
+| 13 | **category** | text enum (16-way, `job_enrichment_schema.py`) | Domain facet ("IT vs teaching vs healthcare") for retrieval prefilter and dashboard facets; free deriver already exists (`services/domain_classifier.py`) | retrieval prefilter, facets | in LLM contract only; adzuna `category.label`, smartrecruiters `industry`/`function`, teaching `occupationalCategory` unread |
 
 **Absent everywhere = column NULL.** The string `"unknown"` is an LLM-contract value; the catalog stores NULL plus a provenance reason (§3, §4).
 
@@ -72,9 +72,9 @@ All field names below are from the live harvest of 2026-08-16 unless cited other
 | Source — read today | pinpoint `deadline_at` · recruitee `close_at` · workday detail `endDate` · himalayas `expiryDate` · landingjobs `expires_at` · weworkremotely `expires_at` · teaching_vacancies `validThrough` · nhs_jobs `closeDate` |
 | Source — in payload, unread (FREE) | reed `expirationDate` · gov_apprenticeships `closingDate` (3/3 sample) · greenhouse `application_deadline` (non-null on a live Monzo job) · linkedin JSON-LD `validThrough` (detail page already fetched) |
 | Source — extra request | nofluffjobs detail `expiresAt` (`GET /api/posting/{id}`, id in hand) · eightykhours `closes_at` (schema-present, null in 26-hit sample) |
-| Free derivation | `services/deadline.extract_deadline(description)` — already runs for every job lacking a structured deadline (`main.py:708-716`), sets `deadline_source='description'` |
+| Free derivation | `services/deadline.extract_deadline(description)` — already runs for every job lacking a structured deadline (`main.py`), sets `deadline_source='description'` |
 | JOB SOURCE ENRICHMENT | **NONE, deliberately.** `JobEnrichment` has no deadline field and must not get one: the regex covers prose dates, and an LLM-guessed date is exactly the fabrication rule #29 bans. Chain ends at derived. |
-| ABSENT | `not_stated` — most boards have no deadline concept. `models.py:43`: "None means no deadline listed. NEVER fabricated." |
+| ABSENT | `not_stated` — most boards have no deadline concept. `models.py`: "None means no deadline listed. NEVER fabricated." |
 
 ### SALARY (owner-named)
 
@@ -83,19 +83,19 @@ All field names below are from the live harvest of 2026-08-16 unless cited other
 | Source — numbers read today | smartrecruiters `compensation.min/max/currency/period` (only source reading currency+period) · pinpoint `compensation_minimum/maximum` · recruitee `salary.min/max` · remoteok `salary_min/max` (USD by convention, unstated in payload) · devitjobs `annualSalaryFrom/To` (+ `contractRate*` fallback) · jobicy `salaryMin/Max` · himalayas `minSalary/maxSalary` · landingjobs `gross_salary_low/high` · nofluffjobs `salary.from/to` (currency-guarded — the only guard in the free batch) · climatebase `salary_from/to` (3/100 fill) · indeed `min_amount/max_amount` · adzuna `salary_min/max` (3/3 fill) · reed `minimumSalary/maximumSalary` · careerjet `salary_min/max` · google `detected_extensions.salary` (regex) · jsearch `job_min_salary/job_max_salary` |
 | Source — unit/currency SIDECARS, unread (FREE — these are the mislabel bugs) | jobicy `salaryCurrency`+`salaryPeriod` (of 3 filled: 1 USD, 2 GBP) · himalayas `currency`+`salaryPeriod` (USD seen stored as GBP) · landingjobs `currency_code` (**0/50 GBP live** — every stored salary from this source mislabeled) · careerjet `salary_type` ('Y'/'H' both seen — hourly and annual currently indistinguishable) + `salary_currency_code` · indeed `currency`+`interval`+`salary_source` · nofluffjobs `salary.period` ('Month' seen — latent gap behind the currency guard) · pinpoint `compensation_currency`/`compensation_frequency` · recruitee `salary.period/currency` · reed detail `salaryType` ('per day' with null amount — rate unit without a number) · adzuna `salary_is_predicted` (real vs ML-guessed, '0'/'1' both seen) |
 | Source — unlockable | ashby `compensation.summaryComponents[].{minValue,maxValue,currencyCode,interval}` — requires only `?includeCompensation=true` on the existing request (confirmed populated live on openai: $257K–$335K structured) · linkedin JSON-LD `baseSalary.value.{minValue,maxValue,currency,unitText}` (clean numerics, page already fetched — £65,000–£75,000/YEAR seen) · eightykhours `salary_limit` (clean numeric) + `salary` string · gov_apprenticeships `wage.wageAdditionalInformation` free text — the ONLY number carrier; code reads `wage.wageAmount` which does not exist in the payload (3/3 samples), so gov salary is null 100% today |
-| Free derivation | `normalize_salary()` (`services/salary.py:37`) annualises via `_FREQUENCY_ANNUAL` and converts via `core/fx.to_gbp` (18 hardcoded rates, 2026-Q1, `fx.py:14-33`); `is_known_currency` guards display (`api/routes/jobs.py:43-49`); remotive's regex parser (correctly skips hourly); nhs regex (broken: splits on '.', decimal hourly rates never parse — fix in gate) |
-| JOB SOURCE ENRICHMENT | `JobEnrichment.salary` = `SalaryBand{min,max,currency,frequency}` (`job_enrichment_schema.py:108-119`) |
-| ABSENT | `not_stated` — ~70% of the UK corpus omits pay entirely (`job_enrichment_schema.py:110`) |
+| Free derivation | `normalize_salary()` (`services/salary.py`) annualises via `_FREQUENCY_ANNUAL` and converts via `core/fx.to_gbp` (18 hardcoded rates, 2026-Q1, `fx.py`); `is_known_currency` guards display (`api/routes/jobs.py`); remotive's regex parser (correctly skips hourly); nhs regex (broken: splits on '.', decimal hourly rates never parse — fix in gate) |
+| JOB SOURCE ENRICHMENT | `JobEnrichment.salary` = `SalaryBand{min,max,currency,frequency}` (`job_enrichment_schema.py`) |
+| ABSENT | `not_stated` — ~70% of the UK corpus omits pay entirely (`job_enrichment_schema.py`) |
 
-**Gate rule for salary:** annualise + currency-tag FIRST, then sanity-clamp. The current clamp (`models.py:91-95`, <10k or >500k → None, GBP-annual assumed) destroys every honest hourly/daily/monthly figure (nhs £30.27/h, nofluffjobs 3,600/Month) — with `salary_period` known, the gate converts before clamping and keeps `salary_is_estimated` from adzuna so a real advertised figure outranks an ML guess.
+**Gate rule for salary:** annualise + currency-tag FIRST, then sanity-clamp. The current clamp (`models.py`, <10k or >500k → None, GBP-annual assumed) destroys every honest hourly/daily/monthly figure (nhs £30.27/h, nofluffjobs 3,600/Month) — with `salary_period` known, the gate converts before clamping and keeps `salary_is_estimated` from adzuna so a real advertised figure outranks an ML guess.
 
 ### VISA SPONSORSHIP (owner-named)
 
 | Layer | Real fields |
 |---|---|
 | Source | devitjobs `hasVisaSponsorship` (real bool, read today) · eightykhours `visas[]` (e.g. `['not us','not uk']`, unread) |
-| Free derivation | `visa_signal.detect_visa_status(description, title)` → 3-state, refusal beats offer (`visa_signal.py:70-93`) — already exists and already accepts the LLM verdict as an override |
-| JOB SOURCE ENRICHMENT | `JobEnrichment.visa_sponsorship` (yes/no/unknown) — `detect_visa_status(..., enrichment_value=...)` already gives it precedence (`visa_signal.py:78-87`) |
+| Free derivation | `visa_signal.detect_visa_status(description, title)` → 3-state, refusal beats offer (`visa_signal.py`) — already exists and already accepts the LLM verdict as an override |
+| JOB SOURCE ENRICHMENT | `JobEnrichment.visa_sponsorship` (yes/no/unknown) — `detect_visa_status(..., enrichment_value=...)` already gives it precedence (`visa_signal.py`) |
 | ABSENT | IS the third state: `unknown`. Rule #31 — never shrink the catalog, never penalise unknown; sponsors get the spotlight, unknown stays visible unbadged. |
 
 ### EMPLOYMENT_TYPE (widest free coverage of any missing shelf)
@@ -106,7 +106,7 @@ All field names below are from the live harvest of 2026-08-16 unless cited other
 | Source — ATS | lever `categories.commitment` · ashby `employmentType` · workable `type` · pinpoint `employment_type(_text)` · recruitee `employment_type_code` · workday LIST `timeType` (in the list response, before any detail call — costs nothing) · personio `employmentType`+`schedule` · smartrecruiters `typeOfEmployment.label` (rides the already-made detail call) · successfactors JSON-LD `employmentType[]` (needs the page fetch) |
 | Source — free/feeds | arbeitnow `job_types[]` (82% fill) · jobicy `jobType[]` · himalayas `employmentType` · remotive `job_type` (100% fill: full_time/part_time/freelance) · landingjobs `type` · nhs `type` (100% fill) · weworkremotely `type` (100/100: 96 Full-Time, 4 Contract) · teaching_vacancies `employmentType[]` (100% fill; can be multi: PART_TIME+TEMPORARY) · climatebase `job_types` (96% fill) · eightykhours `tags_role_type` · aijobs_ai badge = `_card_texts()[1]`, computed then thrown away · indeed `job_type` (empty on n=1 — unverified fill) · linkedin JSON-LD `employmentType` |
 | Free derivation | none — no guessing from titles |
-| JOB SOURCE ENRICHMENT | `employment_type` enum (`job_enrichment_schema.py:53-61`) |
+| JOB SOURCE ENRICHMENT | `employment_type` enum (`job_enrichment_schema.py`) |
 | ABSENT | `not_stated` / `source_lacks_field`. Multi-valued reality (teaching: 4% carry two): store the primary value; raw list preserved in provenance. |
 
 ### SENIORITY
@@ -116,8 +116,8 @@ All field names below are from the live harvest of 2026-08-16 unless cited other
 | Source — read today | smartrecruiters `experienceLevel.label` · personio `seniority` · jobicy `jobLevel` · themuse `levels[0].name` · nofluffjobs `seniority[0]` · devitjobs `expLevel` |
 | Source — unread (FREE) | recruitee `experience_code` ('entry_level' — literally the shelf, nothing reads it) · gov_apprenticeships `apprenticeshipLevel` + `course.level` · eightykhours `tags_exp_required` ('Mid (5-9 years experience)') · linkedin JSON-LD `experienceRequirements.monthsOfExperience` + `educationRequirements.credentialCategory` · uni_jobs `category` (Studentships→Professorships role-tier, 100% fill of 198) |
 | Source — extra request | jsearch detail `seniority_level` |
-| Free derivation | `detect_experience_level(job.title)` — already runs (`main.py:706`) |
-| JOB SOURCE ENRICHMENT | `seniority` (7-enum) + `experience_level` (entry/mid/senior) + `experience_min_years` (`job_enrichment_schema.py:77-92,157-160`) |
+| Free derivation | `detect_experience_level(job.title)` — already runs (`main.py`) |
+| JOB SOURCE ENRICHMENT | `seniority` (7-enum) + `experience_level` (entry/mid/senior) + `experience_min_years` (`job_enrichment_schema.py`) |
 | ABSENT | `not_stated` — legacy free-text `experience_level` column stays until consumers migrate to the enum |
 
 ### WORKPLACE_MODE
@@ -126,7 +126,7 @@ All field names below are from the live harvest of 2026-08-16 unless cited other
 |---|---|
 | Source | ashby `isRemote`+`workplaceType` · lever `workplaceType` · workable `remote`+`workplace` · pinpoint `workplace_type(_text)` · smartrecruiters `location.remote/hybrid` · jsearch `job_is_remote` · arbeitnow `remote` · findwork `remote` · landingjobs `remote` · climatebase `remote_preferences` (100% fill) · indeed `is_remote`+`work_from_home_type` · nofluffjobs `fullyRemote` · devitjobs `remoteType`/`workplace` · himalayas `locationRestrictions[]`/`timezoneRestrictions[]` |
 | Free derivation | 'remote' token in the location string (today's only signal — weak; keep as fallback) |
-| JOB SOURCE ENRICHMENT | `workplace_type` enum (`job_enrichment_schema.py:64-68`) |
+| JOB SOURCE ENRICHMENT | `workplace_type` enum (`job_enrichment_schema.py`) |
 | ABSENT | `not_stated` |
 
 ### DESCRIPTION (recovery, not extraction — the LLM reads this shelf, it never writes it)
@@ -135,7 +135,7 @@ All field names below are from the live harvest of 2026-08-16 unless cited other
 |---|---|
 | Source — same response, unread (FREE) | himalayas `description` (avg 7,299 chars vs the `excerpt` we store at avg 187 — bigger on 20/20 samples) · pinpoint `key_responsibilities` (3,381) + `skills_knowledge_expertise` (1,998) beside the 1,625-char `description` we read · lever `lists[].content` (~5,200 chars already downloaded — task brief) · landingjobs `main_requirements`+`nice_to_have` · nofluffjobs `tiles.values[]` (100% fill on all 21,795 postings; today NO `description=` kwarg is passed at all — every row ships empty) |
 | Source — extra request (budget-cap pattern already exists in smartrecruiters/workday) | reed detail `jobDescription` (453-char teaser → ~4,700 full) · workable detail GET `.../jobs/{shortcode}` (description 2,237 + requirements 2,134 + benefits 1,884 — list endpoint genuinely has none) · nofluffjobs detail `requirements.description` · successfactors job-page JSON-LD `description` (8,876 chars; today description=title for all ~1,800 jobs/run) · nhs detail page (list gives a ~180-char excerpt) · climatebase detail page (list has no description field) |
-| Free derivation | the existing sweep: `workers/tasks.py::_backfill_thin_descriptions`, `DESCRIPTION_BACKFILL_PER_TICK=50` per 30-min cron tick (`settings.py:229-240`) |
+| Free derivation | the existing sweep: `workers/tasks.py::_backfill_thin_descriptions`, `DESCRIPTION_BACKFILL_PER_TICK=50` per 30-min cron tick (`settings.py`) |
 | JOB SOURCE ENRICHMENT | never |
 | ABSENT | `stub` (description==title or <600 chars — blocks the LLM pass for this job, §6) or `source_lacks_field` (hn_jobs, devitjobs structurally have none) |
 
@@ -143,9 +143,9 @@ All field names below are from the live harvest of 2026-08-16 unless cited other
 
 | Shelf | Source fields | Derivation | LLM | Notes |
 |---|---|---|---|---|
-| title | every source; google/jsearch also carry canonical variants | `html.unescape` (`models.py:87`) | `title_canonical` (enrichment, stays there) | filled everywhere |
-| company | every source except landingjobs (API has no company field — documented no-op) and hn/aijobs sponsored cards | `_clean_company` (`models.py:97-104`) | — | absent = 'Unknown' today; keep |
-| location | every source; structured upgrades sitting free: jsearch `job_city/state/country`, workday detail `country.alpha2Code`, ashby `address.postalAddress`, linkedin JSON-LD `jobLocation`, eightykhours `tags_city/tags_country` (code currently reads nonexistent `locations` key → every job defaults to 'Remote') · aijobs_ai `_card_texts()[2]` thrown away → confirmed US-job leak past the UK gate | `uk_gate.check_uk` (the door, rule #30) | — (retired from LLM contract 2026-08: `locations` 0% populated over 3,119 rows, `job_enrichment_schema.py:12-19`) | fix the two reader bugs; keep raw string as the shelf |
+| title | every source; google/jsearch also carry canonical variants | `html.unescape` (`models.py`) | `title_canonical` (enrichment, stays there) | filled everywhere |
+| company | every source except landingjobs (API has no company field — documented no-op) and hn/aijobs sponsored cards | `_clean_company` (`models.py`) | — | absent = 'Unknown' today; keep |
+| location | every source; structured upgrades sitting free: jsearch `job_city/state/country`, workday detail `country.alpha2Code`, ashby `address.postalAddress`, linkedin JSON-LD `jobLocation`, eightykhours `tags_city/tags_country` (code currently reads nonexistent `locations` key → every job defaults to 'Remote') · aijobs_ai `_card_texts()[2]` thrown away → confirmed US-job leak past the UK gate | `uk_gate.check_uk` (the door, rule #30) | — (retired from LLM contract 2026-08: `locations` 0% populated over 3,119 rows, `job_enrichment_schema.py`) | fix the two reader bugs; keep raw string as the shelf |
 | posted_at | climatebase `activation_date` (100% fill, hardcoded None today) · eightykhours `posted_at` epoch (code reads nonexistent `date_published`) · reed detail `datePosted` · all sources' existing date fields | `normalize_posted_at` + 5-column confidence model | never (fabrication risk) | exists, works |
 | skills | arbeitnow `tags[]` (93%) · remotive `tags[]` (100%) · remoteok `tags[]` · findwork `keywords[]` · themuse `tags[]`/`categories[]` · devitjobs `technologies[]` (read, composed) · nofluffjobs `tiles.values[]` · linkedin JSON-LD `skills` · jsearch detail `required_technologies`/`preferred_technologies`/`soft_skills` | normalise via `core/skill_synonyms.py` (retained carve-out, rule #28 — scoring vocab, reads no CV) | `required_skills`/`preferred_skills` ≤30 each | source tags land in `jobs.source_tags`; LLM lists stay in `job_enrichment` |
 | category | adzuna `category.label` · smartrecruiters `industry.label`+`function.label` · teaching_vacancies `occupationalCategory` (100% fill) · themuse `categories[]` · uni_jobs `category` | `services/domain_classifier.py` (exists) | `category` 16-enum | write-back to `jobs.category` |
@@ -183,7 +183,7 @@ Contract: keys are exactly the `UNIVERSAL_SHELF` tuple (§5) — no more, no few
 
 **Values live in typed columns; provenance lives in JSONB.** The shelf VALUES (salary_min, deadline, employment_type…) stay real, indexable columns on `jobs` — filterable and cheap. Only the how-it-got-there metadata goes to JSONB. New columns (migration `0031`): `employment_type`, `workplace_mode`, `seniority`, `salary_currency`, `salary_period`, `salary_is_estimated`, `salary_min_gbp_annual`, `salary_max_gbp_annual`, `visa_status`, `category`, `source_tags`, `shelf_provenance` (NOT NULL DEFAULT '{}').
 
-**Where LLM values land:** `job_enrichment` remains the LLM layer's append store (versioned raw output, idempotent per `job_id` — `job_enrichment.py:3-6`). The enrichment sweep then WRITES BACK through the gate (§5) into still-NULL `jobs` columns with `how:"llm"`. Rejected alternative — virtual shelves via `COALESCE(jobs.col, enrichment.col)` at read time — would force every consumer (filters, serializers, embeddings) to replicate the join+merge logic, which is exactly the per-source scatter this design exists to kill. (Read-time merge already crept in once: `api/routes/jobs.py:43-49` reads enrichment salary directly.)
+**Where LLM values land:** `job_enrichment` remains the LLM layer's append store (versioned raw output, idempotent per `job_id` — `job_enrichment.py`). The enrichment sweep then WRITES BACK through the gate (§5) into still-NULL `jobs` columns with `how:"llm"`. Rejected alternative — virtual shelves via `COALESCE(jobs.col, enrichment.col)` at read time — would force every consumer (filters, serializers, embeddings) to replicate the join+merge logic, which is exactly the per-source scatter this design exists to kill. (Read-time merge already crept in once: `api/routes/jobs.py` reads enrichment salary directly.)
 
 ---
 
@@ -205,11 +205,11 @@ Rule #29 for the catalog side: an empty shelf must never become a guess, a zero,
 
 | Consumer | Rule on NULL shelf |
 |---|---|
-| Dim scorers | Return the neutral constant — `salary_score` already treats no-signal as the neutral band (`services/salary.py:7-9`); never a per-job zero |
+| Dim scorers | Return the neutral constant — `salary_score` already treats no-signal as the neutral band (`services/salary.py`); never a per-job zero |
 | Prefilters | Pass the job through. A filter "salary ≥ £50k" excludes NULL-salary jobs ONLY if the user explicitly ticks "only show jobs that state pay" — default keeps them, ranked by everything else |
 | Visa consumers | `unknown` = visible, unbadged, unpenalised (rule #31 — refusal is tested before offer) |
 | Deadline consumers | NULL ≠ expired. Never sort NULL to "closing soon" or "expired"; UI shows the existing fallback |
-| JOB SOURCE ENRICHMENT | Never asked to fill a shelf from a `stub` job; prompt already mandates explicit `unknown` over invention (`job_enrichment.py:42-46`) |
+| JOB SOURCE ENRICHMENT | Never asked to fill a shelf from a `stub` job; prompt already mandates explicit `unknown` over invention (`job_enrichment.py`) |
 | Frontend | Show "—" / omit the chip. Never render 0, never a red state |
 | Telemetry | Per-shelf, per-source fill-rate split BY `why` — the empty-shelf-three-causes rule: broken extractor vs merge-dropped vs no front door look identical in a bare NULL; `why` separates them |
 
@@ -224,13 +224,13 @@ Today ~42 hand-written `Job(...)` constructions each fill whatever they happen t
 `src/services/shelf_gate.py` — `fill_shelves(job: Job) -> Job` (sync, no I/O, no await):
 
 1. **Sources become dumb mappers.** A source's only duty is copying upstream keys onto `Job` fields (including the new ones: `employment_type`, `salary_currency`, …). No policy, no normalisation, no defaults in source files.
-2. **The gate owns all policy:** enum-normalise employment/workplace/seniority strings ('Full time', 'FULLTIME', 'permanent' → `full_time` — a CLOSED set, so enumeration is legal under rule #30's bounded-set law, raw value preserved in provenance); annualise+currency-tag salary via `normalize_salary`/`fx` then clamp (moving the unit-blind clamp out of `models.py:91-95`); run `detect_visa_status`; run `extract_deadline` (absorbing the existing pass at `main.py:708-716`); detect stub descriptions (`description == title` or <600 chars → `absent:stub`).
+2. **The gate owns all policy:** enum-normalise employment/workplace/seniority strings ('Full time', 'FULLTIME', 'permanent' → `full_time` — a CLOSED set, so enumeration is legal under rule #30's bounded-set law, raw value preserved in provenance); annualise+currency-tag salary via `normalize_salary`/`fx` then clamp (moving the unit-blind clamp out of `models.py`); run `detect_visa_status`; run `extract_deadline` (absorbing the existing pass at `main.py`); detect stub descriptions (`description == title` or <600 chars → `absent:stub`).
 3. **Stamp provenance for EVERY shelf, always** — filled or absent. The invariant is not "every shelf filled" (impossible); it is "every shelf ACCOUNTED FOR."
 4. Two entry points, same core: `fill_shelves(job)` at ingest; `apply_enrichment(job_row, enrichment)` in the sweep write-back — so `how:"llm"` rows get identical normalisation and never overwrite `source`/`derived` fills.
 
 ### Where it sits — WIRED 2026-08-16 (step 2)
 
-Inside `_score_dedup_and_filter()` (`src/main.py:681`) — the single synchronous stage every run already passes through (score → deadline-extract → dedup → store, threaded off the loop since PR #123). The gate runs FIRST in that function, before scoring, so the scorer reads normalised shelves; the existing deadline loop (`main.py:708-716`) moves into the gate. No source can bypass it because sources don't call it — the orchestrator does, downstream of all of them. **Done:** `main.py` now calls `fill_shelves(job)` for every raw job before scoring; the deadline loop is gone from `main.py` and lives in `shelf_gate._fill_deadline`; the unit-blind clamp is gone from `models.Job.__post_init__` and lives in `shelf_gate._fill_salary`, which annualises + converts to GBP FIRST (`salary.normalize_salary` / `core.fx`) and writes the derived `salary_min_gbp_annual` / `salary_max_gbp_annual` pair. `SCORER_VERSION` 7 → 8 so the freeze in `services/feed.py` does not make it inert on existing rows. Source #41 forgetting a shelf now produces a counted `absent:not_mapped`, not a silent hole.
+Inside `_score_dedup_and_filter()` (`src/main.py`) — the single synchronous stage every run already passes through (score → deadline-extract → dedup → store, threaded off the loop since PR #123). The gate runs FIRST in that function, before scoring, so the scorer reads normalised shelves; the existing deadline loop (`main.py`) moves into the gate. No source can bypass it because sources don't call it — the orchestrator does, downstream of all of them. **Done:** `main.py` now calls `fill_shelves(job)` for every raw job before scoring; the deadline loop is gone from `main.py` and lives in `shelf_gate._fill_deadline`; the unit-blind clamp is gone from `models.Job.__post_init__` and lives in `shelf_gate._fill_salary`, which annualises + converts to GBP FIRST (`salary.normalize_salary` / `core.fx`) and writes the derived `salary_min_gbp_annual` / `salary_max_gbp_annual` pair. `SCORER_VERSION` 7 → 8 so the freeze in `services/feed.py` does not make it inert on existing rows. Source #41 forgetting a shelf now produces a counted `absent:not_mapped`, not a silent hole.
 
 ### Enforcement — `tests/test_universal_shelf.py`
 
@@ -277,18 +277,18 @@ Two rules the code enforces that this doc previously only asserted: re-running t
 
 **Text recovery MUST precede LLM shelf-filling, per job. Two independent proofs:**
 
-1. **Fabrication is cached.** A confident LLM answer extracted from reed's 453-char teaser or successfactors' description==title is a fabrication — and `enrich_job` is idempotent (second call on an enriched `job_id` is a no-op unless `force=True`, `job_enrichment.py:3-6`), so the wrong enum is PERMANENT until someone force-re-runs. Recover text first and the poison never enters.
-2. **Prod already measured the correlation.** 1,311 active jobs (30% of catalog) carry <200 chars of description, and coverage of every enriched field (workplace/seniority/visa) "tracks description length almost perfectly" (`settings.py:234-236`, measured 2026-08-07). Enriching thin jobs buys `unknown`s at full token price.
+1. **Fabrication is cached.** A confident LLM answer extracted from reed's 453-char teaser or successfactors' description==title is a fabrication — and `enrich_job` is idempotent (second call on an enriched `job_id` is a no-op unless `force=True`, `job_enrichment.py`), so the wrong enum is PERMANENT until someone force-re-runs. Recover text first and the poison never enters.
+2. **Prod already measured the correlation.** 1,311 active jobs (30% of catalog) carry <200 chars of description, and coverage of every enriched field (workplace/seniority/visa) "tracks description length almost perfectly" (`settings.py`, measured 2026-08-07). Enriching thin jobs buys `unknown`s at full token price.
 
 ---
 
 ## 7. Cost of JOB SOURCE ENRICHMENT at ~6,000 new jobs per run
 
-**Model:** the enrichment chain is OpenAI-primary — `llm_extract_validated` → `gpt-4o-mini` (paid, deterministic), then free-tier Gemini `gemini-3.7-flash` → Groq → Cerebras fallbacks (`settings.py:61,69`; `llm_provider.py:311,330,477-480`). Cost math below prices the primary; fallbacks only fire on OpenAI failure.
+**Model:** the enrichment chain is OpenAI-primary — `llm_extract_validated` → `gpt-4o-mini` (paid, deterministic), then free-tier Gemini `gemini-3.7-flash` → Groq → Cerebras fallbacks (`settings.py`; `llm_provider.py`). Cost math below prices the primary; fallbacks only fire on OpenAI failure.
 
 **Price** (OpenAI list price, web-verified 2026-08-16 — no price constant exists in the codebase): **$0.150 / 1M input tokens, $0.600 / 1M output tokens**; Batch API −50% on both. Source: openrouter.ai/openai/gpt-4o-mini, pricepertoken.com (checked 2026-08-16). Model is env-overridable (`OPENAI_MODEL`), so re-price with: cost/job = (in_tokens × in_price + out_tokens × out_price).
 
-**Tokens per job** (from the real prompt, `job_enrichment.py:49-93`): fixed system+contract ≈ 400 tok; title/company/location ≈ 30; description capped at 4,000 chars ≈ 1,000 tok → **~1,400 in**; 16-field JSON out ≈ **~200 out**. Per job ≈ $0.00033.
+**Tokens per job** (from the real prompt, `job_enrichment.py`): fixed system+contract ≈ 400 tok; title/company/location ≈ 30; description capped at 4,000 chars ≈ 1,000 tok → **~1,400 in**; 16-field JSON out ≈ **~200 out**. Per job ≈ $0.00033.
 
 | Strategy | LLM calls / run | Cost / run | Cost / 1,000 jobs | Notes |
 |---|---|---|---|---|
@@ -298,7 +298,7 @@ Two rules the code enforces that this doc previously only asserted: re-running t
 
 **Recommendation: two-pass, batched.** Not mainly for the ~$1.40/run saved — pass 1 IS the fabrication guard (§6) and the provenance stays honest (`source` beats `llm` in the trust order). Numbers are estimates on stated assumptions; re-measure after the first real sweep.
 
-**Budget reality check:** today's default enriches at most **20 jobs per run** (`ENRICHMENT_MAX_JOBS=20`, `settings.py:151`) with `ENRICHMENT_ENABLED` defaulting off (`job_enrichment.py:33`, rule #18). Filling 6,000/run is a deliberate budget raise and belongs in the worker's enrichment sweep cron — never the search hot path (the event loop has been frozen by catalog-scale work before; PR #123).
+**Budget reality check:** today's default enriches at most **20 jobs per run** (`ENRICHMENT_MAX_JOBS=20`, `settings.py`) with `ENRICHMENT_ENABLED` defaulting off (`job_enrichment.py`, rule #18). Filling 6,000/run is a deliberate budget raise and belongs in the worker's enrichment sweep cron — never the search hot path (the event loop has been frozen by catalog-scale work before; PR #123).
 
 **Shipped budget (2026-08-17).** The step-3 sweep has TWO hard ceilings, both from settings, both checked BEFORE each call, and it stops at whichever bites first: `SHELF_ENRICHMENT_MAX_JOBS` (default 500) and `SHELF_ENRICHMENT_MAX_SPEND_USD` (default $1.00). A job cap alone cannot bound cost — the same 500 jobs cost several times more when the ads are long — so the spend cap is the real rail. Hitting either logs at ERROR with how many eligible jobs went unread; a cap that trims silently is a cap nobody can act on (same lesson as `MAX_REFRESH_INGEST_IDS`). Prices are `LLM_INPUT_USD_PER_1M` / `LLM_OUTPUT_USD_PER_1M`, env-overridable for the same reason `OPENAI_MODEL` is — a stale hardcoded price is a silent lie. Input tokens are measured from the real prompt at ~4 chars/token (≈15% conservative against the tiktoken dry run, i.e. the cap trips early not late); output is the fixed ~200-token JSON shape, which cannot be measured without making the call.
 
@@ -310,7 +310,7 @@ Two rules the code enforces that this doc previously only asserted: re-running t
 
 ## 8. Embeddings — what text represents a job
 
-Catalog-side only. Infra exists: `job_embeddings` (no user_id — rule #17), `SEMANTIC_ENABLED` default off (`settings.py:221`), convergence backfill `EMBED_BACKFILL_PER_RUN=300` (`settings.py:227`). The enrichment `requirements_summary` field (≤250 chars) was designed as embedding input (`job_enrichment_schema.py:162-163`).
+Catalog-side only. Infra exists: `job_embeddings` (no user_id — rule #17), `SEMANTIC_ENABLED` default off (`settings.py`), convergence backfill `EMBED_BACKFILL_PER_RUN=300` (`settings.py`). The enrichment `requirements_summary` field (≤250 chars) was designed as embedding input (`job_enrichment_schema.py`).
 
 **Embed this per job, in this order (stable template):**
 
