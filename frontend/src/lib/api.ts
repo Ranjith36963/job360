@@ -8,6 +8,9 @@ import type {
   ActionRequest,
   ActionResponse,
   ApplicationTimelineResponse,
+  BringJobRequest,
+  BringJobResponse,
+  CreateReceiptRequest,
   DuplicateJobsResponse,
   HealthResponse,
   JobFilters,
@@ -23,6 +26,8 @@ import type {
   ProfileResponse,
   ProfileVersionDiff,
   ProfileVersionsListResponse,
+  Receipt,
+  ReceiptListResponse,
   RecentRunsResponse,
   SearchStartResponse,
   SearchStatusResponse,
@@ -756,4 +761,65 @@ export async function downloadTailored(
   a.download = `${kind}_${jobId}.${fmt}`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// Bring a job + application receipts (career-ops pivot, slice one)
+// ---------------------------------------------------------------------------
+
+/** The user pastes the ad; the backend stores, scores and feeds it. */
+export async function bringJob(body: BringJobRequest): Promise<BringJobResponse> {
+  return request<BringJobResponse>(`/api/jobs/bring`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** "I applied": freeze the job + the CV/cover letter as sent. Append-only. */
+export async function createReceipt(
+  jobId: number,
+  // Both fields have backend defaults; the generated type marks them required.
+  body: Partial<CreateReceiptRequest> = {}
+): Promise<Receipt> {
+  return request<Receipt>(`/api/receipts/${jobId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listReceipts(jobId?: number): Promise<ReceiptListResponse> {
+  return request<ReceiptListResponse>(`/api/receipts${qs({ job_id: jobId })}`);
+}
+
+export async function getReceipt(receiptId: number): Promise<Receipt> {
+  return request<Receipt>(`/api/receipts/${receiptId}`);
+}
+
+// ---- Personal API tokens (agent access) ----
+//
+// A token lets an MCP client (Claude Code, Claude Desktop…) act as the user via
+// `Authorization: Bearer j360_…` — see backend/src/api/mcp_server.py. The plain
+// token is returned ONCE by createToken and never again; the list only carries
+// the display prefix. Minting and revoking are cookie-session-only on the
+// backend, so a stolen token cannot mint more tokens.
+
+export type TokenCreated = _Schemas["TokenCreated"];
+export type TokenSummary = _Schemas["TokenSummary"];
+
+export async function createToken(name: string): Promise<TokenCreated> {
+  return request<TokenCreated>("/api/tokens", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function listTokens(): Promise<TokenSummary[]> {
+  const res = await request<_Schemas["TokenListResponse"]>("/api/tokens");
+  return res.tokens;
+}
+
+export async function revokeToken(tokenId: number): Promise<void> {
+  await request<void>(`/api/tokens/${tokenId}`, { method: "DELETE" });
 }

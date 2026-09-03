@@ -15,13 +15,13 @@ Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from 
 | Unique source classes | **40** | same dict — `indeed` and `glassdoor` both alias `JobSpySource` |
 | `RATE_LIMITS` entries | **41** | `core/settings.py` `RATE_LIMITS` |
 | `LOCATIONS` entries | **26** | `core/keywords.py` `LOCATIONS` |
-| Migration head | **0033** | `backend/migrations/` |
+| Migration head | **0035** | `backend/migrations/` |
 | `SCORER_VERSION` | **8** | `services/skill_matcher.SCORER_VERSION` |
 | `BaseJobSource` subclasses | **40** | `src/sources/` |
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
-| Migration files | **34** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **230** | `backend/tests/` |
+| Migration files | **36** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **237** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -114,7 +114,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # across 230 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 237 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -682,6 +682,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `PATCH` | `/api/auth/users/me/password` | `auth.py` |
 | `POST` | `/api/auth/verify-email/confirm` | `auth.py` |
 | `POST` | `/api/auth/verify-email/request` | `auth.py` |
+| `POST` | `/api/jobs/bring` | `bring.py` |
 | `GET` | `/api/settings/channels` | `channels.py` |
 | `POST` | `/api/settings/channels` | `channels.py` |
 | `DELETE` | `/api/settings/channels/{channel_id:int}` | `channels.py` |
@@ -718,6 +719,9 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/api/profile/versions` | `profile.py` |
 | `GET` | `/api/profile/versions/{version_id1}/diff/{version_id2}` | `profile.py` |
 | `POST` | `/api/profile/versions/{version_id}/restore` | `profile.py` |
+| `GET` | `/api/receipts` | `receipts.py` |
+| `POST` | `/api/receipts/{job_id}` | `receipts.py` |
+| `GET` | `/api/receipts/{receipt_id}` | `receipts.py` |
 | `GET` | `/api/runs/recent` | `runs.py` |
 | `GET` | `/api/runs/source-health` | `runs.py` |
 | `POST` | `/api/search` | `search.py` |
@@ -728,8 +732,11 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/tailor/{job_id}/{doc_kind}/download` | `tailor.py` |
 | `POST` | `/api/tailor/{job_id}/{doc_kind}/keep` | `tailor.py` |
 | `GET` | `/api/tailor/{job_id}/{doc_kind}/provenance` | `tailor.py` |
+| `GET` | `/api/tokens` | `tokens.py` |
+| `POST` | `/api/tokens` | `tokens.py` |
+| `DELETE` | `/api/tokens/{token_id}` | `tokens.py` |
 
-**65 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + `include_router(prefix="/api")`.
+**72 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + `include_router(prefix="/api")`.
 <!-- /generated -->
 
 ## Configuration
@@ -763,6 +770,9 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `TAILOR_FREE_PER_MONTH` | No (default `10`) | Free-tier cap on AI CV/cover-letter generations per user/month |
 | `PROFILE_EXTRACT_MAX_PER_HOUR` | No (default `12`) | Cost cap on profile re-extraction. EVERY profile change re-runs the full two-pass extraction (4+ paid LLM calls); five routes reach `_extract_save_trigger` and nothing bounded it. Over the limit returns HTTP 429. `0` disables. Uses the shared limiter, so `RATE_LIMIT_REDIS=true` makes the cap hold across replicas |
 | `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS` | No (default `5` / `900`) | Brute-force login lockout (in-memory) |
+| `API_TOKENS_PER_USER` | No (default `10`) | Active personal API tokens one user may hold (one per agent/machine). Minting past the cap returns HTTP 409 |
+| `API_TOKEN_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `Authorization: Bearer j360_…` attempts per client IP per minute before 429 — a brute-force brake on the token door (`api/auth_deps.py`) |
+| `MCP_ALLOWED_HOSTS` | No (default empty = off) | Comma-separated `Host` values the MCP transport at `/api/mcp` accepts (DNS-rebinding guard). Off in prod because the backend sits behind the Next rewrite and sees Railway's internal host; the bearer token is the real guard |
 | `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user cap on concurrent `POST /search` (429 over cap) |
 | `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE`) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
 | `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from |

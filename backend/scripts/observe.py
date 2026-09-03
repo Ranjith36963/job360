@@ -51,6 +51,8 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("notification_rules", "user_id"),
     ("notification_ledger", "user_id"),
     ("user_notification_digests", "user_id"),
+    ("application_receipts", "user_id"),
+    ("api_tokens", "user_id"),
     ("tailored_documents", "user_id"),
     ("tailored_usage", "user_id"),
     ("sessions", "user_id"),

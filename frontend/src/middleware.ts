@@ -8,6 +8,8 @@ const PROTECTED_PATHS = [
   "/dashboard",
   "/profile",
   "/pipeline",
+  "/bring",
+  "/receipts",
   "/channels",
   "/settings",
   "/notifications",
