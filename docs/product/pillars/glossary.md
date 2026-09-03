@@ -88,15 +88,15 @@ A *batched* notification sent at a scheduled time (e.g. 08:00 in user's timezone
 
 ### ESCO
 
-European Skills, Competences, Qualifications and Occupations — a multilingual standard taxonomy. Job360 has the code to canonicalise CV skills to ESCO URIs, but **it has never run**: `_maybe_normalise_skills_via_esco()` needs `SEMANTIC_ENABLED=true` **and** `is_available()` (`cv_parser.py:821,830`), and the index artefacts were never built, so it is an identity transform in every environment (rule #28).
+European Skills, Competences, Qualifications and Occupations — a multilingual standard taxonomy. Job360 has the code to canonicalise CV skills to ESCO URIs, but **it has never run**: `_maybe_normalise_skills_via_esco()` needs `SEMANTIC_ENABLED=true` **and** `skill_normalizer.is_available()`, and the index artefacts were never built, so it is an identity transform in every environment (rule #28).
 **Code:** `_maybe_normalise_skills_via_esco()` in `cv_parser.py` · **Pillars 1 + 2**
 
 ### Feature flags
 
-Three legacy toggles gate Pillar-2's advanced engines, each paired with an `ENGINEx_ENABLED` equivalent that opens the same gate — six names, six **defaults off** (rule #18). `ENGINE1_ENABLED` (keyword) is the only engine switch that defaults ON and has no legacy partner. Guard: `backend/tests/test_engine_switches.py::test_engine_switch_defaults` pins E1 true / E2-E4 false.
-- `ENRICHMENT_ENABLED` — LLM enrichment + `job_enrichment` DB writes. All eight E2 call sites read `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`backend/src/main.py:853,1137`; `backend/src/services/rescore.py:85,345,527`; `backend/src/workers/tasks.py:237,876`; `backend/src/api/routes/jobs.py:779`), so either name switches it on. It does **not** activate multi-dim scoring: that path is gated on `user_preferences` alone (`backend/src/services/skill_matcher.py:587`, rule #20) — the flag only decides whether the dims have real data or their neutral halves
-- `SEMANTIC_ENABLED` — writes embeddings into the pgvector store. Hybrid retrieval reads `ENGINE3_ENABLED or SEMANTIC_ENABLED`; ESCO needs this flag AND index artefacts that were never built, so it stays a no-op either way
-- `MATCHER_ENABLED` — the Engine 4 LLM judge. Both call sites read `ENGINE4_ENABLED or MATCHER_ENABLED` (`backend/src/main.py:352`, `backend/src/services/rescore.py:589`); the second decides whether a profile re-score clears the user's stored verdicts (`backend/src/services/rescore.py:595-598`)
+Three legacy toggles gate Pillar-2's advanced engines, each paired with an `ENGINEx_ENABLED` equivalent that opens the same gate — six names, six **defaults off** (rule #18). `ENGINE1_ENABLED` (keyword) is the only engine switch that defaults ON and has no legacy partner. Guards: `backend/tests/test_engine_switches.py::test_engine_switch_defaults` pins E1 true / E2-E4 false; `backend/tests/test_engine_flag_gates.py` pins the pairing at every call site, so no census of them belongs here.
+- `ENRICHMENT_ENABLED` — LLM enrichment + `job_enrichment` DB writes. It does **not** activate multi-dim scoring: that path is gated on `user_preferences` alone (rule #20) — the flag only decides whether the dims have real data or their neutral halves
+- `SEMANTIC_ENABLED` — writes embeddings into the pgvector store, and is the one flag read WITHOUT its partner: `ENGINE3_ENABLED` opens the hybrid read path only. ESCO needs this flag AND index artefacts that were never built, so it stays a no-op either way
+- `MATCHER_ENABLED` — the Engine 4 LLM judge. One of its gates, in `rescore.rescore_user_feed`, decides whether a profile re-score clears the user's stored verdicts; with the judge off, the default, no verdict is touched
 
 ### Feed (user_feed)
 

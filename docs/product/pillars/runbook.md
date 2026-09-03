@@ -386,7 +386,7 @@ dies with the web process (`profile.py:179-184`).
 What `rescore_user_feed` actually does, precisely:
 
 - It reads **up to 50,000** catalog rows — `get_catalog_jobs_for_rescore(limit=50000)`, `backend/src/repositories/database.py:750-777`. The SQL is `SELECT … FROM jobs ORDER BY date_found DESC LIMIT ?` with **no date predicate**. The 30-day horizon people quote is a *consequence* of `purge_old_jobs()` capping the catalog, not a filter in this query — and the limit is deliberately set far above the catalog so a "full re-score" really is one.
-- It clears the user's LLM verdicts **only when `ENGINE4_ENABLED or MATCHER_ENABLED`** (`backend/src/services/rescore.py:589,595-598`). With the judge off — the default — no verdict is touched.
+- It clears the user's LLM verdicts **only when `ENGINE4_ENABLED or MATCHER_ENABLED`** (in `rescore.rescore_user_feed`). With the judge off — the default — no verdict is touched.
 
 And the part that is easy to get wrong:
 

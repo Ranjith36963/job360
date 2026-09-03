@@ -21,7 +21,7 @@ Job360 is a UK-focused multi-domain job search aggregator. It fetches jobs from 
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
 | Migration files | **36** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **236** | `backend/tests/` |
+| `test_*.py` files | **237** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -42,10 +42,10 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
                                                   Embed (opt-in) -> job_embeddings.embedding (pgvector)
 ```
 
-Two legacy opt-in feature flags gate the advanced surfaces (both default OFF; hard rule #18 — `.claude/skills/hard-rules/SKILL.md`). Each is only HALF of its gate — the effective condition is `ENGINEx_ENABLED or <legacy flag>`, so test both names:
+Two legacy opt-in feature flags gate the advanced surfaces (both default OFF; hard rule #18 — `.claude/skills/hard-rules/SKILL.md`). Each is only HALF of its gate — the effective condition is `ENGINEx_ENABLED or <legacy flag>`, pinned across every call site by `backend/tests/test_engine_flag_gates.py`:
 
-- `ENRICHMENT_ENABLED=true` → the LLM **enrichment step** runs, so the Batch-2.9 dimensions read real data instead of their neutral halves. The dimensions themselves are not gated on this flag — they fire on `user_preferences` alone (`skill_matcher.py:587`, rule #20). Effective gate at every call site: `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853,1137`)
-- `SEMANTIC_ENABLED=true` → embeddings into the pgvector store (`job_embeddings.embedding`, migration `0027` — **not** ChromaDB; see `services/pg_vector_index.py`). Hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), while the embedding WRITES are gated on `SEMANTIC_ENABLED` alone (`main.py:1292,1348`) — so `ENGINE3_ENABLED=true` by itself queries an index nothing fills. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
+- `ENRICHMENT_ENABLED=true` → the LLM **enrichment step** runs, so the Batch-2.9 dimensions read real data instead of their neutral halves. The dimensions themselves are not gated on this flag — they fire on `user_preferences` alone (rule #20).
+- `SEMANTIC_ENABLED=true` → embeddings into the pgvector store (`job_embeddings.embedding`, migration `0027` — **not** ChromaDB; see `services/pg_vector_index.py`). Hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) accepts either name, while the embedding WRITES read `SEMANTIC_ENABLED` alone — so `ENGINE3_ENABLED=true` by itself queries an index nothing fills. It does **NOT** activate ESCO skill normalisation: that path is gated on `skill_normalizer.is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
 
 ---
 
@@ -114,7 +114,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # across 229 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 237 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -279,20 +279,14 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 
 | # | Engine | Service | Flag | Default |
 |---|--------|---------|------|---------|
-| 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | `ENGINE1_ENABLED` (no legacy alias; `skill_matcher.py:480-483` reads it, `:560` gates the keyword half) | **true** |
-| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:582-617`; data from the enrichment step `services/job_enrichment.py`) | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` at every call site (`main.py:853,1137`, `rescore.py:85`, `api/routes/jobs.py:779`, `workers/tasks.py:237`) — this gates the enrichment DATA, not the dim path: the dims fire on `user_preferences` alone (`skill_matcher.py:587`, rule #20) | false |
+| 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | `ENGINE1_ENABLED` — no legacy alias; `JobScorer.__init__` reads it into `self._engine1`, which gates the keyword half | **true** |
+| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace; data from the enrichment step `services/job_enrichment.py`) | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` — this gates the enrichment DATA, not the dim path: the dims fire on `user_preferences` alone (rule #20) | false |
 | 3 | Hybrid | `services/embeddings.py` + `pg_vector_index.py` + `retrieval.py` (`vector_index.py` is the legacy Chroma wrapper, no production caller) | reads: `ENGINE3_ENABLED` **or** `SEMANTIC_ENABLED`; embedding writes: `SEMANTIC_ENABLED` alone | false |
-| 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` (`main.py:352`, `rescore.py:395,589`) | false |
+| 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` | false |
 
-**Engine 4 — LLM judge detail:**
-- Service: `backend/src/services/llm_matcher.py`. `MatchVerdict{fit_score: int 0-100, verdict: str, reason: str}`.
-- `match_batch()` runs with `asyncio.Semaphore(3)`, skips jobs already holding a verdict, per-job errors swallowed.
-- Uses `llm_provider.llm_extract_validated` (OpenAI (PRIMARY) → Gemini → Groq → Cerebras chain — `llm_provider.py:329-334`). Test isolation via `llm_extract_validated_fn` kwarg.
-- Results stored on `user_feed` (per-user state; rules #10/#17 keep shared catalog tables untouched). Migration 0017 adds `llm_fit_score`, `llm_verdict`, `llm_reason`, `llm_matched_at`.
-- `_run_matcher_stage` in `src/main.py` invokes `match_batch` after the per-user feed write.
-- Feed read path: `SELECT ... ORDER BY COALESCE(llm_fit_score, score) DESC`.
-- API: `GET /api/jobs` exposes the four `llm_*` fields; dashboard renders an AI-verdict badge.
-- Measured: 18/18 judged in 89.8 s (concurrency 3); judge spread 20–92 vs keyword 30–43; 10/10 fit accuracy.
+Every gate in that column is pinned by `backend/tests/test_engine_flag_gates.py` — it fails if a call site ever reads a legacy name without its `ENGINEx` partner (rule #18), or if the dim path acquires a flag.
+
+**Engine 4 — LLM judge detail:** `llm_matcher.match_batch`, invoked by `_run_matcher_stage` after the per-user feed write. Verdicts land on `user_feed`, never on the shared catalog tables (rules #10/#17) — migration 0017 adds the four `llm_*` columns, and the feed read ranks by `COALESCE(llm_fit_score, score)`. Measured when it shipped: 18/18 judged in 89.8 s at concurrency 3; judge spread 20–92 vs keyword 30–43; 10/10 fit accuracy.
 
 **Profile-version re-score (migration 0018, automatic, no new env flags):**
 
@@ -300,7 +294,7 @@ Every row written to `user_feed` now carries a `profile_version INTEGER` column 
 
 Two operating modes:
 
-- **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it enqueues `rescore_user_feed_task` on the ARQ worker queue (`src/api/routes/profile.py:163`) — a deploy that kills the web process no longer drops the re-score, and ARQ retries it. Only when the queue is unreachable does it fall back to an in-process `asyncio` task (`profile.py:179-184`). The rescore service (`src/services/rescore.py`) re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. The LLM verdicts are cleared (`clear_user_verdicts` in `llm_matcher.py`) **only when the judge is on** — `matcher_on = ENGINE4_ENABLED or MATCHER_ENABLED` (`rescore.py:589,595-598`); with the judge off, which is the default, no verdict is touched. When it is on, the LLM re-judge runs for the top candidates. Either flag name opens it (rule #18).
+- **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it enqueues `rescore_user_feed_task` on the ARQ worker queue (`src/api/routes/profile.py:163`) — a deploy that kills the web process no longer drops the re-score, and ARQ retries it. Only when the queue is unreachable does it fall back to an in-process `asyncio` task (`profile.py:179-184`). The rescore service (`src/services/rescore.py`) re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. The LLM verdicts are cleared (`clear_user_verdicts` in `llm_matcher.py`) **only when the judge is on** — `matcher_on = ENGINE4_ENABLED or MATCHER_ENABLED` inside `rescore.rescore_user_feed`; with the judge off, which is the default, no verdict is touched. When it is on, the LLM re-judge runs for the top candidates. Either flag name opens it (rule #18).
 - **Mode 2 — ordinary search / refresh.** Newly-fetched jobs get scored and stamped with the current profile version. Every authenticated search ALSO runs `backfill_feed_from_catalog(user_id, db)` (`src/main.py:1272-1278`), which scores the shared catalog for that user and upserts feed rows — so existing rows are re-visited, not skipped. Their **scores** still hold steady: `upsert_feed_row` freezes the score on an existing row when the incoming `profile_version` **and** `scorer_version` both match the stored ones, and overwrites it when either differs (`src/services/feed.py:288-303`). `bucket` and both version stamps are always rewritten. Verdicts are separately protected by the `skip_existing` lock in `match_batch` (`src/services/llm_matcher.py:436,443`).
 
 **Invariant:** a job's score only changes when the PROFILE changes or `SCORER_VERSION` is bumped — never just because time passed. That is enforced by the version-conditional freeze above, not by skipping the write. The `jobs` and `job_enrichment` shared catalog tables are not touched (rules #10/#17 still hold).
@@ -780,9 +774,9 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `API_TOKEN_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `Authorization: Bearer j360_…` attempts per client IP per minute before 429 — a brute-force brake on the token door (`api/auth_deps.py`) |
 | `MCP_ALLOWED_HOSTS` | No (default empty = off) | Comma-separated `Host` values the MCP transport at `/api/mcp` accepts (DNS-rebinding guard). Off in prod because the backend sits behind the Next rewrite and sees Railway's internal host; the bearer token is the real guard |
 | `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user cap on concurrent `POST /search` (429 over cap) |
-| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:155) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
-| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:152) |
-| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py:151) — in practice the REAL selection lever, not the threshold |
+| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE`) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
+| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from |
+| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment — in practice the REAL selection lever, not the threshold |
 | Slack/Discord/Telegram OAuth (`SLACK_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`, `TELEGRAM_BOT_TOKEN`/`_USERNAME`, `OAUTH_REDIRECT_BASE`) | No | One-click channel connect flows (skip endpoint when blank) |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
