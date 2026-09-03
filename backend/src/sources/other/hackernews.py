@@ -124,7 +124,7 @@ def _parse_hn_comment(text: str) -> dict[str, Any] | None:
     # short ones ("Full-time Join our team.") kept a value the gate can never
     # match. Cut at the paragraph break first, then split on pipes.
     # Same `parts` the three fields above read — computed once, near the top.
-    type_field = parts[3].strip() if len(parts) > 3 else ""
+    type_field: str | None = parts[3].strip() if len(parts) > 3 else ""
     type_field = type_field if type_field and len(type_field) <= 60 else None
 
     return {

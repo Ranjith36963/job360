@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from src.services.profile.cv_parser import (
@@ -671,7 +672,10 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
     #
     # Bounded: at most one extra call per empty-or-partial input, and only
     # when the input was non-empty and not cached.
-    _retryable = [
+    # Explicitly typed: the four entries return four different awaitable
+    # payloads (CVData / dict / list), and without an annotation mypy joins
+    # them into a bare `function`, which then reads as an untyped call.
+    _retryable: list[tuple[str, Any, Callable[[], Awaitable[Any]]]] = [
         ("cv", cv.raw_text, lambda: llm_cv_fields_from_text(cv.raw_text)),
         ("linkedin", cv.linkedin_raw_text, lambda: llm_linkedin_fields(cv.linkedin_raw_text)),
         ("github", _has_github, lambda: llm_infer_github_skills(
