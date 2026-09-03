@@ -9,7 +9,7 @@
 
 ## What this is
 
-The Job360 backend: Python 3.9+, FastAPI, Postgres via psycopg3 (`pg.py` — an aiosqlite-shaped shim), ARQ worker.
+The Job360 backend: Python 3.10+ (`mcp` needs it; CI and prod run 3.12), FastAPI, Postgres via psycopg3 (`pg.py` — an aiosqlite-shaped shim), ARQ worker.
 Entry points: `main.py` (uvicorn) and `python -m src.cli`. Runtime data (gitignored)
 lives in `data/` (`exports/`, `reports/`, `logs/`, `chroma/`, and the legacy `user_profile.json` that
 `storage.py` migrates once then deletes). There is **no `data/jobs.db`** — the store is

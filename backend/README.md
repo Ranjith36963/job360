@@ -7,7 +7,7 @@ and hosts the ARQ worker for notifications.
 
 ## Prerequisites
 
-- Python 3.9+ (tested through 3.12)
+- Python 3.10+ (tested through 3.12; `mcp` needs 3.10)
 - Redis only if you run the ARQ worker (optional for CLI / API usage)
 
 ## Install

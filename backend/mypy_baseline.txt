@@ -1,5 +1,61 @@
 # mypy ratchet baseline — DO NOT hand-edit to silence a new error.
 # Regenerate with: python scripts/mypy_ratchet.py --update
 # Only run --update to record errors you FIXED. See scripts/mypy_ratchet.py.
-# total errors: 0
+# total errors: 96
 
+1	src/api/routes/jobs.py	type-arg	Missing type arguments for generic type "dict"
+1	src/main.py	arg-type	Argument 1 to "generate_search_config" has incompatible type "UserProfile | None"; expected "UserProfile"
+1	src/models.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/coverage.py	assignment	Incompatible types in assignment (expression has type "SenioritySignal", variable has type "WorkplaceSignal")
+4	src/services/coverage.py	type-arg	Missing type arguments for generic type "dict"
+1	src/services/job_signals.py	assignment	Incompatible types in assignment (expression has type "SenioritySignal", variable has type "WorkplaceSignal")
+1	src/services/job_signals.py	return-value	No return value expected
+1	src/services/profile/dep_file_parser.py	no-redef	Name "tomllib" already defined (by an import)
+1	src/services/profile/dep_file_parser.py	unused-ignore	Unused "type: ignore" comment
+1	src/services/profile/linkedin_parser.py	dict-item	Dict entry 15 has incompatible type "str": "Any | str"; expected "str": "list[Any]"
+1	src/services/profile/two_pass.py	no-untyped-call	Call to untyped function (unknown) in typed context
+1	src/services/retrieval.py	arg-type	Argument 1 to "float" has incompatible type "list[float]"; expected "str | Buffer | SupportsFloat | SupportsIndex"
+1	src/sources/apis_free/devitjobs.py	no-untyped-call	Call to untyped function "_extract_detail_description" of "DevITJobsSource" in typed context
+1	src/sources/apis_free/devitjobs.py	no-untyped-call	Call to untyped function "_fetch_job_detail" in typed context
+2	src/sources/apis_free/devitjobs.py	no-untyped-def	Function is missing a type annotation
+1	src/sources/apis_keyed/reed.py	var-annotated	Need type annotation for "jobs" (hint: "jobs: list[<type>] = ...")
+1	src/sources/ats/ashby.py	type-arg	Missing type arguments for generic type "dict"
+1	src/sources/ats/lever.py	type-arg	Missing type arguments for generic type "dict"
+1	src/sources/ats/pinpoint.py	type-arg	Missing type arguments for generic type "dict"
+1	src/sources/ats/recruitee.py	type-arg	Missing type arguments for generic type "dict"
+2	src/sources/ats/successfactors.py	no-untyped-call	Call to untyped function "_as_number" in typed context
+1	src/sources/ats/successfactors.py	no-untyped-call	Call to untyped function "_extract_from_jsonld" in typed context
+1	src/sources/ats/successfactors.py	no-untyped-call	Call to untyped function "_extract_from_microdata" in typed context
+2	src/sources/ats/successfactors.py	no-untyped-call	Call to untyped function "_iter_local" of "SuccessFactorsSource" in typed context
+2	src/sources/ats/successfactors.py	no-untyped-call	Call to untyped function "_local_findtext" of "SuccessFactorsSource" in typed context
+3	src/sources/ats/successfactors.py	no-untyped-call	Call to untyped function "_local_name" of "SuccessFactorsSource" in typed context
+1	src/sources/ats/successfactors.py	no-untyped-call	Call to untyped function "_parse_sitemap_index" in typed context
+1	src/sources/ats/successfactors.py	no-untyped-call	Call to untyped function "_parse_sitemap_or_index" in typed context
+2	src/sources/ats/successfactors.py	no-untyped-call	Call to untyped function "_parse_urlset" in typed context
+2	src/sources/ats/successfactors.py	no-untyped-call	Call to untyped function "_parse_xml" in typed context
+1	src/sources/ats/successfactors.py	no-untyped-call	Call to untyped function "_title_from_url" of "SuccessFactorsSource" in typed context
+11	src/sources/ats/successfactors.py	no-untyped-def	Function is missing a type annotation
+1	src/sources/ats/successfactors.py	no-untyped-def	Function is missing a type annotation for one or more parameters
+1	src/sources/ats/successfactors.py	type-arg	Missing type arguments for generic type "list"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "BasicAuth | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "ClientTimeout | _SENTINEL | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "Iterable[str] | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "Mapping[str, Any] | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "Mapping[str, str | BaseCookie[str] | Morsel[Any]] | Iterable[tuple[str, str | BaseCookie[str] | Morsel[Any]]] | BaseCookie[str] | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "Mapping[str, str] | Mapping[istr, str] | CIMultiDict[str] | CIMultiDictProxy[str] | Iterable[tuple[str | istr, str]] | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "SSLContext | bool | Fingerprint"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "Sequence[Callable[[ClientRequest, Callable[[ClientRequest], Awaitable[ClientResponse]]], Awaitable[ClientResponse]]] | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "bool | Callable[[ClientResponse], Awaitable[None]] | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "bool | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "bool"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "int | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "int"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "str | Mapping[str, str | SupportsInt | float | Sequence[str | SupportsInt | float]] | Sequence[tuple[str, str | SupportsInt | float | Sequence[str | SupportsInt | float]]] | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "str | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "str | URL | None"
+2	src/sources/base.py	arg-type	Argument 3 to "request" of "ClientSession" has incompatible type "**dict[str, object]"; expected "str | bool | None"
+1	src/sources/feeds/uni_jobs.py	no-untyped-def	Function is missing a return type annotation
+1	src/sources/other/hackernews.py	assignment	Incompatible types in assignment (expression has type "str | None", variable has type "str")
+2	src/sources/other/nofluffjobs.py	type-arg	Missing type arguments for generic type "dict"
+1	src/sources/other/themuse.py	arg-type	Argument "source_tags" to "Job" has incompatible type "list[str | Any | None]"; expected "list[str]"
+2	src/sources/scrapers/aijobs_ai.py	type-arg	Missing type arguments for generic type "dict"

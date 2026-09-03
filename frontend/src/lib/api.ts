@@ -796,3 +796,30 @@ export async function listReceipts(jobId?: number): Promise<ReceiptListResponse>
 export async function getReceipt(receiptId: number): Promise<Receipt> {
   return request<Receipt>(`/api/receipts/${receiptId}`);
 }
+
+// ---- Personal API tokens (agent access) ----
+//
+// A token lets an MCP client (Claude Code, Claude Desktop…) act as the user via
+// `Authorization: Bearer j360_…` — see backend/src/api/mcp_server.py. The plain
+// token is returned ONCE by createToken and never again; the list only carries
+// the display prefix. Minting and revoking are cookie-session-only on the
+// backend, so a stolen token cannot mint more tokens.
+
+export type TokenCreated = _Schemas["TokenCreated"];
+export type TokenSummary = _Schemas["TokenSummary"];
+
+export async function createToken(name: string): Promise<TokenCreated> {
+  return request<TokenCreated>("/api/tokens", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function listTokens(): Promise<TokenSummary[]> {
+  const res = await request<_Schemas["TokenListResponse"]>("/api/tokens");
+  return res.tokens;
+}
+
+export async function revokeToken(tokenId: number): Promise<void> {
+  await request<void>(`/api/tokens/${tokenId}`, { method: "DELETE" });
+}

@@ -354,8 +354,10 @@ async def export_my_data(
     security-token tables are omitted entirely; see ``export_user_data``.
     """
     data = await db.export_user_data(user.id)
+    # Flat file: ``exported_at`` beside the tables (``user``, ``api_tokens``, …),
+    # no wrapper object — one level to read for a human opening the download.
     body = json.dumps(
-        {"exported_at": datetime.now(timezone.utc).isoformat(), "data": data},
+        {"exported_at": datetime.now(timezone.utc).isoformat(), **data},
         indent=2,
         default=str,
     )
