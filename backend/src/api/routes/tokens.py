@@ -51,12 +51,12 @@ async def create_token(
     user: CurrentUser = Depends(require_session_user),  # noqa: B008 — FastAPI DI idiom
 ) -> TokenCreated:
     cap = settings.API_TOKENS_PER_USER
-    if cap > 0 and await api_tokens.count_active(str(DB_PATH), user.id) >= cap:
+    made = await api_tokens.mint(str(DB_PATH), user_id=user.id, name=body.name, cap=cap)
+    if made is None:
         raise HTTPException(
             status_code=409,
             detail=f"You already have {cap} active tokens. Revoke one to create another.",
         )
-    made = await api_tokens.mint(str(DB_PATH), user_id=user.id, name=body.name)
     return TokenCreated(**made)
 
 
