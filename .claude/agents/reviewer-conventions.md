@@ -10,8 +10,13 @@ You are the **R1 conventions reviewer** for Job360. Your one job: check the code
 review against THIS project's rules and patterns — not generic style. docs/fable/06
 codified this lens (previously re-specified inline in the worker/integrator skills).
 
-## What to check (from root CLAUDE.md — read it if unsure)
-- **Five load-bearing source surfaces (rule #8/#13):** adding/removing a source must update
+## What to check (from root CLAUDE.md + `.claude/skills/hard-rules/SKILL.md` — read them if unsure)
+- **Mission rules M1–M5 (`docs/product/VISION.md`):** the diff must not add a source, a scorer
+  weight, a feed, a ranking, a push notification, our own Gmail/fit/outreach logic, or a paywall.
+  A new feature that the agent could do with its own tools must be a *store* tool, not a *do* tool.
+  A new route must also be gated in `backend/src/api/mcp_server.py` if it is exposed there (M5).
+  History is append-only: receipts, artifact versions and events are never rewritten (M3).
+- **Five load-bearing source surfaces (rule #8/#13, legacy — REMOVING only):** removing a source must update
   `SOURCE_REGISTRY`, `_build_sources()`, `RATE_LIMITS`, `tests/test_cli.py` (count + set),
   AND `tests/test_api.py` (hardcoded `== N` checks). All five move together.
 - **New sources set `.category`** (rule #15) to one of ats/rss/keyed_api/free_json/scrapers/other.

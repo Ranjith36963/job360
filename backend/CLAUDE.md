@@ -1,15 +1,17 @@
 # backend/ — Claude Code pointer
-<!-- doc: LIVING | last-verified: 2026-08-25 by the nightly doc-truth routine -->
+<!-- doc: LIVING | last-verified: 2026-09-03 by the mission sweep -->
 
-> **This is a thin pointer, not the source of truth.** The load-bearing guidance
-> (the 31 hard rules, `SOURCE_REGISTRY`/five-surfaces, lazy-import rules, scoring
-> algorithm, DB schema, phase history) lives in the **root [`../CLAUDE.md`](../CLAUDE.md)** —
+> **This is a thin pointer, not the source of truth.** The mission is
+> [`../docs/product/VISION.md`](../docs/product/VISION.md) (agent thinks, Job360
+> remembers; never source or rank). The load-bearing guidance (hard rules,
+> lazy-import rules, DB schema) lives in the **root [`../CLAUDE.md`](../CLAUDE.md)** —
 > read that first. This file only adds backend-local essentials so they're at hand
 > when you're working in this directory. Keep it thin; do not duplicate the root.
 
 ## What this is
 
-The Job360 backend: Python 3.10+ (`mcp` needs it; CI and prod run 3.12), FastAPI, Postgres via psycopg3 (`pg.py` — an aiosqlite-shaped shim), ARQ worker.
+The Job360 backend: Python 3.10+ (`mcp` needs it; CI and prod run 3.12), FastAPI, Postgres via psycopg3 (`pg.py` — an aiosqlite-shaped shim). No worker: the ARQ code in `src/workers/` is dead since the worker + Redis services were deleted 2026-09-02.
+**Product path:** `src/api/routes/bring.py` → `receipts.py` → `tailor.py` (web fallback) → `src/api/mcp_server.py`; `src/services/profile/` feeds it. Everything else under `src/sources/`, `src/main.py`, `services/skill_matcher.py`, `services/enrichment/` is the sourcing era — still runs, slated for deletion (roadmap slice 5, #483). Never add to it.
 Entry points: `main.py` (uvicorn) and `python -m src.cli`. Runtime data (gitignored)
 lives in `data/` (`exports/`, `reports/`, `logs/`, `chroma/`, and the legacy `user_profile.json` that
 `storage.py` migrates once then deletes). There is **no `data/jobs.db`** — the store is
@@ -58,8 +60,9 @@ add `--ignore=tests/test_main.py` back.
 
 ## Where things are
 
-- `src/main.py` — orchestrator + `SOURCE_REGISTRY` (41) + `_build_sources()`
-- `src/cli.py` — Click CLI · `src/api/` — FastAPI app + routes · `src/services/` — engine
+- `src/api/routes/bring.py`, `receipts.py`, `tailor.py`, `src/api/mcp_server.py` — the product path
+- `src/main.py` — legacy orchestrator + `SOURCE_REGISTRY` (41) + `_build_sources()` (sourcing era, never extend)
+- `src/cli.py` — Click CLI · `src/api/` — FastAPI app + routes · `src/services/` — profile extraction + legacy engine
 - `src/repositories/database.py` — Postgres via psycopg3 (aiosqlite-shaped shim) · `migrations/` — forward/reverse SQL pairs
 - `scripts/` — backend Python helpers (run `python scripts/X.py`); see root `CONTRIBUTING.md`
 

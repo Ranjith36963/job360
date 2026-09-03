@@ -16,18 +16,20 @@ You are the Job360 health checker. You ignore the backlog and missions entirely 
 
 ## Checks (run all, collect verbatim evidence)
 
-### Pillar 1 — Ingestion
-- Trigger one fresh pipeline run (POST /api/search as the test user). Record: sources_queried, returned>0 count, errored count, duration, new jobs.
-- GREEN: ≥20 productive sources, 0 errors from sources not on the known-broken list, duration <300s.
-- AMBER: productive 15–19 OR new errored source not previously known.
-- RED: productive <15 OR any previously-working source newly dead OR latest job in DB older than 48h.
+> **Mission (2026-09-03, `docs/product/VISION.md`):** Job360 no longer sources or ranks jobs. "Healthy" now means the memory layer works: a job can be brought, a receipt saved, the MCP server answers. The old Pillar 1/2 checks below are **retired** — do not trigger `/api/search`, do not grade a feed, do not count productive sources.
 
-### Pillar 2 — Matching
-- Confirm judged coverage: user_feed rows with llm_matched_at vs shortlist size for the test user.
-- Spot-check ranking: GET /api/jobs authed — is rank 1 the highest llm_fit_score? Do any intern/mismatch roles outrank senior fits?
-- Run the accuracy harness sample if cheap (<2 min).
-- GREEN: full judged coverage on the shortlist, ranking honors the judge, no engine flag drift (MATCHER/ENRICHMENT/SEMANTIC flags match documented intent).
-- RED: ranking ignores the judge, judged coverage 0 on a fresh feed, or any engine throwing.
+### Pillar 1 — Bring + remember (the product path)
+- `POST /api/jobs/bring` with pasted text as the test user → 2xx, a job row exists.
+- Tailor the CV for it (web fallback), then `POST /api/receipts/{job_id}` → 201; `GET /api/receipts` lists it with the frozen ad + documents.
+- MCP: call the `/api/mcp` mount (streamable HTTP, not a `@router` route) with a `j360_…` bearer → `tools/list` returns the tool set; `get_profile` returns the test user's profile.
+- GREEN: all 2xx, receipt readable after the job row changes. RED: any 5xx, a receipt that lost its documents, MCP 401 with a valid token.
+
+### Pillar 2 — Profile
+- Upload the test CV → extraction completes; profile fields are non-empty for what the CV contains (value-presence, rule #21); an unset preference is absent, not zero (rule #29).
+- GREEN: extraction returns within 120s and the profile shows the CV's skills. RED: extraction throws or an empty preference shows as a default.
+
+### Retired (sourcing era — do not run)
+- ~~Trigger one fresh pipeline run (POST /api/search), count productive sources, grade ranking against `llm_fit_score`, run the accuracy harness.~~ Slice 5 (#483) deletes this code.
 
 ### Pillar 3 — Delivery
 - Auth round-trip: POST /api/auth/register (new account) **then always** POST /api/auth/login,
