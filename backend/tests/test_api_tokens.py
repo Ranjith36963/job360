@@ -10,6 +10,7 @@ Contract (docs/plans/2026-09-03-mcp-server/spec.md R1–R3, R6):
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 
 import pytest
@@ -17,6 +18,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.api import dependencies as api_deps
 from src.core import settings
+from src.services.auth import api_tokens
 
 
 async def _mint(client, name: str = "claude code") -> dict:
@@ -156,3 +158,24 @@ async def test_tokens_die_with_the_account_and_export_hides_the_hash(
         cur = await db._conn.execute("SELECT count(*) FROM api_tokens WHERE user_id = ?", (fixture_user_id,))
         (left,) = await cur.fetchone()
         assert left == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_mints_never_exceed_cap(authenticated_async_context, fixture_user_id, monkeypatch):
+    """Issue #475 — 5+ concurrent POSTs with room for 1 must not all squeeze through."""
+    monkeypatch.setattr(settings, "API_TOKENS_PER_USER", 3)
+    async with authenticated_async_context():
+        db_path = str(settings.DB_PATH)
+        uid = fixture_user_id
+        await api_tokens.mint(db_path, user_id=uid, name="pre-1", cap=3)
+        await api_tokens.mint(db_path, user_id=uid, name="pre-2", cap=3)
+        assert await api_tokens.count_active(db_path, uid) == 2
+
+        results = await asyncio.gather(
+            *[api_tokens.mint(db_path, user_id=uid, name=f"t{i}", cap=3) for i in range(6)]
+        )
+        successes = [r for r in results if r is not None]
+        failures = [r for r in results if r is None]
+        assert len(successes) == 1, f"expected exactly 1 mint to win the last slot, got {len(successes)}"
+        assert len(failures) == 5, f"expected exactly 5 mints to lose to the cap, got {len(failures)}"
+        assert await api_tokens.count_active(db_path, uid) == 3

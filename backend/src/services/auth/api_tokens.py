@@ -69,21 +69,34 @@ async def count_active(db_path: str, user_id: str) -> int:
     return int(row[0]) if row else 0
 
 
-async def mint(db_path: str, *, user_id: str, name: str) -> dict[str, Any]:
-    """Create a token. Returns the row fields PLUS ``token`` — the only time it exists in plaintext."""
+async def mint(db_path: str, *, user_id: str, name: str, cap: int = 0) -> Optional[dict[str, Any]]:
+    """Create a token, enforcing ``cap`` under a per-user row lock so concurrent
+    mints for the same user serialise and can never together exceed it; returns
+    ``None`` (nothing inserted) when the cap is already reached."""
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     prefix = token[:PREFIX_DISPLAY_CHARS]
     created_at = _now().isoformat()
     async with open_db(db_path) as db:
-        cur = await db.execute(
-            """
-            INSERT INTO api_tokens(user_id, name, token_hash, prefix, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (user_id, name, _hash(token), prefix, created_at),
-        )
-        token_id = cur.lastrowid
-        await db.commit()
+        async with db.transaction():
+            lock_cur = await db.execute("SELECT id FROM users WHERE id = ? FOR UPDATE", (user_id,))
+            if await lock_cur.fetchone() is None:
+                return None  # unknown user — route can't reach this, but stay safe
+            count_cur = await db.execute(
+                "SELECT COUNT(*) FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL",
+                (user_id,),
+            )
+            count_row = await count_cur.fetchone()
+            active_count = int(count_row[0]) if count_row else 0
+            if cap > 0 and active_count >= cap:
+                return None
+            cur = await db.execute(
+                """
+                INSERT INTO api_tokens(user_id, name, token_hash, prefix, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, name, _hash(token), prefix, created_at),
+            )
+            token_id = cur.lastrowid
     get_audit_logger().info(
         "api_token_create",
         extra={"event": "api_token_create", "user_id": user_id, "token_id": token_id, "prefix": prefix},
