@@ -76,7 +76,7 @@ class TheMuseSource(BaseJobSource):
                 # (checked live: `type` is a listing-source marker like
                 # "external", not an employment type) -- nothing to map.
                 cats = item.get("categories") or []
-                cat_names = [str(c.get("name")) for c in cats if isinstance(c, dict) and c.get("name")]
+                cat_names = [c.get("name") for c in cats if isinstance(c, dict) and c.get("name")]
                 tag_names = [str(t) for t in (item.get("tags") or []) if t]
                 jobs.append(Job(
                     title=title,

@@ -4,7 +4,7 @@ import logging
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from typing import Any, Optional, cast
+from typing import Optional, cast
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -45,7 +45,7 @@ _MICRODATA_DESC_WINDOW = 8000
 _MAX_DETAIL_FETCHES_PER_COMPANY = 20
 
 
-def _as_number(value: Any) -> Optional[float]:
+def _as_number(value):
     """A JSON-LD number, or None. Never raises — see the call site."""
     if isinstance(value, bool):  # bool is an int subclass; a flag is not a salary
         return None
@@ -59,7 +59,7 @@ def _as_number(value: Any) -> Optional[float]:
     return None
 
 
-def _extract_from_jsonld(page_html: str) -> Optional[dict[str, Any]]:
+def _extract_from_jsonld(page_html):
     # EVERY ld+json BLOCK, NOT THE FIRST. Careers pages routinely carry an
     # Organization or BreadcrumbList block before the JobPosting one, and
     # taking `search()` meant landing on that, returning a dict with none of
@@ -145,7 +145,7 @@ def _extract_from_jsonld(page_html: str) -> Optional[dict[str, Any]]:
     }
 
 
-def _extract_from_microdata(page_html: str) -> Optional[dict[str, Any]]:
+def _extract_from_microdata(page_html):
     loc_match = _GEOLOCATION_RE.search(page_html)
     location = loc_match.group(1).strip() if loc_match else None
 
@@ -166,17 +166,12 @@ class SuccessFactorsSource(BaseJobSource):
     name = "successfactors"
     category = "ats"
 
-    def __init__(
-        self,
-        session: aiohttp.ClientSession,
-        companies: Optional[list[dict[str, str]]] = None,
-        search_config: Optional[SearchConfig] = None,
-    ) -> None:
+    def __init__(self, session: aiohttp.ClientSession, companies=None, search_config: Optional[SearchConfig] = None):
         super().__init__(session, search_config=search_config)
         self._companies = companies or SUCCESSFACTORS_COMPANIES
 
-    async def fetch_jobs(self) -> list[Job]:
-        jobs: list[Job] = []
+    async def fetch_jobs(self) -> list:
+        jobs = []
         for company in self._companies:
             sitemap_url = company["sitemap_url"]
             company_name = company["name"]
@@ -190,9 +185,7 @@ class SuccessFactorsSource(BaseJobSource):
         logger.info("SuccessFactors: found %s relevant jobs", len(jobs))
         return jobs
 
-    async def _parse_sitemap_or_index(
-        self, xml_text: str, company_name: str, detail_budget: list[int]
-    ) -> list[Job]:
+    async def _parse_sitemap_or_index(self, xml_text, company_name, detail_budget):
         root = self._parse_xml(xml_text, company_name)
         if root is None:
             return []
@@ -201,17 +194,15 @@ class SuccessFactorsSource(BaseJobSource):
             return await self._parse_sitemap_index(root, company_name, detail_budget)
         return await self._parse_urlset(root, company_name, detail_budget)
 
-    def _parse_xml(self, xml_text: str, company_name: str) -> Optional[ET.Element]:
+    def _parse_xml(self, xml_text, company_name):
         try:
             return cast(ET.Element, _safe_fromstring(_sanitize_xml(xml_text)))
         except ET.ParseError as e:
             logger.warning("SuccessFactors [%s]: XML parse error: %s", company_name, e)
             return None
 
-    async def _parse_sitemap_index(
-        self, root: ET.Element, company_name: str, detail_budget: list[int]
-    ) -> list[Job]:
-        jobs: list[Job] = []
+    async def _parse_sitemap_index(self, root, company_name, detail_budget):
+        jobs = []
         child_urls = [
             self._local_findtext(sitemap_elem, "loc")
             for sitemap_elem in self._iter_local(root, "sitemap")
@@ -229,10 +220,8 @@ class SuccessFactorsSource(BaseJobSource):
 
         return jobs
 
-    async def _parse_urlset(
-        self, root: ET.Element, company_name: str, detail_budget: list[int]
-    ) -> list[Job]:
-        jobs: list[Job] = []
+    async def _parse_urlset(self, root, company_name, detail_budget):
+        jobs = []
         now = datetime.now(timezone.utc).isoformat()
 
         for url_elem in self._iter_local(root, "url"):
@@ -301,22 +290,22 @@ class SuccessFactorsSource(BaseJobSource):
         return jobs
 
     @staticmethod
-    def _local_name(tag: str) -> str:
+    def _local_name(tag):
         return tag.split("}")[-1]
 
     @classmethod
-    def _iter_local(cls, root: ET.Element, tag_name: str) -> list[ET.Element]:
+    def _iter_local(cls, root, tag_name):
         return [elem for elem in root.iter() if cls._local_name(elem.tag) == tag_name]
 
     @classmethod
-    def _local_findtext(cls, elem: ET.Element, tag_name: str) -> str:
+    def _local_findtext(cls, elem, tag_name):
         for child in elem:
             if cls._local_name(child.tag) == tag_name:
                 return (child.text or "").strip()
         return ""
 
     @staticmethod
-    def _title_from_url(url: str) -> str:
+    def _title_from_url(url):
         """Extract a readable title from a career page URL path.
 
         QinetiQ (and likely other legacy-template SuccessFactors vendors)

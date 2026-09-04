@@ -1,7 +1,6 @@
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any
 
 from src.models import Job
 from src.sources.base import BaseJobSource, _is_uk_or_remote
@@ -179,7 +178,7 @@ class DevITJobsSource(BaseJobSource):
         logger.info("DevITjobs: found %s relevant jobs", len(jobs))
         return jobs
 
-    async def _fetch_job_detail(self, job_id: str) -> dict[str, Any]:
+    async def _fetch_job_detail(self, job_id):
         """Fetch one posting raw detail JSON from the public detail endpoint.
 
         Returns {} on any failure (including no id) -- callers treat a
@@ -191,7 +190,7 @@ class DevITJobsSource(BaseJobSource):
         return detail if isinstance(detail, dict) else {}
 
     @staticmethod
-    def _extract_detail_description(detail: dict[str, Any]) -> str:
+    def _extract_detail_description(detail):
         """Concatenate the detail endpoint three prose fields, tag-stripped.
 
         requirementsNiceTextArea is near-always empty (measured live: 1 of

@@ -628,7 +628,7 @@ async def list_jobs(
             ) is VisaStatus.SPONSORS
         ]
     elif visa_only:
-        def _visa_rank(r: dict[str, Any]) -> int:
+        def _visa_rank(r: dict) -> int:
             st = detect_visa_status(
                 r.get("description", ""), r.get("title", ""),
                 enrichment_value=r.get("visa_sponsorship"),
@@ -877,11 +877,6 @@ async def get_job(
         # these; the single-job read didn't, so llm_* came back null here).
         row.update(await db.get_user_feed_verdict(user.id, job_id))
     resp = _row_to_job_response(row, job_action)
-    if user is not None:
-        # The full text rides only for a logged-in user: a `user_brought` row
-        # is an ad someone pasted, and ids are sequential, so an anonymous
-        # read would let anyone walk other people's pastes.
-        resp.description = row.get("description") or None
 
     # Skill Analysis: split the job's required skills into matched / missing /
     # transferable against the user's profile skills (read-time; empty when the job

@@ -7,11 +7,9 @@ name: Live end-to-end (online)
 #
 # Triggers: nightly (cron) + manual (workflow_dispatch button in the Actions tab).
 
-# PAUSED 2026-09-03 — sourcing era. This detector watches the search feed /
-# catalog / scorer, which the product no longer has (docs/product/VISION.md,
-# roadmap slice 5 deletes the code). Schedule removed; workflow_dispatch kept
-# so it can still be fired by hand until the code it watches is gone.
 on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC nightly
   workflow_dispatch: {}
 
 # Least-privilege token (CodeQL actions/missing-workflow-permissions):

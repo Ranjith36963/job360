@@ -102,35 +102,23 @@ def api_routes() -> str:
     decl = re.compile(r"@router\.(get|post|put|patch|delete)\(\s*[\"']([^\"']*)")
     prefix_re = re.compile(r"APIRouter\(\s*prefix=[\"']([^\"']+)")
 
-    # The mount prefix is whatever main.py passes to include_router — "/api"
-    # for almost every router, but the OAuth discovery documents
-    # (`well_known`) are mounted at the site ROOT, because a client resolves
-    # `/.well-known/...` against the bare origin. Read it, don't assume it.
-    mount_re = re.compile(
-        r"include_router\(\s*(\w+)\.router\s*(?:,\s*prefix=[\"']([^\"']*)[\"'])?"
-    )
-    main_body = (ROOT / "backend/src/api/main.py").read_text(encoding="utf-8", errors="replace")
-    mounts = {m.group(1): (m.group(2) or "") for m in mount_re.finditer(main_body)}
-
     lines = ["| Method | Path | Router |", "| --- | --- | --- |"]
     total = 0
     for path in sorted(routes_dir.glob("*.py")):
         body = path.read_text(encoding="utf-8", errors="replace")
         pm = prefix_re.search(body)
         prefix = pm.group(1).rstrip("/") if pm else ""
-        mount = mounts.get(path.stem, "/api")
         found = []
         for m in decl.finditer(body):
-            full = f"{mount}{prefix}{m.group(2)}".rstrip("/") or mount or "/"
+            full = f"/api{prefix}{m.group(2)}".rstrip("/") or "/api"
             found.append((m.group(1).upper(), full))
         for method, full in sorted(found, key=lambda r: (r[1], r[0])):
             lines.append(f"| `{method}` | `{full}` | `{path.name}` |")
             total += 1
     lines.append("")
     lines.append(f"**{total} routes.** Generated from the routers; a path is "
-                 f"assembled from `APIRouter(prefix=…)` + the decorator + the "
-                 f"`include_router(prefix=…)` in `main.py` (`/api` for all but "
-                 f"the root-mounted `/.well-known/*` discovery documents).")
+                 f"assembled from `APIRouter(prefix=…)` + the decorator + "
+                 f"`include_router(prefix=\"/api\")`.")
     return "\n".join(lines)
 
 

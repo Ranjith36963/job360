@@ -354,10 +354,8 @@ async def export_my_data(
     security-token tables are omitted entirely; see ``export_user_data``.
     """
     data = await db.export_user_data(user.id)
-    # Flat file: ``exported_at`` beside the tables (``user``, ``api_tokens``, …),
-    # no wrapper object — one level to read for a human opening the download.
     body = json.dumps(
-        {"exported_at": datetime.now(timezone.utc).isoformat(), **data},
+        {"exported_at": datetime.now(timezone.utc).isoformat(), "data": data},
         indent=2,
         default=str,
     )
@@ -650,10 +648,6 @@ async def verify_email_confirm(req: EmailVerificationConfirmRequest) -> Response
 
 class MagicLinkRequest(BaseModel):
     email: EmailStr
-    # Optional post-login redirect PATH (spec 2026-09-03-oauth-mcp R9) — lets
-    # `/oauth/consent/{rid}` survive a login bounce. Validated server-side by
-    # `magic_link.safe_next`; anything else is silently ignored, never a 400.
-    next: str | None = Field(default=None, max_length=512)
 
 
 class MagicLinkConsumeRequest(BaseModel):
@@ -691,7 +685,6 @@ async def magic_link_request(
         db_path=str(DB_PATH),
         email=str(req.email),
         frontend_origin=_frontend_origin(),
-        next_path=req.next,
     )
     get_audit_logger().info(
         "auth",

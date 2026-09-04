@@ -14,11 +14,9 @@ name: Absence check (did anything STOP?)
 # Free: read-only SQL, no LLM. Runs at 08:00 UTC, four hours after the 04:00
 # catalog cron, so "did last night's refresh actually happen?" is answerable.
 
-# PAUSED 2026-09-03 — sourcing era. This detector watches the search feed /
-# catalog / scorer, which the product no longer has (docs/product/VISION.md,
-# roadmap slice 5 deletes the code). Schedule removed; workflow_dispatch kept
-# so it can still be fired by hand until the code it watches is gone.
 on:
+  schedule:
+    - cron: "0 8 * * *" # 08:00 UTC daily — after the 04:00 catalog refresh
   workflow_dispatch:
     inputs:
       drill:

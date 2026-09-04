@@ -41,11 +41,9 @@ name: Data invariants (is the data VALID, not just PRESENT?)
 # wrong. That half lives in frontend/tests/synthetic/live-smoke.mjs. Two bugs,
 # two legs; neither leg alone catches both.
 
-# PAUSED 2026-09-03 — sourcing era. This detector watches the search feed /
-# catalog / scorer, which the product no longer has (docs/product/VISION.md,
-# roadmap slice 5 deletes the code). Schedule removed; workflow_dispatch kept
-# so it can still be fired by hand until the code it watches is gone.
 on:
+  schedule:
+    - cron: "15 */6 * * *" # every 6h, offset off the other detectors
   workflow_dispatch:
     inputs:
       drill:

@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 # branch_prune.sh — conservative local-branch cleanup.
 #
+# ⚠️ SUPERSEDED FOR AUTOMATIC USE (2026-09-02). Use scripts/worktree_reaper.py.
+#
+#   This script is still SAFE — nothing below deletes unmerged work. It is simply
+#   BLIND on this repo, because check #1 asks the wrong oracle:
+#
+#       git branch --merged origin/main   ->    1 branch
+#       gh pr list --state merged         ->  343 branches
+#
+#   The repo SQUASH-merges. A squash rewrites the commits, so a shipped branch is
+#   never an ancestor of main and never appears in `--merged`. That is why this
+#   file ran for five weeks and collected nothing while the estate went from 14 to
+#   98 worktrees: it was not broken, it was looking at a number that is always 1.
+#
+#   scripts/worktree_census.py computes the right answer with `git cherry`
+#   (patch-ids, which survive a squash), and scripts/worktree_reaper.py acts on it
+#   from a SessionStart hook. Keep this for the manual, deliberately conservative
+#   case; do not wire it into automation expecting it to find anything.
+#
 # WHY THIS EXISTS
 #   The 2026-07-26 hygiene audit found 76 local branches (only ~14 holding real
 #   work), 14 worktrees, and 5 weeks of drift since the repo was last clean.

@@ -107,7 +107,7 @@ def _is_real_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _has_salary_value(job_row: dict[str, Any], enrichment_row: Optional[dict[str, Any]]) -> bool:
+def _has_salary_value(job_row: dict, enrichment_row: Optional[dict]) -> bool:
     """THE bug this module exists to fix — see the module docstring.
 
     A job has a usable salary only if a real number is findable: either the
@@ -128,7 +128,7 @@ def _has_salary_value(job_row: dict[str, Any], enrichment_row: Optional[dict[str
     return any(_is_real_number(parsed.get(key)) for key in _SALARY_KEYS)
 
 
-def _has_skill_value(job_row: dict[str, Any], enrichment_row: Optional[dict[str, Any]]) -> bool:
+def _has_skill_value(job_row: dict, enrichment_row: Optional[dict]) -> bool:
     """True when there is real text (or an LLM-extracted list) to match skills against.
 
     Two independent sources count, matching what `JobScorer` actually reads
@@ -177,8 +177,8 @@ def _has_enum_value(raw: Any) -> bool:
 
 def job_has_value(
     dimension: str,
-    job_row: dict[str, Any],
-    enrichment_row: Optional[dict[str, Any]],
+    job_row: dict,
+    enrichment_row: Optional[dict],
 ) -> bool:
     """Does this job actually carry a usable value for `dimension`?
 
@@ -247,10 +247,6 @@ def job_has_value(
 
         title = job_row.get("title") or ""
         desc = job_row.get("description") or ""
-        # `Any`: the two detectors return different signal types
-        # (`WorkplaceSignal` / `SenioritySignal`) and only their duck-typed
-        # `.value` is read below.
-        got: Any
         if dimension == "workplace":
             got = detect_workplace(
                 desc, title, location=job_row.get("location") or ""

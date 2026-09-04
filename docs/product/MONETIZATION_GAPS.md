@@ -1,8 +1,6 @@
 # Monetization Gaps — What's Missing to Make Money
 <!-- doc: LIVING -->
 
-> **⚠️ SOURCING ERA — superseded 2026-09-03.** Job360 no longer sources, ranks or recommends jobs. The seeker's own AI agent does that; Job360 is the agent's memory (profile, artifact versions, typed events, receipts). Read [`VISION.md`](VISION.md) first — it wins over anything below. This file is kept as history only. Job360 is free for seekers until value is proven (rule 6); no plan/paywall work is planned.
-
 > **What this is.** An honest gap analysis of everything between "Job360 is a working app" and "Job360 is a SaaS that charges money." Created 2026-06-22 from a code-verified audit.
 >
 > **What this is NOT.** A feature plan (see `LAUNCH_PLAN.md`) or a status doc (see `STATUS.md`). This answers one question: *what stops me taking real money today, and in what order do I fix it?*

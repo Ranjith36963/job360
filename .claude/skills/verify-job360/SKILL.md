@@ -120,22 +120,17 @@ For per-user routes you need a session cookie — register via `POST /api/auth/r
 > the spine; `CHECKLIST.md` is the complete ~47-checkpoint contract (all routes + pages +
 > buttons + the Redis/LinkedIn/GitHub gates). Report its PASS/FAIL/GATED table.
 
-Run **both** servers, then walk the real journey with the browser and watch the DB/logs in parallel.
-**The journey is the product path (`docs/product/VISION.md`): bring → tailor → receipt → MCP. The old
-search journey is legacy — verify it only when the change touched `src/sources/` or the scorer.**
+Run **both** servers, then walk the real journey with the browser and watch the DB/logs in parallel:
 
 1. **Register** a fresh account (UI: `/register`, or `POST /api/auth/register`).
 2. **Upload a CV** on `/profile` — use `test-artifacts/sample_cv.pdf` (a realistic ML-engineer CV).
    Confirm the profile populates (skills/titles chips, Skill Tiers) and the log shows
    `Profile saved for user …`.
-3. **Bring a job** on `/bring` (paste an ad; a link too once slice 3 lands) or `POST /api/jobs/bring`.
-   The job page must open from the response.
-4. **Tailor + "I applied"** — tailor the CV on the job page, click "I applied", then open `/receipts`:
-   the receipt shows the ad as it read, the exact CV/cover letter, the date. Re-tailor and confirm
-   the receipt did NOT change (append-only, rule M3).
-5. **MCP** — call the `/api/mcp` mount (streamable HTTP, not a `@router` route) with a personal `j360_…` token: `tools/list`, then `get_profile` and the
-   receipt-listing tool return the same data the web showed.
-6. *(legacy, only if touched)* "New Search" on `/dashboard` → `jobs` count > 0 → dashboard renders scores.
+3. **Trigger a search** ("New Search" on `/dashboard`, or `POST /api/search`).
+4. **Verify jobs come through** — this is the whole point. Check `jobs` table count > 0 AND
+   that the dashboard renders them with scores. If 0 jobs: read the log for *why*
+   (no profile? all filtered by score? a source returned nothing?) — that diagnosis is the finding.
+5. Spot-check downstream: job detail (`/jobs/[id]`), bookmark/apply → pipeline, notifications.
 
 A good E2E run produces a short report: what works, what's broken (with the exact file:line
 and the DB/log evidence), severity, and the fix. See `E2E_TEST_REPORT.md` at the repo root

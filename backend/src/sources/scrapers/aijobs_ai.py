@@ -141,7 +141,7 @@ class AIJobsAISource(BaseJobSource):
         return True
 
     @staticmethod
-    def _extract_ldjson_fields(raw: str) -> dict[str, str]:
+    def _extract_ldjson_fields(raw: str) -> dict:
         """Tolerant JobPosting field extractor.
 
         aijobs.ai's per-job ld+json is frequently NOT valid JSON: description
@@ -165,7 +165,7 @@ class AIJobsAISource(BaseJobSource):
         except (ValueError, TypeError):
             pass
 
-        fields: dict[str, str] = {}
+        fields: dict = {}
         dp = re.search(r'"datePosted"\s*:\s*"([^"]*)"', raw)
         if dp and dp.group(1):
             fields["datePosted"] = dp.group(1)

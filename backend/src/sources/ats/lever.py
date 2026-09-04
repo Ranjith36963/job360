@@ -1,7 +1,7 @@
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import aiohttp
 
@@ -15,7 +15,7 @@ logger = logging.getLogger("job360.sources.lever")
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
-def _build_description(item: dict[str, Any]) -> str:
+def _build_description(item: dict) -> str:
     """Concatenate every text block Lever gives us for a posting.
 
     Verified live 2026-08-16 (spotify board): `descriptionPlain` alone

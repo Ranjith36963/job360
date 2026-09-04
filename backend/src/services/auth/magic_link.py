@@ -53,47 +53,16 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def safe_next(value: Optional[str]) -> Optional[str]:
-    """Validate a post-login redirect PATH carried through the magic-link
-    email (spec 2026-09-03-oauth-mcp R9).
-
-    Mirrors the frontend's `safeNext`: accepted only when it starts with a
-    single ``/`` (never ``//``, which a browser treats as protocol-relative),
-    carries no scheme, and is at most 512 chars. Anything else is dropped —
-    the caller falls back to its own default (``/dashboard``). This is what
-    lets `/oauth/consent/{rid}` survive a login bounce: the rid lives in the
-    path (`middleware.ts` keeps only the pathname), so `next` must reach the
-    emailed link, not just the login page's query string.
-    """
-    if not value:
-        return None
-    if len(value) > 512:
-        return None
-    if not value.startswith("/") or value.startswith("//"):
-        return None
-    # The WHATWG URL parser (what the browser and Next's router use) treats
-    # a backslash as a slash for http(s) and strips tab/CR/LF BEFORE parsing,
-    # so "/\evil.com" and "/\t/evil.com" both resolve to https://evil.com/.
-    # A path is plain ASCII-printable with no backslash, or it is not a path.
-    if any(ch in value for ch in "\\\t\n\r") or not value.isprintable():
-        return None
-    return value
-
-
 def _build_magic_link_email(
-    *, to_email: str, raw_token: str, frontend_origin: str, next_path: Optional[str] = None
+    *, to_email: str, raw_token: str, frontend_origin: str
 ) -> tuple[str, str, str]:
     """Return ``(subject, text_body, html_body)`` for the sign-in email.
 
     Defense-in-depth HTML escaping mirrors the sibling helpers in
-    ``password_reset.py`` / ``email_verification.py``. ``next_path`` (already
-    validated by :func:`safe_next`) is appended url-quoted so
-    ``/auth/magic`` can honour it after consume (R9).
+    ``password_reset.py`` / ``email_verification.py``.
     """
     safe_token = urlquote(raw_token, safe="")
     link = f"{frontend_origin}/auth/magic?token={safe_token}"
-    if next_path:
-        link += f"&next={urlquote(next_path, safe='')}"
     subject = "Sign in to Job360"
     text = (
         f"Hi,\n\n"
@@ -118,15 +87,8 @@ async def request_magic_link(
     db_path: str,
     email: str,
     frontend_origin: str,
-    next_path: Optional[str] = None,
 ) -> bool:
     """Issue + email a magic-link sign-in token for ``email``.
-
-    ``next_path`` is validated with :func:`safe_next` here (belt-and-braces —
-    the route validates too) and, when it survives, appended to the emailed
-    link so ``/auth/magic`` can redirect there after consume (R9). An invalid
-    value is silently dropped, never a 400: the no-enumeration contract means
-    this call never fails loudly.
 
     Returns True if the email was actually sent, False otherwise. Never
     raises — the route returns 204 regardless (no-enumeration contract).
@@ -150,8 +112,7 @@ async def request_magic_link(
             await db.commit()
 
         subject, text, html_body = _build_magic_link_email(
-            to_email=email, raw_token=raw, frontend_origin=frontend_origin,
-            next_path=safe_next(next_path),
+            to_email=email, raw_token=raw, frontend_origin=frontend_origin
         )
         return await send_system_email(
             to_email=email, subject=subject, body_text=text, body_html=html_body

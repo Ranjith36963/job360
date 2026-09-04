@@ -869,11 +869,6 @@ async def run_search(
         }
 
     if search_config is None:
-        # Unreachable: the no-profile guard above already returned unless
-        # `profile` was truthy. Restated only because mypy cannot carry that
-        # narrowing across two statements.
-        if profile is None:
-            raise RuntimeError("no profile after the no-profile guard")
         search_config = generate_search_config(profile)
         logger.info("  Using dynamic keywords from user profile")
     else:

@@ -1,7 +1,7 @@
 import html
 import re
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 # Max chars per normalized-key component — see normalized_key() for the why.
 _KEY_COMPONENT_MAX = 300
@@ -136,7 +136,7 @@ class Job:
     # are exactly the UNIVERSAL_SHELF tuple above, no more, no fewer. Stamped
     # by services/shelf_gate.py::fill_shelves — nothing calls it yet (step 1
     # ships the gate built and tested in isolation; wiring it in is step 2).
-    shelf_provenance: dict[str, Any] = field(default_factory=dict)
+    shelf_provenance: dict = field(default_factory=dict)
     # Database row id, populated AFTER the row is inserted (None for a Job that
     # has not been persisted yet). Declared last so positional construction is
     # unaffected.

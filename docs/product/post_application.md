@@ -1,8 +1,6 @@
 # Post-Application Features — the "after you apply" career co-pilot
 <!-- doc: PLAN -->
 
-> **⚠️ SOURCING ERA — superseded 2026-09-03.** Job360 no longer sources, ranks or recommends jobs. The seeker's own AI agent does that; Job360 is the agent's memory (profile, artifact versions, typed events, receipts). Read [`VISION.md`](VISION.md) first — it wins over anything below. This file is kept as history only. Interview prep, mock interview, follow-up writing and outreach drafting are the agent's job (rule 5); Job360 only stores what happened.
-
 > **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 > **The idea in one line:** Once a user applies (with their tailored CV + cover letter), Job360 already knows *everything* about them and the job — so it can carry them through the rest of the journey: **interview prep → mock interview → skill-gap → follow-up email → outreach.** Each feature is "one more prompt + one more screen" using data we already store.

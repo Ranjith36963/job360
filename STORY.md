@@ -1,8 +1,6 @@
 # STORY.md — the true story of Job360
 <!-- doc: LIVING -->
 
-> **⚠️ SOURCING ERA — superseded 2026-09-03.** Job360 no longer sources, ranks or recommends jobs. The seeker's own AI agent does that; Job360 is the agent's memory (profile, artifact versions, typed events, receipts). Read [`docs/product/VISION.md`](docs/product/VISION.md) first — it wins over anything below. This file is kept as history only.
-
 `CLAUDE.md` tells an agent **how to work**.
 `STORY.md` tells the owner **what is actually true** — the product, in plain words, and then the
 honest part.

@@ -10,8 +10,6 @@ import {
   Menu,
   Activity,
   Send,
-  ClipboardPaste,
-  FileCheck2,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -21,10 +19,8 @@ import { useAuth } from "@/components/layout/AuthProvider";
 
 const NAV_LINKS = [
   { href: "/profile", label: "Profile", icon: User },
-  { href: "/bring", label: "Bring a job", icon: ClipboardPaste },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/pipeline", label: "Pipeline", icon: Kanban },
-  { href: "/receipts", label: "Receipts", icon: FileCheck2 },
   { href: "/channels", label: "Channels", icon: Send },
 ] as const;
 

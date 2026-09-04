@@ -317,38 +317,15 @@ jobs:
             # `|| echo 0` is gone: a failed lookup used to mean "nobody is busy",
             # i.e. the runaway guard failed OPEN — the one direction it must
             # never fail. (CodeRabbit, PR #380.)
-            # PER PR, NOT REPO-WIDE (changed 2026-08-27). This used to count
-            # every unfinished pr-repair run anywhere and refuse if there was
-            # one. Combined with pr-repair's own global concurrency lock it
-            # starved the queue: a repair takes 18.7-21.5 min (measured over 10
-            # runs, avg 19.8) and this sweep sees it every 30, so one busy
-            # repair silently dropped every other PR that round, with nothing
-            # retrying them and no ordering to make it fair. Four PRs waited
-            # 16-36 hours behind that on 2026-08-25/26.
-            #
-            # WHY THERE IS NO PER-PR BUSY CHECK HERE, AND WHY THAT IS SAFE.
-            #
-            # The obvious fix was to filter the same query by this PR's branch.
-            # It does not work and it fails OPEN, which is worse than the bug it
-            # replaces: pr-repair is started by `workflow_dispatch`, so every one
-            # of its runs reports `head_branch: main` regardless of which PR it
-            # is repairing — verified across the last 22 runs, all `main`. The
-            # runs API does not expose `inputs`, so the PR number a run is
-            # working on is not readable from here at all. A branch filter would
-            # therefore match nothing, count 0 every time, and wave through a
-            # second agent onto a branch that already has one.
-            #
-            # So the serialisation moved to where it can be exact: pr-repair now
-            # declares `concurrency: group: pr-repair-${{ inputs.pr }}` with
-            # `cancel-in-progress: false`. GitHub itself queues a second run for
-            # the same PR behind the first — that is enforced by the platform,
-            # not by a poll that can be stale by the time it is read.
-            #
-            # A duplicate dispatch is now harmless rather than forbidden: it
-            # waits, and when it starts, GUARD 1 above (newest commit is the
-            # fixer's own and CI is not red) or pr-repair's own "nothing to
-            # push" arm makes it a no-op. Cheaper than starving three PRs to
-            # avoid one wasted runner, which is what the repo-wide check did.
+            busy=$(gh api "repos/$GH_REPO/actions/workflows/pr-repair.yml/runs?per_page=100" \
+              --jq '[.workflow_runs[]|select(.status!="completed")]|length') || {
+              note "$pr" "could not tell whether a fixer is already running — refusing to start one, because 'I do not know' must not mean 'go ahead'."
+              exit 0
+            }
+            if [ "$busy" -gt 0 ]; then
+              note "$pr" "$threads thread(s)/$red red check(s), but a pr-repair run is already in flight (they run one at a time) — not starting a second one."
+              exit 0
+            fi
 
             # ── GUARD 3: the hard ceiling ────────────────────────────────────
             # Recorded as a label so the count survives this run, the next run,

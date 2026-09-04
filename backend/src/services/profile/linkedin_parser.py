@@ -1017,19 +1017,15 @@ def deterministic_linkedin_fields(text: str) -> dict[str, Any]:
     }
 
 
-async def llm_linkedin_fields(text: str) -> dict[str, Any]:
+async def llm_linkedin_fields(text: str) -> dict[str, list[Any]]:
     """Pass 2 for LinkedIn — LLM ONLY.
 
     Runs the seven per-section LLM extractions (experience/education/…) PLUS the
     prose-skills pass (``llm_infer_linkedin_skills``) over the same raw text the
     deterministic pass read. Returns the LLM-owned fields; the orchestrator (and
     ``parse_linkedin_from_text``) merge this with the deterministic dict.
-
-    Values are NOT all lists: ``headline`` is a plain string. The return type
-    says ``Any`` for that reason — it matches ``_empty_linkedin_data()``, which
-    is the schema this dict is merged into.
     """
-    empty: dict[str, Any] = {
+    empty: dict[str, list[Any]] = {
         "positions": [], "education": [], "certifications": [],
         "languages": [], "projects": [], "volunteer": [], "courses": [], "skills": [],
     }

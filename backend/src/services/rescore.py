@@ -252,17 +252,12 @@ async def _load_action_sets(db: Any, user_id: str) -> tuple[set[Any], set[Any]]:
     """The user-feedback loop's read side (2026-08-05).
 
     Returns ``(protected, rejected)`` job-id sets from ``user_actions``:
-      * ``protected`` — liked/applied jobs, plus any job the user BROUGHT
-        (``jobs.source = 'user_brought'`` in their feed): user investment that
-        must survive any re-selection (same principle as the LLM-verdict
-        guard). A pasted ad has no like/apply row yet, and may score under
-        ``MIN_STORE_SCORE``; without this it vanished on the next search.
+      * ``protected`` — liked/applied jobs: user investment that must survive
+        any re-selection (same principle as the LLM-verdict guard).
       * ``rejected`` — not_interested jobs: an explicit user NO that selection
         must honour; before this, the reject button recorded a row the
         candidate layer completely ignored — a dead lever.
     """
-    from src.core.settings import USER_BROUGHT_SOURCE  # noqa: PLC0415
-
     cur = await db._db.execute(
         "SELECT job_id, action FROM user_actions WHERE user_id = ?",
         (user_id,),
@@ -275,12 +270,6 @@ async def _load_action_sets(db: Any, user_id: str) -> tuple[set[Any], set[Any]]:
             rejected.add(jid)
         elif action in ("liked", "applied"):
             protected.add(jid)
-    cur = await db._db.execute(
-        "SELECT f.job_id FROM user_feed f JOIN jobs j ON j.id = f.job_id "
-        "WHERE f.user_id = ? AND j.source = ?",
-        (user_id, USER_BROUGHT_SOURCE),
-    )
-    protected.update(row[0] for row in await cur.fetchall())
     return protected, rejected
 
 

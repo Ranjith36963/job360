@@ -259,7 +259,7 @@ class NoFluffJobsSource(BaseJobSource):
         logger.info("NoFluffJobs: found %s relevant jobs", len(jobs))
         return jobs
 
-    async def _fetch_posting_detail(self, posting_id: str) -> dict[str, Any]:
+    async def _fetch_posting_detail(self, posting_id: str) -> dict:
         """Fetch one posting's RAW detail JSON. Returns ``{}`` on any failure.
 
         Split from ``_fetch_posting_text`` so the caller can read description,
@@ -273,7 +273,7 @@ class NoFluffJobsSource(BaseJobSource):
         return detail if isinstance(detail, dict) else {}
 
     @staticmethod
-    def _extract_detail_description(detail: dict[str, Any]) -> str:
+    def _extract_detail_description(detail: dict) -> str:
         """Body text from a raw detail response — prose plus the asked-for skills.
 
         The prose lives at ``requirements.description`` (HTML) — verified live

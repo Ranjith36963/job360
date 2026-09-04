@@ -182,13 +182,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Since 36c1c84 (2026-09-03) merge_cage.py reads its policy file with
-      # PyYAML at import time. The `verify` job below already installs it; this
-      # job did not, so the drill died with ModuleNotFoundError on every PR
-      # from 07:54 that day (#474).
-      - name: Install what the cage imports
-        run: python -m pip install --quiet pyyaml
-
       # Proving the cage still refuses on purpose costs seconds and is the only
       # thing standing between "there is a cage" and "the cage works".
       - name: The cage still refuses — and can still allow
@@ -352,10 +345,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      # `lane.py` imports PyYAML, and since 36c1c84 so does `merge_cage.py`
-      # (the `advise` job installs it too). Left implicit, its absence would
-      # have surfaced here on the first real PR as a traceback nobody was
-      # watching for.
+      # `lane.py` imports PyYAML; `merge_cage.py` does not, so the `advise` job
+      # above never needed it. Left implicit, its absence would have surfaced
+      # here on the first real PR as a traceback nobody was watching for.
       - name: The classifier's one dependency
         run: python -m pip install --quiet pyyaml
 
@@ -405,45 +397,6 @@ jobs:
           # exemption can only ever LOOSEN a lane, so the safe direction when
           # this job cannot verify one is to withhold it.
           python scripts/lane.py --json verdict.json $(tr '\n' ' ' < changed.txt)
-
-      # ── THE LANE, WHERE THE OWNER CAN SEE IT (2026-08-27) ─────────────────
-      # The lane decided everything and appeared nowhere he looks. It was
-      # computed here, written into a comment, and that was all — so the PR
-      # LIST, the one screen you actually scan, showed no hint of who owned
-      # what. Four PRs sat for a day and a half and the reason was a lane
-      # nobody could see without opening a comment and reading it.
-      #
-      # Exactly one `lane:*` label at a time, so the label cannot say two
-      # things. Failure here is loud but not fatal: a missing label must not
-      # stop the advice from being posted.
-      - name: Stamp the lane on the PR
-        id: lanelabel
-        if: steps.rules.outputs.ready == 'true'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ steps.pick.outputs.pr }}
-        run: |
-          set -euo pipefail
-          lane=$(python -c "import json;print(json.load(open('verdict.json')).get('lane',''))")
-          case "$lane" in
-            product)                    want="lane:product" ;;
-            harness)                    want="lane:harness" ;;
-            product_owner|harness_owner) want="lane:owner"  ;;
-            *)
-              echo "::warning::lane.py returned '$lane' — no label stamped"
-              exit 0 ;;
-          esac
-          for l in lane:product lane:harness lane:owner; do
-            [ "$l" = "$want" ] && continue
-            gh pr edit "$PR" --remove-label "$l" 2>/dev/null || true
-          done
-          if gh pr edit "$PR" --add-label "$want"; then
-            echo "lane label: \`$want\` (lane.py said \`$lane\`)" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "::warning::could not add $want to PR #$PR — the lane is still only in the comment"
-          fi
-          echo "lane=$lane" >> "$GITHUB_OUTPUT"
 
       # RUN THE RULES' COPY OF THE SCRIPT, AGAINST THE PR'S TREE. Both halves
       # matter. Pointing `--repo` at the default-branch checkout instead would

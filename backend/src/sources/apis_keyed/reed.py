@@ -58,7 +58,7 @@ class ReedSource(BaseJobSource):
         if not self.is_configured:
             logger.warning("Reed: no API key, skipping")
             return []
-        jobs: list[Job] = []
+        jobs = []
         auth = base64.b64encode(f"{self._api_key}:".encode()).decode()
         headers = {"Authorization": f"Basic {auth}"}
         # S2 — size the fan-out from the actual time budget instead of a

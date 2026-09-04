@@ -1,7 +1,5 @@
-<!-- doc: LIVING | last-verified: 2026-09-03 by the mission sweep (stays LIVING until slice 5 archives it — doc_sync_check watches this folder) -->
+<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
 # Job360 — The Three Pillars
-
-> **⚠️ SOURCING ERA — superseded 2026-09-03.** Job360 no longer sources, ranks or recommends jobs. The seeker's own AI agent does that; Job360 is the agent's memory (profile, artifact versions, typed events, receipts). Read [`../VISION.md`](../VISION.md) first — it wins over anything below. This file is kept as history only.
 
 Job360 is built as three architectural pillars. This folder documents each one from the code up — what it does, how it works, and where it stands today.
 

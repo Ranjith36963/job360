@@ -135,7 +135,7 @@ class UniJobsSource(BaseJobSource):
         return found_any
 
     @staticmethod
-    def _parse_salary_range(text: str) -> tuple[float | None, float | None]:
+    def _parse_salary_range(text: str):
         """"£35,608-£46,049 pro rata" -> (35608.0, 46049.0). Sanity-bounded
         the same way Job.__post_init__ bounds every other salary figure;
         Job.__post_init__ re-applies its own clamp regardless (models.py).

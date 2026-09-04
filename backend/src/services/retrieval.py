@@ -386,16 +386,12 @@ def cross_encoder_rerank(
     if misses:
         encoder: Any = encoder_factory() if encoder_factory else _load_cross_encoder()
         pairs = [(query, head[i][1]) for i in misses]
-        # `raw` is deliberately NOT `list[float]`: `.predict` may return a numpy
-        # array, or — for a single pair — a bare numpy scalar, which is not
-        # iterable. Keeping the un-normalised result in its own `Any` name is
-        # what lets the scalar branch below say `float(raw)` honestly.
-        raw: Any = encoder.predict(pairs)
+        fresh = encoder.predict(pairs)
         # Normalise to a plain Python list[float] in case a numpy array comes back.
         try:
-            fresh = [float(s) for s in raw]
+            fresh = [float(s) for s in fresh]
         except TypeError:
-            fresh = [float(raw)]
+            fresh = [float(fresh)]
         if use_cache:
             for i, score in zip(misses, fresh):
                 _cache_put(keys[i], score)
