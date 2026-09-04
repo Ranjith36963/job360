@@ -52,6 +52,9 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("notification_ledger", "user_id"),
     ("user_notification_digests", "user_id"),
     ("application_receipts", "user_id"),
+    # Application spine (docs/plans/2026-09-04-application-spine/spec.md).
+    ("application_events", "user_id"),
+    ("application_artifacts", "user_id"),
     ("api_tokens", "user_id"),
     ("tailored_documents", "user_id"),
     ("tailored_usage", "user_id"),

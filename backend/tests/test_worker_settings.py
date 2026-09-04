@@ -94,23 +94,40 @@ def test_arq_not_imported_at_module_top():
             del sys.modules["src.workers.settings"]
 
 
-def test_worker_schedules_the_daily_catalog_refresh():
-    """The SHARED job catalog must refill on a schedule, not only when a human
-    clicks Search.
+def test_worker_schedules_the_daily_catalog_refresh(monkeypatch):
+    """The SHARED job catalog refills on a schedule when the operator opts in.
 
     Measured in prod 2026-07-27: `run_log` held 11 rows in 25 days and the
     catalog showed 5,827 jobs fetched all-time vs 112 visible — because nothing
     refills it between user searches while `purge_old_jobs` removes anything
     older than 30 days. Every instrument stayed green the whole time: this is an
     ABSENCE failure, which no presence-detector can see.
-    """
-    from src.workers.settings import WorkerSettings
 
-    crons = WorkerSettings.__dict__.get("cron_jobs", [])
-    names = {
-        getattr(getattr(c, "coroutine", None), "__name__", "") for c in crons
-    }
-    assert "refresh_catalog" in names, f"no catalog-refresh cron registered: {names}"
+    R13 (docs/plans/2026-09-04-application-spine/spec.md) — the mission is
+    "the agent finds the job, Job360 remembers" (VISION rule 4: never source
+    or rank). `refresh_catalog` is legacy sourcing, so it is now OFF by
+    default and only cron-scheduled when `CATALOG_CRONS_ENABLED=1`; the
+    default-off state is pinned by
+    tests/test_search_flag.py::test_catalog_crons_are_off_by_default.
+    """
+    import importlib
+
+    monkeypatch.setenv("CATALOG_CRONS_ENABLED", "1")
+    import src.core.settings as settings
+    import src.workers.settings as worker_settings
+
+    importlib.reload(settings)
+    importlib.reload(worker_settings)
+    try:
+        crons = worker_settings.WorkerSettings.__dict__.get("cron_jobs", [])
+        names = {
+            getattr(getattr(c, "coroutine", None), "__name__", "") for c in crons
+        }
+        assert "refresh_catalog" in names, f"no catalog-refresh cron registered: {names}"
+    finally:
+        monkeypatch.delenv("CATALOG_CRONS_ENABLED", raising=False)
+        importlib.reload(settings)
+        importlib.reload(worker_settings)
 
 
 def test_worker_settings_functions_includes_refresh_catalog():

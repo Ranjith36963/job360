@@ -74,6 +74,9 @@ class BringJobResponse(BaseModel):
     job: JobResponse
     existing: bool   # the same (company, title) was already in the catalog
     scored: bool     # False when the user has no complete profile yet
+    # spec 2026-09-04-application-spine R1 — an Application is born HERE.
+    application_id: int
+    status: str
 
 
 @router.post("/jobs/bring", response_model=BringJobResponse)
@@ -88,6 +91,8 @@ async def bring_job(
     """
     # Lazy: Job + the shelf gate pull the scoring stack (rule #16).
     from src.models import Job  # noqa: PLC0415
+    from src.services.applications import spine as applications_spine  # noqa: PLC0415
+    from src.services.applications.authorship import actor_for  # noqa: PLC0415
     from src.services.feed import FeedService  # noqa: PLC0415
     from src.services.profile.storage import current_profile_version_id  # noqa: PLC0415
     from src.services.shelf_gate import fill_shelves  # noqa: PLC0415
@@ -147,6 +152,15 @@ async def bring_job(
         scorer_version=SCORER_VERSION,
     )
 
+    # R1/R2 — the Application is born HERE, in the same request: upsert the
+    # `applications` row for (user, job) with status='considering', copy the
+    # ad onto it (the snapshot purge_old_jobs can no longer erase), append a
+    # `brought` event. Bringing the same job twice reuses the row and appends
+    # no second event (birth_application reads-before-inserting).
+    birth = await applications_spine.birth_application(
+        db, user_id=user.id, job_id=job_id, job_row=dict(row), recorded_by=actor_for(user),
+    )
+
     get_audit_logger().info(
         "job_brought",
         extra={
@@ -157,4 +171,7 @@ async def bring_job(
     job_action = await db.get_action_for_job(job_id, user.id)
     resp = _row_to_job_response(personalised, job_action)
     resp.description = personalised.get("description") or None
-    return BringJobResponse(job=resp, existing=not inserted, scored=scored)
+    return BringJobResponse(
+        job=resp, existing=not inserted, scored=scored,
+        application_id=birth["application_id"], status=birth["status"],
+    )

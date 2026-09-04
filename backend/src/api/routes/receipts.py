@@ -107,6 +107,7 @@ async def create_receipt(
     existing per-user tables (`user_actions` for the card, `applications` for
     the pipeline) so every surface agrees.
     """
+    from src.services.applications import spine as applications_spine  # noqa: PLC0415
     from src.services.profile.storage import current_profile_version_id  # noqa: PLC0415
 
     job = await db.get_job_by_id(job_id)
@@ -115,6 +116,16 @@ async def create_receipt(
 
     cv_text, cv_origin = _sent_text(await db.get_tailored_doc(user.id, job_id, "cv"))
     cl_text, cl_origin = _sent_text(await db.get_tailored_doc(user.id, job_id, "cover_letter"))
+
+    # Mark applied on the existing surfaces FIRST — `create_application` is an
+    # upsert (INSERT OR IGNORE), so the application row (and its id) exists
+    # before the receipt does. R8's `application_id` is then part of the
+    # receipt's own INSERT (below), never a later UPDATE:
+    # tests/test_receipts.py::test_receipts_are_append_only greps
+    # `backend/src/` for any UPDATE/DELETE against `application_receipts`.
+    await db.insert_action(job_id, "applied", user.id)
+    await db.create_application(job_id, user.id)
+    application = await applications_spine.get_application_by_job(db, user.id, job_id)
 
     receipt = await db.insert_receipt(
         user_id=user.id,
@@ -126,12 +137,17 @@ async def create_receipt(
         profile_version=current_profile_version_id(user.id),
         channel=body.channel.strip(),
         note=body.note.strip(),
+        application_id=application["id"] if application else None,
     )
-    # Mark applied on both existing surfaces. Both writes are idempotent
-    # (ON CONFLICT / INSERT OR IGNORE), so a second receipt for the same job
-    # is fine — that is a re-application, and it gets its own receipt.
-    await db.insert_action(job_id, "applied", user.id)
-    await db.create_application(job_id, user.id)
+
+    # R8 — write-through to the spine: append the `applied` event. The
+    # route's OWN shape and behaviour are unchanged for the caller
+    # (constraint 4).
+    if application is not None:
+        await applications_spine.write_through_legacy_receipt(
+            db, user_id=user.id, application_id=application["id"],
+            receipt_id=receipt["id"], sent_at=receipt["sent_at"], note=body.note.strip(),
+        )
 
     get_audit_logger().info(
         "receipt_create",

@@ -16,12 +16,13 @@
 > Postgres only — **worker and Redis were deleted 2026-09-02**, so nothing runs in
 > the background (no notifications, no crons; Redis-unreachable log lines are expected).
 >
-> **Next, in order (VISION.md):** 1 OAuth 2.1 for ChatGPT/Grok clients → 2 the spine
-> (one Application object, typed event log, versioned artifacts, `save_artifact` /
-> `record_event` / `whats_new` / `export_history`; home = your applications; old
-> search UI hidden, scorer off) → 3 URL fetch on the web (link or text, paste as
-> fallback) → 4 contacts/outreach, stats, `update_profile`. Measure: the owner uses
-> it daily for his own hunt.
+> **Next, in order (VISION.md):** 1 OAuth 2.1 for ChatGPT/Grok clients (draft PR #488,
+> awaiting merge) → 2 the spine — **built on branch `feat/application-spine`, awaiting
+> review/PR** (one Application object, typed event log, versioned artifacts,
+> `save_artifact` / `record_event` / `whats_new` / `export_history`; home = your
+> applications; old search UI hidden behind `SEARCH_UI_ENABLED`, scorer off) → 3 URL
+> fetch on the web (link or text, paste as fallback) → 4 contacts/outreach, stats,
+> `update_profile`. Measure: the owner uses it daily for his own hunt.
 
 ## Sourcing era (history) — Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
 

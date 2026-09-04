@@ -13,6 +13,7 @@ _VALID_COL_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
 # see 0032_universal_shelf.up.sql for why.
 _VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC", "BOOLEAN", "JSONB"}
 
+from src.core.settings import USER_BROUGHT_SOURCE  # noqa: E402
 from src.models import Job  # noqa: E402  # after the regex constants to avoid circular import
 from src.utils.logger import get_logger  # noqa: E402
 
@@ -786,7 +787,17 @@ class JobDatabase:
         ``user_feed`` is the big one: one row per user per job.
         """
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        stale = "SELECT id FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ?"
+        # R2 amendment (spec 2026-09-04-application-spine, hard rule #3): a
+        # `user_brought` row is never a scrape aging out — the user is
+        # tracking it, and the application snapshot needs the live catalog
+        # row for the detail page. Both the direct DELETE below AND this
+        # `stale` subquery (which feeds the cascade-child DELETEs) exclude
+        # it, so neither the job row nor its user_feed/enrichment children
+        # are purged out from under a brought application.
+        stale = (
+            "SELECT id FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ? "
+            "AND source <> ?"
+        )
         # Children first (the subquery needs the jobs rows to still exist).
         #
         # Skip a child table that does not exist IN THIS SCHEMA. EVERY table in
@@ -818,10 +829,12 @@ class JobDatabase:
             if table not in present:
                 continue
             await self._db.execute(
-                f"DELETE FROM {table} WHERE job_id IN ({stale})", (cutoff,)  # noqa: S608 — table name is a module constant, never user input
+                f"DELETE FROM {table} WHERE job_id IN ({stale})",  # noqa: S608 — table name is a module constant, never user input
+                (cutoff, USER_BROUGHT_SOURCE),
             )
         cursor = await self._db.execute(
-            "DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ?", (cutoff,)
+            "DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ? AND source <> ?",
+            (cutoff, USER_BROUGHT_SOURCE),
         )
         await self._db.commit()
         _log.info(
@@ -1320,7 +1333,7 @@ class JobDatabase:
                FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
                WHERE a.user_id = ?
                  AND a.updated_at < ?
-                 AND a.stage NOT IN ('offer', 'rejected')
+                 AND a.stage NOT IN ('offer', 'rejected', 'considering')
                ORDER BY a.updated_at ASC""",
             (user_id, cutoff),
         )
@@ -1385,10 +1398,16 @@ class JobDatabase:
         profile_version: int | None,
         channel: str = "",
         note: str = "",
+        application_id: int | None = None,
     ) -> dict[str, Any]:
         """Freeze one application: the job row as it reads NOW plus the documents
         as sent. `job` is a `get_job_by_id` dict; its fields are COPIED, never
         referenced, so the receipt survives re-description, expiry and purge.
+
+        `application_id` (spec 2026-09-04-application-spine R8) is set HERE, at
+        INSERT time, never by a later UPDATE — tests/test_receipts.py::
+        test_receipts_are_append_only greps `backend/src/` for any UPDATE/DELETE
+        against `application_receipts` and must stay green.
         """
         now = datetime.now(timezone.utc).isoformat()
         cursor = await self._db.execute(
@@ -1396,15 +1415,15 @@ class JobDatabase:
                (user_id, job_id, sent_at, job_title, job_company, job_location,
                 job_apply_url, job_source, job_description, cv_text, cv_origin,
                 cover_letter_text, cover_letter_origin, profile_version, channel,
-                note, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                note, created_at, application_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 user_id, int(job["id"]), now,
                 job.get("title") or "", job.get("company") or "",
                 job.get("location") or "", job.get("apply_url") or "",
                 job.get("source") or "", job.get("description") or "",
                 cv_text, cv_origin, cover_letter_text, cover_letter_origin,
-                profile_version, channel, note, now,
+                profile_version, channel, note, now, application_id,
             ),
         )
         await self._db.commit()
@@ -1777,7 +1796,7 @@ class JobDatabase:
     # schema turns "delete my account" into an UndefinedTable crash (rule #26).
     # The list and the schema must move together, in the same commit.
     _PER_USER_TABLES = (
-        "api_tokens", "application_receipts",
+        "api_tokens", "application_artifacts", "application_events", "application_receipts",
         "application_stage_history", "applications", "email_verifications",
         "notification_ledger", "notification_rules", "oauth_grants",
         "password_resets", "sessions", "tailored_documents", "tailored_usage",
@@ -1796,7 +1815,8 @@ class JobDatabase:
     # connect?") but its `token_hash` is redacted below; the plaintext was never
     # stored, so the export can hand out nothing usable as a credential.
     _EXPORT_TABLES = (
-        "api_tokens", "application_receipts", "applications", "application_stage_history", "audit_log",
+        "api_tokens", "application_artifacts", "application_events", "application_receipts",
+        "applications", "application_stage_history", "audit_log",
         "notification_ledger", "notification_rules", "oauth_grants", "tailored_documents",
         "tailored_usage", "user_actions", "user_channels", "user_feed",
         "user_profile_versions", "user_profiles",

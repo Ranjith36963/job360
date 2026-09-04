@@ -10,6 +10,7 @@ const PROTECTED_PATHS = [
   "/pipeline",
   "/bring",
   "/receipts",
+  "/applications",
   "/channels",
   "/settings",
   "/notifications",
@@ -17,11 +18,31 @@ const PROTECTED_PATHS = [
   "/oauth",
 ];
 
+// R12 (docs/plans/2026-09-04-application-spine) — the legacy search UI goes
+// behind a flag, off by default. Not a security control (spec S10): these
+// routes keep their normal auth gate below regardless of the flag: the flag
+// only decides whether the FEATURE exists. NEXT_PUBLIC_* is inlined at build
+// time — flipping it is a redeploy, not a restart (spec C2).
+const SEARCH_UI_ENABLED = process.env.NEXT_PUBLIC_SEARCH_UI_ENABLED === "true";
+// `/dashboard` (the whole search UI) and bare `/jobs` (the redirect page —
+// see src/app/jobs/page.tsx) 404 when the flag is off. `/jobs/[id]` is
+// DELIBERATELY exempt: job detail pages are shared-catalog and public
+// (unfurl bots, existing links — same reasoning as PROTECTED_PATHS above).
+const SEARCH_UI_EXACT_PATHS = new Set(["/dashboard", "/jobs"]);
+
 // Backend origin used to VERIFY the session (same value the /api proxy forwards to).
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN || "http://localhost:8000";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (
+    !SEARCH_UI_ENABLED &&
+    (SEARCH_UI_EXACT_PATHS.has(pathname) || pathname.startsWith("/dashboard/"))
+  ) {
+    return new NextResponse("Not Found", { status: 404 });
+  }
+
   const isProtected = PROTECTED_PATHS.some((p) => pathname.startsWith(p));
 
   if (!isProtected) return NextResponse.next();

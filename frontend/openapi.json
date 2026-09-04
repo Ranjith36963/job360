@@ -71,6 +71,627 @@
         "title": "ActionsListResponse",
         "type": "object"
       },
+      "ApplicationArtifactOut": {
+        "description": "The ``get_application`` artifacts-list shape: ``text`` is ALWAYS a key\n(null unless ``with_artifact_text=true`` and under the byte cap).",
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "made_by": {
+            "title": "Made By",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "version_no",
+          "made_by",
+          "model",
+          "profile_version",
+          "label",
+          "chars",
+          "created_at",
+          "text",
+          "truncated"
+        ],
+        "title": "ApplicationArtifactOut",
+        "type": "object"
+      },
+      "ApplicationArtifactRowOut": {
+        "description": "``get_application_artifact`` \u2014 one version in full. No ``truncated``:\nthis route always returns the real row, never a capped read.",
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "made_by": {
+            "title": "Made By",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "version_no",
+          "text",
+          "made_by",
+          "model",
+          "profile_version",
+          "label",
+          "chars",
+          "created_at"
+        ],
+        "title": "ApplicationArtifactRowOut",
+        "type": "object"
+      },
+      "ApplicationDetailOut": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicationArtifactOut"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicationEventOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApplicationFitOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job": {
+            "$ref": "#/components/schemas/ApplicationJobOut"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event At"
+          },
+          "receipts": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicationReceiptOut"
+            },
+            "title": "Receipts",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "job_id",
+          "status",
+          "created_at",
+          "updated_at",
+          "last_event_at",
+          "job",
+          "fit",
+          "artifacts",
+          "events",
+          "receipts"
+        ],
+        "title": "ApplicationDetailOut",
+        "type": "object"
+      },
+      "ApplicationEventOut": {
+        "description": "The timeline shape (``list_events_for_display``) \u2014 used by\n``get_application`` and ``export_history``. Carries ``superseded``;\n``whats_new``'s events do not (see ``WhatsNewEventOut``).",
+        "properties": {
+          "corrects_event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrects Event Id"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          },
+          "superseded": {
+            "title": "Superseded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "event_type",
+          "detail",
+          "payload",
+          "occurred_at",
+          "recorded_at",
+          "recorded_by",
+          "corrects_event_id",
+          "superseded"
+        ],
+        "title": "ApplicationEventOut",
+        "type": "object"
+      },
+      "ApplicationFitOut": {
+        "properties": {
+          "gaps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning"
+          },
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          }
+        },
+        "required": [
+          "score",
+          "verdict",
+          "gaps",
+          "reasoning",
+          "recorded_by",
+          "recorded_at"
+        ],
+        "title": "ApplicationFitOut",
+        "type": "object"
+      },
+      "ApplicationJobOut": {
+        "properties": {
+          "catalog_present": {
+            "title": "Catalog Present",
+            "type": "boolean"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_description_snapshot": {
+            "title": "Job Description Snapshot",
+            "type": "string"
+          },
+          "job_location": {
+            "title": "Job Location",
+            "type": "string"
+          },
+          "job_source": {
+            "title": "Job Source",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "job_url": {
+            "title": "Job Url",
+            "type": "string"
+          },
+          "snapshot_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot At"
+          }
+        },
+        "required": [
+          "job_title",
+          "job_company",
+          "job_location",
+          "job_url",
+          "job_source",
+          "job_description_snapshot",
+          "snapshot_at",
+          "catalog_present"
+        ],
+        "title": "ApplicationJobOut",
+        "type": "object"
+      },
+      "ApplicationReceiptExportOut": {
+        "properties": {
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "confirmation": {
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "cover_letter_artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter Artifact Id"
+          },
+          "cover_letter_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter Text"
+          },
+          "cv_artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Artifact Id"
+          },
+          "cv_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Text"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "sent_at": {
+            "title": "Sent At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sent_at",
+          "channel",
+          "confirmation",
+          "cv_artifact_id",
+          "cover_letter_artifact_id",
+          "note"
+        ],
+        "title": "ApplicationReceiptExportOut",
+        "type": "object"
+      },
+      "ApplicationReceiptOut": {
+        "description": "``get_application``'s receipts list \u2014 never carries the receipt text\n(that call site never passes ``include_text``; see\n``ApplicationReceiptExportOut`` for the ``export_history`` shape).",
+        "properties": {
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "confirmation": {
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "cover_letter_artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter Artifact Id"
+          },
+          "cv_artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Artifact Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "sent_at": {
+            "title": "Sent At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sent_at",
+          "channel",
+          "confirmation",
+          "cv_artifact_id",
+          "cover_letter_artifact_id",
+          "note"
+        ],
+        "title": "ApplicationReceiptOut",
+        "type": "object"
+      },
+      "ApplicationSummaryOut": {
+        "properties": {
+          "artifacts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Artifacts",
+            "type": "object"
+          },
+          "events": {
+            "title": "Events",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event At"
+          },
+          "receipts": {
+            "title": "Receipts",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "job_id",
+          "job_title",
+          "job_company",
+          "status",
+          "last_event_at",
+          "events",
+          "artifacts",
+          "receipts"
+        ],
+        "title": "ApplicationSummaryOut",
+        "type": "object"
+      },
       "ApplicationTimelineResponse": {
         "properties": {
           "job_id": {
@@ -217,6 +838,10 @@
       },
       "BringJobResponse": {
         "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
           "existing": {
             "title": "Existing",
             "type": "boolean"
@@ -227,12 +852,18 @@
           "scored": {
             "title": "Scored",
             "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
           }
         },
         "required": [
           "job",
           "existing",
-          "scored"
+          "scored",
+          "application_id",
+          "status"
         ],
         "title": "BringJobResponse",
         "type": "object"
@@ -629,6 +1260,201 @@
           "token"
         ],
         "title": "EmailVerificationConfirmRequest",
+        "type": "object"
+      },
+      "ExportApplicationOut": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ExportArtifactOut"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicationEventOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event At"
+          },
+          "receipts": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicationReceiptExportOut"
+            },
+            "title": "Receipts",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "job_id",
+          "status",
+          "job_title",
+          "job_company",
+          "created_at",
+          "updated_at",
+          "last_event_at",
+          "events",
+          "artifacts",
+          "receipts"
+        ],
+        "title": "ExportApplicationOut",
+        "type": "object"
+      },
+      "ExportArtifactOut": {
+        "description": "``export_history``'s artifact METADATA (not the full row): ``text`` is\nonly a key at all when ``include_text=true`` \u2014 hence the default.",
+        "properties": {
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "made_by": {
+            "title": "Made By",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "version_no",
+          "made_by",
+          "model",
+          "profile_version",
+          "label",
+          "chars",
+          "created_at"
+        ],
+        "title": "ExportArtifactOut",
+        "type": "object"
+      },
+      "ExportHistoryResponse": {
+        "properties": {
+          "applications": {
+            "items": {
+              "$ref": "#/components/schemas/ExportApplicationOut"
+            },
+            "title": "Applications",
+            "type": "array"
+          },
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "next_since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Since"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "applications",
+          "truncated",
+          "bytes"
+        ],
+        "title": "ExportHistoryResponse",
         "type": "object"
       },
       "GitHubResponse": {
@@ -1228,6 +2054,27 @@
           "merged"
         ],
         "title": "LinkedInResponse",
+        "type": "object"
+      },
+      "ListApplicationsResponse": {
+        "properties": {
+          "applications": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicationSummaryOut"
+            },
+            "title": "Applications",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "applications",
+          "total"
+        ],
+        "title": "ListApplicationsResponse",
         "type": "object"
       },
       "LivezResponse": {
@@ -2205,6 +3052,27 @@
         "title": "Receipt",
         "type": "object"
       },
+      "ReceiptAnswer": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "maxLength": 2000,
+            "title": "Answer",
+            "type": "string"
+          },
+          "question": {
+            "maxLength": 500,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer"
+        ],
+        "title": "ReceiptAnswer",
+        "type": "object"
+      },
       "ReceiptListResponse": {
         "properties": {
           "receipts": {
@@ -2288,6 +3156,235 @@
           "note"
         ],
         "title": "ReceiptSummary",
+        "type": "object"
+      },
+      "RecordApplicationReceiptRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAnswer"
+            },
+            "maxItems": 50,
+            "title": "Answers",
+            "type": "array"
+          },
+          "applied_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
+          },
+          "channel": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Channel",
+            "type": "string"
+          },
+          "confirmation": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "cover_letter_artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter Artifact Id"
+          },
+          "cv_artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Artifact Id"
+          },
+          "fields_filled": {
+            "additionalProperties": true,
+            "title": "Fields Filled",
+            "type": "object"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "title": "RecordApplicationReceiptRequest",
+        "type": "object"
+      },
+      "RecordApplicationReceiptResponse": {
+        "properties": {
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "confirmation": {
+            "title": "Confirmation",
+            "type": "string"
+          },
+          "cover_letter_artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter Artifact Id"
+          },
+          "cv_artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Artifact Id"
+          },
+          "cv_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Version No"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "receipt_id": {
+            "title": "Receipt Id",
+            "type": "integer"
+          },
+          "sent_at": {
+            "title": "Sent At",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "receipt_id",
+          "sent_at",
+          "cv_artifact_id",
+          "cv_version_no",
+          "cover_letter_artifact_id",
+          "channel",
+          "confirmation",
+          "url",
+          "event_id"
+        ],
+        "title": "RecordApplicationReceiptResponse",
+        "type": "object"
+      },
+      "RecordEventRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "corrects_event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrects Event Id"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "event_type"
+        ],
+        "title": "RecordEventRequest",
+        "type": "object"
+      },
+      "RecordEventResponse": {
+        "properties": {
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "occurred_at",
+          "recorded_at",
+          "recorded_by",
+          "status"
+        ],
+        "title": "RecordEventResponse",
         "type": "object"
       },
       "RegisterRequest": {
@@ -2474,6 +3571,190 @@
           "offset"
         ],
         "title": "RunsListResponse",
+        "type": "object"
+      },
+      "SaveArtifactRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 100,
+            "title": "Label",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ],
+        "title": "SaveArtifactRequest",
+        "type": "object"
+      },
+      "SaveArtifactResponse": {
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "made_by": {
+            "title": "Made By",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "profile_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Version"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "kind",
+          "version_no",
+          "chars",
+          "made_by",
+          "model",
+          "profile_version",
+          "created_at",
+          "event_id"
+        ],
+        "title": "SaveArtifactResponse",
+        "type": "object"
+      },
+      "SaveFitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "gaps": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gaps"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          }
+        },
+        "title": "SaveFitRequest",
+        "type": "object"
+      },
+      "SaveFitResponse": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "fit": {
+            "$ref": "#/components/schemas/ApplicationFitOut"
+          }
+        },
+        "required": [
+          "application_id",
+          "fit",
+          "event_id"
+        ],
+        "title": "SaveFitResponse",
         "type": "object"
       },
       "SearchStartResponse": {
@@ -3046,6 +4327,164 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "WhatsNewApplicationOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "job_title",
+          "job_company",
+          "status",
+          "last_event_at"
+        ],
+        "title": "WhatsNewApplicationOut",
+        "type": "object"
+      },
+      "WhatsNewEventOut": {
+        "description": "``whats_new``'s raw event rows \u2014 no ``superseded`` (unlike\n``ApplicationEventOut``); carries ``application_id`` instead.",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "corrects_event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrects Event Id"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "application_id",
+          "event_type",
+          "detail",
+          "payload",
+          "occurred_at",
+          "recorded_at",
+          "recorded_by",
+          "corrects_event_id"
+        ],
+        "title": "WhatsNewEventOut",
+        "type": "object"
+      },
+      "WhatsNewResponse": {
+        "properties": {
+          "applications": {
+            "items": {
+              "$ref": "#/components/schemas/WhatsNewApplicationOut"
+            },
+            "title": "Applications",
+            "type": "array"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/WhatsNewEventOut"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "next_after_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next After Id"
+          },
+          "next_since": {
+            "title": "Next Since",
+            "type": "string"
+          },
+          "now": {
+            "title": "Now",
+            "type": "string"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "now",
+          "since",
+          "events",
+          "applications",
+          "next_since",
+          "next_after_id",
+          "truncated"
+        ],
+        "title": "WhatsNewResponse",
+        "type": "object"
       }
     }
   },
@@ -3243,6 +4682,720 @@
         "summary": "Action Counts",
         "tags": [
           "actions"
+        ]
+      }
+    },
+    "/api/applications": {
+      "get": {
+        "operationId": "list_applications_api_applications_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "updated_since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListApplicationsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Applications",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/export": {
+      "get": {
+        "operationId": "export_history_api_applications_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_text",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Text",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export History",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}": {
+      "get": {
+        "operationId": "get_application_api_applications__application_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "with_artifact_text",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "With Artifact Text",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Application",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/artifacts": {
+      "post": {
+        "operationId": "save_artifact_api_applications__application_id__artifacts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveArtifactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveArtifactResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Artifact",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/artifacts/{artifact_id}": {
+      "get": {
+        "operationId": "get_application_artifact_api_applications__application_id__artifacts__artifact_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationArtifactRowOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Application Artifact",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/events": {
+      "post": {
+        "operationId": "record_event_api_applications__application_id__events_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordEventResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Event",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/fit": {
+      "put": {
+        "operationId": "save_fit_api_applications__application_id__fit_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveFitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveFitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Fit",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/receipt": {
+      "post": {
+        "operationId": "record_application_receipt_api_applications__application_id__receipt_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordApplicationReceiptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordApplicationReceiptResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Application Receipt",
+        "tags": [
+          "applications"
         ]
       }
     },
@@ -8572,6 +10725,115 @@
         "summary": "Revoke Token",
         "tags": [
           "tokens"
+        ]
+      }
+    },
+    "/api/whats-new": {
+      "get": {
+        "operationId": "whats_new_api_whats_new_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsNewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Whats New",
+        "tags": [
+          "applications"
         ]
       }
     }

@@ -1,8 +1,5 @@
 import Link from "next/link";
 import { Activity, ExternalLink } from "lucide-react";
-// This strapline sits on every page. It said "47 sources" for a week after the
-// registry dropped to 41. See src/lib/catalog.ts.
-import { SOURCE_COUNT, SCORING_DIMENSIONS } from "@/lib/catalog";
 
 // Legal link slots — content (privacy policy, terms) populated in Batch 4 launch readiness
 const LEGAL_LINKS: { label: string; href: string }[] = [
@@ -49,7 +46,10 @@ export function Footer() {
         </nav>
 
         <p className="text-xs text-muted-foreground/60">
-          {SOURCE_COUNT} sources. {SCORING_DIMENSIONS}D scoring. One dashboard.
+          {/* C2 (application-spine review) — VISION rule 4: Job360 never
+              sources or ranks jobs. This footer advertised a source count on
+              every page; replaced with the mission line. */}
+          Your career memory. Your agent&apos;s context.
         </p>
       </div>
     </footer>

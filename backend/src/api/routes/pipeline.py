@@ -33,7 +33,14 @@ router = APIRouter(tags=["pipeline"])
 # (Contrast services/ghost_detection.py, which infers staleness from a listing
 # DISAPPEARING from its source — usually a sign the role was filled, i.e. the
 # opposite of a ghost job. User-confirmed silence is the stronger signal.)
-_VALID_STAGES = {"applied", "outreach", "interview", "offer", "rejected", "ghosted"}
+#
+# "considering" (B2 fix, application-spine review) — a job merely brought via
+# the spine (`bring_job`) and not yet actively worked. `birth_application`
+# writes this stage explicitly so a freshly-brought job does not read as
+# "applied" on the legacy board; it is not a legal ADVANCE target in the
+# product sense, but belongs in the set because it is a real value the
+# `stage` column now holds.
+_VALID_STAGES = {"considering", "applied", "outreach", "interview", "offer", "rejected", "ghosted"}
 
 
 def _to_pipeline_application(row: dict[str, Any]) -> PipelineApplication:

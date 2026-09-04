@@ -81,6 +81,11 @@ async function serveAccount(
 }
 
 test.describe("two accounts in one browser", () => {
+  test.skip(
+    process.env.NEXT_PUBLIC_SEARCH_UI_ENABLED !== "true",
+    "legacy search UI is off by default (slice 2, R12); dies with slice 5"
+  );
+
   test("side-by-side sessions never see each other's jobs", async ({ browser }) => {
     const ctxA = await browser.newContext();
     const ctxB = await browser.newContext();

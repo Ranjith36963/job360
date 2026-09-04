@@ -222,11 +222,13 @@ def build_server() -> MCPServer:
     from mcp.server import MCPServer
     from pydantic import ValidationError
 
+    from src.api.routes import applications as applications_route
     from src.api.routes import bring as bring_route
     from src.api.routes import jobs as jobs_route
     from src.api.routes import profile as profile_route
     from src.api.routes import receipts as receipts_route
     from src.api.routes import tailor as tailor_route
+    from src.services.applications import spine as applications_spine
 
     mcp = MCPServer(SERVER_NAME, instructions=INSTRUCTIONS)
 
@@ -285,7 +287,10 @@ def build_server() -> MCPServer:
             raise _tool_error(exc) from None
         _audit("bring_job", "ok", job_id=resp.job.id, existing=resp.existing)
         out = _job_summary(resp.job)
-        out.update({"existing": resp.existing, "scored": resp.scored})
+        out.update({
+            "existing": resp.existing, "scored": resp.scored,
+            "application_id": resp.application_id, "status": resp.status,
+        })
         return out
 
     @mcp.tool()
@@ -330,30 +335,60 @@ def build_server() -> MCPServer:
         return _bundle(resp)
 
     @mcp.tool()
-    async def record_application(job_id: int, channel: str = "", note: str = "") -> dict[str, Any]:
+    async def record_application(
+        job_id: int,
+        channel: str = "",
+        note: str = "",
+        confirmation: str = "",
+        answers: Optional[list[dict[str, str]]] = None,
+        fields_filled: Optional[dict[str, Any]] = None,
+        cv_artifact_id: Optional[int] = None,
+        cover_letter_artifact_id: Optional[int] = None,
+        applied_at: Optional[str] = None,
+    ) -> dict[str, Any]:
         """Record that the user has applied to this job — ONLY after they say so. Freezes
-        the job and the tailored documents as sent into an immutable receipt. Sends
-        nothing anywhere. `channel` is where they applied ("company site", "LinkedIn",
-        "email"); `note` is free text."""
+        the named CV / cover-letter version (or the newest saved one, if none named) and
+        any answers/fields into an immutable receipt, and appends an `applied` event to
+        the application's history. Sends nothing anywhere. `channel` is where they
+        applied ("company site", "LinkedIn", "email"); `note` is free text.
+
+        C1 (application-spine review) — this is the SAME tool as before (`job_id`,
+        `channel`, `note` still work unchanged), rewired onto the rich
+        `POST /applications/{id}/receipt` route instead of the legacy
+        `POST /receipts/{job_id}` — the new optional fields (`confirmation`, `answers`,
+        `fields_filled`, `cv_artifact_id`, `cover_letter_artifact_id`, `applied_at`)
+        are exactly spec R8/S4's tool contract.
+        """
         try:
-            body = receipts_route.CreateReceiptRequest(channel=channel, note=note)
+            body = applications_route.RecordApplicationReceiptRequest(
+                channel=channel, note=note, confirmation=confirmation,
+                answers=[applications_route.ReceiptAnswer(**a) for a in (answers or [])],
+                fields_filled=fields_filled or {}, cv_artifact_id=cv_artifact_id,
+                cover_letter_artifact_id=cover_letter_artifact_id, applied_at=applied_at,
+            )
         except ValidationError as exc:
             raise _validation_error(exc) from None
         try:
             async with _request_db() as db:
-                resp = await receipts_route.create_receipt(job_id, body, db, _user())
+                job = await db.get_job_by_id(job_id)
+                if job is None:
+                    raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+                # Upsert-by-read, same as the legacy `/receipts/{job_id}` route
+                # (receipts.py:126-128): a job the caller never explicitly
+                # `bring_job`-ed still gets an application row here, so
+                # "record I applied" never 404s on a job that plainly exists.
+                await db.create_application(job_id, _user().id)
+                application = await applications_spine.get_application_by_job(db, _user().id, job_id)
+                if application is None:  # pragma: no cover — create_application always upserts one
+                    raise HTTPException(status_code=404, detail="application not found")
+                resp = await applications_route.record_application_receipt(
+                    application["id"], body, db, _user()
+                )
         except HTTPException as exc:
             _audit("record_application", "error", job_id=job_id, http_status=exc.status_code)
             raise _tool_error(exc) from None
-        _audit("record_application", "ok", job_id=job_id, receipt_id=resp.id)
-        return _receipt_summary(
-            receipts_route.ReceiptSummary(
-                id=resp.id, job_id=resp.job_id, sent_at=resp.sent_at, job_title=resp.job_title,
-                job_company=resp.job_company, job_location=resp.job_location,
-                job_apply_url=resp.job_apply_url, has_cv=resp.cv_text is not None,
-                has_cover_letter=resp.cover_letter_text is not None, channel=resp.channel, note=resp.note,
-            )
-        )
+        _audit("record_application", "ok", job_id=job_id, receipt_id=resp["receipt_id"])
+        return {"job_id": job_id, **resp}
 
     @mcp.tool()
     async def list_receipts(job_id: Optional[int] = None, limit: int = 20) -> dict[str, Any]:
@@ -381,6 +416,149 @@ def build_server() -> MCPServer:
             raise _tool_error(exc) from None
         _audit("get_receipt", "ok", receipt_id=receipt_id)
         return _receipt_full(resp)
+
+    # ── Application spine (spec 2026-09-04-application-spine, S11) ──────────
+    # Seven tools, each calling its route FUNCTION directly. None of these
+    # routes is `require_verified_user` (spec: "nothing here spends an LLM
+    # call"), so every one uses `_user()`, never `_verified_user()` — the
+    # parity test (test_mcp_gate_parity.py) checks exactly this.
+
+    @mcp.tool()
+    async def get_application(application_id: int, with_artifact_text: bool = False) -> dict[str, Any]:
+        """One application in full: status, the job snapshot, the fit verdict,
+        every artifact version (text omitted unless with_artifact_text=true),
+        the whole event timeline, and receipts."""
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.get_application(application_id, with_artifact_text, db, _user())
+        except HTTPException as exc:
+            _audit("get_application", "error", application_id=application_id, http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("get_application", "ok", application_id=application_id)
+        return resp
+
+    @mcp.tool()
+    async def list_applications(
+        status: Optional[str] = None, updated_since: Optional[str] = None, limit: int = 20, offset: int = 0
+    ) -> dict[str, Any]:
+        """The user's applications (newest activity first). Filter by status
+        (e.g. "considering", "applied", "interview_scheduled")."""
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.list_applications(status, updated_since, limit, offset, db, _user())
+        except HTTPException as exc:
+            _audit("list_applications", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("list_applications", "ok", count=len(resp.get("applications", [])))
+        return resp
+
+    @mcp.tool()
+    async def save_artifact(
+        application_id: int, kind: str, text: str, label: str = "", model: Optional[str] = None
+    ) -> dict[str, Any]:
+        """Save a new version of a CV / cover letter / answers / outreach note
+        for this application. Every save is a NEW version — nothing is ever
+        overwritten; both old and new stay readable forever."""
+        try:
+            body = applications_route.SaveArtifactRequest(kind=kind, text=text, label=label, model=model)
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.save_artifact(application_id, body, db, _user())
+        except HTTPException as exc:
+            _audit("save_artifact", "error", application_id=application_id, http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("save_artifact", "ok", application_id=application_id, kind=kind)
+        return resp
+
+    @mcp.tool()
+    async def save_fit(
+        application_id: int,
+        score: Optional[int] = None,
+        verdict: Optional[str] = None,
+        gaps: Optional[list[str]] = None,
+        reasoning: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Record YOUR OWN fit judgement for this application — never computed
+        by Job360 (VISION rule 4). Overwrites the current verdict; the log
+        keeps every past judgement too."""
+        try:
+            body = applications_route.SaveFitRequest(score=score, verdict=verdict, gaps=gaps, reasoning=reasoning)
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.save_fit(application_id, body, db, _user())
+        except HTTPException as exc:
+            _audit("save_fit", "error", application_id=application_id, http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("save_fit", "ok", application_id=application_id)
+        return resp
+
+    @mcp.tool()
+    async def record_event(
+        application_id: int,
+        event_type: str,
+        detail: str = "",
+        payload: Optional[dict[str, Any]] = None,
+        occurred_at: Optional[str] = None,
+        corrects_event_id: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Append one event to this application's history — replied, an
+        interview stage, a note, a lesson learned. `occurred_at` may be in the
+        past (backdating a reply you just found is normal); it may not be
+        implausibly in the future. A status event (applied/replied/interview_*/
+        offer/rejected/withdrawn/ghosted) moves the application's status; a
+        note-family event never does."""
+        try:
+            body = applications_route.RecordEventRequest(
+                event_type=event_type, detail=detail, payload=payload or {},
+                occurred_at=occurred_at, corrects_event_id=corrects_event_id,
+            )
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.record_event(application_id, body, db, _user())
+        except HTTPException as exc:
+            _audit("record_event", "error", application_id=application_id, http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("record_event", "ok", application_id=application_id, event_type=event_type)
+        return resp
+
+    @mcp.tool()
+    async def whats_new(since: Optional[str] = None, after_id: Optional[int] = None, limit: int = 50) -> dict[str, Any]:
+        """What happened across ALL of the user's applications since a given
+        time — for an agent waking up and asking "what did I miss?". Paged by
+        when Job360 recorded each event, never by when it happened in the
+        world, so a backdated event can never be silently skipped."""
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.whats_new(since, after_id, limit, db, _user())
+        except HTTPException as exc:
+            _audit("whats_new", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("whats_new", "ok", count=len(resp.get("events", [])))
+        return resp
+
+    @mcp.tool()
+    async def export_history(since: Optional[str] = None, include_text: bool = False) -> dict[str, Any]:
+        """Export the user's whole application history: every application,
+        its events, and artifact metadata (full text only when
+        include_text=true). Bounded and rate-limited — a truncated response
+        names next_since to page from."""
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.export_history(since, include_text, db, _user())
+        except HTTPException as exc:
+            _audit("export_history", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit(
+            "export_history", "ok",
+            applications=len(resp.get("applications", [])), truncated=resp.get("truncated", False),
+        )
+        return resp
 
     return mcp
 

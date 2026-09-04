@@ -21,13 +21,13 @@ Job360 *was* a UK-focused multi-domain job search aggregator. This path fetches 
 | Unique source classes | **40** | same dict — `indeed` and `glassdoor` both alias `JobSpySource` |
 | `RATE_LIMITS` entries | **41** | `core/settings.py` `RATE_LIMITS` |
 | `LOCATIONS` entries | **26** | `core/keywords.py` `LOCATIONS` |
-| Migration head | **0036** | `backend/migrations/` |
+| Migration head | **0037** | `backend/migrations/` |
 | `SCORER_VERSION` | **8** | `services/skill_matcher.SCORER_VERSION` |
 | `BaseJobSource` subclasses | **40** | `src/sources/` |
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
-| Migration files | **37** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **237** | `backend/tests/` |
+| Migration files | **38** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **241** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -679,6 +679,15 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/api/actions/counts` | `actions.py` |
 | `DELETE` | `/api/jobs/{job_id}/action` | `actions.py` |
 | `POST` | `/api/jobs/{job_id}/action` | `actions.py` |
+| `GET` | `/api/applications` | `applications.py` |
+| `GET` | `/api/applications/export` | `applications.py` |
+| `GET` | `/api/applications/{application_id}` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/artifacts` | `applications.py` |
+| `GET` | `/api/applications/{application_id}/artifacts/{artifact_id}` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/events` | `applications.py` |
+| `PUT` | `/api/applications/{application_id}/fit` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/receipt` | `applications.py` |
+| `GET` | `/api/whats-new` | `applications.py` |
 | `POST` | `/api/auth/login` | `auth.py` |
 | `POST` | `/api/auth/logout` | `auth.py` |
 | `POST` | `/api/auth/magic-link/consume` | `auth.py` |
@@ -759,7 +768,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**83 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**92 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->
 
 ## Configuration
@@ -830,6 +839,25 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `NOTIFY_DEFAULT_MODE` | No (default `daily`) | `notify_mode` given to a seeded rulebook. Keep it a BUNDLING mode — `instant` plus the nightly cron means one email per matching job (~280/tick) |
 | `NOTIFY_DEFAULT_SEND_TIME` / `NOTIFY_DEFAULT_INTERVAL_HOURS` | No (default `08:00` / `6`) | Seeded digest send time and every-N-hours interval |
 | `REFRESH_CATALOG_NOTIFY` | No (default `0` = off) | Lets the 04:00 `refresh_catalog` cron notify. OFF keeps today's behaviour (the nightly refill is silent, so new jobs reach a user only when they search). Only safe to enable while seeded users default to a bundling `NOTIFY_DEFAULT_MODE` — see `workers/tasks._refresh_catalog_notifies` |
+| `SEARCH_UI_ENABLED` | No (default `false`) | Application-spine slice 2 (R12): `POST /api/search` and `GET /api/search/{run_id}/status` answer 404 when off — the legacy sourcing UI is hidden ahead of its slice-5 deletion. Not a security control (the routes keep `Depends(require_user)` either way). Frontend counterpart `NEXT_PUBLIC_SEARCH_UI_ENABLED` is inlined at Next.js **build** time — flipping it needs a redeploy, not a restart |
+| `CATALOG_CRONS_ENABLED` | No (default `false`) | Application-spine slice 2 (R13): gates whether `refresh_catalog` / `enrichment_sweep` are appended to `WorkerSettings.cron_jobs` (`src/workers/settings.py`). `nightly_ghost_sweep` and `notification_tick` stay unconditional. No production effect today — the `worker` and `Redis` services were deleted 2026-09-02, so nothing runs any cron |
+| `APPLICATION_EXTRA_EVENT_TYPES` | No (default empty) | Comma-separated list extending the application-spine's event vocabulary (R7) with NON-status note-type events only — a status event also needs an R4 status mapping, which an env var cannot add. Unknown types still 422 naming the allowed list |
+| `APPLICATION_ARTIFACT_MAX_CHARS` | No (default `60000`) | Per-artifact-version character cap (`POST /applications/{id}/artifacts`, S5) — over the cap is a 422 naming this variable |
+| `APPLICATION_ARTIFACT_MAX_VERSIONS` | No (default `200`) | Per-`(application_id, kind)` version-count cap — over the cap is a 429 naming this variable, never a silent drop |
+| `APPLICATION_EVENT_DETAIL_MAX_CHARS` | No (default `2000`) | S5 — `detail` char cap on `POST /applications/{id}/events`; over the cap is a 422 naming this variable |
+| `APPLICATION_EVENT_PAYLOAD_MAX_BYTES` | No (default `8192`) | S5 — event `payload` cap, checked on the SERIALISED (`json.dumps`) size, because that is what the column costs; the payload must also be a JSON object, never a list/scalar |
+| `APPLICATION_EVENT_MAX_FUTURE_SECONDS` | No (default `300`) | S6 — how far into the future `occurred_at` may claim to be before it is refused as implausible. No lower bound: backdating is the normal case |
+| `APPLICATION_RECEIPT_ANSWERS_MAX` | No (default `50`) | S5 — max `answers` items on `POST /applications/{id}/receipt` |
+| `APPLICATION_RECEIPT_ANSWER_MAX_CHARS` | No (default `2000`) | S5 — max chars per receipt answer |
+| `APPLICATION_RECEIPT_FIELDS_MAX_BYTES` | No (default `8192`) | S5 — `fields_filled` cap on the receipt, checked on the serialised size |
+| `APPLICATION_FIT_REASONING_MAX_CHARS` | No (default `4000`) | S5 — `reasoning` char cap on `PUT /applications/{id}/fit` |
+| `APPLICATION_ACTOR_NAME_MAX_CHARS` | No (default `60`) | S3 — how much of an OAuth client's attacker-supplied name `actor_for` keeps as `agent:<name>` authorship (`src/services/applications/authorship.py`) |
+| `WHATS_NEW_DEFAULT_WINDOW_DAYS` | No (default `7`) | R9 — how far back `GET /whats-new` looks when `since` is omitted |
+| `WHATS_NEW_MAX_EVENTS` | No (default `200`) | R9 — `whats_new`'s page-size ceiling; `limit` above it is clamped, `truncated: true` when the cap bites |
+| `EXPORT_HISTORY_MAX_APPLICATIONS` | No (default `500`) | R10/S8 — `export_history` stops at this many applications and reports `truncated: true` with `next_since` |
+| `EXPORT_HISTORY_MAX_BYTES` | No (default `8388608` = 8 MiB) | R10/S8 — `export_history`'s response-size ceiling; also bounds how much artifact text `get_application(with_artifact_text=true)` will inline (`EXPORT_HISTORY_MAX_BYTES / 4`) |
+| `EXPORT_HISTORY_MAX_PER_HOUR` | No (default `12`) | R10/S8 — `export_history` rate limit, keyed on `user.id` (never per IP — every agent shares the proxy IP behind the Next rewrite unless `JOB360_TRUST_PROXY=1`) |
+| `NEXT_PUBLIC_SEARCH_UI_ENABLED` (frontend) | No (default `false`) | R12 — frontend counterpart to `SEARCH_UI_ENABLED`: `middleware.ts` 404s `/dashboard` and `/jobs`, `Navbar.tsx` drops the Dashboard link, when off. Inlined at Next.js **build** time — flipping it needs a redeploy, not a restart |
 
 ### Constants (`settings.py`)
 

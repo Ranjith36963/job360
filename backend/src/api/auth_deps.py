@@ -65,6 +65,12 @@ class CurrentUser:
     # 2026-09-03-oauth-mcp R6/S13). None for a session or a personal token —
     # only an OAuth bearer ever carries one, and only `/api/mcp` checks it.
     audience: Optional[str] = None
+    # The application-spine actor name (spec 2026-09-04-application-spine
+    # S3): the personal token's own `name` for auth_via="token", the OAuth
+    # client's `client_name` for auth_via="oauth", unused for a session.
+    # `src/services/applications/authorship.py::actor_for` is the ONLY place
+    # this is read.
+    actor_name: Optional[str] = None
 
 
 def _client_ip(request: Request) -> str:
@@ -137,6 +143,7 @@ async def _current_user_from_personal_bearer(request: Request, token: str) -> Cu
         email=owner.email,
         email_verified=owner.email_verified,
         auth_via="token",
+        actor_name=owner.name,
     )
 
 
@@ -174,6 +181,7 @@ async def _current_user_from_oauth_bearer(request: Request, token: str) -> Curre
         email_verified=owner.email_verified,
         auth_via="oauth",
         audience=owner.audience,
+        actor_name=owner.client_name,
     )
 
 
