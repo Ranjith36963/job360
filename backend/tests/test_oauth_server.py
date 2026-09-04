@@ -940,13 +940,18 @@ async def test_revoke_access_kills_refresh_too_and_always_200(authenticated_asyn
 
 @pytest.mark.asyncio
 async def test_migration_0036_up_down_up(migrated_db_path):
-    """`migrated_db_path` already ran `init_db()` + every migration (0036
-    included, since it's the newest) — this only exercises down()/up() on it,
-    matching the runner's real "reverse the LAST migration" contract."""
+    """`migrated_db_path` already ran `init_db()` + every migration — this
+    only exercises down()/up() on it, matching the runner's real "reverse the
+    LAST migration" contract. 0037 (application spine) is now the newest, so
+    it is reverted first to put 0036 back at the top before this test's own
+    up/down/up cycle."""
     from migrations import runner
     from src.repositories import pg as _pg
 
     db_path = migrated_db_path
+    reverted_0037 = await runner.down(db_path)
+    assert reverted_0037 == "0037_application_spine"
+
     oauth_tables = (
         "oauth_clients", "oauth_authorization_requests", "oauth_grants",
         "oauth_authorization_codes", "oauth_tokens",
@@ -967,7 +972,9 @@ async def test_migration_0036_up_down_up(migrated_db_path):
     for table in oauth_tables:
         assert not await _has_table(table), f"{table} still present after down()"
 
+    # `up()` with no target applies EVERY pending migration — 0037 (already
+    # reverted above) comes back along with 0036.
     reapplied = await runner.up(db_path)
-    assert reapplied == ["0036_oauth"]
+    assert reapplied == ["0036_oauth", "0037_application_spine"]
     for table in oauth_tables:
         assert await _has_table(table), f"{table} missing after re-up()"

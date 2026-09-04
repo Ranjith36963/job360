@@ -89,6 +89,142 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Applications */
+        get: operations["list_applications_api_applications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export History */
+        get: operations["export_history_api_applications_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Application */
+        get: operations["get_application_api_applications__application_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save Artifact */
+        post: operations["save_artifact_api_applications__application_id__artifacts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/artifacts/{artifact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Application Artifact */
+        get: operations["get_application_artifact_api_applications__application_id__artifacts__artifact_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Event */
+        post: operations["record_event_api_applications__application_id__events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/fit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Fit */
+        put: operations["save_fit_api_applications__application_id__fit_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Application Receipt */
+        post: operations["record_application_receipt_api_applications__application_id__receipt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -1691,6 +1827,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/whats-new": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whats New */
+        get: operations["whats_new_api_whats_new_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1723,6 +1876,213 @@ export interface components {
         ActionsListResponse: {
             /** Actions */
             actions: components["schemas"]["ActionResponse"][];
+        };
+        /**
+         * ApplicationArtifactOut
+         * @description The ``get_application`` artifacts-list shape: ``text`` is ALWAYS a key
+         *     (null unless ``with_artifact_text=true`` and under the byte cap).
+         */
+        ApplicationArtifactOut: {
+            /** Chars */
+            chars: number;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model: string | null;
+            /** Profile Version */
+            profile_version: number | null;
+            /** Text */
+            text: string | null;
+            /** Truncated */
+            truncated: boolean;
+            /** Version No */
+            version_no: number;
+        };
+        /**
+         * ApplicationArtifactRowOut
+         * @description ``get_application_artifact`` — one version in full. No ``truncated``:
+         *     this route always returns the real row, never a capped read.
+         */
+        ApplicationArtifactRowOut: {
+            /** Chars */
+            chars: number;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model: string | null;
+            /** Profile Version */
+            profile_version: number | null;
+            /** Text */
+            text: string;
+            /** Version No */
+            version_no: number;
+        };
+        /** ApplicationDetailOut */
+        ApplicationDetailOut: {
+            /** Artifacts */
+            artifacts: components["schemas"]["ApplicationArtifactOut"][];
+            /** Created At */
+            created_at: string;
+            /** Events */
+            events: components["schemas"]["ApplicationEventOut"][];
+            fit: components["schemas"]["ApplicationFitOut"] | null;
+            /** Id */
+            id: number;
+            job: components["schemas"]["ApplicationJobOut"];
+            /** Job Id */
+            job_id: number;
+            /** Last Event At */
+            last_event_at: string | null;
+            /** Receipts */
+            receipts: components["schemas"]["ApplicationReceiptOut"][];
+            /** Status */
+            status: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * ApplicationEventOut
+         * @description The timeline shape (``list_events_for_display``) — used by
+         *     ``get_application`` and ``export_history``. Carries ``superseded``;
+         *     ``whats_new``'s events do not (see ``WhatsNewEventOut``).
+         */
+        ApplicationEventOut: {
+            /** Corrects Event Id */
+            corrects_event_id: number | null;
+            /** Detail */
+            detail: string;
+            /** Event Type */
+            event_type: string;
+            /** Id */
+            id: number;
+            /** Occurred At */
+            occurred_at: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+            /** Superseded */
+            superseded: boolean;
+        };
+        /** ApplicationFitOut */
+        ApplicationFitOut: {
+            /** Gaps */
+            gaps: string[];
+            /** Reasoning */
+            reasoning: string | null;
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+            /** Score */
+            score: number | null;
+            /** Verdict */
+            verdict: string | null;
+        };
+        /** ApplicationJobOut */
+        ApplicationJobOut: {
+            /** Catalog Present */
+            catalog_present: boolean;
+            /** Job Company */
+            job_company: string;
+            /** Job Description Snapshot */
+            job_description_snapshot: string;
+            /** Job Location */
+            job_location: string;
+            /** Job Source */
+            job_source: string;
+            /** Job Title */
+            job_title: string;
+            /** Job Url */
+            job_url: string;
+            /** Snapshot At */
+            snapshot_at: string | null;
+        };
+        /** ApplicationReceiptExportOut */
+        ApplicationReceiptExportOut: {
+            /** Channel */
+            channel: string;
+            /** Confirmation */
+            confirmation: string;
+            /** Cover Letter Artifact Id */
+            cover_letter_artifact_id: number | null;
+            /** Cover Letter Text */
+            cover_letter_text?: string | null;
+            /** Cv Artifact Id */
+            cv_artifact_id: number | null;
+            /** Cv Text */
+            cv_text?: string | null;
+            /** Id */
+            id: number;
+            /** Note */
+            note: string;
+            /** Sent At */
+            sent_at: string;
+        };
+        /**
+         * ApplicationReceiptOut
+         * @description ``get_application``'s receipts list — never carries the receipt text
+         *     (that call site never passes ``include_text``; see
+         *     ``ApplicationReceiptExportOut`` for the ``export_history`` shape).
+         */
+        ApplicationReceiptOut: {
+            /** Channel */
+            channel: string;
+            /** Confirmation */
+            confirmation: string;
+            /** Cover Letter Artifact Id */
+            cover_letter_artifact_id: number | null;
+            /** Cv Artifact Id */
+            cv_artifact_id: number | null;
+            /** Id */
+            id: number;
+            /** Note */
+            note: string;
+            /** Sent At */
+            sent_at: string;
+        };
+        /** ApplicationSummaryOut */
+        ApplicationSummaryOut: {
+            /** Artifacts */
+            artifacts: {
+                [key: string]: number;
+            };
+            /** Events */
+            events: number;
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Id */
+            job_id: number;
+            /** Job Title */
+            job_title: string;
+            /** Last Event At */
+            last_event_at: string | null;
+            /** Receipts */
+            receipts: number;
+            /** Status */
+            status: string;
         };
         /** ApplicationTimelineResponse */
         ApplicationTimelineResponse: {
@@ -1793,11 +2153,15 @@ export interface components {
         };
         /** BringJobResponse */
         BringJobResponse: {
+            /** Application Id */
+            application_id: number;
             /** Existing */
             existing: boolean;
             job: components["schemas"]["JobResponse"];
             /** Scored */
             scored: boolean;
+            /** Status */
+            status: string;
         };
         /**
          * CVDetail
@@ -2006,6 +2370,69 @@ export interface components {
         EmailVerificationConfirmRequest: {
             /** Token */
             token: string;
+        };
+        /** ExportApplicationOut */
+        ExportApplicationOut: {
+            /** Artifacts */
+            artifacts: components["schemas"]["ExportArtifactOut"][];
+            /** Created At */
+            created_at: string;
+            /** Events */
+            events: components["schemas"]["ApplicationEventOut"][];
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Id */
+            job_id: number;
+            /** Job Title */
+            job_title: string;
+            /** Last Event At */
+            last_event_at: string | null;
+            /** Receipts */
+            receipts: components["schemas"]["ApplicationReceiptExportOut"][];
+            /** Status */
+            status: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * ExportArtifactOut
+         * @description ``export_history``'s artifact METADATA (not the full row): ``text`` is
+         *     only a key at all when ``include_text=true`` — hence the default.
+         */
+        ExportArtifactOut: {
+            /** Chars */
+            chars: number;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model: string | null;
+            /** Profile Version */
+            profile_version: number | null;
+            /** Text */
+            text?: string | null;
+            /** Version No */
+            version_no: number;
+        };
+        /** ExportHistoryResponse */
+        ExportHistoryResponse: {
+            /** Applications */
+            applications: components["schemas"]["ExportApplicationOut"][];
+            /** Bytes */
+            bytes: number;
+            /** Next Since */
+            next_since?: string | null;
+            /** Truncated */
+            truncated: boolean;
         };
         /** GitHubResponse */
         GitHubResponse: {
@@ -2240,6 +2667,13 @@ export interface components {
             merged: boolean;
             /** Ok */
             ok: boolean;
+        };
+        /** ListApplicationsResponse */
+        ListApplicationsResponse: {
+            /** Applications */
+            applications: components["schemas"]["ApplicationSummaryOut"][];
+            /** Total */
+            total: number;
         };
         /** LivezResponse */
         LivezResponse: {
@@ -2657,6 +3091,13 @@ export interface components {
             /** Sent At */
             sent_at: string;
         };
+        /** ReceiptAnswer */
+        ReceiptAnswer: {
+            /** Answer */
+            answer: string;
+            /** Question */
+            question: string;
+        };
         /** ReceiptListResponse */
         ReceiptListResponse: {
             /** Receipts */
@@ -2691,6 +3132,90 @@ export interface components {
             note: string;
             /** Sent At */
             sent_at: string;
+        };
+        /** RecordApplicationReceiptRequest */
+        RecordApplicationReceiptRequest: {
+            /** Answers */
+            answers?: components["schemas"]["ReceiptAnswer"][];
+            /** Applied At */
+            applied_at?: string | null;
+            /**
+             * Channel
+             * @default
+             */
+            channel: string;
+            /**
+             * Confirmation
+             * @default
+             */
+            confirmation: string;
+            /** Cover Letter Artifact Id */
+            cover_letter_artifact_id?: number | null;
+            /** Cv Artifact Id */
+            cv_artifact_id?: number | null;
+            /** Fields Filled */
+            fields_filled?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** RecordApplicationReceiptResponse */
+        RecordApplicationReceiptResponse: {
+            /** Channel */
+            channel: string;
+            /** Confirmation */
+            confirmation: string;
+            /** Cover Letter Artifact Id */
+            cover_letter_artifact_id: number | null;
+            /** Cv Artifact Id */
+            cv_artifact_id: number | null;
+            /** Cv Version No */
+            cv_version_no: number | null;
+            /** Event Id */
+            event_id: number;
+            /** Receipt Id */
+            receipt_id: number;
+            /** Sent At */
+            sent_at: string;
+            /** Url */
+            url: string;
+        };
+        /** RecordEventRequest */
+        RecordEventRequest: {
+            /** Corrects Event Id */
+            corrects_event_id?: number | null;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Event Type */
+            event_type: string;
+            /** Occurred At */
+            occurred_at?: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+        };
+        /** RecordEventResponse */
+        RecordEventResponse: {
+            /** Event Id */
+            event_id: number;
+            /** Event Type */
+            event_type: string;
+            /** Occurred At */
+            occurred_at: string;
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+            /** Status */
+            status: string;
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -2757,6 +3282,60 @@ export interface components {
             runs: components["schemas"]["RunEntry"][];
             /** Total */
             total: number;
+        };
+        /** SaveArtifactRequest */
+        SaveArtifactRequest: {
+            /** Kind */
+            kind: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /** Model */
+            model?: string | null;
+            /** Text */
+            text: string;
+        };
+        /** SaveArtifactResponse */
+        SaveArtifactResponse: {
+            /** Artifact Id */
+            artifact_id: number;
+            /** Chars */
+            chars: number;
+            /** Created At */
+            created_at: string;
+            /** Event Id */
+            event_id: number;
+            /** Kind */
+            kind: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model: string | null;
+            /** Profile Version */
+            profile_version: number | null;
+            /** Version No */
+            version_no: number;
+        };
+        /** SaveFitRequest */
+        SaveFitRequest: {
+            /** Gaps */
+            gaps?: string[] | null;
+            /** Reasoning */
+            reasoning?: string | null;
+            /** Score */
+            score?: number | null;
+            /** Verdict */
+            verdict?: string | null;
+        };
+        /** SaveFitResponse */
+        SaveFitResponse: {
+            /** Application Id */
+            application_id: number;
+            /** Event Id */
+            event_id: number;
+            fit: components["schemas"]["ApplicationFitOut"];
         };
         /** SearchStartResponse */
         SearchStartResponse: {
@@ -2954,6 +3533,63 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** WhatsNewApplicationOut */
+        WhatsNewApplicationOut: {
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            /** Last Event At */
+            last_event_at: string | null;
+            /** Status */
+            status: string;
+        };
+        /**
+         * WhatsNewEventOut
+         * @description ``whats_new``'s raw event rows — no ``superseded`` (unlike
+         *     ``ApplicationEventOut``); carries ``application_id`` instead.
+         */
+        WhatsNewEventOut: {
+            /** Application Id */
+            application_id: number;
+            /** Corrects Event Id */
+            corrects_event_id: number | null;
+            /** Detail */
+            detail: string;
+            /** Event Type */
+            event_type: string;
+            /** Id */
+            id: number;
+            /** Occurred At */
+            occurred_at: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+        };
+        /** WhatsNewResponse */
+        WhatsNewResponse: {
+            /** Applications */
+            applications: components["schemas"]["WhatsNewApplicationOut"][];
+            /** Events */
+            events: components["schemas"]["WhatsNewEventOut"][];
+            /** Next After Id */
+            next_after_id: number | null;
+            /** Next Since */
+            next_since: string;
+            /** Now */
+            now: string;
+            /** Since */
+            since: string;
+            /** Truncated */
+            truncated: boolean;
+        };
     };
     responses: never;
     parameters: never;
@@ -3078,6 +3714,309 @@ export interface operations {
                     "application/json": {
                         [key: string]: number;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_applications_api_applications_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                updated_since?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListApplicationsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_history_api_applications_export_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+                include_text?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_application_api_applications__application_id__get: {
+        parameters: {
+            query?: {
+                with_artifact_text?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_artifact_api_applications__application_id__artifacts_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaveArtifactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_application_artifact_api_applications__application_id__artifacts__artifact_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+                artifact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationArtifactRowOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_event_api_applications__application_id__events_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordEventRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordEventResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_fit_api_applications__application_id__fit_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveFitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaveFitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_application_receipt_api_applications__application_id__receipt_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordApplicationReceiptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordApplicationReceiptResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5700,6 +6639,43 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    whats_new_api_whats_new_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+                after_id?: number | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WhatsNewResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

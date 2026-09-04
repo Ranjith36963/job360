@@ -10,6 +10,20 @@
 2. A valid token is never throttled. The failed-bearer limiter is keyed by
    client IP, and behind the Next.js rewrite every agent shares the proxy's IP.
    The lock must apply to junk only — one bad client must not 429 everyone.
+
+Extended for the application spine (docs/plans/2026-09-04-application-spine/
+spec.md S11): seven new tools land on ``src.api.routes.applications`` — each
+one MUST get a ``TOOL_ROUTES`` row here or ``test_the_parity_table_covers_
+every_tool`` turns red, by design. ``record_application`` is NOT a new TOOL
+(spec: "the existing tool enriched, not a new one") — its NAME and call
+shape (``job_id``, ``channel``, ``note`` still work) are unchanged — but a
+review finding (C1) rewired its IMPLEMENTATION off the legacy
+``receipts.create_receipt`` onto the new rich
+``applications.record_application_receipt`` route, so this row's
+(module, function) pair now points there too. None of the eight
+(the seven new tools, plus this rewired one) are ``require_verified_user``
+(spec: "Every route Depends(require_user)... not require_verified_user —
+nothing here spends an LLM call").
 """
 from __future__ import annotations
 
@@ -38,9 +52,24 @@ TOOL_ROUTES = {
     "get_job": ("jobs", "get_job", {"job_id": 987654321}),
     "tailor_documents": ("tailor", "generate", {"job_id": 987654321}),
     "get_tailored_documents": ("tailor", "get_tailored", {"job_id": 987654321}),
-    "record_application": ("receipts", "create_receipt", {"job_id": 987654321}),
+    # C1 (application-spine review) — rewired onto the rich receipt route;
+    # the tool's own call shape (job_id, channel, note) is unchanged.
+    "record_application": ("applications", "record_application_receipt", {"job_id": 987654321}),
     "list_receipts": ("receipts", "list_receipts", {}),
     "get_receipt": ("receipts", "get_receipt", {"receipt_id": 987654321}),
+    # Application spine (spec 2026-09-04, S11) — seven new tools, all on the
+    # new "applications" route module, none require_verified_user.
+    "get_application": ("applications", "get_application", {"application_id": 987654321}),
+    "list_applications": ("applications", "list_applications", {}),
+    "save_artifact": (
+        "applications", "save_artifact", {"application_id": 987654321, "kind": "cv", "text": "x"}
+    ),
+    "save_fit": ("applications", "save_fit", {"application_id": 987654321}),
+    "record_event": (
+        "applications", "record_event", {"application_id": 987654321, "event_type": "note"}
+    ),
+    "whats_new": ("applications", "whats_new", {}),
+    "export_history": ("applications", "export_history", {}),
 }
 
 

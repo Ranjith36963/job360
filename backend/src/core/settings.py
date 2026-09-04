@@ -423,6 +423,81 @@ def _env_flag(name: str, default: bool) -> bool:
     return raw.lower() in {"1", "true", "yes", "on"}
 
 
+def _env_list(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    """Comma-separated env var -> tuple of non-empty, stripped strings."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return tuple(v.strip() for v in raw.split(",") if v.strip())
+
+
+# ---------------------------------------------------------------------------
+# The application spine (docs/plans/2026-09-04-application-spine/spec.md).
+#
+# R12/R13 — the old search UI and the catalog crons go behind parameters,
+# both default OFF: the mission (docs/product/VISION.md) is "the agent finds
+# the job, Job360 remembers" — Job360 never sources or ranks. Flipping either
+# flag ON is a deliberate opt-in, never a silent behaviour change.
+SEARCH_UI_ENABLED = _env_flag("SEARCH_UI_ENABLED", False)
+CATALOG_CRONS_ENABLED = _env_flag("CATALOG_CRONS_ENABLED", False)
+
+# R7 — the event vocabulary. Closed set in CODE, not a DB CHECK constraint, so
+# a new event type is a settings.py edit, never a migration (constraint 5).
+# `brought` maps to status `considering`; every other status event's NAME is
+# the status itself (src/services/applications/status.py's mapping dict).
+# A frozen test (test_event_types_match_vision_doc) pins these two tuples to
+# docs/product/VISION.md:66-71 so doc and code cannot drift apart silently.
+APPLICATION_STATUS_EVENT_TYPES = (
+    "brought", "applied", "replied", "interview_requested",
+    "interview_scheduled", "interview_done", "offer", "rejected",
+    "withdrawn", "ghosted",
+)
+APPLICATION_NOTE_EVENT_TYPES = (
+    "fit_judged", "artifact_saved", "contact_added", "outreach_sent", "note", "lesson",
+)
+# Env-added types are non-status only — a status type also needs an R4
+# mapping entry, which an env var cannot supply.
+APPLICATION_EXTRA_EVENT_TYPES = _env_list("APPLICATION_EXTRA_EVENT_TYPES", ())
+
+# S5 — input caps for the application spine. Every one a parameter; every
+# breach a 422/429 naming the field and the limit, never a silent drop/clip.
+APPLICATION_EVENT_DETAIL_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_DETAIL_MAX_CHARS", "2000"))
+APPLICATION_EVENT_PAYLOAD_MAX_BYTES = int(os.getenv("APPLICATION_EVENT_PAYLOAD_MAX_BYTES", "8192"))
+# S6 — how far into the future `occurred_at` may claim to be before it is
+# refused as implausible. No lower bound: backdating is the normal case.
+APPLICATION_EVENT_MAX_FUTURE_SECONDS = int(os.getenv("APPLICATION_EVENT_MAX_FUTURE_SECONDS", "300"))
+
+# R5 — artifact versions. Storage decision: TEXT in Postgres, not a file store
+# (spec §Data model) — a tailored CV measured on this codebase is 2-8 KB.
+APPLICATION_ARTIFACT_KINDS = ("cv", "cover_letter", "answers", "outreach")
+APPLICATION_ARTIFACT_MAX_CHARS = int(os.getenv("APPLICATION_ARTIFACT_MAX_CHARS", "60000"))
+APPLICATION_ARTIFACT_MAX_VERSIONS = int(os.getenv("APPLICATION_ARTIFACT_MAX_VERSIONS", "200"))
+
+# R8 — record_application (the rich receipt).
+APPLICATION_RECEIPT_ANSWERS_MAX = int(os.getenv("APPLICATION_RECEIPT_ANSWERS_MAX", "50"))
+APPLICATION_RECEIPT_ANSWER_MAX_CHARS = int(os.getenv("APPLICATION_RECEIPT_ANSWER_MAX_CHARS", "2000"))
+APPLICATION_RECEIPT_FIELDS_MAX_BYTES = int(os.getenv("APPLICATION_RECEIPT_FIELDS_MAX_BYTES", "8192"))
+
+# R6 — the fit verdict is stored, never computed.
+APPLICATION_FIT_REASONING_MAX_CHARS = int(os.getenv("APPLICATION_FIT_REASONING_MAX_CHARS", "4000"))
+
+# S3 — how much of an OAuth client's attacker-supplied name `actor_for` keeps
+# as `agent:<name>` authorship. Env-backed like every other spine cap (C8);
+# was hardcoded in authorship.py before.
+APPLICATION_ACTOR_NAME_MAX_CHARS = int(os.getenv("APPLICATION_ACTOR_NAME_MAX_CHARS", "60"))
+
+# R9 — whats_new.
+WHATS_NEW_DEFAULT_WINDOW_DAYS = int(os.getenv("WHATS_NEW_DEFAULT_WINDOW_DAYS", "7"))
+WHATS_NEW_MAX_EVENTS = int(os.getenv("WHATS_NEW_MAX_EVENTS", "200"))
+
+# R10/S8 — export_history: bounds explicit, never silent; rate-limited per USER
+# (never per IP — every agent shares the proxy IP behind the Next rewrite
+# unless JOB360_TRUST_PROXY=1, the trap the OAuth slice documented).
+EXPORT_HISTORY_MAX_APPLICATIONS = int(os.getenv("EXPORT_HISTORY_MAX_APPLICATIONS", "500"))
+EXPORT_HISTORY_MAX_BYTES = int(os.getenv("EXPORT_HISTORY_MAX_BYTES", str(8 * 1024 * 1024)))
+EXPORT_HISTORY_MAX_PER_HOUR = int(os.getenv("EXPORT_HISTORY_MAX_PER_HOUR", "12"))
+
+
 # --- Independent per-engine switches -------------------------------------
 # Four scoring engines, each with its own on/off switch so ANY combination
 # can be selected (e.g. E1+E3 on, E2+E4 off). Each switch DEFAULTS to its

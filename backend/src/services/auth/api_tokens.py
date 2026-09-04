@@ -36,6 +36,10 @@ class TokenOwner:
     user_id: str
     email: str
     email_verified: bool
+    # The token's own display name ("my-agent"), fed straight to
+    # `made_by="token:<name>"` / `recorded_by="token:<name>"` on the
+    # application spine (spec 2026-09-04-application-spine S3).
+    name: str
 
 
 def _hash(token: str) -> str:
@@ -165,7 +169,7 @@ async def resolve(db_path: str, token: str) -> Optional[TokenOwner]:
         db.row_factory = pg.Row
         cur = await db.execute(
             """
-            SELECT t.id AS token_id, t.last_used_at,
+            SELECT t.id AS token_id, t.last_used_at, t.name AS token_name,
                    u.id AS user_id, u.email, u.email_verified_at
             FROM api_tokens t
             JOIN users u ON u.id = t.user_id
@@ -189,4 +193,5 @@ async def resolve(db_path: str, token: str) -> Optional[TokenOwner]:
         user_id=row["user_id"],
         email=row["email"],
         email_verified=row["email_verified_at"] is not None,
+        name=row["token_name"],
     )

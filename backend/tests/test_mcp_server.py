@@ -26,6 +26,15 @@ EXPECTED_TOOLS = {
     "record_application",
     "list_receipts",
     "get_receipt",
+    # Application spine (docs/plans/2026-09-04-application-spine/spec.md
+    # §Tool contracts) — seven new tools, 8 -> 15 total.
+    "get_application",
+    "list_applications",
+    "save_artifact",
+    "save_fit",
+    "record_event",
+    "whats_new",
+    "export_history",
 }
 
 JOB = {
@@ -106,7 +115,7 @@ async def test_without_the_runtime_the_endpoint_says_503_not_crash(authenticated
 
 
 @pytest.mark.asyncio
-async def test_tools_list_is_exactly_the_eight_tools(authenticated_async_context):
+async def test_tools_list_is_exactly_the_expected_tools(authenticated_async_context):
     from src.api.mcp_server import mcp_runtime
 
     token = await _mint_token(authenticated_async_context)
@@ -138,25 +147,31 @@ async def test_bring_then_read_then_record_then_list_round_trip(authenticated_as
             job = _payload(await mcp.call_tool("get_job", {"job_id": job_id}))
             assert job["job_id"] == job_id and "description" in job
 
+            # C1 (application-spine review) — record_application is rewired onto
+            # the rich `POST /applications/{id}/receipt` route; its response is
+            # now the R8 shape (receipt_id/event_id/etc, plus job_id echoed back
+            # for continuity), not the legacy ReceiptSummary shape.
             receipt = _payload(
                 await mcp.call_tool(
                     "record_application", {"job_id": job_id, "channel": "company site", "note": "via MCP"}
                 )
             )
             assert receipt["job_id"] == job_id and receipt["sent_at"]
+            assert receipt["channel"] == "company site"
+            assert receipt["event_id"]
 
             listed = _payload(await mcp.call_tool("list_receipts", {}))
             assert listed["total"] == 1
-            assert listed["receipts"][0]["id"] == receipt["id"]
+            assert listed["receipts"][0]["id"] == receipt["receipt_id"]
 
-            full = _payload(await mcp.call_tool("get_receipt", {"receipt_id": receipt["id"]}))
+            full = _payload(await mcp.call_tool("get_receipt", {"receipt_id": receipt["receipt_id"]}))
             assert full["note"] == "via MCP" and full["channel"] == "company site"
 
     # The web app sees the same record — one API, every surface.
     async with authenticated_async_context() as client:
         resp = await client.get("/api/receipts")
         assert resp.status_code == 200
-        assert [r["id"] for r in resp.json()["receipts"]] == [receipt["id"]]
+        assert [r["id"] for r in resp.json()["receipts"]] == [receipt["receipt_id"]]
 
 
 @pytest.mark.asyncio
@@ -187,7 +202,7 @@ async def test_another_users_receipt_is_unreachable(authenticated_async_context)
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             job_id = _payload(await mcp.call_tool("bring_job", JOB))["job_id"]
-            receipt_id = _payload(await mcp.call_tool("record_application", {"job_id": job_id}))["id"]
+            receipt_id = _payload(await mcp.call_tool("record_application", {"job_id": job_id}))["receipt_id"]
 
     # A second account, with its own token.
     from src.api.main import app
@@ -220,3 +235,55 @@ async def test_another_users_receipt_is_unreachable(authenticated_async_context)
             assert stolen.is_error and "404" in stolen.content[0].text
             mine = _payload(await mcp.call_tool("list_receipts", {}))
             assert mine["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_record_application_writes_a_rich_receipt_through_the_new_route(authenticated_async_context):
+    """C1 (application-spine review) — `record_application` must go through
+    `applications.record_application_receipt` (the rich receipt), not the
+    legacy `receipts.create_receipt`: a NAMED artifact version and
+    `confirmation` passed to the MCP tool must land on the receipt exactly as
+    the web's `POST /applications/{id}/receipt` would record them — the old
+    legacy route has no `confirmation` or `cv_artifact_id` field at all, so
+    this would 422/be silently dropped if the tool still called it.
+    """
+    from src.api.mcp_server import mcp_runtime
+
+    token = await _mint_token(authenticated_async_context)
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            job_id = _payload(await mcp.call_tool("bring_job", JOB))["job_id"]
+
+    async with authenticated_async_context() as client:
+        apps = await client.get("/api/applications")
+        assert apps.status_code == 200, apps.text
+        application_id = apps.json()["applications"][0]["id"]
+        saved = await client.post(
+            f"/api/applications/{application_id}/artifacts",
+            json={"kind": "cv", "text": "my tailored cv"},
+        )
+        assert saved.status_code == 201, saved.text
+        cv_artifact_id = saved.json()["artifact_id"]
+
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            receipt = _payload(
+                await mcp.call_tool(
+                    "record_application",
+                    {"job_id": job_id, "confirmation": "REF-12345", "cv_artifact_id": cv_artifact_id},
+                )
+            )
+
+    assert receipt["confirmation"] == "REF-12345"
+    assert receipt["cv_artifact_id"] == cv_artifact_id
+    assert receipt["cv_version_no"] == 1
+
+    async with authenticated_async_context() as client:
+        detail = await client.get(f"/api/applications/{application_id}")
+        assert detail.status_code == 200, detail.text
+        receipts = detail.json()["receipts"]
+        assert receipts[0]["confirmation"] == "REF-12345"
+        assert receipts[0]["cv_artifact_id"] == cv_artifact_id
+        # The event log recorded it too — not just the receipts table.
+        statuses = [e["event_type"] for e in detail.json()["events"]]
+        assert "applied" in statuses

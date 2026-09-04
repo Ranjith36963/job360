@@ -108,6 +108,11 @@ function renderedCount(page: Page): Promise<number> {
 }
 
 test.describe("Feed visibility", () => {
+  test.skip(
+    process.env.NEXT_PUBLIC_SEARCH_UI_ENABLED !== "true",
+    "legacy search UI is off by default (slice 2, R12); dies with slice 5"
+  );
+
   test("shows EVERY job by default — the floor no longer hides the product", async ({
     page,
     context,

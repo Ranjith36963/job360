@@ -73,20 +73,46 @@ test.describe("Landing CTA → profile journeys", () => {
   });
 
   // ── Journey 3: already signed in → straight to /profile ───────────────────
+  //
+  // R14 (docs/plans/2026-09-04-application-spine) — a signed-in visitor's "/"
+  // is now the applications home, not the marketing landing page, so there is
+  // no more "Get Started" CTA to click for this journey. The behaviour this
+  // journey actually protects — a real session reaches a protected page with
+  // no sign-in detour — is asserted directly against /profile instead.
 
-  test("signed-in 'Get Started' goes straight to /profile (no sign-in detour)", async ({
+  test("a signed-in visitor reaches /profile with no sign-in detour", async ({
     page,
     context,
   }) => {
     await signedIn(context);
     await mockAuthedApis(page);
 
-    await page.goto("/");
-    await page.getByRole("link", { name: /get started/i }).click();
-
     // Generous timeout: /profile may cold-compile on the first navigation.
-    await expect(page).toHaveURL(/\/profile/, { timeout: 40_000 });
+    await page.goto("/profile", { timeout: 40_000 });
+    await expect(page).toHaveURL(/\/profile/);
     await expect(page).not.toHaveURL(/\/login/);
+  });
+
+  // R14 — the signed-in home is now applications, not the marketing landing.
+  test("a signed-in visitor's '/' shows the applications home, not the landing hero", async ({
+    page,
+    context,
+  }) => {
+    await signedIn(context);
+    await mockAuthedApis(page);
+    await page.route("**/api/applications?**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ applications: [], total: 0 }),
+      })
+    );
+
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: /your applications/i })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.getByRole("link", { name: /get started/i })).toHaveCount(0);
   });
 
   // ── Journey 2: returning user → sign in → /profile ────────────────────────

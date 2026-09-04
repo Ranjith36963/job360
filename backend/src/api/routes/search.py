@@ -186,6 +186,11 @@ async def start_search(
     queued, returns HTTP 429. Counting is per-user, so other users are
     unaffected by one user's burst.
     """
+    if not settings.SEARCH_UI_ENABLED:
+        # R12 — hidden feature, not a security control (S10): the route keeps
+        # its existing Depends(require_verified_user) regardless of the flag.
+        raise HTTPException(status_code=404, detail="Not Found")
+
     if _active_run_count_for_user(user.id) >= settings.MAX_CONCURRENT_SEARCHES_PER_USER:
         raise HTTPException(
             status_code=429,
@@ -272,6 +277,9 @@ async def search_status(
     both return 404 with the same body. An attacker enumerating run_ids
     cannot distinguish "does not exist" from "exists but not mine".
     """
+    if not settings.SEARCH_UI_ENABLED:
+        raise HTTPException(status_code=404, detail="Not Found")
+
     run = _runs.get(run_id)
     if run is None or run.get("user_id") != user.id:
         raise HTTPException(status_code=404, detail="run not found")

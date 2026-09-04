@@ -217,27 +217,38 @@ class WorkerSettings:
     try:
         from arq.cron import cron as _cron  # noqa: PLC0415
 
+        from src.core.settings import CATALOG_CRONS_ENABLED as _CATALOG_CRONS_ENABLED  # noqa: PLC0415
+
         cron_jobs = [
+            # nightly_ghost_sweep + notification_tick stay UNCONDITIONAL (spec
+            # R13) — neither sources/ranks/pushes a job, so the mission rule
+            # (VISION.md, "never source or rank") does not touch them.
             _cron(nightly_ghost_sweep, hour=2, minute=0),
-            # THE PRODUCTION LOOP. Nothing fetched jobs on a timer before
-            # this: run_search fired only on a human click, while
-            # purge_old_jobs deleted anything >30 days, so the catalog
-            # drained (prod 2026-07-27: 11 run_log rows in 25 days, 112 jobs
-            # visible of 5,827 fetched). Daily is the right cadence — jobs are
-            # posted daily and the purge window is 30 days — and it keeps
-            # keyed-API quota modest (~30 runs/month, not ~120). 04:00 UTC:
-            # clear of the 02:00 ghost sweep, done before UK morning.
-            # Cost is CPU only; user_id=None makes the paid LLM stages
-            # structurally unreachable (see refresh_catalog's docstring).
-            _cron(refresh_catalog, hour=4, minute=0),
             _cron(notification_tick, minute=set(range(0, 60, 5))),
-            # Self-heal enrichment coverage: every 30 min, enrich the
-            # ENRICHMENT_SWEEP_PER_TICK (default 100) highest-value candidate
-            # jobs still missing enrichment. Prod gap at ship time: 738/6,589
-            # candidates enriched — this cron closes it in ~1-2 days and keeps
-            # it closed as new jobs arrive. No-op when E2 flags are off.
-            _cron(enrichment_sweep, minute={10, 40}),
         ]
+        if _CATALOG_CRONS_ENABLED:
+            cron_jobs.extend(
+                [
+                    # THE PRODUCTION LOOP (legacy — slated for deletion, slice
+                    # 5). Nothing fetched jobs on a timer before this:
+                    # run_search fired only on a human click, while
+                    # purge_old_jobs deleted anything >30 days, so the catalog
+                    # drained (prod 2026-07-27: 11 run_log rows in 25 days,
+                    # 112 jobs visible of 5,827 fetched). Daily is the right
+                    # cadence — jobs are posted daily and the purge window is
+                    # 30 days — and it keeps keyed-API quota modest (~30
+                    # runs/month, not ~120). 04:00 UTC: clear of the 02:00
+                    # ghost sweep, done before UK morning. Cost is CPU only;
+                    # user_id=None makes the paid LLM stages structurally
+                    # unreachable (see refresh_catalog's docstring).
+                    _cron(refresh_catalog, hour=4, minute=0),
+                    # Self-heal enrichment coverage: every 30 min, enrich the
+                    # ENRICHMENT_SWEEP_PER_TICK (default 100) highest-value
+                    # candidate jobs still missing enrichment. No-op when E2
+                    # flags are off.
+                    _cron(enrichment_sweep, minute={10, 40}),
+                ]
+            )
         del _cron
     except Exception:  # noqa: BLE001 — arq absent in a minimal env
         cron_jobs = []

@@ -20,7 +20,7 @@ Nothing here is weaker for being a skill. It loads when the work touches it.
 
 - **M1. The user brings the job; we never source, rank or recommend** (product rule 4). Never add a source, a scorer weight, a feed, or a "recommended for you". `SOURCE_REGISTRY` and `JobScorer` are legacy code waiting for slice 5 — obey their rules while they exist, never extend them.
 - **M2. The agent thinks, Job360 remembers** (product rule 5). Before adding a feature ask: *could Claude Code / ChatGPT do this with its own tools?* If yes, expose a **store** tool, not a **do** tool. No Gmail readers, no fit judges, no outreach writers of our own.
-- **M3. One door for history: `record_event`** — fixed event types (VISION.md), free text, `recorded_by`. Every artifact version is kept forever with `made_by` + `profile_version`. A receipt is append-only. Nothing rewrites history.
+- **M3. One door for history: `record_event`** — fixed event types (VISION.md), free text, `recorded_by`. Every artifact version is kept forever with `made_by` + `profile_version`. A receipt is append-only. Nothing rewrites history. **Built in slice 2 (application spine):** `application_events` + `application_artifacts` (migration `0037_application_spine`) — no runtime code in `backend/src/` may `UPDATE`/`DELETE` either table (guard: `tests/test_application_spine.py::test_events_are_append_only`, a grep over `backend/src/`); `applications.status`/`stage` are the one cache SLOT that IS updated (S7 — a slot is not history). `application_receipts.application_id` is set at INSERT time, never backfilled by an UPDATE (guard: `tests/test_receipts.py::test_receipts_are_append_only`).
 - **M4. Free, pull, consent-first** (product rule 6). No credits, no paywall, no push. Agents connect over MCP with OAuth 2.1; personal `j360_…` tokens stay as the fallback.
 - **M5. Every MCP tool = the same per-user route the web uses** (#12/#25 apply) and every new route gate must be re-applied in `backend/src/api/mcp_server.py` — parity is by hand, there is no shared gate.
 
@@ -61,7 +61,7 @@ An index, one line each. Where a test guards a rule, the test is named — that 
 
 ### Schema + data integrity
 1. **`normalized_key()` in `models.py`** — never change without re-verifying the deduplicator AND the DB UNIQUE constraint. Wrong normalization = duplicate rows or missed dedup. (Still bites `bring_job`: two users pasting the same ad share one row.)
-3. **`purge_old_jobs()` in `database.py`** — never change without explicit confirmation. Wrong threshold = data loss. **Slice 2 must make sure a brought job is never purged.**
+3. **`purge_old_jobs()` in `database.py`** — never change without explicit confirmation. Wrong threshold = data loss. **Slice 2 (application spine) did this: `source <> USER_BROUGHT_SOURCE` on both the direct DELETE and the cascade-child subquery — a brought job (and its application snapshot) survives the catalog purge. Guards: `tests/test_application_spine.py::test_purge_spares_a_brought_job` / `::test_the_job_snapshot_survives_a_purge`.**
 17. **`job_enrichment` + `job_embeddings` must NOT gain `user_id`** (same reason as #10). Per-user scoring happens at read time via `JobScorer(..., user_preferences=…, enrichment_lookup=…)`.
 
 ### Catalog scope + filters (owner product rules — full text: `docs/product/product_design_rules.md`)

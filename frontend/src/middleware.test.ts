@@ -12,8 +12,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { middleware } from "./middleware";
 
+// R12 (docs/plans/2026-09-04-application-spine) — /dashboard now 404s ahead
+// of the auth check when NEXT_PUBLIC_SEARCH_UI_ENABLED is off (unset here),
+// which would short-circuit every test below before it reached the outage/
+// bypass logic these tests actually exercise. /profile is protected the same
+// way (PROTECTED_PATHS) without the search-flag gate, so it stands in as
+// "any protected route" here.
 function protectedRequest(): NextRequest {
-  return new NextRequest("http://localhost:3000/dashboard", {
+  return new NextRequest("http://localhost:3000/profile", {
     headers: { cookie: "job360_session=some-session-value" },
   });
 }
@@ -37,7 +43,7 @@ describe("middleware — backend outage (F4)", () => {
     expect(res.status).toBe(307);
     const location = new URL(res.headers.get("location")!);
     expect(location.pathname).toBe("/login");
-    expect(location.searchParams.get("next")).toBe("/dashboard");
+    expect(location.searchParams.get("next")).toBe("/profile");
     expect(location.searchParams.get("error")).toBe("service_unavailable");
   });
 
@@ -76,7 +82,7 @@ describe("middleware — backend outage (F4)", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const res = await middleware(
-      new NextRequest("http://localhost:3000/dashboard")
+      new NextRequest("http://localhost:3000/profile")
     );
     expect(res.status).toBe(307);
     expect(new URL(res.headers.get("location")!).pathname).toBe("/login");

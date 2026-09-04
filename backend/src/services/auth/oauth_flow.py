@@ -526,6 +526,10 @@ class OAuthTokenOwner:
     email: str
     email_verified: bool
     audience: str
+    # The registering client's display name — untrusted attacker text by
+    # construction (slice 1 R2 sanitises it at registration; the application
+    # spine re-truncates it — spec 2026-09-04-application-spine S3/C5).
+    client_name: str
 
 
 @dataclass(frozen=True)
@@ -557,10 +561,12 @@ async def resolve_access_token(db_path: str, token: str) -> AccessTokenResolutio
         cur = await db.execute(
             "SELECT t.audience, t.revoked_at AS token_revoked_at, t.expires_at AS token_expires_at, "
             "g.id AS grant_id, g.revoked_at AS grant_revoked_at, g.last_used_at, "
-            "u.id AS user_id, u.email, u.email_verified_at, u.deleted_at AS user_deleted_at "
+            "u.id AS user_id, u.email, u.email_verified_at, u.deleted_at AS user_deleted_at, "
+            "c.client_name "
             "FROM oauth_tokens t "
             "JOIN oauth_grants g ON g.id = t.grant_id "
             "JOIN users u ON u.id = g.user_id "
+            "JOIN oauth_clients c ON c.id = g.client_id "
             "WHERE t.token_hash = ? AND t.kind = 'access'",
             (token_hash,),
         )
@@ -588,6 +594,7 @@ async def resolve_access_token(db_path: str, token: str) -> AccessTokenResolutio
         owner=OAuthTokenOwner(
             user_id=row["user_id"], email=row["email"],
             email_verified=row["email_verified_at"] is not None, audience=row["audience"],
+            client_name=row["client_name"],
         ),
         hash_known=True,
     )
