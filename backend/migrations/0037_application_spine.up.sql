@@ -159,6 +159,14 @@ END;
 -- the catalog row is already gone: honest, and better than a NULL join later.
 -- Scoped to `job_title = ''` so this only touches rows the ALTER just created
 -- (their default), never a snapshot a later run already filled in.
+--
+-- Precondition, declared not assumed: `jobs.location` / `jobs.description`
+-- come from 0011's CREATE TABLE IF NOT EXISTS — a database whose `jobs` was
+-- created BEFORE the chain ran (the app's inline schema, or a test's minimal
+-- fixture) may lack them, and 0011 then skips. The pg shim's translate()
+-- rewrites ADD COLUMN to ADD COLUMN IF NOT EXISTS, so these are idempotent.
+ALTER TABLE jobs ADD COLUMN location TEXT DEFAULT '';
+ALTER TABLE jobs ADD COLUMN description TEXT DEFAULT '';
 UPDATE applications SET
     job_title = COALESCE((SELECT j.title FROM jobs j WHERE j.id = applications.job_id), ''),
     job_company = COALESCE((SELECT j.company FROM jobs j WHERE j.id = applications.job_id), ''),
