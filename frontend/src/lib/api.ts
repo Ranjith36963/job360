@@ -776,6 +776,23 @@ export async function bringJob(body: BringJobRequest): Promise<BringJobResponse>
   });
 }
 
+/**
+ * Fetch a job-ad URL under the backend's SSRF guard (docs/plans/
+ * 2026-09-04-url-fetch/spec.md). Always resolves with a closed `outcome` —
+ * "the site refused us" is a normal response, not a thrown error. A 404
+ * (URL_FETCH_ENABLED off) or a 429 (rate limited) still throw via the
+ * shared `request()` — the caller shows those the same way any other
+ * ApiError is shown.
+ */
+export type FetchUrlResponse = _Schemas["FetchUrlResponse"];
+
+export async function fetchJobUrl(url: string): Promise<FetchUrlResponse> {
+  return request<FetchUrlResponse>("/api/jobs/fetch-url", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+}
+
 /** "I applied": freeze the job + the CV/cover letter as sent. Append-only. */
 export async function createReceipt(
   jobId: number,

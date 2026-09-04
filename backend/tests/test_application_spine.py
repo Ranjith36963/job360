@@ -347,9 +347,8 @@ async def test_status_event_moves_status_and_note_does_not(authenticated_async_c
 
 @pytest.mark.asyncio
 async def test_status_is_rebuildable_from_the_event_log(authenticated_async_context):
-    from src.services.applications.status import replay_status
-
     from src.api import dependencies as api_deps
+    from src.services.applications.status import replay_status
 
     async with authenticated_async_context() as client:
         app_id = (await _bring(client))["application_id"]
