@@ -9,20 +9,11 @@ import { z } from "zod";
 
 import { login, requestMagicLink } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
+import { safeNext, safeNextOrUndefined } from "@/lib/safe-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-
-// ---------------------------------------------------------------------------
-// safeNext — validates the ?next param to prevent open-redirect attacks.
-// Only allows paths that start with "/" but not "//" (protocol-relative).
-// ---------------------------------------------------------------------------
-
-export function safeNext(p: string | null): string {
-  if (!p || !p.startsWith("/") || p.startsWith("//")) return "/dashboard";
-  return p;
-}
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -44,6 +35,13 @@ type LoginSchema = z.infer<typeof loginSchema>;
 // ---------------------------------------------------------------------------
 
 function MagicLinkForm({ onUsePassword }: { onUsePassword: () => void }) {
+  const searchParams = useSearchParams();
+  // Carry `next` through the emailed link (spec R9) so e.g. an OAuth consent
+  // page keeps working after a magic-link round trip. An external/malformed
+  // `next` is dropped here rather than substituted with a fallback — the
+  // backend treats an absent `next` as "no preference", not "/dashboard".
+  const next = safeNextOrUndefined(searchParams.get("next"));
+
   const [serverError, setServerError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
 
@@ -56,7 +54,7 @@ function MagicLinkForm({ onUsePassword }: { onUsePassword: () => void }) {
   const onSubmit = handleSubmit(async (data) => {
     setServerError(null);
     try {
-      await requestMagicLink(data.email);
+      await requestMagicLink(data.email, next);
       setSent(true);
     } catch (err) {
       setServerError(friendlyAuthError(err, "Could not send the link. Please try again."));

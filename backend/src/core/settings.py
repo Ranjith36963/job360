@@ -144,6 +144,10 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 # whether what is left is usable. Guard: tests/test_site_base_url.py.
 _SITE_BASE_URL_RAW = os.getenv("SITE_BASE_URL", "").strip().rstrip("/")
 SITE_BASE_URL = _SITE_BASE_URL_RAW or "https://job360.uk"
+# True when the operator set SITE_BASE_URL. The OAuth discovery documents
+# advertise SITE_BASE_URL as the issuer, so a non-prod instance running on
+# the default is misconfigured — api.main.lifespan warns once at boot.
+SITE_BASE_URL_IS_EXPLICIT = bool(_SITE_BASE_URL_RAW)
 
 # Search
 # MIN_MATCH_SCORE is the *display* floor — the default "good enough to show"
@@ -158,6 +162,11 @@ MIN_MATCH_SCORE = 30
 # profile (or a job that simply aged past the recency bands) lost jobs forever
 # with no way to get them back. Store broadly, filter at read time.
 MIN_STORE_SCORE = int(os.getenv("MIN_STORE_SCORE", "1"))
+# USER_BROUGHT_SOURCE — the `jobs.source` value for an ad the user pasted
+# (POST /jobs/bring). Not a scraper: it is outside SOURCE_REGISTRY and the
+# five-surface contract on purpose. Selection treats such rows as protected —
+# the user chose them, so no cap or score floor may evict them.
+USER_BROUGHT_SOURCE = "user_brought"
 # FEED_CANDIDATE_CAP — the User-Level candidate bound (funnel Stage-1,
 # 2026-08-05). user_feed is a bounded per-user CANDIDATE SET, not a mirror of
 # the shared catalog: only the user's top-N jobs by score enter/stay in it
@@ -254,6 +263,68 @@ TAILOR_FREE_PER_MONTH = int(os.getenv("TAILOR_FREE_PER_MONTH", "10"))
 #
 # Set 0 to disable the cap entirely.
 PROFILE_EXTRACT_MAX_PER_HOUR = int(os.getenv("PROFILE_EXTRACT_MAX_PER_HOUR", "12"))
+
+# Personal API tokens + MCP (docs/plans/2026-09-03-mcp-server). Read through
+# `settings.X` at call time, never bound at import — tests monkeypatch them.
+# Active (unrevoked) tokens one user may hold. 10 = one per client/machine.
+API_TOKENS_PER_USER = int(os.getenv("API_TOKENS_PER_USER", "10"))
+# Failed bearer attempts per client IP per minute before 429 (brute-force brake;
+# the token itself is 256-bit random, this just makes guessing loud and slow).
+API_TOKEN_FAIL_MAX_PER_MIN = int(os.getenv("API_TOKEN_FAIL_MAX_PER_MIN", "30"))
+# Comma-separated Host values the MCP transport accepts (DNS-rebinding guard).
+# Empty = off: the backend sits behind the Next rewrite, so the Host header is
+# Railway's internal name, not job360.uk. The bearer token is the real guard.
+MCP_ALLOWED_HOSTS = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+
+# OAuth 2.1 authorization server for MCP clients (docs/plans/2026-09-03-oauth-mcp).
+# Read through `settings.X` at call time, never bound at import — tests monkeypatch them.
+#
+# S3 — host-anchored redirect allow-list. Comma-separated full URLs; a
+# candidate is accepted when scheme+host+port match an entry AND the path is
+# byte-equal (or the entry path ends in "/" and the candidate starts with it).
+# Adding a client = editing this var, no deploy.
+OAUTH_REDIRECT_ALLOWLIST = os.getenv(
+    "OAUTH_REDIRECT_ALLOWLIST",
+    "https://claude.ai/api/mcp/auth_callback,"
+    "https://chatgpt.com/connector_platform_oauth_redirect,"
+    "https://chatgpt.com/connector/oauth/",
+)
+# RFC 8252 loopback redirects (127.0.0.1 / ::1 / localhost, scheme http, any
+# port). Defaults OFF — nothing in production needs it (Claude Code keeps a
+# personal token; intent.md).
+OAUTH_ALLOW_LOOPBACK_REDIRECTS = os.getenv("OAUTH_ALLOW_LOOPBACK_REDIRECTS", "0").lower() in (
+    "1", "true", "yes", "on",
+)
+# Token/code/request lifetimes, all in seconds.
+OAUTH_ACCESS_TOKEN_TTL_SECONDS = int(os.getenv("OAUTH_ACCESS_TOKEN_TTL_SECONDS", "3600"))
+OAUTH_REFRESH_TOKEN_TTL_SECONDS = int(os.getenv("OAUTH_REFRESH_TOKEN_TTL_SECONDS", "2592000"))
+OAUTH_CODE_TTL_SECONDS = int(os.getenv("OAUTH_CODE_TTL_SECONDS", "60"))
+# Long enough for the magic-link email round-trip between /authorize and consent.
+OAUTH_AUTHORIZE_TTL_SECONDS = int(os.getenv("OAUTH_AUTHORIZE_TTL_SECONDS", "1800"))
+# A code/refresh token reused within this window after being consumed is a
+# client timeout-and-retry (Claude.ai retries ~10s later), not an attack —
+# `invalid_grant` without revoking. Reuse AFTER the window revokes the grant.
+OAUTH_REUSE_GRACE_SECONDS = int(os.getenv("OAUTH_REUSE_GRACE_SECONDS", "10"))
+# Registration is unauthenticated, so it is rate-limited per IP and globally
+# (Claude.ai re-registers a fresh client per connection).
+OAUTH_REGISTER_MAX_PER_HOUR = int(os.getenv("OAUTH_REGISTER_MAX_PER_HOUR", "60"))
+OAUTH_REGISTER_MAX_PER_HOUR_GLOBAL = int(os.getenv("OAUTH_REGISTER_MAX_PER_HOUR_GLOBAL", "600"))
+OAUTH_AUTHORIZE_MAX_PER_MIN = int(os.getenv("OAUTH_AUTHORIZE_MAX_PER_MIN", "60"))
+# /token failures, keyed unconditionally on IP (a missing/unknown client_id
+# cannot dodge the counter by varying client_id).
+OAUTH_TOKEN_FAIL_MAX_PER_MIN = int(os.getenv("OAUTH_TOKEN_FAIL_MAX_PER_MIN", "30"))
+# Bearer failures on a `j360a_` credential — its own bucket, never api_tokens'.
+OAUTH_BEARER_FAIL_MAX_PER_MIN = int(os.getenv("OAUTH_BEARER_FAIL_MAX_PER_MIN", "30"))
+# Housekeeping (R10): a client with no oauth_grants row at all (revoked
+# included) older than this many days is prune-eligible.
+OAUTH_CLIENT_PRUNE_DAYS = int(os.getenv("OAUTH_CLIENT_PRUNE_DAYS", "7"))
+# S7 — bounded client table. At/above this count, /register first prunes the
+# oldest grant-less clients to make room before ever refusing a real client.
+OAUTH_MAX_CLIENTS = int(os.getenv("OAUTH_MAX_CLIENTS", "10000"))
+# Housekeeping runs sampled 1-in-N token-endpoint calls, after the response is
+# computed, so a slow prune can never delay a token exchange (Claude.ai's 10s
+# budget). `1` = every call; `0` disables housekeeping entirely.
+OAUTH_PRUNE_SAMPLE = int(os.getenv("OAUTH_PRUNE_SAMPLE", "20"))
 
 # Pillar 2 Batch 2.6 — semantic stack feature flag.
 # When false (default), embeddings + ChromaDB + ESCO normalisation all skip.

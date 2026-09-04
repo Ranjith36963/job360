@@ -4,6 +4,57 @@
  */
 
 export interface paths {
+    "/.well-known/oauth-authorization-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Authorization Server Metadata */
+        get: operations["authorization_server_metadata__well_known_oauth_authorization_server_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/.well-known/oauth-protected-resource": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Protected Resource Metadata Root */
+        get: operations["protected_resource_metadata_root__well_known_oauth_protected_resource_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/.well-known/oauth-protected-resource/api/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Protected Resource Metadata Mcp */
+        get: operations["protected_resource_metadata_mcp__well_known_oauth_protected_resource_api_mcp_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/actions": {
         parameters: {
             query?: never;
@@ -437,6 +488,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/bring": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bring Job
+         * @description Store the pasted ad, score it against the caller's profile, put it in
+         *     their feed. Returns the job exactly as GET /jobs/{id} would, so the
+         *     frontend can route straight to the detail page.
+         */
+        post: operations["bring_job_api_jobs_bring_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/export": {
         parameters: {
             query?: never;
@@ -582,6 +655,142 @@ export interface paths {
         get: operations["notification_stats_api_notifications_stats_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Authorize */
+        get: operations["authorize_api_oauth_authorize_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/authorize/{rid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Consent Request */
+        get: operations["get_consent_request_api_oauth_authorize__rid__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/authorize/{rid}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide Consent */
+        post: operations["decide_consent_api_oauth_authorize__rid__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Grants */
+        get: operations["list_grants_api_oauth_grants_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/grants/{grant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Grant */
+        delete: operations["revoke_grant_api_oauth_grants__grant_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register Client */
+        post: operations["register_client_api_oauth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke */
+        post: operations["revoke_api_oauth_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Token */
+        post: operations["token_api_oauth_token_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1025,6 +1234,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Receipts */
+        get: operations["list_receipts_api_receipts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/receipts/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Receipt
+         * @description "I applied": freeze the receipt, then mark the job applied in BOTH
+         *     existing per-user tables (`user_actions` for the card, `applications` for
+         *     the pipeline) so every surface agrees.
+         */
+        post: operations["create_receipt_api_receipts__job_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/receipts/{receipt_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Receipt */
+        get: operations["get_receipt_api_receipts__receipt_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/recent": {
         parameters: {
             query?: never;
@@ -1391,6 +1656,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tokens */
+        get: operations["list_tokens_api_tokens_get"];
+        put?: never;
+        /** Create Token */
+        post: operations["create_token_api_tokens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tokens/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Token */
+        delete: operations["revoke_token_api_tokens__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1471,6 +1771,33 @@ export interface components {
             cv?: string;
             /** Preferences */
             preferences?: string;
+        };
+        /** BringJobRequest */
+        BringJobRequest: {
+            /**
+             * Apply Url
+             * @default
+             */
+            apply_url: string;
+            /** Company */
+            company: string;
+            /** Description */
+            description: string;
+            /**
+             * Location
+             * @default
+             */
+            location: string;
+            /** Title */
+            title: string;
+        };
+        /** BringJobResponse */
+        BringJobResponse: {
+            /** Existing */
+            existing: boolean;
+            job: components["schemas"]["JobResponse"];
+            /** Scored */
+            scored: boolean;
         };
         /**
          * CVDetail
@@ -1622,6 +1949,49 @@ export interface components {
             /** Url */
             url?: string | null;
         };
+        /** ConsentDecisionRequest */
+        ConsentDecisionRequest: {
+            /** Approve */
+            approve: boolean;
+        };
+        /** ConsentDecisionResponse */
+        ConsentDecisionResponse: {
+            /** Redirect To */
+            redirect_to: string;
+        };
+        /** ConsentRequestResponse */
+        ConsentRequestResponse: {
+            /** Client Name */
+            client_name: string;
+            /** Expires At */
+            expires_at: string;
+            /** Redirect Uri */
+            redirect_uri: string;
+            /** Scope */
+            scope: string;
+            /** Scope Description */
+            scope_description: string;
+            /** User Email */
+            user_email: string;
+        };
+        /** CreateReceiptRequest */
+        CreateReceiptRequest: {
+            /**
+             * Channel
+             * @default
+             */
+            channel: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** CreateTokenRequest */
+        CreateTokenRequest: {
+            /** Name */
+            name: string;
+        };
         /** EmailChangeRequest */
         EmailChangeRequest: {
             /** Current Password */
@@ -1643,6 +2013,11 @@ export interface components {
             merged: boolean;
             /** Ok */
             ok: boolean;
+        };
+        /** GrantListResponse */
+        GrantListResponse: {
+            /** Grants */
+            grants: components["schemas"]["OAuthGrantOut"][];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1700,6 +2075,8 @@ export interface components {
             deadline_source?: string | null;
             /** Dedup Group Ids */
             dedup_group_ids?: number[] | null;
+            /** Description */
+            description?: string | null;
             /**
              * Dims Active
              * @default false
@@ -1891,6 +2268,8 @@ export interface components {
              * Format: email
              */
             email: string;
+            /** Next */
+            next?: string | null;
         };
         /** NotesUpdateRequest */
         NotesUpdateRequest: {
@@ -1994,6 +2373,21 @@ export interface components {
             quiet_hours_start?: string | null;
             /** Score Threshold */
             score_threshold?: number | null;
+        };
+        /** OAuthGrantOut */
+        OAuthGrantOut: {
+            /** Client Name */
+            client_name: string;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Redirect Uri */
+            redirect_uri: string;
+            /** Scope */
+            scope: string;
         };
         /** PasswordChangeRequest */
         PasswordChangeRequest: {
@@ -2228,6 +2622,76 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** Receipt */
+        Receipt: {
+            /** Channel */
+            channel: string;
+            /** Cover Letter Origin */
+            cover_letter_origin: string | null;
+            /** Cover Letter Text */
+            cover_letter_text: string | null;
+            /** Cv Origin */
+            cv_origin: string | null;
+            /** Cv Text */
+            cv_text: string | null;
+            /** Id */
+            id: number;
+            /** Job Apply Url */
+            job_apply_url: string;
+            /** Job Company */
+            job_company: string;
+            /** Job Description */
+            job_description: string;
+            /** Job Id */
+            job_id: number;
+            /** Job Location */
+            job_location: string;
+            /** Job Source */
+            job_source: string;
+            /** Job Title */
+            job_title: string;
+            /** Note */
+            note: string;
+            /** Profile Version */
+            profile_version: number | null;
+            /** Sent At */
+            sent_at: string;
+        };
+        /** ReceiptListResponse */
+        ReceiptListResponse: {
+            /** Receipts */
+            receipts: components["schemas"]["ReceiptSummary"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ReceiptSummary
+         * @description List row: everything but the three long bodies.
+         */
+        ReceiptSummary: {
+            /** Channel */
+            channel: string;
+            /** Has Cover Letter */
+            has_cover_letter: boolean;
+            /** Has Cv */
+            has_cv: boolean;
+            /** Id */
+            id: number;
+            /** Job Apply Url */
+            job_apply_url: string;
+            /** Job Company */
+            job_company: string;
+            /** Job Id */
+            job_id: number;
+            /** Job Location */
+            job_location: string;
+            /** Job Title */
+            job_title: string;
+            /** Note */
+            note: string;
+            /** Sent At */
+            sent_at: string;
+        };
         /** RegisterRequest */
         RegisterRequest: {
             /**
@@ -2437,6 +2901,39 @@ export interface components {
             /** User Id */
             user_id: string;
         };
+        /** TokenCreated */
+        TokenCreated: {
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Token */
+            token: string;
+        };
+        /** TokenListResponse */
+        TokenListResponse: {
+            /** Tokens */
+            tokens: components["schemas"]["TokenSummary"][];
+        };
+        /** TokenSummary */
+        TokenSummary: {
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+        };
         /** UserResponse */
         UserResponse: {
             /** Email */
@@ -2466,10 +2963,72 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    list_actions_api_actions_get: {
+    authorization_server_metadata__well_known_oauth_authorization_server_get: {
         parameters: {
             query?: never;
             header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    protected_resource_metadata_root__well_known_oauth_protected_resource_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    protected_resource_metadata_mcp__well_known_oauth_protected_resource_api_mcp_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_actions_api_actions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2500,7 +3059,9 @@ export interface operations {
     action_counts_api_actions_counts_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2659,7 +3220,9 @@ export interface operations {
     me_api_auth_me_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2690,7 +3253,9 @@ export interface operations {
     get_email_verified_api_auth_me_email_verified_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2818,7 +3383,9 @@ export interface operations {
     delete_account_api_auth_users_me_delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2851,7 +3418,9 @@ export interface operations {
     change_email_api_auth_users_me_email_patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2884,7 +3453,9 @@ export interface operations {
     export_my_data_api_auth_users_me_export_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2915,7 +3486,9 @@ export interface operations {
     change_password_api_auth_users_me_password_patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2979,7 +3552,9 @@ export interface operations {
     verify_email_request_api_auth_verify_email_request_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3008,7 +3583,9 @@ export interface operations {
     client_log_api_client_log_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3075,7 +3652,9 @@ export interface operations {
                 limit?: number;
                 offset?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3103,10 +3682,49 @@ export interface operations {
             };
         };
     };
+    bring_job_api_jobs_bring_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BringJobRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BringJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     export_jobs_api_jobs_export_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3137,7 +3755,9 @@ export interface operations {
     get_job_api_jobs__job_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3170,7 +3790,9 @@ export interface operations {
     set_action_api_jobs__job_id__action_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3207,7 +3829,9 @@ export interface operations {
     delete_action_api_jobs__job_id__action_delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3240,7 +3864,9 @@ export interface operations {
     get_job_duplicates_api_jobs__job_id__duplicates_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3308,7 +3934,9 @@ export interface operations {
                 /** @description ISO-8601 upper bound on created_at */
                 end_time?: string | null;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3339,7 +3967,9 @@ export interface operations {
     notification_stats_api_notifications_stats_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3371,12 +4001,234 @@ export interface operations {
             };
         };
     };
+    authorize_api_oauth_authorize_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_consent_request_api_oauth_authorize__rid__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                rid: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentRequestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_consent_api_oauth_authorize__rid__decision_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                rid: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsentDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentDecisionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_grants_api_oauth_grants_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_grant_api_oauth_grants__grant_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                grant_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_client_api_oauth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    revoke_api_oauth_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    token_api_oauth_token_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     list_pipeline_api_pipeline_get: {
         parameters: {
             query?: {
                 stage?: string | null;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3407,7 +4259,9 @@ export interface operations {
     pipeline_counts_api_pipeline_counts_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3440,7 +4294,9 @@ export interface operations {
     pipeline_reminders_api_pipeline_reminders_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3471,7 +4327,9 @@ export interface operations {
     create_application_api_pipeline__job_id__post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3504,7 +4362,9 @@ export interface operations {
     advance_application_api_pipeline__job_id__advance_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3541,7 +4401,9 @@ export interface operations {
     update_notes_api_pipeline__job_id__notes_patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3578,7 +4440,9 @@ export interface operations {
     get_pipeline_timeline_api_pipeline__job_id__timeline_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3611,7 +4475,9 @@ export interface operations {
     get_profile_api_profile_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3642,7 +4508,9 @@ export interface operations {
     upsert_profile_api_profile_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3677,7 +4545,9 @@ export interface operations {
     clear_profile_section_api_profile_clear_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3712,7 +4582,9 @@ export interface operations {
     upload_cv_api_profile_cv_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3747,7 +4619,9 @@ export interface operations {
     upload_github_api_profile_github_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3782,7 +4656,9 @@ export interface operations {
     get_json_resume_api_profile_json_resume_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3813,7 +4689,9 @@ export interface operations {
     upload_linkedin_api_profile_linkedin_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3848,7 +4726,9 @@ export interface operations {
     upsert_preferences_api_profile_preferences_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3885,7 +4765,9 @@ export interface operations {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3916,7 +4798,9 @@ export interface operations {
     diff_profile_versions_api_profile_versions__version_id1__diff__version_id2__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 version_id1: number;
                 version_id2: number;
@@ -3952,7 +4836,9 @@ export interface operations {
     restore_version_api_profile_versions__version_id__restore_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 version_id: number;
             };
@@ -4002,13 +4888,126 @@ export interface operations {
             };
         };
     };
+    list_receipts_api_receipts_get: {
+        parameters: {
+            query?: {
+                job_id?: number | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_receipt_api_receipts__job_id__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                job_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateReceiptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Receipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_receipt_api_receipts__receipt_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                receipt_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Receipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     recent_runs_api_runs_recent_get: {
         parameters: {
             query?: {
                 limit?: number;
                 offset?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4042,7 +5041,9 @@ export interface operations {
                 /** @description How many recent runs to aggregate over. */
                 runs?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4075,7 +5076,9 @@ export interface operations {
             query?: {
                 source?: string | null;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4106,7 +5109,9 @@ export interface operations {
     search_status_api_search__run_id__status_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 run_id: string;
             };
@@ -4139,7 +5144,9 @@ export interface operations {
     list_channels_api_settings_channels_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4170,7 +5177,9 @@ export interface operations {
     create_channel_api_settings_channels_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4205,7 +5214,9 @@ export interface operations {
     delete_channel_api_settings_channels__channel_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 channel_id: number;
             };
@@ -4236,7 +5247,9 @@ export interface operations {
     test_send_channel_api_settings_channels__channel_id__test_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 channel_id: number;
             };
@@ -4269,7 +5282,9 @@ export interface operations {
     get_notification_rule_api_settings_notification_rule_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4300,7 +5315,9 @@ export interface operations {
     upsert_notification_rule_api_settings_notification_rule_put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4375,7 +5392,9 @@ export interface operations {
     get_tailored_api_tailor__job_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -4408,7 +5427,9 @@ export interface operations {
     generate_api_tailor__job_id__generate_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -4441,7 +5462,9 @@ export interface operations {
     save_edit_api_tailor__job_id___doc_kind__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
                 doc_kind: string;
@@ -4481,7 +5504,9 @@ export interface operations {
             query?: {
                 fmt?: string;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
                 doc_kind: string;
@@ -4515,7 +5540,9 @@ export interface operations {
     keep_api_tailor__job_id___doc_kind__keep_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
                 doc_kind: string;
@@ -4549,7 +5576,9 @@ export interface operations {
     provenance_api_tailor__job_id___doc_kind__provenance_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
                 doc_kind: string;
@@ -4568,6 +5597,109 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ProvenanceSegment"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tokens_api_tokens_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_token_api_tokens_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_token_api_tokens__token_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                token_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
