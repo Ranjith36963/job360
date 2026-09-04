@@ -122,26 +122,34 @@ CREATE INDEX IF NOT EXISTS idx_receipts_application
 -- (the second statement's WHERE NOT EXISTS sees the first statement's rows,
 -- inside the same transaction).
 
+-- GROUP BY, not SELECT DISTINCT: DISTINCT over (user_id, job_id, created_at)
+-- still yields one row PER TIMESTAMP for the same key, and WHERE NOT EXISTS
+-- cannot see sibling rows inserted by the same statement — two tailored
+-- documents for one (user, job) killed the first prod deploy of this
+-- migration with a UniqueViolation. One row per key, oldest timestamp.
 INSERT INTO applications (user_id, job_id, stage, status, created_at, updated_at)
-SELECT DISTINCT ar.user_id, ar.job_id, 'applied', 'applied', ar.created_at, ar.created_at
+SELECT ar.user_id, ar.job_id, 'applied', 'applied', MIN(ar.created_at), MIN(ar.created_at)
 FROM application_receipts ar
 WHERE NOT EXISTS (
     SELECT 1 FROM applications a WHERE a.user_id = ar.user_id AND a.job_id = ar.job_id
-);
+)
+GROUP BY ar.user_id, ar.job_id;
 
 INSERT INTO applications (user_id, job_id, stage, status, created_at, updated_at)
-SELECT DISTINCT td.user_id, td.job_id, 'applied', 'applied', td.created_at, td.created_at
+SELECT td.user_id, td.job_id, 'applied', 'applied', MIN(td.created_at), MIN(td.created_at)
 FROM tailored_documents td
 WHERE NOT EXISTS (
     SELECT 1 FROM applications a WHERE a.user_id = td.user_id AND a.job_id = td.job_id
-);
+)
+GROUP BY td.user_id, td.job_id;
 
 INSERT INTO applications (user_id, job_id, stage, status, created_at, updated_at)
-SELECT DISTINCT ash.user_id, ash.job_id, 'applied', 'applied', ash.transitioned_at, ash.transitioned_at
+SELECT ash.user_id, ash.job_id, 'applied', 'applied', MIN(ash.transitioned_at), MIN(ash.transitioned_at)
 FROM application_stage_history ash
 WHERE NOT EXISTS (
     SELECT 1 FROM applications a WHERE a.user_id = ash.user_id AND a.job_id = ash.job_id
-);
+)
+GROUP BY ash.user_id, ash.job_id;
 
 -- ── Step 3: backfill `status` from `stage` — R4's mapping, reversed. ──
 UPDATE applications SET status = CASE stage
@@ -159,6 +167,14 @@ END;
 -- the catalog row is already gone: honest, and better than a NULL join later.
 -- Scoped to `job_title = ''` so this only touches rows the ALTER just created
 -- (their default), never a snapshot a later run already filled in.
+--
+-- Precondition, declared not assumed: `jobs.location` / `jobs.description`
+-- come from 0011's CREATE TABLE IF NOT EXISTS — a database whose `jobs` was
+-- created BEFORE the chain ran (the app's inline schema, or a test's minimal
+-- fixture) may lack them, and 0011 then skips. The pg shim's translate()
+-- rewrites ADD COLUMN to ADD COLUMN IF NOT EXISTS, so these are idempotent.
+ALTER TABLE jobs ADD COLUMN location TEXT DEFAULT '';
+ALTER TABLE jobs ADD COLUMN description TEXT DEFAULT '';
 UPDATE applications SET
     job_title = COALESCE((SELECT j.title FROM jobs j WHERE j.id = applications.job_id), ''),
     job_company = COALESCE((SELECT j.company FROM jobs j WHERE j.id = applications.job_id), ''),
