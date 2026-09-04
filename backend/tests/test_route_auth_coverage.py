@@ -72,6 +72,17 @@ ROUTE_MODULES = [
     "notification_rules",
     "runs",
     "tailor",
+    "tokens",
+    "bring",
+    "receipts",
+    "oauth",
+]
+
+# Route modules main.py mounts at the site ROOT (no "/api"). Only the OAuth
+# discovery documents live here: a client resolves `/.well-known/...` against
+# the bare origin, never under the API path (src/api/main.py, `well_known`).
+ROOT_ROUTE_MODULES = [
+    "well_known",
 ]
 
 # ---------------------------------------------------------------------------
@@ -105,6 +116,38 @@ PUBLIC_ROUTES: dict[str, str] = {
         "VERBATIM as `last_run`, so any source error string captured there is served "
         "publicly. Worth confirming no source ever records a keyed URL in that field."
     ),
+    # --- OAuth 2.1 authorization server (docs/plans/2026-09-03-oauth-mcp/spec.md) ---
+    # An MCP client (ChatGPT, Claude.ai) has NO Job360 identity when it starts the
+    # flow; these are the endpoints the OAuth specs define as anonymous. Each is
+    # rate-limited per IP (spec S6) and the browser-facing steps (consent read +
+    # decision, grant list/revoke) stay session-only via require_session_user.
+    "/.well-known/oauth-authorization-server": (
+        "RFC 8414 discovery document — a client reads it before it has any credential"
+    ),
+    "/.well-known/oauth-protected-resource": (
+        "RFC 9728 protected-resource metadata (root form) — anonymous by definition"
+    ),
+    "/.well-known/oauth-protected-resource/api/mcp": (
+        "RFC 9728 protected-resource metadata for /api/mcp — the URL the 401 "
+        "challenge on /api/mcp points at, read before any token exists"
+    ),
+    "/api/oauth/register": (
+        "RFC 7591 dynamic client registration — a public client (`none` auth) "
+        "registers before any user is involved; per-IP + global rate limits (spec R2/S6)"
+    ),
+    "/api/oauth/authorize": (
+        "authorization endpoint — validates client + redirect_uri, stores the request "
+        "and 302s to the consent page; the LOGIN happens there (spec R3). Nothing is "
+        "granted without a session on /api/oauth/authorize/{rid}/decision"
+    ),
+    "/api/oauth/token": (
+        "token endpoint — authenticated by the authorization code + PKCE verifier or "
+        "by the refresh token itself, never by a session (spec R5)"
+    ),
+    "/api/oauth/revoke": (
+        "RFC 7009 revocation — authenticated by the token being revoked; always 200 "
+        "so it cannot be used as an oracle (spec R8)"
+    ),
 }
 
 AUTH_MARKERS = {"require_user", "require_verified_user", "optional_user"}
@@ -114,6 +157,8 @@ _DISCOVER = r"""
 import importlib, json, sys
 API_PREFIX = "/api"
 AUTH_MARKERS = {"require_user", "require_verified_user", "optional_user"}
+# {module name: mount prefix} — "/api" for almost everything, "" for the
+# root-mounted discovery documents.
 MODULES = json.loads(sys.argv[1])
 
 def dep_names(route):
@@ -133,7 +178,7 @@ def dep_names(route):
     return names
 
 out = []
-for name in MODULES:
+for name, prefix in MODULES.items():
     mod = importlib.import_module("src.api.routes." + name)
     router = getattr(mod, "router", None)
     if router is None:
@@ -149,7 +194,7 @@ for name in MODULES:
         # "/api/auth/auth/register", which is why every /api/auth/* path looked
         # non-existent. Only main.py's "/api" is missing here.
         out.append({
-            "path": API_PREFIX + path,
+            "path": prefix + path,
             "verbs": ",".join(sorted(methods - {"HEAD", "OPTIONS"})),
             "protected": bool(dep_names(route) & AUTH_MARKERS),
         })
@@ -173,7 +218,14 @@ def _all_routes() -> tuple[dict[str, Any], ...]:
     construction, for about two seconds, and the result is cached for the module.
     """
     proc = subprocess.run(
-        [sys.executable, "-c", _DISCOVER, json.dumps(ROUTE_MODULES)],
+        [
+            sys.executable,
+            "-c",
+            _DISCOVER,
+            json.dumps(
+                {**{m: API_PREFIX for m in ROUTE_MODULES}, **{m: "" for m in ROOT_ROUTE_MODULES}}
+            ),
+        ],
         cwd=str(Path(__file__).resolve().parent.parent),
         capture_output=True,
         text=True,

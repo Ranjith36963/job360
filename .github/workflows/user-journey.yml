@@ -35,9 +35,11 @@ name: User journey (walk every user, find where it breaks for them)
 #
 # Read-only SQL. No model. Which is why it is trusted to raise an alarm itself.
 
+# PAUSED 2026-09-03 — sourcing era. This detector watches the search feed /
+# catalog / scorer, which the product no longer has (docs/product/VISION.md,
+# roadmap slice 5 deletes the code). Schedule removed; workflow_dispatch kept
+# so it can still be fired by hand until the code it watches is gone.
 on:
-  schedule:
-    - cron: "0 9 * * *" # 09:00 UTC, after absence (08:00) and product-health (08:30)
   workflow_dispatch:
     inputs:
       drill:

@@ -28,6 +28,22 @@ const nextConfig: NextConfig = {
         source: "/api/:path*",
         destination: `${BACKEND_ORIGIN}/api/:path*`,
       },
+      // OAuth 2.1 discovery documents (spec R1) — RFC 8414 / RFC 9728 require
+      // these to live at the site root, never under /api. Three entries
+      // because `:path*` does not match the bare root path, so the exact
+      // `/oauth-protected-resource` route needs its own rule.
+      {
+        source: "/.well-known/oauth-authorization-server",
+        destination: `${BACKEND_ORIGIN}/.well-known/oauth-authorization-server`,
+      },
+      {
+        source: "/.well-known/oauth-protected-resource",
+        destination: `${BACKEND_ORIGIN}/.well-known/oauth-protected-resource`,
+      },
+      {
+        source: "/.well-known/oauth-protected-resource/:path*",
+        destination: `${BACKEND_ORIGIN}/.well-known/oauth-protected-resource/:path*`,
+      },
     ];
   },
 

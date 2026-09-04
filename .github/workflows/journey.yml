@@ -33,9 +33,11 @@ name: Journey probe (walk a real user, grade every step)
 # The preflight below reports BOTH at once, on purpose: a guard that reveals one
 # blocker per night costs a night per blocker.
 
+# PAUSED 2026-09-03 — sourcing era. This detector watches the search feed /
+# catalog / scorer, which the product no longer has (docs/product/VISION.md,
+# roadmap slice 5 deletes the code). Schedule removed; workflow_dispatch kept
+# so it can still be fired by hand until the code it watches is gone.
 on:
-  schedule:
-    - cron: "40 5 * * *" # 05:40 UTC daily, before the other detectors
   workflow_dispatch:
     inputs:
       only:

@@ -8,10 +8,13 @@ const PROTECTED_PATHS = [
   "/dashboard",
   "/profile",
   "/pipeline",
+  "/bring",
+  "/receipts",
   "/channels",
   "/settings",
   "/notifications",
   "/admin",
+  "/oauth",
 ];
 
 // Backend origin used to VERIFY the session (same value the /api proxy forwards to).

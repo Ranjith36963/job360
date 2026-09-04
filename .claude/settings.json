@@ -98,12 +98,6 @@
           {
             "type": "command",
             "command": "bash .claude/hooks/session-context.sh"
-          },
-          {
-            "type": "command",
-            "command": "bash .claude/hooks/worktree-reaper.sh",
-            "timeout": 15,
-            "shell": "bash"
           }
         ]
       }

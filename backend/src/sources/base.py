@@ -162,7 +162,10 @@ class BaseJobSource(ABC):
         for attempt in range(MAX_RETRIES):
             await self._rate_limiter.acquire()
             try:
-                kwargs = {
+                # dict[str, Any]: the values are a heterogeneous mix (headers dict,
+                # ClientTimeout, params, json body) splatted into ClientSession.request —
+                # Any keeps mypy from checking the splat against every keyword param.
+                kwargs: dict[str, Any] = {
                     "headers": self._headers(headers),
                     "timeout": aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
                 }
@@ -296,7 +299,9 @@ class BaseJobSource(ABC):
 
         await self._rate_limiter.acquire()
         try:
-            kwargs = {
+            # dict[str, Any]: same reason as in _request — heterogeneous values
+            # splatted into ClientSession.request.
+            kwargs: dict[str, Any] = {
                 "headers": self._headers(extra_headers),
                 "timeout": aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
                 "params": params,

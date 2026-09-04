@@ -179,13 +179,6 @@ jobs:
       - name: The broom still refuses to sweep up unsaved work
         run: python scripts/worktree_census.py --drill
 
-      # The broom's ENTRANCE. Same reason this step sits next to the one above and
-      # not in branch-reaper.yml alone: that workflow runs weekly, so a break
-      # would sit undetected for up to seven days in the one component whose whole
-      # job is deleting things.
-      - name: The reaper still refuses, and still delegates
-        run: python scripts/worktree_reaper.py --drill
-
       - name: The ruleset checker can still fail
         run: python scripts/ruleset_gate.py --drill
       - name: Would the ruleset wedge the repo?

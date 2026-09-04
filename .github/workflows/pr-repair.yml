@@ -17,10 +17,22 @@ name: PR repair (fix conflicts + red CI on a PR branch)
 #      lands, which is the wire that was missing between "the harness can see a
 #      problem" and "the harness can fix a problem".
 #
-# MERGE STAYS HUMAN. This workflow contains zero `gh pr merge` — turning a PR
-# green is repair; merging it is authorization, and authorization is the
-# owner's (his explicit split: "Merging we leave it for myself. Remaining
-# everything autonomous.").
+# THIS WORKFLOW STILL CONTAINS ZERO `gh pr merge`, AND NOW FOR A SECOND REASON.
+#
+# The original one was the owner's split on 2026-07-30: "Merging we leave it for
+# myself. Remaining everything autonomous." He REVERSED that on 2026-08-27 —
+# product and harness lanes may now merge without him; only the owner lanes come
+# back to his hand.
+#
+# The merge still does not belong here. `auto-merge.yml` already does it, from
+# the DEFAULT BRANCH, with the full cage and `--auto` so GitHub's own ruleset
+# still holds the 11 required checks. A second merger in this file would be two
+# pieces of code answering one question — the exact drift that PR #444 spent
+# itself removing from the path lists. One merger, and it is not this one.
+#
+# What this file owes the merger instead is an HONEST GREEN: a repair that
+# actually fixed the thing, and review threads that are only closed when a
+# second model agrees they were answered (see the `resolve` step).
 #
 # THE CAGE (public repo, write token — same posture as repair.yml):
 #   G1  SAME-REPO branches only. A fork PR's code is a stranger's code; this
@@ -29,10 +41,18 @@ name: PR repair (fix conflicts + red CI on a PR branch)
 #       agent pushed onto it.
 #   G3  The agent has NO shell (Edit/Write/Read/Glob/Grep only). The workflow
 #       runs every command; test output is handed to the agent as a file.
-#   G4  Path cage after the edit: only backend/ and frontend/ may change
-#       beyond what the merge itself brought in. Conflicts touching anything
-#       else (.github/, .claude/, scripts/) are a human's job — commented and
-#       stopped.
+#   G4  Path cage after the edit, from the LANE MAP (2026-08-27). Only files
+#       in a lane a machine may decide may change beyond what the merge itself
+#       brought in — `scripts/repairable.py`, loaded from the DEFAULT BRANCH so
+#       a PR cannot widen its own cage. `.github/`, `.claude/` and `scripts/`
+#       are refused whatever the lane says: that is the harness judging this
+#       repair. Owner-lane files are refused too — commented and stopped.
+#
+#       It was the hardcoded regex `^(backend|frontend)/` until 2026-08-27, and
+#       that was narrower than the lane map by most of the repo. Measured that
+#       day: of the four PRs stuck for a day and a half, THREE were docs or
+#       scripts changes. The fixer refused them before reading a line and
+#       reported success — which is indistinguishable from having nothing to do.
 #   G5  Independent verification: the workflow re-runs the suite itself after
 #       the agent claims success. An agent never judges its own work.
 #   G6  Plain `git push` only — never force, never rewrite. Additive commits
@@ -53,7 +73,21 @@ permissions:
   actions: write # approve the CI runs our own push parks in action_required
 
 concurrency:
-  group: pr-repair
+  # PER PR, not one lock for the whole repo (changed 2026-08-27).
+  #
+  # A single global group starved the queue. Measured over the last 10 runs a
+  # repair takes 18.7-21.5 minutes (avg 19.8); `finding-watch` sweeps every 30
+  # and refuses to dispatch while ANY repair is in flight. So a repair is
+  # usually still running when the next sweep fires, the other PRs are skipped
+  # with a note, and nothing retries them — they wait for a sweep that happens
+  # to catch a quiet moment. There is no ordering, so a PR can lose that race
+  # indefinitely. Four PRs sat 16-36 hours on 2026-08-25/26 behind this.
+  #
+  # Two repairs on DIFFERENT PRs share nothing: separate checkouts, separate
+  # branches, separate Postgres service containers, separate label sets. The
+  # thing that must not double up is two repairs on the SAME PR, and that is
+  # exactly what this group now prevents.
+  group: pr-repair-${{ inputs.pr }}
   cancel-in-progress: false
 
 jobs:
@@ -161,6 +195,50 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      # ── THE CAGE COMES FROM THE DEFAULT BRANCH, NEVER FROM THE PR ──────────
+      # Same rule `auto-merge.yml` follows with its three checkouts, and for the
+      # same reason: a PR must not supply the code that judges it. Without this,
+      # a PR could add `paths: ["**"]` to a fast lane in its own copy of
+      # merge-policy.yml and the cage below would read that copy and agree.
+      - name: Fetch the repair cage from the default branch
+        if: steps.token.outputs.have == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/rules"
+          git fetch origin "$DEFAULT_BRANCH" --depth=1
+          # WHOLE SUBTREES, NOT A NAMED FILE LIST. `repairable.py` imports
+          # `lane.py`, which imports the glob matcher and the lane tuple from the
+          # cage — one matcher, one answer, which is the rule that stopped these
+          # files drifting apart in the first place. Listing that chain by hand
+          # here would (a) rot the day an import changes and (b) put the cage's
+          # filename in a command position, where `gate_wiring_check` G1 reads
+          # it as "this job judges a PR with the cage" and asks for a baseline
+          # it does not need. Copying the subtree names nothing and breaks
+          # neither rule.
+          git archive "origin/$DEFAULT_BRANCH" scripts .github/merge-policy.yml \
+            | tar -x -C "$RUNNER_TEMP/rules"
+          # One entry point the shell can pipe paths into. Prints the paths a
+          # machine may NOT decide, one per line; empty output is the pass.
+          printf '%s\n' \
+            '#!/usr/bin/env bash' \
+            'exec python "$RUNNER_TEMP/rules/scripts/repairable.py" --paths-only' \
+            > "$RUNNER_TEMP/rules/cage"
+          chmod +x "$RUNNER_TEMP/rules/cage"
+          # Prove it loaded before anything depends on it. A cage that silently
+          # failed to load would read as "nothing is blocked".
+          # PROVE IT BLOCKS BEFORE ANYTHING TRUSTS IT. A cage that failed to load
+          # would print nothing, and nothing reads as "everything is allowed" —
+          # the fail-open direction. The witness is the CI definition on purpose:
+          # it is the file an agent would most like to edit to go green, and an
+          # adversarial review of this design named it first.
+          if ! printf '.github/workflows/ci.yml\n' | "$RUNNER_TEMP/rules/cage" | grep -q .; then
+            echo "::error::the repair cage did not block the CI definition — it is not working, refusing to continue"
+            exit 1
+          fi
+          echo "repair cage loaded from origin/$DEFAULT_BRANCH and self-tested" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
       # ── Phase A: bring main in; surface conflicts as FILES for the agent ───
       - name: Merge main into the branch
         if: steps.token.outputs.have == 'true'
@@ -175,12 +253,12 @@ jobs:
             echo "merge of main: clean" >> "$GITHUB_STEP_SUMMARY"
           else
             files=$(git diff --name-only --diff-filter=U)
-            # G4 for conflicts: anything outside backend/frontend is a human's
-            # merge. Abort BEFORE the model sees anything.
-            outside=$(echo "$files" | grep -vE '^(backend|frontend)/' || true)
+            # G4 for conflicts: anything the LANE MAP will not let a machine
+            # decide is a human's merge. Abort BEFORE the model sees anything.
+            outside=$(echo "$files" | "$RUNNER_TEMP/rules/cage")
             if [ -n "$outside" ]; then
               git merge --abort
-              gh pr comment "${{ inputs.pr }}" --body "**PR repair stopped:** the merge with \`main\` conflicts outside the repair cage (backend/frontend): $(echo "$outside" | tr '\n' ' '). That merge is yours."
+              gh pr comment "${{ inputs.pr }}" --body "**PR repair stopped:** the merge with \`main\` conflicts on files a machine may not decide: $(echo "$outside" | tr '\n' ' '). That merge is yours."
               echo "::error::conflicts outside cage"; exit 1
             fi
             echo "conflicted<<EOF" >> "$GITHUB_OUTPUT"
@@ -390,9 +468,18 @@ jobs:
             reviewer being wrong is a normal event.
 
             HARD RULES — not negotiable:
-            - Edit ONLY files under `backend/` or `frontend/`. NEVER touch
-              .github/, .claude/, or scripts/ — a deterministic cage checks
-              after you finish and refuses to ship if you did.
+            - NEVER touch `.github/`, `.claude/` or `scripts/`. That is the
+              harness that judges this repair; editing it is how a cage is
+              escaped, and a deterministic check after you finish will refuse
+              to ship if you did.
+            - Everything else you may edit only if the LANE MAP allows a
+              machine to decide it (`.github/merge-policy.yml`). Product code,
+              frontend, tests and documentation: yes. Migrations, `models.py`,
+              settings, auth and account routes, notifications, dependency
+              manifests, the product rule documents: NO — those are the
+              owner's, and the same check refuses them.
+            - If the fix you want needs a file you may not touch, do not work
+              around it. Change nothing there and say so in your summary.
             - When resolving a conflict marker, preserve the INTENT of both
               sides — the PR's change AND what main added. Deleting one side
               wholesale is almost always wrong; understand both first.
@@ -463,13 +550,21 @@ jobs:
           #   >>>>>>>  seven, then a space and a label
           # Anchored that way, `=====...=` (100 chars) is a rule in a report and
           # `=======` is a conflict. The distinction the old pattern threw away.
-          if git grep -lE '^(<{7} |\|{7} |={7}$|>{7} )' -- 'backend' 'frontend' >/dev/null 2>&1; then
+          # WHOLE TREE, not just backend/frontend. The cage below widened to the
+          # lane map, so a repair can now legitimately land in docs/ — and a
+          # conflict marker committed into a document is every bit as broken as
+          # one in a module, just quieter. Widening the sweep with the cage.
+          if git grep -lE '^(<{7} |\|{7} |={7}$|>{7} )' >/dev/null 2>&1; then
             echo "::error::conflict markers still present — refusing to ship"
-            git grep -lE '^(<{7} |\|{7} |={7}$|>{7} )' -- 'backend' 'frontend' || true
+            git grep -lE '^(<{7} |\|{7} |={7}$|>{7} )' || true
             exit 1
           fi
           changed=$(git status --porcelain | sed 's/^...//' | sed 's/.* -> //')
-          outside=$(echo "$changed" | grep -vE '^(backend|frontend)/' | grep -v '^$' || true)
+          # Was the hardcoded regex `^(backend|frontend)/`. Now the lane map,
+          # loaded from the DEFAULT BRANCH, so this file and the policy cannot
+          # be widened by the PR being judged. `repairable.py` additionally
+          # refuses .github/, scripts/ and .claude/ whatever the lane says.
+          outside=$(echo "$changed" | grep -v '^$' | "$RUNNER_TEMP/rules/cage")
           if [ -n "$outside" ]; then
             echo "::error::agent edited outside the cage: $(echo "$outside" | tr '\n' ' ')"; exit 1
           fi
@@ -637,19 +732,23 @@ jobs:
               echo "- left open: \`$tpath\` (this repair did not change that file)" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
-            body="**PR repair:** \`$tpath\` was changed in this repair and the full offline suite passed afterwards in the workflow itself ([run]($run_url)). Resolving on that basis — if this does not actually answer your point, reopen the thread and it will come back to the fixer."
+            body="**PR repair:** \`$tpath\` was changed in this repair and the full offline suite passed afterwards in the workflow itself ([run]($run_url)). A second model reviews this diff blind; if it approves, this thread is resolved on that basis, and if it does not, the thread stays open for you."
             gh api graphql -f query='
               mutation($tid:ID!,$body:String!){
                 addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$tid,body:$body}){ clientMutationId }
               }' -f tid="$tid" -f body="$body" >/dev/null 2>&1 || \
               echo "::warning::could not reply to thread on $tpath"
-            if gh api graphql -f query='
-              mutation($tid:ID!){ resolveReviewThread(input:{threadId:$tid}){ thread{ isResolved } } }' \
-              -f tid="$tid" >/dev/null 2>&1; then
-              echo "- resolved: \`$tpath\`" >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "::warning::could not resolve the thread on $tpath — it stays open, which is the safe direction"
-            fi
+            # RESOLUTION IS NOT DONE HERE ANY MORE — see the step after the blind
+            # checker. Replying is information; resolving is a JUDGEMENT, and it
+            # is the judgement that lets `check_review` pass and the arm queue
+            # the merge. "This repair changed the file the thread points at" is
+            # not "this repair answered the finding": the independent check is a
+            # TEST SUITE, and a correctness finding with no test cannot fail it.
+            # So a real reviewer finding could be closed by a fixer that edited
+            # the file and understood nothing, and the PR would then merge to
+            # production. Recorded the thread id for the gated step instead.
+            echo "$tid	$tpath" >> "$RUNNER_TEMP/resolve-candidates.tsv"
+            echo "- answered, resolution pending the blind checker: \`$tpath\`" >> "$GITHUB_STEP_SUMMARY"
           done
 
 
@@ -727,6 +826,7 @@ jobs:
           claude_args: --model claude-opus-5 --allowedTools Read,Glob,Grep,Write --max-turns 25
 
       - name: Post the checker verdict
+        id: verdict
         if: always() && steps.token.outputs.have == 'true' && steps.ship.outcome == 'success'
         continue-on-error: true
         env:
@@ -749,7 +849,48 @@ jobs:
           { echo "**Blind checker verdict: ${v^^}** (independent agent — saw only goal + diff + invariants, none of the builder's reasoning)"; echo; cat checker-verdict.md; } > checker-comment.md
           gh pr comment "$prnum" --body-file checker-comment.md
           gh pr edit "$prnum" --add-label "$label" 2>/dev/null || true
+          echo "verdict=$v" >> "$GITHUB_OUTPUT"
           echo "checker: $v" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── RESOLVE ONLY WHAT A SECOND MODEL APPROVED (2026-08-27) ─────────────
+      # Resolving a review thread is the act that lets `check_review` pass and
+      # therefore lets the arm queue the merge. Until today the fixer did it
+      # itself on one test: "this repair changed the file the thread points at,
+      # and the suite passed". That is not the same claim as "the finding is
+      # answered" — the independent check is a TEST SUITE, and a correctness
+      # finding with no test cannot fail it. A real reviewer finding could be
+      # closed by a fixer that edited the file and understood nothing, and the
+      # PR would then merge to production, where `main` auto-deploys.
+      #
+      # So the fixer now REPLIES (information) and the blind checker decides
+      # whether to RESOLVE (judgement). The checker saw only the goal, the diff
+      # and the invariants — never the builder's reasoning — so this is a second
+      # opinion, not the same opinion twice.
+      #
+      # `uncertain` and `reject` both leave every thread OPEN. Not-approved is
+      # not approved; the cage then blocks the merge and the owner gets a PR
+      # with the work done, the reasoning replied, and the decision still his.
+      - name: Resolve the answered threads — only if the blind checker approved
+        id: resolve
+        if: always() && steps.token.outputs.have == 'true' && steps.ship.outputs.pushed == 'true' && steps.verdict.outputs.verdict == 'approve'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          f="$RUNNER_TEMP/resolve-candidates.tsv"
+          [ -s "$f" ] || { echo "no threads were answered — nothing to resolve" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          while IFS=$'\t' read -r tid tpath; do
+            [ -n "$tid" ] || continue
+            if gh api graphql -f query='
+              mutation($tid:ID!){ resolveReviewThread(input:{threadId:$tid}){ thread{ isResolved } } }' \
+              -f tid="$tid" >/dev/null 2>&1; then
+              echo "- resolved (checker approved): \`$tpath\`" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::could not resolve the thread on $tpath — it stays open, which is the safe direction"
+            fi
+          done < "$f"
 
       - name: Report back when it could not fix it
         if: always() && steps.token.outputs.have == 'true' && failure()

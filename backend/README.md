@@ -1,14 +1,18 @@
-<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-09-03 by the mission sweep -->
 # Job360 Backend
 
-FastAPI backend for Job360. Async job aggregator across 41 sources + scoring +
-semantic retrieval. Serves the Next.js dashboard, runs the scheduled pipeline,
-and hosts the ARQ worker for notifications.
+FastAPI backend for Job360 — the memory layer for the seeker's own AI agent
+(`../docs/product/VISION.md`): profile extraction, bring-a-job, application
+receipts, the CV tailor (web fallback) and the MCP server at `/api/mcp`.
+The legacy search pipeline (41 sources + scoring + semantic retrieval) is still
+in the tree and runs only on demand; it is slated for deletion (roadmap slice 5).
+Notifications (email via Resend + webhook) are sent synchronously from the API
+process — the ARQ worker and Redis services were deleted 2026-09-02, and there
+are no background jobs.
 
 ## Prerequisites
 
-- Python 3.9+ (tested through 3.12)
-- Redis only if you run the ARQ worker (optional for CLI / API usage)
+- Python 3.10+ (tested through 3.12; `mcp` needs 3.10)
 
 ## Install
 
@@ -103,37 +107,10 @@ python -m migrations.runner down       # reverse last migration
 
 The API also auto-applies on boot via `lifespan`.
 
-## ARQ worker (required for notifications)
+## Worker (deleted 2026-09-02)
 
-The worker fires per-user notifications. Without it, `score_and_ingest`
-enqueues vanish silently and "configure email channel → wait for new job →
-verify email arrives" cannot be tested end-to-end. **Phase −1 manual
-verification requires this to be running.**
-
-### Local dev — three commands
-
-From the repo root:
-
-```bash
-make redis-up   # start Redis on localhost:6379 via docker-compose.dev.yml
-make worker     # run the ARQ worker (blocks — open in a separate terminal)
-make redis-down # stop Redis when done
-```
-
-`make worker` resolves to `cd backend && arq src.workers.settings.WorkerSettings`
-with `REDIS_URL` defaulting to `redis://localhost:6379`. Override with
-`REDIS_URL=redis://other-host:6379 make worker` if you've provisioned Redis
-elsewhere.
-
-### Production
-
-Same entry point — `arq src.workers.settings.WorkerSettings`. Replace
-docker-compose with managed Redis (Upstash, ElastiCache, Render add-on)
-and a real process supervisor (systemd, supervisord, container
-orchestrator). Phase 3 of `LAUNCH_PLAN.md` covers this.
-
-Tests never touch Redis — they monkeypatch the Apprise dispatcher and call
-worker tasks as pure async functions.
+The ARQ worker and Redis services were deleted. Notifications now send
+synchronously from the API process — there is nothing to run separately.
 
 ## Cross-wiring with the frontend
 
