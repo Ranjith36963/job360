@@ -138,8 +138,7 @@ search journey is legacy — verify it only when the change touched `src/sources
 6. *(legacy, only if touched)* "New Search" on `/dashboard` → `jobs` count > 0 → dashboard renders scores.
 
 A good E2E run produces a short report: what works, what's broken (with the exact file:line
-and the DB/log evidence), severity, and the fix. See `E2E_TEST_REPORT.md` at the repo root
-for the format and the two real bugs this methodology already caught.
+and the DB/log evidence), severity, and the fix.
 
 ---
 
