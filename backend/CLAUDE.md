@@ -15,7 +15,7 @@ The Job360 backend: Python 3.10+ (`mcp` needs it; CI and prod run 3.12), FastAPI
 Entry points: `main.py` (uvicorn) and `python -m src.cli`. Runtime data (gitignored)
 lives in `data/` (`exports/`, `reports/`, `logs/`, `chroma/`, and the legacy `user_profile.json` that
 `storage.py` migrates once then deletes). There is **no `data/jobs.db`** — the store is
-Postgres; `DB_PATH` is only a connection selector (`src/core/settings.py:15-20`,
+Postgres; `DB_PATH` is only a connection selector (`src/core/settings.py`,
 `src/repositories/pg.py:732-737`).
 
 ## Owner rule #29 — empty user fields stay SILENT
@@ -25,7 +25,7 @@ Like Indeed/LinkedIn: match on what the user filled. An empty preference
 never a penalty, never a per-job zero, never a guess. Dim scorers return a
 constant for an empty user side; prefilter passes everything; the judge prompt
 omits unset prefs. Details + audit: `../docs/product/product_design_rules.md` (root
-CLAUDE.md rule #29).
+hard rule #29).
 
 ## Commands (run from `backend/`)
 

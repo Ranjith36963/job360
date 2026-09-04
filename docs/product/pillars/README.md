@@ -52,7 +52,7 @@ Each pillar doc also has three "manual" sections inside it:
 
 1. **The system requires a user profile.** `backend/src/core/keywords.py` was emptied on 2026-04-09 (commit `3ba1342`). There are no AI/ML defaults any more — without a profile, the legacy scoring path produces near-zero results. Job360 is now a *generic* jobs platform that is *personalised by the profile*, not an AI-jobs aggregator.
 
-2. **Shared catalog, per-user overlay.** The `jobs`, `job_enrichment`, and `job_embeddings` tables have **no `user_id`** by design (CLAUDE.md rules #1, #10, #17). The same job row and the same enrichment serve every user; all per-user state (visibility, actions, applications, notifications) lives in separate user-scoped tables joined by `job_id`. Per-user *scoring* against the shared catalog happens at read time.
+2. **Shared catalog, per-user overlay.** The `jobs`, `job_enrichment`, and `job_embeddings` tables have **no `user_id`** by design (hard rules #1, #10, #17). The same job row and the same enrichment serve every user; all per-user state (visibility, actions, applications, notifications) lives in separate user-scoped tables joined by `job_id`. Per-user *scoring* against the shared catalog happens at read time.
 
 ---
 

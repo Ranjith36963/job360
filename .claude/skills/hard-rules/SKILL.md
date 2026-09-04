@@ -36,7 +36,7 @@ An index, one line each. Where a test guards a rule, the test is named — that 
 ### Auth + multi-tenant routes
 12. **Every per-user FastAPI route MUST `Depends(require_user)`** and scope queries by `user.id`. Never accept `user_id` from URL/body — trivial IDOR.
 25. **Per-user mutating routes MUST scope by `user.id`** (extends #12) — derive from the session cookie / bearer / OAuth subject, never a parameter. Step 3 review caught 3 real IDOR violations.
-26. **Account-mgmt routes (password/email/delete) MUST verify the current password BEFORE the mutation, then `response.delete_cookie("job360_session")`** (forces re-login).
+26. **Account-mgmt routes (password/email/delete) MUST verify the current password BEFORE the mutation, then `response.delete_cookie(auth_deps.SESSION_COOKIE_NAME)`** (forces re-login — never the literal string).
 
 ### Heavy imports
 11. **Never import `apprise` at module top level** (~30 MB) — lazy-import inside the function (see `dispatcher._get_apprise_cls`).
@@ -70,7 +70,7 @@ An index, one line each. Where a test guards a rule, the test is named — that 
 
 ### Sources (removal recipe: `.claude/skills/add-source/SKILL.md` — NEVER add one, M1)
 2. **Never change `BaseJobSource`** (constructor, properties, retry, `_get_json`/`_post_json`/`_get_text`) without checking every source file that inherits it.
-8 + 13. **Adding/removing a source = FIVE surfaces:** `SOURCE_REGISTRY`, `_build_sources()`, `RATE_LIMITS`, `backend/tests/test_cli.py`, `backend/tests/test_api.py`. Guards (hardcoded counts that must move together): `backend/tests/test_cli.py:55`, `backend/tests/test_api.py:43,58,160,165`.
+8 + 13. **Adding/removing a source = FIVE surfaces:** `SOURCE_REGISTRY`, `_build_sources()`, `RATE_LIMITS`, `backend/tests/test_cli.py`, `backend/tests/test_api.py`. Guards (hardcoded counts that must move together): the `== len(SOURCE_REGISTRY)` assertions in `backend/tests/test_cli.py` and the `sources_total` / `/api/sources` counts in `backend/tests/test_api.py`.
 14. **Conditional fetch is opt-in** — only call `_get_json_conditional()` when the upstream really honours ETag/Last-Modified.
 15. **Sources MUST set `.category`** (`ats`/`rss`/`keyed_api`/`free_json`/`scrapers`/`other`) or a `NAME_TIER` override in `scheduler.py`; untagged falls to the 60-min tier. Folder ≠ tier (`teaching_vacancies` is in `apis_free/` but is `rss`).
 
@@ -78,7 +78,7 @@ An index, one line each. Where a test guards a rule, the test is named — that 
 29-legacy. **Dim scorers return a CONSTANT for an unset preference; prefilters pass everything; the judge prompt omits unset prefs.** Guard: `backend/tests/test_design_rules.py` — **covers only the dim scorers + prefilter; the judge prompt and frontend are UNGUARDED**, check by hand.
 9. **Scoring changes require running `backend/tests/test_scorer.py` AND `backend/tests/test_profile.py`.**
 18. **Pillar 2 engines default off — but the gate is `ENGINEx_ENABLED OR <legacy flag>`** (`backend/src/core/settings.py`, `ENGINE2_ENABLED` / `ENGINE3_ENABLED`), so `ENGINE2_ENABLED=true` runs Engine 2 with `ENRICHMENT_ENABLED` false. E1 on; E2/E3/E4 off. With all off, behaviour must *exactly* match pre-Pillar-2 — no semantic queries, no LLM calls. Test BOTH names.
-19. **`JobScorer` default = 4 components MINUS 1 penalty** (Title 40 / Skill 40 / Location 10 / Recency 10, then **−30 negative title**; the −15 foreign penalty died 2026-08-12, #30). `SCORER_VERSION` = **8** (`backend/src/services/skill_matcher.SCORER_VERSION`) — bump it whenever a score moves. The **4 extra dims** (8 total, not 7) activate on #20's ONE condition (`:587`); the `engine1` kwarg gates the KEYWORD half only (`:480-483`/`:560`), never the dims. Don't flip defaults silently.
+19. **`JobScorer` default = 4 components MINUS 1 penalty** (Title 40 / Skill 40 / Location 10 / Recency 10, then **−30 negative title**; the −15 foreign penalty died 2026-08-12, #30). `SCORER_VERSION` = **8** (`backend/src/services/skill_matcher.SCORER_VERSION`) — bump it whenever a score moves. The **4 extra dims** (8 total, not 7) activate on #20's ONE condition; the `engine1` kwarg gates the KEYWORD half only, never the dims — both branches are in `skill_matcher.JobScorer.score`. Don't flip defaults silently.
 20. **Multi-dim scoring is gated on `user_preferences` ALONE** — a missing `enrichment_lookup` gives each dim its documented NEUTRAL half, never zeros (#29). Guard: `backend/tests/test_scorer.py::test_dims_neutral_not_zero_when_enrichment_missing`.
 27. **Multi-dim weights add 30 on top of the legacy 100 (raw max 130); the clamp to `[0, 100]` is load-bearing** — never remove it.
 

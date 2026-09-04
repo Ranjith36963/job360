@@ -15,7 +15,7 @@
 
 Discipline rule: a shelf earns its place only if (a) at least one real source can fill it and (b) a named consumer reads it. A shelf nobody fills or nothing consumes is dead weight — see the rejected list below.
 
-The three owner-named shelves are **DEADLINE**, **SALARY**, **VISA SPONSORSHIP**. Four shelves (salary, seniority, visa, workplace) already have paid-for consumers waiting: the multi-dim scorer weights SALARY 10 / SENIORITY 8 / VISA 6 / WORKPLACE 6 points (`core/settings.py:195-198`) — today those dims run mostly on empty inputs.
+The three owner-named shelves are **DEADLINE**, **SALARY**, **VISA SPONSORSHIP**. Four shelves (salary, seniority, visa, workplace) already have paid-for consumers waiting: the multi-dim scorer weights SALARY 10 / SENIORITY 8 / VISA 6 / WORKPLACE 6 points (`core/settings.py`) — today those dims run mostly on empty inputs.
 
 ### Identity block (not matchable shelves, but every row needs them)
 
@@ -33,7 +33,7 @@ The three owner-named shelves are **DEADLINE**, **SALARY**, **VISA SPONSORSHIP**
 | 1 | **title** | text | Primary role match — Title component is 40 of 100 legacy points | `JobScorer` title component | exists, filled |
 | 2 | **company** | text | Identity, dedup key half, display trust | dedup (`normalized_key`), UI | exists, filled |
 | 3 | **location** | text (raw) | UK door (rule #30) + location score 10 pts | `uk_gate.check_uk`, location component | exists; known leak: aijobs_ai drops the card's own location text so a "United States" job slipped the gate (harvest 2026-08-16) |
-| 4 | **description** | text | Raw material for skill match (40 pts), JOB SOURCE ENRICHMENT, and embeddings. Everything downstream eats this. | skill matcher, enrichment, embeddings | exists; 24% of catalog empty, 16/39 sources stub it (harvest 2026-08-16); prod 2026-08-07: 30% of active jobs <200 chars and enriched-field coverage tracks description length almost perfectly (`settings.py:234-236`) |
+| 4 | **description** | text | Raw material for skill match (40 pts), JOB SOURCE ENRICHMENT, and embeddings. Everything downstream eats this. | skill matcher, enrichment, embeddings | exists; 24% of catalog empty, 16/39 sources stub it (harvest 2026-08-16); prod 2026-08-07: 30% of active jobs <200 chars and enriched-field coverage tracks description length almost perfectly (`settings.py`) |
 | 5 | **posted_at** (+ `date_confidence`, `date_posted_raw`) | timestamp + enum | Recency score 10 pts; honesty about date trust | recency component, UI | exists (5-column date model, `models.py:35-41`); free fixes owed: climatebase `activation_date` (100% fill, code hardcodes None), eightykhours reads nonexistent `date_published` instead of `posted_at` |
 | 6 | **deadline** (+ `deadline_source`) | date + enum | OWNER-NAMED. "Closing soon" urgency, expired-job removal — an application after the deadline is wasted user effort | UI, feed ordering (unblocks §9) | exists, partially fed (8 sources read it; 4+ more carry it unread) |
 | 7 | **salary** = `salary_min`, `salary_max`, + NEW `salary_currency`, `salary_period`, `salary_is_estimated`, + derived `salary_min_gbp_annual`/`salary_max_gbp_annual` | numeric ×2, text ×2, bool, numeric ×2 | OWNER-NAMED. Salary dim is 10 pts; salary filter is a top-3 job-board filter. Without currency+period the numbers are lies: landingjobs live 2026-08-16 = 0/50 jobs GBP (46 EUR, 3 BRL, 1 USD) yet all stored as GBP; careerjet stores hourly and annual in the same field | salary dim (`salary.py`), display (`api/routes/jobs.py:43-49`) | min/max exist; currency/period/estimated DO NOT — the model clamp `models.py:91-95` silently assumes GBP-annual |
@@ -135,7 +135,7 @@ All field names below are from the live harvest of 2026-08-16 unless cited other
 |---|---|
 | Source — same response, unread (FREE) | himalayas `description` (avg 7,299 chars vs the `excerpt` we store at avg 187 — bigger on 20/20 samples) · pinpoint `key_responsibilities` (3,381) + `skills_knowledge_expertise` (1,998) beside the 1,625-char `description` we read · lever `lists[].content` (~5,200 chars already downloaded — task brief) · landingjobs `main_requirements`+`nice_to_have` · nofluffjobs `tiles.values[]` (100% fill on all 21,795 postings; today NO `description=` kwarg is passed at all — every row ships empty) |
 | Source — extra request (budget-cap pattern already exists in smartrecruiters/workday) | reed detail `jobDescription` (453-char teaser → ~4,700 full) · workable detail GET `.../jobs/{shortcode}` (description 2,237 + requirements 2,134 + benefits 1,884 — list endpoint genuinely has none) · nofluffjobs detail `requirements.description` · successfactors job-page JSON-LD `description` (8,876 chars; today description=title for all ~1,800 jobs/run) · nhs detail page (list gives a ~180-char excerpt) · climatebase detail page (list has no description field) |
-| Free derivation | the existing sweep: `workers/tasks.py::_backfill_thin_descriptions`, `DESCRIPTION_BACKFILL_PER_TICK=50` per 30-min cron tick (`settings.py:229-240`) |
+| Free derivation | the existing sweep: `workers/tasks.py::_backfill_thin_descriptions`, `DESCRIPTION_BACKFILL_PER_TICK=50` per 30-min cron tick (`settings.py`) |
 | JOB SOURCE ENRICHMENT | never |
 | ABSENT | `stub` (description==title or <600 chars — blocks the LLM pass for this job, §6) or `source_lacks_field` (hn_jobs, devitjobs structurally have none) |
 
@@ -278,13 +278,13 @@ Two rules the code enforces that this doc previously only asserted: re-running t
 **Text recovery MUST precede LLM shelf-filling, per job. Two independent proofs:**
 
 1. **Fabrication is cached.** A confident LLM answer extracted from reed's 453-char teaser or successfactors' description==title is a fabrication — and `enrich_job` is idempotent (second call on an enriched `job_id` is a no-op unless `force=True`, `job_enrichment.py:3-6`), so the wrong enum is PERMANENT until someone force-re-runs. Recover text first and the poison never enters.
-2. **Prod already measured the correlation.** 1,311 active jobs (30% of catalog) carry <200 chars of description, and coverage of every enriched field (workplace/seniority/visa) "tracks description length almost perfectly" (`settings.py:234-236`, measured 2026-08-07). Enriching thin jobs buys `unknown`s at full token price.
+2. **Prod already measured the correlation.** 1,311 active jobs (30% of catalog) carry <200 chars of description, and coverage of every enriched field (workplace/seniority/visa) "tracks description length almost perfectly" (`settings.py`, measured 2026-08-07). Enriching thin jobs buys `unknown`s at full token price.
 
 ---
 
 ## 7. Cost of JOB SOURCE ENRICHMENT at ~6,000 new jobs per run
 
-**Model:** the enrichment chain is OpenAI-primary — `llm_extract_validated` → `gpt-4o-mini` (paid, deterministic), then free-tier Gemini `gemini-3.7-flash` → Groq → Cerebras fallbacks (`settings.py:61,69`; `llm_provider.py:311,330,477-480`). Cost math below prices the primary; fallbacks only fire on OpenAI failure.
+**Model:** the enrichment chain is OpenAI-primary — `llm_extract_validated` → `gpt-4o-mini` (paid, deterministic), then free-tier Gemini `gemini-3.7-flash` → Groq → Cerebras fallbacks (`settings.py`; `llm_provider.py:311,330,477-480`). Cost math below prices the primary; fallbacks only fire on OpenAI failure.
 
 **Price** (OpenAI list price, web-verified 2026-08-16 — no price constant exists in the codebase): **$0.150 / 1M input tokens, $0.600 / 1M output tokens**; Batch API −50% on both. Source: openrouter.ai/openai/gpt-4o-mini, pricepertoken.com (checked 2026-08-16). Model is env-overridable (`OPENAI_MODEL`), so re-price with: cost/job = (in_tokens × in_price + out_tokens × out_price).
 
@@ -298,7 +298,7 @@ Two rules the code enforces that this doc previously only asserted: re-running t
 
 **Recommendation: two-pass, batched.** Not mainly for the ~$1.40/run saved — pass 1 IS the fabrication guard (§6) and the provenance stays honest (`source` beats `llm` in the trust order). Numbers are estimates on stated assumptions; re-measure after the first real sweep.
 
-**Budget reality check:** today's default enriches at most **20 jobs per run** (`ENRICHMENT_MAX_JOBS=20`, `settings.py:151`) with `ENRICHMENT_ENABLED` defaulting off (`job_enrichment.py:33`, rule #18). Filling 6,000/run is a deliberate budget raise and belongs in the worker's enrichment sweep cron — never the search hot path (the event loop has been frozen by catalog-scale work before; PR #123).
+**Budget reality check:** today's default enriches at most **20 jobs per run** (`ENRICHMENT_MAX_JOBS=20`, `settings.py`) with `ENRICHMENT_ENABLED` defaulting off (`job_enrichment.py:33`, rule #18). Filling 6,000/run is a deliberate budget raise and belongs in the worker's enrichment sweep cron — never the search hot path (the event loop has been frozen by catalog-scale work before; PR #123).
 
 **Shipped budget (2026-08-17).** The step-3 sweep has TWO hard ceilings, both from settings, both checked BEFORE each call, and it stops at whichever bites first: `SHELF_ENRICHMENT_MAX_JOBS` (default 500) and `SHELF_ENRICHMENT_MAX_SPEND_USD` (default $1.00). A job cap alone cannot bound cost — the same 500 jobs cost several times more when the ads are long — so the spend cap is the real rail. Hitting either logs at ERROR with how many eligible jobs went unread; a cap that trims silently is a cap nobody can act on (same lesson as `MAX_REFRESH_INGEST_IDS`). Prices are `LLM_INPUT_USD_PER_1M` / `LLM_OUTPUT_USD_PER_1M`, env-overridable for the same reason `OPENAI_MODEL` is — a stale hardcoded price is a silent lie. Input tokens are measured from the real prompt at ~4 chars/token (≈15% conservative against the tiktoken dry run, i.e. the cap trips early not late); output is the fixed ~200-token JSON shape, which cannot be measured without making the call.
 
@@ -310,7 +310,7 @@ Two rules the code enforces that this doc previously only asserted: re-running t
 
 ## 8. Embeddings — what text represents a job
 
-Catalog-side only. Infra exists: `job_embeddings` (no user_id — rule #17), `SEMANTIC_ENABLED` default off (`settings.py:221`), convergence backfill `EMBED_BACKFILL_PER_RUN=300` (`settings.py:227`). The enrichment `requirements_summary` field (≤250 chars) was designed as embedding input (`job_enrichment_schema.py:162-163`).
+Catalog-side only. Infra exists: `job_embeddings` (no user_id — rule #17), `SEMANTIC_ENABLED` default off (`settings.py`), convergence backfill `EMBED_BACKFILL_PER_RUN=300` (`settings.py`). The enrichment `requirements_summary` field (≤250 chars) was designed as embedding input (`job_enrichment_schema.py:162-163`).
 
 **Embed this per job, in this order (stable template):**
 

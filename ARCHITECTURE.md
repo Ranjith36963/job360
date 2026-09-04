@@ -27,7 +27,7 @@ Job360 *was* a UK-focused multi-domain job search aggregator. This path fetches 
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
 | Migration files | **37** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **237** | `backend/tests/` |
+| `test_*.py` files | **238** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -64,7 +64,7 @@ job360/
 ├── backend/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev + indeed extras, ruff/mypy/pytest config
-│   ├── data/                         # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — the store is Postgres; DB_PATH is a connection selector, not a file (settings.py:15-20, pg.py:732-737)
+│   ├── data/                         # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — the store is Postgres; DB_PATH is a connection selector, not a file (settings.py, pg.py:732-737)
 │   ├── migrations/                   # forward/reverse SQL migration pairs + runner.py (counts: ARCHITECTURE.md code-facts)
 │   ├── src/
 │   │   ├── main.py                   # Orchestrator: run_search(), SOURCE_REGISTRY (41 keys → 40 instances), _build_sources()
@@ -120,7 +120,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # across 237 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 238 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -657,9 +657,9 @@ CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
 CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 ```
 
-**Pragmas:** none. This was a SQLite-era line (`journal_mode=WAL`, `busy_timeout=5000`); the store has been Postgres since 2026-07-02 and sets neither — `database.py:94` says so in as many words, `db_retry.open_db()` accepts `busy_timeout_ms` only for signature compatibility and ignores it (`db_retry.py:30-31`), and the `pg.py` shim turns any remaining `PRAGMA` into a no-op (`pg.py:316-317`).
+**Pragmas:** none. This was a SQLite-era line (`journal_mode=WAL`, `busy_timeout=5000`); the store has been Postgres since 2026-07-02 and sets neither — `database.py` says so in as many words, `db_retry.open_db()` accepts `busy_timeout_ms` only for signature compatibility and ignores it (`db_retry.py:30-31`), and the `pg.py` shim turns any remaining `PRAGMA` into a no-op (`pg.py:316-317`).
 
-**Auto-purge:** `purge_old_jobs(days=30)` deletes jobs by **liveness, not ingestion** — `DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < cutoff` (`repositories/database.py:688,723`). A posting still live after 30 days is KEPT; `first_seen` is only the fallback for legacy rows whose `last_seen_at` is NULL. It also deletes the catalog-derived child rows itself because the shim strips every FK clause, including `ON DELETE CASCADE`. Runs at the start of every pipeline run (`main.py:840`).
+**Auto-purge:** `purge_old_jobs(days=30)` deletes jobs by **liveness, not ingestion** — `DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < cutoff` (`repositories/database.py`). A posting still live after 30 days is KEPT; `first_seen` is only the fallback for legacy rows whose `last_seen_at` is NULL. It also deletes the catalog-derived child rows itself because the shim strips every FK clause, including `ON DELETE CASCADE`. Runs at the start of every pipeline run (`main.py:840`).
 
 **first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a database DEFAULT).
 
@@ -781,10 +781,10 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `REED_API_KEY` / `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` / `JSEARCH_API_KEY` / `JOOBLE_API_KEY` / `SERPAPI_KEY` / `CAREERJET_AFFID` / `FINDWORK_API_KEY` / `DFE_APPRENTICESHIPS_API_KEY` | No | Keyed API sources (skip on empty) |
 | `GITHUB_TOKEN` | No | Higher GitHub API rate limit (5000/hr vs 60/hr) |
 | `SMTP_EMAIL` + `SMTP_PASSWORD` (+ `SMTP_HOST` / `SMTP_PORT`) | No | The PLATFORM's SMTP credentials — the `mailtos://` fallback for both system email and the per-user email channel (`services/channels/email_url.py:121-140`). Prefer `RESEND_API_KEY` (row below): Railway blocks SMTP 25/465/587 |
-| ~~`NOTIFY_EMAIL`~~ / ~~`SLACK_WEBHOOK_URL`~~ / ~~`DISCORD_WEBHOOK_URL`~~ | **DEAD** | Declared at `core/settings.py:78,81,82` and imported by nothing in `src/`, `tests/` or `scripts/`. They drove the pre-Batch-2 single-tenant notifier, which was deleted; setting them has no effect. Slack/Discord/Telegram are per-user channels via the Connect flow now |
+| ~~`NOTIFY_EMAIL`~~ / ~~`SLACK_WEBHOOK_URL`~~ / ~~`DISCORD_WEBHOOK_URL`~~ | **DEAD** | Declared at `core/settings.py` and imported by nothing in `src/`, `tests/` or `scripts/`. They drove the pre-Batch-2 single-tenant notifier, which was deleted; setting them has no effect. Slack/Discord/Telegram are per-user channels via the Connect flow now |
 | `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker (default 40k–120k) |
-| `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py:25). Enforced by `validate_required_env()` |
-| `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py:60-71) |
+| `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py). Enforced by `validate_required_env()` |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py) |
 | `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
 | `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
 | `APP_ENV` / `RAILWAY_ENVIRONMENT` | No | Prod detection for HSTS + required-env validation (`APP_ENV=production` OR any `RAILWAY_ENVIRONMENT`) |
@@ -807,9 +807,9 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `OAUTH_BEARER_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `Authorization: Bearer j360a_…` attempts per IP per minute — its own bucket, only a hash matching **no** row counts (an expired token is normal, not an attack) |
 | `OAUTH_CLIENT_PRUNE_DAYS` / `OAUTH_MAX_CLIENTS` / `OAUTH_PRUNE_SAMPLE` | No (default `7` / `10000` / `20`) | Housekeeping: a registered client with no grant ever is dropped after N days; the client table is capped (prune-at-ceiling, then 503); the prune runs after 1-in-N `/token` calls, in its own transaction, never delaying the exchange |
 | `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user cap on concurrent `POST /search` (429 over cap) |
-| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:155) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
-| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:152) |
-| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py:151) — in practice the REAL selection lever, not the threshold |
+| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
+| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py) |
+| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py) — in practice the REAL selection lever, not the threshold |
 | Slack/Discord/Telegram OAuth (`SLACK_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`, `TELEGRAM_BOT_TOKEN`/`_USERNAME`, `OAUTH_REDIRECT_BASE`) | No | One-click channel connect flows (skip endpoint when blank) |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
@@ -835,7 +835,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `MIN_STORE_SCORE` | 1 (env-overridable) | **Catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`) (`settings.py:115-120`, applied at `main.py:729`; re-applied by the backfill at `services/rescore.py:271`). It does **not** gate `user_feed`: `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison (`workers/tasks.py:208-217`) |
+| `MIN_STORE_SCORE` | 1 (env-overridable) | **Catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`) (`settings.py`, applied at `main.py:729`; re-applied by the backfill at `services/rescore.py:271`). It does **not** gate `user_feed`: `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison (`workers/tasks.py:208-217`) |
 
 ### Rate Limits (`settings.py:RATE_LIMITS`)
 

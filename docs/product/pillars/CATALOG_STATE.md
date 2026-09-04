@@ -78,7 +78,7 @@ indexes + TOAST**, not row data. (Why, was not investigated.)
 
 ### 2.1 `jobs` — the universal shelf, all 36 columns
 
-Source of truth for the DDL: `backend/src/repositories/database.py:99-127` (`init_db`),
+Source of truth for the DDL: `backend/src/repositories/database.py` (`init_db`),
 mirrored at `:171-199` (`_migrate`), plus migrations `0011` / `0021` / `0029`.
 Note the actual `CREATE TABLE jobs` lives in the **legacy init path**, not in a numbered
 migration — `0000_baseline.up.sql` is a documented no-op, and `0011`'s
@@ -101,7 +101,7 @@ migration — `0000_baseline.up.sql` is a documented no-op, and `0011`'s
 | `experience_level` | text | `''` | YES | `detect_experience_level`, `main.py:706` | CATALOG |
 | `normalized_company` | text | — | NO | `Job.normalized_key()` | CATALOG (dedup key) |
 | `normalized_title` | text | — | NO | `Job.normalized_key()` | CATALOG (dedup key) |
-| `first_seen` | text | — | NO | pipeline, always `now()` at insert (`database.py:413`) | CATALOG |
+| `first_seen` | text | — | NO | pipeline, always `now()` at insert (`database.py`) | CATALOG |
 | `posted_at` | text | — | YES | source (claimed posting date) | CATALOG |
 | `first_seen_at` | text | — | YES | pipeline | CATALOG |
 | `last_seen_at` | text | — | YES | pipeline — **this is what purge reads** | CATALOG |
@@ -181,7 +181,7 @@ run_uuid, per_source_errors, per_source_duration, total_duration, user_id, match
 ## 3. HOW A JOB GETS IN — the real path, function by function
 
 **One full sweep per day.** ARQ cron `refresh_catalog` at **04:00 UTC**
-(`backend/src/workers/settings.py:222`) → `workers/tasks.py:1416` → `src.main.run_search()`.
+(`backend/src/workers/settings.py`) → `workers/tasks.py:1416` → `src.main.run_search()`.
 A user clicking Search also triggers `run_search()`.
 
 `TieredScheduler.tick(force=True)` (`main.py:944`) dispatches **all 40 source instances at
@@ -199,7 +199,7 @@ wired to any process (`scheduler.py:194-199` says so explicitly).
 | 6 | dedup **within the run** | `services/deduplicator.py` | 4 layers: exact key → RapidFuzz → TF-IDF → optional embedding-repost. |
 | 7 | score floor | same thread | `MIN_STORE_SCORE` drop. |
 | 8 | **UK gate** | `services/uk_gate.check_uk`, `main.py:1040` | THE single chokepoint that refuses foreign jobs (hard rule #30). Not per-source, not a penalty. |
-| 9 | insert | `database.py:372-448` `insert_job()` | `INSERT OR IGNORE` on the UNIQUE key. Duplicate silently no-ops (`rowcount=0`). **One exception:** if duplicate AND incoming description is non-empty while stored one is empty, a separate UPDATE backfills the description. Empty→non-empty is the only allowed transition. Each insert is in its own try/except so one poison row never aborts the run. |
+| 9 | insert | `database.py` `insert_job()` | `INSERT OR IGNORE` on the UNIQUE key. Duplicate silently no-ops (`rowcount=0`). **One exception:** if duplicate AND incoming description is non-empty while stored one is empty, a separate UPDATE backfills the description. Empty→non-empty is the only allowed transition. Each insert is in its own try/except so one poison row never aborts the run. |
 
 ### 3.1 The only normalization that exists
 
@@ -207,7 +207,7 @@ wired to any process (`scheduler.py:194-199` says so explicitly).
 
 | Call site | Why |
 |---|---|
-| `database.py:382` | at insert time, to fill the dedup columns |
+| `database.py` | at insert time, to fill the dedup columns |
 | `deduplicator.py:117` | in-run dedup grouping |
 | `main.py:1028` | the id-backfill lookup |
 
@@ -250,7 +250,7 @@ Short answer: **it mostly doesn't.**
 
 ### 4.1 Removal — the only real DELETE
 
-`purge_old_jobs()`, `backend/src/repositories/database.py:674-730`.
+`purge_old_jobs()`, `backend/src/repositories/database.py`.
 Deletes where `COALESCE(last_seen_at, first_seen) < now - 30 days`.
 Keyed on **LIVENESS**, not age — a job re-scraped daily never ages out, ever.
 
@@ -277,7 +277,7 @@ threshold — the catalog is only 44 days old and everything keeps being re-scra
 `ACTIVE` → `POSSIBLY_STALE` (≥2 misses + ≥12h absent) → `LIKELY_STALE` (≥3 misses + ≥24h absent) → `CONFIRMED_EXPIRED` (sticky).
 
 Runs on two paths: the `nightly_ghost_sweep` ARQ cron at **02:00 UTC**
-(`workers/settings.py:211`), and `_ghost_detection_pass` inside every `run_search`
+(`workers/settings.py`), and `_ghost_detection_pass` inside every `run_search`
 (`main.py:1005`).
 
 **Live state counts (measured 2026-08-16, 10,579 jobs):**
@@ -552,7 +552,7 @@ Compounding: a field 93.6% unknown inside a table covering 62% of jobs is unknow
 ### 6.2 JOB SOURCE ENRICHMENT — token cost
 
 Provider chain: **OpenAI `gpt-4o-mini` PRIMARY**
-(`services/profile/llm_provider.py:329-333`, `core/settings.py:61`) → Gemini
+(`services/profile/llm_provider.py:329-333`, `core/settings.py`) → Gemini
 (`gemini-3.7-flash`) → Groq (`llama-3.3-70b-versatile`) → Cerebras (`gpt-oss-120b`),
 the last three all free-tier.
 
@@ -612,7 +612,7 @@ run, blows the free tier.** SerpApi does not scale with catalog size — it stay
 at 1× or 10×.
 
 Other limits, none binding today: DfE apprenticeships 150 req / 5-min rolling window
-(`core/settings.py:318`); Reed client-throttled to concurrent=1 / 2.0s delay
+(`core/settings.py`); Reed client-throttled to concurrent=1 / 2.0s delay
 (~1,800 req/hr ceiling vs its 2,000 req/hr budget, `scheduler.py:8`).
 No other source carries a documented hard external quota.
 
@@ -624,13 +624,13 @@ No other source carries a documented hard external quota.
 
 | # | Problem | Evidence | Impact |
 |---|---|---|---|
-| **B1** | **Embedding backfill can never run.** `backend/Dockerfile` installs `.[semantic]` + torch (line 20); `backend/Dockerfile.worker` installs plain `.` (line 17) — no sentence-transformers. The ARQ worker is exactly where `refresh_catalog` + the embedding backfill run (`workers/tasks.py:1293-1330`). | `job_embeddings` = 687 rows on both 2026-08-15 and 2026-08-16 while `jobs` grew 9,977 → 10,579. `EMBED_BACKFILL_PER_RUN=300` (`settings.py:227`) means it *should* be attempting 300/run. | 95.7% of the catalog is invisible to semantic retrieval. Structural, not budget. |
-| **B2** | **JOB SOURCE ENRICHMENT has been stalled since 2026-08-08.** Cron `enrichment_sweep` fires every 30 min (`workers/settings.py:229`, budget `ENRICHMENT_MAX_JOBS=20`) and lands nothing. | `max(enriched_at)` = `2026-08-08T14:38:24Z`, measured live 2026-08-16. 0 rows in 24h, 0 in 7d. | Coverage frozen at 62% while the catalog grows. Root cause NOT diagnosed. |
+| **B1** | **Embedding backfill can never run.** `backend/Dockerfile` installs `.[semantic]` + torch (line 20); `backend/Dockerfile.worker` installs plain `.` (line 17) — no sentence-transformers. The ARQ worker is exactly where `refresh_catalog` + the embedding backfill run (`workers/tasks.py:1293-1330`). | `job_embeddings` = 687 rows on both 2026-08-15 and 2026-08-16 while `jobs` grew 9,977 → 10,579. `EMBED_BACKFILL_PER_RUN=300` (`settings.py`) means it *should* be attempting 300/run. | 95.7% of the catalog is invisible to semantic retrieval. Structural, not budget. |
+| **B2** | **JOB SOURCE ENRICHMENT has been stalled since 2026-08-08.** Cron `enrichment_sweep` fires every 30 min (`workers/settings.py`, budget `ENRICHMENT_MAX_JOBS=20`) and lands nothing. | `max(enriched_at)` = `2026-08-08T14:38:24Z`, measured live 2026-08-16. 0 rows in 24h, 0 in 7d. | Coverage frozen at 62% while the catalog grows. Root cause NOT diagnosed. |
 | **B3** | **No job-liveness check exists.** The `apply_url` is never re-fetched. `CONFIRMED_EXPIRED`'s docstring promises "a later direct-URL verification step" that was never built. | Zero grep hits in `backend/src/`. The 242 `confirmed_expired` rows have `min(consecutive_misses)=0` — set by `scripts/uk_sweep.py`, not by absence. | Dead links stay in the catalog indefinitely. |
 | **B4** | **`likely_stale` does nothing.** 5,060 jobs (47.8%) flagged probably-dead remain fully present and searchable; the flag's only consumer is `should_exclude_from_24h()` (`ghost_detection.py:48-50`). | State counts, §4.2 | Half the catalog may be dead and users still see it. |
 | **B5** | **Deadline is 1.3% filled and the structured path is 0%.** 8 source files can set `deadline_source='listing'`; that value appears 0 times in prod. 24 jobs are past their own deadline and still shown. | §4.4 | Expired postings shown as live. |
 | **B6** | **Stub descriptions poison everything downstream.** 24.1% of jobs have an empty description; devitjobs/greenhouse/workday/smartrecruiters (60% of the catalog) are majority-under-300-chars. | §5.3 | JOB SOURCE ENRICHMENT and embeddings both read the description — a stub cannot yield facts. |
-| **B7** | **`jobs.last_updated_at` is a dead column** — declared at `database.py:119` and `:176`, zero write sites in `backend/src/`, 0% filled in prod. | grep + live count | Schema noise; anything reading it silently gets NULL. |
+| **B7** | **`jobs.last_updated_at` is a dead column** — declared at `database.py` and `:176`, zero write sites in `backend/src/`, 0% filled in prod. | grep + live count | Schema noise; anything reading it silently gets NULL. |
 | **B8** | **5 `job_enrichment` fields are 100% empty.** `locations`, `employer_type` (both already dropped from the extraction schema per `job_enrichment_schema.py:12-19`), plus `remote_region`, `apply_instructions`, `red_flags` (never wired). | §5.5 | Dead columns that look like gaps in every audit. |
 | **B9** | **Schema drift:** `run_log.matcher_stats` exists in prod but in no numbered migration — only added via `database.py::_migrate()`. Likewise the real `CREATE TABLE jobs` lives in the legacy `init_db()` path, not a migration; `0011`'s copy is a hand-synced mirror. | §2.4, §2.1 | A fresh migrate-only environment will not match prod. |
 | **B10** | **The tiered scheduler is dead code in prod.** `TieredScheduler.tick(force=True)` ignores all tier intervals; `run_forever()` is wired to no process (`scheduler.py:194-199`). Hard rule #15 (new sources must set `.category`) therefore guards a tier that never fires today. | `main.py:944`, `scheduler.py` | One sweep/day, not the tiered polling the code implies. |

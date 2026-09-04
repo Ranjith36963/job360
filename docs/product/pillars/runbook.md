@@ -12,7 +12,7 @@
 >
 > ```bash
 > # Local dev — the docker-compose.dev.yml Postgres on port 5433.
-> # DATABASE_URL defaults to this (backend/src/core/settings.py:25).
+> # DATABASE_URL defaults to this (backend/src/core/settings.py).
 > psql postgresql://job360:job360dev@localhost:5433/job360
 >
 > # Production — see CLAUDE.md. Use DATABASE_PUBLIC_URL: plain
@@ -37,7 +37,7 @@ python -m src.cli status
 ### See the last 20 runs with per-source timing + errors
 
 `run_log` is **per-user** operational metadata — it has a `user_id` column
-(migration `0010`, mirrored at `backend/src/repositories/database.py:208`), and
+(migration `0010`, mirrored at `backend/src/repositories/database.py`), and
 rule #12 applies. Scope by it, or you are reading someone else's runs:
 
 ```sql
@@ -46,7 +46,7 @@ FROM run_log WHERE user_id = '<uuid>' ORDER BY timestamp DESC LIMIT 20;
 ```
 
 That is the query `GET /api/runs/recent` (auth-gated) runs — `get_recent_runs(user_id=…)`
-at `backend/src/repositories/database.py:2002-2015`, which also drops legacy rows with a
+at `backend/src/repositories/database.py`, which also drops legacy rows with a
 NULL `user_id`. `GET /api/runs/source-health` sits beside it
 (`backend/src/api/routes/runs.py:63,150`). There is no bare `GET /api/runs`.
 
@@ -385,7 +385,7 @@ dies with the web process (`profile.py:179-184`).
 
 What `rescore_user_feed` actually does, precisely:
 
-- It reads **up to 50,000** catalog rows — `get_catalog_jobs_for_rescore(limit=50000)`, `backend/src/repositories/database.py:750-777`. The SQL is `SELECT … FROM jobs ORDER BY date_found DESC LIMIT ?` with **no date predicate**. The 30-day horizon people quote is a *consequence* of `purge_old_jobs()` capping the catalog, not a filter in this query — and the limit is deliberately set far above the catalog so a "full re-score" really is one.
+- It reads **up to 50,000** catalog rows — `get_catalog_jobs_for_rescore(limit=50000)`, `backend/src/repositories/database.py`. The SQL is `SELECT … FROM jobs ORDER BY date_found DESC LIMIT ?` with **no date predicate**. The 30-day horizon people quote is a *consequence* of `purge_old_jobs()` capping the catalog, not a filter in this query — and the limit is deliberately set far above the catalog so a "full re-score" really is one.
 - It clears the user's LLM verdicts **only when `ENGINE4_ENABLED or MATCHER_ENABLED`** (`backend/src/services/rescore.py:589,595-598`). With the judge off — the default — no verdict is touched.
 
 And the part that is easy to get wrong:
