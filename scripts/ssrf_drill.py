@@ -81,6 +81,14 @@ FETCHER_SRC = BACKEND / "src" / "services" / "fetch" / "fetcher.py"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
+# Cases 3/5/7 mock HTTP with aioresponses, which cannot build an aiohttp>=3.14
+# ClientResponse on its own (missing ``stream_writer``). pytest gets the shim
+# from tests/conftest.py; this script runs outside pytest, so it installs the
+# same one itself. Must happen before any ClientResponse is constructed.
+from tests.aiohttp314_shim import install as _install_aiohttp314_shim  # noqa: E402
+
+_install_aiohttp314_shim()
+
 _CASE_COUNTER = {"n": 0}
 
 
