@@ -50,8 +50,8 @@ Profile (CV+Prefs) +-> Fetch -> Prefilter -> Score -> Dedup -+   +-> CSV
 
 Two legacy opt-in feature flags gate the advanced surfaces (both default OFF; hard rule #18 — `.claude/skills/hard-rules/SKILL.md`). Each is only HALF of its gate — the effective condition is `ENGINEx_ENABLED or <legacy flag>`, so test both names:
 
-- `ENRICHMENT_ENABLED=true` → the LLM **enrichment step** runs, so the Batch-2.9 dimensions read real data instead of their neutral halves. The dimensions themselves are not gated on this flag — they fire on `user_preferences` alone (`skill_matcher.py:587`, rule #20). Effective gate at every call site: `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853,1137`)
-- `SEMANTIC_ENABLED=true` → embeddings into the pgvector store (`job_embeddings.embedding`, migration `0027` — **not** ChromaDB; see `services/pg_vector_index.py`). Hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs.py:368-369`), while the embedding WRITES are gated on `SEMANTIC_ENABLED` alone (`main.py:1292,1348`) — so `ENGINE3_ENABLED=true` by itself queries an index nothing fills. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
+- `ENRICHMENT_ENABLED=true` → the LLM **enrichment step** runs, so the Batch-2.9 dimensions read real data instead of their neutral halves. The dimensions themselves are not gated on this flag — they fire on `user_preferences` alone (rule #20). Effective gate at every call site: `ENGINE2_ENABLED or ENRICHMENT_ENABLED` — enforced by `backend/tests/test_engine_gate_parity.py`
+- `SEMANTIC_ENABLED=true` → embeddings into the pgvector store (`job_embeddings.embedding`, migration `0027` — **not** ChromaDB; see `services/pg_vector_index.py`). Hybrid retrieval (RRF fusion of keyword + **BM25** + vector rankings, then **cross-encoder rerank**) is gated on `ENGINE3_ENABLED or SEMANTIC_ENABLED` (`api/routes/jobs._maybe_apply_hybrid_reorder`), while the embedding WRITES are gated on `SEMANTIC_ENABLED` alone — so `ENGINE3_ENABLED=true` by itself queries an index nothing fills. It does **NOT** activate ESCO skill normalisation: that path is gated on `is_available()` as well as the flag, and the `data/esco/` artefacts are gitignored, absent from the image, and were never built — so it stays a no-op (see `docs/product/PILLAR1_EXTRACTION_AUDIT.md`)
 
 ---
 
@@ -120,7 +120,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # across 237 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 238 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -228,7 +228,7 @@ unique = deduplicate(all_jobs)
 # Filter by MIN_STORE_SCORE (the STORAGE floor, default 1) — NOT MIN_MATCH_SCORE.
 # MIN_MATCH_SCORE (30) is a DISPLAY floor applied at read time; the pipeline used
 # to drop <30 before persisting, which destroyed rows a thin profile or recency
-# decay had scored low (src/main.py:720-737).
+# decay had scored low.
 kept = [j for j in unique_jobs if (j.match_score or 0) >= MIN_STORE_SCORE]
 
 # Check against DB for new-ness
@@ -285,10 +285,10 @@ Note: as of 2026-04-09 (commit `3ba1342`) all default keyword lists in `keywords
 
 | # | Engine | Service | Flag | Default |
 |---|--------|---------|------|---------|
-| 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | `ENGINE1_ENABLED` (no legacy alias; `skill_matcher.py:480-483` reads it, `:560` gates the keyword half) | **true** |
-| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, `skill_matcher.py:582-617`; data from the enrichment step `services/job_enrichment.py`) | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` at every call site (`main.py:853,1137`, `rescore.py:85`, `api/routes/jobs.py:779`, `workers/tasks.py:237`) — this gates the enrichment DATA, not the dim path: the dims fire on `user_preferences` alone (`skill_matcher.py:587`, rule #20) | false |
+| 1 | Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | `ENGINE1_ENABLED` (no legacy alias; read in `JobScorer.__init__`, gates the keyword half of `JobScorer.score`) | **true** |
+| 2 | Dimensions | `services/scoring_dimensions.py` (+30 seniority/salary/visa/workplace, applied in `JobScorer.score`; data from the enrichment step `services/job_enrichment.py`) | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` at every call site — this gates the enrichment DATA, not the dim path: the dims fire on `user_preferences` alone (rule #20). Both pinned by `backend/tests/test_engine_gate_parity.py` | false |
 | 3 | Hybrid | `services/embeddings.py` + `pg_vector_index.py` + `retrieval.py` (`vector_index.py` is the legacy Chroma wrapper, no production caller) | reads: `ENGINE3_ENABLED` **or** `SEMANTIC_ENABLED`; embedding writes: `SEMANTIC_ENABLED` alone | false |
-| 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` (`main.py:352`, `rescore.py:395,589`) | false |
+| 4 | LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` at every call site (`backend/tests/test_engine_gate_parity.py`) | false |
 
 **Engine 4 — LLM judge detail:**
 - Service: `backend/src/services/llm_matcher.py`. `MatchVerdict{fit_score: int 0-100, verdict: str, reason: str}`.
@@ -307,7 +307,7 @@ Every row written to `user_feed` now carries a `profile_version INTEGER` column 
 Two operating modes:
 
 - **Mode 1 — profile content changes.** When `POST /api/profile` (save or upload) completes, the API trigger in `src/api/routes/profile.py` compares the last two `user_profile_versions` snapshots. If the content differs, it enqueues `rescore_user_feed_task` on the ARQ worker queue (`src/api/routes/profile.py:163`) — a deploy that kills the web process no longer drops the re-score, and ARQ retries it. Only when the queue is unreachable does it fall back to an in-process `asyncio` task (`profile.py:179-184`). The rescore service (`src/services/rescore.py`) re-scores every job in that user's 30-day catalog view against the new profile, writing fresh keyword scores and stamping the new version. The LLM verdicts are cleared (`clear_user_verdicts` in `llm_matcher.py`) **only when the judge is on** — `matcher_on = ENGINE4_ENABLED or MATCHER_ENABLED` (`rescore.py:589,595-598`); with the judge off, which is the default, no verdict is touched. When it is on, the LLM re-judge runs for the top candidates. Either flag name opens it (rule #18).
-- **Mode 2 — ordinary search / refresh.** Newly-fetched jobs get scored and stamped with the current profile version. Every authenticated search ALSO runs `backfill_feed_from_catalog(user_id, db)` (`src/main.py:1272-1278`), which scores the shared catalog for that user and upserts feed rows — so existing rows are re-visited, not skipped. Their **scores** still hold steady: `upsert_feed_row` freezes the score on an existing row when the incoming `profile_version` **and** `scorer_version` both match the stored ones, and overwrites it when either differs (`src/services/feed.py:288-303`). `bucket` and both version stamps are always rewritten. Verdicts are separately protected by the `skip_existing` lock in `match_batch` (`src/services/llm_matcher.py:436,443`).
+- **Mode 2 — ordinary search / refresh.** Newly-fetched jobs get scored and stamped with the current profile version. Every authenticated search ALSO runs `main.backfill_feed_from_catalog`, which scores the shared catalog for that user and upserts feed rows — so existing rows are re-visited, not skipped. Their **scores** still hold steady: `upsert_feed_row` freezes the score on an existing row when the incoming `profile_version` **and** `scorer_version` both match the stored ones, and overwrites it when either differs (`src/services/feed.py:288-303`). `bucket` and both version stamps are always rewritten. Verdicts are separately protected by the `skip_existing` lock in `match_batch` (`src/services/llm_matcher.py:436,443`).
 
 **Invariant:** a job's score only changes when the PROFILE changes or `SCORER_VERSION` is bumped — never just because time passed. That is enforced by the version-conditional freeze above, not by skipping the write. The `jobs` and `job_enrichment` shared catalog tables are not touched (rules #10/#17 still hold).
 
@@ -657,7 +657,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
 CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
 ```
 
-**Pragmas:** none. This was a SQLite-era line (`journal_mode=WAL`, `busy_timeout=5000`); the store has been Postgres since 2026-07-02 and sets neither — `database.py:94` says so in as many words, `db_retry.open_db()` accepts `busy_timeout_ms` only for signature compatibility and ignores it (`db_retry.py:30-31`), and the `pg.py` shim turns any remaining `PRAGMA` into a no-op (`pg.py:316-317`).
+**Pragmas:** none. This was a SQLite-era line (`journal_mode=WAL`, `busy_timeout=5000`); the store has been Postgres since 2026-07-02 and sets neither — `repositories/db_retry.open_db` accepts `busy_timeout_ms` only for signature compatibility and ignores it (`db_retry.py:30-31`), and the `pg.py` shim turns any remaining `PRAGMA` into a no-op (`pg.py:316-317`).
 
 **Auto-purge:** `purge_old_jobs(days=30)` deletes jobs by **liveness, not ingestion** — `DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < cutoff` (`repositories/database.py:688,723`). A posting still live after 30 days is KEPT; `first_seen` is only the fallback for legacy rows whose `last_seen_at` is NULL. It also deletes the catalog-derived child rows itself because the shim strips every FK clause, including `ON DELETE CASCADE`. Runs at the start of every pipeline run (`main.py:840`).
 
@@ -781,10 +781,10 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `REED_API_KEY` / `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` / `JSEARCH_API_KEY` / `JOOBLE_API_KEY` / `SERPAPI_KEY` / `CAREERJET_AFFID` / `FINDWORK_API_KEY` / `DFE_APPRENTICESHIPS_API_KEY` | No | Keyed API sources (skip on empty) |
 | `GITHUB_TOKEN` | No | Higher GitHub API rate limit (5000/hr vs 60/hr) |
 | `SMTP_EMAIL` + `SMTP_PASSWORD` (+ `SMTP_HOST` / `SMTP_PORT`) | No | The PLATFORM's SMTP credentials — the `mailtos://` fallback for both system email and the per-user email channel (`services/channels/email_url.py:121-140`). Prefer `RESEND_API_KEY` (row below): Railway blocks SMTP 25/465/587 |
-| ~~`NOTIFY_EMAIL`~~ / ~~`SLACK_WEBHOOK_URL`~~ / ~~`DISCORD_WEBHOOK_URL`~~ | **DEAD** | Declared at `core/settings.py:78,81,82` and imported by nothing in `src/`, `tests/` or `scripts/`. They drove the pre-Batch-2 single-tenant notifier, which was deleted; setting them has no effect. Slack/Discord/Telegram are per-user channels via the Connect flow now |
+| ~~`NOTIFY_EMAIL`~~ / ~~`SLACK_WEBHOOK_URL`~~ / ~~`DISCORD_WEBHOOK_URL`~~ | **DEAD** | Declared in `core/settings.py` and imported by nothing in `src/`, `tests/` or `scripts/`. They drove the pre-Batch-2 single-tenant notifier, which was deleted; setting them has no effect. Slack/Discord/Telegram are per-user channels via the Connect flow now |
 | `TARGET_SALARY_MIN` / `TARGET_SALARY_MAX` | No | Salary range tiebreaker (default 40k–120k) |
 | `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py:25). Enforced by `validate_required_env()` |
-| `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py:60-71) |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (`settings.OPENAI_MODEL`) |
 | `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
 | `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
 | `APP_ENV` / `RAILWAY_ENVIRONMENT` | No | Prod detection for HSTS + required-env validation (`APP_ENV=production` OR any `RAILWAY_ENVIRONMENT`) |
@@ -807,9 +807,9 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `OAUTH_BEARER_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `Authorization: Bearer j360a_…` attempts per IP per minute — its own bucket, only a hash matching **no** row counts (an expired token is normal, not an attack) |
 | `OAUTH_CLIENT_PRUNE_DAYS` / `OAUTH_MAX_CLIENTS` / `OAUTH_PRUNE_SAMPLE` | No (default `7` / `10000` / `20`) | Housekeeping: a registered client with no grant ever is dropped after N days; the client table is capped (prune-at-ceiling, then 503); the prune runs after 1-in-N `/token` calls, in its own transaction, never delaying the exchange |
 | `MAX_CONCURRENT_SEARCHES_PER_USER` | No (default `3`) | Per-user cap on concurrent `POST /search` (429 over cap) |
-| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `ENRICHMENT_MIN_SCORE` — settings.py:155) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
-| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from (settings.py:152) |
-| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment (settings.py:151) — in practice the REAL selection lever, not the threshold |
+| `ENRICHMENT_THRESHOLD` | No (**default `10`**, inherited from `settings.ENRICHMENT_MIN_SCORE`) | Min match_score for a job to be LLM-enriched. The doc said 60 for months; the code has never used 60 |
+| `ENRICHMENT_MIN_SCORE` | No (default `10`) | The fallback `ENRICHMENT_THRESHOLD` resolves from |
+| `ENRICHMENT_MAX_JOBS` | No (default `20`) | Per-run cap on jobs sent for enrichment — in practice the REAL selection lever, not the threshold |
 | Slack/Discord/Telegram OAuth (`SLACK_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`, `TELEGRAM_BOT_TOKEN`/`_USERNAME`, `OAUTH_REDIRECT_BASE`) | No | One-click channel connect flows (skip endpoint when blank) |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | Only for ARQ worker | ARQ broker (default `redis://localhost:6379`) |
@@ -835,7 +835,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `MIN_STORE_SCORE` | 1 (env-overridable) | **Catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`) (`settings.py:115-120`, applied at `main.py:729`; re-applied by the backfill at `services/rescore.py:271`). It does **not** gate `user_feed`: `score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison (`workers/tasks.py:208-217`) |
+| `MIN_STORE_SCORE` | 1 (env-overridable) | **Catalog** floor — the spam cut a job must reach to enter the shared `jobs` table (inclusive — `>= MIN_STORE_SCORE`), re-applied by the backfill in `services/rescore.py`. It does **not** gate `user_feed`: `tasks.score_and_ingest` upserts a feed row for every prefilter survivor with no score comparison |
 
 ### Rate Limits (`settings.py:RATE_LIMITS`)
 
