@@ -32,7 +32,8 @@ docs at the repo root). Start here to find the right doc fast.
 | **Run it locally** | [`../backend/README.md`](../backend/README.md) · [`../frontend/README.md`](../frontend/README.md) |
 | **Contribute / open a PR** | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | **Debug a runtime problem** | [`troubleshooting.md`](product/troubleshooting.md) → [`pillars/runbook.md`](product/pillars/runbook.md) |
-| **Understand the architecture deeply** | [`pillars/`](product/pillars/README.md) (authoritative) → [`../ARCHITECTURE.md`](../ARCHITECTURE.md) |
+| **Know what to build next** | [`plans/2026-09-03-mission-roadmap.md`](plans/2026-09-03-mission-roadmap.md) — slices 0–6, one issue each |
+| **Understand the architecture deeply** | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) (product path vs legacy path) → [`pillars/`](product/pillars/README.md) (sourcing era, dated) |
 | **Know what's verified working** | [`CHECKLIST_KANBAN.md`](harness/CHECKLIST_KANBAN.md) |
 
 ---
@@ -53,7 +54,9 @@ docs at the repo root). Start here to find the right doc fast.
 | [`UPGRADE_PLAN.md`](harness/UPGRADE_PLAN.md) | Phase 1–3 execution plan (Postgres → deploy → monitoring): TDD + multi-agent, money + keys per phase. |
 | [`../CLAUDE.md`](../CLAUDE.md) | Load-bearing architecture doc: data flow, module map, **31 hard rules**, scoring, env vars. |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Deep technical reference: directory tree, DB schema, data-flow diagrams, dependencies. |
-| [`pillars/`](product/pillars/README.md) | **Authoritative** per-pillar deep reference (code-verified). See below. |
+| [`product/VISION.md`](product/VISION.md) | **The mission.** Agent thinks, Job360 remembers; never source/rank; build order; decision log Q1–Q18. |
+| [`plans/2026-09-03-mission-roadmap.md`](plans/2026-09-03-mission-roadmap.md) | The work list that follows from VISION.md — one issue per slice (#479–#483). |
+| [`pillars/`](product/pillars/README.md) | Per-pillar deep reference for the **sourcing era** (code-verified 2026-08, now dated). Slice 5 archives it. |
 | [`troubleshooting.md`](product/troubleshooting.md) | Dev-environment FAQ: port conflicts, Postgres connection/schema errors in tests, missing LLM keys, Redis on Windows. |
 | [`pillars/runbook.md`](product/pillars/runbook.md) | "I see a problem at 2am" operational guide — SQL queries + CLI commands. |
 | [`pillars/glossary.md`](product/pillars/glossary.md) | Plain-English definitions of every domain term. |
@@ -71,13 +74,15 @@ docs at the repo root). Start here to find the right doc fast.
 
 | Doc | What it is |
 |---|---|
-| [`PRD.md`](product/PRD.md) | Product requirements + vision. |
-| [`MONETIZATION_GAPS.md`](product/MONETIZATION_GAPS.md) | What's missing to charge money — payments, paywall, hosting, legal (code-verified gap analysis). |
+| [`product_design_rules.md`](product/product_design_rules.md) | The owner's product rules — 4 (user brings the job), 5 (agent thinks, Job360 remembers), 6 (free, pull, consent-first) are the mission. |
+| [`PRD.md`](product/PRD.md) | 🗄️ Sourcing-era product requirements (superseded by VISION.md). |
+| [`MONETIZATION_GAPS.md`](product/MONETIZATION_GAPS.md) | 🗄️ Sourcing-era paywall gap analysis — free for seekers now (rule 6). |
 | [`feedback_loops_map.md`](harness/feedback_loops_map.md) | The whole-tool map: 15 honest places to add feedback loops (signal + gate), across Pillars 1–3 + features, all answering to the master outcome loop. |
 | [`raw_feedback_loop.md`](harness/raw_feedback_loop.md) | Design: turn the hardcoded skill/company/domain/location lists into self-growing data via a gated LLM feedback loop (kills the tech/UK ceiling). |
 | [`peruser_cv_coverletter.md`](product/peruser_cv_coverletter.md) | Design: per-job AI-tailored CV + cover letter that learns from your edits (per-user 2-layer learning + guardrails). ~80% built. |
-| [`post_application.md`](product/post_application.md) | Design: the "after you apply" co-pilot — interview prep, mock interview, skill-gap, follow-up email, outreach (offer/salary deliberately out). |
-| [`plans/2026-06-21-free-premium-plans.md`](product/plans/2026-06-21-free-premium-plans.md) | Free/Premium tier design (not yet built). |
+| [`post_application.md`](product/post_application.md) | 🗄️ "After you apply" co-pilot design — the agent does this now (rule 5); we store what happened. |
+| [`plans/2026-06-21-free-premium-plans.md`](product/plans/2026-06-21-free-premium-plans.md) | 🗄️ Free/Premium tier design — not planned (rule 6). |
+| [`plans/2026-09-03-oauth-mcp/`](plans/2026-09-03-oauth-mcp/) | Slice 1 of the pivot (shipped, PR #488): OAuth 2.1 authorization server for MCP clients (intent / spec with security section / plan + diff-vs-plan). |
 | [`References.md`](harness/References.md) | Source-of-truth list of external references and research links. |
 
 ## 📘 Engine evaluation
