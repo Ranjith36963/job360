@@ -122,7 +122,10 @@ jobs:
       # aiohttp + aioresponses: scripts/ssrf_drill.py's fetcher-level cases
       # (3, 5, 7) import both — without them this step reds on ImportError,
       # a dead wire the chain job exists to catch everywhere ELSE.
-      - run: pip install pyyaml aiohttp aioresponses
+      # python-dotenv + psycopg: the guard reads its caps from
+      # src.core.settings, whose import chain is dotenv -> src.repositories.pg
+      # -> psycopg (first PR #496 run: 9/10 cases "No module named 'dotenv'").
+      - run: pip install pyyaml aiohttp aioresponses python-dotenv "psycopg[binary]"
 
       # Every NODE in detect -> triage -> repair -> verify -> PR has always been
       # healthy. The WIRES between them kept breaking silently: two spellings of
