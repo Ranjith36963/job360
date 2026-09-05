@@ -15,16 +15,12 @@ dependencies = [
     # when (and only when) the caller omitted it, which is exactly aioresponses'
     # case; real aiohttp traffic is untouched and nothing ships to production.
     "aiohttp>=3.14.1",
-    "defusedxml>=0.7.1",  # M18: XXE-safe parsing of untrusted RSS/XML job feeds
     "psycopg[binary,pool]>=3.2",  # async Postgres driver (Phase 1) + AsyncConnectionPool (per-request connection reuse)
     "python-dotenv>=1.0.0",
-    "jinja2>=3.1.0",
     "click>=8.1.0",
-    "pandas>=2.0.0",
     "pdfplumber>=0.10.0",
     "python-docx>=1.1.0",
     "rich>=13.0.0",
-    "humanize>=4.9.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "python-multipart>=0.0.9",
@@ -50,12 +46,10 @@ dependencies = [
     "google-generativeai>=0.8.0",
     "groq>=0.11.0",
     "cerebras-cloud-sdk>=1.0.0",
-    # Batch 2 — multi-user delivery layer (auth, channels, notifications).
+    # Batch 2 — multi-user auth layer.
     "argon2-cffi>=23.1.0",          # password hashing (argon2id, OWASP-recommended)
     "itsdangerous>=2.2.0",          # signed session cookies
-    "apprise>=1.7.0",               # multi-channel notification sending
     "email-validator>=2.1.0",       # pydantic EmailStr (via pydantic[email])
-    "cryptography>=42.0.0",         # Fernet for user_channels credential storage
     # DECLARED HERE BY SLICE 5 (#483), and that is the point. `redis` was never
     # a direct dependency — it arrived transitively through `arq`, which this
     # slice deletes with the worker. Two things still import it lazily:
@@ -73,12 +67,6 @@ dependencies = [
     # the source CV?) and the two-pass profile merge. Lazy-imported per rules
     # #11/#16 — small and C-backed, but not on the import path.
     "rapidfuzz>=3.0",
-    # scikit-learn was the TF-IDF layer of the four-layer deduplicator, deleted
-    # in slice 5 (#483). NOTHING under backend/src imports it today. Kept for
-    # now because the semantic extra's stack expects it and dropping a heavy
-    # dep is its own verification job — a follow-up, not a silent side effect
-    # of this slice.
-    "scikit-learn>=1.4",
     "sentry-sdk>=1.40.0",           # error tracking + performance monitoring (Phase 3)
 ]
 
@@ -140,33 +128,26 @@ include = ["src*"]
 
 # ISSUE #260 — WITHOUT THIS BLOCK THE DATA-DRIVEN SERVICES SHIP BLIND.
 #
-# `include = ["src*"]` copies .py files only. Two services are data-driven by
-# design, so their .txt files are as load-bearing as their code:
+# `include = ["src*"]` copies .py files only. `job_signals/` is data-driven by
+# design, so its .txt files are as load-bearing as its code (rule #28's
+# rationale extended: the workplace / seniority vocabularies are data so a new
+# term is a data edit, not a code edit).
 #
-#   uk_gazetteer/ — rule #30: UK places are matched from a 52k-row gazetteer,
-#                   never a hand-typed city list.
-#   job_signals/  — rule #28's rationale extended: the workplace / seniority
-#                   vocabularies are data so a new term is a data edit, not a
-#                   code edit.
-#
-# Both used to live in `backend/data/`, outside every package, and production
-# runs `pip install .` — so they never reached site-packages. The gazetteer
-# degraded silently to empty sets for four days (#260); job_signals had the
+# It used to live in `backend/data/`, outside every package, and production
+# runs `pip install .` — so it never reached site-packages. It had the
 # identical bug until 2026-08-12, returning {} for all three vocabularies so
 # `signal_backed_lookup` and `detect_seniority` answered UNKNOWN for every job.
 #
 # ANY new shipped data directory must be added here AND live under `src/`.
 # `tests/test_shipped_data.py` matches EVERY git-tracked file under `src/data/`
 # against the globs below, so an undeclared directory fails — and so does a new
-# EXTENSION in a declared one (`*.txt` and `NOTICE` are all that is listed, so a
-# `uk_places.json` would be dropped from the wheel just as silently).
+# EXTENSION in a declared one (`*.txt` is all that is listed, so a
+# `.json` file would be dropped from the wheel just as silently).
 # Verify by hand after any packaging change with:
 #   pip wheel . --no-deps -w /tmp/wh
 #   python -c "import zipfile,glob;print('\n'.join(n for n in zipfile.ZipFile(glob.glob('/tmp/wh/job360-*.whl')[0]).namelist() if '/data/' in n))"
 [tool.setuptools.package-data]
 src = [
-    "data/uk_gazetteer/*.txt",
-    "data/uk_gazetteer/NOTICE",
     "data/job_signals/*.txt",
 ]
 
@@ -245,8 +226,6 @@ ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904",
 # tests silently never run. Baselined so CI isn't blocked; the duplication is a
 # real coverage bug that should be de-duped by whoever owns the Pillar-1 tests.
 "tests/test_two_pass.py" = ["F811"]
-# ops/ metrics helpers: a best-effort try/except around export is intentional.
-"ops/*" = ["S110"]
 "migrations/runner.py" = ["S603", "S607"]
 # cv_parser.py contains the multi-line LLM prompt — single-string lines
 # inside the system / user prompt cannot be split without breaking the

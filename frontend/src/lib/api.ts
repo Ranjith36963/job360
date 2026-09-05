@@ -5,17 +5,11 @@
 import { ApiError } from "./api-error";
 import type { components } from "./api-types";
 import type {
-  ApplicationTimelineResponse,
   BringJobRequest,
   BringJobResponse,
   CreateReceiptRequest,
   HealthResponse,
   JsonResumeResponse,
-  NotificationLedgerListResponse,
-  NotificationRule,
-  NotificationRuleUpdate,
-  PipelineAdvanceRequest,
-  PipelineApplication,
   PreferencesRequest,
   ProfileResponse,
   ProfileVersionDiff,
@@ -230,48 +224,6 @@ export async function getJsonResume(): Promise<JsonResumeResponse> {
 }
 
 // ---------------------------------------------------------------------------
-// Pipeline (application tracking)
-// ---------------------------------------------------------------------------
-
-export async function getPipelineApplications(
-  stage?: string
-): Promise<{ applications: PipelineApplication[] }> {
-  const q = stage ? qs({ stage }) : "";
-  return request<{ applications: PipelineApplication[] }>(
-    `/api/pipeline${q}`
-  );
-}
-
-export async function createPipelineApplication(
-  jobId: number
-): Promise<PipelineApplication> {
-  return request<PipelineApplication>(`/api/pipeline/${jobId}`, {
-    method: "POST",
-  });
-}
-
-export async function advancePipelineStage(
-  jobId: number,
-  body: PipelineAdvanceRequest
-): Promise<PipelineApplication> {
-  return request<PipelineApplication>(`/api/pipeline/${jobId}/advance`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-export async function getPipelineReminders(): Promise<{
-  reminders: PipelineApplication[];
-}> {
-  return request<{ reminders: PipelineApplication[] }>("/api/pipeline/reminders");
-}
-
-export async function getPipelineCounts(): Promise<Record<string, number>> {
-  return request<Record<string, number>>("/api/pipeline/counts");
-}
-
-// ---------------------------------------------------------------------------
 // Auth (Batch 2)
 // ---------------------------------------------------------------------------
 
@@ -385,73 +337,6 @@ export async function getEmailVerified(): Promise<{ email_verified: boolean }> {
   return await request<{ email_verified: boolean }>("/api/auth/me/email-verified");
 }
 
-// ---------------------------------------------------------------------------
-// Channel config (Batch 2)
-// ---------------------------------------------------------------------------
-
-// `Channel` derives non-tightened fields from the generated ChannelOut schema.
-// `channel_type` is intentionally narrowed from `string` to a literal union —
-// the backend OpenAPI declares it as string but only these two values are
-// valid (backend `ChannelIn.channel_type` regex: `^(email|webhook)$`).
-export type Channel = Omit<_Schemas["ChannelOut"], "channel_type"> & {
-  channel_type: "email" | "webhook";
-};
-
-export type ChannelTestResult = { ok: boolean; error: string | null };
-
-export async function listChannels(): Promise<Channel[]> {
-  return request<Channel[]>("/api/settings/channels");
-}
-
-export async function createChannel(body: {
-  channel_type: Channel["channel_type"];
-  display_name: string;
-  credential: string;
-}): Promise<Channel> {
-  return request<Channel>("/api/settings/channels", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-export async function deleteChannel(id: number): Promise<void> {
-  await request<void>(`/api/settings/channels/${id}`, { method: "DELETE" });
-}
-
-export async function testChannel(id: number): Promise<ChannelTestResult> {
-  return request<ChannelTestResult>(`/api/settings/channels/${id}/test`, {
-    method: "POST",
-  });
-}
-
-// ---- Notification rule (one shared rulebook per user) ----
-
-/**
- * Get the user's single notification rule. The backend returns 200 with a null
- * body when the user has not saved one yet — we surface that as null ("no rule,
- * use defaults"). The 404 branch is kept as defensive back-compat in case an
- * older backend is still returning 404 for the empty-state.
- */
-export async function getNotificationRule(): Promise<NotificationRule | null> {
-  try {
-    return await request<NotificationRule | null>("/api/settings/notification-rule");
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
-    throw err;
-  }
-}
-
-export async function saveNotificationRule(
-  body: NotificationRuleUpdate
-): Promise<NotificationRule> {
-  return request<NotificationRule>("/api/settings/notification-rule", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
 // ---- Step-3: Account management ----
 
 export async function changePassword(
@@ -483,27 +368,6 @@ export async function deleteAccount(currentPassword: string): Promise<void> {
   });
 }
 
-// ---- Step-3: Notification ledger ----
-
-export async function getNotificationLedger(
-  limit = 20,
-  offset = 0,
-  filters: { channel?: string; status?: string } = {}
-): Promise<NotificationLedgerListResponse> {
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  if (filters.channel) params.set("channel", filters.channel);
-  if (filters.status) params.set("status", filters.status);
-  return request<NotificationLedgerListResponse>(
-    `/api/notifications?${params.toString()}`
-  );
-}
-
-/** Per-channel ledger aggregation: { channel: { sent, failed, queued, ... } }.
- *  Used to list ALL channels in the history filter, not just the current page. */
-export async function getNotificationStats(): Promise<Record<string, Record<string, number>>> {
-  return request<Record<string, Record<string, number>>>("/api/notifications/stats");
-}
-
 // ---- Step-3: Profile version diff ----
 
 export async function getProfileVersionDiff(
@@ -511,25 +375,6 @@ export async function getProfileVersionDiff(
   v2: number
 ): Promise<ProfileVersionDiff> {
   return request<ProfileVersionDiff>(`/api/profile/versions/${v1}/diff/${v2}`);
-}
-
-// ---- Step-3: Application timeline ----
-
-export async function getApplicationTimeline(
-  jobId: number
-): Promise<ApplicationTimelineResponse> {
-  return request<ApplicationTimelineResponse>(`/api/pipeline/${jobId}/timeline`);
-}
-
-export async function updateApplicationNotes(
-  jobId: number,
-  notes: string
-): Promise<void> {
-  await request<void>(`/api/pipeline/${jobId}/notes`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ notes }),
-  });
 }
 
 type _Schemas = components["schemas"];

@@ -69,7 +69,7 @@ describe("safeNext()", () => {
   });
 
   it("returns the path for a valid internal path", () => {
-    expect(safeNext("/pipeline")).toBe("/pipeline");
+    expect(safeNext("/receipts")).toBe("/receipts");
   });
 
   it("returns the path for /applications", () => {
@@ -77,7 +77,7 @@ describe("safeNext()", () => {
   });
 
   it("returns the path for deeply-nested routes", () => {
-    expect(safeNext("/jobs/123")).toBe("/jobs/123");
+    expect(safeNext("/applications/123")).toBe("/applications/123");
   });
 });
 
@@ -112,11 +112,11 @@ describe("LoginPage — ?next redirect", () => {
     mockGet.mockReset();
   });
 
-  it("redirects to ?next=/pipeline after successful login", async () => {
-    mockGet.mockReturnValue("/pipeline");
+  it("redirects to ?next=/receipts after successful login", async () => {
+    mockGet.mockReturnValue("/receipts");
     renderPage();
     await fillAndSubmit();
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/pipeline"));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/receipts"));
   });
 
   it("falls back to /applications when ?next=https://evil.com", async () => {

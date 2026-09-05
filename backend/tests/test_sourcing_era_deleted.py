@@ -164,8 +164,12 @@ def test_live_docs_clean() -> None:
     assert not hits, "living docs still describe the sourcing era:\n" + "\n".join(hits[:60])
 
 
-# ── R12: the archive ────────────────────────────────────────────────────────
-_ARCHIVED = (
+# ── R12: the archive is gone, not frozen ─────────────────────────────────────
+# The sourcing era's frozen reference docs (docs/_archive/sourcing-era/) were
+# themselves deleted as part of the 2026-09-03 mission cleanup — the era is
+# not just dead code, it is dead history too. This flips the earlier version
+# of this test, which asserted the archive existed with a FROZEN header.
+_FORMERLY_ARCHIVED = (
     "02-search-and-match-engine.md",
     "03-job-providers.md",
     "CATALOG_STATE.md",
@@ -175,14 +179,12 @@ _ARCHIVED = (
 )
 
 
-def test_archive_populated() -> None:
-    archive = REPO / "docs" / "_archive" / "sourcing-era"
-    for name in _ARCHIVED:
-        f = archive / name
-        assert f.is_file(), f"{f.relative_to(REPO)} missing"
-        head = f.read_text(encoding="utf-8", errors="replace")[:600]
-        assert "FROZEN" in head, f"{name} lacks the FROZEN header"
-    for name in _ARCHIVED[:5]:
+def test_archive_deleted() -> None:
+    assert not (REPO / "docs" / "_archive").exists(), (
+        "docs/_archive/ must not exist — the sourcing-era archive was deleted "
+        "in the mission cleanup, not just the sourcing-era code."
+    )
+    for name in _FORMERLY_ARCHIVED[:5]:
         assert not (REPO / "docs" / "product" / "pillars" / name).exists(), f"{name} still in pillars/"
     assert not (REPO / ".claude" / "skills" / "add-source").exists()
 
@@ -265,7 +267,7 @@ _SCORE_FIELDS = {
 
 
 @pytest.mark.asyncio
-async def test_bring_stores_without_scoring(authenticated_async_context, fixture_user_id):
+async def test_bring_stores_without_scoring(authenticated_async_context):
     from src.api import dependencies as api_deps
 
     async with authenticated_async_context() as client:
@@ -289,11 +291,10 @@ async def test_bring_stores_without_scoring(authenticated_async_context, fixture
     db = await api_deps.get_db()
     cur = await db._conn.execute("SELECT source FROM jobs WHERE id = ?", (job["id"],))
     assert (await cur.fetchone())[0] == "user_brought"
-    cur = await db._conn.execute(
-        "SELECT COUNT(*) FROM user_feed WHERE user_id = ? AND job_id = ?",
-        (fixture_user_id, job["id"]),
-    )
-    assert (await cur.fetchone())[0] == 0, "bring still writes a feed row"
+    # `user_feed` — the scorer's per-user feed row bring used to be checked
+    # against — was itself dropped by the mission-sweep migration (0040): the
+    # table no longer exists, so "bring writes no feed row" now holds by
+    # construction rather than by query.
 
 
 # ── R4: profile ─────────────────────────────────────────────────────────────
@@ -342,7 +343,11 @@ async def test_migration_0039_up_down_up(migrated_db_path):
 
     for t in _DROPPED:
         assert not await _has_table(t), f"{t} present after the fixture's up()"
-    for t in ("jobs", "user_feed", "applications", "application_events", "user_actions"):
+    # `user_feed` and `user_actions` used to be on this survivor list — 0039
+    # deliberately did not touch them, but they did not survive FOREVER: the
+    # mission-sweep migration (0040) drops both, and this fixture applies every
+    # migration up to head before this test's own down/up walk even starts.
+    for t in ("jobs", "applications", "application_events"):
         assert await _has_table(t), f"{t} must survive 0039"
 
     # Walk down through anything newer first, then through the drop itself.

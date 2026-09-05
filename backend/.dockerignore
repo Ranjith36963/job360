@@ -1,20 +1,16 @@
 # Runtime data (jobs.db, logs, exports, reports) — never bake into the image.
 # This pattern is ROOT-ANCHORED: it excludes `backend/data/` only. Do NOT widen
-# it to `**/data` — `src/data/` holds packaged code-data (the UK gazetteer and
-# the job-signal vocabularies) that two services cannot run without, and
-# shipping without it is issue #260 (four days of foreign jobs in a UK-only
-# catalog, with every instrument green).
+# it to `**/data` — `src/data/` holds packaged code-data (the job-signal
+# vocabularies) that a service cannot run without, and shipping without it is
+# issue #260's exact shape (silent degrade to "unknown", every instrument
+# green).
 data/
 
 # THERE ARE DELIBERATELY NO `!` EXEMPTIONS BELOW, and that is the fix, not an
 # omission.
 #
-# Both shipped reference-data directories now live INSIDE the package:
+# The shipped reference-data directory now lives INSIDE the package:
 #
-#   src/data/uk_gazetteer/ — the ~52k UK place names rule #30 is built on.
-#                            Without it `uk_gate._read()` returns an empty
-#                            frozenset (it degrades rather than raising), so no
-#                            job can match a UK place. (Moved by PR #312.)
 #   src/data/job_signals/  — the seniority / workplace / location term tables
 #                            behind `signal_backed_lookup`, which fills
 #                            'unknown' enrichment at read time, and

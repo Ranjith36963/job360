@@ -447,12 +447,13 @@ export function PreferencesForm({
 
       <div className="space-y-6">
         {/* ── Target Job Titles ────────────────────
-            The `id` is the landing spot for the dashboard's "Searching for: …
-            [change]" line (components/jobs/SearchingFor.tsx). `scroll-mt-24`
-            keeps it clear of the sticky Navbar — Next.js skips fixed/sticky
-            elements when it picks a scroll target, so without the margin the
-            field lands underneath the header (documented in
-            node_modules/next/dist/docs/…/components/link.md). */}
+            `id="target-job-titles"` + `scroll-mt-24` keep this field ready as
+            a scroll target for any future deep link — Next.js skips
+            fixed/sticky elements when it picks a scroll target, so without
+            the margin the field would land underneath the sticky Navbar
+            (documented in node_modules/next/dist/docs/…/components/link.md).
+            No current caller deep-links here (the dashboard "Searching for…"
+            row that used to was deleted with the sourcing era, slice 5). */}
         <div id="target-job-titles" className="scroll-mt-24">
           <TagInput
             label="Target Job Titles"

@@ -1,10 +1,10 @@
 """Tests for the FastAPI backend's remaining always-on routes.
 
 Slice 5 (#483) deleted `/api/jobs*`, `/api/actions*`, `/api/search*`,
-`/api/runs*` and `/api/sources`, and with them almost every test that used to
-live here — the file was a catalog test file. What is left is the small set
-that is still true: the public probes, the pipeline reads, the profile 404,
-and the per-request-connection guard.
+`/api/runs*` and `/api/sources`, and the mission sweep deleted the Kanban
+`/api/pipeline*` API — with them went almost every test that used to live
+here. What is left is the small set that is still true: the public probes,
+the spine reads, the profile 404, and the per-request-connection guard.
 """
 
 import pytest
@@ -51,25 +51,8 @@ async def test_profile_404_when_none(authenticated_async_context):
 
 
 @pytest.mark.asyncio
-async def test_pipeline_counts_empty(authenticated_async_context):
-    async with authenticated_async_context() as client:
-        resp = await client.get("/api/pipeline/counts")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data.get("applied", 0) == 0
-
-
-@pytest.mark.asyncio
-async def test_pipeline_list_empty(authenticated_async_context):
-    async with authenticated_async_context() as client:
-        resp = await client.get("/api/pipeline")
-    assert resp.status_code == 200
-    assert resp.json()["applications"] == []
-
-
-@pytest.mark.asyncio
 async def test_full_api_workflow(authenticated_async_context):
-    """Integration smoke: health → status → applications → pipeline → profile."""
+    """Integration smoke: health → status → applications → receipts → profile."""
     async with authenticated_async_context() as client:
         resp = await client.get("/api/health")
         assert resp.status_code == 200
@@ -86,16 +69,6 @@ async def test_full_api_workflow(authenticated_async_context):
         resp = await client.get("/api/receipts")
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
-
-        resp = await client.get("/api/pipeline/counts")
-        assert resp.status_code == 200
-
-        resp = await client.get("/api/pipeline")
-        assert resp.status_code == 200
-        assert resp.json()["applications"] == []
-
-        resp = await client.get("/api/pipeline/reminders")
-        assert resp.status_code == 200
 
         # Profile (authed — no row for fixture-user, so 404)
         resp = await client.get("/api/profile")

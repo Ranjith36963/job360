@@ -22,27 +22,19 @@ Thumbs.db
 # Project specific
 *.log
 data/
-# ...EXCEPT the compiled UK gazetteer. It is checked in on purpose: the UK gate
-# runs on every ingest and its tests must pass OFFLINE (hard rule #4), so the
-# data cannot be a runtime download the way ESCO is. 745 KB, rebuilt only by
-# `python backend/scripts/build_uk_gazetteer.py` — UK settlements do not churn.
-# It now lives INSIDE the package (`backend/src/data/uk_gazetteer/`) because
-# `pip install .` ships only `src*`; anywhere else and production runs without
-# it, which is issue #260. `data/` above matches a directory of that name at
-# ANY depth, so the exception has to name the new home too.
-!backend/src/data/
-!backend/src/data/uk_gazetteer/
-!backend/src/data/uk_gazetteer/**
-# ...and the job-signal vocabularies, for the same reason: the detectors run on
-# every scored job and their tests must pass OFFLINE (hard rule #4). CI proved
-# this the hard way — without the files committed, the detectors correctly
-# degraded to UNKNOWN and 4 tests failed in CI while passing locally.
+# ...EXCEPT the job-signal vocabularies. `data/` above matches a directory of
+# that name at ANY depth, so shipped data living inside the package needs its
+# own exception. The detectors run on every scored job and their tests must
+# pass OFFLINE (hard rule #4). CI proved this the hard way — without the
+# files committed, the detectors correctly degraded to UNKNOWN and 4 tests
+# failed in CI while passing locally.
 # They moved from `backend/data/job_signals/` into the package on 2026-08-12:
 # committed is not deployed. `pip install .` ships only `src*`, so on the old
 # path `job_signals._DATA` resolved to `<site-packages>/data/job_signals` in the
 # container, `_load_terms()` returned {} for all three vocabularies, and both
 # `signal_backed_lookup` and `detect_seniority` answered UNKNOWN in production
 # with no error. Identical to issue #260 — third time for the same bug.
+!backend/src/data/
 !backend/src/data/job_signals/
 !backend/src/data/job_signals/**
 .secrets/

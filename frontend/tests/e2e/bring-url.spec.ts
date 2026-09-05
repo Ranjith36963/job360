@@ -88,7 +88,6 @@ async function mockCommonLayout(page: Page) {
   await page.route("**/api/status**", (route) =>
     route.fulfill(json({ jobs_total: 0, last_run: null, sources: [] }))
   );
-  await page.route("**/api/pipeline**", (route) => route.fulfill(json({ applications: [] })));
 }
 
 test.describe("Bring a job — fetch from a link", () => {

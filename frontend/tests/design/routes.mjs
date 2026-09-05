@@ -2,7 +2,7 @@
 //
 // Kept in its own file so it is the ONE place a new page gets registered — the
 // runner, the contact sheet and any future guard all read this list. Derived
-// from `frontend/src/app/**/page.tsx` (22 routes, 2026-08-24).
+// from `frontend/src/app/**/page.tsx` (14 routes, 2026-09-05).
 //
 // `auth: true`  -> the middleware redirects an anonymous visitor to /login.
 //                  Needs DESIGN_SESSION (a real job360_session cookie) or the
@@ -25,23 +25,20 @@ export const ROUTES = [
   // ── authed ────────────────────────────────────────────────────────────────
   // /dashboard, /jobs, /jobs/:id and /admin/sources were deleted in slice 5
   // (delete-sourcing-era) — Job360 never sources or ranks jobs (VISION rule 4),
-  // so there is no catalog left to review.
+  // so there is no catalog left to review. /pipeline, /channels, /notifications
+  // and /settings/notifications were deleted in the mission sweep — notifications
+  // are pull-not-push (VISION:133) and the Kanban /pipeline folded into
+  // /applications.
   { path: "/profile", name: "profile", auth: true },
-  { path: "/pipeline", name: "pipeline", auth: true },
   { path: "/applications", name: "applications", auth: true },
-  { path: "/channels", name: "channels", auth: true },
-  { path: "/notifications", name: "notifications", auth: true },
   { path: "/settings", name: "settings", auth: true },
   { path: "/settings/account", name: "settings-account", auth: true },
-  { path: "/settings/notifications", name: "settings-notifications", auth: true },
 
   // ── not reviewed ──────────────────────────────────────────────────────────
   // /auth/magic consumes a one-time token and redirects; screenshotting it
   // without a token only ever captures the error branch, which the login and
   // verify-email shots already cover.
   { path: "/auth/magic", name: "auth-magic", skip: "consumes a one-time token" },
-  // A deliberate crash endpoint for Sentry wiring. Not a user-facing surface.
-  { path: "/sentry-test", name: "sentry-test", skip: "deliberate crash probe" },
 ];
 
 export const VIEWPORTS = [

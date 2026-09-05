@@ -26,7 +26,7 @@ edited) rather than duplicated.
 from __future__ import annotations
 
 import contextlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -118,46 +118,25 @@ async def test_b1_a_legacy_offer_survives_its_first_new_event(tmp_path):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# B2 — a brought job is 'considering' on the legacy pipeline, never 'applied',
-# and never nagged about by reminders
+# B2 — a brought job is 'considering' on the spine, never 'applied'
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 @pytest.mark.asyncio
-async def test_b2_a_brought_job_shows_considering_not_applied_on_the_pipeline(
-    authenticated_async_context, fixture_user_id
-):
+async def test_b2_a_brought_job_shows_considering_not_applied(authenticated_async_context):
+    """The Kanban `/api/pipeline` this originally pinned went with the
+    mission sweep; `GET /api/applications` is the one surface left to read
+    a freshly-brought job's status back from."""
     async with authenticated_async_context() as client:
         brought = await _bring(client)
         job_id = brought["job"]["id"]
 
-        pipeline = await client.get("/api/pipeline")
-        assert pipeline.status_code == 200, pipeline.text
-        row = next(a for a in pipeline.json()["applications"] if a["job_id"] == job_id)
-        assert row["stage"] == "considering", (
-            "B2: birth_application must write stage='considering' explicitly — "
+        apps = await client.get("/api/applications")
+        assert apps.status_code == 200, apps.text
+        row = next(a for a in apps.json()["applications"] if a["job_id"] == job_id)
+        assert row["status"] == "considering", (
+            "B2: birth_application must write status='considering' explicitly — "
             "the column's 'applied' default must never leak through"
-        )
-
-    # Age the row past the 7-day reminder window and confirm reminders still
-    # never fire for a merely-considered job (database.py get_stale_applications).
-    old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-    from src.core import settings
-    from src.repositories import pgsync
-
-    conn = pgsync.connect(str(settings.DB_PATH))
-    conn.execute(
-        "UPDATE applications SET updated_at = ? WHERE user_id = ? AND job_id = ?",
-        (old, fixture_user_id, job_id),
-    )
-    conn.commit()
-    conn.close()
-
-    async with authenticated_async_context() as client:
-        reminders = await client.get("/api/pipeline/reminders")
-        assert reminders.status_code == 200, reminders.text
-        assert all(r["job_id"] != job_id for r in reminders.json()["reminders"]), (
-            "B2: reminders must not fire for a 'considering' application"
         )
 
 

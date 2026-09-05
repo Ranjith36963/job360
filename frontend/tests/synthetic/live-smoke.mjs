@@ -6,7 +6,7 @@
 // human can see WHAT broke and WHY, in the same logs, without watching it live.
 //
 //   Public corners (landing, login, register, legal)  → always run.
-//   Authed corners (applications, CV upload→extraction, bring, pipeline, …)
+//   Authed corners (applications, CV upload→extraction, bring, settings, …)
 //        → run only when the robot can LOG ITSELF IN as a dedicated synthetic
 //          account, and only after the backend confirms that is whose account it is.
 //          See session-gate.mjs for both gates and why they exist.
@@ -251,10 +251,7 @@ const AUTHED = [
     await page.getByText(/python|airflow|data engineer/i).first().waitFor({ timeout: 90000 });
   }],
   ["bring a job (form renders)", async () => { await gotoAuthed("/bring"); await page.waitForTimeout(1500); }],
-  ["pipeline (kanban)", async () => { await gotoAuthed("/pipeline"); await page.waitForTimeout(1500); }],
-  ["channels", async () => { await gotoAuthed("/channels"); await page.waitForTimeout(1500); }],
   ["settings", async () => { await gotoAuthed("/settings"); await page.waitForTimeout(1500); }],
-  ["notifications", async () => { await gotoAuthed("/notifications"); await page.waitForTimeout(1500); }],
 ];
 
 // ── The session gate (decided in session-gate.mjs, reported here) ───────────

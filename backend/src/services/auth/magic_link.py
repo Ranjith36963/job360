@@ -39,7 +39,6 @@ from src.services.auth import sessions as auth_sessions
 from src.services.auth import tokens
 from src.services.auth.email_sender import send_system_email
 from src.services.auth.passwords import hash_password
-from src.services.notifications.defaults import seed_notification_defaults
 from src.utils.logger import mask_email
 
 logger = logging.getLogger("job360.auth.magic_link")
@@ -235,28 +234,6 @@ async def consume_magic_link(
             (now, user_id),
         )
         await db.commit()
-
-        # #318 — seed the notification rulebook + the account-email channel.
-        #
-        # This path, not just `register`, is where Job360 users actually come
-        # from: the INSERT OR IGNORE above creates accounts, so seeding only in
-        # register would miss every passwordless signup. It also heals the users
-        # who already exist without a rulebook — they never pass through
-        # register again, so sign-in is the only place that can reach them.
-        #
-        # The channel is seeded HERE rather than at register because clicking
-        # the emailed link is the proof of address ownership that register
-        # lacks.
-        #
-        # Guarded here as well as inside the helper: the session is about to be
-        # issued and the user row is already committed, so anything escaping
-        # this line would turn a valid sign-in into a 400 "invalid or expired
-        # link". Locking users out of the product is never an acceptable price
-        # for a notification default.
-        try:
-            await seed_notification_defaults(db, user_id=user_id, email=email)
-        except Exception as exc:  # noqa: BLE001 — sign-in must still succeed
-            logger.warning("notification seed failed for user=%s: %s", user_id, exc)
 
     cookie = await auth_sessions.create_session(db_path, user_id=user_id, secret=secret)
     logger.info("magic link consume: ok user=%s", user_id)

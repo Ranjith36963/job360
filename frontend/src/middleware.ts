@@ -5,13 +5,10 @@ import type { NextRequest } from "next/server";
 // catalog left to expose, so every one of these paths is one user's data.
 const PROTECTED_PATHS = [
   "/profile",
-  "/pipeline",
   "/bring",
   "/receipts",
   "/applications",
-  "/channels",
   "/settings",
-  "/notifications",
   "/admin",
   "/oauth",
 ];

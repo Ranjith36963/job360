@@ -73,3 +73,26 @@ describe("Root layout metadata — no source-count copy (R14, C2)", () => {
     expect(metadataBlock).not.toMatch(/\d+D scoring/i);
   });
 });
+
+// Mission sweep (2026-09-05) — Landing.tsx used to sell "8-dimensional
+// scoring", "career intelligence" and a "search engine". Job360 never
+// sources, ranks or recommends jobs (VISION rule 4); it is the memory layer
+// for the seeker's own AI agent. Checks RENDERED text (not raw source, which
+// would also match the word "sources" inside this file's own code comments)
+// — the same rendering approach the "no source-count copy" test above uses.
+describe("Landing page — no false-advertising copy (mission sweep)", () => {
+  const BANNED_WORDS = [
+    "8-dimensional",
+    "sources",
+    "scoring",
+    "career intelligence",
+    "search engine",
+  ];
+
+  it.each(BANNED_WORDS)('never mentions "%s"', (banned) => {
+    const { container } = render(<Landing />);
+    const text = container.textContent ?? "";
+    const re = new RegExp(banned.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    expect(text).not.toMatch(re);
+  });
+});

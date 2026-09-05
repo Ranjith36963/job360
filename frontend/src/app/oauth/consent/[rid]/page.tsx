@@ -13,7 +13,7 @@ import { ConsentClient } from "./ConsentClient";
 // Server component shell: awaits `params` (Next.js 16 — sync access to
 // `params` was removed, see frontend/AGENTS.md) and hands the plain `rid`
 // string to a client child, which does the actual fetch/decision round trip.
-// Same server-page + client-child split as src/app/jobs/[id]/page.tsx.
+// Same server-page + client-child split as src/app/applications/[id]/page.tsx.
 //
 // This route is protected: middleware.ts bounces an anonymous visitor to
 // /login?next=/oauth/consent/<rid> before this component ever renders.

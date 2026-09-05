@@ -234,8 +234,10 @@ async def test_0017_adds_llm_verdict_columns(tmp_db_path):
             """
         )
         await db.commit()
-    # Apply all real migrations (0000 -> latest).
-    await runner.up(tmp_db_path)
+    # Apply real migrations up to the point `user_feed` still exists — the
+    # mission-sweep migration (0040) drops it, and this test's subject is the
+    # 0017 columns, not the table's whole lifetime.
+    await runner.up(tmp_db_path, target="0039_drop_sourcing_tables")
     async with pg.connect(tmp_db_path) as conn:
         cur = await conn.execute("PRAGMA table_info(user_feed)")
         cols = {row[1] for row in await cur.fetchall()}
@@ -292,7 +294,10 @@ async def test_0018_adds_profile_version_column(tmp_db_path):
             """
         )
         await db.commit()
-    await runner.up(tmp_db_path)
+    # Apply real migrations up to the point `user_feed` still exists — the
+    # mission-sweep migration (0040) drops it, and this test's subject is the
+    # 0018 column, not the table's whole lifetime.
+    await runner.up(tmp_db_path, target="0039_drop_sourcing_tables")
     async with pg.connect(tmp_db_path) as conn:
         cur = await conn.execute("PRAGMA table_info(user_feed)")
         cols = {row[1] for row in await cur.fetchall()}
@@ -350,7 +355,10 @@ async def test_0019_channel_columns_survive_and_oauth_states_is_dropped(tmp_db_p
             """
         )
         await db.commit()
-    await runner.up(tmp_db_path)
+    # Apply real migrations up to the point `user_channels` still exists — the
+    # mission-sweep migration (0040) drops it. This still exercises the end
+    # state relative to 0031 (oauth_states dropped), just not relative to 0040.
+    await runner.up(tmp_db_path, target="0039_drop_sourcing_tables")
     async with pg.connect(tmp_db_path) as conn:
         # user_channels gains the two new columns.
         cur = await conn.execute("PRAGMA table_info(user_channels)")
@@ -364,9 +372,9 @@ async def test_0019_channel_columns_survive_and_oauth_states_is_dropped(tmp_db_p
 
         # oauth_states is GONE. 0019 created it for the Slack/Discord OAuth
         # connect flow; 0031 dropped it when those channels were deleted
-        # (2026-08-24). `runner.up` applies EVERY migration, so this test sees
-        # the end state, not 0019's — asserting the table exists here would
-        # have gone red the moment 0031 landed.
+        # (2026-08-24). `runner.up` applies every migration up to the target,
+        # so this test sees the end state as of 0039, not 0019's — asserting
+        # the table exists here would have gone red the moment 0031 landed.
         cur2 = await conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='oauth_states'"
         )
@@ -517,8 +525,12 @@ async def test_0020_notification_rules_rebuild_preserves_existing_row(tmp_db_pat
         )
         await db.commit()
 
-    # Apply the rest of the chain, including 0020's table rebuild.
-    await runner.up(tmp_db_path)
+    # Apply through 0020's table rebuild — NOT the rest of the chain: the
+    # mission-sweep migration (0040) drops `notification_rules` entirely, so
+    # running unbounded `up()` here would make the SELECT below fail on a
+    # table that no longer exists. This test's subject is the 0019->0020
+    # rebuild specifically, not the table's whole lifetime.
+    await runner.up(tmp_db_path, target="0020_notification_rule_single")
 
     async with pg.connect(tmp_db_path) as conn:
         cur = await conn.execute(

@@ -23,8 +23,8 @@ test.describe("Auth middleware", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test("anonymous visit to /pipeline redirects to /login", async ({ page }) => {
-    await page.goto("/pipeline");
+  test("anonymous visit to /receipts redirects to /login", async ({ page }) => {
+    await page.goto("/receipts");
     await expect(page).toHaveURL(/\/login/);
   });
 

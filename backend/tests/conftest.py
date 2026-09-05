@@ -35,13 +35,11 @@ from contextlib import asynccontextmanager  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 
 import pytest  # noqa: E402
-from cryptography.fernet import Fernet  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 
 from migrations import runner  # noqa: E402
 from src.models import Job  # noqa: E402
-from src.services.channels import crypto  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -170,7 +168,7 @@ def authenticated_async_context(tmp_path):
       * patches DB_PATH on every known settings/routes/auth_deps capture
       * resets the ``dependencies._db`` singleton so it lazy-binds to the
         tmp DB
-      * sets SESSION_SECRET + CHANNEL_ENCRYPTION_KEY envs, fresh per test
+      * sets SESSION_SECRET, fresh per test
       * registers a throwaway user via sync TestClient (simplest cookie
         capture) and stashes the session cookie on the factory
       * replaces ``app.router.lifespan_context`` with a no-op so
@@ -193,17 +191,14 @@ def authenticated_async_context(tmp_path):
 
     from src.api import auth_deps, dependencies
     from src.api.routes import auth as auth_route
-    from src.api.routes import channels as channels_route
     from src.core import settings
 
     mp.setattr(settings, "DB_PATH", db_path, raising=True)
     mp.setattr(dependencies, "DB_PATH", db_path, raising=True)
     mp.setattr(auth_deps, "DB_PATH", db_path, raising=True)
     mp.setattr(auth_route, "DB_PATH", db_path, raising=True)
-    mp.setattr(channels_route, "DB_PATH", db_path, raising=True)
     mp.setattr(dependencies, "_db", None, raising=False)
 
-    crypto.set_test_key(Fernet.generate_key().decode("ascii"))
     mp.setenv("SESSION_SECRET", "test-secret-" + "z" * 40)
 
     # Redirect DB_PATH on EVERY module that captured it at import time. A

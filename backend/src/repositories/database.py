@@ -1,6 +1,5 @@
-import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from src.repositories import pg
@@ -114,6 +113,15 @@ class JobDatabase:
             CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
             CREATE INDEX IF NOT EXISTS idx_jobs_staleness_state ON jobs(staleness_state);
             CREATE INDEX IF NOT EXISTS idx_jobs_last_seen_at ON jobs(last_seen_at);
+            -- `user_actions` is dropped by migration 0040 (mission sweep) — no
+            -- product code reads or writes it any more. It stays HERE, though,
+            -- because migration 0002_multi_tenant's rebuild pattern (create
+            -- user_actions_new, copy FROM user_actions, drop, rename) assumes
+            -- the table already exists; without it a fresh boot 500s on
+            -- `relation "user_actions" does not exist` before it ever reaches
+            -- the migration that retires it. init_db() creates the legacy
+            -- scaffolding every migration after it expects; 0040 is the one
+            -- that actually removes it from the schema.
             CREATE TABLE IF NOT EXISTS user_actions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_id INTEGER NOT NULL,
@@ -216,39 +224,6 @@ class JobDatabase:
             );
             CREATE INDEX IF NOT EXISTS idx_stage_history_job_user
                 ON application_stage_history(job_id, user_id);
-        """)
-
-        # Ensure notification_rules + user_notification_digests exist (migration 0012 / 0013).
-        # Mirrors the forward direction of the SQL migration files so tests that
-        # call init_db() directly (without the external runner) see the full schema.
-        await self._db.executescript("""
-            CREATE TABLE IF NOT EXISTS notification_rules (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT NOT NULL,
-                score_threshold INTEGER NOT NULL DEFAULT 60,
-                notify_mode TEXT NOT NULL DEFAULT 'instant'
-                    CHECK (notify_mode IN ('instant', 'daily', 'every_n_hours')),
-                interval_hours INTEGER NOT NULL DEFAULT 6,
-                daily_send_time TEXT NOT NULL DEFAULT '08:00',
-                quiet_hours_start TEXT,
-                quiet_hours_end TEXT,
-                last_sent_at TEXT,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-                UNIQUE(user_id)
-            );
-            CREATE TABLE IF NOT EXISTS user_notification_digests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT NOT NULL,
-                channel TEXT NOT NULL,
-                job_id INTEGER NOT NULL,
-                queued_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-                sent INTEGER NOT NULL DEFAULT 0,
-                sent_at TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_digests_user_channel_pending
-                ON user_notification_digests(user_id, channel, sent);
         """)
 
         # Ensure tailored-document tables exist (migration 0023 — Per-User AI CV &
@@ -626,22 +601,6 @@ class JobDatabase:
             result.setdefault(jid, {})[kind] = status
         return result
 
-    async def get_fit_reason(self, user_id: str, job_id: int) -> str:
-        """The judge's (E4) 'why it fits' reason for (user, job); '' if none computed.
-
-        Tells the tailoring prompt what to emphasise. Tolerates a missing user_feed
-        row (returns '') so tailoring works even before the judge has run.
-        """
-        try:
-            cursor = await self._db.execute(
-                "SELECT llm_reason FROM user_feed WHERE user_id = ? AND job_id = ?",
-                (user_id, job_id),
-            )
-        except Exception:  # noqa: BLE001 — user_feed may not exist in minimal test DBs
-            return ""
-        row = await cursor.fetchone()
-        return (row[0] or "") if row else ""
-
     async def create_application(self, job_id: int, user_id: str) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
@@ -715,71 +674,6 @@ class JobDatabase:
             "title": row[5] or "",
             "company": row[6] or "",
         }
-
-    async def get_applications(self, user_id: str, stage: str | None = None) -> list[dict[str, Any]]:
-        if stage:
-            cursor = await self._db.execute(
-                """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
-                          j.title, j.company
-                   FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
-                   WHERE a.user_id = ? AND a.stage = ?
-                   ORDER BY a.updated_at DESC""",
-                (user_id, stage),
-            )
-        else:
-            cursor = await self._db.execute(
-                """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
-                          j.title, j.company
-                   FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
-                   WHERE a.user_id = ?
-                   ORDER BY a.updated_at DESC""",
-                (user_id,),
-            )
-        return [
-            {
-                "job_id": r[0],
-                "stage": r[1],
-                "created_at": r[2],
-                "updated_at": r[3],
-                "notes": r[4] or "",
-                "title": r[5] or "",
-                "company": r[6] or "",
-            }
-            for r in await cursor.fetchall()
-        ]
-
-    async def get_application_counts(self, user_id: str) -> dict[str, int]:
-        cursor = await self._db.execute(
-            """SELECT stage, COUNT(*) FROM applications
-               WHERE user_id = ? GROUP BY stage""",
-            (user_id,),
-        )
-        return {r[0]: r[1] for r in await cursor.fetchall()}
-
-    async def get_stale_applications(self, user_id: str, days: int = 7) -> list[dict[str, Any]]:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        cursor = await self._db.execute(
-            """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
-                      j.title, j.company
-               FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
-               WHERE a.user_id = ?
-                 AND a.updated_at < ?
-                 AND a.stage NOT IN ('offer', 'rejected', 'considering')
-               ORDER BY a.updated_at ASC""",
-            (user_id, cutoff),
-        )
-        return [
-            {
-                "job_id": r[0],
-                "stage": r[1],
-                "created_at": r[2],
-                "updated_at": r[3],
-                "notes": r[4] or "",
-                "title": r[5] or "",
-                "company": r[6] or "",
-            }
-            for r in await cursor.fetchall()
-        ]
 
     async def get_job_id_by_key(self, normalized_key: tuple[str, str]) -> int | None:
         """Resolve a (normalized_company, normalized_title) key to the catalog id.
@@ -923,27 +817,6 @@ class JobDatabase:
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
-    async def insert_action(self, job_id: int, action: str, user_id: str, notes: str = "") -> dict[str, Any]:
-        """Record the user's own action on a job in ``user_actions``.
-
-        Slice 5 (#483) deleted the save/dismiss ROUTES and every other reader
-        of this table, but `POST /receipts/{job_id}` still stamps `applied`
-        here, so the writer stays. `user_actions` itself is retired in a later
-        slice, once nothing writes it (spec §Out of scope).
-        """
-        now = datetime.now(timezone.utc).isoformat()
-        await self._db.execute(
-            """INSERT INTO user_actions (user_id, job_id, action, notes, created_at)
-               VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(user_id, job_id)
-               DO UPDATE SET action = excluded.action,
-                             notes = excluded.notes,
-                             created_at = excluded.created_at""",
-            (user_id, job_id, action, notes, now),
-        )
-        await self._db.commit()
-        return {"job_id": job_id, "action": action, "notes": notes, "created_at": now}
-
     async def get_job_by_id(self, job_id: int) -> dict[str, Any] | None:
         cursor = await self._db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
         row = await cursor.fetchone()
@@ -956,94 +829,6 @@ class JobDatabase:
         assert cursor.description is not None
         cols = [d[0] for d in cursor.description]
         return dict(zip(cols, row))
-
-    async def get_notification_ledger(
-        self,
-        user_id: str,
-        limit: int = 50,
-        offset: int = 0,
-        channel: str | None = None,
-        status: str | None = None,
-        job_id: int | None = None,
-        start_time: str | None = None,
-        end_time: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Return a paginated slice of the user's notification ledger,
-        newest first. Empty list when the table is missing (legacy DB
-        without migration 0004) — matches the graceful-degrade pattern
-        already used in :meth:`get_recent_jobs_with_enrichment`.
-
-        Step-3 O-01: added ``job_id``, ``start_time``, ``end_time`` filters.
-        """
-        sql = (
-            "SELECT id, job_id, channel, status, sent_at, error_message, "
-            "retry_count, created_at "
-            "FROM notification_ledger "
-            "WHERE user_id = ?"
-        )
-        params: list[Any] = [user_id]
-        if channel:
-            sql += " AND channel = ?"
-            params.append(channel)
-        if status:
-            sql += " AND status = ?"
-            params.append(status)
-        if job_id is not None:
-            sql += " AND job_id = ?"
-            params.append(job_id)
-        if start_time:
-            sql += " AND created_at >= ?"
-            params.append(start_time)
-        if end_time:
-            sql += " AND created_at <= ?"
-            params.append(end_time)
-        sql += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
-        params.extend([limit, offset])
-        try:
-            cursor = await self._db.execute(sql, tuple(params))
-        except pg.OperationalError:
-            return []
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-
-    async def count_notification_ledger(
-        self,
-        user_id: str,
-        channel: str | None = None,
-        status: str | None = None,
-        job_id: int | None = None,
-        start_time: str | None = None,
-        end_time: str | None = None,
-    ) -> int:
-        """Return the total count for the same WHERE-clause as
-        :meth:`get_notification_ledger`. Used to compute pagination
-        ``total`` in NotificationLedgerListResponse.
-
-        Step-3 O-01: added ``job_id``, ``start_time``, ``end_time`` filters.
-        """
-        sql = "SELECT COUNT(*) FROM notification_ledger WHERE user_id = ?"
-        params: list[Any] = [user_id]
-        if channel:
-            sql += " AND channel = ?"
-            params.append(channel)
-        if status:
-            sql += " AND status = ?"
-            params.append(status)
-        if job_id is not None:
-            sql += " AND job_id = ?"
-            params.append(job_id)
-        if start_time:
-            sql += " AND created_at >= ?"
-            params.append(start_time)
-        if end_time:
-            sql += " AND created_at <= ?"
-            params.append(end_time)
-        try:
-            cursor = await self._db.execute(sql, tuple(params))
-        except pg.OperationalError:
-            return 0
-        row = await cursor.fetchone()
-        return int(row[0]) if row else 0
 
     # ── Account management (Step-3 B-11..13) ─────────────────────────────────────
 
@@ -1068,10 +853,9 @@ class JobDatabase:
     _PER_USER_TABLES = (
         "api_tokens", "application_artifacts", "application_contacts", "application_events",
         "application_receipts", "application_stage_history", "applications", "email_verifications",
-        "notification_ledger", "notification_rules", "oauth_grants",
+        "oauth_grants",
         "password_resets", "profile_edits", "sessions", "tailored_documents", "tailored_usage",
-        "user_actions", "user_channels", "user_feed",
-        "user_notification_digests", "user_profile_versions", "user_profiles",
+        "user_profile_versions", "user_profiles",
     )
 
     # Tables included in a GDPR Article 20 export (docs/fable/05 C7). This is the
@@ -1087,8 +871,8 @@ class JobDatabase:
     _EXPORT_TABLES = (
         "api_tokens", "application_artifacts", "application_contacts", "application_events",
         "application_receipts", "applications", "application_stage_history", "audit_log",
-        "notification_ledger", "notification_rules", "oauth_grants", "profile_edits", "tailored_documents",
-        "tailored_usage", "user_actions", "user_channels", "user_feed",
+        "oauth_grants", "profile_edits", "tailored_documents",
+        "tailored_usage",
         "user_profile_versions", "user_profiles",
     )
 
@@ -1298,241 +1082,6 @@ class JobDatabase:
             (new_email, user_id),
         )
         await self._db.commit()
-
-    # ── Application timeline (Step-3 B-07) ───────────────────────────────────────
-    async def get_application_timeline(self, job_id: int, user_id: str) -> list[dict[str, Any]]:
-        """Return stage history for a job+user, ordered by transitioned_at ASC."""
-        cursor = await self._db.execute(
-            "SELECT * FROM application_stage_history WHERE job_id = ? AND user_id = ? ORDER BY transitioned_at ASC",
-            (job_id, user_id),
-        )
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-
-    # ── Discovery (Step-3 B-09, B-15) ────────────────────────────────────────────
-    async def update_application_notes(self, job_id: int, user_id: str, new_notes: str) -> dict[str, Any] | None:
-        """Append current notes to notes_history, set notes = new_notes."""
-        from datetime import datetime, timezone
-
-        # Fetch current notes
-        cursor = await self._db.execute(
-            "SELECT notes, notes_history FROM applications WHERE job_id = ? AND user_id = ?",
-            (job_id, user_id),
-        )
-        row = await cursor.fetchone()
-        if not row:
-            return None
-        current_notes = row[0] or ""
-        history = json.loads(row[1] or "[]") if row[1] else []
-        if current_notes:  # only append if there's something to archive
-            history.append({"note": current_notes, "timestamp": datetime.now(timezone.utc).isoformat()})
-        await self._db.execute(
-            "UPDATE applications SET notes = ?, notes_history = ?, updated_at = ? WHERE job_id = ? AND user_id = ?",
-            (new_notes, json.dumps(history), datetime.now(timezone.utc).isoformat(), job_id, user_id),
-        )
-        await self._db.commit()
-        # Return updated row
-        cursor = await self._db.execute(
-            "SELECT a.*, j.title, j.company "
-            "FROM applications a LEFT JOIN jobs j ON a.job_id = j.id "
-            "WHERE a.job_id = ? AND a.user_id = ?",
-            (job_id, user_id),
-        )
-        updated = await cursor.fetchone()
-        return dict(updated) if updated else None
-
-    # ── Notification rules ───────────────────────────────────────────────────────
-
-    async def get_notification_rules(self, user_id: str) -> list[dict[str, Any]]:
-        """Return all notification rules for a user, ordered by channel."""
-        try:
-            cursor = await self._db.execute(
-                "SELECT * FROM notification_rules WHERE user_id = ? ORDER BY channel",
-                (user_id,),
-            )
-        except pg.OperationalError:
-            return []
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-
-    async def get_user_notification_rule(self, user_id: str) -> dict[str, Any] | None:
-        """Return the single notification rule for user_id, or None."""
-        try:
-            cursor = await self._db.execute(
-                "SELECT * FROM notification_rules WHERE user_id = ?",
-                (user_id,),
-            )
-        except pg.OperationalError:
-            return None
-        row = await cursor.fetchone()
-        return dict(row) if row else None
-
-    async def save_user_notification_rule(self, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
-        """Upsert the single notification rule for user_id. Returns the full row."""
-        # #318 — these fallbacks used to be a hardcoded 60/'instant' while the
-        # dispatcher defaulted to 30 and the frontend to 60: three numbers for
-        # one concept, which is how the old unreachable-threshold bug hid for
-        # so long. All three now read the shared, env-driven defaults.
-        from src.services.notifications.defaults import (  # noqa: PLC0415
-            DEFAULT_NOTIFY_MODE,
-            DEFAULT_SCORE_THRESHOLD,
-        )
-
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        score_threshold = data.get("score_threshold", DEFAULT_SCORE_THRESHOLD)
-        notify_mode = data.get("notify_mode", DEFAULT_NOTIFY_MODE)
-        interval_hours = data.get("interval_hours", 6)
-        daily_send_time = data.get("daily_send_time", "08:00")
-        quiet_hours_start = data.get("quiet_hours_start")
-        quiet_hours_end = data.get("quiet_hours_end")
-        enabled = int(data.get("enabled", True))
-
-        await self._db.execute(
-            """
-            INSERT INTO notification_rules
-                (user_id, score_threshold, notify_mode, interval_hours,
-                 daily_send_time, quiet_hours_start, quiet_hours_end,
-                 enabled, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                score_threshold   = excluded.score_threshold,
-                notify_mode       = excluded.notify_mode,
-                interval_hours    = excluded.interval_hours,
-                daily_send_time   = excluded.daily_send_time,
-                quiet_hours_start = excluded.quiet_hours_start,
-                quiet_hours_end   = excluded.quiet_hours_end,
-                enabled           = excluded.enabled,
-                updated_at        = excluded.updated_at
-            """,
-            (
-                user_id,
-                score_threshold,
-                notify_mode,
-                interval_hours,
-                daily_send_time,
-                quiet_hours_start,
-                quiet_hours_end,
-                enabled,
-                now,
-                now,
-            ),
-        )
-        await self._db.commit()
-        cursor = await self._db.execute(
-            "SELECT * FROM notification_rules WHERE user_id = ?",
-            (user_id,),
-        )
-        row = await cursor.fetchone()
-        return dict(row) if row else {}
-
-    async def set_rule_last_sent(self, user_id: str, ts: str) -> None:
-        """Update last_sent_at for the user's notification rule."""
-        try:
-            await self._db.execute(
-                "UPDATE notification_rules SET last_sent_at = ? WHERE user_id = ?",
-                (ts, user_id),
-            )
-            await self._db.commit()
-        except pg.OperationalError:
-            pass
-
-    async def get_users_with_rules(self) -> list[dict[str, Any]]:
-        """Return all enabled notification rules (one per user)."""
-        try:
-            cursor = await self._db.execute(
-                "SELECT * FROM notification_rules WHERE enabled = 1"
-            )
-        except pg.OperationalError:
-            return []
-        rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
-
-    async def cleanup_old_digests(self, *, days: int = 30) -> int:
-        """Delete sent digest rows older than `days` days. Returns count deleted."""
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        try:
-            cursor = await self._db.execute(
-                "DELETE FROM user_notification_digests WHERE sent = 1 AND sent_at < ?",
-                (cutoff,),
-            )
-            await self._db.commit()
-            return cursor.rowcount
-        except pg.OperationalError:
-            return 0
-
-    async def queue_digest_notification(self, user_id: str, channel: str, job_id: int) -> None:
-        """Enqueue a job for the user's digest on the given channel.
-
-        Idempotent — duplicate (user_id, channel, job_id) rows are allowed
-        because digests may be queued multiple times before send; dedup happens
-        in the digest sender via the sent=0 filter.
-        """
-        try:
-            await self._db.execute(
-                "INSERT INTO user_notification_digests(user_id, channel, job_id) VALUES(?, ?, ?)",
-                (user_id, channel, job_id),
-            )
-            await self._db.commit()
-        except pg.OperationalError:
-            pass  # Table missing on legacy DB — graceful no-op.
-
-    async def get_pending_digests(self, user_id: str, channel: str) -> list[dict[str, Any]]:
-        """Return all un-sent digest rows for (user_id, channel)."""
-        try:
-            cursor = await self._db.execute(
-                "SELECT * FROM user_notification_digests " "WHERE user_id = ? AND channel = ? AND sent = 0",
-                (user_id, channel),
-            )
-        except pg.OperationalError:
-            return []
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-
-    async def mark_digests_sent(self, user_id: str, channel: str) -> int:
-        """Flip sent=1 on all pending digest rows for (user_id, channel).
-
-        Returns the count of rows updated.
-        """
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        try:
-            cursor = await self._db.execute(
-                "UPDATE user_notification_digests "
-                "SET sent = 1, sent_at = ? "
-                "WHERE user_id = ? AND channel = ? AND sent = 0",
-                (now, user_id, channel),
-            )
-        except pg.OperationalError:
-            return 0
-        await self._db.commit()
-        return cursor.rowcount
-
-    # ── Notification ledger stats ────────────────────────────────────────────
-
-    async def get_notification_ledger_stats(self, user_id: str) -> dict[str, dict[str, int]]:
-        """Aggregate notification_ledger by channel + status for the caller.
-
-        Returns ``{channel: {sent: N, failed: M, queued: P, ...}}``.
-        Missing table on legacy DB returns an empty dict — same graceful-degrade
-        pattern as the rest of the notification_ledger surface.
-        """
-        try:
-            cursor = await self._db.execute(
-                "SELECT channel, status, COUNT(*) as cnt "
-                "FROM notification_ledger "
-                "WHERE user_id = ? "
-                "GROUP BY channel, status",
-                (user_id,),
-            )
-        except pg.OperationalError:
-            return {}
-        rows = await cursor.fetchall()
-        result: dict[str, dict[str, int]] = {}
-        for row in rows:
-            channel = row[0]
-            status = row[1]
-            count = int(row[2])
-            result.setdefault(channel, {})[status] = count
-        return result
 
     async def close(self) -> None:
         if self._conn:

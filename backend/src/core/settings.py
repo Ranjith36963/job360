@@ -78,13 +78,6 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
 
-# Email
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
-
 # NOTE (2026-08-24) — the per-user Slack / Discord / Telegram delivery channels
 # were removed. Nine settings lived here for them: SLACK_WEBHOOK_URL,
 # DISCORD_WEBHOOK_URL (which had ZERO consumers anywhere in the codebase — dead
@@ -402,8 +395,8 @@ PROFILE_EDIT_MAX_PER_HOUR = int(os.getenv("PROFILE_EDIT_MAX_PER_HOUR", "120"))  
 
 
 # Outbound HTTP defaults. Kept through slice 5 (#483) on purpose: the URL
-# fetcher (#496) and the channel dispatcher are the outbound callers now, and
-# both need a timeout and an honest identifying agent string.
+# fetcher (#496) is the outbound caller now, and it needs a timeout and an
+# honest identifying agent string.
 REQUEST_TIMEOUT = 30
 USER_AGENT = "Job360/1.0 (+https://job360.uk)"
 
@@ -413,7 +406,7 @@ SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 
 # --- Production env validation --------------------------------------------
 # These vars must be non-empty when running in production.
-_REQUIRED_PROD_VARS = ["SESSION_SECRET", "CHANNEL_ENCRYPTION_KEY", "DATABASE_URL"]
+_REQUIRED_PROD_VARS = ["SESSION_SECRET", "DATABASE_URL"]
 
 
 # ---------------------------------------------------------------------------

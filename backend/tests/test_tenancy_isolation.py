@@ -42,7 +42,12 @@ async def tenant_db():
             """
         )
         await db.commit()
-    await runner.up(path)
+    # Bounded, not unbounded: this fixture uses `user_actions` as its example
+    # per-user table throughout, and the mission-sweep migration (0040) drops
+    # it. The isolation mechanics under test are generic, not specific to any
+    # migration after 0039, so capping the target here keeps the table alive
+    # without changing what this file actually verifies.
+    await runner.up(path, target="0039_drop_sourcing_tables")
     yield path
     try:
         os.unlink(path)

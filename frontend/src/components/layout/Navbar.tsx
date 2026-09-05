@@ -7,7 +7,6 @@ import {
   User,
   Menu,
   Activity,
-  Send,
   ClipboardPaste,
   FolderClock,
   Settings,
@@ -17,15 +16,16 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/components/layout/AuthProvider";
 
-// R14 (docs/plans/2026-09-04-application-spine) — /pipeline and /receipts
-// leave the nav here; both URLs keep working. Slice 5 (delete-sourcing-era)
-// removed the Dashboard link and the route it pointed at — Job360 never
-// sources or ranks jobs (VISION rule 4), so there is no catalog left to browse.
+// R14 (docs/plans/2026-09-04-application-spine) — /receipts leaves the nav
+// here; the URL keeps working. Slice 5 (delete-sourcing-era) removed the
+// Dashboard link and the route it pointed at, and the mission sweep removed
+// Channels/notifications outright (VISION:133 — notifications are pull-not-
+// push) — Job360 never sources or ranks jobs (VISION rule 4), so there is no
+// catalog left to browse either.
 const NAV_LINKS = [
   { href: "/profile", label: "Profile", icon: User },
   { href: "/bring", label: "Bring a job", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },
-  { href: "/channels", label: "Channels", icon: Send },
 ] as const;
 
 export function Navbar() {
@@ -123,8 +123,8 @@ export function Navbar() {
           {user && (
             <div className="flex items-center gap-2 pl-2 border-l border-border/40">
               {/* Hidden until `lg`. The desktop bar turns on at `md` (768px),
-                  but its contents do not fit there: logo + four nav links +
-                  the settings gear + a 140px email + logout measured 809px
+                  but its contents do not fit there: logo + three nav links +
+                  the settings gear + a 140px email + logout measured too wide
                   against a 768px viewport, so BOTH /profile and /dashboard
                   scrolled sideways at tablet width. The email is the only
                   part that is purely informational, so it is what yields;

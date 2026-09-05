@@ -24,7 +24,6 @@ _PROBE = """
 import os
 os.environ["APP_ENV"] = "production"
 os.environ.setdefault("SESSION_SECRET", "x" * 40)
-os.environ.setdefault("CHANNEL_ENCRYPTION_KEY", "x" * 40)
 os.environ.setdefault("DATABASE_URL", "postgresql://job360:job360dev@localhost:5433/job360")
 
 import src.core.settings as settings

@@ -12,13 +12,11 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import pytest
-from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from httpx import Response
 
 from migrations import runner
 from src.repositories import pg
-from src.services.channels import crypto
 
 # ---------------------------------------------------------------------------
 # Shared fixtures (mirrors test_auth_routes.py pattern)
@@ -62,7 +60,6 @@ def temp_db(monkeypatch, tmp_path):
 
     from src.api import auth_deps, dependencies
     from src.api.routes import auth as auth_route
-    from src.api.routes import channels as channels_route
     from src.core import settings
 
     patched = Path(db_path)
@@ -70,13 +67,11 @@ def temp_db(monkeypatch, tmp_path):
     monkeypatch.setattr(dependencies, "DB_PATH", patched, raising=True)
     monkeypatch.setattr(auth_deps, "DB_PATH", patched, raising=True)
     monkeypatch.setattr(auth_route, "DB_PATH", patched, raising=True)
-    monkeypatch.setattr(channels_route, "DB_PATH", patched, raising=True)
 
     # Reset the JobDatabase singleton so get_db() creates a fresh one
     # pointing at this test's DB (not a previous test's DB).
     monkeypatch.setattr(dependencies, "_db", None)
 
-    crypto.set_test_key(Fernet.generate_key().decode("ascii"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret-" + "x" * 40)
 
     yield db_path

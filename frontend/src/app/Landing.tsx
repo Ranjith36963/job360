@@ -4,7 +4,6 @@ import {
   Globe,
   Target,
   Layers,
-  Kanban,
   Brain,
   ArrowRight,
   Upload,
@@ -15,50 +14,51 @@ import {
 } from "lucide-react";
 
 // R14 (docs/plans/2026-09-04-application-spine/spec.md) — the landing copy
-// no longer advertises a job-source count. Job360 never sources or ranks
-// jobs (VISION rule 4); the pitch is the memory layer AFTER the click, not
-// the catalog. See docs/product/VISION.md.
+// no longer advertises a job-source count. Job360 never sources, ranks or
+// recommends jobs (VISION rule 4); the pitch is the memory layer AFTER the
+// click, for the seeker's own AI agent — not a search or matching engine.
+// See docs/product/VISION.md.
 const FEATURES = [
-  {
-    icon: Radar,
-    title: "8-Dimensional Scoring",
-    description:
-      "Role, Skill, Seniority, Experience, Credentials, Location, Recency, and Semantic similarity — every job scored 0-100 with evidence-backed reasons.",
-    stagger: 1,
-  },
   {
     icon: Globe,
     title: "Bring Any Job",
     description:
-      "Paste a job you found anywhere — LinkedIn, a company site, a referral. Job360 stores it, keeps the ad even after the listing disappears, and starts your record.",
-    stagger: 2,
+      "Paste a job you found anywhere — a URL or the raw text. Job360 stores the ad and keeps it even after the listing disappears.",
+    stagger: 1,
   },
   {
     icon: Target,
-    title: "Skill Gap Analysis",
+    title: "One Application, One Record",
     description:
-      "Instantly see matched, missing, and transferable skills for every listing. Know exactly where you stand before you apply.",
-    stagger: 3,
+      "Every job you bring becomes a single application: every CV and cover-letter version, every event, and the receipt of what you actually sent.",
+    stagger: 2,
   },
   {
     icon: Layers,
     title: "Every Version, Forever",
     description:
       "Every CV, cover letter and edit you ever save is kept — nothing is overwritten. Come back a year later and read exactly what you sent.",
+    stagger: 3,
+  },
+  {
+    icon: Radar,
+    title: "Built From Your Real History",
+    description:
+      "Your profile comes from your CV, LinkedIn and GitHub — the real facts your agent needs, kept in one place.",
     stagger: 4,
   },
   {
-    icon: Kanban,
-    title: "Application Pipeline",
+    icon: Brain,
+    title: "Your Agent's Memory",
     description:
-      "Track every opportunity from discovery to offer. Bookmarks, applications, interviews, and outcomes — all in one view.",
+      "Connect your own Claude or ChatGPT over MCP so it can read your profile and applications, and write straight back into them.",
     stagger: 5,
   },
   {
-    icon: Brain,
-    title: "Career Intelligence",
+    icon: Shield,
+    title: "Secure by Design",
     description:
-      "AI-powered matching with 424 synonym groups, a 563-edge skill graph, and cross-encoder reranking. It understands your career, not just keywords.",
+      "OAuth 2.1 sign-in means only the agents you approve can act for you. Built and hosted in the UK at job360.uk.",
     stagger: 6,
   },
 ] as const;
@@ -71,22 +71,22 @@ const STATS = [
     description: "Every CV & cover letter kept",
   },
   {
-    icon: Radar,
-    value: "8D",
-    label: "Scoring",
-    description: "Multi-dimensional match engine",
+    icon: Brain,
+    value: "MCP",
+    label: "Agent access",
+    description: "Your own Claude or ChatGPT reads and writes",
   },
   {
     icon: Clock,
-    value: "Real-time",
-    label: "Updates",
-    description: "Fresh jobs every run",
+    value: "Every",
+    label: "Event",
+    description: "Typed, timestamped, kept",
   },
   {
     icon: Shield,
-    value: "Any",
-    label: "Domain",
-    description: "Tech, finance, health & more",
+    value: "UK",
+    label: "Hosted",
+    description: "job360.uk, OAuth 2.1 secured",
   },
 ] as const;
 
@@ -138,7 +138,7 @@ export default function Landing() {
           {/* Pill badge */}
           <div className="animate-fade-in-up stagger-1 mb-8 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/[0.06] px-4 py-1.5 text-sm text-primary">
             <Sparkles className="h-3.5 w-3.5" />
-            <span className="font-medium">Career Command Center</span>
+            <span className="font-medium">Your Career Memory Layer</span>
           </div>
 
           {/* Headline — each line staggers in, neon glow */}
@@ -163,12 +163,12 @@ export default function Landing() {
 
           {/* Subtitle */}
           <p className="animate-fade-in-up stagger-5 mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground sm:text-xl">
-            Upload your CV and let Job
+            Upload your CV, bring the jobs you find, and let Job
             <span className="bg-gradient-to-r from-primary via-lime-300 to-primary bg-clip-text text-transparent font-semibold">
               360
-            </span>
-            &apos;s 8-dimensional scoring engine judge the fit, tailor your
-            documents, and remember every version — forever.
+            </span>{" "}
+            keep every document, every event, and the receipt — so your own
+            AI agent always has the full story.
           </p>
 
           {/* CTAs */}
@@ -238,8 +238,9 @@ export default function Landing() {
               Built for serious job seekers
             </h2>
             <p className="mt-4 text-muted-foreground text-lg">
-              Not another job board. A professional-grade search engine that
-              understands your career and finds roles you&apos;d actually want.
+              Not another job board. Job360 is the memory layer that keeps
+              every job, document and event straight — so your own AI agent
+              can act on it.
             </p>
           </div>
 
@@ -287,21 +288,21 @@ export default function Landing() {
                 step: "01",
                 title: "Upload your CV",
                 description:
-                  "Drop your PDF or DOCX. Our parser extracts skills, titles, experience, education, and certifications automatically.",
+                  "Drop your PDF or DOCX, add LinkedIn and GitHub. Job360 extracts your skills, titles, experience and education automatically.",
                 icon: Upload,
               },
               {
                 step: "02",
                 title: "Bring the job you found",
                 description:
-                  "Paste a job you found anywhere. Job360 scores it against your profile in 8 dimensions and keeps the ad even after the listing disappears.",
+                  "Paste a URL or the raw text for a job you found anywhere. Job360 stores the ad and starts one application record, even after the listing disappears.",
                 icon: Zap,
               },
               {
                 step: "03",
-                title: "Review top matches",
+                title: "Let your agent take it from there",
                 description:
-                  "Deduplicated, reranked, and sorted. See exactly why each job matched with evidence-backed scoring breakdowns.",
+                  "Your own Claude or ChatGPT reads your profile and application over MCP — judges fit, drafts the CV, and applies. Job360 remembers everything it did.",
                 icon: Target,
               },
             ].map(({ step, title, description, icon: Icon }, i) => (
@@ -353,15 +354,15 @@ export default function Landing() {
 
           <div className="relative">
             <h2 className="animate-fade-in-up stagger-1 font-heading text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
-              Ready to find your{" "}
+              Ready to give your{" "}
               <span className="bg-gradient-to-r from-primary via-lime-300 to-primary bg-clip-text text-transparent">
-                next role
-              </span>
-              ?
+                agent
+              </span>{" "}
+              a memory?
             </h2>
             <p className="animate-fade-in-up stagger-2 mx-auto mt-4 max-w-xl text-lg text-muted-foreground">
-              Upload your CV and let the engine do the heavy lifting. No
-              accounts, no spam, no fluff — just relevant matches.
+              Upload your CV, bring the jobs you find, and give your own AI
+              agent everything it needs to apply well.
             </p>
             <div className="animate-fade-in-up stagger-3 mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
               <Link
@@ -374,7 +375,7 @@ export default function Landing() {
               </Link>
             </div>
             <p className="animate-fade-in-up stagger-4 mt-6 text-xs text-muted-foreground/60">
-              Free and open source. Your data stays on your machine.
+              UK-hosted at job360.uk. No spam, no fluff.
             </p>
           </div>
         </div>

@@ -32,13 +32,9 @@ from src.api.routes import (
     applications,
     auth,
     bring,
-    channels,
     client_log,
     health,
-    notification_rules,
-    notifications,
     oauth,
-    pipeline,
     profile,
     receipts,
     tailor,
@@ -207,18 +203,12 @@ app.add_middleware(RequestIdMiddleware)
 app.include_router(health.router, prefix="/api")
 app.include_router(client_log.router, prefix="/api")  # frontend → server log bridge (D)
 app.include_router(profile.router, prefix="/api")
-app.include_router(pipeline.router, prefix="/api")
 # Career-ops pivot (plan §8, slice one) — bring-a-job + application receipts
 app.include_router(bring.router, prefix="/api")
 app.include_router(receipts.router, prefix="/api")
 app.include_router(applications.router, prefix="/api")
-# Batch 2 — auth + channel config
+# Batch 2 — auth
 app.include_router(auth.router, prefix="/api")
-app.include_router(channels.router, prefix="/api")
-# Step-1.5 S3-D — notification ledger reader
-app.include_router(notifications.router, prefix="/api")
-# Step-3 B-02 — per-user per-channel notification rules
-app.include_router(notification_rules.router, prefix="/api")
 # Per-User AI CV & Cover Letter (docs/product/peruser_cv_coverletter.md)
 app.include_router(tailor.router, prefix="/api")
 # Career-ops pivot, slice two (docs/plans/2026-09-03-mcp-server) — personal

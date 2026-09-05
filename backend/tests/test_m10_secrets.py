@@ -2,14 +2,13 @@
 
 Two guarantees pinned here:
 
-1. ``src.core.settings`` must NOT expose ``SESSION_SECRET`` /
-   ``CHANNEL_ENCRYPTION_KEY`` as module constants. They used to be bound as
-   ``os.getenv(NAME, "")`` — dead (nothing imported them) but actively
-   misleading, because an empty-string default reads as "an empty secret is a
-   valid state". A future caller reading that constant would silently sign
-   cookies / encrypt credentials with "".
+1. ``src.core.settings`` must NOT expose ``SESSION_SECRET`` as a module
+   constant. It used to be bound as ``os.getenv(NAME, "")`` — dead (nothing
+   imported it) but actively misleading, because an empty-string default
+   reads as "an empty secret is a valid state". A future caller reading
+   that constant would silently sign cookies with "".
 
-2. The REAL accessors read the env var at call time and raise when it is
+2. The REAL accessor reads the env var at call time and raises when it is
    missing. That is the actual enforcement point and must stay fail-closed.
 """
 
@@ -26,9 +25,6 @@ def test_settings_does_not_export_empty_defaulted_secrets():
         "settings.SESSION_SECRET must not exist — an empty-default constant "
         "invites silently signing with ''. Use auth_deps._secret() instead."
     )
-    assert not hasattr(settings, "CHANNEL_ENCRYPTION_KEY"), (
-        "settings.CHANNEL_ENCRYPTION_KEY must not exist — use crypto._key()."
-    )
 
 
 def test_required_prod_vars_still_lists_the_secrets():
@@ -36,7 +32,6 @@ def test_required_prod_vars_still_lists_the_secrets():
     from src.core import settings
 
     assert "SESSION_SECRET" in settings._REQUIRED_PROD_VARS
-    assert "CHANNEL_ENCRYPTION_KEY" in settings._REQUIRED_PROD_VARS
     assert "DATABASE_URL" in settings._REQUIRED_PROD_VARS
 
 
@@ -49,31 +44,13 @@ def test_session_secret_accessor_fails_closed_when_unset():
             _secret()
 
 
-def test_channel_encryption_key_accessor_fails_closed_when_unset():
-    """``_fernet()`` is the real enforcement point and is lru_cached, so the
-    cache must be cleared to exercise the env lookup."""
-    from src.services.channels import crypto
-
-    saved = os.environ.get("CHANNEL_ENCRYPTION_KEY")
-    try:
-        os.environ.pop("CHANNEL_ENCRYPTION_KEY", None)
-        crypto._fernet.cache_clear()
-        with pytest.raises(RuntimeError, match="CHANNEL_ENCRYPTION_KEY"):
-            crypto._fernet()
-    finally:
-        # Restore the suite's key and drop the poisoned cache entry.
-        if saved is not None:
-            os.environ["CHANNEL_ENCRYPTION_KEY"] = saved
-        crypto._fernet.cache_clear()
-
-
 def test_prod_validation_raises_when_secrets_missing():
     """validate_required_env must still hard-fail in production."""
     from src.core import settings
 
     with patch.dict(
         os.environ,
-        {"APP_ENV": "production", "SESSION_SECRET": "", "CHANNEL_ENCRYPTION_KEY": "", "DATABASE_URL": ""},
+        {"APP_ENV": "production", "SESSION_SECRET": "", "DATABASE_URL": ""},
         clear=False,
     ):
         with pytest.raises(RuntimeError, match="Missing required environment variables"):
