@@ -1,11 +1,13 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-08-25 by the nightly doc-truth routine -->
+<!-- doc: LIVING | last-verified: 2026-09-03 by the mission sweep -->
 
-Automated UK job search system supporting **any professional domain**. Aggregates jobs from **40 source instances** (41 keys in `SOURCE_REGISTRY`; `indeed`/`glassdoor` share `JobSpySource`), scores them 0–100 against your profile (CV, LinkedIn, GitHub, and manual preferences), deduplicates via a four-layer cascade, and delivers results via CLI, email or webhook (per-user via Apprise), CSV, Rich terminal table, and a Next.js dashboard backed by FastAPI.
+**Job360 is the memory and context layer for the seeker's own AI agent.** Job boards find jobs. Agents (Claude Code, ChatGPT, Grok) think and act — judge fit, write the CV, read Gmail, find the recruiter, fill the form. Job360 remembers: the structured profile, every artifact version, every typed event with its author, and the receipt of what was sent. Agents connect over MCP (`/api/mcp`) with OAuth 2.1 (slice 1) or a personal token; the web app is the same record with a screen.
 
-> **A profile is required.** Default keyword lists (`JOB_TITLES`, `PRIMARY_SKILLS`, …) were emptied on 2026-04-09 (commit `3ba1342`). Without a profile, the system has nothing to score against — `setup-profile` is now a mandatory first step, not optional.
+**We never source, rank or recommend jobs.** The user (or their agent) brings the job — a link or pasted text — and Job360 keeps everything that happens after the click. Read [`docs/product/VISION.md`](./docs/product/VISION.md) first; the work list with an issue per slice is [`docs/plans/2026-09-03-mission-roadmap.md`](./docs/plans/2026-09-03-mission-roadmap.md).
 
-> **For current architecture detail**: see [`docs/product/pillars/`](./docs/product/pillars/) — three code-verified pillar manuals (User, Search & Match Engine, Job Providers) plus a glossary and runbook. The sections below in this README cover quick-start and CLI; the pillar docs are authoritative for system internals.
+> **What is live on `main` today:** magic-link login, profile extraction (CV / LinkedIn / GitHub / preferences), `POST /api/jobs/bring`, application receipts, a CV tailor kept as the web fallback, and an 8-tool MCP server. Three Railway services: `backend`, `frontend`, `Postgres` (worker + Redis deleted 2026-09-02).
+
+> **Everything below the API-docs section is the sourcing era** — the 40-source aggregator, the 0–100 scorer, the four-layer dedup, the search dashboard. That code still runs on `main` today; slice 2 (#480) hides it behind a flag and slice 5 (#483) deletes it. Kept here as history until then. A profile is still required — extraction is the part that survives.
 
 ### API docs (auto-generated)
 

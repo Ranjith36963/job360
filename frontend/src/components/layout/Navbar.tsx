@@ -6,10 +6,11 @@ import { useState } from "react";
 import {
   LayoutDashboard,
   User,
-  Kanban,
   Menu,
   Activity,
   Send,
+  ClipboardPaste,
+  FolderClock,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -17,10 +18,21 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/components/layout/AuthProvider";
 
+// R12/R14 (docs/plans/2026-09-04-application-spine) — the legacy search UI
+// (Dashboard) is gated behind the same build-time flag as the backend
+// routes and the /dashboard 404 in middleware.ts. NEXT_PUBLIC_* is inlined
+// at build time, same convention as src/lib/api.ts:47.
+const SEARCH_UI_ENABLED = process.env.NEXT_PUBLIC_SEARCH_UI_ENABLED === "true";
+
+// R14 (docs/plans/2026-09-04-application-spine) — /pipeline and /receipts
+// leave the nav here; both URLs keep working (slice 5 removes the routes).
 const NAV_LINKS = [
   { href: "/profile", label: "Profile", icon: User },
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/pipeline", label: "Pipeline", icon: Kanban },
+  { href: "/bring", label: "Bring a job", icon: ClipboardPaste },
+  { href: "/applications", label: "Applications", icon: FolderClock },
+  ...(SEARCH_UI_ENABLED
+    ? [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }]
+    : []),
   { href: "/channels", label: "Channels", icon: Send },
 ] as const;
 

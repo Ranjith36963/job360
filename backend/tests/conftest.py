@@ -149,6 +149,24 @@ def _loop_guard_strict(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _search_ui_enabled_for_legacy_suite(monkeypatch):
+    """R12 (spec 2026-09-04-application-spine) — SEARCH_UI_ENABLED defaults to
+    OFF in production, but the legacy search suite (hundreds of tests,
+    slated for deletion in slice 5) still exercises the real routes. Force
+    it ON for the whole suite here; tests/test_search_flag.py pins BOTH
+    positions of the flag explicitly via monkeypatch.setattr(settings, ...).
+
+    Its own fixture (C6, split out of ``_loop_guard_strict``, which is about
+    the event-loop guard and unrelated): same autouse/function scope, so this
+    changes nothing about schema isolation between tests — only which fixture
+    function the setattr call lives in.
+    """
+    from src.core import settings as _settings
+
+    monkeypatch.setattr(_settings, "SEARCH_UI_ENABLED", True, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _offline_openai(monkeypatch):
     """Keep the WHOLE suite offline for LLMs (rule #4).
 

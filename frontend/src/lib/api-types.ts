@@ -4,6 +4,57 @@
  */
 
 export interface paths {
+    "/.well-known/oauth-authorization-server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Authorization Server Metadata */
+        get: operations["authorization_server_metadata__well_known_oauth_authorization_server_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/.well-known/oauth-protected-resource": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Protected Resource Metadata Root */
+        get: operations["protected_resource_metadata_root__well_known_oauth_protected_resource_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/.well-known/oauth-protected-resource/api/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Protected Resource Metadata Mcp */
+        get: operations["protected_resource_metadata_mcp__well_known_oauth_protected_resource_api_mcp_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/actions": {
         parameters: {
             query?: never;
@@ -32,6 +83,142 @@ export interface paths {
         get: operations["action_counts_api_actions_counts_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Applications */
+        get: operations["list_applications_api_applications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export History */
+        get: operations["export_history_api_applications_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Application */
+        get: operations["get_application_api_applications__application_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save Artifact */
+        post: operations["save_artifact_api_applications__application_id__artifacts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/artifacts/{artifact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Application Artifact */
+        get: operations["get_application_artifact_api_applications__application_id__artifacts__artifact_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Event */
+        post: operations["record_event_api_applications__application_id__events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/fit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Fit */
+        put: operations["save_fit_api_applications__application_id__fit_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Application Receipt */
+        post: operations["record_application_receipt_api_applications__application_id__receipt_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -437,6 +624,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/bring": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bring Job
+         * @description Store the pasted ad, score it against the caller's profile, put it in
+         *     their feed. Returns the job exactly as GET /jobs/{id} would, so the
+         *     frontend can route straight to the detail page.
+         */
+        post: operations["bring_job_api_jobs_bring_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/export": {
         parameters: {
             query?: never;
@@ -582,6 +791,142 @@ export interface paths {
         get: operations["notification_stats_api_notifications_stats_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Authorize */
+        get: operations["authorize_api_oauth_authorize_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/authorize/{rid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Consent Request */
+        get: operations["get_consent_request_api_oauth_authorize__rid__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/authorize/{rid}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide Consent */
+        post: operations["decide_consent_api_oauth_authorize__rid__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Grants */
+        get: operations["list_grants_api_oauth_grants_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/grants/{grant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Grant */
+        delete: operations["revoke_grant_api_oauth_grants__grant_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register Client */
+        post: operations["register_client_api_oauth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke */
+        post: operations["revoke_api_oauth_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/oauth/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Token */
+        post: operations["token_api_oauth_token_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1025,6 +1370,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Receipts */
+        get: operations["list_receipts_api_receipts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/receipts/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Receipt
+         * @description "I applied": freeze the receipt, then mark the job applied in BOTH
+         *     existing per-user tables (`user_actions` for the card, `applications` for
+         *     the pipeline) so every surface agrees.
+         */
+        post: operations["create_receipt_api_receipts__job_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/receipts/{receipt_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Receipt */
+        get: operations["get_receipt_api_receipts__receipt_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/recent": {
         parameters: {
             query?: never;
@@ -1391,6 +1792,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tokens */
+        get: operations["list_tokens_api_tokens_get"];
+        put?: never;
+        /** Create Token */
+        post: operations["create_token_api_tokens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tokens/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Token */
+        delete: operations["revoke_token_api_tokens__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/whats-new": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whats New */
+        get: operations["whats_new_api_whats_new_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1423,6 +1876,213 @@ export interface components {
         ActionsListResponse: {
             /** Actions */
             actions: components["schemas"]["ActionResponse"][];
+        };
+        /**
+         * ApplicationArtifactOut
+         * @description The ``get_application`` artifacts-list shape: ``text`` is ALWAYS a key
+         *     (null unless ``with_artifact_text=true`` and under the byte cap).
+         */
+        ApplicationArtifactOut: {
+            /** Chars */
+            chars: number;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model: string | null;
+            /** Profile Version */
+            profile_version: number | null;
+            /** Text */
+            text: string | null;
+            /** Truncated */
+            truncated: boolean;
+            /** Version No */
+            version_no: number;
+        };
+        /**
+         * ApplicationArtifactRowOut
+         * @description ``get_application_artifact`` — one version in full. No ``truncated``:
+         *     this route always returns the real row, never a capped read.
+         */
+        ApplicationArtifactRowOut: {
+            /** Chars */
+            chars: number;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model: string | null;
+            /** Profile Version */
+            profile_version: number | null;
+            /** Text */
+            text: string;
+            /** Version No */
+            version_no: number;
+        };
+        /** ApplicationDetailOut */
+        ApplicationDetailOut: {
+            /** Artifacts */
+            artifacts: components["schemas"]["ApplicationArtifactOut"][];
+            /** Created At */
+            created_at: string;
+            /** Events */
+            events: components["schemas"]["ApplicationEventOut"][];
+            fit: components["schemas"]["ApplicationFitOut"] | null;
+            /** Id */
+            id: number;
+            job: components["schemas"]["ApplicationJobOut"];
+            /** Job Id */
+            job_id: number;
+            /** Last Event At */
+            last_event_at: string | null;
+            /** Receipts */
+            receipts: components["schemas"]["ApplicationReceiptOut"][];
+            /** Status */
+            status: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * ApplicationEventOut
+         * @description The timeline shape (``list_events_for_display``) — used by
+         *     ``get_application`` and ``export_history``. Carries ``superseded``;
+         *     ``whats_new``'s events do not (see ``WhatsNewEventOut``).
+         */
+        ApplicationEventOut: {
+            /** Corrects Event Id */
+            corrects_event_id: number | null;
+            /** Detail */
+            detail: string;
+            /** Event Type */
+            event_type: string;
+            /** Id */
+            id: number;
+            /** Occurred At */
+            occurred_at: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+            /** Superseded */
+            superseded: boolean;
+        };
+        /** ApplicationFitOut */
+        ApplicationFitOut: {
+            /** Gaps */
+            gaps: string[];
+            /** Reasoning */
+            reasoning: string | null;
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+            /** Score */
+            score: number | null;
+            /** Verdict */
+            verdict: string | null;
+        };
+        /** ApplicationJobOut */
+        ApplicationJobOut: {
+            /** Catalog Present */
+            catalog_present: boolean;
+            /** Job Company */
+            job_company: string;
+            /** Job Description Snapshot */
+            job_description_snapshot: string;
+            /** Job Location */
+            job_location: string;
+            /** Job Source */
+            job_source: string;
+            /** Job Title */
+            job_title: string;
+            /** Job Url */
+            job_url: string;
+            /** Snapshot At */
+            snapshot_at: string | null;
+        };
+        /** ApplicationReceiptExportOut */
+        ApplicationReceiptExportOut: {
+            /** Channel */
+            channel: string;
+            /** Confirmation */
+            confirmation: string;
+            /** Cover Letter Artifact Id */
+            cover_letter_artifact_id: number | null;
+            /** Cover Letter Text */
+            cover_letter_text?: string | null;
+            /** Cv Artifact Id */
+            cv_artifact_id: number | null;
+            /** Cv Text */
+            cv_text?: string | null;
+            /** Id */
+            id: number;
+            /** Note */
+            note: string;
+            /** Sent At */
+            sent_at: string;
+        };
+        /**
+         * ApplicationReceiptOut
+         * @description ``get_application``'s receipts list — never carries the receipt text
+         *     (that call site never passes ``include_text``; see
+         *     ``ApplicationReceiptExportOut`` for the ``export_history`` shape).
+         */
+        ApplicationReceiptOut: {
+            /** Channel */
+            channel: string;
+            /** Confirmation */
+            confirmation: string;
+            /** Cover Letter Artifact Id */
+            cover_letter_artifact_id: number | null;
+            /** Cv Artifact Id */
+            cv_artifact_id: number | null;
+            /** Id */
+            id: number;
+            /** Note */
+            note: string;
+            /** Sent At */
+            sent_at: string;
+        };
+        /** ApplicationSummaryOut */
+        ApplicationSummaryOut: {
+            /** Artifacts */
+            artifacts: {
+                [key: string]: number;
+            };
+            /** Events */
+            events: number;
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Id */
+            job_id: number;
+            /** Job Title */
+            job_title: string;
+            /** Last Event At */
+            last_event_at: string | null;
+            /** Receipts */
+            receipts: number;
+            /** Status */
+            status: string;
         };
         /** ApplicationTimelineResponse */
         ApplicationTimelineResponse: {
@@ -1471,6 +2131,37 @@ export interface components {
             cv?: string;
             /** Preferences */
             preferences?: string;
+        };
+        /** BringJobRequest */
+        BringJobRequest: {
+            /**
+             * Apply Url
+             * @default
+             */
+            apply_url: string;
+            /** Company */
+            company: string;
+            /** Description */
+            description: string;
+            /**
+             * Location
+             * @default
+             */
+            location: string;
+            /** Title */
+            title: string;
+        };
+        /** BringJobResponse */
+        BringJobResponse: {
+            /** Application Id */
+            application_id: number;
+            /** Existing */
+            existing: boolean;
+            job: components["schemas"]["JobResponse"];
+            /** Scored */
+            scored: boolean;
+            /** Status */
+            status: string;
         };
         /**
          * CVDetail
@@ -1622,6 +2313,49 @@ export interface components {
             /** Url */
             url?: string | null;
         };
+        /** ConsentDecisionRequest */
+        ConsentDecisionRequest: {
+            /** Approve */
+            approve: boolean;
+        };
+        /** ConsentDecisionResponse */
+        ConsentDecisionResponse: {
+            /** Redirect To */
+            redirect_to: string;
+        };
+        /** ConsentRequestResponse */
+        ConsentRequestResponse: {
+            /** Client Name */
+            client_name: string;
+            /** Expires At */
+            expires_at: string;
+            /** Redirect Uri */
+            redirect_uri: string;
+            /** Scope */
+            scope: string;
+            /** Scope Description */
+            scope_description: string;
+            /** User Email */
+            user_email: string;
+        };
+        /** CreateReceiptRequest */
+        CreateReceiptRequest: {
+            /**
+             * Channel
+             * @default
+             */
+            channel: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** CreateTokenRequest */
+        CreateTokenRequest: {
+            /** Name */
+            name: string;
+        };
         /** EmailChangeRequest */
         EmailChangeRequest: {
             /** Current Password */
@@ -1637,12 +2371,80 @@ export interface components {
             /** Token */
             token: string;
         };
+        /** ExportApplicationOut */
+        ExportApplicationOut: {
+            /** Artifacts */
+            artifacts: components["schemas"]["ExportArtifactOut"][];
+            /** Created At */
+            created_at: string;
+            /** Events */
+            events: components["schemas"]["ApplicationEventOut"][];
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Id */
+            job_id: number;
+            /** Job Title */
+            job_title: string;
+            /** Last Event At */
+            last_event_at: string | null;
+            /** Receipts */
+            receipts: components["schemas"]["ApplicationReceiptExportOut"][];
+            /** Status */
+            status: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
+         * ExportArtifactOut
+         * @description ``export_history``'s artifact METADATA (not the full row): ``text`` is
+         *     only a key at all when ``include_text=true`` — hence the default.
+         */
+        ExportArtifactOut: {
+            /** Chars */
+            chars: number;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model: string | null;
+            /** Profile Version */
+            profile_version: number | null;
+            /** Text */
+            text?: string | null;
+            /** Version No */
+            version_no: number;
+        };
+        /** ExportHistoryResponse */
+        ExportHistoryResponse: {
+            /** Applications */
+            applications: components["schemas"]["ExportApplicationOut"][];
+            /** Bytes */
+            bytes: number;
+            /** Next Since */
+            next_since?: string | null;
+            /** Truncated */
+            truncated: boolean;
+        };
         /** GitHubResponse */
         GitHubResponse: {
             /** Merged */
             merged: boolean;
             /** Ok */
             ok: boolean;
+        };
+        /** GrantListResponse */
+        GrantListResponse: {
+            /** Grants */
+            grants: components["schemas"]["OAuthGrantOut"][];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1700,6 +2502,8 @@ export interface components {
             deadline_source?: string | null;
             /** Dedup Group Ids */
             dedup_group_ids?: number[] | null;
+            /** Description */
+            description?: string | null;
             /**
              * Dims Active
              * @default false
@@ -1864,6 +2668,13 @@ export interface components {
             /** Ok */
             ok: boolean;
         };
+        /** ListApplicationsResponse */
+        ListApplicationsResponse: {
+            /** Applications */
+            applications: components["schemas"]["ApplicationSummaryOut"][];
+            /** Total */
+            total: number;
+        };
         /** LivezResponse */
         LivezResponse: {
             /** Status */
@@ -1891,6 +2702,8 @@ export interface components {
              * Format: email
              */
             email: string;
+            /** Next */
+            next?: string | null;
         };
         /** NotesUpdateRequest */
         NotesUpdateRequest: {
@@ -1994,6 +2807,21 @@ export interface components {
             quiet_hours_start?: string | null;
             /** Score Threshold */
             score_threshold?: number | null;
+        };
+        /** OAuthGrantOut */
+        OAuthGrantOut: {
+            /** Client Name */
+            client_name: string;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Redirect Uri */
+            redirect_uri: string;
+            /** Scope */
+            scope: string;
         };
         /** PasswordChangeRequest */
         PasswordChangeRequest: {
@@ -2228,6 +3056,167 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** Receipt */
+        Receipt: {
+            /** Channel */
+            channel: string;
+            /** Cover Letter Origin */
+            cover_letter_origin: string | null;
+            /** Cover Letter Text */
+            cover_letter_text: string | null;
+            /** Cv Origin */
+            cv_origin: string | null;
+            /** Cv Text */
+            cv_text: string | null;
+            /** Id */
+            id: number;
+            /** Job Apply Url */
+            job_apply_url: string;
+            /** Job Company */
+            job_company: string;
+            /** Job Description */
+            job_description: string;
+            /** Job Id */
+            job_id: number;
+            /** Job Location */
+            job_location: string;
+            /** Job Source */
+            job_source: string;
+            /** Job Title */
+            job_title: string;
+            /** Note */
+            note: string;
+            /** Profile Version */
+            profile_version: number | null;
+            /** Sent At */
+            sent_at: string;
+        };
+        /** ReceiptAnswer */
+        ReceiptAnswer: {
+            /** Answer */
+            answer: string;
+            /** Question */
+            question: string;
+        };
+        /** ReceiptListResponse */
+        ReceiptListResponse: {
+            /** Receipts */
+            receipts: components["schemas"]["ReceiptSummary"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * ReceiptSummary
+         * @description List row: everything but the three long bodies.
+         */
+        ReceiptSummary: {
+            /** Channel */
+            channel: string;
+            /** Has Cover Letter */
+            has_cover_letter: boolean;
+            /** Has Cv */
+            has_cv: boolean;
+            /** Id */
+            id: number;
+            /** Job Apply Url */
+            job_apply_url: string;
+            /** Job Company */
+            job_company: string;
+            /** Job Id */
+            job_id: number;
+            /** Job Location */
+            job_location: string;
+            /** Job Title */
+            job_title: string;
+            /** Note */
+            note: string;
+            /** Sent At */
+            sent_at: string;
+        };
+        /** RecordApplicationReceiptRequest */
+        RecordApplicationReceiptRequest: {
+            /** Answers */
+            answers?: components["schemas"]["ReceiptAnswer"][];
+            /** Applied At */
+            applied_at?: string | null;
+            /**
+             * Channel
+             * @default
+             */
+            channel: string;
+            /**
+             * Confirmation
+             * @default
+             */
+            confirmation: string;
+            /** Cover Letter Artifact Id */
+            cover_letter_artifact_id?: number | null;
+            /** Cv Artifact Id */
+            cv_artifact_id?: number | null;
+            /** Fields Filled */
+            fields_filled?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+        };
+        /** RecordApplicationReceiptResponse */
+        RecordApplicationReceiptResponse: {
+            /** Channel */
+            channel: string;
+            /** Confirmation */
+            confirmation: string;
+            /** Cover Letter Artifact Id */
+            cover_letter_artifact_id: number | null;
+            /** Cv Artifact Id */
+            cv_artifact_id: number | null;
+            /** Cv Version No */
+            cv_version_no: number | null;
+            /** Event Id */
+            event_id: number;
+            /** Receipt Id */
+            receipt_id: number;
+            /** Sent At */
+            sent_at: string;
+            /** Url */
+            url: string;
+        };
+        /** RecordEventRequest */
+        RecordEventRequest: {
+            /** Corrects Event Id */
+            corrects_event_id?: number | null;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Event Type */
+            event_type: string;
+            /** Occurred At */
+            occurred_at?: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+        };
+        /** RecordEventResponse */
+        RecordEventResponse: {
+            /** Event Id */
+            event_id: number;
+            /** Event Type */
+            event_type: string;
+            /** Occurred At */
+            occurred_at: string;
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+            /** Status */
+            status: string;
+        };
         /** RegisterRequest */
         RegisterRequest: {
             /**
@@ -2293,6 +3282,60 @@ export interface components {
             runs: components["schemas"]["RunEntry"][];
             /** Total */
             total: number;
+        };
+        /** SaveArtifactRequest */
+        SaveArtifactRequest: {
+            /** Kind */
+            kind: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /** Model */
+            model?: string | null;
+            /** Text */
+            text: string;
+        };
+        /** SaveArtifactResponse */
+        SaveArtifactResponse: {
+            /** Artifact Id */
+            artifact_id: number;
+            /** Chars */
+            chars: number;
+            /** Created At */
+            created_at: string;
+            /** Event Id */
+            event_id: number;
+            /** Kind */
+            kind: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model: string | null;
+            /** Profile Version */
+            profile_version: number | null;
+            /** Version No */
+            version_no: number;
+        };
+        /** SaveFitRequest */
+        SaveFitRequest: {
+            /** Gaps */
+            gaps?: string[] | null;
+            /** Reasoning */
+            reasoning?: string | null;
+            /** Score */
+            score?: number | null;
+            /** Verdict */
+            verdict?: string | null;
+        };
+        /** SaveFitResponse */
+        SaveFitResponse: {
+            /** Application Id */
+            application_id: number;
+            /** Event Id */
+            event_id: number;
+            fit: components["schemas"]["ApplicationFitOut"];
         };
         /** SearchStartResponse */
         SearchStartResponse: {
@@ -2437,6 +3480,39 @@ export interface components {
             /** User Id */
             user_id: string;
         };
+        /** TokenCreated */
+        TokenCreated: {
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Token */
+            token: string;
+        };
+        /** TokenListResponse */
+        TokenListResponse: {
+            /** Tokens */
+            tokens: components["schemas"]["TokenSummary"][];
+        };
+        /** TokenSummary */
+        TokenSummary: {
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+        };
         /** UserResponse */
         UserResponse: {
             /** Email */
@@ -2457,6 +3533,63 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** WhatsNewApplicationOut */
+        WhatsNewApplicationOut: {
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            /** Last Event At */
+            last_event_at: string | null;
+            /** Status */
+            status: string;
+        };
+        /**
+         * WhatsNewEventOut
+         * @description ``whats_new``'s raw event rows — no ``superseded`` (unlike
+         *     ``ApplicationEventOut``); carries ``application_id`` instead.
+         */
+        WhatsNewEventOut: {
+            /** Application Id */
+            application_id: number;
+            /** Corrects Event Id */
+            corrects_event_id: number | null;
+            /** Detail */
+            detail: string;
+            /** Event Type */
+            event_type: string;
+            /** Id */
+            id: number;
+            /** Occurred At */
+            occurred_at: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+        };
+        /** WhatsNewResponse */
+        WhatsNewResponse: {
+            /** Applications */
+            applications: components["schemas"]["WhatsNewApplicationOut"][];
+            /** Events */
+            events: components["schemas"]["WhatsNewEventOut"][];
+            /** Next After Id */
+            next_after_id: number | null;
+            /** Next Since */
+            next_since: string;
+            /** Now */
+            now: string;
+            /** Since */
+            since: string;
+            /** Truncated */
+            truncated: boolean;
+        };
     };
     responses: never;
     parameters: never;
@@ -2466,10 +3599,72 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    list_actions_api_actions_get: {
+    authorization_server_metadata__well_known_oauth_authorization_server_get: {
         parameters: {
             query?: never;
             header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    protected_resource_metadata_root__well_known_oauth_protected_resource_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    protected_resource_metadata_mcp__well_known_oauth_protected_resource_api_mcp_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_actions_api_actions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2500,7 +3695,9 @@ export interface operations {
     action_counts_api_actions_counts_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2517,6 +3714,309 @@ export interface operations {
                     "application/json": {
                         [key: string]: number;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_applications_api_applications_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                updated_since?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListApplicationsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_history_api_applications_export_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+                include_text?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_application_api_applications__application_id__get: {
+        parameters: {
+            query?: {
+                with_artifact_text?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_artifact_api_applications__application_id__artifacts_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaveArtifactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_application_artifact_api_applications__application_id__artifacts__artifact_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+                artifact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationArtifactRowOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_event_api_applications__application_id__events_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordEventRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordEventResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_fit_api_applications__application_id__fit_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveFitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaveFitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_application_receipt_api_applications__application_id__receipt_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordApplicationReceiptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordApplicationReceiptResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2659,7 +4159,9 @@ export interface operations {
     me_api_auth_me_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2690,7 +4192,9 @@ export interface operations {
     get_email_verified_api_auth_me_email_verified_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2818,7 +4322,9 @@ export interface operations {
     delete_account_api_auth_users_me_delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2851,7 +4357,9 @@ export interface operations {
     change_email_api_auth_users_me_email_patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2884,7 +4392,9 @@ export interface operations {
     export_my_data_api_auth_users_me_export_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2915,7 +4425,9 @@ export interface operations {
     change_password_api_auth_users_me_password_patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -2979,7 +4491,9 @@ export interface operations {
     verify_email_request_api_auth_verify_email_request_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3008,7 +4522,9 @@ export interface operations {
     client_log_api_client_log_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3075,7 +4591,9 @@ export interface operations {
                 limit?: number;
                 offset?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3103,10 +4621,49 @@ export interface operations {
             };
         };
     };
+    bring_job_api_jobs_bring_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BringJobRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BringJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     export_jobs_api_jobs_export_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3137,7 +4694,9 @@ export interface operations {
     get_job_api_jobs__job_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3170,7 +4729,9 @@ export interface operations {
     set_action_api_jobs__job_id__action_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3207,7 +4768,9 @@ export interface operations {
     delete_action_api_jobs__job_id__action_delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3240,7 +4803,9 @@ export interface operations {
     get_job_duplicates_api_jobs__job_id__duplicates_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3308,7 +4873,9 @@ export interface operations {
                 /** @description ISO-8601 upper bound on created_at */
                 end_time?: string | null;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3339,7 +4906,9 @@ export interface operations {
     notification_stats_api_notifications_stats_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3371,12 +4940,234 @@ export interface operations {
             };
         };
     };
+    authorize_api_oauth_authorize_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_consent_request_api_oauth_authorize__rid__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                rid: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentRequestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_consent_api_oauth_authorize__rid__decision_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                rid: string;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsentDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsentDecisionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_grants_api_oauth_grants_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_grant_api_oauth_grants__grant_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                grant_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_client_api_oauth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    revoke_api_oauth_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    token_api_oauth_token_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     list_pipeline_api_pipeline_get: {
         parameters: {
             query?: {
                 stage?: string | null;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3407,7 +5198,9 @@ export interface operations {
     pipeline_counts_api_pipeline_counts_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3440,7 +5233,9 @@ export interface operations {
     pipeline_reminders_api_pipeline_reminders_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3471,7 +5266,9 @@ export interface operations {
     create_application_api_pipeline__job_id__post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3504,7 +5301,9 @@ export interface operations {
     advance_application_api_pipeline__job_id__advance_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3541,7 +5340,9 @@ export interface operations {
     update_notes_api_pipeline__job_id__notes_patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3578,7 +5379,9 @@ export interface operations {
     get_pipeline_timeline_api_pipeline__job_id__timeline_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -3611,7 +5414,9 @@ export interface operations {
     get_profile_api_profile_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3642,7 +5447,9 @@ export interface operations {
     upsert_profile_api_profile_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3677,7 +5484,9 @@ export interface operations {
     clear_profile_section_api_profile_clear_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3712,7 +5521,9 @@ export interface operations {
     upload_cv_api_profile_cv_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3747,7 +5558,9 @@ export interface operations {
     upload_github_api_profile_github_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3782,7 +5595,9 @@ export interface operations {
     get_json_resume_api_profile_json_resume_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3813,7 +5628,9 @@ export interface operations {
     upload_linkedin_api_profile_linkedin_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3848,7 +5665,9 @@ export interface operations {
     upsert_preferences_api_profile_preferences_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3885,7 +5704,9 @@ export interface operations {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -3916,7 +5737,9 @@ export interface operations {
     diff_profile_versions_api_profile_versions__version_id1__diff__version_id2__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 version_id1: number;
                 version_id2: number;
@@ -3952,7 +5775,9 @@ export interface operations {
     restore_version_api_profile_versions__version_id__restore_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 version_id: number;
             };
@@ -4002,13 +5827,126 @@ export interface operations {
             };
         };
     };
+    list_receipts_api_receipts_get: {
+        parameters: {
+            query?: {
+                job_id?: number | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_receipt_api_receipts__job_id__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                job_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateReceiptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Receipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_receipt_api_receipts__receipt_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                receipt_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Receipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     recent_runs_api_runs_recent_get: {
         parameters: {
             query?: {
                 limit?: number;
                 offset?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4042,7 +5980,9 @@ export interface operations {
                 /** @description How many recent runs to aggregate over. */
                 runs?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4075,7 +6015,9 @@ export interface operations {
             query?: {
                 source?: string | null;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4106,7 +6048,9 @@ export interface operations {
     search_status_api_search__run_id__status_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 run_id: string;
             };
@@ -4139,7 +6083,9 @@ export interface operations {
     list_channels_api_settings_channels_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4170,7 +6116,9 @@ export interface operations {
     create_channel_api_settings_channels_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4205,7 +6153,9 @@ export interface operations {
     delete_channel_api_settings_channels__channel_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 channel_id: number;
             };
@@ -4236,7 +6186,9 @@ export interface operations {
     test_send_channel_api_settings_channels__channel_id__test_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 channel_id: number;
             };
@@ -4269,7 +6221,9 @@ export interface operations {
     get_notification_rule_api_settings_notification_rule_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4300,7 +6254,9 @@ export interface operations {
     upsert_notification_rule_api_settings_notification_rule_put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: {
                 job360_session?: string | null;
@@ -4375,7 +6331,9 @@ export interface operations {
     get_tailored_api_tailor__job_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -4408,7 +6366,9 @@ export interface operations {
     generate_api_tailor__job_id__generate_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
             };
@@ -4441,7 +6401,9 @@ export interface operations {
     save_edit_api_tailor__job_id___doc_kind__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
                 doc_kind: string;
@@ -4481,7 +6443,9 @@ export interface operations {
             query?: {
                 fmt?: string;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
                 doc_kind: string;
@@ -4515,7 +6479,9 @@ export interface operations {
     keep_api_tailor__job_id___doc_kind__keep_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
                 doc_kind: string;
@@ -4549,7 +6515,9 @@ export interface operations {
     provenance_api_tailor__job_id___doc_kind__provenance_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 job_id: number;
                 doc_kind: string;
@@ -4567,6 +6535,146 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProvenanceSegment"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tokens_api_tokens_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_token_api_tokens_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_token_api_tokens__token_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                token_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    whats_new_api_whats_new_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+                after_id?: number | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WhatsNewResponse"];
                 };
             };
             /** @description Validation Error */

@@ -9,12 +9,14 @@ You are checking that the codebase and documentation reflect the same informatio
 
 ## Step 1: Scan the Codebase for Real Facts
 
-Read the actual code and extract current facts. Check ALL of these:
+Read the actual code and extract current facts. **The mission is `docs/product/VISION.md` — a doc that still tells a session to build search, ranking or a feed is a mismatch even if its numbers are right.** Check ALL of these:
 
-- **Source count**: Count classes in `backend/src/sources/` that extend `BaseJobSource`, count entries in `SOURCE_REGISTRY` in `backend/src/main.py`, count entries in `_build_sources()` (note: `SOURCE_INSTANCE_COUNT` in `main.py` is the unique-instance count — one less than the registry size, because `indeed` and `glassdoor` both map to `JobSpySource`)
+- **Product path**: which routes exist in `backend/src/api/routes/bring.py`, `receipts.py`, `tailor.py`; which tools `backend/src/api/mcp_server.py` registers (count them); which Railway services exist (three: backend, frontend, Postgres — worker + Redis deleted 2026-09-02)
+- **Roadmap state**: which slices in `docs/plans/2026-09-03-mission-roadmap.md` have merged (check the issue #479–#483 state with `gh issue view`)
+- **Source count (legacy, only while `src/sources/` exists)**: Count classes in `backend/src/sources/` that extend `BaseJobSource`, count entries in `SOURCE_REGISTRY` in `backend/src/main.py` (`indeed` and `glassdoor` both map to `JobSpySource`). Never let a doc call this "the product".
 - **Test count**: Run (from `backend/`) `python -m pytest tests/ --collect-only -q 2>&1 | tail -3` to get exact test count
-- **Scoring rules**: Read `backend/src/services/skill_matcher.py` for actual dimensions, weights, penalties, threshold
-- **DB schema**: Read `backend/src/repositories/database.py` for table definitions (jobs, run_log, user_actions, applications), column names, UNIQUE constraints, indexes
+- **Scoring rules (legacy)**: Read `backend/src/services/skill_matcher.py` only to confirm docs call it legacy/off for the product path
+- **DB schema**: Read `backend/src/repositories/database.py` + `backend/migrations/` for table definitions (jobs, applications, application_receipts, tailored_documents, user_actions), column names, UNIQUE constraints, indexes
 - **Features**: Check what modules exist in `backend/src/services/`, `backend/src/services/profile/`, `backend/src/services/notifications/`, `backend/src/api/` — what's actually implemented
 - **Commands**: Read `backend/src/cli.py` for actual CLI commands and flags
 - **Dependencies**: Read `backend/pyproject.toml` for actual packages
@@ -27,8 +29,8 @@ Read the actual code and extract current facts. Check ALL of these:
 
 Read each MD file and flag every mismatch:
 
-- `CLAUDE.md` — project overview, commands, architecture, scoring, source count, test count, core rules
-- `backend/CLAUDE.md` — thin backend pointer; check its `SOURCE_REGISTRY (N)` count + module-path lines
+- `CLAUDE.md` — mission block points at VISION.md + roadmap; product path vs legacy path split; commands; test count; three services
+- `backend/CLAUDE.md` — thin backend pointer; product-path module lines + the legacy `SOURCE_REGISTRY (N)` count
 - `ARCHITECTURE.md` — deep system description, module relationships, data flow
 - `STATUS.md` — what's done, what's in progress, what's next
 - `README.md` — quickstart, features overview, usage examples

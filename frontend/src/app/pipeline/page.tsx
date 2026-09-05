@@ -95,8 +95,19 @@ export default function PipelinePage() {
         getPipelineCounts(),
         getPipelineReminders(),
       ]);
-      setApplications(appsRes.applications);
-      setCounts(countsRes);
+      // B2 (application-spine review) — a freshly-brought job now lands at
+      // stage "considering" (birth_application writes it explicitly, see
+      // backend/src/services/applications/spine.py::birth_application). That
+      // is not one of this board's six columns (STAGE_META/KanbanBoard), so a
+      // "considering" row would silently vanish from the Kanban while still
+      // padding the applications array and the stats-row total. Filter it out
+      // here — the legacy board stays exactly as it read before this slice.
+      setApplications(
+        appsRes.applications.filter((a) => a.stage !== "considering")
+      );
+      const visibleCounts = { ...countsRes };
+      delete visibleCounts.considering;
+      setCounts(visibleCounts);
       setReminders(
         (remindersRes.reminders ?? []) as PipelineApplication[]
       );

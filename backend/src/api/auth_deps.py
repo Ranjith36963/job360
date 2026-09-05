@@ -1,4 +1,4 @@
-"""FastAPI auth dependencies — cookie-based session resolution.
+"""FastAPI auth dependencies — session cookie OR personal bearer token.
 
 Usage::
 
@@ -6,21 +6,34 @@ Usage::
     async def me(user: CurrentUser = Depends(require_user)):
         return {"id": user.id, "email": user.email}
 
-When the session cookie is missing / tampered / expired, raises HTTP 401.
+Two credentials, one resolution order (spec 2026-09-03-mcp-server, R2):
+
+* ``Authorization: Bearer j360_…`` present → token path ONLY. A bad or revoked
+  token is 401 even if a valid cookie rides along — an explicit credential is
+  never silently downgraded to the ambient one.
+* otherwise → the ``job360_session`` cookie.
+
+``CurrentUser.auth_via`` says which one won (``"session"`` / ``"token"``) so
+routes that must stay session-only (token management) can refuse tokens.
 """
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Literal, Optional
 
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 
+from src.core import settings
 from src.core.settings import DB_PATH
 from src.repositories import pg
+from src.services.auth import api_tokens as auth_api_tokens
+from src.services.auth import oauth_flow as auth_oauth_flow
+from src.services.auth import rate_limit as auth_rate_limit
 from src.services.auth import sessions as auth_sessions
 
 SESSION_COOKIE_NAME = "job360_session"
+_BEARER_CHALLENGE = {"WWW-Authenticate": "Bearer"}
 
 
 def _secret() -> str:
@@ -47,6 +60,129 @@ class CurrentUser:
     id: str
     email: str
     email_verified: bool = False
+    auth_via: Literal["session", "token", "oauth"] = "session"
+    # RFC 8707 audience the OAuth access token was issued for (spec
+    # 2026-09-03-oauth-mcp R6/S13). None for a session or a personal token —
+    # only an OAuth bearer ever carries one, and only `/api/mcp` checks it.
+    audience: Optional[str] = None
+    # The application-spine actor name (spec 2026-09-04-application-spine
+    # S3): the personal token's own `name` for auth_via="token", the OAuth
+    # client's `client_name` for auth_via="oauth", unused for a session.
+    # `src/services/applications/authorship.py::actor_for` is the ONLY place
+    # this is read.
+    actor_name: Optional[str] = None
+
+
+def _client_ip(request: Request) -> str:
+    """Same trust rule as routes/auth._client_meta: X-Forwarded-For only behind our proxy."""
+    if os.getenv("JOB360_TRUST_PROXY") == "1":
+        xff = request.headers.get("x-forwarded-for", "")
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    return request.client.host if request.client else "unknown"
+
+
+def _bearer_from_header(authorization: Optional[str]) -> Optional[str]:
+    """The token part of ``Authorization: Bearer <token>``; None when the header is absent."""
+    if not authorization:
+        return None
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return value.strip()
+
+
+async def _current_user_from_bearer(request: Request, token: str) -> CurrentUser:
+    """Resolve a presented bearer or raise. Never falls back to the cookie.
+
+    Prefix dispatch (spec 2026-09-03-oauth-mcp, R6): ``j360a_`` -> an OAuth
+    access token (its own throttle, below); anything else -> a personal
+    ``j360_`` token (unchanged). ``"j360a_".startswith("j360_")`` is False,
+    so nothing overlaps.
+    """
+    if token.startswith(auth_oauth_flow.ACCESS_TOKEN_PREFIX):
+        return await _current_user_from_oauth_bearer(request, token)
+    return await _current_user_from_personal_bearer(request, token)
+
+
+async def _current_user_from_personal_bearer(request: Request, token: str) -> CurrentUser:
+    """Resolve a ``j360_...`` personal API token or raise.
+
+    Failed attempts are rate-limited per client IP (``API_TOKEN_FAIL_MAX_PER_MIN``):
+    a 256-bit token cannot be guessed, but a guesser should be slow and loud.
+
+    The token is resolved FIRST and the throttle consulted only on failure: a
+    credential that verifies is never brute force, so it must never be refused
+    because of someone else's junk. Behind the Next.js rewrite every agent
+    shares the proxy's IP (unless ``JOB360_TRUST_PROXY=1``), so a lock checked
+    before the lookup would let one bad client 429 every valid token. The cost
+    is one indexed hash lookup per junk attempt — cheap, and bounded by 429.
+    """
+    owner = await auth_api_tokens.resolve(str(DB_PATH), token)
+    if owner is None:
+        limit = settings.API_TOKEN_FAIL_MAX_PER_MIN
+        if limit > 0:
+            fail_key = f"api_token_fail:{_client_ip(request)}"
+            # is_locked prunes the window; checking it before recording keeps
+            # the bucket bounded (same order the login route uses).
+            if auth_rate_limit.is_locked(fail_key, max_failures=limit, window_seconds=60):
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="too many failed token attempts",
+                    headers=_BEARER_CHALLENGE,
+                )
+            auth_rate_limit.record_failure(fail_key)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or revoked token",
+            headers=_BEARER_CHALLENGE,
+        )
+    return CurrentUser(
+        id=owner.user_id,
+        email=owner.email,
+        email_verified=owner.email_verified,
+        auth_via="token",
+        actor_name=owner.name,
+    )
+
+
+async def _current_user_from_oauth_bearer(request: Request, token: str) -> CurrentUser:
+    """Resolve a ``j360a_...`` OAuth access token or raise (spec R6).
+
+    Its own throttle key (``oauth_bearer_fail:{ip}``) — never ``api_token_fail``,
+    so a guesser against one credential kind can never spend the other's
+    budget. Only a hash that matches NO row counts as a failure; an
+    expired/revoked token (``hash_known=True``) is the normal hourly state of
+    every connected client, not an attack, so it never touches the counter.
+    """
+    resolution = await auth_oauth_flow.resolve_access_token(str(DB_PATH), token)
+    if resolution.owner is None:
+        if not resolution.hash_known:
+            limit = settings.OAUTH_BEARER_FAIL_MAX_PER_MIN
+            if limit > 0:
+                fail_key = f"oauth_bearer_fail:{_client_ip(request)}"
+                if auth_rate_limit.is_locked(fail_key, max_failures=limit, window_seconds=60):
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail="too many failed token attempts",
+                        headers=_BEARER_CHALLENGE,
+                    )
+                auth_rate_limit.record_failure(fail_key)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or revoked token",
+            headers=_BEARER_CHALLENGE,
+        )
+    owner = resolution.owner
+    return CurrentUser(
+        id=owner.user_id,
+        email=owner.email,
+        email_verified=owner.email_verified,
+        auth_via="oauth",
+        audience=owner.audience,
+        actor_name=owner.client_name,
+    )
 
 
 async def _current_user_from_cookie(
@@ -76,11 +212,29 @@ async def _current_user_from_cookie(
     )
 
 
+async def resolve_current_user(
+    request: Request,
+    cookie: Optional[str],
+    authorization: Optional[str],
+) -> Optional[CurrentUser]:
+    """Header present → bearer only (may raise 401/429); else cookie or None.
+
+    Shared by the FastAPI dependencies below and by the raw-ASGI MCP mount,
+    which has no ``Depends`` to lean on.
+    """
+    # A non-Bearer Authorization header (Basic, Digest…) is not ours → cookie path.
+    token = _bearer_from_header(authorization)
+    if token is not None:
+        return await _current_user_from_bearer(request, token)
+    return await _current_user_from_cookie(cookie)
+
+
 async def require_user(
     request: Request,
     job360_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    authorization: Optional[str] = Header(default=None),
 ) -> CurrentUser:
-    user = await _current_user_from_cookie(job360_session)
+    user = await resolve_current_user(request, job360_session, authorization)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -95,10 +249,28 @@ async def require_user(
 async def optional_user(
     request: Request,
     job360_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    authorization: Optional[str] = Header(default=None),
 ) -> Optional[CurrentUser]:
-    user = await _current_user_from_cookie(job360_session)
+    user = await resolve_current_user(request, job360_session, authorization)
     if user is not None:
         request.state.user_id = user.id
+    return user
+
+
+async def require_session_user(
+    user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI DI idiom
+) -> CurrentUser:
+    """A browser session only — never a token (spec R3).
+
+    Guards credential management: a leaked token must not be able to mint,
+    list, or revoke tokens. 403 ``session_required`` tells a client exactly
+    what to do (log in on the web app), distinct from the 401 for no auth.
+    """
+    if user.auth_via != "session":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="session_required",
+        )
     return user
 
 

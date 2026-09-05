@@ -1,6 +1,8 @@
 # Job360 — Product Requirements Document (PRD)
 <!-- doc: PLAN -->
 
+> **⚠️ SOURCING ERA — superseded 2026-09-03.** Job360 no longer sources, ranks or recommends jobs. The seeker's own AI agent does that; Job360 is the agent's memory (profile, artifact versions, typed events, receipts). Read [`VISION.md`](VISION.md) first — it wins over anything below. This file is kept as history only.
+
 > **PLAN — not a description of today's code.** Written to be built, possibly never built or since changed. Verify against code before trusting. <!-- banner: auto -->
 
 > **Version:** 1.0  

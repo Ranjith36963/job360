@@ -48,6 +48,11 @@ const MOCK_JOB = {
 };
 
 test.describe("Dashboard job render", () => {
+  test.skip(
+    process.env.NEXT_PUBLIC_SEARCH_UI_ENABLED !== "true",
+    "legacy search UI is off by default (slice 2, R12); dies with slice 5"
+  );
+
   test.beforeEach(async ({ context }) => {
     // Bypass middleware by providing a session cookie
     await context.addCookies([

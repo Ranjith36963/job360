@@ -96,6 +96,32 @@ async def _bundle(db: JobDatabase, user_id: str, job_id: int) -> TailorBundle:
     )
 
 
+async def _mirror_artifact_version(
+    db: JobDatabase, user_id: str, job_id: int, kind: str, text: str, *, made_by: str, model: str | None
+) -> None:
+    """R15 — write-through into the application spine's version history.
+
+    ``tailored_documents`` keeps its DELETE+INSERT behaviour (it is the
+    editor's working copy); this is the memory. Non-fatal by design: a
+    (user, job) pair reached via the legacy search path may have no
+    `applications` row at all (nothing was ever brought), and a mirror
+    failure must never break the tailoring feature it is mirroring.
+    """
+    from src.services.applications import spine as applications_spine  # noqa: PLC0415
+    from src.services.applications.spine import SpineError  # noqa: PLC0415
+
+    application = await applications_spine.get_application_by_job(db, user_id, job_id)
+    if application is None:
+        return
+    try:
+        await applications_spine.save_artifact(
+            db, user_id=user_id, application_id=application["id"], kind=kind, text=text,
+            made_by=made_by, model=model,
+        )
+    except SpineError:
+        logger.warning("tailor artifact mirror failed", extra={"job_id": job_id, "kind": kind})
+
+
 def _load_cv_text(user_id: str) -> str:
     """Full CV text = stored CV + LinkedIn text (the ONLY facts the LLM may use)."""
     profile = load_profile(user_id)  # sync (pgsync shim), fast single-row
@@ -192,6 +218,7 @@ async def generate(
             model=doc.model, flagged_terms=doc.flagged_terms,
             profile_version=profile_version,
         )
+        await _mirror_artifact_version(db, user.id, job_id, kind, doc.document, made_by="web:tailor", model=doc.model)
 
     await db.record_tailored_usage(user.id, job_id)
     get_audit_logger().info(
@@ -251,6 +278,7 @@ async def save_edit(
         # Without this guard _doc_out(None) raised TypeError -> HTTP 500, which
         # tells the user "we broke" for what is really "it's gone".
         raise HTTPException(status_code=404, detail="Draft no longer exists.")
+    await _mirror_artifact_version(db, user.id, job_id, doc_kind, body.text, made_by="human", model=row.get("model"))
     return _doc_out(row)
 
 

@@ -57,7 +57,7 @@ import yaml
 # implementations of "does this path match" is two answers to the same question,
 # and the day they disagree is the day the cage means nothing.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from merge_cage import path_matches  # noqa: E402
+from merge_cage import LANES, path_matches  # noqa: E402
 
 POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy.yml"
 
@@ -67,7 +67,11 @@ POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy
 # questions; a single `owner` bucket collapsed them and quietly left hand-merged
 # migrations with no post-merge watcher at all. product_owner outranks
 # harness_owner because a user is downstream of it.
-PRECEDENCE: tuple[str, ...] = ("product_owner", "harness_owner", "product", "harness")
+# IMPORTED, NOT RETYPED. `merge_cage.LANES` is the one definition; this file
+# used to keep its own copy, and a lane in one list but not the other is the
+# same "two readers, two answers" bug the ALLOW/DENY merge was written to end.
+# merge_cage also REFUSES a policy whose lane set is not exactly this.
+PRECEDENCE: tuple[str, ...] = LANES
 
 
 class PolicyError(RuntimeError):
@@ -224,8 +228,21 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     print("lane.py --drill")
 
     # 1. Pure harness work takes the fast lane.
-    check("harness: a workflow edit",
-          classify([".github/workflows/uptime.yml"], policy)["lane"], "harness")
+    #
+    # THIS TEST USED TO WANT `harness` FOR A WORKFLOW, AND IT WAS NEVER TRUE.
+    # `merge_cage.py` has denied `.github/**` outright since it was written, and
+    # DENY beats ALLOW, so `.github/workflows/uptime.yml` reached the owner every
+    # single time while this line said otherwise. The two files were written down
+    # as one on 2026-08-26 and the blanket deny was kept — changing a security
+    # boundary is not a side effect of a de-duplication. The test now asserts
+    # what the system does.
+    #
+    # The narrower rule is still available and is the owner's to take:
+    # `harness_owner` names the caged workflows individually (auto-merge.yml,
+    # verify-live.yml, revert-main.yml, ...), and deleting the three blanket
+    # lines in merge-policy.yml hands the rest back to this fast lane.
+    check("harness: a workflow edit is the OWNER's (blanket .github/**)",
+          classify([".github/workflows/uptime.yml"], policy)["lane"], "harness_owner")
     check("harness: a doc edit", classify(["docs/README.md"], policy)["lane"], "harness")
 
     # 2. Product code takes the watched lane.
@@ -371,16 +388,51 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #     an outcome check catches any pattern that produces the wrong outcome,
     #     including ones nobody has invented yet.
 
-    # 11a. THE INVARIANT, STATED AS AN OUTCOME. Nothing the owner filed under
-    #      docs/product/ may ever be merged by a machine, at ANY depth. This is
-    #      the entire point of wave 1, so it is asserted directly rather than
-    #      inferred from the shape of the patterns that happen to implement it.
+    # 11a. THE INVARIANT, STATED AS AN OUTCOME — AND NARROWED 2026-08-26.
+    #
+    #      Wave 1 asserted that NOTHING under docs/product/ may be merged by a
+    #      machine, at any depth. The owner has since decided that ordinary
+    #      product prose is prose: it reaches no user, and the `verify` tag —
+    #      watching production for 15 minutes — cannot say anything true about a
+    #      markdown file. `docs/product/**` is in the `harness` lane now.
+    #
+    #      What survives is the part that was always the real invariant: a
+    #      document that IS a decision still goes to a human. Both files are
+    #      named individually in `product_owner`, and both are cited BY NUMBER
+    #      from CLAUDE.md, which is what makes them rules rather than prose.
+    #
+    #      The depth cases stay, because the mechanism they were written to catch
+    #      has not changed: a pattern that fails to cross `/` would classify a
+    #      nested file wrongly, and only a real nested path can prove it does not.
+    #      ASSERT THE LANE, NOT `auto_merge` — §11c below found this the hard way
+    #      and these checks were written breaking its rule. The concrete miss:
+    #      delete BOTH `docs/product/**` from `harness` and
+    #      `product_design_rules.md` from `product_owner`, and the file matches
+    #      nothing, escalates to `product_owner`, and reports auto_merge False.
+    #      An auto_merge assertion goes GREEN over two deleted rules. Escalation
+    #      can fake that answer; it cannot fake the lane NAME.
     for depth in ("docs/product/x.md",
                   "docs/product/pillars/README.md",
                   "docs/product/plans/deep/er/still.md",
                   "docs/product/research/nested/notes.md"):
-        check(f"no machine may merge a product document: {depth}",
-              classify([depth], policy)["auto_merge"], False)
+        check(f"ordinary product prose is in the harness lane at depth: {depth}",
+              classify([depth], policy)["lane"], "harness")
+
+    # 11b. ...and the two documents that are DECISIONS still are not, at any
+    #      depth and whatever else is in the changeset with them. Same rule:
+    #      the lane name, because `product_owner` reached by ESCALATION and
+    #      `product_owner` reached by the RULE are different facts that
+    #      `auto_merge` renders identically.
+    for decision in ("docs/product/product_design_rules.md",
+                     "docs/product/plans/batch-2-decisions.md"):
+        verdict = classify([decision], policy)
+        check(f"a document that IS a decision still needs you: {decision}",
+              verdict["lane"], "product_owner")
+        check(f"...by the RULE, not by escalation: {decision}",
+              decision in (verdict.get("by_lane") or {}).get("product_owner", []), True)
+        check(f"...even beside ordinary prose: {decision}",
+              classify(["docs/product/pillars/README.md", decision], policy)["lane"],
+              "product_owner")
 
     # 11b. EVERY FAST-LANE PATTERN, WITH A REAL NESTED WITNESS.
     #

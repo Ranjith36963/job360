@@ -11,9 +11,11 @@
 # chain — read-only on the DB, no feed writes.
 name: accuracy-audit
 
+# PAUSED 2026-09-03 — sourcing era. This detector watches the search feed /
+# catalog / scorer, which the product no longer has (docs/product/VISION.md,
+# roadmap slice 5 deletes the code). Schedule removed; workflow_dispatch kept
+# so it can still be fired by hand until the code it watches is gone.
 on:
-  schedule:
-    - cron: "20 6 * * 1" # weekly, Monday 06:20 UTC (clear of the 04:00 refresh)
   workflow_dispatch: {} # the drill entrance — every loop must be fireable on purpose
 
 permissions:

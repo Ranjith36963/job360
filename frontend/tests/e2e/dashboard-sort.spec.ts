@@ -100,6 +100,11 @@ function isDescending(arr: number[]): boolean {
 }
 
 test.describe("Dashboard job sort order", () => {
+  test.skip(
+    process.env.NEXT_PUBLIC_SEARCH_UI_ENABLED !== "true",
+    "legacy search UI is off by default (slice 2, R12); dies with slice 5"
+  );
+
   const TABS = ["All", "24h", "48h", "3d", "5d", "7d"];
 
   test("jobs render highest-score-first regardless of server order", async ({

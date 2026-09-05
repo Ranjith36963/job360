@@ -1695,3 +1695,22 @@ The DB backend moved from SQLite to **Postgres (psycopg3)**. `src/repositories/p
 #### Tailored documents — AI CV & cover-letter generator (2026-07-04)
 
 A full-stack, **shipped and live** feature. Per-job, the user generates a tailored CV + cover letter via a paid LLM call. Backend: `services/tailoring/` (`generator.py`, `docx.py`, `pdf.py`, `patterns.py`, `prompts.py`, `provenance.py`, `integrity.py`) + route `api/routes/tailor.py`; migrations 0023 (`tailored_documents`) + 0024 (adds the `flagged_terms` JSON **column** to `tailored_documents` — there is NO `tailored_flagged_terms` table; an agent that queries one will crash). Frontend: `components/tailor/{TailorPanel,TailorButton,TailorSection}.tsx`, wired into `JobDetailClient.tsx`, `JobCard.tsx`, `KanbanBoard.tsx`. Guardrail: `TAILOR_FREE_PER_MONTH` (settings.py:146, default 10) caps free usage — one generation = one CV + cover letter for one job; premium bypass is designed but no plan column exists yet. Design doc: `docs/product/peruser_cv_coverletter.md`.
+
+---
+
+## 2026-09-03 — Mission sweep — the pivot lands in every instruction file
+
+`docs/product/VISION.md` merged (PR #478) after an 18-question owner interview.
+The product is now defined as a memory/context layer for the seeker's own AI
+agent — the agent finds the job, judges fit, writes the CV, applies; Job360
+never sources, ranks, or recommends jobs. Build order: OAuth 2.1 → spine →
+URL fetch → contacts/stats/update_profile → delete sourcing. Roadmap:
+`docs/plans/2026-09-03-mission-roadmap.md`, tracked as issues #479–#483.
+
+This sweep carried the pivot into every instruction surface it touches: it
+bannered the sourcing-era docs (STORY.md, LAUNCH_PLAN.md,
+PLAN-5-free-premium-gating.md, PRD.md, pillars/README.md,
+post_application.md, MONETIZATION_GAPS.md) pointing each one at VISION.md,
+rewrote the CLAUDE.md / backend README / ARCHITECTURE.md intros, marked 18
+hard rules legacy, unscheduled sourcing-only detectors, and closed
+sourcing-era issues. Docs PR: `docs/mission-sweep` branch.

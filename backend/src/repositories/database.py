@@ -13,6 +13,7 @@ _VALID_COL_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
 # see 0032_universal_shelf.up.sql for why.
 _VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC", "BOOLEAN", "JSONB"}
 
+from src.core.settings import USER_BROUGHT_SOURCE  # noqa: E402
 from src.models import Job  # noqa: E402  # after the regex constants to avoid circular import
 from src.utils.logger import get_logger  # noqa: E402
 
@@ -786,7 +787,17 @@ class JobDatabase:
         ``user_feed`` is the big one: one row per user per job.
         """
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        stale = "SELECT id FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ?"
+        # R2 amendment (spec 2026-09-04-application-spine, hard rule #3): a
+        # `user_brought` row is never a scrape aging out — the user is
+        # tracking it, and the application snapshot needs the live catalog
+        # row for the detail page. Both the direct DELETE below AND this
+        # `stale` subquery (which feeds the cascade-child DELETEs) exclude
+        # it, so neither the job row nor its user_feed/enrichment children
+        # are purged out from under a brought application.
+        stale = (
+            "SELECT id FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ? "
+            "AND source <> ?"
+        )
         # Children first (the subquery needs the jobs rows to still exist).
         #
         # Skip a child table that does not exist IN THIS SCHEMA. EVERY table in
@@ -818,10 +829,12 @@ class JobDatabase:
             if table not in present:
                 continue
             await self._db.execute(
-                f"DELETE FROM {table} WHERE job_id IN ({stale})", (cutoff,)  # noqa: S608 — table name is a module constant, never user input
+                f"DELETE FROM {table} WHERE job_id IN ({stale})",  # noqa: S608 — table name is a module constant, never user input
+                (cutoff, USER_BROUGHT_SOURCE),
             )
         cursor = await self._db.execute(
-            "DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ?", (cutoff,)
+            "DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ? AND source <> ?",
+            (cutoff, USER_BROUGHT_SOURCE),
         )
         await self._db.commit()
         _log.info(
@@ -1320,7 +1333,7 @@ class JobDatabase:
                FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
                WHERE a.user_id = ?
                  AND a.updated_at < ?
-                 AND a.stage NOT IN ('offer', 'rejected')
+                 AND a.stage NOT IN ('offer', 'rejected', 'considering')
                ORDER BY a.updated_at ASC""",
             (user_id, cutoff),
         )
@@ -1336,6 +1349,148 @@ class JobDatabase:
             }
             for r in await cursor.fetchall()
         ]
+
+    async def get_job_id_by_key(self, normalized_key: tuple[str, str]) -> int | None:
+        """Resolve a (normalized_company, normalized_title) key to the catalog id.
+
+        `insert_job` returns only "inserted or not"; a caller that needs the
+        row id afterwards (bring-a-job, where a user re-bringing an ad that is
+        already in the catalog must land on the SAME row) resolves it here.
+        """
+        cursor = await self._db.execute(
+            "SELECT id FROM jobs WHERE normalized_company = ? AND normalized_title = ?",
+            (normalized_key[0], normalized_key[1]),
+        )
+        row = await cursor.fetchone()
+        return int(row[0]) if row else None
+
+    # ── Application receipts (migration 0034) ─────────────────────────────────
+    #
+    # APPEND-ONLY. There is deliberately no update_receipt / delete_receipt:
+    # a receipt is the frozen record of what the user sent, and the whole point
+    # is that nothing later can rewrite it (tests/test_receipts.py pins this).
+
+    _RECEIPT_COLS = (
+        "id, user_id, job_id, sent_at, job_title, job_company, job_location, "
+        "job_apply_url, job_source, job_description, cv_text, cv_origin, "
+        "cover_letter_text, cover_letter_origin, profile_version, channel, note, created_at"
+    )
+
+    @staticmethod
+    def _receipt_row_to_dict(row: Any) -> dict[str, Any]:
+        keys = (
+            "id", "user_id", "job_id", "sent_at", "job_title", "job_company",
+            "job_location", "job_apply_url", "job_source", "job_description",
+            "cv_text", "cv_origin", "cover_letter_text", "cover_letter_origin",
+            "profile_version", "channel", "note", "created_at",
+        )
+        return dict(zip(keys, row))
+
+    async def insert_receipt(
+        self,
+        *,
+        user_id: str,
+        job: dict[str, Any],
+        cv_text: str | None,
+        cv_origin: str | None,
+        cover_letter_text: str | None,
+        cover_letter_origin: str | None,
+        profile_version: int | None,
+        channel: str = "",
+        note: str = "",
+        application_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Freeze one application: the job row as it reads NOW plus the documents
+        as sent. `job` is a `get_job_by_id` dict; its fields are COPIED, never
+        referenced, so the receipt survives re-description, expiry and purge.
+
+        `application_id` (spec 2026-09-04-application-spine R8) is set HERE, at
+        INSERT time, never by a later UPDATE — tests/test_receipts.py::
+        test_receipts_are_append_only greps `backend/src/` for any UPDATE/DELETE
+        against `application_receipts` and must stay green.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await self._db.execute(
+            """INSERT INTO application_receipts
+               (user_id, job_id, sent_at, job_title, job_company, job_location,
+                job_apply_url, job_source, job_description, cv_text, cv_origin,
+                cover_letter_text, cover_letter_origin, profile_version, channel,
+                note, created_at, application_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                user_id, int(job["id"]), now,
+                job.get("title") or "", job.get("company") or "",
+                job.get("location") or "", job.get("apply_url") or "",
+                job.get("source") or "", job.get("description") or "",
+                cv_text, cv_origin, cover_letter_text, cover_letter_origin,
+                profile_version, channel, note, now, application_id,
+            ),
+        )
+        await self._db.commit()
+        receipt = await self.get_receipt(user_id, int(cursor.lastrowid or 0))
+        assert receipt is not None  # just inserted under this user_id
+        return receipt
+
+    async def get_receipt(self, user_id: str, receipt_id: int) -> dict[str, Any] | None:
+        """One receipt, scoped by owner (rule #12: a foreign id reads as absent)."""
+        cursor = await self._db.execute(
+            f"SELECT {self._RECEIPT_COLS} FROM application_receipts "  # noqa: S608 — class constant
+            "WHERE user_id = ? AND id = ?",
+            (user_id, receipt_id),
+        )
+        row = await cursor.fetchone()
+        return self._receipt_row_to_dict(row) if row else None
+
+    _RECEIPT_SUMMARY_COLS = (
+        "id, user_id, job_id, sent_at, job_title, job_company, job_location, "
+        "job_apply_url, job_source, cv_text IS NOT NULL, cover_letter_text IS NOT NULL, "
+        "profile_version, channel, note, created_at"
+    )
+
+    async def list_receipts(
+        self, user_id: str, *, job_id: int | None = None, limit: int = 50, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        """The user's receipts, newest first; optionally only for one job.
+
+        Summary rows only: the three long bodies (`job_description`, `cv_text`,
+        `cover_letter_text`) are NOT selected — a receipt can carry 40k chars
+        of ad plus a CV, and the list page shows none of it. `has_cv` /
+        `has_cover_letter` are computed in SQL. Always bounded by `limit`.
+        """
+        sql = (
+            f"SELECT {self._RECEIPT_SUMMARY_COLS} FROM application_receipts "  # noqa: S608 — class constant
+            "WHERE user_id = ?"
+        )
+        params: list[Any] = [user_id]
+        if job_id is not None:
+            sql += " AND job_id = ?"
+            params.append(job_id)
+        sql += " ORDER BY sent_at DESC, id DESC LIMIT ? OFFSET ?"
+        params += [max(1, int(limit)), max(0, int(offset))]
+        cursor = await self._db.execute(sql, params)
+        keys = (
+            "id", "user_id", "job_id", "sent_at", "job_title", "job_company",
+            "job_location", "job_apply_url", "job_source", "has_cv", "has_cover_letter",
+            "profile_version", "channel", "note", "created_at",
+        )
+        out = []
+        for r in await cursor.fetchall():
+            d = dict(zip(keys, r))
+            d["has_cv"] = bool(d["has_cv"])
+            d["has_cover_letter"] = bool(d["has_cover_letter"])
+            out.append(d)
+        return out
+
+    async def count_receipts(self, user_id: str, *, job_id: int | None = None) -> int:
+        """How many receipts `list_receipts` would page through."""
+        sql = "SELECT COUNT(*) FROM application_receipts WHERE user_id = ?"
+        params: list[Any] = [user_id]
+        if job_id is not None:
+            sql += " AND job_id = ?"
+            params.append(job_id)
+        cursor = await self._db.execute(sql, params)
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
 
     async def get_job_by_id(self, job_id: int) -> dict[str, Any] | None:
         cursor = await self._db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
@@ -1641,8 +1796,9 @@ class JobDatabase:
     # schema turns "delete my account" into an UndefinedTable crash (rule #26).
     # The list and the schema must move together, in the same commit.
     _PER_USER_TABLES = (
+        "api_tokens", "application_artifacts", "application_events", "application_receipts",
         "application_stage_history", "applications", "email_verifications",
-        "notification_ledger", "notification_rules",
+        "notification_ledger", "notification_rules", "oauth_grants",
         "password_resets", "sessions", "tailored_documents", "tailored_usage",
         "user_actions", "user_channels", "user_feed",
         "user_notification_digests", "user_profile_versions", "user_profiles",
@@ -1655,9 +1811,13 @@ class JobDatabase:
     # personal data; exporting them would hand out live credentials.
     # (`oauth_states` used to be on that excluded list too — the table itself is
     # gone as of migration 0031.)
+    # `api_tokens` IS exported (the user's own names/dates — "which machines did I
+    # connect?") but its `token_hash` is redacted below; the plaintext was never
+    # stored, so the export can hand out nothing usable as a credential.
     _EXPORT_TABLES = (
+        "api_tokens", "application_artifacts", "application_events", "application_receipts",
         "applications", "application_stage_history", "audit_log",
-        "notification_ledger", "notification_rules", "tailored_documents",
+        "notification_ledger", "notification_rules", "oauth_grants", "tailored_documents",
         "tailored_usage", "user_actions", "user_channels", "user_feed",
         "user_profile_versions", "user_profiles",
     )
@@ -1773,6 +1933,29 @@ class JobDatabase:
                 erasable.append(tbl)
 
         deletion_errors: list[str] = []
+
+        # oauth_tokens / oauth_authorization_codes reference grant_id, not
+        # user_id directly, so the generic "has a user_id column" sweep below
+        # can never reach them. Migration 0036's DDL declares
+        # `ON DELETE CASCADE` for documentation, but `pg.py`'s translate()
+        # strips EVERY FK clause before Postgres ever sees it (see that
+        # migration's header comment) — so nothing here is cascade-deleted at
+        # the database level. Delete them explicitly, via the user's grants,
+        # BEFORE oauth_grants itself is erased by the sweep below.
+        try:
+            await self._db.execute(
+                "DELETE FROM oauth_tokens WHERE grant_id IN "  # noqa: S608 — static SQL, no user input
+                "(SELECT id FROM oauth_grants WHERE user_id = ?)",
+                (user_id,),
+            )
+            await self._db.execute(
+                "DELETE FROM oauth_authorization_codes WHERE grant_id IN "  # noqa: S608
+                "(SELECT id FROM oauth_grants WHERE user_id = ?)",
+                (user_id,),
+            )
+        except Exception as exc:  # noqa: BLE001 — a schema without oauth tables yet (partial test DBs)
+            deletion_errors.append(f"oauth_tokens/oauth_authorization_codes: {type(exc).__name__}: {exc}")
+
         for tbl in erasable:
             try:
                 await self._db.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))

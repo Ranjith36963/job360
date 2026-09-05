@@ -1,7 +1,30 @@
 # Job360 Project Status
-<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-09-03 -->
 
-## Current State: Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
+## Current State: PIVOTED (2026-09-02) — the memory layer for the seeker's AI agent
+
+> **Direction lives in [`docs/product/VISION.md`](docs/product/VISION.md).** Read it
+> first; everything below this block describes the sourcing-era product and is
+> history. In one line: the user (or their agent) brings the job; the agent
+> judges fit, writes the CV, reads the inbox, applies; **Job360 keeps the
+> structured profile, every artifact version, every event and the receipt.**
+> We never source, rank or recommend jobs (product rule 4).
+>
+> **Live on `main` (89cd1dd, 2026-09-03):** bring-a-job (paste) + append-only
+> receipts (#469); personal API tokens + MCP server at `/api/mcp`, 8 tools (#473);
+> token-cap race fix (#476); mypy at 0 (#477). Railway runs backend + frontend +
+> Postgres only — **worker and Redis were deleted 2026-09-02**, so nothing runs in
+> the background (no notifications, no crons; Redis-unreachable log lines are expected).
+>
+> **Next, in order (VISION.md):** 1 OAuth 2.1 for ChatGPT/Grok clients (draft PR #488,
+> awaiting merge) → 2 the spine — **built on branch `feat/application-spine`, awaiting
+> review/PR** (one Application object, typed event log, versioned artifacts,
+> `save_artifact` / `record_event` / `whats_new` / `export_history`; home = your
+> applications; old search UI hidden behind `SEARCH_UI_ENABLED`, scorer off) → 3 URL
+> fetch on the web (link or text, paste as fallback) → 4 contacts/outreach, stats,
+> `update_profile`. Measure: the owner uses it daily for his own hunt.
+
+## Sourcing era (history) — Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
 
 > **Freshest history:** `docs/harness/IMPLEMENTATION_LOG.md` § "2026-08-05 — The funnel batch"
 > (PRs #224/#226/#227/#228/#229): bounded per-user candidate set (top-800), revived

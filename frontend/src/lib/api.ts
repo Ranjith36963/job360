@@ -8,6 +8,9 @@ import type {
   ActionRequest,
   ActionResponse,
   ApplicationTimelineResponse,
+  BringJobRequest,
+  BringJobResponse,
+  CreateReceiptRequest,
   DuplicateJobsResponse,
   HealthResponse,
   JobFilters,
@@ -23,6 +26,8 @@ import type {
   ProfileResponse,
   ProfileVersionDiff,
   ProfileVersionsListResponse,
+  Receipt,
+  ReceiptListResponse,
   RecentRunsResponse,
   SearchStartResponse,
   SearchStatusResponse,
@@ -412,10 +417,10 @@ export async function me(): Promise<User | null> {
 // on consume). consume returns the signed-in user (and sets the session
 // cookie) on success, or throws on an invalid / expired / used token.
 
-export async function requestMagicLink(email: string): Promise<void> {
+export async function requestMagicLink(email: string, next?: string): Promise<void> {
   await request<void>("/api/auth/magic-link/request", {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify(next ? { email, next } : { email }),
   });
 }
 
@@ -756,4 +761,210 @@ export async function downloadTailored(
   a.download = `${kind}_${jobId}.${fmt}`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// Bring a job + application receipts (career-ops pivot, slice one)
+// ---------------------------------------------------------------------------
+
+/** The user pastes the ad; the backend stores, scores and feeds it. */
+export async function bringJob(body: BringJobRequest): Promise<BringJobResponse> {
+  return request<BringJobResponse>(`/api/jobs/bring`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** "I applied": freeze the job + the CV/cover letter as sent. Append-only. */
+export async function createReceipt(
+  jobId: number,
+  // Both fields have backend defaults; the generated type marks them required.
+  body: Partial<CreateReceiptRequest> = {}
+): Promise<Receipt> {
+  return request<Receipt>(`/api/receipts/${jobId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listReceipts(jobId?: number): Promise<ReceiptListResponse> {
+  return request<ReceiptListResponse>(`/api/receipts${qs({ job_id: jobId })}`);
+}
+
+export async function getReceipt(receiptId: number): Promise<Receipt> {
+  return request<Receipt>(`/api/receipts/${receiptId}`);
+}
+
+// ---- Personal API tokens (agent access) ----
+//
+// A token lets an MCP client (Claude Code, Claude Desktop…) act as the user via
+// `Authorization: Bearer j360_…` — see backend/src/api/mcp_server.py. The plain
+// token is returned ONCE by createToken and never again; the list only carries
+// the display prefix. Minting and revoking are cookie-session-only on the
+// backend, so a stolen token cannot mint more tokens.
+
+export type TokenCreated = _Schemas["TokenCreated"];
+export type TokenSummary = _Schemas["TokenSummary"];
+
+export async function createToken(name: string): Promise<TokenCreated> {
+  return request<TokenCreated>("/api/tokens", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function listTokens(): Promise<TokenSummary[]> {
+  const res = await request<_Schemas["TokenListResponse"]>("/api/tokens");
+  return res.tokens;
+}
+
+export async function revokeToken(tokenId: number): Promise<void> {
+  await request<void>(`/api/tokens/${tokenId}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// OAuth 2.1 authorization server — consent screen + connected apps
+// (docs/plans/2026-09-03-oauth-mcp/spec.md R4, R8, R9). Shapes come from the
+// generated api-types (the routes carry `response_model`), so the drift gate
+// catches a backend rename.
+// ---------------------------------------------------------------------------
+
+/** GET /api/oauth/authorize/{rid} — what the consent screen shows. */
+export type ConsentRequest = _Schemas["ConsentRequestResponse"];
+
+export type ConsentDecisionResult = _Schemas["ConsentDecisionResponse"];
+
+/**
+ * Load one authorization request for the consent screen. Throws a 404
+ * `ApiError` when the request is unknown, already consumed, or expired —
+ * callers show the "this request has expired" copy for that case.
+ */
+export async function getConsentRequest(rid: string): Promise<ConsentRequest> {
+  return request<ConsentRequest>(`/api/oauth/authorize/${rid}`);
+}
+
+/** Approve or deny the request; `redirect_to` is where the browser goes next. */
+export async function decideConsent(
+  rid: string,
+  approve: boolean
+): Promise<ConsentDecisionResult> {
+  return request<ConsentDecisionResult>(`/api/oauth/authorize/${rid}/decision`, {
+    method: "POST",
+    body: JSON.stringify({ approve }),
+  });
+}
+
+/** A connected app (one active grant per client), shown under Settings → Connect. */
+export type OAuthGrant = _Schemas["OAuthGrantOut"];
+
+export async function listGrants(): Promise<OAuthGrant[]> {
+  const res = await request<_Schemas["GrantListResponse"]>("/api/oauth/grants");
+  return res.grants;
+}
+
+/** Revoking kills every token under the grant on the next request (spec S5). */
+export async function revokeGrant(id: number): Promise<void> {
+  await request<void>(`/api/oauth/grants/${id}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// The application spine (docs/plans/2026-09-04-application-spine/spec.md)
+// ---------------------------------------------------------------------------
+//
+// Shapes come straight from the generated `_Schemas` (backend `response_model`
+// on `src/api/routes/applications.py` — same pattern as the OAuth helpers
+// above). Run `npm run gen:types` after any change to those response models.
+
+export type ApplicationSummary = _Schemas["ApplicationSummaryOut"];
+export type ApplicationEvent = _Schemas["ApplicationEventOut"];
+export type ApplicationArtifact = _Schemas["ApplicationArtifactOut"];
+export type ApplicationArtifactRow = _Schemas["ApplicationArtifactRowOut"];
+export type ApplicationReceiptEntry = _Schemas["ApplicationReceiptOut"];
+export type ApplicationJobSnapshot = _Schemas["ApplicationJobOut"];
+export type ApplicationFit = _Schemas["ApplicationFitOut"];
+export type ApplicationDetail = _Schemas["ApplicationDetailOut"];
+
+export async function listApplications(
+  params: { status?: string; updated_since?: string; limit?: number; offset?: number } = {}
+): Promise<_Schemas["ListApplicationsResponse"]> {
+  const query = { limit: 20, ...params };
+  return request(`/api/applications${qs(query as Record<string, unknown>)}`);
+}
+
+export async function getApplication(id: number, withArtifactText = false): Promise<ApplicationDetail> {
+  // Query string omitted entirely in the (default) false case — not just an
+  // empty value — so the URL is a bare `/api/applications/{id}` when no
+  // artifact text is requested (matches the hermetic e2e mock's route
+  // pattern, which has no query-string wildcard on this endpoint).
+  const query = withArtifactText ? qs({ with_artifact_text: true }) : "";
+  return request(`/api/applications/${id}${query}`);
+}
+
+export async function getApplicationArtifact(
+  applicationId: number,
+  artifactId: number
+): Promise<ApplicationArtifactRow> {
+  return request(`/api/applications/${applicationId}/artifacts/${artifactId}`);
+}
+
+export async function saveApplicationArtifact(
+  applicationId: number,
+  body: { kind: string; text: string; label?: string; model?: string }
+): Promise<_Schemas["SaveArtifactResponse"]> {
+  return request(`/api/applications/${applicationId}/artifacts`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function saveApplicationFit(
+  applicationId: number,
+  body: { score?: number; verdict?: string; gaps?: string[]; reasoning?: string }
+): Promise<_Schemas["SaveFitResponse"]> {
+  return request(`/api/applications/${applicationId}/fit`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function recordApplicationEvent(
+  applicationId: number,
+  body: {
+    event_type: string;
+    detail?: string;
+    payload?: Record<string, unknown>;
+    occurred_at?: string;
+    corrects_event_id?: number;
+  }
+): Promise<_Schemas["RecordEventResponse"]> {
+  return request(`/api/applications/${applicationId}/events`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** "I applied" (or any receipt) — the rich record. Body fields all optional. */
+export async function recordApplicationReceipt(
+  applicationId: number,
+  body: {
+    channel?: string;
+    note?: string;
+    confirmation?: string;
+    cv_artifact_id?: number;
+    cover_letter_artifact_id?: number;
+    applied_at?: string;
+  } = {}
+): Promise<_Schemas["RecordApplicationReceiptResponse"]> {
+  return request(`/api/applications/${applicationId}/receipt`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getWhatsNew(
+  params: { since?: string; after_id?: number; limit?: number } = {}
+): Promise<_Schemas["WhatsNewResponse"]> {
+  return request(`/api/whats-new${qs(params as Record<string, unknown>)}`);
 }

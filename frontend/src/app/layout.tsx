@@ -1,7 +1,4 @@
 import type { Metadata } from "next";
-// Catalog numbers shown to users live in one place; the copy said 47 for a
-// week after the registry dropped to 41. See src/lib/catalog.ts.
-import { SOURCE_COUNT, SCORING_DIMENSIONS } from "@/lib/catalog";
 import { Sora, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Navbar } from "@/components/layout/Navbar";
@@ -34,20 +31,24 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
+// C2 (application-spine review, VISION rule 4) — Job360 never sources or
+// ranks jobs; the meta/OpenGraph/Twitter copy used to advertise a source
+// count and scoring dimensions on every page. Mission copy instead.
+const TAGLINE = "Your career memory. Your agent's context.";
+
 export const metadata: Metadata = {
   title: "Job360 — Your Career Command Center",
-  description:
-    `${SOURCE_COUNT} sources. ${SCORING_DIMENSIONS}D scoring. One dashboard. Upload your CV and let Job360 find your perfect match.`,
+  description: `${TAGLINE} Job360 remembers every application, every version, every outcome for the AI agent doing your job search.`,
   openGraph: {
     title: "Job360 — Your Career Command Center",
-    description: `${SOURCE_COUNT} sources. ${SCORING_DIMENSIONS}D scoring. One dashboard.`,
+    description: TAGLINE,
     type: "website",
     siteName: "Job360",
   },
   twitter: {
     card: "summary_large_image",
     title: "Job360 — Your Career Command Center",
-    description: `${SOURCE_COUNT} sources. ${SCORING_DIMENSIONS}D scoring. One dashboard.`,
+    description: TAGLINE,
   },
 };
 
