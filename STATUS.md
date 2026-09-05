@@ -22,7 +22,10 @@
 > `save_artifact` / `record_event` / `whats_new` / `export_history`; home = your
 > applications; old search UI hidden behind `SEARCH_UI_ENABLED`, scorer off) → 3 URL
 > fetch on the web (link or text, paste as fallback) → 4 contacts/outreach, stats,
-> `update_profile`. Measure: the owner uses it daily for his own hunt.
+> `update_profile` — **built on branch `feat/contacts-stats`, awaiting review/PR**
+> (`add_contact` / `stats` / `update_profile` MCP tools, `profile_edits` overlay the web
+> shows and clears, People section on the application page). Measure: the owner uses
+> it daily for his own hunt.
 
 ## Sourcing era (history) — Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
 

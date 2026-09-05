@@ -70,6 +70,11 @@ TOOL_ROUTES = {
     ),
     "whats_new": ("applications", "whats_new", {}),
     "export_history": ("applications", "export_history", {}),
+    # Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md, S11) — three more
+    # tools; "update_profile" is on the "profile" route module, not "applications".
+    "add_contact": ("applications", "add_contact", {"application_id": 987654321, "name": "x"}),
+    "stats": ("applications", "stats", {}),
+    "update_profile": ("profile", "update_profile", {"edits": []}),
 }
 
 

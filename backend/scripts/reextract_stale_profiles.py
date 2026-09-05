@@ -100,7 +100,11 @@ async def main(user_id: str | None, limit: int, apply: bool) -> int:
         if not apply and stale_count >= limit:
             break
 
-        profile = load_profile(uid)
+        # The BASE profile (`with_overlay=False`): this sweep re-extracts and
+        # SAVES, and a load→mutate→save that starts from the merged profile
+        # copies the agent's overlay values into extraction's own JSON — after
+        # which clearing the edit reveals the edit again instead of the CV.
+        profile = load_profile(uid, with_overlay=False)
         if profile is None:
             continue
         scanned += 1

@@ -84,6 +84,7 @@ docs at the repo root). Start here to find the right doc fast.
 | [`plans/2026-06-21-free-premium-plans.md`](product/plans/2026-06-21-free-premium-plans.md) | 🗄️ Free/Premium tier design — not planned (rule 6). |
 | [`plans/2026-09-03-oauth-mcp/`](plans/2026-09-03-oauth-mcp/) | Slice 1 of the pivot (shipped, PR #488): OAuth 2.1 authorization server for MCP clients (intent / spec with security section / plan + diff-vs-plan). |
 | [`plans/2026-09-04-application-spine/`](plans/2026-09-04-application-spine/) | Slice 2 of the pivot (branch `feat/application-spine`, awaiting review/PR): one Application object, an append-only typed event log, versioned artifacts, the stored (never computed) fit verdict, `whats_new` / `export_history`, the applications home (intent / spec with security section / plan). |
+| [`plans/2026-09-05-contacts-stats/`](plans/2026-09-05-contacts-stats/) | Slice 4 of the pivot (branch `feat/contacts-stats`, awaiting review/PR): recruiter contacts per application, `stats` (reply / interview rate per CV version and per role — counts, never judgement), `update_profile` as an append-only overlay the human can see and clear (intent / spec with security section / plan). |
 | [`References.md`](harness/References.md) | Source-of-truth list of external references and research links. |
 
 ## 📘 Engine evaluation

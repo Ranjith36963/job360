@@ -942,15 +942,23 @@ async def test_revoke_access_kills_refresh_too_and_always_200(authenticated_asyn
 async def test_migration_0036_up_down_up(migrated_db_path):
     """`migrated_db_path` already ran `init_db()` + every migration — this
     only exercises down()/up() on it, matching the runner's real "reverse the
-    LAST migration" contract. 0037 (application spine) is now the newest, so
-    it is reverted first to put 0036 back at the top before this test's own
-    up/down/up cycle."""
+    LAST migration" contract.
+
+    ``down()`` only ever reverses the NEWEST applied migration, so everything
+    above 0036 has to come off first. Which migrations those are is READ FROM
+    THE DIRECTORY, never named: a test that hardcodes "the newest migration is
+    0037" turns main red the moment 0038 lands, which is exactly what happened
+    (memory: tests must not encode the merge queue). The names below are the
+    ones this test is actually ABOUT — 0036 itself and the tables it creates.
+    """
     from migrations import runner
     from src.repositories import pg as _pg
 
     db_path = migrated_db_path
-    reverted_0037 = await runner.down(db_path)
-    assert reverted_0037 == "0037_application_spine"
+    all_stems = runner._discover_pairs(runner.MIGRATIONS_DIR)
+    newer = [s for s in all_stems if s > "0036_oauth"]
+    for expected in reversed(newer):
+        assert await runner.down(db_path) == expected
 
     oauth_tables = (
         "oauth_clients", "oauth_authorization_requests", "oauth_grants",
@@ -972,9 +980,9 @@ async def test_migration_0036_up_down_up(migrated_db_path):
     for table in oauth_tables:
         assert not await _has_table(table), f"{table} still present after down()"
 
-    # `up()` with no target applies EVERY pending migration — 0037 (already
-    # reverted above) comes back along with 0036.
+    # `up()` with no target applies EVERY pending migration — everything
+    # reverted above comes back along with 0036, in order.
     reapplied = await runner.up(db_path)
-    assert reapplied == ["0036_oauth", "0037_application_spine"]
+    assert reapplied == ["0036_oauth", *newer]
     for table in oauth_tables:
         assert await _has_table(table), f"{table} missing after re-up()"

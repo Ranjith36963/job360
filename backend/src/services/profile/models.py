@@ -5,6 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+# Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md R10) — the closed sets
+# for `preferences.work_arrangement` / `preferences.experience_level`, shared
+# by the web preferences normaliser (`api/routes/profile.py`) and the agent
+# edit validator (`services/profile/edits.py`). ONE vocabulary, not two: this
+# used to be an inline set at `profile.py:522` plus a second definition in
+# `UserPreferences._WORKPLACE_VALUES` below — living here lets both readers
+# import the same object instead of drifting apart the way `work_arrangement`
+# and `preferred_workplace` once did.
+VALID_WORK_ARRANGEMENTS: frozenset[str] = frozenset({"remote", "hybrid", "onsite"})
+VALID_EXPERIENCE_LEVELS: frozenset[str] = frozenset({"entry", "mid", "senior", "lead", "executive"})
+
 
 @dataclass
 class CVData:
@@ -22,6 +33,13 @@ class CVData:
     headline: str = ""
     location: str = ""
     achievements: list[str] = field(default_factory=list)
+    # Portfolio / personal-site / other links the CV doesn't have a shelf for
+    # elsewhere (LinkedIn has its own `linkedin_*` fields, GitHub its own
+    # `github_*`). New in slice 4 (spec R9) as an AGENT-EDITABLE path
+    # (`cv_data.links`, `services/profile/edits.py`) — extraction never
+    # writes it today, only `update_profile` does. JSON blob, no migration:
+    # `storage._filter_fields` drops unknown keys, so old rows load with [].
+    links: list[str] = field(default_factory=list)
     # The universal extraction gate's verdict on THIS profile (coverage,
     # precision, completeness, input health, overall, problems). Written by
     # run_two_pass_extraction after both passes merge. Advisory: it never
@@ -527,7 +545,9 @@ class UserPreferences:
     # Values the workplace scorer can actually match. A CLOSED set, because the
     # job side of the comparison (`JobEnrichment.workplace_type`) is an enum —
     # anything outside it can never match anything (rule #30's closed-set test).
-    _WORKPLACE_VALUES = frozenset({"remote", "hybrid", "onsite"})
+    # Sourced from the module-level `VALID_WORK_ARRANGEMENTS` (spec R10) so
+    # this property and the agent edit validator can never disagree.
+    _WORKPLACE_VALUES = VALID_WORK_ARRANGEMENTS
 
     @property
     def preferred_workplace(self) -> Optional[str]:

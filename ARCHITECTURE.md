@@ -21,13 +21,13 @@ Job360 *was* a UK-focused multi-domain job search aggregator. This path fetches 
 | Unique source classes | **40** | same dict — `indeed` and `glassdoor` both alias `JobSpySource` |
 | `RATE_LIMITS` entries | **41** | `core/settings.py` `RATE_LIMITS` |
 | `LOCATIONS` entries | **26** | `core/keywords.py` `LOCATIONS` |
-| Migration head | **0037** | `backend/migrations/` |
+| Migration head | **0038** | `backend/migrations/` |
 | `SCORER_VERSION` | **8** | `services/skill_matcher.SCORER_VERSION` |
 | `BaseJobSource` subclasses | **40** | `src/sources/` |
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
-| Migration files | **38** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **241** | `backend/tests/` |
+| Migration files | **39** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **246** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -71,7 +71,7 @@ job360/
 │   │   ├── cli.py                    # Click CLI: run, api, status, sources, view, setup-profile, rescore-backfill
 │   │   ├── cli_view.py               # Rich terminal table viewer
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE + dedup Layer-1
-│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 18 route modules (83 endpoints, all per-user routes gated)
+│   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, 19 route modules (95 endpoints, all per-user routes gated)
 │   │   │   └── routes/               # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log, tokens, bring, receipts, oauth, well_known (root-mounted)
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, RATE_LIMITS (41 entries), thresholds, feature flags
@@ -120,7 +120,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── rate_limiter.py       # Async semaphore + delay
 │   │       └── time_buckets.py
-│   └── tests/                        # across 237 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 246 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,jobs,profile,pipeline,layout}/
@@ -681,9 +681,11 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/jobs/{job_id}/action` | `actions.py` |
 | `GET` | `/api/applications` | `applications.py` |
 | `GET` | `/api/applications/export` | `applications.py` |
+| `GET` | `/api/applications/stats` | `applications.py` |
 | `GET` | `/api/applications/{application_id}` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/artifacts` | `applications.py` |
 | `GET` | `/api/applications/{application_id}/artifacts/{artifact_id}` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/contacts` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/events` | `applications.py` |
 | `PUT` | `/api/applications/{application_id}/fit` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/receipt` | `applications.py` |
@@ -738,6 +740,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `PATCH` | `/api/pipeline/{job_id}/notes` | `pipeline.py` |
 | `GET` | `/api/pipeline/{job_id}/timeline` | `pipeline.py` |
 | `GET` | `/api/profile` | `profile.py` |
+| `PATCH` | `/api/profile` | `profile.py` |
 | `POST` | `/api/profile` | `profile.py` |
 | `POST` | `/api/profile/clear` | `profile.py` |
 | `POST` | `/api/profile/cv` | `profile.py` |
@@ -768,7 +771,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**92 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**95 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->
 
 ## Configuration
