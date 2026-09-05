@@ -1071,6 +1071,40 @@ _HEREDOC_BROKEN = _HEREDOC_OK.replace(
     "readyz_url: ${{ steps.parse.outputs.readyz_urlx }}",
 )
 
+# W13 and W6 used to mutate real lines in triage.yml — the auto-authorisation
+# branch (`grep -qFx -e "github-actions[bot]" -e "app/github-actions"`) and its
+# `gh workflow run repair.yml` dispatch. Both were deleted 2026-09-05 when
+# triage.yml became diagnose-and-comment only (repair.yml itself was removed
+# as unwired scaffolding). The checks (`_check_source_vs_literal` for W13, the
+# `gh workflow run` scan for W6) are still real and still general, so each
+# drill now supplies its own synthetic fixture instead of depending on
+# triage.yml's current wording.
+_W13_BROKEN = """\
+name: drill — W13 gh-literal mismatch (synthetic)
+on:
+  workflow_dispatch:
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - name: check bot author
+        run: |
+          issue_author=$(gh issue view "$n" --json author --jq .author.login)
+          echo "$issue_author" | grep -qFx "github-actions[bot]"
+"""
+
+_W6_BROKEN = """\
+name: drill — W6 misspelt dispatch target (synthetic)
+on:
+  workflow_dispatch:
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - name: dispatch
+        run: gh workflow run totally-fake-workflow.yml -f pr="$n"
+"""
+
 
 DRILLS = [
     Drill(
@@ -1085,20 +1119,22 @@ DRILLS = [
     Drill(
         name="a literal its source can never produce",
         mechanism="W13 -- the mismatch is between the file and the API it reads",
-        target="triage.yml",
-        before='grep -qFx -e "github-actions[bot]" -e "app/github-actions"',
-        after='grep -qFx "github-actions[bot]"',
+        target="drill-w13-broken.yml",
+        before="",
+        after="",
         expect_check="W13",
         expect_in_message="app/NAME",
+        create=_W13_BROKEN,
     ),
     Drill(
         name="misspelt dispatch target",
         mechanism="W6 — hop points at a workflow that does not exist",
-        target="triage.yml",
-        before="gh workflow run repair.yml",
-        after="gh workflow run repair-loop.yml",
+        target="drill-w6-broken.yml",
+        before="",
+        after="",
         expect_check="W6",
-        expect_in_message="repair-loop.yml",
+        expect_in_message="totally-fake-workflow.yml",
+        create=_W6_BROKEN,
     ),
     Drill(
         name="literal the producer cannot emit",

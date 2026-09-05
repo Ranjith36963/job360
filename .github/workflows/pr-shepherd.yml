@@ -18,7 +18,8 @@ name: PR shepherd (conflicts + red CI on human PRs)
 #                   human: comment once naming it.
 #   GREEN+IDLE   -> a summary line only. Merging a human's PR is an
 #                   AUTHORIZATION, and this harness reserves authorization for
-#                   humans (same reason triage may not apply agent:fix).
+#                   humans — the same reason triage.yml is diagnose-and-comment
+#                   only and never starts a write-capable agent itself.
 #
 # WHAT IT NEVER DOES: merge, close, rebase, or force-push anyone's branch.
 # It repairs metadata (branch freshness) and routes problems; it does not

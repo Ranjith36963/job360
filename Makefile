@@ -1,9 +1,8 @@
 # Job360 developer Makefile.
 #
 # Convention: every target is self-describing. Run `make help` for a menu.
-# `verify-step-0` is the aggregate gate checked by the Step-0 Ralph Loop.
 
-.PHONY: help install test test-fast test-live lint format migrate bootstrap verify-step-0 verify-step-1 verify-step-1-5 verify-step-2 verify-step-3 migrate-roundtrip verify-batch clean redis-up redis-down worker
+.PHONY: help install test test-fast test-live lint format migrate bootstrap migrate-roundtrip clean
 
 help:
 	@echo "Job360 targets:"
@@ -14,16 +13,7 @@ help:
 	@echo "  format           ruff format across backend/"
 	@echo "  migrate          apply pending DB migrations"
 	@echo "  bootstrap        run backend/scripts/bootstrap_dev.py against localhost:8000"
-	@echo "  verify-step-0    run the Step-0 pre-flight gate (aggregate of below)"
-	@echo "  verify-step-1    run the Step-1 engine→API seam gate"
-	@echo "  verify-step-1-5  run the Step-1.5 stabilisation gate (S1.1 + S1.5 + Step-3 MVP)"
-	@echo "  verify-step-2    run the Step-2 API→UI seam gate"
-	@echo "  verify-step-3    run the Step-3 new endpoints + Settings UI gate"
-	@echo "  migrate-roundtrip  test Step-3 migrations (0012-0014) down→up round-trip"
-	@echo "  verify-batch     enforce the Step-1.6 generator/reviewer contract"
-	@echo "  redis-up         start local Redis container (Phase −2 item C)"
-	@echo "  redis-down       stop the local Redis container"
-	@echo "  worker           run the ARQ worker against local Redis"
+	@echo "  migrate-roundtrip  test migrations down->up round-trip"
 	@echo "  clean            wipe __pycache__ + *.pyc"
 
 install:
@@ -52,202 +42,9 @@ migrate:
 bootstrap:
 	cd backend && python scripts/bootstrap_dev.py
 
-# ---------------------------------------------------------------------------
-# Step-0 pre-flight gate.
-#
-# The Ralph Loop halts once this target exits 0. Each check is best-effort
-# wired so a failure prints a readable reason instead of a silent non-zero.
-# ---------------------------------------------------------------------------
-
-verify-step-0:
-	@echo "==> Step-0 gate: pytest"
-	cd backend && python -m pytest tests/ -q -p no:randomly --tb=no
-	@echo "==> Step-0 gate: env parity"
-	cd backend && python scripts/check_env_example.py
-	@echo "==> Step-0 gate: migrations applied"
-	cd backend && python -m migrations.runner status
-	@echo "==> Step-0 gate: docs inventory"
-	@test -f CONTRIBUTING.md          || { echo "MISSING: CONTRIBUTING.md"; exit 1; }
-	@test -f backend/README.md        || { echo "MISSING: backend/README.md"; exit 1; }
-	@test -f frontend/README.md       || { echo "MISSING: frontend/README.md"; exit 1; }
-	@test -f docs/README.md           || { echo "MISSING: docs/README.md"; exit 1; }
-	@test -f docs/product/troubleshooting.md  || { echo "MISSING: docs/product/troubleshooting.md"; exit 1; }
-	@test -f .gitattributes           || { echo "MISSING: .gitattributes"; exit 1; }
-	@test -f setup.bat                || { echo "MISSING: setup.bat"; exit 1; }
-	@test -f backend/scripts/bootstrap_dev.py || { echo "MISSING: bootstrap_dev.py"; exit 1; }
-	@test -f backend/migrations/0010_run_log_observability.up.sql || { echo "MISSING: 0010 up"; exit 1; }
-	@echo "==> Step-0 gate: PASS"
-	@mkdir -p .claude
-	@git rev-parse HEAD > .claude/step-0-verified.txt
-	@echo "STEP-0 GREEN: $$(cat .claude/step-0-verified.txt)"
-
-# ---------------------------------------------------------------------------
-# Step-1 engine→API seam gate.
-#
-# Aggregates the 13 verification checks from docs/_archive/step_1_plan.md §Verification.
-# Ralph Loop halts once this exits 0 and the sentinel is written.
-# ---------------------------------------------------------------------------
-
-verify-step-1:
-	@echo "==> Step-1 gate: pytest regression (>=1,018p/0f/3s)"
-	cd backend && python -m pytest tests/ -q -p no:randomly --tb=short
-	@echo "==> Step-1 gate: migration concurrency"
-	cd backend && python scripts/verify_migration_race.py
-	@echo "==> Step-1 gate: dataclass round-trip (B1+B2)"
-	cd backend && python scripts/verify_dataclass_roundtrip.py
-	@echo "==> Step-1 gate: expired-job filter (B9)"
-	cd backend && python -m pytest tests/test_api_security.py::test_expired_jobs_filtered -v -p no:randomly
-	@echo "==> Step-1 gate: CLI↔ARQ parity (B10)"
-	cd backend && python -m pytest tests/test_workers_tasks.py::test_cli_arq_scoring_parity -v -p no:randomly
-	@echo "==> Step-1 gate: enrichment batch concurrency (B7)"
-	cd backend && python -m pytest tests/test_job_enrichment.py::test_enrich_batch_respects_semaphore -v -p no:randomly
-	@echo "==> Step-1 gate: hybrid mode fallback (B8)"
-	cd backend && python -m pytest tests/test_retrieval_integration.py::test_mode_hybrid_empty_index_falls_back tests/test_retrieval_integration.py::test_mode_hybrid_populated_index_fuses -v -p no:randomly
-	@echo "==> Step-1 gate: per-user rate limit (B12)"
-	cd backend && python -m pytest tests/test_api_security.py::test_search_concurrent_cap_per_user -v -p no:randomly
-	@echo "==> Step-1 gate: lazy-import startup safety"
-	cd backend && python scripts/verify_lazy_imports.py
-	@echo "==> Step-1 gate: ARQ worker smoke"
-	cd backend && ARQ_TEST_MODE=1 python scripts/verify_arq_functions.py
-	@echo "==> Step-1 gate: frontend build"
-	cd frontend && npm run build
-	@echo "==> Step-1 gate: PASS"
-	@mkdir -p .claude
-	@git rev-parse HEAD > .claude/step-1-verified.txt
-	@echo "STEP-1 GREEN: $$(cat .claude/step-1-verified.txt)"
-
-# ---------------------------------------------------------------------------
-# Step-1.5 stabilisation gate (S1.1 + S1.5 + Step-3 MVP).
-#
-# Aggregates the verification checks from docs/_archive/step_1_5_plan.md §Verification.
-# Ralph Loop halts once this exits 0 and the sentinel is written.
-# ---------------------------------------------------------------------------
-
-verify-step-1-5:
-	@echo "==> Step-1.5 gate: pytest regression"
-	cd backend && python -m pytest tests/ -q -p no:randomly --tb=short
-	@echo "==> Step-1.5 gate: dim-column round-trip"
-	cd backend && python -m pytest tests/test_database.py::test_dim_columns_round_trip -v -p no:randomly
-	@echo "==> Step-1.5 gate: bombshell value-presence"
-	cd backend && python -m pytest tests/test_api.py::test_jobs_response_includes_score_dim_breakdown -v -p no:randomly
-	@echo "==> Step-1.5 gate: ghost-detection state machine"
-	cd backend && python -m pytest tests/test_ghost_detection_integration.py -v -p no:randomly
-	@echo "==> Step-1.5 gate: ESCO normaliser smoke"
-	cd backend && python -m pytest tests/test_cv_parser_esco.py -v -p no:randomly
-	@echo "==> Step-1.5 gate: profile version + JSON Resume endpoints"
-	cd backend && python -m pytest tests/test_profile_versions_endpoint.py -v -p no:randomly
-	@echo "==> Step-1.5 gate: notification ledger endpoint"
-	cd backend && python -m pytest tests/test_notifications_endpoint.py -v -p no:randomly
-	@echo "==> Step-1.5 gate: PASS"
-	@mkdir -p .claude
-	@git rev-parse HEAD > .claude/step-1-5-verified.txt
-	@echo "STEP-1.5 GREEN: $$(cat .claude/step-1-5-verified.txt)"
-
-# ---------------------------------------------------------------------------
-# Step-1.6 generator/reviewer contract gate.
-#
-# Reads .claude/reviewer-verdict.md (produced by scripts/review_batch.sh +
-# the reviewer agent) and refuses to merge unless:
-#   1. The file exists.
-#   2. verdict: APPROVED  (not PENDING / CHANGES_REQUESTED / BLOCKED).
-#   3. verification_commands_run is non-empty (proves the wrapper ran).
-#
-# Background: Step-1.5 shipped a stale sentinel (1086p/0f/4s claimed,
-# 1087p/0f/17s observed by reviewer) because scope drift was undetected
-# until post-merge. This target makes that drift impossible.
-# ---------------------------------------------------------------------------
-
-verify-batch:
-	@test -f .claude/reviewer-verdict.md || { echo "FAIL: .claude/reviewer-verdict.md missing — run scripts/review_batch.sh <branch>"; exit 1; }
-	@grep -E '^verdict:[[:space:]]+APPROVED([[:space:]]|$$)' .claude/reviewer-verdict.md > /dev/null || { echo "FAIL: verdict is not APPROVED in .claude/reviewer-verdict.md"; grep -E '^verdict:' .claude/reviewer-verdict.md || true; exit 1; }
-	@if grep -E '^verification_commands_run:[[:space:]]*\[\][[:space:]]*$$' .claude/reviewer-verdict.md > /dev/null; then echo "FAIL: verification_commands_run is empty — run scripts/review_batch.sh first"; exit 1; fi
-	@grep -E '^verification_commands_run:' .claude/reviewer-verdict.md > /dev/null || { echo "FAIL: verification_commands_run YAML key missing"; exit 1; }
-	@echo "PASS: reviewer verdict APPROVED with non-empty verification_commands_run."
-
-# ---------------------------------------------------------------------------
-# Step-2 API→UI seam gate.
-#
-# Aggregates the verification checks from docs/_archive/step_2_plan.md §Verification.
-# Ralph Loop halts once this exits 0 and the sentinel is written.
-# ---------------------------------------------------------------------------
-
-verify-step-2:
-	@echo "==> Step-2 gate: backend regression (>=1,056p/0f/3s)"
-	cd backend && python -m pytest tests/ -q -p no:randomly --tb=short
-	@echo "==> Step-2 gate: frontend type-check"
-	cd frontend && npm run type-check
-	@echo "==> Step-2 gate: frontend lint"
-	cd frontend && npm run lint
-	@echo "==> Step-2 gate: frontend unit tests"
-	cd frontend && npm run test:unit -- --run
-	@echo "==> Step-2 gate: frontend build"
-	cd frontend && npm run build
-	@echo "==> Step-2 gate: PASS"
-	@mkdir -p .claude
-	@git rev-parse HEAD > .claude/step-2-verified.txt
-	@echo "STEP-2 GREEN: $$(cat .claude/step-2-verified.txt)"
-
 migrate-roundtrip:
 	bash scripts/migration_roundtrip.sh
-
-# ---------------------------------------------------------------------------
-# Step-3 gate — New endpoints + Settings UI.
-#
-# Aggregates the verification checks from docs/harness/step_3_plan.md §Stop-criteria.
-# Ralph Loop halts once this exits 0 and the sentinel is written.
-# ---------------------------------------------------------------------------
-
-verify-step-3:
-	@echo "==> Step-3 gate: backend regression (>=1,081p/0f)"
-	cd backend && python -m pytest tests/ -q -p no:randomly --tb=short
-	@echo "==> Step-3 gate: migration round-trip (0012, 0013, 0014)"
-	bash scripts/migration_roundtrip.sh
-	@echo "==> Step-3 gate: backend lint"
-	cd backend && python -m ruff check src tests
-	@echo "==> Step-3 gate: frontend type-check"
-	cd frontend && npm run type-check
-	@echo "==> Step-3 gate: frontend lint"
-	cd frontend && npm run lint
-	@echo "==> Step-3 gate: frontend unit tests (>=50 passing)"
-	cd frontend && npm run test:unit -- --run
-	@echo "==> Step-3 gate: frontend build"
-	cd frontend && npm run build
-	@echo "==> Step-3 gate: PASS"
-	@mkdir -p .claude
-	@git rev-parse HEAD > .claude/step-3-verified.txt
-	@echo "STEP-3 GREEN: $$(cat .claude/step-3-verified.txt)"
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
-
-# ---------------------------------------------------------------------------
-# Phase −2 item C — ARQ worker dev runner.
-#
-# The worker code lives in backend/src/workers/. Until this section landed,
-# spinning it up locally was a manual multi-step affair (install Redis,
-# remember the right env vars, find the WorkerSettings import path). These
-# three targets make Phase −1 manual verification's notification scenarios
-# actually exercise the worker — without them, send_notification enqueues
-# vanish into the void and the verification reports "no email arrived".
-#
-# Production deployment (Phase 3) replaces docker-compose with managed
-# Redis + a real process supervisor. Same WorkerSettings entry point.
-# ---------------------------------------------------------------------------
-
-redis-up:
-	docker compose -f docker-compose.dev.yml up -d redis
-	@echo ""
-	@echo "Redis is running on redis://localhost:6379"
-	@echo "Next: `make worker` (in a separate terminal — it blocks)."
-
-redis-down:
-	docker compose -f docker-compose.dev.yml down
-
-worker:
-	@if ! command -v arq >/dev/null 2>&1; then \
-		echo "FAIL: 'arq' CLI not on PATH. Did you `pip install -e backend/` recently?"; \
-		exit 1; \
-	fi
-	@echo "Starting ARQ worker against REDIS_URL=$${REDIS_URL:-redis://localhost:6379}"
-	cd backend && arq src.workers.settings.WorkerSettings

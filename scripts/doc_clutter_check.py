@@ -46,14 +46,16 @@ if hasattr(sys.stdout, "reconfigure"):
 
 # ── The ratchet. Measured 2026-07-26 — these ARE today's real numbers, so any
 # regression fires immediately. May only ever go DOWN. ───────────────────────
+# Lowered 2026-09-05 (harness+docs cleanup) after the harness/docs deletion pass:
+# 138 -> 49 tracked .md files, 33,708-ish -> 6,248 lines. Re-measured, not estimated.
 BUDGET = {
-    "orphan_pct": 61,        # docs nothing links to (archives excluded — see ARCHIVE_DIRS)
-    "stale_pct": 51,         # untouched > STALE_DAYS
-    "max_file_lines": 1578,  # largest single living doc (IMPLEMENTATION_LOG.md)
-    "dupe_clusters": 7,      # same-topic doc pairs with no cross-reference
-    "root_loose": 10,        # stray .md sitting in the repo root
-    "headerless_pct": 99,    # docs with no lifecycle header (137 of 138 today)
-    "stamped_stale": 1,      # STATUS.md today — fires the moment a SECOND doc lies
+    "orphan_pct": 55,        # docs nothing links to (archives excluded — see ARCHIVE_DIRS)
+    "stale_pct": 0,          # untouched > STALE_DAYS
+    "max_file_lines": 550,   # largest single living doc (docs/plans/2026-09-04-url-fetch/spec.md)
+    "dupe_clusters": 0,      # same-topic doc pairs with no cross-reference
+    "root_loose": 1,         # stray .md sitting in the repo root (REVIEW.md)
+    "headerless_pct": 84,    # docs with no lifecycle header
+    "stamped_stale": 0,      # a LIVING doc whose freshness stamp is too old
     "shipped_living": 0,     # status: IMPLEMENTED docs still outside an archive dir
 }
 

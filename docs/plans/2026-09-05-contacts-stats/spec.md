@@ -1,9 +1,11 @@
 <!-- doc: PLAN | status: ACTIVE | pr: — -->
 # Spec: contacts, outreach, stats, profile edits (slice 4, #482)
 
-Intent: `intent.md`. Builds on the spine spec
+Builds on the spine spec
 (`docs/plans/2026-09-04-application-spine/spec.md`) — every rule there (R1–R10, S1–S12)
-still holds; this document only adds. Line numbers are as of `1fba085`.
+still holds; this document only adds. Line numbers are as of `1fba085`. Status: shipped
+(PR #498). (Its companion `intent.md` is deleted scaffolding, 2026-09-05 — git history
+holds it.)
 
 ## Measured starting point
 

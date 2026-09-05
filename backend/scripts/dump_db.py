@@ -1,17 +1,17 @@
 """Dev helper: dump useful summaries from the Job360 DB.
 
-(`run_log` went with the sourcing era — migration 0039, slice 5 #483 — so the
-run summary this script used to print is gone with it.)
+(`run_log` went with the sourcing era — migration 0039, slice 5 #483 — and
+`user_feed` / `user_actions` went with the notification/pipeline tables —
+migration 0040 — so the run summary and the per-user feed/actions dump this
+script used to print are both gone with them.)
 
 Usage:
     python backend/scripts/dump_db.py
     python backend/scripts/dump_db.py --db-path /tmp/test.db
-    python backend/scripts/dump_db.py --user alice@example.com
 
 Prints:
     * Tables present + row counts
     * Top 10 recently-seen jobs by match_score
-    * If --user given and found: their recent user_feed + user_actions rows
 """
 
 from __future__ import annotations
@@ -81,40 +81,9 @@ def _top_jobs(conn: pgsync.Connection, limit: int = 10) -> list[tuple]:
     return conn.execute(q, (limit,)).fetchall()
 
 
-def _user_id_for_email(conn: pgsync.Connection, email: str) -> str | None:
-    try:
-        row = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
-    except pgsync.Error as e:
-        _say(f"[warn] users lookup failed: {e}")
-        return None
-    return row[0] if row else None
-
-
-def _user_feed(conn: pgsync.Connection, user_id: str, limit: int = 10) -> list[tuple]:
-    try:
-        return conn.execute(
-            "SELECT job_id, status, score, notified_at FROM user_feed"
-            " WHERE user_id = ? ORDER BY notified_at DESC NULLS LAST LIMIT ?",
-            (user_id, limit),
-        ).fetchall()
-    except pgsync.Error:
-        return conn.execute(
-            "SELECT job_id, status, score, notified_at FROM user_feed" " WHERE user_id = ? ORDER BY rowid DESC LIMIT ?",
-            (user_id, limit),
-        ).fetchall()
-
-
-def _user_actions(conn: pgsync.Connection, user_id: str, limit: int = 10) -> list[tuple]:
-    return conn.execute(
-        "SELECT job_id, action, created_at FROM user_actions" " WHERE user_id = ? ORDER BY rowid DESC LIMIT ?",
-        (user_id, limit),
-    ).fetchall()
-
-
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--db-path", default=str(DEFAULT_DB))
-    p.add_argument("--user", help="Email of user to dump feed/actions for")
     args = p.parse_args()
 
     db_path = Path(args.db_path)
@@ -133,25 +102,6 @@ def main() -> int:
             ["id", "match_score", "title", "company", "location", "first_seen"],
             jobs,
         )
-
-        if args.user:
-            uid = _user_id_for_email(conn, args.user)
-            if uid is None:
-                _say(f"No user found for email: {args.user}")
-            else:
-                _say(f"Resolved user {args.user} -> id {uid}")
-                feed = _user_feed(conn, uid)
-                _print_rows(
-                    f"user_feed for {args.user}",
-                    ["job_id", "status", "score", "notified_at"],
-                    feed,
-                )
-                actions = _user_actions(conn, uid)
-                _print_rows(
-                    f"user_actions for {args.user}",
-                    ["job_id", "action", "created_at"],
-                    actions,
-                )
     finally:
         conn.close()
     return 0

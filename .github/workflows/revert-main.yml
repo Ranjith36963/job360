@@ -1,10 +1,11 @@
 name: Reverse gear (build the revert — a human merges it)
 
 # THERE WAS NO REVERSE GEAR AT ALL. Grepping every file under .github/workflows/
-# and scripts/ for revert|rollback|redeploy found only: repair.yml reverting an
-# AGENT'S OWN TEST EDITS, migration_roundtrip.sh reverting migrations in a
-# throwaway database, and psycopg's conn.rollback(). Nothing takes production
-# back to the previous commit.
+# and scripts/ for revert|rollback|redeploy found only: repair.yml (removed
+# 2026-09-05 as unwired harness scaffolding) reverting an AGENT'S OWN TEST
+# EDITS, migration_roundtrip.sh reverting migrations in a throwaway database,
+# and psycopg's conn.rollback(). Nothing took production back to the previous
+# commit.
 #
 # Merge -> live is 2m14s forward (PR #337: merged 15:16:24, users live 15:18:38)
 # and undefined backward. Every argument about gates is downstream of that.

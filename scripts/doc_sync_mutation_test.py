@@ -96,11 +96,14 @@ CASES: list[tuple[str, str, str, str]] = [
     # Every scout pass following that rule wrote nowhere. Four skills carried
     # the same stale root, and scout/SKILL.md contradicted itself: line 9 had
     # the correct path in prose, line 23 -- the operative rule -- had the dead one.
-    (".claude/skills/scout/SKILL.md",
-     r"docs\\(harness)\\maintenance\\MISSIONS\.md",
-     # Replacement goes through re.subn, so each literal backslash must be
-     # doubled here or `\n` / `\m` are read as escapes.
-     "docs\\\\nowhere\\\\maintenance\\\\MISSIONS.md", "skill-dead-path"),
+    #
+    # Retargeted 2026-09-05 (harness+docs cleanup): scout/SKILL.md itself was
+    # deleted along with worker/integrator/health (unwired, per the mission
+    # sweep). skill_dead_paths() is a generic scan over every .claude/skills/
+    # file, so any surviving skill with a `docs/....md` backtick path drills
+    # it just as well — hard-rules/SKILL.md's own pointer to VISION.md.
+    (".claude/skills/hard-rules/SKILL.md",
+     r"`docs/product/VISION\.md`", "`docs/nonexistent-xyz/VISION.md`", "skill-dead-path"),
     # Sixth batch, 2026-08-24. The nightly routine found runbook.md still
     # telling operators to run `sqlite3 data/jobs.db` against a Postgres
     # database -- five dead COMMANDS, not stale prose. The four SQLite entries
@@ -332,31 +335,14 @@ def structural_drills() -> list[str]:
     # require build_checks() to still emit `subfolder-ats`) was retired
     # 2026-09-05 with `source_subfolder_counts()` itself (slice 5, #483).
 
-    # 3. A NEW pillar doc must be caught the day it appears.
-    #
-    # This one cannot use a throwaway root: pillars_fully_watched() compares the
-    # real folder against the real LIVING_DOCS, and the bug it guards is a file
-    # existing that nobody listed. So a real file is created and removed under
-    # try/finally -- a drill that leaves litter in the authoritative folder
-    # would be worse than the bug.
-    probe = ROOT / "docs/product/pillars/_drill_probe.md"
-    try:
-        probe.write_text("# drill probe\n", encoding="utf-8")
-        missing = dsc.pillars_fully_watched()
-        if not any(p.endswith("_drill_probe.md") for p in missing):
-            failures.append(
-                "pillar-unwatched: a new file in docs/product/pillars/ was NOT reported "
-                "— the folder-coverage guard is blind"
-            )
-    finally:
-        probe.unlink(missing_ok=True)
-
-    if probe.exists():  # belt and braces: never leave litter behind
-        failures.append(f"pillar-unwatched: drill failed to clean up {probe}")
+    # The pillar-coverage drill that used to run here (plant a new file under
+    # docs/product/pillars/, require pillars_fully_watched() to catch it) was
+    # retired 2026-09-05 with the pillars folder and pillars_fully_watched()
+    # itself (slice 5, #483 cleanup) — there is no folder left to watch.
 
     if not failures:
         print("PASS  structural      missing subfolder (count + emitted guard), "
-              "gapped/malformed/duplicate migrations, unwatched pillar doc, "
+              "gapped/malformed/duplicate migrations, "
               "control byte in a guard, line-citation ratchet, surface ratchet, dead tree path")
     return failures
 

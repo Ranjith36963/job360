@@ -483,8 +483,9 @@ BLOCKERS: list[Blocker] = [
         repro="python scripts/merge_cage.py --replay 60   # used to print 0/60 and call it "
         "a measurement",
         rule="AN INSTRUMENT THAT CANNOT COMPUTE ITS ANSWER MUST REFUSE TO ANSWER. A "
-        "convincing wrong number is worse than no number. The real replay needs a checkout "
-        "per PR and lives in scripts/cage_replay.py; this flag now says so and exits USAGE.",
+        "convincing wrong number is worse than no number. The real replay needed a checkout "
+        "per PR (scripts/cage_replay.py, removed 2026-09-05 as unused); this flag now says "
+        "to read `python scripts/merge_cage.py --measure` instead, and exits USAGE.",
         drill="--replay refuses to answer instead of printing an agreement rate "
         "it cannot compute",
         severity="too-permissive",
@@ -500,7 +501,8 @@ BLOCKERS: list[Blocker] = [
         "live run: 16 of 16 merged PRs refused with an argparse usage message as the "
         "explanation, which is a reason no owner can act on.",
         repro="git show origin/main:backend/scripts/mypy_ratchet.py | grep add_argument   "
-        "# only --update; then python scripts/cage_replay.py --merged 16",
+        "# only --update; then read python scripts/merge_cage.py --measure for the live "
+        "ratchet values (the per-PR replay runner used at the time is gone)",
         rule="PROBE THE CAPABILITY, NOT THE FILE. `needs` is {file, supports}: the file must "
         "exist AND contain the flag the ratchet is about to pass. The probe is static — "
         "deciding a refusal by parsing an argparse usage message is a guess, and both ways "
@@ -519,8 +521,8 @@ BLOCKERS: list[Blocker] = [
         "the runner has no merge surface, and the surface existed, spelled by accident. "
         "merge_cage.py had the same setting and only escaped because none of its flags "
         "happen to start with `--merge`.",
-        repro="python scripts/cage_replay.py 1 --merge   # 'argument --merged: expected one "
-        "argument', i.e. ACCEPTED as --merged rather than rejected",
+        repro="python scripts/cage_replay.py 1 --merge (file since removed)   # 'argument "
+        "--merged: expected one argument', i.e. ACCEPTED as --merged rather than rejected",
         rule="allow_abbrev=False ON EVERY PARSER IN THE MERGE PATH. On a repo where merging "
         "is deploying, a flag that means something other than what it says is a trapdoor, "
         "not a convenience.",

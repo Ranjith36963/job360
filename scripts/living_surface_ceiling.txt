@@ -82,4 +82,15 @@
 # 4951 (2026-09-05, slice 5 review): the review fix batch trimmed stale skill
 # and STATUS lines after 5133 was measured, leaving 182 lines of slack — the
 # same shape the previous entry warns about. Re-measured, not estimated.
-4951
+# 3770 (2026-09-05, harness+docs cleanup): lowered by 1,181. The harness
+# cleanup deleted docs/harness/ down to three maintenance files, docs/product/
+# plans+research+pillars, root PLAN/STORY/KANBAN docs, and rewrote docs/README.md,
+# ARCHITECTURE.md's dead sections, README.md, STATUS.md and hard-rules/SKILL.md
+# to drop the per-user notification-channel system deleted the same day.
+# Re-measured, not estimated.
+# 3773 (2026-09-05, same cleanup): +3 for VISION.md's "Older docs this
+# supersedes" and decisions/0005's "Still valid?" sections, both rewritten to
+# fold in the reasoning that PILLAR1_EXTRACTION_AUDIT.md and the pillar docs
+# carried before they were deleted whole (no archive left to point at). WHY,
+# not a restatement of code.
+3773

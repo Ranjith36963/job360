@@ -117,7 +117,7 @@ REGISTRY: dict[str, Guard] = {
     # declared, and the registry certified two guards that NOTHING RUNS.
     # With the policy file excluded they surface as STALE ENTRY, which is true:
     # lane.py has no consumer until PR #356 wires it into pr-advisor.yml, and
-    # data_only.py is imported by merge_cage rather than run by a workflow.
+    # data_only.py is imported by lane.py:136, not merge_cage, rather than run by a workflow.
     # Whoever wires either one adds its entry back, with a drill.
     # Written against the OLD main. #348 landed pr-advisor.yml, revert-main.yml,
     # post-merge-watch.yml and merge-policy.yml, each invoking a script this file
@@ -318,13 +318,6 @@ REGISTRY: dict[str, Guard] = {
         status="owed",
         reason="offline and therefore the cheapest debt here to clear — a drill can "
         "plant a duplicate-looking file and demand it is named",
-        since="2026-08-16",
-    ),
-    "scripts/checker_scorecard.py": Guard(
-        status="owed",
-        reason="measures whether the other checkers fired; it silently measured 0 and "
-        "then stopped entirely on 2026-08-10, which is precisely the failure a "
-        "drill would have caught — highest-value debt in this list",
         since="2026-08-16",
     ),
     "scripts/doc_clutter_check.py": Guard(

@@ -6,7 +6,7 @@ export const metadata: Metadata = {
 };
 
 // A legal document states when it changed; never derive this at render time.
-const LAST_UPDATED = "24 July 2026";
+const LAST_UPDATED = "5 September 2026";
 
 export default function TermsPage() {
   return (
@@ -22,10 +22,13 @@ export default function TermsPage() {
             1. The service
           </h2>
           <p className="mt-2">
-            Job360 (job360.uk) aggregates job listings from public sources,
-            scores them against the profile you provide, and can generate
-            AI-tailored application documents. By creating an account you
-            agree to these terms and to our{" "}
+            Job360 (job360.uk) stores the jobs you (or your own connected AI
+            agent) bring in, keeps a full history of your applications —
+            events, tailored documents, contacts, and receipts of what you
+            sent — and can generate AI-tailored application documents. Your
+            own AI agent (for example Claude or ChatGPT) can connect to your
+            account and read or write this data on your behalf. By creating
+            an account you agree to these terms and to our{" "}
             <a href="/privacy" className="underline">
               Privacy Policy
             </a>
@@ -77,12 +80,12 @@ export default function TermsPage() {
             4. Job listings
           </h2>
           <p className="mt-2">
-            Listings originate from third-party sources. We work to
-            deduplicate them, score them, and detect stale (&ldquo;ghost&rdquo;)
-            postings, but we do not control the sources and cannot guarantee
-            that any listing is accurate, current, or still open. A match
-            score is our estimate, not a promise of suitability or an
-            endorsement of the employer.
+            Every job on Job360 is one you or your agent brought in yourself
+            — by pasting the ad, or a link we fetch on your behalf. We do not
+            search, rank, deduplicate, or score jobs, and we cannot guarantee
+            that any listing you bring is accurate, current, or still open.
+            Any fit assessment attached to an application is one you or your
+            agent recorded yourselves — Job360 never judges or computes it.
           </p>
         </section>
 
@@ -121,8 +124,9 @@ export default function TermsPage() {
           <p className="mt-2">
             To the fullest extent permitted by law, Job360 is not liable for
             indirect or consequential losses — including missed job
-            opportunities, decisions made from match scores, or the outcome
-            of any application. Nothing in these terms limits liability that
+            opportunities, decisions made from a fit note you or your agent
+            recorded, or the outcome of any application. Nothing in these
+            terms limits liability that
             cannot be limited under the law of England and Wales, including
             for fraud. Our total liability for any claim is capped at the
             amount you paid us in the 12 months before the claim (zero for
@@ -135,10 +139,9 @@ export default function TermsPage() {
             8. Changes to these terms
           </h2>
           <p className="mt-2">
-            If we make material changes, we will update the date at the top
-            and notify registered users by email before the changes take
-            effect. Continued use after that means you accept the updated
-            terms.
+            If we make material changes, we post them here and update the
+            date at the top. Continued use after that means you accept the
+            updated terms.
           </p>
         </section>
 

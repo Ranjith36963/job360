@@ -34,40 +34,28 @@ if hasattr(sys.stdout, "reconfigure"):
 # GitHub's own cron is best-effort and can drift by tens of minutes.
 EXPECTED: dict[str, tuple[float, str]] = {
     "uptime.yml": (3, "every 10 min"),
+    "auto-merge.yml": (2, "every 20 min"),
     "synthetic-live.yml": (14, "every 6h"),
     "db-backup.yml": (36, "daily 02:17"),
-    "live-e2e.yml": (36, "daily 03:00"),
     "ci-offline.yml": (36, "daily 06:00"),
     "doc-sync.yml": (36, "daily 06:30"),
+    "finding-watch.yml": (2, "every 30 min"),
     "absence.yml": (36, "daily 08:00"),
-    # THE PRODUCT + QUEUE LOOPS. Added 2026-08-03 after an audit found them
-    # UNWATCHED: every loop written after this file was created had been
-    # silently omitted, because the roster is hand-maintained and nothing
-    # checked it against the directory. That included the two loops that
-    # actually look at production data (product-health, user-journey), both
-    # loops that manage the PR queue, and the judge-of-the-judge.
-    "journey.yml": (36, "daily 05:40"),
+    "security-watch.yml": (36, "daily 08:20"),
     "external-health.yml": (36, "daily 07:10"),
-    "product-health.yml": (36, "daily 08:30"),
-    "user-journey.yml": (36, "daily 09:00"),
-    "data-invariants.yml": (14, "every 6h"),
     "dependabot-auto.yml": (36, "daily 09:30"),
     "pr-shepherd.yml": (36, "daily 09:45"),
-    "checker-scorecard.yml": (9 * 24, "weekly Mon 10:00"),
-    # The ranking ground-truth eval (2026-08-06): judges the shown top-100 +
-    # buried samples against a real profile weekly; opens a harness issue on
-    # regression. Born from the audit that found the top-100 at 39% strong.
-    "accuracy-audit.yml": (9 * 24, "weekly Mon 06:20"),
     "security.yml": (9 * 24, "weekly Mon 04:00"),
     "codeql.yml": (9 * 24, "weekly Mon 05:00"),
-    # ci.yml and repair.yml are event-triggered only — silence is normal, so
-    # they are deliberately NOT watched here. Watching them would produce a
-    # permanent false alarm, and a permanent alarm is how a loop dies.
+    "revert-main.yml": (32 * 24, "monthly, 1st 06:00"),
+    # ci.yml is event-triggered only — silence is normal, so it is
+    # deliberately NOT watched here. Watching it would produce a permanent
+    # false alarm, and a permanent alarm is how a loop dies.
 }
 
 # Event-triggered or PR-only workflows: silence is CORRECT for these, so they
 # are excluded from the roster-drift check below rather than watched.
-NOT_SCHEDULED: set[str] = {"ci.yml", "repair.yml", "pr-repair.yml", "triage.yml"}
+NOT_SCHEDULED: set[str] = {"ci.yml", "pr-repair.yml", "triage.yml"}
 
 
 def roster_drift(workflow_dir: str = ".github/workflows") -> list[str]:

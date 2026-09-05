@@ -34,9 +34,8 @@
 Everything this file used to say about the job-search-and-score product
 (Phases 1–3, the four matching engines, ops-hardening roadmap, fragility
 notes, known issues, quick-verification commands) described code that no
-longer exists. It is archived verbatim, FROZEN, at
-[`docs/_archive/sourcing-era/STATUS_HISTORY.md`](docs/_archive/sourcing-era/STATUS_HISTORY.md)
-— read it as history, never as a guide for what to build next.
+longer exists. It is not archived in-tree — `git show` a pre-2026-09-05
+commit of this file for that history, never as a guide for what to build next.
 
 For the current architecture see [`ARCHITECTURE.md`](ARCHITECTURE.md); for
 current test/lint commands see [`backend/README.md`](backend/README.md) and

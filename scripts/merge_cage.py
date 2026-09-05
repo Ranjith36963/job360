@@ -2750,17 +2750,18 @@ def replay(limit: int) -> int:
     resting on that number is resting on nothing.
 
     A real replay needs a checkout per PR (the base, to measure the baseline, and
-    `refs/pull/<N>/merge`, to measure the PR's own tree). That is worktree
-    management, so it lives in a runner: scripts/cage_replay.py. Leaving a
-    convincing-looking wrapper here would just be a second place for the same lie
-    to come from.
+    `refs/pull/<N>/merge`, to measure the PR's own tree). That worktree-management
+    runner (scripts/cage_replay.py) was removed 2026-09-05 as unused harness
+    scaffolding. Leaving a convincing-looking wrapper here would just be a second
+    place for the same lie to come from.
     """
     print("merge_cage --replay no longer answers, because the answer it used to give was "
           "0/N by construction.", file=sys.stderr)
     print(f"  It called decide(pr) with no --baseline, so RATCHET returned `not_checked` and "
           f"`not_checked` blocks. Every PR refused, whatever the PR was.\n"
-          f"  FIX: `python scripts/cage_replay.py --merged {limit}` — it does the two "
-          f"checkouts per PR that a tree-scoped ratchet actually requires.", file=sys.stderr)
+          f"  FIX: there is no per-PR replay runner anymore — read the cage's own "
+          f"`python scripts/merge_cage.py --measure` output for the current ratchet values "
+          f"instead.", file=sys.stderr)
     return EXIT_USAGE
 
 

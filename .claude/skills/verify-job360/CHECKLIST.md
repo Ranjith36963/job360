@@ -13,8 +13,6 @@ register a fresh user, then walk the list top to bottom. Prove each with evidenc
 not fired (needs external service or sample data) · `GATED` = needs infra not present.
 
 **Standing gates (note in every report until resolved):**
-- **Real notification delivery (#38)** needs **Redis + the ARQ worker** running. Redis not
-  installed by default → mark GATED unless present (`redis-cli ping`).
 - **LinkedIn enrich (#12)** needs a sample LinkedIn PDF in `test-artifacts/`.
 - **GitHub enrich (#13)** hits **live GitHub** (rate-limited; needs a real handle).
 - **LLM CV parse (#11)** uses the Gemini→Groq→Cerebras fallback; free-tier daily quotas can
@@ -60,39 +58,23 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 - [ ] 27. Receipt → `POST /applications/{id}/receipt` 201; `GET /api/receipts` lists it; `/receipts/{id}` shows note + channel
 - [ ] 28. Export → `GET /api/applications/export` 200 with every application, event, artifact and receipt of the caller
 
-## F. Pipeline / Kanban
-- [ ] 29. Create card → advance stage → `POST /pipeline/{id}` + `/advance`; `applications.stage` + history row update
-- [ ] 30. Notes editor → `PATCH /pipeline/{id}/notes`
-- [ ] 31. Stage-history timeline → `GET /pipeline/{id}/timeline`
-- [ ] 32. Counts + interview reminders → `GET /pipeline/counts`, `/pipeline/reminders`
-- [ ] 33. Kanban drag — mouse AND keyboard (a11y: Space pick up, arrows move, Enter drop, Esc cancel)
+## F. Account management
+- [ ] 29. Password change guard — wrong current password → 401 (rule #26), tested non-destructively
+- [ ] 30. Email change → `PATCH /users/me/email` (verify current password first)
+- [ ] 31. Account delete → `DELETE /users/me` soft-delete (sets `deleted_at`; restore after to keep the demo account)
 
-## G. Channels
-- [ ] 34. Channel create / list / delete → CRUD + `DELETE /{channel_id}` (email + webhook work without OAuth)
-- [ ] 35. Test-send → `POST /{channel_id}/test`
+## G. Agent surface (MCP)
+- [ ] 32. Token → `POST /api/tokens` 201 returns a `j360_…` token once; `GET /api/tokens` lists names only; `DELETE /api/tokens/{id}` revokes
+- [ ] 33. MCP → a POST to `/api/mcp` (a mounted ASGI app, not a router) with no bearer = 401 + `WWW-Authenticate: Bearer`; with the token, `tools/list` names every tool (count it with `grep -c "@mcp.tool()" backend/src/api/mcp_server.py`)
 
-## H. Notifications
-- [ ] 36. Notification rules — `POST/GET/PUT /settings/notification-rule`, rule row lands
-- [ ] 37. History + stats → `GET /api/notifications`, `/notifications/stats`
-- [ ] 38. **Actual delivery** (GATED: Redis + ARQ worker) — fire a real send through a configured channel and confirm the ledger row
-
-## I. Account management
-- [ ] 39. Password change guard — wrong current password → 401 (rule #26), tested non-destructively
-- [ ] 40. Email change → `PATCH /users/me/email` (verify current password first)
-- [ ] 41. Account delete → `DELETE /users/me` soft-delete (sets `deleted_at`; restore after to keep the demo account)
-
-## J. Agent surface (MCP)
-- [ ] 42. Token → `POST /api/tokens` 201 returns a `j360_…` token once; `GET /api/tokens` lists names only; `DELETE /api/tokens/{id}` revokes
-- [ ] 43. MCP → a POST to `/api/mcp` (a mounted ASGI app, not a router) with no bearer = 401 + `WWW-Authenticate: Bearer`; with the token, `tools/list` names every tool (count it with `grep -c "@mcp.tool()" backend/src/api/mcp_server.py`)
-
-## K. Cross-cutting
-- [ ] 44. Every page renders with no console errors: `/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/bring`, `/applications`, `/applications/[id]`, `/receipts`, `/pipeline`, `/profile`, `/settings/channels`, `/settings/notifications`, `/settings/account`, `/notifications`
-- [ ] 45. Theme toggle works; spot-click every primary button on every page (no dead buttons)
+## H. Cross-cutting
+- [ ] 34. Every page renders with no console errors: `/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/bring`, `/applications`, `/applications/[id]`, `/receipts`, `/profile`, `/settings/account`
+- [ ] 35. Theme toggle works; spot-click every primary button on every page (no dead buttons)
 
 ---
 
 ## Report format
 Produce a table: `# | item | LIVE/CODE/GATED/FAIL | evidence`. End with:
-- counts (e.g. "40 LIVE, 3 CODE, 1 GATED, 1 FAIL")
+- counts (e.g. "30 LIVE, 3 CODE, 1 GATED, 1 FAIL")
 - the FIRST real FAIL with exact file:line + error (if any)
 - what's needed to close the gates (install Redis; add LinkedIn sample; set OAuth creds)

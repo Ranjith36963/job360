@@ -19,13 +19,14 @@
 # left this list; STATUS.md and ARCHITECTURE.md were rewritten with symbol
 # names and dropped to 0 and 11. The mutation drill proved the old rows had
 # become slack: a planted citation in STATUS.md went unreported under 15.
+#
+# Re-baselined again 2026-09-05 (harness+docs cleanup). health/SKILL.md,
+# worker/SKILL.md, STORY.md and docs/product/MONETIZATION_GAPS.md were
+# deleted whole, so they left this list. README.md's dead source-tree
+# citations were rewritten to 0. ARCHITECTURE.md fell 11 -> 10 rewriting the
+# ESCO citation as a symbol name. Re-measured, not estimated.
 
-.claude/skills/health/SKILL.md 4
-.claude/skills/worker/SKILL.md 1
-ARCHITECTURE.md 11
-README.md 11
-STORY.md 4
+ARCHITECTURE.md 10
 backend/CLAUDE.md 2
-docs/product/MONETIZATION_GAPS.md 3
 docs/product/product_design_rules.md 5
 docs/product/troubleshooting.md 7
