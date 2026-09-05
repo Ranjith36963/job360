@@ -40,13 +40,13 @@ Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. **Every merge 
 - Branch: `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface on divergence — never silent rebase.
 - **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly`. **Never quote a test count from a doc — measure it** (`python -m pytest --collect-only -q | tail -1`); three docs once disagreed by 400–800 tests. Runs against a **real Postgres** (docker-compose.dev.yml, port 5433) via the `sqlite3`/`aiosqlite` shims in `tests/conftest.py`, schema-per-test. HTTP is mocked with `aioresponses`; the suite must run offline. Never add `--ignore=` for a test file; fix or delete the test.
 - Two deployables: `backend/` (Python 3.10+, FastAPI, Postgres via psycopg3) and `frontend/` (Next.js 16, React 19). Runtime data in `backend/data/`. Live on Railway at job360.uk since 2026-07-02; three services: `backend`, `frontend`, `Postgres` — `worker` + `Redis` were deleted 2026-09-02, so nothing runs in the background (no notifications, no crons; Redis-unreachable log lines are expected).
-- What automation is actually running: the GitHub Actions harness — 24 workflows in `.github/workflows/` (repair, triage, doc-sync, ci, ci-offline, codeql, security, uptime, db-backup, pr-shepherd…; measure with `ls`). The old agent loop (`docs/harness/maintenance/MISSIONS.md`) is DORMANT — disabled 2026-06-21. Do not wait on it.
-- What surprises new sessions: the sourcing era (sources, scorer, dedup, enrichment, ARQ worker, dashboard) was **deleted 2026-09-05** (slice 5, #483) — its docs live under `docs/_archive/sourcing-era/`, never rebuild it. Heavy deps must be lazy-imported (top-level imports cost every CLI run and every pytest collection). Next.js 15 made `params` a Promise and 16 removed synchronous access — await it. MCP tools call route *functions*, so any new route gate must be re-applied in `mcp_server.py` (parity test enforces). Migrations auto-apply on boot: `api.dependencies.init_db()`, called by `api.main.lifespan`.
+- What automation is actually running: the GitHub Actions harness — 22 workflows in `.github/workflows/` (triage, doc-sync, ci, ci-offline, codeql, security, uptime, db-backup, pr-shepherd…; measure with `ls`). The old agent loop (scout/worker/integrator) was disabled 2026-06-21 and its files deleted 2026-09-05 — there is no background agent to wait on.
+- What surprises new sessions: the sourcing era (sources, scorer, dedup, enrichment, ARQ worker, dashboard) was **deleted 2026-09-05** (slice 5, #483) and the notification/channel/Kanban stack followed in the cleanup audit — git history is the only record; never rebuild them. Heavy deps must be lazy-imported (top-level imports cost every CLI run and every pytest collection). Next.js 15 made `params` a Promise and 16 removed synchronous access — await it. MCP tools call route *functions*, so any new route gate must be re-applied in `mcp_server.py` (parity test enforces). Migrations auto-apply on boot: `api.dependencies.init_db()`, called by `api.main.lifespan`.
 
 ## Hard Rules
 
 The numbered invariants that break production or corrupt data when violated —
-schema, the application spine, MCP, auth, notifications, extraction. They live in
+schema, the application spine, MCP, auth, extraction. They live in
 `.claude/skills/hard-rules/SKILL.md` and load when the work touches them.
 
 Read them before editing any of those areas. Full product rules:
@@ -68,13 +68,11 @@ npm run dev | build | lint | type-check | test:unit | test:e2e
 
 ## Architecture (one paragraph + pointers)
 
-**Product path:** `POST /jobs/bring` (`api/routes/bring.py`) stores the ad as a `jobs` row and births one Application (`services/applications/spine.py`: `applications` + append-only `application_events` / `application_artifacts` / `application_receipts`) → tailoring as web fallback (`api/routes/tailor.py`) → MCP server `api/mcp_server.py` (15 tools — measure with `grep -c "@mcp.tool()"`; bearer tokens `j360_…` or OAuth 2.1; `/api/mcp`). Nothing scores, ranks, dedups or enriches a job — that pipeline was deleted in slice 5 (#483).
+**Product path:** `POST /jobs/bring` (`api/routes/bring.py`) stores the ad as a `jobs` row and births one Application (`services/applications/spine.py`: `applications` + append-only `application_events` / `application_artifacts` / `application_receipts`) → tailoring as web fallback (`api/routes/tailor.py`) → MCP server `api/mcp_server.py` (18 tools — measure with `grep -c "@mcp.tool()"`; bearer tokens `j360_…` or OAuth 2.1; `/api/mcp`). Nothing scores, ranks, dedups or enriches a job — that pipeline was deleted in slice 5 (#483).
 
 - `src/repositories/pg.py` is the single DB door — an `aiosqlite`-shaped async driver whose `translate()` rewrites legacy SQLite SQL to Postgres at runtime. It is production-critical, not test-only (guard: `tests/test_pg_translate.py`). Every module does `from src.repositories import pg as aiosqlite`.
-- `docs/_archive/sourcing-era/` — FROZEN reference for the deleted pipeline (pillars, catalog/shelf measurements, `add-source` skill, the old STATUS history). Read as history only.
 - `ARCHITECTURE.md` — system overview, full directory tree, DB schema, dependency table, and the canonical environment-variable table.
-- `docs/README.md` — index of every plan/design/eval doc.
-- `docs/harness/IMPLEMENTATION_LOG.md` — append-only batch history (read FIRST when picking up unfamiliar work).
+- `docs/README.md` — index of every surviving doc (product, operations, harness). History lives in git log, not in docs.
 - `docs/product/product_design_rules.md` — the owner's product rules in full (rules 4–6 are the mission).
 - `STATUS.md` — current phase, what is live on main, what is next. `CONTRIBUTING.md` — branch/commit/PR conventions. `backend/README.md` / `frontend/README.md` — install + run.
 - Second brain: older project memory lives at `D:\second-brain\wiki\projects\job360\`.
