@@ -713,6 +713,82 @@ SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 _REQUIRED_PROD_VARS = ["SESSION_SECRET", "CHANNEL_ENCRYPTION_KEY", "DATABASE_URL"]
 
 
+# ---------------------------------------------------------------------------
+# Bring-a-job field caps (docs/plans/2026-09-04-url-fetch/spec.md C4).
+# Originally hand-typed module constants in api/routes/bring.py; moved here so
+# src/services/fetch/extract.py (a SERVICE, no FastAPI) can read them without
+# importing a route module — the only such import that existed in the
+# backend. Bounds are guardrails, not product limits: a real ad is
+# 500-8,000 chars; the cap stops a pasted PDF dump (or a hostile 50MB body)
+# from becoming a catalog row every later read has to carry. Shared by the
+# URL-fetch extraction ladder so the two caps never drift apart.
+# ---------------------------------------------------------------------------
+BRING_MAX_TEXT = int(os.getenv("BRING_MAX_TEXT", "40000"))
+BRING_MAX_FIELD = int(os.getenv("BRING_MAX_FIELD", "300"))
+
+# ---------------------------------------------------------------------------
+# URL fetch on the web (docs/plans/2026-09-04-url-fetch/spec.md) — every cap
+# a parameter (intent constraint 6), never a literal in guard.py/fetcher.py.
+# ---------------------------------------------------------------------------
+
+# The kill switch (R11). Default ON; flipping it OFF 404s the route on the
+# next restart with no code deploy — the control that actually matters if
+# the fetcher is ever implicated in an incident (the frontend's
+# NEXT_PUBLIC_URL_FETCH_ENABLED only hides the button and needs a rebuild).
+URL_FETCH_ENABLED = _env_flag("URL_FETCH_ENABLED", True)
+
+# Decoded-body size cap (2 MiB) — checked BOTH on a declared Content-Length
+# (refuse before reading) and while streaming (catches a lying/absent header
+# and a decompression bomb, since the cap is on decoded bytes).
+URL_FETCH_MAX_BYTES = int(os.getenv("URL_FETCH_MAX_BYTES", str(2 * 1024 * 1024)))
+# Three independent time budgets (R7) — bytes, per-request time and
+# whole-journey time are different attacks and need different ceilings.
+URL_FETCH_TIMEOUT_S = int(os.getenv("URL_FETCH_TIMEOUT_S", "10"))
+URL_FETCH_TOTAL_BUDGET_S = int(os.getenv("URL_FETCH_TOTAL_BUDGET_S", "20"))
+URL_FETCH_EXTRACT_BUDGET_S = float(os.getenv("URL_FETCH_EXTRACT_BUDGET_S", "3"))
+URL_FETCH_MAX_REDIRECTS = int(os.getenv("URL_FETCH_MAX_REDIRECTS", "5"))
+# A7 — the heuristic extractor's container-frame stack never grows past this,
+# so a pathologically nested document can't make our OWN algorithm blow up
+# even though html.parser itself would happily keep streaming.
+URL_FETCH_MAX_HTML_DEPTH = int(os.getenv("URL_FETCH_MAX_HTML_DEPTH", "200"))
+
+# R9 — rate limits: two per-user buckets plus one GLOBAL bucket. Per USER,
+# never per IP (every browser/agent shares the proxy address behind the Next
+# rewrite unless JOB360_TRUST_PROXY=1 — the OAuth slice's own trap). The
+# global bucket is what stops a handful of accounts turning Job360 into an
+# open relay/scanner for the whole internet (A9) — it is not redundant with
+# the per-address deny list.
+URL_FETCH_MAX_PER_MINUTE = int(os.getenv("URL_FETCH_MAX_PER_MINUTE", "6"))
+URL_FETCH_MAX_PER_HOUR = int(os.getenv("URL_FETCH_MAX_PER_HOUR", "60"))
+URL_FETCH_MAX_PER_HOUR_GLOBAL = int(os.getenv("URL_FETCH_MAX_PER_HOUR_GLOBAL", "2000"))
+
+# R7 — we never sniff content; a server's stated Content-Type decides
+# unsupported_content vs. a bounded, tag-stripping, script-free parse.
+URL_FETCH_ALLOWED_CONTENT_TYPES = _env_list(
+    "URL_FETCH_ALLOWED_CONTENT_TYPES", ("text/html", "application/xhtml+xml")
+)
+# Constraint 8 — never pretend to be a browser. Names Job360 and says the
+# fetch is user-initiated; beating a bot wall by lying about who we are is
+# not a decision this header gets to make quietly.
+URL_FETCH_USER_AGENT = os.getenv(
+    "URL_FETCH_USER_AGENT", "Job360/1.0 (+https://job360.uk/bot; user-initiated)"
+)
+# S9 — a self-hosted deployment may legitimately need an internal careers
+# page; EXTRA_DENY_NETS adds a net without a code change, ALLOW_NETS is the
+# loud escape hatch (empty by default, changes nothing, warns every time it
+# lets an address through — a documented hole with an alarm on it, not a
+# convenience).
+URL_FETCH_EXTRA_DENY_NETS = _env_list("URL_FETCH_EXTRA_DENY_NETS", ())
+URL_FETCH_ALLOW_NETS = _env_list("URL_FETCH_ALLOW_NETS", ())
+
+# B3 — a single ``<script type="application/ld+json">`` block is skipped
+# before ``json.loads`` ever sees it once it exceeds this many bytes. A real
+# JobPosting block is a few KB; this bounds the CPU a hostile
+# ``"["*60000``-shaped bomb can spend even after RecursionError is caught,
+# and stops one pathological block from starving the other rungs' budget.
+URL_FETCH_MAX_JSONLD_BYTES = int(os.getenv("URL_FETCH_MAX_JSONLD_BYTES", str(256 * 1024)))
+
+
 def validate_required_env() -> None:
     """Raise ``RuntimeError`` if required env vars are missing in production.
 

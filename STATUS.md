@@ -21,11 +21,13 @@
 > review/PR** (one Application object, typed event log, versioned artifacts,
 > `save_artifact` / `record_event` / `whats_new` / `export_history`; home = your
 > applications; old search UI hidden behind `SEARCH_UI_ENABLED`, scorer off) → 3 URL
-> fetch on the web (link or text, paste as fallback) → 4 contacts/outreach, stats,
-> `update_profile` — **built on branch `feat/contacts-stats`, awaiting review/PR**
-> (`add_contact` / `stats` / `update_profile` MCP tools, `profile_edits` overlay the web
-> shows and clears, People section on the application page). Measure: the owner uses
-> it daily for his own hunt.
+> fetch on the web — **shipped (PR #496)**: `POST /jobs/fetch-url` fills `/bring` from a
+> link (JSON-LD → meta → heuristic ladder) under a new `src/services/fetch/` SSRF guard
+> drilled ten ways (`scripts/ssrf_drill.py`); paste stays the fallback, no MCP tool → 4
+> contacts/outreach, stats, `update_profile` — **built on branch `feat/contacts-stats`,
+> awaiting review/PR** (`add_contact` / `stats` / `update_profile` MCP tools,
+> `profile_edits` overlay the web shows and clears, People section on the application
+> page). Measure: the owner uses it daily for his own hunt.
 
 ## Sourcing era (history) — Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
 

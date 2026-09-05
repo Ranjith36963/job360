@@ -705,6 +705,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/fetch-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetch Url Route
+         * @description Fetch a job-ad URL the user pasted, under the SSRF guard, and hand
+         *     back extracted fields for the form to pre-fill. Never stores anything
+         *     (S2) — the human still presses "Score this job" to actually bring it.
+         *
+         *     Always HTTP 200 with a closed ``outcome`` except auth (401), the feature
+         *     switch (404), a rate limit (429), or a malformed body (422) — "the site
+         *     refused us" is a product outcome the form renders a sentence for, not a
+         *     transport error (spec R1).
+         */
+        post: operations["fetch_url_route_api_jobs_fetch_url_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{job_id}": {
         parameters: {
             query?: never;
@@ -2600,6 +2627,68 @@ export interface components {
             profile_edits_truncated: boolean;
             /** Truncated */
             truncated: boolean;
+        };
+        /** FetchUrlRequest */
+        FetchUrlRequest: {
+            /** Url */
+            url: string;
+        };
+        /** FetchUrlResponse */
+        FetchUrlResponse: {
+            /**
+             * Bytes Read
+             * @default 0
+             */
+            bytes_read: number;
+            /**
+             * Company
+             * @default
+             */
+            company: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Elapsed Ms
+             * @default 0
+             */
+            elapsed_ms: number;
+            /**
+             * Final Url
+             * @default
+             */
+            final_url: string;
+            /** Found */
+            found?: string[];
+            /**
+             * Location
+             * @default
+             */
+            location: string;
+            /** Message */
+            message: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "ok" | "ssrf_denied" | "invalid_url" | "unreachable" | "blocked" | "timeout" | "too_large" | "unsupported_content";
+            /**
+             * Redirects
+             * @default 0
+             */
+            redirects: number;
+            /**
+             * Source Hint
+             * @default
+             */
+            source_hint: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
         };
         /** GitHubResponse */
         GitHubResponse: {
@@ -5090,6 +5179,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fetch_url_route_api_jobs_fetch_url_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FetchUrlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FetchUrlResponse"];
                 };
             };
             /** @description Validation Error */
