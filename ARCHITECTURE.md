@@ -27,7 +27,7 @@ Job360 *was* a UK-focused multi-domain job search aggregator. This path fetches 
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
 | Migration files | **39** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **246** | `backend/tests/` |
+| `test_*.py` files | **247** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
