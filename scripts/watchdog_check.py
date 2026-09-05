@@ -47,6 +47,7 @@ EXPECTED: dict[str, tuple[float, str]] = {
     "pr-shepherd.yml": (36, "daily 09:45"),
     "security.yml": (9 * 24, "weekly Mon 04:00"),
     "codeql.yml": (9 * 24, "weekly Mon 05:00"),
+    "branch-reaper.yml": (9 * 24, "weekly Mon 04:00"),
     "revert-main.yml": (32 * 24, "monthly, 1st 06:00"),
     # ci.yml is event-triggered only — silence is normal, so it is
     # deliberately NOT watched here. Watching it would produce a permanent
