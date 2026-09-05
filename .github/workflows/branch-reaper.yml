@@ -1,0 +1,94 @@
+# branch-reaper.yml — the REMOTE half of worktree cleanup.
+#
+# WHY A SEPARATE HALF
+#   A GitHub Action cannot delete a folder on somebody's laptop. Local worktrees
+#   are reaped by .claude/hooks/worktree-reaper.sh; this reaps remote branches.
+#   Neither substitutes for the other, and building only this one is why every
+#   previous attempt left 98 worktrees on disk.
+#
+# WHY IT FINDS ANYTHING AT ALL
+#   The repo squash-merges, so `git branch --merged origin/main` reports 1 while
+#   GitHub reports 343 merged PRs. Every stock "delete merged branches" action
+#   consults the first number and correctly concludes there is nothing to do.
+#   scripts/worktree_reaper.py --remote asks the GitHub API instead.
+#
+# THE DRILL ENTRANCE
+#   Two loops in this repo shipped dead and were only found by firing them on
+#   purpose. `workflow_dispatch` is that entrance, and it defaults to DRY RUN, so
+#   the safe thing is also the default thing.
+name: branch-reaper
+
+on:
+  schedule:
+    # Weekly. Branch sprawl accrues over weeks, not hours, and a daily job here
+    # would spend its life printing "nothing to do".
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List what would be deleted without deleting it"
+        type: boolean
+        default: true
+      older_than_days:
+        description: "Grace period after the merge before a branch may be deleted"
+        default: "14"
+
+permissions:
+  contents: write        # needed to delete a ref
+  pull-requests: read
+
+concurrency:
+  group: branch-reaper
+  cancel-in-progress: false
+
+jobs:
+  reap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Prove the reaper still refuses before letting it delete anything. A guard
+      # is trusted because it has been watched going red, not because it exists.
+      - name: Drill — the reaper must still refuse
+        run: python scripts/worktree_reaper.py --drill
+
+      - name: Reap merged remote branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: ${{ (github.event_name == 'schedule' || inputs.dry_run == false) && '--apply' || '' }}
+          DAYS: ${{ inputs.older_than_days || '14' }}
+        run: |
+          python scripts/worktree_reaper.py --remote $APPLY \
+            --older-than-days "$DAYS" --max 25
+
+      # DELIBERATELY NOT COMMITTED.
+      #
+      # The local half writes tip SHAs to docs/maintenance/REAPED.log because a
+      # deleted LOCAL branch has no other record -- reflog is not an undo (`git
+      # branch -d` deletes the branch's own reflog with it, and HEAD reflogs are
+      # per-worktree, so a branch never checked out there has none at all).
+      #
+      # A REMOTE branch deleted here has a better record than any log: the merged
+      # pull request. GitHub keeps a merged PR and its head commits indefinitely,
+      # reachable from the PR page, so `gh pr checkout <n>` restores the work.
+      #
+      # Pushing the log anyway would mean a commit to `main` every week, and
+      # `main` auto-deploys to production. A weekly release to write down
+      # something GitHub already stores is a bad trade.
+      - name: Record what was reaped
+        if: always()
+        run: |
+          {
+            echo "### branch-reaper"
+            echo
+            echo "Recovery: every branch above belongs to a MERGED pull request."
+            echo "GitHub keeps merged PRs and their commits — \`gh pr checkout <number>\`"
+            echo "restores any of them. Nothing here is unrecoverable."
+          } >> "$GITHUB_STEP_SUMMARY"
