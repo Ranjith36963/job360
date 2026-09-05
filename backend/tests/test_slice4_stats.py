@@ -350,8 +350,10 @@ async def test_stats_is_rate_limited_per_user(authenticated_async_context, monke
 
 def test_stats_route_is_declared_before_the_id_route():
     from src.api.main import app
+    from tests._routes import route_paths
 
-    paths = [getattr(r, "path", "") for r in app.routes]
+    # route_paths, not app.routes -- FastAPI 0.141 nests included routers.
+    paths = route_paths(app)
     assert "/api/applications/stats" in paths
     assert paths.index("/api/applications/stats") < paths.index("/api/applications/{application_id}")
 

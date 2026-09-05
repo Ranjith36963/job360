@@ -403,12 +403,16 @@ def test_contacts_are_append_only():
     assert offenders == [], f"application_contacts/profile_edits must be append-only: {offenders}"
 
     from src.api.main import app
+    from tests._routes import route_table
 
-    for route in app.routes:
-        path = getattr(route, "path", "")
-        methods = getattr(route, "methods", set()) or set()
-        if path.startswith("/api/applications") and "/contacts" in path:
-            assert not (methods & {"PATCH", "PUT", "DELETE"}), f"{path} exposes {methods}"
+    # route_table, not app.routes: FastAPI 0.141 nests included routers and the
+    # raw list has no /contacts rows, so this loop passed by seeing nothing.
+    seen = 0
+    for row in route_table(app):
+        if row.path.startswith("/api/applications") and "/contacts" in row.path:
+            seen += 1
+            assert not (row.methods & {"PATCH", "PUT", "DELETE"}), f"{row.path} exposes {set(row.methods)}"
+    assert seen, "no /api/applications/*/contacts routes found -- the guard is vacuous"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

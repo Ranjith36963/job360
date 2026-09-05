@@ -10,6 +10,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 
 const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "" };
+// One stable empty list. An inline `= []` default would be a NEW array every
+// render, the `[contacts]` effect below would fire every render, and setList
+// would re-render forever.
+const NO_CONTACTS: Contact[] = [];
 
 /** S5: `linkedin_url` is rendered as text everywhere, an `<a href>` ONLY when
  * it actually starts with `https://` — a stored `javascript:` (or bare
@@ -37,10 +41,13 @@ function LinkedinCell({ url }: { url: string }) {
  * here, by design. */
 export function Contacts({
   applicationId,
-  contacts,
+  contacts = NO_CONTACTS,
 }: {
   applicationId: number;
-  contacts: Contact[];
+  /** Optional on purpose: a detail payload without `contacts` (older backend,
+   * a cached response, a test double) must render "no people yet", never
+   * take the whole record page down with `undefined.length`. */
+  contacts?: Contact[];
 }) {
   // Own copy so a successful add can append instantly without waiting for a
   // full `GET /applications/{id}` round trip. Re-synced whenever the parent

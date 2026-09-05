@@ -50,6 +50,7 @@ class _Recorder:
     def __init__(self) -> None:
         self.extracted: list[str] = []
         self.saved: list[str] = []
+        self.overlay_flags: list[bool] = []
 
 
 @pytest.fixture()
@@ -72,7 +73,15 @@ def sweep(monkeypatch):
     import src.services.profile.two_pass as two_pass
 
     monkeypatch.setattr(storage, "list_profile_user_ids", lambda: ids)
-    monkeypatch.setattr(storage, "load_profile", lambda uid: _Profile(uid))
+
+    def _load(uid: str, *, with_overlay: bool = True) -> _Profile:
+        # The sweep is a WRITER: it must re-extract from the BASE profile, never
+        # from a base with the user's edits laid on top (slice 4 overlay rule —
+        # readers same-conn with overlay, writers `with_overlay=False`).
+        rec.overlay_flags.append(with_overlay)
+        return _Profile(uid)
+
+    monkeypatch.setattr(storage, "load_profile", _load)
     monkeypatch.setattr(
         storage, "save_profile",
         lambda profile, uid, action: rec.saved.append(uid),
@@ -127,3 +136,12 @@ class TestTheSpendCapIsHonoured:
         run(5, True)
         assert len(rec.extracted) == 5
         assert rec.saved == rec.extracted
+
+    def test_it_reextracts_from_the_base_never_the_overlay(self, sweep) -> None:
+        """A writer reads the base. Re-extracting from the overlaid profile
+        would feed the user's typed edits back into extraction and then save
+        them as extraction's answer — the overlay would silently become base."""
+        run, rec = sweep
+        run(5, True)
+        assert rec.overlay_flags, "load_profile was never called"
+        assert all(flag is False for flag in rec.overlay_flags), rec.overlay_flags

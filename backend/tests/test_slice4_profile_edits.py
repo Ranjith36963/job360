@@ -422,11 +422,13 @@ async def test_second_user_is_unaffected(authenticated_async_context, fixture_us
 def test_profile_route_exposes_patch_only_as_append():
     """S12 — PATCH /profile appends rows; no route deletes or rewrites them."""
     from src.api.main import app
+    from tests._routes import route_table
 
-    methods = {}
-    for route in app.routes:
-        if getattr(route, "path", "") == "/api/profile":
-            methods.update({m: True for m in (getattr(route, "methods", set()) or set())})
+    # route_table, not app.routes -- FastAPI 0.141 nests included routers.
+    methods: set[str] = set()
+    for row in route_table(app):
+        if row.path == "/api/profile":
+            methods |= row.methods
     assert "PATCH" in methods
     assert "DELETE" not in methods
 
