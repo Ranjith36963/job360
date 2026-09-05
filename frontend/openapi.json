@@ -71,6 +71,81 @@
         "title": "ActionsListResponse",
         "type": "object"
       },
+      "AddContactRequest": {
+        "additionalProperties": false,
+        "description": "Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md \u00a7Tool contracts).\n\nNo length/shape constraints declared here (unlike ``SaveArtifactRequest``'s\n``label``): every cap is a live ``settings`` value a test can monkeypatch,\nso ``contacts.add_contact`` checks them at call time \u2014 the same pattern\n``SaveFitRequest.clamp_reasoning``/``RecordEventRequest.clamp_detail`` use.\n``added_by`` is deliberately ABSENT \u2014 ``extra=\"forbid\"`` rejects it (S2).",
+        "properties": {
+          "email": {
+            "default": "",
+            "title": "Email",
+            "type": "string"
+          },
+          "linkedin_url": {
+            "default": "",
+            "title": "Linkedin Url",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "role": {
+            "default": "",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AddContactRequest",
+        "type": "object"
+      },
+      "AddContactResponse": {
+        "properties": {
+          "already_existed": {
+            "title": "Already Existed",
+            "type": "boolean"
+          },
+          "contact": {
+            "$ref": "#/components/schemas/ContactOut"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          }
+        },
+        "required": [
+          "contact",
+          "already_existed",
+          "event_id"
+        ],
+        "title": "AddContactResponse",
+        "type": "object"
+      },
       "ApplicationArtifactOut": {
         "description": "The ``get_application`` artifacts-list shape: ``text`` is ALWAYS a key\n(null unless ``with_artifact_text=true`` and under the byte cap).",
         "properties": {
@@ -238,6 +313,13 @@
             "title": "Artifacts",
             "type": "array"
           },
+          "contacts": {
+            "items": {
+              "$ref": "#/components/schemas/ContactOut"
+            },
+            "title": "Contacts",
+            "type": "array"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -308,7 +390,8 @@
           "fit",
           "artifacts",
           "events",
-          "receipts"
+          "receipts",
+          "contacts"
         ],
         "title": "ApplicationDetailOut",
         "type": "object"
@@ -971,6 +1054,14 @@
             "title": "Job Titles",
             "type": "array"
           },
+          "links": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Links",
+            "type": "array"
+          },
           "location": {
             "default": "",
             "title": "Location",
@@ -1195,6 +1286,60 @@
         "title": "ConsentRequestResponse",
         "type": "object"
       },
+      "ContactOut": {
+        "description": "A contact row (``contacts.list_contacts`` / ``add_contact``'s return).\nSame shape everywhere a contact appears \u2014 detail, export, the add response.",
+        "properties": {
+          "added_by": {
+            "title": "Added By",
+            "type": "string"
+          },
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "linkedin_url": {
+            "title": "Linkedin Url",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "application_id",
+          "name",
+          "role",
+          "email",
+          "linkedin_url",
+          "notes",
+          "added_by",
+          "created_at"
+        ],
+        "title": "ContactOut",
+        "type": "object"
+      },
       "CreateReceiptRequest": {
         "properties": {
           "channel": {
@@ -1271,6 +1416,13 @@
             "title": "Artifacts",
             "type": "array"
           },
+          "contacts": {
+            "items": {
+              "$ref": "#/components/schemas/ContactOut"
+            },
+            "title": "Contacts",
+            "type": "array"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -1336,7 +1488,8 @@
           "last_event_at",
           "events",
           "artifacts",
-          "receipts"
+          "receipts",
+          "contacts"
         ],
         "title": "ExportApplicationOut",
         "type": "object"
@@ -1444,6 +1597,18 @@
             ],
             "title": "Next Since"
           },
+          "profile_edits": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileEditExportOut"
+            },
+            "title": "Profile Edits",
+            "type": "array"
+          },
+          "profile_edits_truncated": {
+            "default": false,
+            "title": "Profile Edits Truncated",
+            "type": "boolean"
+          },
           "truncated": {
             "title": "Truncated",
             "type": "boolean"
@@ -1452,7 +1617,8 @@
         "required": [
           "applications",
           "truncated",
-          "bytes"
+          "bytes",
+          "profile_edits"
         ],
         "title": "ExportHistoryResponse",
         "type": "object"
@@ -2725,8 +2891,88 @@
         "title": "PipelineRemindersResponse",
         "type": "object"
       },
+      "ProfileEditExportOut": {
+        "description": "One row of ``export_history``'s top-level ``profile_edits`` \u2014 EVERY\nrow, including a clear (``value: null``); it is the history, unlike\n``GET /profile``'s ``agent_edits`` (the live, non-cleared overlay only).",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "set_at": {
+            "title": "Set At",
+            "type": "string"
+          },
+          "set_by": {
+            "title": "Set By",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "path",
+          "value",
+          "set_by",
+          "set_at"
+        ],
+        "title": "ProfileEditExportOut",
+        "type": "object"
+      },
+      "ProfileEditIn": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "ProfileEditIn",
+        "type": "object"
+      },
+      "ProfileEditOut": {
+        "description": "One row of the agent-edit overlay (slice 4, spec R8/R11).\n\nThe SAME shape everywhere an edit appears: ``GET /profile``'s\n``agent_edits``, ``PATCH /profile``'s ``applied``, and\n``export_history``'s ``profile_edits``. Declared once, here, so the\ngenerated ``api-types.ts`` gives the frontend real field names instead of\nthe ``{[key: string]: unknown}[]`` an untyped ``dict`` renders as \u2014 the\nprofile page reads ``set_by`` and ``set_at`` off every one of these\n(``components/profile/EditedMark.tsx``).\n\n``value`` is ``Any``: the overlay carries whatever the path's dataclass\nfield holds \u2014 a string, a list of strings, a number, a bool.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "set_at": {
+            "title": "Set At",
+            "type": "string"
+          },
+          "set_by": {
+            "title": "Set By",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "path",
+          "set_by",
+          "set_at"
+        ],
+        "title": "ProfileEditOut",
+        "type": "object"
+      },
       "ProfileResponse": {
         "properties": {
+          "agent_edits": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ProfileEditOut"
+            },
+            "title": "Agent Edits",
+            "type": "array"
+          },
           "ai_suggestions": {
             "default": [],
             "items": {
@@ -4033,6 +4279,339 @@
         "title": "SourcesResponse",
         "type": "object"
       },
+      "StatsCvVersionGroupOut": {
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "integer"
+          },
+          "brought": {
+            "title": "Brought",
+            "type": "integer"
+          },
+          "interview": {
+            "title": "Interview",
+            "type": "integer"
+          },
+          "interview_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Rate"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "offer": {
+            "title": "Offer",
+            "type": "integer"
+          },
+          "offer_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Rate"
+          },
+          "profile_versions": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Profile Versions",
+            "type": "array"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "profile_versions",
+          "brought",
+          "applied",
+          "replied",
+          "interview",
+          "offer",
+          "rejected",
+          "reply_rate",
+          "interview_rate",
+          "offer_rate"
+        ],
+        "title": "StatsCvVersionGroupOut",
+        "type": "object"
+      },
+      "StatsOverallOut": {
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "integer"
+          },
+          "brought": {
+            "title": "Brought",
+            "type": "integer"
+          },
+          "interview": {
+            "title": "Interview",
+            "type": "integer"
+          },
+          "interview_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Rate"
+          },
+          "offer": {
+            "title": "Offer",
+            "type": "integer"
+          },
+          "offer_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Rate"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          }
+        },
+        "required": [
+          "brought",
+          "applied",
+          "replied",
+          "interview",
+          "offer",
+          "rejected",
+          "reply_rate",
+          "interview_rate",
+          "offer_rate"
+        ],
+        "title": "StatsOverallOut",
+        "type": "object"
+      },
+      "StatsResponse": {
+        "properties": {
+          "applications_truncated": {
+            "title": "Applications Truncated",
+            "type": "boolean"
+          },
+          "by_cv_version": {
+            "items": {
+              "$ref": "#/components/schemas/StatsCvVersionGroupOut"
+            },
+            "title": "By Cv Version",
+            "type": "array"
+          },
+          "by_role": {
+            "items": {
+              "$ref": "#/components/schemas/StatsRoleGroupOut"
+            },
+            "title": "By Role",
+            "type": "array"
+          },
+          "computed_at": {
+            "title": "Computed At",
+            "type": "string"
+          },
+          "groups_truncated": {
+            "title": "Groups Truncated",
+            "type": "boolean"
+          },
+          "overall": {
+            "$ref": "#/components/schemas/StatsOverallOut"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          }
+        },
+        "required": [
+          "since",
+          "overall",
+          "by_cv_version",
+          "by_role",
+          "groups_truncated",
+          "applications_truncated",
+          "computed_at"
+        ],
+        "title": "StatsResponse",
+        "type": "object"
+      },
+      "StatsRoleGroupOut": {
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "integer"
+          },
+          "brought": {
+            "title": "Brought",
+            "type": "integer"
+          },
+          "interview": {
+            "title": "Interview",
+            "type": "integer"
+          },
+          "interview_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Rate"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "offer": {
+            "title": "Offer",
+            "type": "integer"
+          },
+          "offer_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Rate"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "required": [
+          "key",
+          "role",
+          "brought",
+          "applied",
+          "replied",
+          "interview",
+          "offer",
+          "rejected",
+          "reply_rate",
+          "interview_rate",
+          "offer_rate"
+        ],
+        "title": "StatsRoleGroupOut",
+        "type": "object"
+      },
       "StatusResponse": {
         "properties": {
           "jobs_total": {
@@ -4363,6 +4942,45 @@
           "last_used_at"
         ],
         "title": "TokenSummary",
+        "type": "object"
+      },
+      "UpdateProfileRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "edits": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileEditIn"
+            },
+            "minItems": 1,
+            "title": "Edits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "edits"
+        ],
+        "title": "UpdateProfileRequest",
+        "type": "object"
+      },
+      "UpdateProfileResponse": {
+        "description": "What ``PATCH /profile`` actually returns.\n\nDeclared as the route's ``response_model`` so the OpenAPI schema \u2014 and\ntherefore the frontend's generated ``api-types.ts`` \u2014 says so. An\nundeclared ``dict[str, Any]`` return renders as a bare ``{}`` schema,\nwhich tells a generated client nothing about the two keys it is about to\nread (S2/N3).",
+        "properties": {
+          "applied": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileEditOut"
+            },
+            "title": "Applied",
+            "type": "array"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ProfileResponse"
+          }
+        },
+        "required": [
+          "applied",
+          "profile"
+        ],
+        "title": "UpdateProfileResponse",
         "type": "object"
       },
       "UserResponse": {
@@ -4991,6 +5609,87 @@
         ]
       }
     },
+    "/api/applications/stats": {
+      "get": {
+        "operationId": "stats_api_applications_stats_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stats",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/applications/{application_id}": {
       "get": {
         "operationId": "get_application_api_applications__application_id__get",
@@ -5237,6 +5936,101 @@
           }
         },
         "summary": "Get Application Artifact",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/contacts": {
+      "post": {
+        "description": "201 for a new contact, 200 (``already_existed: true``) for the same\nemail seen again on this application (R2) \u2014 the status code is set\ndynamically since the same call can legitimately answer either.",
+        "operationId": "add_contact_api_applications__application_id__contacts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddContactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddContactResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddContactResponse"
+                }
+              }
+            },
+            "description": "Contact created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Contact",
         "tags": [
           "applications"
         ]
@@ -8344,8 +9138,82 @@
           "profile"
         ]
       },
+      "patch": {
+        "description": "Apply 1..N agent edits to the caller's profile as one atomic overlay write.\n\nR12 \u2014 the same function REST and MCP call: the MCP `update_profile` tool\ninvokes this route function directly with the resolved user (the pattern\nevery other MCP tool in `mcp_server.py` already uses), so there is\nexactly one place this logic can drift.\n\nAll-or-nothing (S12): every edit is validated before anything is\nwritten \u2014 one bad path or value means the whole call 422s and NOTHING\nchanges. A user with no profile row yet gets an empty base created first\n(R8) so the overlay has something to sit on. The response carries the\nfull merged profile (`GET /profile`'s own shape) so the caller sees the\neffect without a second round trip.\n\nThe audit line for this action names PATHS and the actor only \u2014 never a\nvalue (S3): an edit can carry a name, an email fragment inside `about_me`,\nor anything else the agent chose to write, and none of that belongs in a\nlog line.",
+        "operationId": "update_profile_api_profile_patch",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Profile",
+        "tags": [
+          "profile"
+        ]
+      },
       "post": {
-        "description": "Combined CV + preferences (backward-compatible with the frontend form).\n\nThe dedicated single-input routes are POST /profile/cv and\nPOST /profile/preferences; this endpoint accepts both together.",
+        "description": "Combined CV + preferences (backward-compatible with the frontend form).\n\nThe dedicated single-input routes are POST /profile/cv and\nPOST /profile/preferences; this endpoint accepts both together.\n\nLoads the BASE profile (``with_overlay=False``) for the same reason the\ndedicated routes do \u2014 it mutates and saves.",
         "operationId": "upsert_profile_api_profile_post",
         "parameters": [
           {
@@ -8420,7 +9288,7 @@
     },
     "/api/profile/clear": {
       "post": {
-        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\n``section``: cv | linkedin | github | preferences | all.\n\nDeliberately does NOT re-run extraction: there is nothing to extract, and a\npaid LLM round-trip to rebuild an empty profile would be waste. The stored\nsnapshot taken by ``save_profile`` is what makes this reversible.",
+        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\n``section``: cv | linkedin | github | preferences | all.\n\nDeliberately does NOT re-run extraction: there is nothing to extract, and a\npaid LLM round-trip to rebuild an empty profile would be waste. The stored\nsnapshot taken by ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``all`` -> both. ``linkedin`` and ``github`` own no\neditable path, so they clear nothing in the overlay.",
         "operationId": "clear_profile_section_api_profile_clear_post",
         "parameters": [
           {
@@ -8496,7 +9364,7 @@
     },
     "/api/profile/cv": {
       "post": {
-        "description": "Set the caller's CV (PDF/DOCX) \u2014 one input, one dedicated route.",
+        "description": "Set the caller's CV (PDF/DOCX) \u2014 one input, one dedicated route.\n\nLoads the BASE profile (``with_overlay=False``): this route MUTATES and\nSAVES, and starting from the merged profile would copy the agent's\noverlay values into the extraction's own JSON \u2014 see the note on\n``storage.load_profile``.",
         "operationId": "upload_cv_api_profile_cv_post",
         "parameters": [
           {
@@ -8790,7 +9658,7 @@
     },
     "/api/profile/preferences": {
       "post": {
-        "description": "Set the caller's preferences form \u2014 one input, one dedicated route.",
+        "description": "Set the caller's preferences form \u2014 one input, one dedicated route.\n\nLoads the BASE profile (``with_overlay=False``) and, after saving,\nretires the overlay for any preference the human actually changed \u2014\nsee :func:`_retire_overlaid_preferences`.",
         "operationId": "upsert_preferences_api_profile_preferences_post",
         "parameters": [
           {

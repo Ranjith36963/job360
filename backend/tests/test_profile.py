@@ -1323,7 +1323,10 @@ def test_has_linkedin_true_from_positions_even_without_skills():
     # user_id is now required: the helper used to derive it via
     # getattr(profile, "user_id", None) against an object that has no such
     # field, so every caller silently fell back to the default tenant.
-    resp = _build_profile_response(profile, "00000000-0000-0000-0000-000000000001")
+    # agent_edits is passed IN (slice-4 review N4): the caller has already read
+    # the overlay on the connection it loaded the profile with, so the helper
+    # never opens a second one. Empty here — no agent has edited this profile.
+    resp = _build_profile_response(profile, "00000000-0000-0000-0000-000000000001", [])
     assert resp.summary.has_linkedin is True
 
 

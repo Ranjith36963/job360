@@ -70,6 +70,9 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     # `run_log` is a pipeline record, but it carries a user_id (whose search it
     # was), so it is owned data and belongs in the orphan sweep.
     ("run_log", "user_id"),
+    # Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md).
+    ("application_contacts", "user_id"),
+    ("profile_edits", "user_id"),
 )
 
 # The SHARED catalog. These MUST NOT have a user_id — a user_id appearing here

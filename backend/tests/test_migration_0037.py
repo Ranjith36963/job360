@@ -151,21 +151,29 @@ def pre_fold_db_path(tmp_path):
         asyncio.run(_pg.drop_schema(db_path))
 
 
+_STEM = "0037_application_spine"
+
+
 @pytest.mark.asyncio
 async def test_up_down_up_is_clean(pre_fold_db_path):
-    applied = await runner.up(pre_fold_db_path)
-    assert "0037_application_spine" in applied, f"0037 never applied: {applied}"
+    # STOP AT 0037. `runner.down()` always reverses the NEWEST applied stem, so
+    # a bare `up()` here would make this test assert about whatever migration
+    # landed last — it broke the moment 0038 was added. Naming the target keeps
+    # the test about 0037 forever (feedback: a test must not encode the merge
+    # queue).
+    applied = await runner.up(pre_fold_db_path, target=_STEM)
+    assert _STEM in applied, f"0037 never applied: {applied}"
 
     for table in ("application_events", "application_artifacts"):
         assert await _has_table(pre_fold_db_path, table), f"{table} missing after up()"
 
     reverted = await runner.down(pre_fold_db_path)
-    assert reverted == "0037_application_spine"
+    assert reverted == _STEM
     for table in ("application_events", "application_artifacts"):
         assert not await _has_table(pre_fold_db_path, table), f"{table} still present after down()"
 
-    reapplied = await runner.up(pre_fold_db_path)
-    assert reapplied == ["0037_application_spine"]
+    reapplied = await runner.up(pre_fold_db_path, target=_STEM)
+    assert reapplied == [_STEM]
     for table in ("application_events", "application_artifacts"):
         assert await _has_table(pre_fold_db_path, table), f"{table} missing after re-up()"
 

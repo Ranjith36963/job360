@@ -496,6 +496,85 @@ WHATS_NEW_MAX_EVENTS = int(os.getenv("WHATS_NEW_MAX_EVENTS", "200"))
 EXPORT_HISTORY_MAX_APPLICATIONS = int(os.getenv("EXPORT_HISTORY_MAX_APPLICATIONS", "500"))
 EXPORT_HISTORY_MAX_BYTES = int(os.getenv("EXPORT_HISTORY_MAX_BYTES", str(8 * 1024 * 1024)))
 EXPORT_HISTORY_MAX_PER_HOUR = int(os.getenv("EXPORT_HISTORY_MAX_PER_HOUR", "12"))
+# Slice 4 review (S3) — the export's top-level `profile_edits` blob is bounded
+# like everything else it carries: the NEWEST N rows, rendered oldest-first,
+# with `profile_edits_truncated` saying when the tail was cut.
+EXPORT_HISTORY_MAX_PROFILE_EDITS = int(os.getenv("EXPORT_HISTORY_MAX_PROFILE_EDITS", "500"))
+
+# ── Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md) ─────────────────
+# S4 — every cap a parameter; a breach is a 422 naming the field and the
+# limit, never a silent clip.
+
+# add_contact (R1/R2). Contacts are add-only rows on an application.
+CONTACT_NAME_MAX_CHARS = int(os.getenv("CONTACT_NAME_MAX_CHARS", "200"))
+CONTACT_ROLE_MAX_CHARS = int(os.getenv("CONTACT_ROLE_MAX_CHARS", "200"))
+CONTACT_EMAIL_MAX_CHARS = int(os.getenv("CONTACT_EMAIL_MAX_CHARS", "254"))
+CONTACT_LINKEDIN_URL_MAX_CHARS = int(os.getenv("CONTACT_LINKEDIN_URL_MAX_CHARS", "300"))
+CONTACT_NOTES_MAX_CHARS = int(os.getenv("CONTACT_NOTES_MAX_CHARS", "2000"))
+CONTACTS_PER_APPLICATION_MAX = int(os.getenv("CONTACTS_PER_APPLICATION_MAX", "50"))
+CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 — per USER
+
+# stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
+STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))
+STATS_MAX_PER_HOUR = int(os.getenv("STATS_MAX_PER_HOUR", "60"))  # S7 — per USER
+# S6 — the DRIVING query is bounded too, not just the group list: stats reads
+# the newest N applications for the user and says so (`applications_truncated`).
+# A user with more than this many applications gets an honest partial answer
+# rather than an unbounded fetch.
+STATS_MAX_APPLICATIONS = int(os.getenv("STATS_MAX_APPLICATIONS", "5000"))
+
+
+# ── The event-type vocabulary has ONE home (review finding S4) ───────────────
+# `APPLICATION_STATUS_EVENT_TYPES` above is it. Everything stats counts is
+# DERIVED from that tuple here and bound as a query parameter downstream —
+# `services/applications/stats.py` never re-types an event name as a SQL
+# literal, so a rename in the vocabulary cannot leave a stale string behind in
+# the counting code. Drift refuses to boot rather than counting silently wrong.
+def _status_event(name: str) -> str:
+    """One member of ``APPLICATION_STATUS_EVENT_TYPES``, or a startup error."""
+    if name not in APPLICATION_STATUS_EVENT_TYPES:
+        raise RuntimeError(
+            f"stats names the event type {name!r}, which is not in "
+            f"APPLICATION_STATUS_EVENT_TYPES {APPLICATION_STATUS_EVENT_TYPES}"
+        )
+    return name
+
+
+STATS_APPLIED_EVENT_TYPE = _status_event("applied")
+STATS_REPLIED_EVENT_TYPE = _status_event("replied")
+STATS_OFFER_EVENT_TYPE = _status_event("offer")
+STATS_REJECTED_EVENT_TYPE = _status_event("rejected")
+# The event types that make an application count as "interview" — derived from
+# the status vocabulary by prefix, never a second hand-typed list.
+STATS_INTERVIEW_EVENT_TYPES = tuple(
+    t for t in APPLICATION_STATUS_EVENT_TYPES if t.startswith("interview_")
+)
+if not STATS_INTERVIEW_EVENT_TYPES:  # pragma: no cover — a vocabulary edit would trip this
+    raise RuntimeError(
+        "APPLICATION_STATUS_EVENT_TYPES declares no interview_* event type; "
+        "stats cannot compute an interview count"
+    )
+
+# update_profile (R8-R11). The overlay of agent edits over extraction.
+# R9 — a CLOSED set of dotted paths into UserProfile. Each MUST be a declared
+# dataclass field (S8); src/services/profile/edits.py asserts that at import.
+PROFILE_EDITABLE_PATHS = (
+    "cv_data.name", "cv_data.headline", "cv_data.location", "cv_data.summary",
+    "cv_data.skills", "cv_data.job_titles", "cv_data.education", "cv_data.certifications",
+    "cv_data.achievements", "cv_data.cv_right_to_work", "cv_data.cv_languages", "cv_data.links",
+    "preferences.target_job_titles", "preferences.preferred_locations", "preferences.industries",
+    "preferences.additional_skills", "preferences.excluded_skills", "preferences.negative_keywords",
+    "preferences.salary_min", "preferences.salary_max", "preferences.work_arrangement",
+    "preferences.experience_level", "preferences.about_me", "preferences.needs_visa",
+)
+# Env-added paths must ALSO be declared dataclass fields — an unknown one is a
+# startup error, not an accepted path.
+PROFILE_EXTRA_EDITABLE_PATHS = _env_list("PROFILE_EXTRA_EDITABLE_PATHS", ())
+PROFILE_EDIT_MAX_PATHS_PER_CALL = int(os.getenv("PROFILE_EDIT_MAX_PATHS_PER_CALL", "30"))
+PROFILE_EDIT_MAX_CHARS = int(os.getenv("PROFILE_EDIT_MAX_CHARS", "2000"))
+PROFILE_EDIT_MAX_LIST_ITEMS = int(os.getenv("PROFILE_EDIT_MAX_LIST_ITEMS", "100"))
+PROFILE_EDIT_MAX_ITEM_CHARS = int(os.getenv("PROFILE_EDIT_MAX_ITEM_CHARS", "200"))
+PROFILE_EDIT_MAX_PER_HOUR = int(os.getenv("PROFILE_EDIT_MAX_PER_HOUR", "120"))  # S7 — per USER
 
 
 # --- Independent per-engine switches -------------------------------------

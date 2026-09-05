@@ -24,10 +24,16 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { ClearButton } from "@/components/profile/ClearButton";
+import { EditedMark } from "@/components/profile/EditedMark";
+import { findAgentEdit, type AgentEdit } from "@/lib/agent-edits";
 import type { PreferencesRequest } from "@/lib/types";
 
 interface PreferencesFormProps {
   preferences: Record<string, unknown>;
+  /** ProfileResponse.agent_edits (spec R11) — the current agent-edit overlay.
+   *  Optional; each editable field looks up its own `preferences.<field>`
+   *  path and renders nothing extra when there is no active edit for it. */
+  agentEdits?: AgentEdit[];
   /** Adjacent skills the extractor proposed. Shown as one-tap chips beside
    *  Additional Skills.
    *
@@ -61,6 +67,8 @@ interface TagInputProps {
   suggestions?: string[];
   suggestionsLabel?: string;
   suggestionsHint?: string;
+  /** Extra content after the label — e.g. an `EditedMark` (spec R11). */
+  trailing?: React.ReactNode;
 }
 
 function TagInput({
@@ -74,6 +82,7 @@ function TagInput({
   suggestions,
   suggestionsLabel,
   suggestionsHint,
+  trailing,
 }: TagInputProps) {
   const [inputValue, setInputValue] = useState("");
 
@@ -119,6 +128,7 @@ function TagInput({
       <Label className="text-sm font-medium">
         {icon}
         {label}
+        {trailing}
       </Label>
       {description && (
         <p className="text-xs text-muted-foreground -mt-1">{description}</p>
@@ -284,7 +294,9 @@ export function PreferencesForm({
   onSave,
   onClear,
   loading,
+  agentEdits,
 }: PreferencesFormProps) {
+  const editOf = (field: string) => findAgentEdit(agentEdits, `preferences.${field}`);
   const [targetTitles, setTargetTitles] = useState<string[]>([]);
   const [additionalSkills, setAdditionalSkills] = useState<string[]>([]);
   const [excludedSkills, setExcludedSkills] = useState<string[]>([]);
@@ -449,6 +461,7 @@ export function PreferencesForm({
             onChange={setTargetTitles}
             placeholder="e.g. Data Scientist"
             description="Roles you're targeting"
+            trailing={<EditedMark edit={editOf("target_job_titles")} />}
           />
         </div>
 
@@ -462,6 +475,7 @@ export function PreferencesForm({
           suggestions={suggestions}
           suggestionsLabel="Skills that often go with yours"
           suggestionsHint="Tap any you actually have. Nothing is added until you tap."
+          trailing={<EditedMark edit={editOf("additional_skills")} />}
         />
 
         {/* Excluded Skills input removed from UI (owner, 2026-08-08) — the
@@ -478,6 +492,7 @@ export function PreferencesForm({
           tags={preferredLocations}
           onChange={setPreferredLocations}
           placeholder="e.g. London, Manchester, Remote"
+          trailing={<EditedMark edit={editOf("preferred_locations")} />}
         />
 
         {/* ── Industries ─────────────────────────── */}
@@ -488,6 +503,7 @@ export function PreferencesForm({
           onChange={setIndustries}
           placeholder="e.g. FinTech, Healthcare, AI"
           description="Used only for AI similarity matching today — most jobs are not affected by this at all."
+          trailing={<EditedMark edit={editOf("industries")} />}
         />
 
         <Separator />
@@ -497,6 +513,7 @@ export function PreferencesForm({
           <Label className="text-sm font-medium">
             <DollarSign className="h-3.5 w-3.5" />
             Salary Range
+            <EditedMark edit={editOf("salary_min") ?? editOf("salary_max")} />
           </Label>
           <div className="grid grid-cols-2 gap-3">
             <div className="relative">
@@ -529,7 +546,10 @@ export function PreferencesForm({
         {/* ── Work Arrangement & Experience Level ── */}
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
-            <Label className="text-sm font-medium">Work Arrangement</Label>
+            <Label className="text-sm font-medium">
+              Work Arrangement
+              <EditedMark edit={editOf("work_arrangement")} />
+            </Label>
             <Select
               value={workArrangement}
               onValueChange={(v) => setWorkArrangement(v ?? "")}
@@ -546,7 +566,10 @@ export function PreferencesForm({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label className="text-sm font-medium">Experience Level</Label>
+            <Label className="text-sm font-medium">
+              Experience Level
+              <EditedMark edit={editOf("experience_level")} />
+            </Label>
             <Select
               value={experienceLevel}
               onValueChange={(v) => setExperienceLevel(v ?? "")}
@@ -582,6 +605,7 @@ export function PreferencesForm({
             onChange={(e) => setNeedsVisa(e.target.checked)}
           />
           I need visa sponsorship to work in the UK
+          <EditedMark edit={editOf("needs_visa")} />
         </label>
 
         <Separator />
@@ -600,11 +624,15 @@ export function PreferencesForm({
           placeholder="e.g. sales, recruiter"
           description="A job whose TITLE contains one of these drops 30 points. It still shows up — this pushes it down the list, it doesn't hide it."
           variant="destructive"
+          trailing={<EditedMark edit={editOf("negative_keywords")} />}
         />
 
         {/* ── About Me ───────────────────────────── */}
         <div className="space-y-2">
-          <Label className="text-sm font-medium">About Me</Label>
+          <Label className="text-sm font-medium">
+            About Me
+            <EditedMark edit={editOf("about_me")} />
+          </Label>
           <p className="text-xs text-muted-foreground -mt-1">
             Brief professional summary used for semantic matching
           </p>

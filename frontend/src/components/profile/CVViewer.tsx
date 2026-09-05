@@ -21,10 +21,16 @@ import {
   Trophy,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { EditedMark } from "@/components/profile/EditedMark";
+import { findAgentEdit, type AgentEdit } from "@/lib/agent-edits";
 import type { CVDetail } from "@/lib/types";
 
 interface CVViewerProps {
   cv: CVDetail;
+  /** ProfileResponse.agent_edits (spec R11) — the current agent-edit overlay.
+   *  Optional; each editable field looks up its own `cv_data.<field>` path and
+   *  renders nothing extra when there is no active edit for it. */
+  agentEdits?: AgentEdit[];
   /** skill -> list of raw provenance source labels (e.g. "cv_explicit", "linkedin").
    *  Optional — when absent, skills render as a plain list with no source hint. */
   skillProvenance?: Record<string, string[]>;
@@ -201,9 +207,13 @@ function provenanceTooltip(
 function SectionLabel({
   icon: Icon,
   text,
+  trailing,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   text: string;
+  /** Extra content after the label text — e.g. an `EditedMark` for a field
+   *  that carries an active agent-edit overlay. */
+  trailing?: React.ReactNode;
 }) {
   return (
     <div className="flex items-center gap-2 mb-2">
@@ -211,6 +221,7 @@ function SectionLabel({
       <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {text}
       </span>
+      {trailing}
     </div>
   );
 }
@@ -221,7 +232,9 @@ export function CVViewer({
   linkedinSubsections,
   githubTemporal,
   githubDetail,
+  agentEdits,
 }: CVViewerProps) {
+  const editOf = (field: string) => findAgentEdit(agentEdits, `cv_data.${field}`);
   // (The showFullCV toggle and its highlight terms went with the "Full CV
   // Text" panel — that text now lives only in the CV Uploaded card.)
 
@@ -388,17 +401,20 @@ export function CVViewer({
             {cv.name && (
               <h4 className="font-heading text-lg font-semibold text-foreground">
                 {cv.name}
+                <EditedMark edit={editOf("name")} />
               </h4>
             )}
             {cv.headline && (
               <p className="mt-0.5 text-sm text-muted-foreground">
                 {cv.headline}
+                <EditedMark edit={editOf("headline")} />
               </p>
             )}
             {cv.location && (
               <p className="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground">
                 <MapPin className="h-3 w-3" />
                 {cv.location}
+                <EditedMark edit={editOf("location")} />
               </p>
             )}
           </div>
@@ -412,6 +428,7 @@ export function CVViewer({
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Professional Summary
               </span>
+              <EditedMark edit={editOf("summary")} />
             </div>
             <p className="text-sm text-foreground/90 leading-relaxed pl-5 border-l-2 border-primary/20">
               {cv.summary_text}
@@ -427,6 +444,7 @@ export function CVViewer({
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Skills Extracted ({cv.skills.length})
               </span>
+              <EditedMark edit={editOf("skills")} />
             </div>
             <div className="flex flex-wrap gap-1.5 pl-5">
               {cv.skills.map((skill) => (
@@ -451,6 +469,7 @@ export function CVViewer({
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Experience Found
               </span>
+              <EditedMark edit={editOf("job_titles")} />
             </div>
             <div className="flex flex-wrap gap-1.5 pl-5">
               {cv.job_titles.map((title) => (
@@ -523,6 +542,7 @@ export function CVViewer({
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Education
               </span>
+              <EditedMark edit={editOf("education")} />
             </div>
             <ul className="space-y-1 pl-5 text-sm text-foreground/80">
               {cv.education.map((line, i) => (
@@ -542,6 +562,7 @@ export function CVViewer({
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Certifications
               </span>
+              <EditedMark edit={editOf("certifications")} />
             </div>
             <ul className="space-y-1 pl-5 text-sm text-foreground/80">
               {cv.certifications.map((cert, i) => (
@@ -570,7 +591,10 @@ export function CVViewer({
               {cv.cv_right_to_work && (
                 <div className="contents">
                   <dt className="text-muted-foreground">Right to work</dt>
-                  <dd className="text-foreground/85">{cv.cv_right_to_work}</dd>
+                  <dd className="text-foreground/85">
+                    {cv.cv_right_to_work}
+                    <EditedMark edit={editOf("cv_right_to_work")} />
+                  </dd>
                 </div>
               )}
             </dl>
@@ -618,11 +642,44 @@ export function CVViewer({
             cv_positions was. */}
         {cv.achievements.length > 0 && (
           <div className="mb-5">
-            <SectionLabel icon={Trophy} text={`Achievements (${cv.achievements.length})`} />
+            <SectionLabel
+              icon={Trophy}
+              text={`Achievements (${cv.achievements.length})`}
+              trailing={<EditedMark edit={editOf("achievements")} />}
+            />
             <ul className="space-y-1 pl-5 text-sm text-foreground/80">
               {cv.achievements.map((achievement, i) => (
                 <li key={i} className="leading-relaxed">
                   {achievement}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Links — portfolio / personal-site / other URLs (spec R9's new
+            `cv_data.links` field). Agent-editable only (there is no
+            extraction path for it yet), so this section is either empty or
+            entirely agent-added. S5: only a value starting `https://` is
+            rendered as a clickable link — anything else shows as plain
+            text so a bad value can never become a clickable script. */}
+        {(cv.links ?? []).length > 0 && (
+          <div className="mb-5">
+            <SectionLabel
+              icon={Link2}
+              text={`Links (${(cv.links ?? []).length})`}
+              trailing={<EditedMark edit={editOf("links")} />}
+            />
+            <ul className="space-y-1 pl-5 text-sm text-foreground/80">
+              {(cv.links ?? []).map((link, i) => (
+                <li key={i} className="break-all leading-relaxed">
+                  {link.startsWith("https://") ? (
+                    <a href={link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                      {link}
+                    </a>
+                  ) : (
+                    link
+                  )}
                 </li>
               ))}
             </ul>

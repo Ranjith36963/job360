@@ -1796,10 +1796,10 @@ class JobDatabase:
     # schema turns "delete my account" into an UndefinedTable crash (rule #26).
     # The list and the schema must move together, in the same commit.
     _PER_USER_TABLES = (
-        "api_tokens", "application_artifacts", "application_events", "application_receipts",
-        "application_stage_history", "applications", "email_verifications",
+        "api_tokens", "application_artifacts", "application_contacts", "application_events",
+        "application_receipts", "application_stage_history", "applications", "email_verifications",
         "notification_ledger", "notification_rules", "oauth_grants",
-        "password_resets", "sessions", "tailored_documents", "tailored_usage",
+        "password_resets", "profile_edits", "sessions", "tailored_documents", "tailored_usage",
         "user_actions", "user_channels", "user_feed",
         "user_notification_digests", "user_profile_versions", "user_profiles",
     )
@@ -1815,9 +1815,9 @@ class JobDatabase:
     # connect?") but its `token_hash` is redacted below; the plaintext was never
     # stored, so the export can hand out nothing usable as a credential.
     _EXPORT_TABLES = (
-        "api_tokens", "application_artifacts", "application_events", "application_receipts",
-        "applications", "application_stage_history", "audit_log",
-        "notification_ledger", "notification_rules", "oauth_grants", "tailored_documents",
+        "api_tokens", "application_artifacts", "application_contacts", "application_events",
+        "application_receipts", "applications", "application_stage_history", "audit_log",
+        "notification_ledger", "notification_rules", "oauth_grants", "profile_edits", "tailored_documents",
         "tailored_usage", "user_actions", "user_channels", "user_feed",
         "user_profile_versions", "user_profiles",
     )

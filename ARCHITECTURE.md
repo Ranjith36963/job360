@@ -21,13 +21,13 @@ Job360 *was* a UK-focused multi-domain job search aggregator. This path fetches 
 | Unique source classes | **40** | same dict — `indeed` and `glassdoor` both alias `JobSpySource` |
 | `RATE_LIMITS` entries | **41** | `core/settings.py` `RATE_LIMITS` |
 | `LOCATIONS` entries | **26** | `core/keywords.py` `LOCATIONS` |
-| Migration head | **0037** | `backend/migrations/` |
+| Migration head | **0038** | `backend/migrations/` |
 | `SCORER_VERSION` | **8** | `services/skill_matcher.SCORER_VERSION` |
 | `BaseJobSource` subclasses | **40** | `src/sources/` |
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
-| Migration files | **38** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **245** | `backend/tests/` |
+| Migration files | **39** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **250** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -681,9 +681,11 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/jobs/{job_id}/action` | `actions.py` |
 | `GET` | `/api/applications` | `applications.py` |
 | `GET` | `/api/applications/export` | `applications.py` |
+| `GET` | `/api/applications/stats` | `applications.py` |
 | `GET` | `/api/applications/{application_id}` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/artifacts` | `applications.py` |
 | `GET` | `/api/applications/{application_id}/artifacts/{artifact_id}` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/contacts` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/events` | `applications.py` |
 | `PUT` | `/api/applications/{application_id}/fit` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/receipt` | `applications.py` |
@@ -739,6 +741,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `PATCH` | `/api/pipeline/{job_id}/notes` | `pipeline.py` |
 | `GET` | `/api/pipeline/{job_id}/timeline` | `pipeline.py` |
 | `GET` | `/api/profile` | `profile.py` |
+| `PATCH` | `/api/profile` | `profile.py` |
 | `POST` | `/api/profile` | `profile.py` |
 | `POST` | `/api/profile/clear` | `profile.py` |
 | `POST` | `/api/profile/cv` | `profile.py` |
@@ -769,7 +772,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**93 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**96 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->
 
 ## Configuration

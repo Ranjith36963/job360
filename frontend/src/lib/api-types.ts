@@ -123,6 +123,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stats */
+        get: operations["stats_api_applications_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}": {
         parameters: {
             query?: never;
@@ -168,6 +185,28 @@ export interface paths {
         get: operations["get_application_artifact_api_applications__application_id__artifacts__artifact_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Contact
+         * @description 201 for a new contact, 200 (``already_existed: true``) for the same
+         *     email seen again on this application (R2) — the status code is set
+         *     dynamically since the same call can legitimately answer either.
+         */
+        post: operations["add_contact_api_applications__application_id__contacts_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1128,12 +1167,36 @@ export interface paths {
          *
          *     The dedicated single-input routes are POST /profile/cv and
          *     POST /profile/preferences; this endpoint accepts both together.
+         *
+         *     Loads the BASE profile (``with_overlay=False``) for the same reason the
+         *     dedicated routes do — it mutates and saves.
          */
         post: operations["upsert_profile_api_profile_post"];
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Profile
+         * @description Apply 1..N agent edits to the caller's profile as one atomic overlay write.
+         *
+         *     R12 — the same function REST and MCP call: the MCP `update_profile` tool
+         *     invokes this route function directly with the resolved user (the pattern
+         *     every other MCP tool in `mcp_server.py` already uses), so there is
+         *     exactly one place this logic can drift.
+         *
+         *     All-or-nothing (S12): every edit is validated before anything is
+         *     written — one bad path or value means the whole call 422s and NOTHING
+         *     changes. A user with no profile row yet gets an empty base created first
+         *     (R8) so the overlay has something to sit on. The response carries the
+         *     full merged profile (`GET /profile`'s own shape) so the caller sees the
+         *     effect without a second round trip.
+         *
+         *     The audit line for this action names PATHS and the actor only — never a
+         *     value (S3): an edit can carry a name, an email fragment inside `about_me`,
+         *     or anything else the agent chose to write, and none of that belongs in a
+         *     log line.
+         */
+        patch: operations["update_profile_api_profile_patch"];
         trace?: never;
     };
     "/api/profile/clear": {
@@ -1154,6 +1217,16 @@ export interface paths {
          *     Deliberately does NOT re-run extraction: there is nothing to extract, and a
          *     paid LLM round-trip to rebuild an empty profile would be waste. The stored
          *     snapshot taken by ``save_profile`` is what makes this reversible.
+         *
+         *     CLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored
+         *     profile, so emptying only the base left every agent edit in the cleared
+         *     scope still showing on the page — the button said "Clear" and the value
+         *     stayed. Worse, the overlay is what "Clear" exists to remove before a
+         *     fresh upload: the whole point is a clean experiment. So each cleared
+         *     scope also appends a clearing row (``value = NULL``, append-only) for
+         *     every overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``
+         *     -> ``preferences.*``, ``all`` -> both. ``linkedin`` and ``github`` own no
+         *     editable path, so they clear nothing in the overlay.
          */
         post: operations["clear_profile_section_api_profile_clear_post"];
         delete?: never;
@@ -1174,6 +1247,11 @@ export interface paths {
         /**
          * Upload Cv
          * @description Set the caller's CV (PDF/DOCX) — one input, one dedicated route.
+         *
+         *     Loads the BASE profile (``with_overlay=False``): this route MUTATES and
+         *     SAVES, and starting from the merged profile would copy the agent's
+         *     overlay values into the extraction's own JSON — see the note on
+         *     ``storage.load_profile``.
          */
         post: operations["upload_cv_api_profile_cv_post"];
         delete?: never;
@@ -1286,6 +1364,10 @@ export interface paths {
         /**
          * Upsert Preferences
          * @description Set the caller's preferences form — one input, one dedicated route.
+         *
+         *     Loads the BASE profile (``with_overlay=False``) and, after saving,
+         *     retires the overlay for any preference the human actually changed —
+         *     see :func:`_retire_overlaid_preferences`.
          */
         post: operations["upsert_preferences_api_profile_preferences_post"];
         delete?: never;
@@ -1905,6 +1987,50 @@ export interface components {
             actions: components["schemas"]["ActionResponse"][];
         };
         /**
+         * AddContactRequest
+         * @description Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md §Tool contracts).
+         *
+         *     No length/shape constraints declared here (unlike ``SaveArtifactRequest``'s
+         *     ``label``): every cap is a live ``settings`` value a test can monkeypatch,
+         *     so ``contacts.add_contact`` checks them at call time — the same pattern
+         *     ``SaveFitRequest.clamp_reasoning``/``RecordEventRequest.clamp_detail`` use.
+         *     ``added_by`` is deliberately ABSENT — ``extra="forbid"`` rejects it (S2).
+         */
+        AddContactRequest: {
+            /**
+             * Email
+             * @default
+             */
+            email: string;
+            /**
+             * Linkedin Url
+             * @default
+             */
+            linkedin_url: string;
+            /** Name */
+            name: string;
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
+            /** Occurred At */
+            occurred_at?: string | null;
+            /**
+             * Role
+             * @default
+             */
+            role: string;
+        };
+        /** AddContactResponse */
+        AddContactResponse: {
+            /** Already Existed */
+            already_existed: boolean;
+            contact: components["schemas"]["ContactOut"];
+            /** Event Id */
+            event_id: number | null;
+        };
+        /**
          * ApplicationArtifactOut
          * @description The ``get_application`` artifacts-list shape: ``text`` is ALWAYS a key
          *     (null unless ``with_artifact_text=true`` and under the byte cap).
@@ -1964,6 +2090,8 @@ export interface components {
         ApplicationDetailOut: {
             /** Artifacts */
             artifacts: components["schemas"]["ApplicationArtifactOut"][];
+            /** Contacts */
+            contacts: components["schemas"]["ContactOut"][];
             /** Created At */
             created_at: string;
             /** Events */
@@ -2272,6 +2400,11 @@ export interface components {
              */
             job_titles: string[];
             /**
+             * Links
+             * @default []
+             */
+            links: string[];
+            /**
              * Location
              * @default
              */
@@ -2365,6 +2498,31 @@ export interface components {
             /** User Email */
             user_email: string;
         };
+        /**
+         * ContactOut
+         * @description A contact row (``contacts.list_contacts`` / ``add_contact``'s return).
+         *     Same shape everywhere a contact appears — detail, export, the add response.
+         */
+        ContactOut: {
+            /** Added By */
+            added_by: string;
+            /** Application Id */
+            application_id: number;
+            /** Created At */
+            created_at: string;
+            /** Email */
+            email: string;
+            /** Id */
+            id: number;
+            /** Linkedin Url */
+            linkedin_url: string;
+            /** Name */
+            name: string;
+            /** Notes */
+            notes: string;
+            /** Role */
+            role: string;
+        };
         /** CreateReceiptRequest */
         CreateReceiptRequest: {
             /**
@@ -2402,6 +2560,8 @@ export interface components {
         ExportApplicationOut: {
             /** Artifacts */
             artifacts: components["schemas"]["ExportArtifactOut"][];
+            /** Contacts */
+            contacts: components["schemas"]["ContactOut"][];
             /** Created At */
             created_at: string;
             /** Events */
@@ -2458,6 +2618,13 @@ export interface components {
             bytes: number;
             /** Next Since */
             next_since?: string | null;
+            /** Profile Edits */
+            profile_edits: components["schemas"]["ProfileEditExportOut"][];
+            /**
+             * Profile Edits Truncated
+             * @default false
+             */
+            profile_edits_truncated: boolean;
             /** Truncated */
             truncated: boolean;
         };
@@ -2975,8 +3142,61 @@ export interface components {
             /** Reminders */
             reminders: components["schemas"]["PipelineApplication"][];
         };
+        /**
+         * ProfileEditExportOut
+         * @description One row of ``export_history``'s top-level ``profile_edits`` — EVERY
+         *     row, including a clear (``value: null``); it is the history, unlike
+         *     ``GET /profile``'s ``agent_edits`` (the live, non-cleared overlay only).
+         */
+        ProfileEditExportOut: {
+            /** Path */
+            path: string;
+            /** Set At */
+            set_at: string;
+            /** Set By */
+            set_by: string;
+            /** Value */
+            value: unknown;
+        };
+        /** ProfileEditIn */
+        ProfileEditIn: {
+            /** Path */
+            path: string;
+            /** Value */
+            value?: unknown;
+        };
+        /**
+         * ProfileEditOut
+         * @description One row of the agent-edit overlay (slice 4, spec R8/R11).
+         *
+         *     The SAME shape everywhere an edit appears: ``GET /profile``'s
+         *     ``agent_edits``, ``PATCH /profile``'s ``applied``, and
+         *     ``export_history``'s ``profile_edits``. Declared once, here, so the
+         *     generated ``api-types.ts`` gives the frontend real field names instead of
+         *     the ``{[key: string]: unknown}[]`` an untyped ``dict`` renders as — the
+         *     profile page reads ``set_by`` and ``set_at`` off every one of these
+         *     (``components/profile/EditedMark.tsx``).
+         *
+         *     ``value`` is ``Any``: the overlay carries whatever the path's dataclass
+         *     field holds — a string, a list of strings, a number, a bool.
+         */
+        ProfileEditOut: {
+            /** Path */
+            path: string;
+            /** Set At */
+            set_at: string;
+            /** Set By */
+            set_by: string;
+            /** Value */
+            value?: unknown;
+        };
         /** ProfileResponse */
         ProfileResponse: {
+            /**
+             * Agent Edits
+             * @default []
+             */
+            agent_edits: components["schemas"]["ProfileEditOut"][];
             /**
              * Ai Suggestions
              * @default []
@@ -3491,6 +3711,95 @@ export interface components {
             /** Sources */
             sources: components["schemas"]["SourceInfo"][];
         };
+        /** StatsCvVersionGroupOut */
+        StatsCvVersionGroupOut: {
+            /** Applied */
+            applied: number;
+            /** Brought */
+            brought: number;
+            /** Interview */
+            interview: number;
+            /** Interview Rate */
+            interview_rate: number | null;
+            /** Key */
+            key: string | null;
+            /** Label */
+            label: string | null;
+            /** Offer */
+            offer: number;
+            /** Offer Rate */
+            offer_rate: number | null;
+            /** Profile Versions */
+            profile_versions: number[];
+            /** Rejected */
+            rejected: number;
+            /** Replied */
+            replied: number;
+            /** Reply Rate */
+            reply_rate: number | null;
+        };
+        /** StatsOverallOut */
+        StatsOverallOut: {
+            /** Applied */
+            applied: number;
+            /** Brought */
+            brought: number;
+            /** Interview */
+            interview: number;
+            /** Interview Rate */
+            interview_rate: number | null;
+            /** Offer */
+            offer: number;
+            /** Offer Rate */
+            offer_rate: number | null;
+            /** Rejected */
+            rejected: number;
+            /** Replied */
+            replied: number;
+            /** Reply Rate */
+            reply_rate: number | null;
+        };
+        /** StatsResponse */
+        StatsResponse: {
+            /** Applications Truncated */
+            applications_truncated: boolean;
+            /** By Cv Version */
+            by_cv_version: components["schemas"]["StatsCvVersionGroupOut"][];
+            /** By Role */
+            by_role: components["schemas"]["StatsRoleGroupOut"][];
+            /** Computed At */
+            computed_at: string;
+            /** Groups Truncated */
+            groups_truncated: boolean;
+            overall: components["schemas"]["StatsOverallOut"];
+            /** Since */
+            since: string | null;
+        };
+        /** StatsRoleGroupOut */
+        StatsRoleGroupOut: {
+            /** Applied */
+            applied: number;
+            /** Brought */
+            brought: number;
+            /** Interview */
+            interview: number;
+            /** Interview Rate */
+            interview_rate: number | null;
+            /** Key */
+            key: string | null;
+            /** Offer */
+            offer: number;
+            /** Offer Rate */
+            offer_rate: number | null;
+            /** Rejected */
+            rejected: number;
+            /** Replied */
+            replied: number;
+            /** Reply Rate */
+            reply_rate: number | null;
+            /** Role */
+            role: string | null;
+        };
         /** StatusResponse */
         StatusResponse: {
             /** Jobs Total */
@@ -3601,6 +3910,26 @@ export interface components {
             name: string;
             /** Prefix */
             prefix: string;
+        };
+        /** UpdateProfileRequest */
+        UpdateProfileRequest: {
+            /** Edits */
+            edits: components["schemas"]["ProfileEditIn"][];
+        };
+        /**
+         * UpdateProfileResponse
+         * @description What ``PATCH /profile`` actually returns.
+         *
+         *     Declared as the route's ``response_model`` so the OpenAPI schema — and
+         *     therefore the frontend's generated ``api-types.ts`` — says so. An
+         *     undeclared ``dict[str, Any]`` return renders as a bare ``{}`` schema,
+         *     which tells a generated client nothing about the two keys it is about to
+         *     read (S2/N3).
+         */
+        UpdateProfileResponse: {
+            /** Applied */
+            applied: components["schemas"]["ProfileEditOut"][];
+            profile: components["schemas"]["ProfileResponse"];
         };
         /** UserResponse */
         UserResponse: {
@@ -3890,6 +4219,41 @@ export interface operations {
             };
         };
     };
+    stats_api_applications_stats_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_application_api_applications__application_id__get: {
         parameters: {
             query?: {
@@ -3989,6 +4353,54 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationArtifactRowOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_contact_api_applications__application_id__contacts_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddContactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddContactResponse"];
+                };
+            };
+            /** @description Contact created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddContactResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5594,6 +6006,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_profile_api_profile_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateProfileResponse"];
                 };
             };
             /** @description Validation Error */

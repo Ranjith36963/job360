@@ -21,14 +21,16 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_request_db
 from src.core import settings
 from src.repositories.database import JobDatabase
+from src.services.applications import contacts as contacts_service
 from src.services.applications import spine
+from src.services.applications import stats as stats_service
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 
@@ -109,6 +111,26 @@ class RecordApplicationReceiptRequest(BaseModel):
         if size > cap:
             raise SpineError(422, f"fields_filled exceeds APPLICATION_RECEIPT_FIELDS_MAX_BYTES ({cap} bytes)")
         return self.fields_filled
+
+
+class AddContactRequest(BaseModel):
+    """Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md §Tool contracts).
+
+    No length/shape constraints declared here (unlike ``SaveArtifactRequest``'s
+    ``label``): every cap is a live ``settings`` value a test can monkeypatch,
+    so ``contacts.add_contact`` checks them at call time — the same pattern
+    ``SaveFitRequest.clamp_reasoning``/``RecordEventRequest.clamp_detail`` use.
+    ``added_by`` is deliberately ABSENT — ``extra="forbid"`` rejects it (S2).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    role: str = ""
+    email: str = ""
+    linkedin_url: str = ""
+    notes: str = ""
+    occurred_at: Optional[str] = None
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -210,6 +232,21 @@ class ApplicationReceiptExportOut(ApplicationReceiptOut):
     cover_letter_text: Optional[str] = None
 
 
+class ContactOut(BaseModel):
+    """A contact row (``contacts.list_contacts`` / ``add_contact``'s return).
+    Same shape everywhere a contact appears — detail, export, the add response."""
+
+    id: int
+    application_id: int
+    name: str
+    role: str
+    email: str
+    linkedin_url: str
+    notes: str
+    added_by: str
+    created_at: str
+
+
 class ApplicationDetailOut(BaseModel):
     id: int
     job_id: int
@@ -222,6 +259,7 @@ class ApplicationDetailOut(BaseModel):
     artifacts: list[ApplicationArtifactOut]
     events: list[ApplicationEventOut]
     receipts: list[ApplicationReceiptOut]
+    contacts: list[ContactOut]
 
 
 class ApplicationSummaryOut(BaseModel):
@@ -341,13 +379,92 @@ class ExportApplicationOut(BaseModel):
     events: list[ApplicationEventOut]
     artifacts: list[ExportArtifactOut]
     receipts: list[ApplicationReceiptExportOut]
+    contacts: list[ContactOut]
+
+
+class ProfileEditExportOut(BaseModel):
+    """One row of ``export_history``'s top-level ``profile_edits`` — EVERY
+    row, including a clear (``value: null``); it is the history, unlike
+    ``GET /profile``'s ``agent_edits`` (the live, non-cleared overlay only)."""
+
+    path: str
+    value: Any
+    set_by: str
+    set_at: str
 
 
 class ExportHistoryResponse(BaseModel):
     applications: list[ExportApplicationOut]
     truncated: bool
     bytes: int
+    profile_edits: list[ProfileEditExportOut]
+    # S3 — true when the edit history was cut at EXPORT_HISTORY_MAX_PROFILE_EDITS
+    # (the newest N are kept, rendered oldest-first).
+    profile_edits_truncated: bool = False
     next_since: Optional[str] = None
+
+
+class AddContactResponse(BaseModel):
+    contact: ContactOut
+    already_existed: bool
+    event_id: Optional[int]
+
+
+class StatsOverallOut(BaseModel):
+    brought: int
+    applied: int
+    replied: int
+    interview: int
+    offer: int
+    rejected: int
+    reply_rate: Optional[float]
+    interview_rate: Optional[float]
+    offer_rate: Optional[float]
+
+
+class StatsCvVersionGroupOut(BaseModel):
+    # The normalised grouping key (`lower(trim(label))`) — what the tie-break
+    # in the group order sorts on, and a stable handle for the caller. `label`
+    # is the display spelling from the group's earliest application.
+    key: Optional[str]
+    label: Optional[str]
+    profile_versions: list[int]
+    brought: int
+    applied: int
+    replied: int
+    interview: int
+    offer: int
+    rejected: int
+    reply_rate: Optional[float]
+    interview_rate: Optional[float]
+    offer_rate: Optional[float]
+
+
+class StatsRoleGroupOut(BaseModel):
+    # See StatsCvVersionGroupOut.key — same normalised key, `role` is display.
+    key: Optional[str]
+    role: Optional[str]
+    brought: int
+    applied: int
+    replied: int
+    interview: int
+    offer: int
+    rejected: int
+    reply_rate: Optional[float]
+    interview_rate: Optional[float]
+    offer_rate: Optional[float]
+
+
+class StatsResponse(BaseModel):
+    since: Optional[str]
+    overall: StatsOverallOut
+    by_cv_version: list[StatsCvVersionGroupOut]
+    by_role: list[StatsRoleGroupOut]
+    groups_truncated: bool
+    # S6 — true when only the newest STATS_MAX_APPLICATIONS applications were
+    # counted; the numbers describe that window, not the whole history.
+    applications_truncated: bool
+    computed_at: str
 
 
 # ── Routes — order matters: /export before /{application_id} ────────────────
@@ -365,6 +482,19 @@ async def export_history(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover — _raise always raises
+
+
+@router.get("/applications/stats", response_model=StatsResponse)
+async def stats(
+    since: Optional[str] = Query(None),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    try:
+        return await stats_service.compute_stats(db, user.id, since)
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
 
 
 @router.get("/applications", response_model=ListApplicationsResponse)
@@ -409,6 +539,39 @@ async def get_application_artifact(
     if row is None:
         raise HTTPException(status_code=404, detail="artifact not found")
     return row
+
+
+@router.post(
+    "/applications/{application_id}/contacts",
+    response_model=AddContactResponse,
+    # The runtime status is set on `response` below (201 create / 200 replay),
+    # which FastAPI cannot infer — so the 201 is declared here by hand.
+    # Without it the schema promised 200 ONLY, and every generated client
+    # (frontend `api-types.ts` included) treated a successful create as an
+    # undocumented response.
+    responses={201: {"model": AddContactResponse, "description": "Contact created"}},
+)
+async def add_contact(
+    application_id: int,
+    body: AddContactRequest,
+    response: Response,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """201 for a new contact, 200 (``already_existed: true``) for the same
+    email seen again on this application (R2) — the status code is set
+    dynamically since the same call can legitimately answer either."""
+    try:
+        result = await contacts_service.add_contact(
+            db, user.id, application_id, actor_for(user),
+            name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
+            notes=body.notes, occurred_at=body.occurred_at,
+        )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+    response.status_code = 200 if result["already_existed"] else 201
+    return result
 
 
 @router.post(

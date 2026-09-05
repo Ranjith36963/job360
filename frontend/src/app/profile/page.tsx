@@ -22,6 +22,7 @@ import {
   type ClearSection,
 } from "@/lib/api";
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
+import type { AgentEdit } from "@/lib/agent-edits";
 import type { CVDetail, ProfileResponse, PreferencesRequest } from "@/lib/types";
 
 /** Human names for the clear toasts — "cv" is not what a person calls it. */
@@ -63,6 +64,7 @@ const EMPTY_CV_DETAIL: CVDetail = {
   headline: "",
   highlights: [],
   job_titles: [],
+  links: [],
   location: "",
   name: "",
   raw_text: "",
@@ -288,6 +290,12 @@ export default function ProfilePage() {
 
   const { percent, label } = calcCompleteness(profile);
 
+  // R11 — the current agent-edit overlay. The backend types this field as a
+  // bare `dict[str, Any]` (it has no dedicated Pydantic model of its own), so
+  // the generated type is untyped too; each row has the same {path, value,
+  // set_by, set_at} shape `export_history`'s typed equivalent uses.
+  const agentEdits = (profile?.agent_edits ?? []) as unknown as AgentEdit[];
+
   return (
     <div className="relative">
       {/* ── Ambient glow ─────────────────────────────── */}
@@ -455,6 +463,7 @@ export default function ProfilePage() {
                 onSave={handleSavePreferences}
                 onClear={profile ? () => handleClear("preferences") : undefined}
                 loading={loadingProfile}
+                agentEdits={agentEdits}
               />
             </div>
 
@@ -475,6 +484,7 @@ export default function ProfilePage() {
                 linkedinSubsections={profile?.linkedin_subsections}
                 githubTemporal={profile?.github_temporal}
                 githubDetail={profile?.github_detail}
+                agentEdits={agentEdits}
               />
             )}
 

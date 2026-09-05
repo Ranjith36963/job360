@@ -48,12 +48,13 @@ logger = get_logger(__name__)
 
 SERVER_NAME = "job360"
 INSTRUCTIONS = (
-    "Job360 keeps the record of a job hunt AFTER the click: the user brings a job "
-    "(they found it themselves — never search for jobs on their behalf), Job360 "
-    "scores the fit against their profile, tailors a CV + cover letter on request, "
-    "and keeps an immutable receipt when the user says they applied. Nothing here "
-    "submits an application anywhere; record_application only records a fact the "
-    "user states."
+    "Job360 is the memory of a job hunt AFTER the click: the user brings a job "
+    "(they found it themselves — never search for jobs on their behalf), YOU judge "
+    "whether it fits and Job360 STORES your verdict, your tailored CV and cover "
+    "letter, and an immutable receipt when the user says they applied. Job360 never "
+    "ranks, scores or recommends a job itself — it remembers what you decided. "
+    "Nothing here submits an application anywhere; record_application only records "
+    "a fact the user states."
 )
 
 # The user behind the request being served. Set by the ASGI shim per request,
@@ -218,9 +219,10 @@ def _receipt_full(r: Any) -> dict[str, Any]:
 
 
 def build_server() -> MCPServer:
-    """Create the MCPServer with the eight tools. Imports the SDK here (rule #16)."""
+    """Create the MCPServer with the eighteen tools. Imports the SDK here (rule #16)."""
     from mcp.server import MCPServer
     from pydantic import ValidationError
+    from starlette.responses import Response
 
     from src.api.routes import applications as applications_route
     from src.api.routes import bring as bring_route
@@ -242,13 +244,27 @@ def build_server() -> MCPServer:
     async def get_profile() -> dict[str, Any]:
         """The user's Job360 profile summary: is it complete, job titles, skill count,
         experience level, and which inputs (CV / LinkedIn / GitHub) they have given."""
+        # ONE profile read for the whole tool call. `load_profile_response` is
+        # the same function `GET /profile` itself is (same 404, same rendering),
+        # and it hands back BOTH the UserProfile object and the rendered
+        # response from a single connection — so the `fields` map below costs
+        # nothing extra. Calling the route and then re-loading the profile
+        # meant four connections to answer one tool call.
+        from src.services.profile import edits as profile_edits  # noqa: PLC0415
+
+        user_id = _user().id
         try:
-            resp = await profile_route.get_profile(_user())
+            profile, resp = profile_route.load_profile_response(user_id)
         except HTTPException as exc:
             _audit("get_profile", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
         s = resp.summary
         _audit("get_profile", "ok")
+
+        # R11 (docs/plans/2026-09-05-contacts-stats/spec.md) — provenance: the
+        # closed set of paths an agent may edit, its own live overlay, and a
+        # `{path: current value}` map over every editable path.
+        editable_paths = list(profile_edits.editable_paths())
         return {
             "is_complete": s.is_complete,
             "job_titles": s.job_titles,
@@ -259,6 +275,11 @@ def build_server() -> MCPServer:
             "has_linkedin": s.has_linkedin,
             "has_github": s.has_github,
             "top_skills": resp.skill_tiers.get("primary", [])[:15],
+            "editable_paths": editable_paths,
+            # Already read on the profile's own connection — the response
+            # carries it, so this is not a third query.
+            "agent_edits": [row.model_dump() for row in resp.agent_edits],
+            "fields": profile_edits.field_values(profile, editable_paths),
         }
 
     @mcp.tool()
@@ -559,6 +580,91 @@ def build_server() -> MCPServer:
             applications=len(resp.get("applications", [])), truncated=resp.get("truncated", False),
         )
         return resp
+
+    # ── Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md, R12/S11) ──────
+    # Three more tools, each calling its route FUNCTION directly, same as the
+    # spine tools above. None require_verified_user (no LLM call).
+
+    @mcp.tool()
+    async def add_contact(
+        application_id: int,
+        name: str,
+        role: str = "",
+        email: str = "",
+        linkedin_url: str = "",
+        notes: str = "",
+        occurred_at: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Record a person met during this application's outreach — a
+        recruiter, referral, hiring manager. Give an email whenever you have
+        one: adding the SAME email again on the SAME application returns the
+        existing contact (already_existed=true) instead of a duplicate, so
+        re-running this safely never doubles up. Without an email every call
+        makes a new row."""
+        try:
+            body = applications_route.AddContactRequest(
+                name=name, role=role, email=email, linkedin_url=linkedin_url,
+                notes=notes, occurred_at=occurred_at,
+            )
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.add_contact(application_id, body, Response(), db, _user())
+        except HTTPException as exc:
+            _audit("add_contact", "error", application_id=application_id, http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit(
+            "add_contact", "ok", application_id=application_id,
+            already_existed=resp.get("already_existed", False),
+        )
+        return resp
+
+    @mcp.tool()
+    async def stats(since: Optional[str] = None) -> dict[str, Any]:
+        """Counts over YOUR applications from the event log — brought,
+        applied, replied, interview, offer, rejected — plus rates and two
+        groupings: by CV version (label the CV with save_artifact's `label`
+        to get a per-variant count here) and by role. `since` (an ISO
+        date/datetime) scopes to applications brought on/after that date.
+        Nothing is inferred; every number is a count of events you recorded."""
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.stats(since, db, _user())
+        except HTTPException as exc:
+            _audit("stats", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("stats", "ok")
+        return resp
+
+    @mcp.tool()
+    async def update_profile(edits: list[dict[str, Any]]) -> dict[str, Any]:
+        """Correct or fill in something the extraction got wrong or missed —
+        location, headline, skills, a preference. Each edit is
+        {"path": <one of get_profile's editable_paths>, "value": <new value,
+        or null to clear back to what extraction says>}. An unknown path or a
+        wrongly-typed value is refused with the allowed set/values named.
+        A re-extraction (a fresh CV/LinkedIn/GitHub) never undoes your edit —
+        only clearing it does."""
+        try:
+            # `model_validate` (not the constructor) so the raw `list[dict]`
+            # coming in over MCP is validated/coerced into `ProfileEditIn`
+            # rows by Pydantic itself, rather than mypy expecting the caller
+            # to have already typed them.
+            body = profile_route.UpdateProfileRequest.model_validate({"edits": edits})
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        paths = [e.get("path") for e in edits]
+        try:
+            resp = await profile_route.update_profile(body, _user())
+        except HTTPException as exc:
+            # S3 — paths only, never values, in the audit trail.
+            _audit("update_profile", "error", http_status=exc.status_code, paths=paths)
+            raise _tool_error(exc) from None
+        _audit("update_profile", "ok", paths=paths)
+        # The route now returns a typed `UpdateProfileResponse` (so OpenAPI
+        # tells the truth); MCP tools answer with plain JSON.
+        return resp.model_dump()
 
     return mcp
 

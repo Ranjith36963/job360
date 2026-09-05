@@ -9,6 +9,7 @@ import type { ApplicationDetail } from "@/lib/api";
 import { Timeline } from "@/components/applications/Timeline";
 import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
 import { FitPanel } from "@/components/applications/FitPanel";
+import { Contacts } from "@/components/applications/Contacts";
 
 const STATUS_LABEL: Record<string, string> = {
   considering: "Considering",
@@ -119,6 +120,13 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fit</h2>
         <FitPanel fit={detail.fit} />
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          People
+        </h2>
+        <Contacts applicationId={detail.id} contacts={detail.contacts} />
       </section>
 
       <section>

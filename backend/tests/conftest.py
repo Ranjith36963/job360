@@ -255,7 +255,7 @@ async def _noop_lifespan(app):
 
 
 @pytest.fixture
-def authenticated_async_context(monkeypatch, tmp_path):
+def authenticated_async_context(tmp_path):
     """Batch 3.5.4 — fixture for async API tests that need auth.
 
     Returns a factory callable. Inside an async test::
@@ -275,7 +275,18 @@ def authenticated_async_context(monkeypatch, tmp_path):
       * replaces ``app.router.lifespan_context`` with a no-op so
         ASGITransport(app=app) doesn't fire the real lifespan
       * yields a single-use AsyncClient with the session cookie set
+
+    ITS PATCHES ARE ITS OWN. This used to take the test's ``monkeypatch``
+    fixture, so a test calling ``monkeypatch.undo()`` mid-test — the normal way
+    to retire a deliberate fault injection — also reverted every ``DB_PATH``
+    patch below, silently pointing the rest of that test at the PRODUCTION
+    database. The symptom is a request that suddenly answers 401
+    "authentication required" (the session row lives in the test schema),
+    which reads like an auth bug and is not one. A private ``MonkeyPatch``,
+    undone in this fixture's own teardown, makes ``monkeypatch.undo()`` in a
+    test mean what the test author meant: undo MY patches.
     """
+    mp = pytest.MonkeyPatch()
     db_path = tmp_path / "test.db"
     _bootstrap_async_db(str(db_path))
 
@@ -284,15 +295,15 @@ def authenticated_async_context(monkeypatch, tmp_path):
     from src.api.routes import channels as channels_route
     from src.core import settings
 
-    monkeypatch.setattr(settings, "DB_PATH", db_path, raising=True)
-    monkeypatch.setattr(dependencies, "DB_PATH", db_path, raising=True)
-    monkeypatch.setattr(auth_deps, "DB_PATH", db_path, raising=True)
-    monkeypatch.setattr(auth_route, "DB_PATH", db_path, raising=True)
-    monkeypatch.setattr(channels_route, "DB_PATH", db_path, raising=True)
-    monkeypatch.setattr(dependencies, "_db", None, raising=False)
+    mp.setattr(settings, "DB_PATH", db_path, raising=True)
+    mp.setattr(dependencies, "DB_PATH", db_path, raising=True)
+    mp.setattr(auth_deps, "DB_PATH", db_path, raising=True)
+    mp.setattr(auth_route, "DB_PATH", db_path, raising=True)
+    mp.setattr(channels_route, "DB_PATH", db_path, raising=True)
+    mp.setattr(dependencies, "_db", None, raising=False)
 
     crypto.set_test_key(Fernet.generate_key().decode("ascii"))
-    monkeypatch.setenv("SESSION_SECRET", "test-secret-" + "z" * 40)
+    mp.setenv("SESSION_SECRET", "test-secret-" + "z" * 40)
 
     # Redirect DB_PATH on EVERY module that captured it at import time. A
     # ``from src.core.settings import DB_PATH`` binds the *value*, so patching
@@ -309,7 +320,7 @@ def authenticated_async_context(monkeypatch, tmp_path):
     for _mod in list(_sys.modules.values()):
         _name = getattr(_mod, "__name__", "")
         if _name.startswith(("src.", "migrations")) and getattr(_mod, "DB_PATH", None) is not None:
-            monkeypatch.setattr(_mod, "DB_PATH", db_path, raising=False)
+            mp.setattr(_mod, "DB_PATH", db_path, raising=False)
 
     app.router.lifespan_context = _noop_lifespan  # type: ignore[assignment]
 
@@ -368,7 +379,7 @@ def authenticated_async_context(monkeypatch, tmp_path):
     # Teardown: close the lazily-created app DB singleton. aiosqlite leaves a
     # non-daemon `_connection_worker_thread` per open connection; not closing
     # them accumulates threads that block interpreter shutdown (the long-
-    # observed test_api.py "exit-hang"). This runs while `monkeypatch` is still
+    # observed test_api.py "exit-hang"). This runs while `mp` is still
     # active — i.e. BEFORE it restores `_db` and discards this test's
     # connection reference — so `dependencies._db` still points at it. Cross-
     # loop close is safe even though the request loop is already gone.
@@ -381,6 +392,8 @@ def authenticated_async_context(monkeypatch, tmp_path):
     # Drop this test's Postgres schema so schemas don't accumulate.
     with contextlib.suppress(Exception):
         asyncio.run(_pg.drop_schema(str(db_path)))
+
+    mp.undo()
 
 
 @pytest.fixture
