@@ -5,7 +5,8 @@
 
 **Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. Every merge ships to real users.** There is no manual deploy step and no staging gate. Merging is a release — never merge "to tidy up".
 
-Live at **job360.uk**. Five services: `backend`, `frontend`, `worker`, `Postgres`, `Redis`.
+Live at **job360.uk**. The service list is not written down here — it changes without a
+commit, so read it: `railway status --json`.
 
 ### How to check what is actually deployed
 
@@ -23,12 +24,10 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 
 ---
 
-> **Status: ✅ LIVE since 2026-07-02.** Railway Hobby active. Project `job360`, 5 services all Online.
+> **Status: ✅ LIVE since 2026-07-02.** Railway Hobby active, project `job360`.
 > - **Custom domain:** https://job360.uk
 > - **Frontend:** https://frontend-production-c608f.up.railway.app
 > - **Backend API:** https://backend-production-80e8e.up.railway.app
-> - Verified live: `/readyz` → `{db:ok, redis:ok}`, security headers, full register→login→/me auth flow.
-> - Worker running 10 ARQ functions + 2 crons. Managed Postgres + Redis attached.
 
 ## 🟢 What's already done (no action needed)
 - Backend + frontend **Dockerfiles**, **`docker-compose.prod.yml`** (5 services) — validated.
@@ -74,6 +73,7 @@ railway domain --service frontend    # → public site URL
 ```
 
 ## Verify after deploy
-- `curl https://<backend-url>/livez` → 200; `/readyz` → `{db:ok, redis:ok}`
+- `curl https://<backend-url>/livez` → 200; `/readyz` → 200. `redis` is `"skipped"`, not
+  `"ok"`, whenever `REDIS_URL` is unset — `backend/tests/test_health_probes.py::test_readyz_redis_skipped_when_url_unset`.
 - Register + upload CV on the live frontend; confirm a row in the managed Postgres.
 - Sentry receives a test error; PostHog receives a pageview.

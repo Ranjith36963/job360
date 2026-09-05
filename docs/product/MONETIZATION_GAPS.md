@@ -42,7 +42,7 @@
 |---|---|
 | **Payments** | No Stripe, no billing route, no checkout. £0 is collectable. |
 | **Plans + paywall** | No free/premium tiers, no quota enforcement, no pricing page. Design exists (`docs/product/plans/2026-06-21-free-premium-plans.md`) — not built. Without a gate, nobody has a reason to upgrade. |
-| ~~A live website~~ **SHIPPED** | Live on Railway at **job360.uk** since 2026-07-02 — five services (backend, frontend, worker, Postgres, Redis). No longer a gap. |
+| ~~A live website~~ **SHIPPED** | Live on Railway at **job360.uk** since 2026-07-02. No longer a gap. |
 | **Legal-to-charge** | `/privacy` + `/terms` pages exist ✅; but **ICO registration** (UK — CVs are personal data) + lawyer review are still owner to-dos. |
 
 ## 🟠 Tier 2 — Keep customers & don't bleed money

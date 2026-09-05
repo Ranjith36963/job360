@@ -4,8 +4,8 @@
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
 > This file describes **two paths that share one Postgres and one FastAPI app**:
-> - **Product path (current)** — `api/routes/bring.py` (`POST /jobs/bring`, link or text) → `api/routes/receipts.py` (append-only `application_receipts`) → `api/routes/tailor.py` (CV tailor, web fallback only) → `api/mcp_server.py` (8 MCP tools at `/api/mcp`, bearer `j360_…`, OAuth 2.1 in slice 1). Profile extraction (`services/profile/`) feeds both paths. Slice 2 (#480) merges `applications` + `application_receipts` + `application_stage_history` + `tailored_documents` into one `Application` object with a typed event log and versioned artifacts.
-> - **Legacy path (sourcing era)** — everything in "System Overview" below: `SOURCE_REGISTRY`, the scorer, dedup, enrichment, embeddings, the search dashboard. It still runs on `main`; slice 2 hides it, slice 5 (#483) deletes it. `docs/product/pillars/` documents this path and is now dated.
+> - **Product path (current)** — `api/routes/bring.py` (`POST /jobs/bring`) → `services/applications/spine.py` + `api/routes/applications.py` (the `Application` object, typed event log, versioned artifacts) → `api/routes/receipts.py` (append-only) → `api/routes/tailor.py` (CV tailor, web fallback only) → `api/mcp_server.build_server` (`/api/mcp`, bearer `j360_…`, OAuth 2.1). Profile extraction (`services/profile/`) feeds both paths. The API Routes table below is generated — read it, not this line, for what exists.
+> - **Legacy path (sourcing era)** — everything in "System Overview" below: `SOURCE_REGISTRY`, the scorer, dedup, enrichment, embeddings, the search dashboard. It is off by default behind `core/settings.SEARCH_UI_ENABLED` and `core/settings.CATALOG_CRONS_ENABLED`; slice 5 (#483) deletes it. `docs/product/pillars/` documents this path and is now dated.
 >
 > Three Railway services: `backend`, `frontend`, `Postgres`. The `worker` and `Redis` services were deleted 2026-09-02 — `src/workers/` still exists but nothing runs it (no background jobs, no digest delivery).
 
@@ -27,7 +27,7 @@ Job360 *was* a UK-focused multi-domain job search aggregator. This path fetches 
 | ATS board slugs | **302** across **11** platforms | `src/data/` ATS slug files |
 | Enrichment enum values | **7** | `services/enrichment` schema |
 | Migration files | **38** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **241** | `backend/tests/` |
+| `test_*.py` files | **242** | `backend/tests/` |
 | GitHub Actions workflows | **30** | `.github/workflows/` |
 | Hard rules | **31** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->

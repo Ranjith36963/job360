@@ -10,19 +10,13 @@
 > structured profile, every artifact version, every event and the receipt.**
 > We never source, rank or recommend jobs (product rule 4).
 >
-> **Live on `main` (89cd1dd, 2026-09-03):** bring-a-job (paste) + append-only
-> receipts (#469); personal API tokens + MCP server at `/api/mcp`, 8 tools (#473);
-> token-cap race fix (#476); mypy at 0 (#477). Railway runs backend + frontend +
-> Postgres only — **worker and Redis were deleted 2026-09-02**, so nothing runs in
-> the background (no notifications, no crons; Redis-unreachable log lines are expected).
->
-> **Next, in order (VISION.md):** 1 OAuth 2.1 for ChatGPT/Grok clients (draft PR #488,
-> awaiting merge) → 2 the spine — **built on branch `feat/application-spine`, awaiting
-> review/PR** (one Application object, typed event log, versioned artifacts,
-> `save_artifact` / `record_event` / `whats_new` / `export_history`; home = your
-> applications; old search UI hidden behind `SEARCH_UI_ENABLED`, scorer off) → 3 URL
-> fetch on the web (link or text, paste as fallback) → 4 contacts/outreach, stats,
-> `update_profile`. Measure: the owner uses it daily for his own hunt.
+> **What is live, and what is next:** never restated here — a merge moves both the
+> same night. Live = the generated API Routes table in
+> [`ARCHITECTURE.md`](ARCHITECTURE.md#api-routes) plus
+> `railway deployment list --service backend --json` (`meta.commitHash`).
+> Next = the slice table in
+> [`docs/plans/2026-09-03-mission-roadmap.md`](docs/plans/2026-09-03-mission-roadmap.md),
+> whose issues carry their own state. Measure: the owner uses it daily for his own hunt.
 
 ## Sourcing era (history) — Funnel batch LIVE (2026-08-05) — retrieve→enrich→rank→judge in prod
 
