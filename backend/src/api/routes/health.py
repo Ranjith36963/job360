@@ -74,7 +74,7 @@ async def readyz() -> JSONResponse:
 
             # redis-py ships py.typed but `from_url` itself carries no
             # annotations, so strict mode flags the call, not the import.
-            r = aioredis.from_url(redis_url, socket_connect_timeout=2)  # type: ignore[no-untyped-call]
+            r = aioredis.from_url(redis_url, socket_connect_timeout=2)
             await r.ping()
             await r.aclose()
             checks["redis"] = "ok"

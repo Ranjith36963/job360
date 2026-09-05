@@ -64,7 +64,11 @@ dependencies = [
     # quietly — in-process windows, a "skipped" probe — so losing the package
     # would not have raised anywhere; the rate limiter would just have stopped
     # holding across replicas, silently. Naming it keeps that honest.
-    "redis>=5.0",
+    # Floor 7.2: the first release whose `from_url` is typed. Below it mypy
+    # needs a `type: ignore` on those two calls; at/above it the same ignore is
+    # "unused" and the ratchet goes red — so the floor is what makes every
+    # machine (CI resolves the newest) agree.
+    "redis>=7.2",
     # rapidfuzz backs the tailor's integrity check (does this sentence exist in
     # the source CV?) and the two-pass profile merge. Lazy-imported per rules
     # #11/#16 — small and C-backed, but not on the import path.
