@@ -378,12 +378,17 @@ async def test_events_are_append_only(authenticated_async_context):
     assert offenders == [], f"application_events/application_artifacts must be append-only: {offenders}"
 
     from src.api.main import app
+    from tests._routes import route_table
 
-    for route in app.routes:
-        path = getattr(route, "path", "")
-        methods = getattr(route, "methods", set()) or set()
-        if path.startswith("/api/applications") and ("/events" in path or "/artifacts" in path):
-            assert not (methods & {"PATCH", "PUT", "DELETE"}), f"{path} exposes {methods}"
+    # route_table, not app.routes: FastAPI 0.141 nests included routers, and a
+    # loop over the raw list saw no /api/applications routes at all -- this
+    # guard went green by seeing NOTHING. `seen` pins that it looks at something.
+    seen = 0
+    for row in route_table(app):
+        if row.path.startswith("/api/applications") and ("/events" in row.path or "/artifacts" in row.path):
+            seen += 1
+            assert not (row.methods & {"PATCH", "PUT", "DELETE"}), f"{row.path} exposes {set(row.methods)}"
+    assert seen, "no /api/applications/*/events|artifacts routes found -- the guard is vacuous"
 
 
 @pytest.mark.asyncio

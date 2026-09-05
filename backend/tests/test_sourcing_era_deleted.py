@@ -190,8 +190,12 @@ def test_archive_populated() -> None:
 # ── R2: routes ──────────────────────────────────────────────────────────────
 def test_routes_gone() -> None:
     from src.api.main import app
+    from tests._routes import route_paths
 
-    paths = sorted({getattr(r, "path", "") for r in app.routes})
+    # route_paths, not app.routes: FastAPI 0.141 nests included routers, and
+    # the raw list has NO /api/* rows -- "nothing sourcing-era is mounted" would
+    # hold vacuously and "/api/jobs/bring" would look absent.
+    paths = sorted(set(route_paths(app)))
     bad = [
         p for p in paths
         if p.startswith(("/api/search", "/api/runs", "/api/sources"))
