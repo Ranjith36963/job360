@@ -62,7 +62,7 @@ Job360 is a UK job hunter that reads *you* before it reads the jobs.
 You give it up to four things — your CV, your LinkedIn export, your GitHub username, and a
 preferences form. Each is pulled apart twice at once: a rules pass that follows structure, and an LLM
 pass that reads prose. The two are merged into one profile, and unchanged inputs are skipped by hash
-so you never pay to re-read the same CV (`backend/src/services/profile/two_pass.py:572`).
+so you never pay to re-read the same CV (`backend/src/services/profile/two_pass.py`).
 
 Every night at 04:00 UTC a worker crawls **41 registered sources** (40 unique scrapers — `indeed` and
 `glassdoor` share one). Yesterday's run pulled 16,040 listings in 398 seconds.
@@ -93,7 +93,7 @@ them was in Vietnam. That was false. I produced it with a broken instrument.**
 
 I pulled his top 25 feed rows sorted by `f.score` — the keyword score. **The product does not sort
 that way.** It sorts by `COALESCE(llm_fit_score, score) DESC`
-(`backend/src/services/feed.py:104` — the executed query; `:90` is the docstring that
+(`backend/src/services/feed.py` — the executed query; `:90` is the docstring that
 explains it) — the
 LLM judge's verdict first, keyword only as fallback.
 
@@ -159,7 +159,7 @@ Its locked verdict, de-biased, three independent labs:
 | BM25 | −0.15 | −0.48 |
 
 **Keyword ranking is worse than useless once its home-field advantage is removed.** The recommendation
-was: retrieve with keyword, decide with the judge. That recommendation *was* shipped — `feed.py:90`
+was: retrieve with keyword, decide with the judge. That recommendation *was* shipped — `feed.py`
 is exactly that funnel. The eval was right and the product followed it.
 
 ### And it has a notifier. It runs weekly. It has never produced a number.
@@ -262,7 +262,7 @@ Append-only. One line each, with the measurement.
   gap in my search as a gap in the repo.
 - **2026-08-18 — THE BAD ONE. Told the owner 1 in 5 of his top jobs was wrong and one was in
   Vietnam.** I sorted by `f.score`; the product sorts by `COALESCE(llm_fit_score, score)`
-  (`feed.py:90`). Correct ordering: 25/25 right field, 0 foreign, 0 wrong-domain. Measured: a
+  (`feed.py`). Correct ordering: 25/25 right field, 0 foreign, 0 wrong-domain. Measured: a
   **20-point fabricated defect rate**, delivered as the headline of an honesty report. The system had
   already caught every job I accused it of showing.
 
