@@ -42,7 +42,7 @@
 > that are not there. Treat every path and commit below as UNVERIFIED unless you have just
 > checked it.
 
-> **SHIPPED** (verified 2026-08-24: `backend/src/services/profile/two_pass.py:572`
+> **SHIPPED** (verified 2026-08-24: `backend/src/services/profile/two_pass.py`
 > `run_two_pass_extraction`). The branch `feat/two-pass-profile-extraction` no
 > longer exists — it merged. This block described it as "in flight" for two
 > months after the work landed. Two-pass
@@ -173,18 +173,8 @@
 
 ## Matching Engines
 
-Four engines are available, stacked **keyword → dimensions → hybrid → LLM judge**. All default OFF except the keyword engine:
-
-| Engine | Service | Flag | Default |
-|--------|---------|------|---------|
-| #1 Keyword | `services/skill_matcher.py` (`JobScorer`, 4-component 0–100) | `ENGINE1_ENABLED` — no legacy alias; `skill_matcher.py:480-483` reads it and `:560` gates the keyword half, so it CAN be switched off | **true** |
-| #2 Dimensions | `services/scoring_dimensions.py` — +30 seniority/salary/visa/workplace (`skill_matcher.py:582-617`). **The scorer enters the dim path on `user_preferences` alone** (`skill_matcher.py:587`), no flag involved; the flag gates only whether the **enrichment** LLM step (`services/job_enrichment.py`) has produced data for those dims to read (`main.py:853`, `main.py:1137`). Without it they score their neutral halves | `ENGINE2_ENABLED` **or** `ENRICHMENT_ENABLED` (enrichment data only) | false |
-| #3 Hybrid | `services/embeddings.py` + `pg_vector_index.py` + `retrieval.py` (RRF fuse + cross-encoder rerank). Vectors live in `job_embeddings.embedding`; `vector_index.py` is the legacy Chroma wrapper with no production caller | reads: `ENGINE3_ENABLED` **or** `SEMANTIC_ENABLED`; embedding writes: `SEMANTIC_ENABLED` alone | false |
-| #4 LLM judge | `services/llm_matcher.py` (`MatchVerdict`) | `ENGINE4_ENABLED` **or** `MATCHER_ENABLED` (`main.py:352`, `rescore.py:395,589`) | false |
-
-Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored on `user_feed` (migration 0017). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Measured: 18/18 judged in 89.8 s at concurrency 3; judge spread 20–92 vs keyword 30–43; 10/10 fit accuracy on labeled sample.
-
-**Profile-version re-score (migration 0018, automatic, no new flags):** `user_feed` carries a nullable `profile_version` stamping which `user_profile_versions.id` produced the row's score — migration 0018 only ADDs the column, so rows written before it stay `NULL` until something re-visits them (`backend/migrations/0018_user_feed_profile_version.up.sql`). When a user saves a new profile (CV / LinkedIn / GitHub / preferences), the system detects whether the content actually changed and re-scores the catalog in the background against the new profile. Old LLM verdicts are cleared **only when the judge is on** (`ENGINE4_ENABLED or MATCHER_ENABLED` — `backend/src/services/rescore.py:589,595-598`); with it off, the default, no verdict is touched. Ordinary searches do **not** skip existing rows: every authenticated search also runs `backfill_feed_from_catalog(user_id, db)` (`backend/src/main.py:1272-1278`), which re-scores the shared catalog for that user. Their scores hold steady because `upsert_feed_row` freezes the score only when the incoming `profile_version` **and** `scorer_version` both match the stored ones, and overwrites it when either differs (`backend/src/services/feed.py:288-303`). **A `SCORER_VERSION` bump therefore re-scores only the rows a run actually reaches** — the write set is bounded by the `MIN_STORE_SCORE` floor and the `FEED_CANDIDATE_CAP` top-N selection (default 800: `scored[:cap]`, `backend/src/services/rescore.py:293`; `backend/src/core/settings.py:129`), not every `user_feed` row. A job's score changes only when the profile or the scorer changes, never just because time passed. Service: `backend/src/services/rescore.py`; trigger: `backend/src/api/routes/profile.py`.
+Engines, their flags and their defaults: **ARCHITECTURE.md → "Matching Engine Stack"**.
+It is the one copy; this section used to hold a second one and the two drifted apart.
 
 ---
 
@@ -215,10 +205,10 @@ Engine #4 runs after per-user feed write (`_run_matcher_stage`). Results stored 
 ## What Is Working Right Now
 
 - Full 41-source pipeline (40 live instances) runs end-to-end (async fetch, score, dedup, store, notify) with `TieredScheduler` wired into `run_search` (Batch 3 / 3.5; M6 rotation removed jobtensor/comeet/aijobs_global; gov_apprenticeships restored 2026-06-16; 2026-08-10 rotation removed 6 dead upstreams)
-- Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback, in order: **OpenAI `gpt-4o-mini` (PRIMARY)** / Gemini / Groq / Cerebras — `llm_provider.py:330-334`)
+- Profile system: CV + LinkedIn + GitHub enrichment → dynamic keywords → personalised search (LLM-only CV parser via multi-provider fallback, in order: **OpenAI `gpt-4o-mini` (PRIMARY)** / Gemini / Groq / Cerebras — `llm_provider.py`)
 - Multi-user delivery layer (Batch 2): auth + per-tenant isolation + ARQ worker (`WorkerSettings` + `send_notification`) + Apprise dispatcher + `FeedService` SSOT
 - Multi-user profile storage (Batch 3.5.2): migration `0006_user_profiles` + per-user `_search_config_for`
-- Conditional-cache machinery (Batch 3.5.3) exists and is tested, but **no source uses it today** — the `nhs_jobs_xml` pilot went with that source in the 2026-08-10 rotation (only `nhs_jobs_xml` was retired — the separate `nhs_jobs` source is still registered, `main.py:142`). Only `backend/tests/test_conditional_fetch.py` calls the helpers; `backend/scripts/preflight_conditional_cache.py` remains for future candidates
+- Conditional-cache machinery (Batch 3.5.3) exists and is tested, but **no source uses it today** — the `nhs_jobs_xml` pilot went with that source in the 2026-08-10 rotation (only `nhs_jobs_xml` was retired — the separate `nhs_jobs` source is still registered, `main.py`). Only `backend/tests/test_conditional_fetch.py` calls the helpers; `backend/scripts/preflight_conditional_cache.py` remains for future candidates
 - All 8 keyed APIs skip gracefully when keys are empty
 - All ATS boards iterate over **297** company slugs actually polled — `core/companies.py` holds **302** across 11 platform lists, but `RIPPLING_COMPANIES` (5) has had no source class since the 2026-08-10 rotation, so 10 ATS sources poll the other 297 (comeet was removed in M6)
 - All RSS/XML feeds parse correctly with mocked data

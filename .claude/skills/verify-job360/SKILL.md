@@ -48,7 +48,7 @@ Choose based on what you touched. When unsure, do the broader one.
 ```
 cd frontend && npm run dev          # → http://localhost:3000 (Next.js 16 + Turbopack)
 ```
-Wait for `Ready in …`. If `:3000` is busy, a server is already up — reuse it.
+Wait for `Ready in …`. If  is busy, a server is already up — reuse it.
 
 **Drive it.** Use the **Playwright MCP** tools (already connected this session):
 - `browser_navigate` to the page you changed.
