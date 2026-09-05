@@ -10,40 +10,33 @@
 
 ## What this is
 
-The Job360 backend: Python 3.10+ (`mcp` needs it; CI and prod run 3.12), FastAPI, Postgres via psycopg3 (`pg.py` — an aiosqlite-shaped shim). No worker: the ARQ code in `src/workers/` is dead since the worker + Redis services were deleted 2026-09-02.
-**Product path:** `src/api/routes/bring.py` → `receipts.py` → `tailor.py` (web fallback) → `src/api/mcp_server.py`; `src/services/profile/` feeds it. Everything else under `src/sources/`, `src/main.py`, `services/skill_matcher.py`, `services/enrichment/` is the sourcing era — still runs, slated for deletion (roadmap slice 5, #483). Never add to it.
+The Job360 backend: Python 3.10+ (`mcp` needs it; CI and prod run 3.12), FastAPI, Postgres via psycopg3 (`pg.py` — an aiosqlite-shaped shim). No worker, no Redis-backed queue: the worker + Redis services were deleted 2026-09-02 and the ARQ code went with slice 5.
+**Product path:** `src/api/routes/bring.py` → `src/services/applications/spine.py` (one Application, append-only events/artifacts/receipts) → `tailor.py` (web fallback) → `src/api/mcp_server.py`; `src/services/profile/` feeds it. The sourcing era (`src/sources/`, `src/main.py`, scorer, dedup, enrichment, embeddings) was **deleted 2026-09-05** (slice 5, #483). Never rebuild it.
 Entry points: `main.py` (uvicorn) and `python -m src.cli`. Runtime data (gitignored)
-lives in `data/` (`exports/`, `reports/`, `logs/`, `chroma/`, and the legacy `user_profile.json` that
+lives in `data/` (`exports/`, `reports/`, `logs/`, and the legacy `user_profile.json` that
 `storage.py` migrates once then deletes). There is **no `data/jobs.db`** — the store is
 Postgres; `DB_PATH` is only a connection selector (`src/core/settings.py:15-20`,
 `src/repositories/pg.py:732-737`).
 
 ## Owner rule #29 — empty user fields stay SILENT
 
-Like Indeed/LinkedIn: match on what the user filled. An empty preference
-(salary, locations, workplace, experience level, about_me) = "don't care" —
-never a penalty, never a per-job zero, never a guess. Dim scorers return a
-constant for an empty user side; prefilter passes everything; the judge prompt
-omits unset prefs. Details + audit: `../docs/product/product_design_rules.md` (root
-CLAUDE.md rule #29).
+An empty preference (salary, locations, workplace, experience level, about_me)
+= "don't care" — never a penalty, never a guess, never a default we invent. The
+profile the agent reads shows an unset field as absent, not zero. Details:
+`../docs/product/product_design_rules.md` (hard-rules skill, rule #29).
 
 ## Commands (run from `backend/`)
 
 ```bash
 # Canonical pre-commit test run — defer to the runtime collected count, not a doc figure
-python -m pytest -q -p no:randomly   # 2 `live` deselected; test_main.py included. Measure the count, never quote it.
+python -m pytest -q -p no:randomly   # measure the count, never quote it
 
-python -m pytest tests/test_scorer.py::test_name -v   # single test
+python -m pytest tests/test_receipts.py::test_name -v # single test
 python -m ruff check .                                # lint (CI gate)
-python -m src.cli run                                 # full pipeline
+python -m src.cli setup-profile --cv cv.pdf           # profile extraction from the CLI
 python main.py                                        # FastAPI on :8000
 python -m migrations.runner up                        # apply migrations (non-API contexts)
 ```
-
-`test_main.py` is now part of the canonical run. The M8 batch stubbed JobSpy
-(`fetch_jobs → []` via autouse fixture) and patched `load_profile`, making it
-fully offline (18 `def test_` as of 2026-08-24 — measure, don't quote). Do NOT
-add `--ignore=tests/test_main.py` back.
 
 ## Backend test-infra notes (hard-won; don't relearn)
 
@@ -61,8 +54,8 @@ add `--ignore=tests/test_main.py` back.
 ## Where things are
 
 - `src/api/routes/bring.py`, `receipts.py`, `tailor.py`, `src/api/mcp_server.py` — the product path
-- `src/main.py` — legacy orchestrator + `SOURCE_REGISTRY` (41) + `_build_sources()` (sourcing era, never extend)
-- `src/cli.py` — Click CLI · `src/api/` — FastAPI app + routes · `src/services/` — profile extraction + legacy engine
+- `src/services/applications/spine.py` — the Application object + append-only event/artifact log · `src/services/profile/` — extraction
+- `src/cli.py` — Click CLI (`api`, `setup-profile`) · `src/api/` — FastAPI app + routes
 - `src/repositories/database.py` — Postgres via psycopg3 (aiosqlite-shaped shim) · `migrations/` — forward/reverse SQL pairs
 - `scripts/` — backend Python helpers (run `python scripts/X.py`); see root `CONTRIBUTING.md`
 
