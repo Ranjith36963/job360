@@ -13,8 +13,8 @@ import { test, expect } from "@playwright/test";
  *    copy and no Allow button.
  * 4. /settings/connect lists connected apps (oauth_grants) and Revoke calls
  *    DELETE and removes the row.
- * 5. /auth/magic honours ?next — including falling back to /dashboard for an
- *    external next.
+ * 5. /auth/magic honours ?next — including falling back to /applications for
+ *    an external next.
  *
  * The backend is mocked with page.route — this proves the UI wiring, same
  * style as tests/e2e/connect-agent.spec.ts. Server-side OAuth logic is
@@ -215,7 +215,7 @@ test.describe("/auth/magic honours ?next", () => {
     });
   });
 
-  test("falls back to /dashboard when next is an external URL", async ({
+  test("falls back to /applications when next is an external URL", async ({
     page,
     context,
   }) => {
@@ -228,6 +228,8 @@ test.describe("/auth/magic honours ?next", () => {
     await page.goto(`/auth/magic?token=t&next=${encodeURIComponent("https://evil.com")}`);
     await page.getByRole("button", { name: /sign in to job360/i }).click();
 
-    await expect(page).toHaveURL(/\/dashboard/, { timeout: 10_000 });
+    // safeNext (src/lib/safe-next.ts) falls back to /applications — /dashboard
+    // left with the sourcing era.
+    await expect(page).toHaveURL(/\/applications/, { timeout: 10_000 });
   });
 });

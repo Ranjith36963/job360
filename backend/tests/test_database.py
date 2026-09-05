@@ -34,15 +34,12 @@ def _make_job(**overrides):
 def test_init_creates_tables(db):
     tables = asyncio.run(db.get_tables())
     assert "jobs" in tables
-    assert "run_log" in tables
+    # Slice 5 (#483): `run_log` is not in the boot DDL any more, and migration
+    # 0039 drops it. Its absence is the assertion — a re-added CREATE would
+    # resurrect a table nothing reads.
+    assert "run_log" not in tables
 
 
-def test_insert_and_check_seen(db):
-    job = _make_job()
-    key = job.normalized_key()
-    assert asyncio.run(db.is_job_seen(key)) is False
-    asyncio.run(db.insert_job(job))
-    assert asyncio.run(db.is_job_seen(key)) is True
 
 
 def test_duplicate_insert_ignored(db):
@@ -62,23 +59,8 @@ def test_insert_different_jobs(db):
     assert count == 2
 
 
-def test_log_run(db):
-    stats = {
-        "total_found": 50,
-        "new_jobs": 10,
-        "per_source": {"reed": 20, "adzuna": 30},
-    }
-    asyncio.run(db.log_run(stats))
-    runs = asyncio.run(db.get_run_logs())
-    assert len(runs) == 1
-    assert runs[0]["total_found"] == 50
 
 
-def test_get_new_jobs_since(db):
-    j1 = _make_job(title="AI Engineer", company="DeepMind")
-    asyncio.run(db.insert_job(j1))
-    jobs = asyncio.run(db.get_new_jobs_since(hours=1))
-    assert len(jobs) == 1
 
 
 def test_migrate_no_op_on_fresh_db(db):
@@ -86,7 +68,7 @@ def test_migrate_no_op_on_fresh_db(db):
     # _migrate() is called during init_db(), so just verify it didn't break anything
     tables = asyncio.run(db.get_tables())
     assert "jobs" in tables
-    assert "run_log" in tables
+    assert "applications" in tables
 
 
 def test_insert_job_preserves_caller_first_seen_at(db):
@@ -103,9 +85,8 @@ def test_insert_job_preserves_caller_first_seen_at(db):
         last_seen_at="2020-06-01T00:00:00+00:00",
     )
     asyncio.run(db.insert_job(job))
-    rows = asyncio.run(db.get_recent_jobs(days=9999))
-    # Find our specific job (other tests may share the db fixture — but :memory: is per-test)
-    row = next(r for r in rows if r["title"] == "Historic Role")
+    job_id = asyncio.run(db.get_job_id_by_key(job.normalized_key()))
+    row = asyncio.run(db.get_job_by_id(job_id))
     assert row["first_seen_at"].startswith("2020-01-01"), f"first_seen_at was overwritten: got {row['first_seen_at']}"
     assert row["last_seen_at"].startswith("2020-06-01"), f"last_seen_at was overwritten: got {row['last_seen_at']}"
 
@@ -120,8 +101,8 @@ def test_insert_job_defaults_first_seen_at_to_now_when_none(db):
     assert job.last_seen_at is None
     before = datetime.now(timezone.utc)
     asyncio.run(db.insert_job(job))
-    rows = asyncio.run(db.get_recent_jobs(days=9999))
-    row = next(r for r in rows if r["title"] == "Fresh Role")
+    job_id = asyncio.run(db.get_job_id_by_key(job.normalized_key()))
+    row = asyncio.run(db.get_job_by_id(job_id))
     assert row["first_seen_at"] is not None
     assert row["last_seen_at"] is not None
     # first_seen_at should be >= `before` (i.e. set during the insert, not 2020)
@@ -129,55 +110,10 @@ def test_insert_job_defaults_first_seen_at_to_now_when_none(db):
     assert got >= before - timedelta(seconds=5), f"first_seen_at not defaulted to now: got {row['first_seen_at']}"
 
 
-def test_dim_columns_round_trip(db):
-    """Step-1.5 S1.1-D — every per-dim score field on the Job dataclass must
-    survive insert_job → get_recent_jobs unchanged. This is the value-presence
-    test the Step-1 reviewer never wrote (CLAUDE.md rule #21 will codify it).
-    """
-    job = _make_job(
-        title="Dim Carrier",
-        company="ScoreCo",
-        match_score=85,
-        role=35,
-        skill=30,
-        location_score=8,
-        recency=6,
-        seniority_score=4,
-        semantic=2,
-    )
-    asyncio.run(db.insert_job(job))
-    rows = asyncio.run(db.get_recent_jobs(days=9999))
-    row = next(r for r in rows if r["title"] == "Dim Carrier")
-    assert row["role"] == 35
-    assert row["skill"] == 30
-    assert row["location_score"] == 8
-    assert row["recency"] == 6
-    assert row["seniority_score"] == 4
-    assert row["semantic"] == 2
-    # Unset dims must default to 0, not NULL — JobResponse declares int.
-    assert row["experience"] == 0
-    assert row["credentials"] == 0
-    assert row["penalty"] == 0
 
 
-def test_get_last_source_counts_empty(db):
-    """get_last_source_counts should return empty dict when no runs exist."""
-    result = asyncio.run(db.get_last_source_counts(5))
-    assert result == {}
 
 
-def test_get_last_source_counts_with_data(db):
-    """get_last_source_counts should return per-source history from run_log."""
-    stats1 = {"total_found": 10, "new_jobs": 5, "per_source": {"reed": 5, "adzuna": 3}}
-    stats2 = {"total_found": 8, "new_jobs": 2, "per_source": {"reed": 0, "adzuna": 4}}
-    asyncio.run(db.log_run(stats1))
-    asyncio.run(db.log_run(stats2))
-    result = asyncio.run(db.get_last_source_counts(5))
-    # Most recent run first
-    assert "reed" in result
-    assert "adzuna" in result
-    assert 0 in result["reed"]
-    assert 5 in result["reed"]
 
 
 async def _create_user_feed_table(db: JobDatabase) -> None:
@@ -226,69 +162,6 @@ async def _create_user_feed_table(db: JobDatabase) -> None:
     await db._conn.commit()
 
 
-@pytest.mark.asyncio
-async def test_feed_jobs_surface_and_rank_by_llm_verdict(db):
-    """COALESCE(llm_fit_score, score) ranking: a judged job with a LOW keyword
-    score but HIGH LLM fit outranks an unjudged higher-keyword job, and the
-    llm_* columns round-trip with real values (CLAUDE.md rule #21).
-    """
-    await _create_user_feed_table(db)
-
-    uid = "test-user-llm"
-    # Insert two catalog jobs
-    job_a = _make_job(title="AI Engineer A", company="CompanyA", match_score=80)
-    job_b = _make_job(title="ML Engineer B", company="CompanyB", match_score=40)
-    inserted_a = await db.insert_job(job_a)
-    inserted_b = await db.insert_job(job_b)
-    assert inserted_a and inserted_b, "Both jobs must insert cleanly"
-
-    # Retrieve their IDs
-    cur = await db._conn.execute("SELECT id FROM jobs WHERE normalized_title = ?", ("ai engineer a",))
-    row = await cur.fetchone()
-    job_a_id = row[0]
-
-    cur = await db._conn.execute("SELECT id FROM jobs WHERE normalized_title = ?", ("ml engineer b",))
-    row = await cur.fetchone()
-    job_b_id = row[0]
-
-    # Insert user_feed rows: A has score=80 (unjudged), B has score=40
-    now = datetime.now(timezone.utc).isoformat()
-    await db._conn.execute(
-        "INSERT INTO user_feed(user_id, job_id, score, bucket, status, created_at, updated_at) "
-        "VALUES (?, ?, ?, 'top', 'active', ?, ?)",
-        (uid, job_a_id, 80, now, now),
-    )
-    await db._conn.execute(
-        "INSERT INTO user_feed(user_id, job_id, score, bucket, status, created_at, updated_at) "
-        "VALUES (?, ?, ?, 'top', 'active', ?, ?)",
-        (uid, job_b_id, 40, now, now),
-    )
-    await db._conn.commit()
-
-    # Set B's LLM verdict to 95 — should now outrank A's keyword score of 80
-    await db._conn.execute(
-        "UPDATE user_feed SET llm_fit_score=95, llm_verdict='strong fit', "
-        "llm_reason='domain match', llm_matched_at=datetime('now') "
-        "WHERE user_id=? AND job_id=?",
-        (uid, job_b_id),
-    )
-    await db._conn.commit()
-
-    rows = await db.get_user_feed_jobs(uid, days=9999, min_score=0)
-
-    assert len(rows) == 2, f"Expected 2 feed rows, got {len(rows)}"
-    assert rows[0]["id"] == job_b_id, (
-        f"Job B (llm_fit_score=95) should outrank Job A (score=80), "
-        f"but got id={rows[0]['id']} first"
-    )
-    # Value-presence checks (rule #21): real values, not schema defaults
-    assert rows[0]["llm_fit_score"] == 95, "llm_fit_score must round-trip"
-    assert rows[0]["llm_verdict"] == "strong fit", "llm_verdict must round-trip"
-    assert rows[0]["llm_reason"] == "domain match", "llm_reason must round-trip"
-    # Unjudged row -> NULL, not 0 (rule: schema default is NULL not 0)
-    assert rows[1]["llm_fit_score"] is None, (
-        f"Unjudged job A must have llm_fit_score=NULL, got {rows[1]['llm_fit_score']}"
-    )
 
 
 # ── Channels & Notifications overhaul — Task 1: single-rule schema ──────────

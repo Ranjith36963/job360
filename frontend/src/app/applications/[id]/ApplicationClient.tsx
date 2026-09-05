@@ -9,6 +9,7 @@ import type { ApplicationDetail } from "@/lib/api";
 import { Timeline } from "@/components/applications/Timeline";
 import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
 import { FitPanel } from "@/components/applications/FitPanel";
+import { TailorSection } from "@/components/tailor/TailorSection";
 import { Contacts } from "@/components/applications/Contacts";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -108,18 +109,16 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
               View ad
             </a>
           )}
-          <Link
-            href={`/jobs/${detail.job_id}`}
-            className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
-          >
-            Tailor CV
-          </Link>
         </div>
       </div>
 
       <section>
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fit</h2>
         <FitPanel fit={detail.fit} />
+      </section>
+
+      <section>
+        <TailorSection jobId={detail.job_id} />
       </section>
 
       <section>

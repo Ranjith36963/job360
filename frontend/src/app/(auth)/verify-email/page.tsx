@@ -69,8 +69,8 @@ function VerifyBody() {
     return (
       <div className="space-y-4">
         <p className="text-sm">Your email is verified. You&apos;re all set.</p>
-        <Button render={<Link href="/dashboard" />} className="w-full">
-          Go to dashboard
+        <Button render={<Link href="/applications" />} className="w-full">
+          Go to my applications
         </Button>
       </div>
     );
@@ -79,8 +79,8 @@ function VerifyBody() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-red-400">{error}</p>
-      <Button render={<Link href="/dashboard" />} className="w-full" variant="secondary">
-        Back to dashboard
+      <Button render={<Link href="/applications" />} className="w-full" variant="secondary">
+        Back to my applications
       </Button>
       <p className="text-center text-sm text-muted-foreground">
         Need a fresh link? Open your account settings to resend.

@@ -333,7 +333,7 @@ export default function PipelinePage() {
           <EmptyState
             icon={<Kanban className="h-12 w-12" />}
             title="No applications yet"
-            description="When you apply to jobs from the dashboard, they will appear here so you can track your progress through each stage."
+            description="When your agent records an application, it will appear here so you can track your progress through each stage."
           />
         </div>
       )}

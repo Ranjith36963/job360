@@ -7,7 +7,7 @@
 // prefetch/render links before the human clicks) burn the single-use token
 // and lock the real user out — scanners load pages, they don't click buttons.
 // On success the backend sets the session cookie, so we redirect to
-// /dashboard. On failure we show an error with a link back to /login.
+// /applications. On failure we show an error with a link back to /login.
 //
 // Mirrors the verify-email page pattern: a client component using
 // useSearchParams inside <Suspense> (the Next.js 16 way to read query params
@@ -30,7 +30,7 @@ function MagicBody() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
   // Where to land after sign-in — e.g. back on an OAuth consent page (spec
-  // R9). safeNext() falls back to /dashboard for anything external/malformed.
+  // R9). safeNext() falls back to /applications for anything external/malformed.
   const next = searchParams.get("next");
   const [state, setState] = useState<State>(token ? "confirm" : "error");
   const [error, setError] = useState<string | null>(

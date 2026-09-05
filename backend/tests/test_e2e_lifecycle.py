@@ -14,13 +14,13 @@ LLM and the source-fetching search are mocked, so this runs in the gate every ti
 What it does NOT cover (needs infra, documented for honesty):
   - real notification DELIVERY. The prerequisites differ per channel, and the
     old blanket "needs Redis + SMTP creds" was wrong for both:
-      * webhook — needs Redis and a RUNNING ARQ worker, because the send is
-        queued, not inline.
+      * webhook — the instant path sends inline; the queued path has had no
+        worker to run on since 2026-09-02.
       * email — needs EITHER ``RESEND_API_KEY`` (the production path; Railway
         blocks outbound SMTP ports 25/465/587) OR real SMTP credentials for a
         local/self-hosted relay. See ``services/channels/email_url.py``.
     This text is documentation only — it does not gate pytest. The dispatch
-    *logic* is covered by test_dispatch_logging / test_worker_logging.
+    *logic* is covered by test_dispatch_logging.
   - the browser UI — that's the Playwright suite (frontend/tests/e2e).
 """
 from __future__ import annotations
@@ -30,7 +30,6 @@ import io
 import logging
 import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 
 import pytest
 from cryptography.fernet import Fernet
@@ -107,25 +106,25 @@ def _mark_verified(db_path, email):
     con.close()
 
 
-def _seed_job_and_feed(db_path, user_id) -> int:
-    """Seed one catalog job + one user_feed row so /jobs returns it for the user."""
-    now = datetime.now(timezone.utc).isoformat()
-    con = pgsync.connect(db_path)
-    cur = con.execute(
-        "INSERT INTO jobs (title, company, location, apply_url, source, date_found, "
-        "normalized_company, normalized_title, first_seen, staleness_state) "
-        "VALUES (?, ?, '', ?, 'test', ?, ?, ?, ?, 'active')",
-        ("Senior ML Engineer", "Acme", "https://acme.test/job", now, "acme", "senior ml engineer", now),
-    )
-    job_id = cur.lastrowid
-    con.execute(
-        "INSERT INTO user_feed (user_id, job_id, score, bucket, status, created_at, updated_at) "
-        "VALUES (?, ?, ?, 'recent', 'active', ?, ?)",
-        (user_id, job_id, 88, now, now),
-    )
-    con.commit()
-    con.close()
-    return job_id
+_AD = {
+    "title": "Senior ML Engineer",
+    "company": "Acme",
+    "location": "London",
+    "apply_url": "https://acme.test/job",
+    "description": "Build and ship ML services. Python, PyTorch, RAG. " * 4,
+}
+
+
+def _bring(client, **overrides) -> dict:
+    """Bring one ad through the REAL front door.
+
+    Slice 5 (#483) replaced the seeded catalog+feed rows this used to fake: the
+    only way a job enters the system now is `POST /jobs/bring`, and what it
+    creates is an Application, not a feed row.
+    """
+    r = client.post("/api/jobs/bring", json={**_AD, **overrides})
+    assert r.status_code == 200, r.text
+    return r.json()
 
 
 class _LogCapture:
@@ -166,18 +165,12 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
 
     monkeypatch.setattr(profile_route, "run_two_pass_extraction", _fake_extract, raising=False)
 
-    # deterministic search (no source fetching)
-    async def _fake_run_search(**kwargs):
-        return {"new_jobs": 1, "sources_queried": 40}
-
-    monkeypatch.setattr("src.api.routes.search.run_search", _fake_run_search)
-
     with _LogCapture(caplog) as logs:
         email = "e2e@example.com"
-        uid = _register(client, email)
+        _register(client, email)
         assert client.get("/api/auth/me").status_code == 200
-        # search is gated until verified
-        assert client.post("/api/search").status_code == 403
+        # the tailor is gated until verified (it spends an LLM call)
+        assert client.post("/api/tailor/1/generate").status_code == 403
         _mark_verified(app_db, email)
 
         # CV upload → deterministic skills
@@ -187,17 +180,30 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
         )
         assert r.status_code == 200, r.text
 
-        # search (verified) → 200 + audit
-        assert client.post("/api/search").status_code == 200
+        # bring an ad → job row + Application, no score anywhere
+        brought = _bring(client)
+        job_id = brought["job"]["id"]
+        application_id = brought["application_id"]
+        assert brought["status"] == "considering"
+        assert "scored" not in brought and "match_score" not in brought["job"]
 
-        # seed a job+feed row so downstream steps have data deterministically
-        job_id = _seed_job_and_feed(app_db, uid)
-        feed = client.get("/api/jobs?limit=5")
-        assert feed.status_code == 200
-        assert feed.json().get("total", 0) >= 1
+        # the spine reads back
+        detail = client.get(f"/api/applications/{application_id}")
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["job_id"] == job_id
+        assert client.get("/api/applications").json()["applications"], "the list must show it"
+        assert client.get(f"/api/applications/job/{job_id}").status_code == 200
 
-        assert client.get(f"/api/jobs/{job_id}").status_code == 200
-        assert client.post(f"/api/jobs/{job_id}/action", json={"action": "liked"}).status_code == 200
+        # the agent's OWN fit verdict — Job360 stores it, never computes it
+        assert client.put(
+            f"/api/applications/{application_id}/fit",
+            json={"score": 72, "verdict": "worth applying"},
+        ).status_code == 200
+
+        # a receipt, and the kanban row
+        assert client.post(
+            f"/api/applications/{application_id}/receipt", json={"channel": "company site"}
+        ).status_code == 201
         assert client.post(f"/api/pipeline/{job_id}", json={}).status_code in (200, 201)
 
         # channel create + test-send
@@ -221,8 +227,8 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
         ).status_code == 204
 
         # a 404 + 422 → 4xx reason logging
-        assert client.get("/api/jobs/99999999").status_code == 404
-        assert client.post(f"/api/jobs/{job_id}/action", json={"action": 123}).status_code == 422
+        assert client.get("/api/applications/99999999").status_code == 404
+        assert client.post("/api/jobs/bring", json={**_AD, "title": "   "}).status_code == 422
 
         assert client.post("/api/auth/logout").status_code == 204
         assert client.get("/api/auth/me").status_code == 401
@@ -235,9 +241,8 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
         "register",              # auth
         "session_created",       # K
         "session_revoked",       # K
-        "job_action",            # C
+        "job_brought",           # C — the product's front door
         "pipeline_create",       # C
-        "search_started",        # F
         "channel_created",       # L
         "channel_test_send",     # L
         "notification_rule_saved",  # L
@@ -252,9 +257,11 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
 # ─── edge cases ──────────────────────────────────────────────────────────────
 
 
-def test_edge_unverified_user_blocked_from_search(client):
+def test_edge_unverified_user_blocked_from_the_tailor(client):
+    """The one remaining `require_verified_user` gate: tailoring spends a paid
+    LLM call. Bringing a job does not, so it is `require_user` only."""
     _register(client, "unverified@example.com")
-    assert client.post("/api/search").status_code == 403  # email_not_verified
+    assert client.post("/api/tailor/1/generate").status_code == 403  # email_not_verified
 
 
 def test_edge_login_lockout_after_five_failures(client):
@@ -266,19 +273,25 @@ def test_edge_login_lockout_after_five_failures(client):
     assert "Retry-After" in r.headers
 
 
-def test_edge_idor_user_cannot_see_another_users_feed(client, app_db):
+def test_edge_idor_user_cannot_see_another_users_applications(client, app_db):
+    """Slice 5 (#483) made the ad itself per-user: `jobs` is still the shared
+    table (rule #10), but the only read of it is scoped through the caller's
+    own application, so Bob cannot reach Alice's paste by guessing an id."""
     from src.api.main import app
 
-    uid_a = _register(client, "alice@example.com")
+    _register(client, "alice@example.com")
     _mark_verified(app_db, "alice@example.com")
-    _seed_job_and_feed(app_db, uid_a)
-    assert client.get("/api/jobs").json().get("total", 0) >= 1  # Alice sees her job
+    brought = _bring(client)
+    job_id = brought["job"]["id"]
+    assert client.get("/api/applications").json()["applications"]
 
     with TestClient(app) as bob:
         _register(bob, "bob@example.com")
         _mark_verified(app_db, "bob@example.com")
-        # Bob has no feed rows → must NOT see Alice's job.
-        assert bob.get("/api/jobs").json().get("total", 0) == 0
+        assert bob.get("/api/applications").json()["applications"] == []
+        # Bob never brought this job — the ad text must be unreachable.
+        assert bob.get(f"/api/applications/job/{job_id}").status_code == 404
+        assert bob.get(f"/api/applications/{brought['application_id']}").status_code == 404
 
 
 def test_edge_malformed_cv_returns_controlled_error_not_crash(client, app_db, caplog):

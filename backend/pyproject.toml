@@ -1,7 +1,7 @@
 [project]
 name = "job360"
 version = "1.0.0"
-description = "Automated UK job search system supporting any professional domain"
+description = "The memory and context layer for a job seeker's own AI agent"
 # 3.10: `mcp` needs it, mypy already targets it, and the code uses `X | Y`
 # unions everywhere (see [tool.mypy]). CI and the prod image run 3.12.
 requires-python = ">=3.10"
@@ -38,8 +38,8 @@ dependencies = [
     # 'openai'", llm_provider.py). OpenAI is the documented PRIMARY CV-parsing
     # provider (CLAUDE.md; default gpt-4o-mini) and llm_provider.py:297 does
     # `from openai import AsyncOpenAI` — but no install path ever installed it:
-    # backend/Dockerfile:20 runs `pip install ".[semantic]" arq`, Dockerfile.worker
-    # runs `pip install .`, and it was in neither pyproject nor a requirements.txt.
+    # the Dockerfiles ran a bare `pip install`, and it was in neither pyproject
+    # nor a requirements.txt.
     # In production the import raised ImportError, which llm_provider.py:154's
     # `except Exception` swallowed as "provider failed, try the next one" — so
     # OpenAI silently NEVER ran and every parse quietly used a free-tier fallback.
@@ -56,13 +56,29 @@ dependencies = [
     "apprise>=1.7.0",               # multi-channel notification sending
     "email-validator>=2.1.0",       # pydantic EmailStr (via pydantic[email])
     "cryptography>=42.0.0",         # Fernet for user_channels credential storage
-    # Pillar 2 Batch 2.10 — four-layer dedup. Both are small + C-backed;
-    # imported lazily so they only activate when the RapidFuzz / TF-IDF
-    # layers are actually invoked (tests that only touch Layer 1 still run
-    # without these installed).
+    # DECLARED HERE BY SLICE 5 (#483), and that is the point. `redis` was never
+    # a direct dependency — it arrived transitively through `arq`, which this
+    # slice deletes with the worker. Two things still import it lazily:
+    # `services/auth/rate_limit.py` (the cross-replica login-lockout window,
+    # RATE_LIMIT_REDIS) and `/readyz`. BOTH swallow ImportError and degrade
+    # quietly — in-process windows, a "skipped" probe — so losing the package
+    # would not have raised anywhere; the rate limiter would just have stopped
+    # holding across replicas, silently. Naming it keeps that honest.
+    # Floor 7.2: the first release whose `from_url` is typed. Below it mypy
+    # needs a `type: ignore` on those two calls; at/above it the same ignore is
+    # "unused" and the ratchet goes red — so the floor is what makes every
+    # machine (CI resolves the newest) agree.
+    "redis>=7.2",
+    # rapidfuzz backs the tailor's integrity check (does this sentence exist in
+    # the source CV?) and the two-pass profile merge. Lazy-imported per rules
+    # #11/#16 — small and C-backed, but not on the import path.
     "rapidfuzz>=3.0",
+    # scikit-learn was the TF-IDF layer of the four-layer deduplicator, deleted
+    # in slice 5 (#483). NOTHING under backend/src imports it today. Kept for
+    # now because the semantic extra's stack expects it and dropping a heavy
+    # dep is its own verification job — a follow-up, not a silent side effect
+    # of this slice.
     "scikit-learn>=1.4",
-    "arq>=0.25",                    # async task queue (worker process); was used but undeclared
     "sentry-sdk>=1.40.0",           # error tracking + performance monitoring (Phase 3)
 ]
 
@@ -96,20 +112,17 @@ dev = [
     # previously-clean code and reds CI on unrelated PRs).
     "ruff>=0.15,<0.17",
 ]
-indeed = [
-    "python-jobspy",
-]
-# Pillar 2 Batch 2.6 — semantic stack (renamed from ``[esco]`` so one
-# install path covers BOTH ESCO skill canonicalisation AND Batch-2.6 job
-# embeddings + ChromaDB vector search). Heavy deps (~300 MB for
-# sentence-transformers + torch CPU wheel, plus ChromaDB); keep optional.
-# Enable with ``pip install '.[semantic]'`` then run
-# ``python scripts/build_esco_index.py --esco-csv skills_en.csv``
-# to generate ``backend/data/esco/{labels.json,embeddings.npy}``.
+# The optional ESCO skill-canonicalisation stack. It used to cover the job
+# side too (embeddings + ChromaDB vector search); slice 5 (#483) deleted that,
+# so `chromadb` is gone from this extra — the only importer left is
+# `services/profile/skill_normalizer.py`, which needs sentence-transformers
+# and numpy. Heavy (~300 MB with the torch CPU wheel), hence optional.
+#
+# Hard rule #28: the ESCO index has never actually been built or shipped, so
+# installing this extra alone still turns nothing on.
 semantic = [
     "sentence-transformers>=2.2",
     "numpy>=1.24",
-    "chromadb>=0.5",
 ]
 # Deprecated alias — kept for compatibility with any operator workflow
 # still referencing the old extra. Points at the same packages.
@@ -242,28 +255,17 @@ ignore = ["S101", "UP007", "UP035", "UP045", "B008", "B904",
 # Step-1.5 added _maybe_normalise_skills_via_esco below the LLM prompt;
 # the late-bound `_coerce_str` imports keep their explicit `noqa: E402`.
 "src/services/profile/cv_parser.py" = ["E501"]
-# RSS/XML source parsers now parse untrusted feed XML via defusedxml (M18 —
-# XXE-safe); the stdlib xml.etree import remains only for ET.ParseError, so keep
-# the S314 ignore as belt-and-braces for that residual import. Nested glob:
-# sources live in category subfolders, so `**/*.py`, not `*`. Long URL lines — E501.
-"src/sources/**/*.py" = ["S314", "E501"]
-# database.py / feed.py build `IN (?,?,?)` placeholder lists dynamically — the
-# `?`s are generated, values are always parameterized, so S608 is a false
-# positive. database.py also has a best-effort purge swallow (S110).
+# database.py builds `IN (?,?,?)` placeholder lists dynamically — the `?`s are
+# generated, values are always parameterized, so S608 is a false positive. It
+# also has best-effort swallows around optional-table reads (S110).
 "src/repositories/database.py" = ["S110", "S608"]
-"src/services/feed.py" = ["S608"]
 # channels.py: _SLACK_TOKEN_URL / _DISCORD_TOKEN_URL are URLs not secrets (S105);
 # long URL lines (E501).
 "src/api/routes/channels.py" = ["S105", "E501"]
-# rescore.py is scoring code (owner-managed): keep math-style UPPERCASE vars
-# (N806). B023 flags a lambda that captures loop vars jid/ms — left untouched
-# and surfaced to the owner rather than edited in a lint pass.
-"src/services/rescore.py" = ["N806", "B023"]
 # LLM prompt strings can't be wrapped without changing what the model sees — E501.
 "src/services/profile/linkedin_parser.py" = ["E501"]
 # Intentional late/conditional imports after module-level setup (rules #11/#16
 # heavy-dep deferral + rule-#28 note imports) — E402.
-"src/cli_view.py" = ["E402"]
 "src/services/profile/github_enricher.py" = ["E402"]
 
 [tool.mypy]
@@ -294,12 +296,8 @@ mypy_path = "backend"
 module = [
     "sentence_transformers.*",
     "sentence_transformers",
-    "chromadb.*",
-    "chromadb",
     "rapidfuzz.*",
     "rapidfuzz",
-    "sklearn.*",
-    "sklearn",
     "apprise.*",
     "apprise",
     "fpdf.*",
@@ -308,8 +306,6 @@ module = [
     "pdfplumber",
     "docx.*",
     "docx",
-    "jobspy.*",
-    "jobspy",
     "groq.*",
     "groq",
     "cerebras.*",
@@ -322,8 +318,6 @@ module = [
     "argon2",
     "aioresponses.*",
     "aioresponses",
-    "arq.*",
-    "arq",
     "torch.*",
     "torch",
 ]

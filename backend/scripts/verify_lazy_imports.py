@@ -1,7 +1,7 @@
-"""Step-1 gate check: SEMANTIC_ENABLED=false must not pull heavy deps.
+"""Step-1 gate check: ESCO_SKILL_NORMALISATION_ENABLED=false must not pull heavy deps.
 
-Imports the FastAPI app with SEMANTIC_ENABLED=false and asserts that
-sentence_transformers, chromadb, and arq are NOT loaded into sys.modules.
+Imports the FastAPI app with ESCO_SKILL_NORMALISATION_ENABLED=false and asserts that
+sentence-transformers, numpy, torch, rapidfuzz and pdfplumber are NOT loaded into sys.modules.
 Honours CLAUDE.md rules #11 and #16 (lazy-import discipline for heavy deps).
 
 Exits 0 on success, 1 on violation. Used by `make verify-step-1`.
@@ -19,19 +19,19 @@ if str(_BACKEND_DIR) not in sys.path:
 
 
 def main() -> int:
-    os.environ["SEMANTIC_ENABLED"] = "false"
+    os.environ["ESCO_SKILL_NORMALISATION_ENABLED"] = "false"
 
     # Import the API app — anything pulled in by it is a startup cost.
     from src.api.main import app  # noqa: F401, E402
 
-    forbidden = ("sentence_transformers", "chromadb", "arq")
+    forbidden = ("sentence_transformers", "numpy", "torch", "rapidfuzz", "pdfplumber")
     leaks = [name for name in forbidden if name in sys.modules]
 
     if leaks:
-        print(f"FAIL: heavy modules loaded at SEMANTIC_ENABLED=false: {leaks}")
+        print(f"FAIL: heavy modules loaded at ESCO_SKILL_NORMALISATION_ENABLED=false: {leaks}")
         return 1
 
-    print("OK: no heavy modules in sys.modules at SEMANTIC_ENABLED=false")
+    print("OK: no heavy modules in sys.modules at ESCO_SKILL_NORMALISATION_ENABLED=false")
     return 0
 
 

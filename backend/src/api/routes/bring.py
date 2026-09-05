@@ -1,8 +1,13 @@
 """Bring-a-job: the user pastes the ad, we do everything after the click.
 
-Product rule (docs/plans/2026-08-27-exponential-product-research.md §8): Job360
-never sources or recommends jobs. Matching runs ONLY on a job the user brings.
-This is that front door.
+Product rule 4 (`docs/product/VISION.md`): Job360 never sources, ranks or
+judges a job. The user's own agent finds the ad and decides whether it fits;
+this route is the front door where that ad becomes something we REMEMBER.
+
+Since slice 5 (#483) it stores and nothing else: no score, no shelf gate, no
+feed row. `POST /jobs/bring` writes the `jobs` row and births the Application
+(`services/applications/spine.py`) — the agent records its own verdict
+afterwards with `save_fit`.
 
 Why paste is still the fallback (docs/plans/2026-09-04-url-fetch/spec.md):
 LinkedIn/Indeed/Workday refuse bots, so `POST /jobs/fetch-url` below fills the
@@ -17,16 +22,16 @@ questions); a future crawler would need its own robots decision. The link is
 kept as `apply_url` so the receipt can point back.
 
 Storage follows rule #10: the ad goes into the SHARED `jobs` catalog under
-`source='user_brought'` (no user_id on `jobs`); "this user brought / is
-tracking it" lives in `user_feed`, exactly like a search hit. Two users
-pasting the same (company, title) share one row — `insert_job` is
-INSERT-OR-IGNORE on the normalized key, and `existing=True` tells the caller.
+`source='user_brought'` (no user_id on `jobs`); "this user is tracking it"
+lives in `applications`. Two users pasting the same (company, title) share one
+row — `insert_job` is INSERT-OR-IGNORE on the normalized key, and
+`existing=True` tells the caller.
 """
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -35,7 +40,6 @@ from pydantic import BaseModel, Field, field_validator
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_request_db
 from src.api.models import JobResponse
-from src.api.routes.jobs import _compute_bucket, _personalize_dims, _row_to_job_response
 from src.core import settings
 from src.core.settings import USER_BROUGHT_SOURCE
 from src.repositories.database import JobDatabase
@@ -43,6 +47,47 @@ from src.services.fetch import outcomes
 from src.utils.logger import get_audit_logger
 
 router = APIRouter(tags=["bring"])
+
+
+def job_row_to_response(row: dict[str, Any]) -> JobResponse:
+    """Build a `JobResponse` straight off a `jobs` row.
+
+    Was `routes/jobs.py::_row_to_job_response`, which merged the row with a
+    per-user feed score and an enrichment LEFT JOIN. Both are gone; what is
+    left is a plain projection of the stored ad, which is the whole contract
+    now (product rule 4 — nothing here is computed about the user).
+
+    Lives here, not on `JobResponse`, because `models.py` is the API's data
+    shapes and knows nothing about DB row keys.
+    """
+    salary = None
+    smin, smax = row.get("salary_min"), row.get("salary_max")
+    if smin and smax:
+        salary = f"{int(smin)}-{int(smax)}"
+    elif smin:
+        salary = str(int(smin))
+    elif smax:
+        salary = str(int(smax))
+
+    return JobResponse(
+        id=row.get("id", 0),
+        title=row.get("title", ""),
+        company=row.get("company", ""),
+        location=row.get("location", "") or "",
+        salary=salary,
+        source=row.get("source", ""),
+        date_found=row.get("date_found", "") or "",
+        apply_url=row.get("apply_url", "") or "",
+        visa_flag=bool(row.get("visa_flag", 0)),
+        experience_level=row.get("experience_level", "") or "",
+        description=row.get("description") or None,
+        posted_at=row.get("posted_at"),
+        first_seen_at=row.get("first_seen_at"),
+        last_seen_at=row.get("last_seen_at"),
+        date_confidence=row.get("date_confidence"),
+        deadline=row.get("deadline"),
+        deadline_source=row.get("deadline_source"),
+    )
 
 # Bounds are guardrails, not product limits: a real ad is 500–8,000 chars; the
 # cap stops a pasted PDF dump (or a hostile 50 MB body) from becoming a
@@ -89,7 +134,6 @@ class BringJobRequest(BaseModel):
 class BringJobResponse(BaseModel):
     job: JobResponse
     existing: bool   # the same (company, title) was already in the catalog
-    scored: bool     # False when the user has no complete profile yet
     # spec 2026-09-04-application-spine R1 — an Application is born HERE.
     application_id: int
     status: str
@@ -101,18 +145,17 @@ async def bring_job(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI DI idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> BringJobResponse:
-    """Store the pasted ad, score it against the caller's profile, put it in
-    their feed. Returns the job exactly as GET /jobs/{id} would, so the
-    frontend can route straight to the detail page.
+    """Store the pasted ad and birth the Application for it.
+
+    Nothing is scored: the caller (the user's agent) already decided this ad
+    is worth keeping, and product rule 4 forbids us judging fit. Returns the
+    stored job plus the `application_id` the caller should work against from
+    here on.
     """
-    # Lazy: Job + the shelf gate pull the scoring stack (rule #16).
+    # Lazy import (rule #16) — keeps the spine off the module import path.
     from src.models import Job  # noqa: PLC0415
     from src.services.applications import spine as applications_spine  # noqa: PLC0415
     from src.services.applications.authorship import actor_for  # noqa: PLC0415
-    from src.services.feed import FeedService  # noqa: PLC0415
-    from src.services.profile.storage import current_profile_version_id  # noqa: PLC0415
-    from src.services.shelf_gate import fill_shelves  # noqa: PLC0415
-    from src.services.skill_matcher import SCORER_VERSION  # noqa: PLC0415
 
     now = datetime.now(timezone.utc).isoformat()
     job = Job(
@@ -130,18 +173,13 @@ async def bring_job(
         first_seen_at=now,
         last_seen_at=now,
     )
-    # Same chokepoint every catalog row passes (Universal Shelf §5): salary
-    # band, workplace mode, visa text, deadline — read from the pasted ad.
-    fill_shelves(job)
-
     inserted = await db.insert_job(job)
     await db.commit()
     if not inserted:
-        # Same key already in the catalog (a scrape, or an earlier paste). The
-        # user is reading this ad right now, so it is LIVE: reset the ghost
-        # detector, otherwise a row it had marked stale stays invisible to
-        # the detail read below (which filters on staleness_state) and the
-        # page the user is sent to is empty.
+        # Same key already in the catalog (a legacy scrape, or an earlier
+        # paste). The user is reading this ad right now, so it is LIVE: clear
+        # the stale mark a long-dead ghost sweep may have left on the row,
+        # otherwise `POST /pipeline/{job_id}` still refuses it as expired.
         await db.update_last_seen(job.normalized_key())
     job_id = await db.get_job_id_by_key(job.normalized_key())
     if job_id is None:
@@ -149,29 +187,14 @@ async def bring_job(
         # insert failure lands here. Say so instead of dying on an assert.
         raise HTTPException(status_code=500, detail="Could not store the job")
 
-    row = await db.get_job_by_id_with_enrichment(job_id, user_id=user.id)
+    row = await db.get_job_by_id(job_id)
     if row is None:
         raise HTTPException(status_code=500, detail="Could not read the job back")
-    personalised = await _personalize_dims(dict(row), db, user)
-    scored = "feed_score" in personalised
-    score = int(personalised.get("feed_score") or 0)
-
-    # Put it in THIS user's feed so the dashboard shows it beside search hits.
-    # Version stamps mirror run_search (main.py) so a later backfill treats the
-    # row like any other.
-    await FeedService(db._db).upsert_feed_row(
-        user_id=user.id,
-        job_id=job_id,
-        score=max(0, min(100, score)),
-        bucket=_compute_bucket(row.get("date_found") or now),
-        profile_version=current_profile_version_id(user.id),
-        scorer_version=SCORER_VERSION,
-    )
 
     # R1/R2 — the Application is born HERE, in the same request: upsert the
     # `applications` row for (user, job) with status='considering', copy the
-    # ad onto it (the snapshot purge_old_jobs can no longer erase), append a
-    # `brought` event. Bringing the same job twice reuses the row and appends
+    # ad onto it (the user's own snapshot, independent of the catalog row),
+    # append a `brought` event. Bringing the same job twice reuses the row and appends
     # no second event (birth_application reads-before-inserting).
     birth = await applications_spine.birth_application(
         db, user_id=user.id, job_id=job_id, job_row=dict(row), recorded_by=actor_for(user),
@@ -181,15 +204,14 @@ async def bring_job(
         "job_brought",
         extra={
             "event": "job_brought", "job_id": job_id, "user_id": user.id,
-            "existing": not inserted, "scored": scored, "status": "ok",
+            "existing": not inserted, "status": "ok",
         },
     )
-    job_action = await db.get_action_for_job(job_id, user.id)
-    resp = _row_to_job_response(personalised, job_action)
-    resp.description = personalised.get("description") or None
     return BringJobResponse(
-        job=resp, existing=not inserted, scored=scored,
-        application_id=birth["application_id"], status=birth["status"],
+        job=job_row_to_response(dict(row)),
+        existing=not inserted,
+        application_id=birth["application_id"],
+        status=birth["status"],
     )
 
 

@@ -1,9 +1,10 @@
 """Bring-a-job (POST /jobs/bring) — the pivot's front door.
 
-Rule under test (plan §8): the user brings the ad; we never source it. So the
-route must store the paste in the shared catalog under `source='user_brought'`
-(rule #10: no user_id on `jobs`), land it in THIS user's feed, and — because
-bring-your-own-job is global on day one — never refuse on location.
+Rule under test (product rule 4): the user brings the ad; we never source it,
+and since slice 5 (#483) we never score it either. The route stores the paste
+in the shared catalog under `source='user_brought'` (rule #10: no user_id on
+`jobs`), births the Application, and — because bring-your-own-job is global —
+never refuses on location.
 """
 from __future__ import annotations
 
@@ -26,7 +27,9 @@ _AD = {
 
 
 @pytest.mark.asyncio
-async def test_bring_stores_scores_and_feeds(authenticated_async_context, fixture_user_id):
+async def test_bring_stores_the_ad_and_births_the_application(
+    authenticated_async_context, fixture_user_id
+):
     async with authenticated_async_context() as client:
         resp = await client.post("/api/jobs/bring", json=_AD)
         assert resp.status_code == 200, resp.text
@@ -38,22 +41,28 @@ async def test_bring_stores_scores_and_feeds(authenticated_async_context, fixtur
         assert job["source"] == "user_brought"
         assert job["apply_url"] == _AD["apply_url"]
 
-        # Same object as the detail page — the frontend routes straight there.
-        detail = await client.get(f"/api/jobs/{job['id']}")
+        # The Application is born in the same request — that id, not the job
+        # id, is what the caller works against from here on.
+        detail = await client.get(f"/api/applications/{body['application_id']}")
         assert detail.status_code == 200, detail.text
-        assert detail.json()["description"] == _AD["description"]
+        assert detail.json()["job_id"] == job["id"]
+        assert body["status"] == "considering"
+
+        # The ad reads back per-user, by job id, off the application.
+        read_back = await client.get(f"/api/applications/job/{job['id']}")
+        assert read_back.status_code == 200, read_back.text
+        assert read_back.json()["description"] == _AD["description"]
 
     db = await api_deps.get_db()
     # Rule #10: shared catalog row, no per-user column.
     cur = await db._conn.execute("SELECT source FROM jobs WHERE id = ?", (job["id"],))
     assert (await cur.fetchone())[0] == "user_brought"
-    # Per-user fact lives in user_feed, active, so the dashboard lists it.
+    # The per-user fact is the APPLICATION now — bring writes no feed row.
     cur = await db._conn.execute(
-        "SELECT status FROM user_feed WHERE user_id = ? AND job_id = ?",
+        "SELECT COUNT(*) FROM user_feed WHERE user_id = ? AND job_id = ?",
         (fixture_user_id, job["id"]),
     )
-    row = await cur.fetchone()
-    assert row is not None and row[0] == "active"
+    assert (await cur.fetchone())[0] == 0
 
 
 @pytest.mark.asyncio

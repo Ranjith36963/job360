@@ -79,7 +79,7 @@ def salary_from_enrichment(raw: Any) -> Optional[str]:
 
     Parity matters at the SOURCE, not just the format. The dashboard's salary
     does not come from ``jobs.salary_min_gbp_annual`` — it comes from the
-    enrichment blob, parsed by ``services.salary.normalize_salary`` and
+    enrichment blob, parsed by ``core.fx.normalize_salary`` and
     currency-checked by ``core.fx.is_known_currency``
     (``api/routes/jobs.py:55-81``). Reading a different column here would
     produce a number that is defensible on its own and still disagrees with the
@@ -90,13 +90,12 @@ def salary_from_enrichment(raw: Any) -> Optional[str]:
     """
     if not raw:
         return None
-    # Imported inside the function: `services.salary` pulls the FX table, and
+    # Imported inside the function: `core.fx` pulls the FX table, and
     # this module is imported by the worker on every digest build (rule #16's
     # habit — keep import cost off the hot path).
     import json as _json
 
-    from src.core.fx import is_known_currency
-    from src.services.salary import normalize_salary
+    from src.core.fx import is_known_currency, normalize_salary
 
     try:
         obj = _json.loads(raw) if isinstance(raw, (str, bytes)) else dict(raw)
@@ -202,6 +201,13 @@ def build_decision_card(
         # anti-scam story all depend on the click landing here first; the
         # employer's apply_url is reached from that page, where we can still
         # say "this one closed".
+        #
+        # DEAD LINK since slice 5 (#483, 2026-09-05): the `/jobs/{id}` page went
+        # with the sourcing era and nothing calls this function any more (its
+        # caller was `workers/tasks.py`, deleted). The push-notification stack is
+        # out of that slice's scope (spec, decision 11) and is deleted or
+        # repointed at `/applications/{id}` by its own issue — do not ship a
+        # card from here until then.
         url=f"{site_base_url.rstrip('/')}/jobs/{job_id}",
         primary_score=primary_score,
         is_judged=is_judged,

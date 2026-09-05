@@ -4,8 +4,8 @@
 -- JobResponse already exposes 9 per-dim score slots (role, skill,
 -- seniority_score, experience, credentials, location_score, recency,
 -- semantic, penalty) defaulted to 0 because Step 1 never persisted the
--- breakdown ScoreBreakdown returns from JobScorer.score(). This migration
--- adds the missing columns; the writer side (insert_job + main.py:run_search)
+-- breakdown the (since-deleted) scorer returned. This migration
+-- adds the missing columns; the writer side (insert_job + the pipeline)
 -- and the read side (_JOBS_ENRICHMENT_JOIN_COLS + _row_to_job_response) land
 -- in the same Step-1.5 batch.
 --

@@ -20,17 +20,17 @@ function isSafePath(p: string | null | undefined): p is string {
 /**
  * Validates the ?next param to prevent open-redirect attacks. Only allows
  * paths that start with "/" but not "//" (protocol-relative); anything else
- * (external URL, missing, malformed) falls back to /dashboard.
+ * (external URL, missing, malformed) falls back to /applications (the signed-in home).
  */
 export function safeNext(p: string | null | undefined): string {
-  return isSafePath(p) ? p : "/dashboard";
+  return isSafePath(p) ? p : "/applications";
 }
 
 /**
  * Same safety check as `safeNext`, but returns `undefined` instead of a
  * fallback — for callers that want to OMIT an unsafe/missing `next` rather
  * than substitute a default (e.g. the magic-link request body: no `next`
- * means "no preference", not "go to /dashboard").
+ * means "no preference", not "go to /applications").
  */
 export function safeNextOrUndefined(p: string | null | undefined): string | undefined {
   return isSafePath(p) ? p : undefined;

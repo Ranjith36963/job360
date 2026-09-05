@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  LayoutDashboard,
   User,
   Menu,
   Activity,
@@ -18,21 +17,14 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/components/layout/AuthProvider";
 
-// R12/R14 (docs/plans/2026-09-04-application-spine) — the legacy search UI
-// (Dashboard) is gated behind the same build-time flag as the backend
-// routes and the /dashboard 404 in middleware.ts. NEXT_PUBLIC_* is inlined
-// at build time, same convention as src/lib/api.ts:47.
-const SEARCH_UI_ENABLED = process.env.NEXT_PUBLIC_SEARCH_UI_ENABLED === "true";
-
 // R14 (docs/plans/2026-09-04-application-spine) — /pipeline and /receipts
-// leave the nav here; both URLs keep working (slice 5 removes the routes).
+// leave the nav here; both URLs keep working. Slice 5 (delete-sourcing-era)
+// removed the Dashboard link and the route it pointed at — Job360 never
+// sources or ranks jobs (VISION rule 4), so there is no catalog left to browse.
 const NAV_LINKS = [
   { href: "/profile", label: "Profile", icon: User },
   { href: "/bring", label: "Bring a job", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },
-  ...(SEARCH_UI_ENABLED
-    ? [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }]
-    : []),
   { href: "/channels", label: "Channels", icon: Send },
 ] as const;
 
@@ -88,9 +80,7 @@ export function Navbar() {
           })}
         </nav>
 
-        {/* Right side — Auth + Theme. The search action lives on the Profile
-            page ("Search Latest Jobs") — a nav link here only navigated and
-            misled users into thinking it searched. */}
+        {/* Right side — Auth + Theme. */}
         <div className="hidden md:flex items-center gap-2">
           {signedIn && (
             <Link

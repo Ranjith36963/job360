@@ -201,19 +201,10 @@ def test_esco_attribution_in_skill_normalizer_module():
     assert "CC BY 4.0" in doc
 
 
-def test_esco_attribution_in_build_script():
-    """Same requirement on the build-time artefact generator — the
-    script MUST carry the attribution so anyone running it (or
-    auditing the release pipeline) sees it."""
-    from pathlib import Path
-    # build_esco_index.py was consolidated from repo-root scripts/ into
-    # backend/scripts/ — parents[1] is backend/, not parents[2] (repo root).
-    script = (Path(__file__).resolve().parents[1]
-              / "scripts" / "build_esco_index.py")
-    content = script.read_text(encoding="utf-8")
-    assert "ESCO" in content
-    assert "CC BY 4.0" in content
-    assert "European Union" in content
+# `test_esco_attribution_in_build_script` used to assert the same licence line
+# on `backend/scripts/build_esco_index.py`. Slice 5 (#483) deleted that script
+# (the index it built was never shipped — hard rule #28), so the module
+# docstring above is the only place the attribution has to live now.
 
 
 # ── 1.8b extended: restore_profile_version atomic rollback ────────

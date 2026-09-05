@@ -49,7 +49,11 @@ JOB = {
 TOOL_ROUTES = {
     "get_profile": ("profile", "get_profile", {}),
     "bring_job": ("bring", "bring_job", JOB),
-    "get_job": ("jobs", "get_job", {"job_id": 987654321}),
+    # Slice 5 (#483) deleted `routes/jobs.py` with the public catalog reads it
+    # served. The TOOL is unchanged (same name, same `job_id` argument); its
+    # ROUTE moved to `GET /api/applications/job/{job_id}` — per-user, so an id
+    # the caller never brought reads as 404 instead of somebody else's paste.
+    "get_job": ("applications", "get_job", {"job_id": 987654321}),
     "tailor_documents": ("tailor", "generate", {"job_id": 987654321}),
     "get_tailored_documents": ("tailor", "get_tailored", {"job_id": 987654321}),
     # C1 (application-spine review) — rewired onto the rich receipt route;

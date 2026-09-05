@@ -26,6 +26,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_request_db
+from src.api.models import JobResponse
+from src.api.routes.bring import job_row_to_response
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications import contacts as contacts_service
@@ -509,6 +511,33 @@ async def list_applications(
     return await spine.list_applications(
         db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset
     )
+
+
+@router.get("/applications/job/{job_id}", response_model=JobResponse)
+async def get_job(
+    job_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> JobResponse:
+    """Read back an ad THIS user brought, by its `job_id`.
+
+    Slice 5 (#483) deleted the public `GET /api/jobs/{id}`. That route served
+    the shared catalog to anyone with an id, which stopped being defensible
+    the moment `jobs` held nothing but ads individual people pasted (S1). This
+    is its per-user replacement: the row is returned only when the caller has
+    an application for it, so an id they never brought reads as 404, never as
+    somebody else's paste.
+
+    Declared BEFORE `/applications/{application_id}` for the same reason
+    `/applications/export` is — a literal segment must not be swallowed by the
+    dynamic one.
+    """
+    if await spine.get_application_by_job(db, user.id, job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    row = await db.get_job_by_id(job_id)
+    if row is None:  # pragma: no cover — an application always has its job row
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job_row_to_response(dict(row))
 
 
 @router.get("/applications/{application_id}", response_model=ApplicationDetailOut)

@@ -9,10 +9,10 @@ from typing import Any, Optional
 
 _RUN_ID = uuid.uuid4().hex[:8]
 
-# Step-1 S1 — per-invocation correlation id. ``run_search`` calls
+# Step-1 S1 — per-invocation correlation id. A long-running task calls
 # :func:`set_run_uuid` once at the top so every subsequent log line in the
 # same async task tree carries the same uuid. Defaults to ``None`` when no
-# pipeline run is in flight (e.g. plain CLI subcommands like ``status``).
+# such task is in flight, which is the ordinary request-path state.
 _run_uuid_var: ContextVar[str | None] = ContextVar("run_uuid", default=None)
 
 
@@ -240,7 +240,7 @@ def setup_audit_logger() -> logging.Logger:
     # audit history survives file rotation and is queryable with SQL. Lazy
     # import: audit_trail pulls in the DB layer, which this low-level logging
     # module must not import at module scope.
-    from src.services.audit_trail import install_db_audit_trail
+    from src.utils.audit_trail import install_db_audit_trail
 
     install_db_audit_trail(audit)
     return audit

@@ -135,7 +135,6 @@ search journey is legacy — verify it only when the change touched `src/sources
    the receipt did NOT change (append-only, rule M3).
 5. **MCP** — call the `/api/mcp` mount (streamable HTTP, not a `@router` route) with a personal `j360_…` token: `tools/list`, then `get_profile` and the
    receipt-listing tool return the same data the web showed.
-6. *(legacy, only if touched)* "New Search" on `/dashboard` → `jobs` count > 0 → dashboard renders scores.
 
 A good E2E run produces a short report: what works, what's broken (with the exact file:line
 and the DB/log evidence), severity, and the fix. See `E2E_TEST_REPORT.md` at the repo root
@@ -161,16 +160,11 @@ These cost real time the first time. Reading them here saves the next run.
   `CHANNEL_ENCRYPTION_KEY` (a Fernet key) must be set. Generate: `SESSION_SECRET` =
   `python -c "import secrets;print(secrets.token_urlsafe(64))"`; `CHANNEL_ENCRYPTION_KEY` =
   `python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"`.
-- **Web profile vs pipeline profile mismatch (a real bug found).** The web app saves profiles
-  per-user in the `user_profiles` DB table, but `run_search` (`src/main.py`) loads
-  `load_profile(DEFAULT_TENANT_ID)`. So a logged-in user's "New Search" runs profile-less.
-  When verifying search, check *which* profile the run actually loaded.
 - **Editable install (`pip install -e`) may resolve `import src` to a git worktree** under
   `.claude/worktrees/…`, not the main checkout. If a standalone script imports the wrong
   copy, force it: `sys.path.insert(0, r'D:\dev\job360\backend')` and `os.chdir` to backend.
 - **Playwright screenshots save to the repo root** by default. Read them from there, and
   tidy them into `test-artifacts/` afterward so they don't clutter the tree.
-- **`test_main.py` is offline now** — the M8 batch stubbed JobSpy (`fetch_jobs → []`) and patched `load_profile`, so its 14 E2E tests run in ~8s with no network. It is part of the canonical suite (no `--ignore` anymore). Do NOT re-add `--ignore=tests/test_main.py`.
 - **Frontend uses Base UI (`@base-ui/react`), NOT Radix/shadcn.** Compose via the
   `render` prop (`<Button render={<Link href=.. />}>text</Button>`), never `asChild`
   (that's a Radix-ism and fails `tsc`). After frontend edits, run BOTH gates:
@@ -189,7 +183,7 @@ These cost real time the first time. Reading them here saves the next run.
 - **CV extraction is ASYNC (~60–90 s).** The upload returns **200 immediately**, then the two-pass LLM extraction runs in the background and saves the profile ~1 min later. Reading `/api/profile` right after the 200 shows **empty skills/titles** — that's timing, NOT a bug. Poll the profile (or the DB `user_profiles.cv_data` blob) until skills appear before asserting populated.
 - **`user_profiles` stores the CV under the `cv_data` JSON column** (siblings: `preferences`, `linkedin_data`, `github_data`) — there is NO `profile_json` column. Use `cv_data` for direct DB skill/title checks.
 - **Login is now brute-force-locked.** 5 failed logins for one email → **HTTP 429** (Retry-After) for ~15 min, even with the correct password. When sweeping: use a **throwaway email** for the lockout test, and never reuse an email you've intentionally failed — the lock turns a later legit login into a false 429.
-- **Search is gated on a verified email.** A fresh registered user is unverified, so `POST /api/search` returns **403 `email_not_verified`** (`require_verified_user`). To exercise search, first verify: walk the verify-email token, or `UPDATE users SET email_verified_at=datetime('now') WHERE email=?`.
+- **Minting an agent token is gated on a verified email.** A fresh registered user is unverified, so `POST /api/tokens` returns **403 `email_not_verified`** (`require_verified_user`). To exercise the MCP surface, first verify: walk the verify-email token, or `UPDATE users SET email_verified_at = now() WHERE email = ?`.
 - **Gemini free tier returns 429 (quota 0); the Groq/Cerebras fallback handles it.** Don't flag the Gemini 429 as a failure — the fallback chain saving the profile ("Profile saved for user …") is the success signal.
 
 ## Tools this skill uses

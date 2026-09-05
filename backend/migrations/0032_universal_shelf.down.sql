@@ -2,12 +2,10 @@
 --
 -- READ THIS BEFORE RUNNING IT: THIS DESTROYS REAL DATA.
 --
--- The original text here said nothing wrote to these columns, because step 1
--- was written before steps 2 and 3 existed. They now ship together: source
--- mappers populate them (lever.py, recruitee.py, smartrecruiters.py and
--- others) and services/shelf_enrichment.py calls fill_shelves(), including
--- LLM-derived values that cost money to produce. Every one of those is gone
--- the moment this runs, and re-deriving the enriched ones means paying again.
+-- These columns hold values the deleted sourcing pipeline wrote, including
+-- LLM-derived ones that cost money to produce. Every one of them is gone the
+-- moment this runs, and nothing in the codebase can re-derive them any more
+-- (slice 5, #483, removed the writers).
 --
 -- Kept as a real reverse migration because a forward migration without one is
 -- a door that only opens one way — but this is a deliberate act now, not the

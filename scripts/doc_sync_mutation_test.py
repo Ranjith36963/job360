@@ -33,50 +33,20 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # (doc, regex with ONE capture group, replacement that lies, fact name in the report)
+#
+# Every case that used to plant a lie in a job-registry / rate-limit table /
+# ATS-slug / dataclass-shape claim was retired 2026-09-05 (slice 5, #483)
+# along with the guard it drilled: those facts no longer exist in the code,
+# so a text mutation would have nothing true to compare against. The three
+# still here (subfolder-ats, disagree:LOCATIONS in the code-facts sense) went
+# with them; `landing-source-count` is now a structural, not textual, drill
+# — see `landing_source_count_drill()` below — because there is no live
+# registry value left to plant a wrong NUMBER against.
 CASES: list[tuple[str, str, str, str]] = [
-    ("CLAUDE.md", r"SOURCE_REGISTRY`? has (\d+) entries", "SOURCE_REGISTRY` has 999 entries", "registry"),
-    ("CLAUDE.md", r"(\d+) unique source classes", "999 unique source classes", "unique-classes"),
-    # Moved to the hard-rules SKILL 2026-08-25 with the CLAUDE.md diet. The
-    # drill said "guard watches nothing" the moment it moved, which is the
-    # design working: a drill whose target relocates must not pass quietly.
-    (".claude/skills/hard-rules/SKILL.md",
-     r"SCORER_VERSION`?\s*=\s*\*{0,2}(\d+)", "SCORER_VERSION` = **999", "scorer-version"),
     ("CLAUDE.md", r"(\d+) workflows in", "999 workflows in", "workflows"),
     ("ARCHITECTURE.md", r"across (\d+) `?test_\*\.py`? files", "across 999 test_*.py files", "test-files"),
     ("frontend/CLAUDE.md", r"Next\.js (\d+\.\d+\.\d+)", "Next.js 1.2.3", "nextjs-version"),
     ("frontend/CLAUDE.md", r"React (\d+\.\d+\.\d+)", "React 4.5.6", "react-version"),
-    # Second promotion batch, 2026-08-24.
-    ("docs/product/pillars/03-job-providers.md",
-     r"checking all (\d+) subclasses", "checking all 999 subclasses", "subclasses"),
-    ("docs/product/pillars/glossary.md",
-     r"`RATE_LIMITS` dict in `settings\.py` \((\d+) entries",
-     "`RATE_LIMITS` dict in `settings.py` (999 entries", "rate-limits"),
-    # Third batch, 2026-08-24 — the glossary's remaining countable facts.
-    ("docs/product/pillars/glossary.md",
-     r"\((\d+) slugs across \d+ platforms\)", "(999 slugs across 11 platforms)", "ats-slugs"),
-    ("docs/product/pillars/glossary.md",
-     r"\(\d+ slugs across (\d+) platforms\)", "(302 slugs across 99 platforms)", "ats-platforms"),
-    ("docs/product/pillars/glossary.md",
-     r"every source must produce: (\d+) fields", "every source must produce: 999 fields", "job-fields"),
-    ("docs/product/pillars/glossary.md",
-     r"shape with (\d+) strict-typed fields", "shape with 999 strict-typed fields",
-     "enrichment-fields"),
-    ("docs/product/pillars/glossary.md",
-     r"strict-typed fields, (\d+) enums", "strict-typed fields, 99 enums", "enrichment-enums"),
-    # The only CODE file guarded here. It shipped "47 Job Sources" to every
-    # visitor of job360.uk for a week after the roster dropped to 41.
-    # The only CODE files guarded here. The copy shipped "47 Job Sources" to
-    # every visitor of job360.uk for a week after the roster dropped to 41 --
-    # on the landing page, in the site metadata Google and social cards read,
-    # and in the footer on every page.
-    #
-    # The constant is drilled SEPARATELY and deliberately. The first version of
-    # this guard filtered lines with `"ource" not in line`, which skipped
-    # `SOURCE_COUNT = 41` because that spelling is uppercase: setting it to 99
-    # left the report green. Drilling only the page copy would never have found
-    # that. One capital letter, one blind guard.
-    ("frontend/src/lib/catalog.ts",
-     r"SOURCE_COUNT = (\d+)", "SOURCE_COUNT = 999", "landing-source-count"),
     # Eighth batch, 2026-08-25. The disagreement guard: does one doc contradict
     # ANOTHER doc about a named constant? Six of ten findings in the cycle that
     # prompted it were exactly this, twice within a single file.
@@ -89,13 +59,12 @@ CASES: list[tuple[str, str, str, str]] = [
     # make a DISAGREEMENT guard red: with every copy equal there is nothing to
     # disagree about.
     #
-    # The first draft mutated a line reading "the old ENRICHMENT_THRESHOLD=60
-    # gate never fired" -- which this guard deliberately SKIPS, because a doc
-    # explaining a retired value has to name it. The drill reported the guard
-    # blind, correctly: I had pointed it at the one line the guard is designed
-    # not to read.
-    ("ARCHITECTURE.md",
-     r"`LOCATIONS` \((\d+)\) and", "`LOCATIONS` (777) and", "disagree:LOCATIONS"),
+    # The `disagree:LOCATIONS` case that used to live here mutated
+    # ARCHITECTURE.md's "Only `LOCATIONS` (26) and `VISA_KEYWORDS`" line, part
+    # of the sourcing-era keyword-defaults paragraph deleted 2026-09-05 (slice
+    # 5, #483) along with `core/keywords.py`'s search-config role. There is no
+    # replacement: the disagreement guard drills whatever CONSTANT claim two
+    # LIVING docs currently share, and none of the surviving docs states one.
     # Fourth batch, 2026-08-24, from the nightly routine.
     #
     # suite-baseline is the odd one out and the point of it: every other guard
@@ -136,14 +105,14 @@ CASES: list[tuple[str, str, str, str]] = [
     # telling operators to run `sqlite3 data/jobs.db` against a Postgres
     # database -- five dead COMMANDS, not stale prose. The four SQLite entries
     # in FORBIDDEN_PHRASES all pin sentences; none matched a shell command.
-    ("docs/product/pillars/runbook.md",
-     # Anchored on `psql ` rather than the longer `railway run -s Postgres psql`
-     # form this drill originally targeted. #396 rewrote the runbook to use bare
-     # SQL blocks with a connect line, so the longer string vanished and the
-     # drill reported "guard watches nothing" -- correctly. Second time a drill
-     # has caught its own target being removed by someone else's fix (the first
-     # was suite-baseline after #393). That is the drill working, not failing.
-     r"(psql) postgresql://", "sqlite3 data/jobs.db postgresql://",
+    # Retargeted 2026-09-05: runbook.md was archived with the sourcing era
+    # (slice 5, #483), so the drill moved to root CLAUDE.md's prod-database
+    # row -- on LIVING_DOCS (the phrase sweep reads only that list) and still
+    # telling an operator which DB command to run. Third time a drill has
+    # caught its own target being removed by someone else's fix. That is the
+    # drill working, not failing.
+    ("CLAUDE.md",
+     r"`(railway run -s Postgres python) <script>`", "`sqlite3 data/jobs.db <script>`",
      "stale-phrase"),
     # Fifth batch, 2026-08-24. Two "N-thing schema" style guards promoted by the
     # nightly routine after ARCHITECTURE.md carried "25-migration forward-compat
@@ -156,39 +125,33 @@ CASES: list[tuple[str, str, str, str]] = [
     # The drill said so rather than passing quietly -- the fourth time this
     # design has caught its own target disappearing, and the first time the
     # target disappeared ON PURPOSE.
-    ("ARCHITECTURE.md",
-     r"\bats/\s*\((\d+)\)", "ats/ (999)", "subfolder-ats"),
+    #
+    # The `subfolder-ats` case that used to live here mutated ARCHITECTURE.md's
+    # `ats/ (10)` source-tree line. `backend/src/sources/` and its per-category
+    # subfolder counts were deleted 2026-09-05 (slice 5, #483) along with
+    # `source_subfolder_counts()` — see structural_drills() below, whose
+    # matching cases went with it.
+    #
     # Sixth batch, 2026-08-25. The route guard: a documented endpoint that no
     # router declares. Cycle 13 found `POST /api/pipeline/applications` in
     # THREE places (real route: `POST /api/pipeline/{job_id}`, id in the path,
     # no body) -- a doc lie that reads like a contract and 404s whoever trusts
     # it. The mutation renames a REAL route to one that has never existed.
-    ("docs/product/pillars/glossary.md",
-     r"`GET (/api/runs/recent)`", "`GET /api/runs/definitely-not-a-route`",
+    # Retargeted 2026-09-05 from docs/product/pillars/glossary.md (archived
+    # with the sourcing era, slice 5, #483) to a route that survives the
+    # slice: OAuth is part of the kept product path.
+    ("ARCHITECTURE.md",
+     r"`GET (/api/oauth/authorize)`", "`GET /api/oauth/definitely-not-a-route`",
      "route-not-found"),
     # The stamp guard. A KIND outside the five is as unreadable as no stamp at
     # all -- both leave the routine unable to tell a dated record from a live
     # claim, which is why thirteen cycles could never reach zero.
     ("STATUS.md",
      r"<!-- doc: (LIVING)", "<!-- doc: BOGUS", "unstamped-doc"),
-    # Ninth batch, 2026-08-25, and the most instructive promotion so far.
-    # `disagree:LOCATIONS` above was GREEN while FIVE living docs said 25 and
-    # the list held 26 -- because it asks "do two docs agree?", and they all
-    # agreed. Consensus is not verification: a doc-vs-doc check can only find
-    # disagreement, never a shared falsehood, and shared falsehoods are what
-    # docs drift toward because docs are copied from each other. The new guard
-    # counts the SOURCE. Both are kept: one is cheap and needs no extractor,
-    # the other is true.
-    #
-    # Anchored on the BACKTICKED prose form at ARCHITECTURE.md:10, not the
-    # tree-diagram line at :53. The first draft targeted the tree line, whose
-    # `LOCATIONS (26) + VISA_KEYWORDS (8)` carries no backticks, and the drill
-    # said "guard watches nothing" instead of passing quietly -- the third time
-    # a drill has caught its own target being rewritten by someone else's fix.
-    ("ARCHITECTURE.md",
-     r"Only `LOCATIONS` \((\d+)\) and `VISA_KEYWORDS`",
-     "Only `LOCATIONS` (999) and `VISA_KEYWORDS`",
-     "locations"),
+    # The ninth-batch `locations` drill (2026-08-25) counted `LOCATIONS` in
+    # `core/keywords.py` against the docs' claim. The list, its reader and the
+    # guard all went with the sourcing era (slice 5, #483); its lesson stays:
+    # a doc-vs-doc check can only find disagreement, never a shared falsehood.
 ]
 
 
@@ -223,19 +186,10 @@ def structural_drills() -> list[str]:
         try:
             dsc.ROOT = fake
 
-            # 1. Every expected subfolder must still yield a guard (count 0)
-            #    when backend/src/sources/ is not there at all.
-            counts = dsc.source_subfolder_counts()
-            for name in dsc.EXPECTED_SOURCE_SUBFOLDERS:
-                if name not in counts:
-                    failures.append(
-                        f"subfolder-{name}: guard VANISHES when the folder is missing "
-                        "— a deleted folder would silently retire its own check"
-                    )
-                elif counts[name] != 0:
-                    failures.append(
-                        f"subfolder-{name}: missing folder scored {counts[name]}, expected 0"
-                    )
+            # The subfolder-missing drill that used to open this block
+            # (source_subfolder_counts() / EXPECTED_SOURCE_SUBFOLDERS) was
+            # retired 2026-09-05 with `backend/src/sources/` itself (slice 5,
+            # #483) — there is no folder left to delete out from under it.
 
             # 1b. A C0 control byte planted in a guard file must be REPORTED.
             #     Text mutation cannot express this: the byte is invisible to
@@ -273,7 +227,7 @@ def structural_drills() -> list[str]:
                 try:
                     dsc.ROOT = real_root
                     real_status.write_bytes(
-                        before + b"\n\nSee `backend/src/main.py:999` for details.\n")
+                        before + b"\n\nSee `backend/src/api/main.py:999` for details.\n")
                     if not dsc.line_citation_regressions():
                         failures.append(
                             "line-citation-ratchet: a NEW raw line number went "
@@ -374,25 +328,9 @@ def structural_drills() -> list[str]:
         finally:
             dsc.ROOT = real_root
 
-    # 5. The GENERATED guard, not just the count behind it. CodeRabbit, on
-    #    PR #394: drill 1 proves source_subfolder_counts() keeps a zero entry,
-    #    but a regression that filtered zero-count folders out of
-    #    build_checks() would still pass it -- the count survives while the
-    #    check it feeds disappears. Force ats to 0 and require the emitted
-    #    check list to still carry `subfolder-ats`. Runs against the REAL root
-    #    (build_checks parses main.py, settings.py, companies.py...), with only
-    #    the counts function swapped.
-    real_counts = dsc.source_subfolder_counts
-    try:
-        dsc.source_subfolder_counts = lambda: {**real_counts(), "ats": 0}  # noqa: E731
-        emitted = {name for name, _, _ in dsc.build_checks()[0]}
-        if "subfolder-ats" not in emitted:
-            failures.append(
-                "subfolder-ats: build_checks() DROPS the guard when the folder counts 0 "
-                "— the count survives but the check it feeds does not"
-            )
-    finally:
-        dsc.source_subfolder_counts = real_counts
+    # The GENERATED-guard drill that used to run here (force `ats` to 0,
+    # require build_checks() to still emit `subfolder-ats`) was retired
+    # 2026-09-05 with `source_subfolder_counts()` itself (slice 5, #483).
 
     # 3. A NEW pillar doc must be caught the day it appears.
     #
@@ -421,6 +359,42 @@ def structural_drills() -> list[str]:
               "gapped/malformed/duplicate migrations, unwatched pillar doc, "
               "control byte in a guard, line-citation ratchet, surface ratchet, dead tree path")
     return failures
+
+
+def landing_source_count_drill() -> list[str]:
+    """Prove `landing-source-count` still fires — as a PRESENCE guard now.
+
+    Before slice 5 (#483) this was an ordinary CASE: mutate a `SOURCE_COUNT`
+    digit in `frontend/src/lib/catalog.ts` (deleted with the sourcing era) and
+    require the number to disagree with the registry. There is no registry
+    left to disagree with, so `landing_page_source_claims()` in
+    doc_sync_check.py changed shape: it now fires on ANY "N source(s)" claim
+    at all, which a text-substitution CASE cannot express (there is nothing
+    truthful already in the file to substitute over — the frontend's own
+    regression test, `landing-sources-count.test.tsx`, keeps that copy at
+    zero mentions on purpose). So this drill INSERTS a claim instead.
+    """
+    target = ROOT / "frontend" / "src" / "app" / "page.tsx"
+    if not target.exists():
+        return ["landing-source-count: frontend/src/app/page.tsx does not exist — cannot drill"]
+
+    before = target.read_bytes()
+    try:
+        # A CODE line, not a `//` comment: the guard skips comment lines on
+        # purpose (prose explaining the old 47-vs-41 bug may say 47), so a
+        # planted comment proves nothing. The first draft planted exactly that
+        # and reported the guard blind when it was the drill that was.
+        target.write_bytes(before + b'\nconst drillCopy = "47 job sources";\n')
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "doc_sync_check.py")],
+            capture_output=True, encoding="utf-8", errors="replace", cwd=str(ROOT),
+        )
+        if "landing-source-count" in (proc.stdout or ""):
+            print("PASS  landing-source-count went RED when the landing page claimed a source count")
+            return []
+        return ["landing-source-count: stayed GREEN on a page claiming '47 job sources' — the guard is blind"]
+    finally:
+        target.write_bytes(before)
 
 
 def unwatched_claims() -> list[str]:
@@ -513,6 +487,10 @@ def main() -> int:
     # Failure paths no text mutation can express: an ABSENT check (deleted
     # source folder) and a structurally broken migration run.
     failures.extend(structural_drills())
+
+    # landing-source-count is now a PRESENCE guard (see docstring) — an
+    # insertion drill, not a CASE substitution.
+    failures.extend(landing_source_count_drill())
 
     # Second half of the drill: docs that make a guarded claim while sitting
     # outside LIVING_DOCS. Planting a lie proves the LISTED docs are scanned;

@@ -69,8 +69,11 @@ def test_reset_index_for_testing_is_idempotent(tmp_path):
     assert is_available() is False  # default dir won't exist in CI
 
 
-def test_semantic_enabled_flag_defaults_off():
-    """The SEMANTIC_ENABLED env var gates the whole Batch-2.6 pipeline."""
+def test_esco_normalisation_flag_is_a_bool():
+    """The flag that gates this module. Was `SEMANTIC_ENABLED`, which also
+    gated the deleted semantic RETRIEVAL stack — slice 5 (#483) renamed it
+    after its one surviving reader. We don't force-toggle the env here; we
+    just assert its nature."""
     from src.core import settings
-    # We don't force-toggle the env in tests; we just assert boolean nature.
-    assert isinstance(settings.SEMANTIC_ENABLED, bool)
+
+    assert isinstance(settings.ESCO_SKILL_NORMALISATION_ENABLED, bool)

@@ -58,21 +58,19 @@ def _checker():
 
 
 def code_facts() -> str:
+    """Countable facts about what remains after slice 5 (#483).
+
+    Every fact this block used to carry about the sourcing era — the job
+    registry, its unique classes, the rate-limit table, the location keyword
+    list, the scorer version, the source-class count, the ATS slug catalog,
+    the enrichment schema — was retired 2026-09-05 with the code that made it
+    true. What is left is generic repo shape, none of it sourcing-specific.
+    """
     c = _checker()
-    registry, unique = c.registry_counts()
-    slugs, platforms = c.ats_slug_count()
     rows = [
         "| Fact | Value | Where the code says it |",
         "| --- | --- | --- |",
-        f"| `SOURCE_REGISTRY` keys | **{registry}** | `src/main.py` `SOURCE_REGISTRY` |",
-        f"| Unique source classes | **{unique}** | same dict — `indeed` and `glassdoor` both alias `JobSpySource` |",
-        f"| `RATE_LIMITS` entries | **{c.rate_limit_count()}** | `core/settings.py` `RATE_LIMITS` |",
-        f"| `LOCATIONS` entries | **{c.locations_count()}** | `core/keywords.py` `LOCATIONS` |",
         f"| Migration head | **{c.migration_head():04d}** | `backend/migrations/` |",
-        f"| `SCORER_VERSION` | **{c.scorer_version()}** | `services/skill_matcher.SCORER_VERSION` |",
-        f"| `BaseJobSource` subclasses | **{c.source_subclass_count()}** | `src/sources/` |",
-        f"| ATS board slugs | **{slugs}** across **{platforms}** platforms | `src/data/` ATS slug files |",
-        f"| Enrichment enum values | **{c.enrichment_enum_count()}** | `services/enrichment` schema |",
         f"| Migration files | **{c.migration_file_count()}** | `backend/migrations/*.up.sql` |",
         f"| `test_*.py` files | **{c.test_file_count()}** | `backend/tests/` |",
         f"| GitHub Actions workflows | **{c.workflow_count()}** | `.github/workflows/` |",

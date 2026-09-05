@@ -23,7 +23,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 ---
 
 ## A. Landing & entry
-- [ ] 1. Landing `/` renders — hero, stats card, CTAs. **The card should read 41 sources** (41 registry keys; 40 live instances). The hardcoded **47** that made this box fail through 2026-08-24 is gone: every rendered count — hero, stats card, footer strapline, and the OG/Twitter card metadata — now reads `SOURCE_COUNT` from `frontend/src/lib/catalog.ts` (`page.tsx`, `layout.tsx`, `Footer.tsx`). If the number on screen disagrees with `SOURCE_REGISTRY`, the bug is in that one constant, and `scripts/doc_sync_check.py` (guard `landing-source-count`) should already be red.
+- [ ] 1. Landing `/` renders — hero + CTAs, and **no source count anywhere** (hero, footer strapline, OG/Twitter metadata). Job360 never sources jobs (VISION rule 4); `frontend/src/app/__tests__/landing-sources-count.test.tsx` pins the absence.
 - [ ] 2. Every nav + footer link and the Get-started / Login buttons navigate correctly
 
 ## B. Auth (full lifecycle)
@@ -40,25 +40,25 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 - [ ] 11. CV upload + LLM parse → `POST /api/profile` 200, skills+titles returned, `user_profiles` row lands
 - [ ] 12. LinkedIn enrich → `POST /profile/linkedin` (GATED: needs sample LinkedIn PDF)
 - [ ] 13. GitHub enrich → `POST /profile/github` (CODE: hits live GitHub)
-- [ ] 14. Profile → keywords — CV produces a SearchConfig (titles/skills) used by search
+- [ ] 14. Profile → agent — `GET /api/profile` returns what the CV contains; an unset preference is ABSENT, not zero (rule #29)
 - [ ] 15. Version history → `GET /profile/versions` 200, count grows on each save
 - [ ] 16. Version **diff** → `/profile/versions/{a}/diff/{b}` 200, and **restore** a prior version
 - [ ] 17. JSON-Resume export → `GET /profile/json-resume` 200
-- [ ] 18. Auto re-score on profile save — `user_feed` rows (re)scored for the user after save
+- [ ] 18. Profile save bumps the version — `GET /profile/versions` count grows; no other side effect (nothing is re-scored any more)
 
-## D. Search & feed
-- [ ] 19. Run search → `POST /api/search` 200, returns `run_id`, pipeline runs
-- [ ] 20. Search status poll → `GET /search/{run_id}/status` reaches `completed`
-- [ ] 21. Dashboard feed → `GET /api/jobs` (user cookie) returns the user's OWN scored jobs (personalized, not the raw catalog)
-- [ ] 22. Dashboard UI — "New Search" button, filter panel, hybrid-mode toggle all work; jobs render with scores
+## D. Bring a job (the product path)
+- [ ] 19. Bring a job → `POST /api/jobs/bring` (title, company, description) 201; response carries `application_id` + `status`, a `jobs` row AND an `applications` row land
+- [ ] 20. Same ad twice → second `POST /api/jobs/bring` returns `existing: true` and the SAME `job_id` (dedup on `normalized_key()`)
+- [ ] 21. Bring page UI — `/bring` form submits and lands on `/applications/{id}`
+- [ ] 22. Applications list → `GET /api/applications` (user cookie) returns ONLY the caller's applications
 
-## E. Job interaction
-- [ ] 23. Job detail → `GET /api/jobs/{id}` 200 with per-dimension scores (role/skill/loc/recency)
-- [ ] 24. Duplicate detection → `GET /jobs/{id}/duplicates`
-- [ ] 25. Like / Apply / Skip → `POST /jobs/{id}/action` 200, `user_actions` row lands
-- [ ] 26. Un-like / remove action → `DELETE /jobs/{id}/action`
-- [ ] 27. Actions list + counts → `GET /actions`, `/actions/counts`
-- [ ] 28. CSV export → `GET /api/jobs/export` 200 real CSV — AND the UI export button (currently missing in UI; flag it)
+## E. Application object
+- [ ] 23. Application detail → `GET /api/applications/{id}` 200 with `events`, `artifacts`, `receipts`; another user's id → 404
+- [ ] 24. By job → `GET /api/applications/job/{job_id}` 200 for the caller's own application, 404 otherwise
+- [ ] 25. Save an artifact → `POST /applications/{id}/artifacts` 201; a second save is version 2, version 1 still readable (append-only)
+- [ ] 26. Record an event → `POST /applications/{id}/events` lands an `application_events` row; `status` moves; history never rewritten
+- [ ] 27. Receipt → `POST /applications/{id}/receipt` 201; `GET /api/receipts` lists it; `/receipts/{id}` shows note + channel
+- [ ] 28. Export → `GET /api/applications/export` 200 with every application, event, artifact and receipt of the caller
 
 ## F. Pipeline / Kanban
 - [ ] 29. Create card → advance stage → `POST /pipeline/{id}` + `/advance`; `applications.stage` + history row update
@@ -81,12 +81,12 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 - [ ] 40. Email change → `PATCH /users/me/email` (verify current password first)
 - [ ] 41. Account delete → `DELETE /users/me` soft-delete (sets `deleted_at`; restore after to keep the demo account)
 
-## J. Ops / admin
-- [ ] 42. Source health → `GET /runs/source-health` 200 (note: no role gate — any logged-in user)
-- [ ] 43. Recent runs → `GET /runs/recent` (feeds the `/admin/runs` UI)
+## J. Agent surface (MCP)
+- [ ] 42. Token → `POST /api/tokens` 201 returns a `j360_…` token once; `GET /api/tokens` lists names only; `DELETE /api/tokens/{id}` revokes
+- [ ] 43. MCP → a POST to `/api/mcp` (a mounted ASGI app, not a router) with no bearer = 401 + `WWW-Authenticate: Bearer`; with the token, `tools/list` names every tool (count it with `grep -c "@mcp.tool()" backend/src/api/mcp_server.py`)
 
 ## K. Cross-cutting
-- [ ] 44. Every page renders with no console errors: `/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/dashboard`, `/jobs/[id]`, `/pipeline`, `/profile`, `/settings/channels`, `/settings/notifications`, `/settings/account`, `/notifications`
+- [ ] 44. Every page renders with no console errors: `/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/bring`, `/applications`, `/applications/[id]`, `/receipts`, `/pipeline`, `/profile`, `/settings/channels`, `/settings/notifications`, `/settings/account`, `/notifications`
 - [ ] 45. Theme toggle works; spot-click every primary button on every page (no dead buttons)
 
 ---

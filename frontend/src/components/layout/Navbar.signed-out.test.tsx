@@ -33,11 +33,10 @@ vi.mock("@/components/layout/AuthProvider", () => ({
   useAuth: () => ({ ...mockAuth, logout: vi.fn() }),
 }));
 
-// R12/R14 (docs/plans/2026-09-04-application-spine) — Dashboard is gated
-// behind NEXT_PUBLIC_SEARCH_UI_ENABLED (unset/false in this test env, so it
-// does not render); Applications is the new spine-home nav item. Pipeline
-// (and Receipts) LEFT the nav under R14 — both URLs still work, just not
-// linked from here (C3, application-spine review).
+// R14 (docs/plans/2026-09-04-application-spine) — Applications is the
+// spine-home nav item. Pipeline (and Receipts) LEFT the nav under R14 — both
+// URLs still work, just not linked from here (C3, application-spine review).
+// Dashboard was deleted outright in slice 5 (delete-sourcing-era).
 const APP_LINKS = ["Profile", "Applications", "Channels"];
 
 beforeEach(() => {

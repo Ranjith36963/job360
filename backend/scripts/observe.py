@@ -9,9 +9,6 @@ that?" from memory or from reading code. Run this and read the numbers.
     # system-wide integrity: orphans, unattributed rows, per-table ownership
     python scripts/observe.py --system
 
-    # do these two accounts share anything they must not?
-    python scripts/observe.py --isolation a@example.com b@example.com
-
 Against production, prefix with Railway so DATABASE_PUBLIC_URL is injected:
 
     railway run -s Postgres python backend/scripts/observe.py --system
@@ -67,9 +64,6 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("oauth_states", "user_id"),
     ("oauth_grants", "user_id"),
     ("audit_log", "user_id"),
-    # `run_log` is a pipeline record, but it carries a user_id (whose search it
-    # was), so it is owned data and belongs in the orphan sweep.
-    ("run_log", "user_id"),
     # Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md).
     ("application_contacts", "user_id"),
     ("profile_edits", "user_id"),
@@ -77,7 +71,10 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
 
 # The SHARED catalog. These MUST NOT have a user_id — a user_id appearing here
 # is the leak, and its absence is the design working.
-SHARED_TABLES: tuple[str, ...] = ("jobs", "job_enrichment", "job_embeddings")
+# Slice 5 (#483) dropped `job_enrichment` and `job_embeddings` (migration
+# 0039); `jobs` is all that is left of the shared catalog — and every row
+# in it is now an ad some user brought.
+SHARED_TABLES: tuple[str, ...] = ("jobs",)
 
 
 def mask_email(email: Optional[str]) -> str:
@@ -153,39 +150,7 @@ def observe_user(cur: Any, email: str) -> int:
         else:
             print("  (no profile versions — nothing has been extracted yet)")
 
-    _rule("FEED — the jobs scored FOR this user, and by which profile")
-    if _table_exists(cur, "user_feed"):
-        cur.execute(
-            "SELECT count(*), min(score), round(avg(score)), max(score), "
-            "count(*) FILTER (WHERE profile_version IS NULL) "
-            "FROM user_feed WHERE user_id = %s",
-            (uid,),
-        )
-        n, lo, avg, hi, unattributed = cur.fetchone()
-        print(f"  rows                : {n}")
-        print(f"  score min/avg/max   : {lo} / {avg} / {hi}")
-        # An unattributed row cannot be explained later: we know the score but
-        # not which profile produced it.
-        flag = "  <-- UNATTRIBUTED" if unattributed else ""
-        print(f"  no profile_version  : {unattributed}{flag}")
-        cur.execute(
-            "SELECT profile_version, count(*) FROM user_feed WHERE user_id = %s "
-            "GROUP BY profile_version ORDER BY 2 DESC LIMIT 6",
-            (uid,),
-        )
-        spread = ", ".join(f"v{v}:{c}" for v, c in cur.fetchall()) or "-"
-        print(f"  scored under        : {spread}")
-        if _table_exists(cur, "jobs"):
-            catalog = _count(cur, "SELECT count(*) FROM jobs")
-            missing = _count(
-                cur,
-                "SELECT count(*) FROM jobs j WHERE NOT EXISTS "
-                "(SELECT 1 FROM user_feed f WHERE f.job_id = j.id AND f.user_id = %s)",
-                (uid,),
-            )
-            print(f"  catalog            : {catalog} jobs, {missing} never scored for them")
-
-    _rule("EVERYTHING ELSE OWNED BY THIS user_id")
+    _rule("EVERYTHING OWNED BY THIS user_id")
     for table, col in PER_USER_TABLES:
         if table in {"user_feed", "user_profile_versions"} or not _table_exists(cur, table):
             continue
@@ -292,71 +257,11 @@ def observe_system(cur: Any) -> int:
     return 0 if (leaks == 0 and orphans_total == 0) else 2
 
 
-# ---------------------------------------------------------------------------
-# --isolation : do two accounts share anything they must not?
-# ---------------------------------------------------------------------------
-
-
-def observe_isolation(cur: Any, email_a: str, email_b: str) -> int:
-    ids = []
-    for email in (email_a, email_b):
-        cur.execute("SELECT id, email FROM users WHERE lower(email) = lower(%s)", (email,))
-        row = cur.fetchone()
-        if row is None:
-            print(f"no user found for {mask_email(email)}")
-            return 1
-        ids.append(row)
-    (ua, ma), (ub, mb) = ids
-
-    _rule(f"ISOLATION  {mask_email(ma)}  vs  {mask_email(mb)}")
-
-    failures = 0
-    for table, col in PER_USER_TABLES:
-        if not _table_exists(cur, table):
-            continue
-        # A row is a violation only if it claims BOTH owners, which the schema
-        # should make impossible. Sharing a job_id is expected — the catalog is
-        # shared by design; sharing a ROW is not.
-        shared_rows = _count(
-            cur,
-            f"SELECT count(*) FROM {table} WHERE {col} = %s AND {col} = %s",  # noqa: S608
-            (ua, ub),
-        )
-        if shared_rows:
-            failures += 1
-            print(f"  {table:<30} SHARES {shared_rows} row(s)  <-- VIOLATION")
-    if failures == 0:
-        print("  no per-user table shares a row between these two accounts.")
-
-    if _table_exists(cur, "user_feed"):
-        cur.execute(
-            "SELECT count(*), count(*) FILTER (WHERE a.score <> b.score) "
-            "FROM user_feed a JOIN user_feed b ON a.job_id = b.job_id "
-            "WHERE a.user_id = %s AND b.user_id = %s",
-            (ua, ub),
-        )
-        both, differing = cur.fetchone()
-        print(f"\n  jobs in BOTH feeds            : {both}   (expected — shared catalog)")
-        print(f"  of those, scored DIFFERENTLY  : {differing}")
-        if both and differing == 0:
-            failures += 1
-            print("  <-- VIOLATION: identical scores mean ONE profile scored both users")
-        elif both:
-            print("  -> per-user scoring is working: the same job scores differently")
-
-    print(f"\nVERDICT: {failures} isolation violation(s).")
-    return 0 if failures == 0 else 2
-
-
 def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--user", metavar="EMAIL", help="everything stored for one person")
     g.add_argument("--system", action="store_true", help="integrity across all tables")
-    g.add_argument(
-        "--isolation", nargs=2, metavar=("EMAIL_A", "EMAIL_B"),
-        help="prove two accounts share nothing they must not",
-    )
     args = ap.parse_args(argv)
 
     dsn = os.environ.get("DATABASE_PUBLIC_URL") or os.environ.get("DATABASE_URL")
@@ -373,8 +278,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         with conn.cursor() as cur:
             if args.user:
                 return observe_user(cur, args.user)
-            if args.isolation:
-                return observe_isolation(cur, args.isolation[0], args.isolation[1])
             return observe_system(cur)
 
 

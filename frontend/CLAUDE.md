@@ -1,10 +1,10 @@
 @AGENTS.md
 
 # frontend/ — Claude Code pointer
-<!-- doc: LIVING | last-verified: 2026-08-21 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
 
-> **Thin pointer, not the source of truth.** The 31 hard rules, scoring/engine
-> guidance, DB schema, and phase history live in the **root [`../CLAUDE.md`](../CLAUDE.md)** —
+> **Thin pointer, not the source of truth.** The hard rules (a skill the root
+> file points at), DB schema, and phase history live in the **root [`../CLAUDE.md`](../CLAUDE.md)** —
 > read that first. This file adds frontend-local essentials so they're at hand when
 > you work in this directory. Keep it thin; do not duplicate the root.
 
@@ -16,7 +16,7 @@ of text — say what happened, what I did, what's next.
 
 ## What this is
 
-The Job360 web app: **Next.js 16.3.2 (App Router) + React 19.2.8 + Tailwind 4 +
+The Job360 web app: **Next.js 16.3.3 (App Router) + React 19.2.8 + Tailwind 4 +
 shadcn 4**. Talks to the FastAPI backend on `:8000`. State via **TanStack Query 5**;
 forms via **react-hook-form 7 + zod 4**; Kanban drag via **@dnd-kit**; charts via
 **recharts**; toasts via **sonner**. Auth is cookie-session — guarded in `src/middleware.ts`.
@@ -24,7 +24,7 @@ forms via **react-hook-form 7 + zod 4**; Kanban drag via **@dnd-kit**; charts vi
 ## Owner rule #29 — empty preferences stay SILENT (never default, never require)
 
 Preference inputs (salary range, locations, remote/hybrid/office, experience
-level, about_me) are OPTIONAL and must read as optional. Never block a search
+level, about_me) are OPTIONAL and must read as optional. Never block a save
 on an unfilled preference, and never write a default value the user didn't
 choose — a silently-written default is indistinguishable from a real choice
 and turns "don't care" into a fake constraint. The backend treats empty as
@@ -41,11 +41,11 @@ Training data for Next.js 14–15 is **wrong** here. Before any App Router patte
   - Server component: `export default async function Page({ params }: { params: Promise<{ id: string }> }) { const { id } = await params }`
   - Route handler: `export async function GET(req, { params }: { params: Promise<{ id: string }> }) { const { id } = await params }`
   - Client component: get the value with React's `use(params)` hook, not `await`.
-  - See `src/app/jobs/[id]/page.tsx` for the real pattern in this repo.
+  - See `src/app/applications/[id]/page.tsx` for the real pattern in this repo.
 - **`"use client"` on a `page.tsx` silently disables `generateMetadata`.** If a page
   needs both metadata and interactivity: keep `page.tsx` a server component, push the
   interactive parts into a child client component (this repo's pattern:
-  `jobs/[id]/page.tsx` server + `jobs/[id]/JobDetailClient.tsx` client).
+  `applications/[id]/page.tsx` server + `applications/[id]/ApplicationClient.tsx` client).
 - A codemod exists for the async migration, but **don't trust auto-fixes blindly** —
   verify against the running app (see "Verify", below).
 
@@ -71,12 +71,12 @@ backend route/response change: run `npm run gen:types`, commit the regenerated
 
 ## Where things are
 
-- `src/app/` — App Router pages: `(auth)/`, `dashboard/`, `jobs/[id]/`, `pipeline/`,
-  `profile/`, `settings/{notifications,account}/` (+ `layout.tsx`, `page.tsx`, `_tabs.tsx`),
+- `src/app/` — App Router pages: `(auth)/`, `bring/`, `applications/[id]/`, `receipts/`, `pipeline/`,
+  `profile/`, `settings/{notifications,account,connect}/` (+ `layout.tsx`, `page.tsx`, `_tabs.tsx`),
   `channels/`, `notifications/`. **Channels is a TOP-LEVEL page (`/channels`), not
   `settings/channels/`** — the Settings gear holds only Notifications + Account (nav IA
   change, 2026-06-20).
-- `src/components/` — `ui/` (shadcn primitives), `jobs/`, `pipeline/` (KanbanBoard),
+- `src/components/` — `ui/` (shadcn primitives), `applications/`, `tailor/`, `pipeline/` (KanbanBoard),
   `profile/`, `layout/`, `providers/`.
 - `src/lib/` — `api.ts` (fetch wrapper), `api-types.ts` (generated), `queryKeys.ts`
   (TanStack Query keys), `api-error.ts`, `types.ts`, `utils.ts`.

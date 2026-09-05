@@ -26,7 +26,7 @@ from src.services.profile.linkedin_parser import (
     parse_linkedin_pdf,
     parse_linkedin_pdf_async,
 )
-from src.services.profile.models import CVData, UserPreferences, UserProfile
+from src.services.profile.models import CVData
 
 # ---------------------------------------------------------------------------
 # Two-column de-interleaving (LinkedIn "Save to PDF" sidebar fix)
@@ -94,7 +94,6 @@ from src.services.profile.github_enricher import (
     enrich_cv_from_github,
     fetch_github_profile,
 )
-from src.services.profile.keyword_generator import generate_search_config
 
 # ---------------------------------------------------------------------------
 # Helpers — build LinkedIn-shaped PDFs in memory
@@ -725,94 +724,6 @@ class TestEnrichCVFromGitHub:
 
 
 # ---------------------------------------------------------------------------
-# Keyword generator with LinkedIn + GitHub data
-# ---------------------------------------------------------------------------
-
-class TestKeywordGeneratorWithEnrichedData:
-    def test_linkedin_skills_in_search_config(self):
-        # Batch 2.3 — skill lists exit the SearchConfig in canonical (lower-case,
-        # alias-resolved) form. "Spark" aliases to "apache spark".
-        profile = UserProfile(
-            cv_data=CVData(raw_text="test", skills=["Python"], linkedin_skills=["SQL", "Docker"]),
-            preferences=UserPreferences(target_job_titles=["Data Engineer"], additional_skills=["Spark"]),
-        )
-        config = generate_search_config(profile)
-        all_skills = config.primary_skills + config.secondary_skills + config.tertiary_skills
-        assert "apache spark" in all_skills  # canonical for "Spark"
-        assert "python" in all_skills
-        assert "sql" in all_skills
-        assert "docker" in all_skills
-
-    def test_github_skills_in_search_config(self):
-        # GitHub now contributes via significant languages (github_languages) +
-        # LLM-read repo skills (github_llm_skills), not the raw inferred dump.
-        profile = UserProfile(
-            cv_data=CVData(raw_text="test", skills=["Python"],
-                           github_languages={"TypeScript": 500_000},
-                           github_llm_skills=["React"]),
-            preferences=UserPreferences(target_job_titles=["Full Stack Developer"]),
-        )
-        config = generate_search_config(profile)
-        all_skills = config.primary_skills + config.secondary_skills + config.tertiary_skills
-        assert "typescript" in all_skills
-        assert "react" in all_skills
-
-    def test_linkedin_positions_as_titles(self):
-        profile = UserProfile(
-            cv_data=CVData(
-                raw_text="test",
-                linkedin_positions=[
-                    {"title": "Senior Engineer", "company": "Google"},
-                    {"title": "Tech Lead", "company": "Meta"},
-                ],
-            ),
-            preferences=UserPreferences(target_job_titles=["Software Engineer"]),
-        )
-        config = generate_search_config(profile)
-        assert "Software Engineer" in config.job_titles
-        assert "Senior Engineer" in config.job_titles
-        assert "Tech Lead" in config.job_titles
-
-    def test_linkedin_industry_in_relevance_keywords(self):
-        profile = UserProfile(
-            cv_data=CVData(raw_text="test", linkedin_industry="Information Technology"),
-            preferences=UserPreferences(target_job_titles=["Engineer"]),
-        )
-        config = generate_search_config(profile)
-        assert "information" in config.relevance_keywords
-        assert "technology" in config.relevance_keywords
-
-    def test_deduplication_across_all_sources(self):
-        # Batch 2.3 — canonical (lower-case) skill assertion.
-        profile = UserProfile(
-            cv_data=CVData(
-                raw_text="test",
-                skills=["Python", "SQL"],
-                linkedin_skills=["Python", "Docker"],
-                github_languages={"Python": 500_000, "Go": 300_000},
-                github_llm_skills=["SQL"],
-            ),
-            preferences=UserPreferences(target_job_titles=["Engineer"], additional_skills=["Python"]),
-        )
-        config = generate_search_config(profile)
-        all_skills = config.primary_skills + config.secondary_skills + config.tertiary_skills
-        assert all_skills.count("python") == 1
-        assert all_skills.count("sql") == 1
-        assert "docker" in all_skills
-        assert "go" in all_skills
-
-    def test_empty_enrichment_fields_no_change(self):
-        # Batch 2.3 — canonical (lower-case) skill assertion.
-        profile = UserProfile(
-            cv_data=CVData(raw_text="test", skills=["Python", "SQL"]),
-            preferences=UserPreferences(target_job_titles=["Engineer"]),
-        )
-        config = generate_search_config(profile)
-        all_skills = config.primary_skills + config.secondary_skills + config.tertiary_skills
-        assert set(all_skills) == {"python", "sql"}
-
-
-# ---------------------------------------------------------------------------
 # GitHub error handling + combined enrichment
 # ---------------------------------------------------------------------------
 
@@ -889,26 +800,6 @@ class TestCombinedEnrichment:
         assert "TypeScript" in cv.github_skills_inferred
         assert "Docker" in cv.github_skills_inferred
         assert "Engineer" in cv.job_titles
-
-    def test_all_sources_skill_dedup_in_search_config(self):
-        # Batch 2.3 — canonical (lower-case) skill assertion.
-        profile = UserProfile(
-            cv_data=CVData(
-                raw_text="test",
-                skills=["Python", "SQL"],
-                linkedin_skills=["Python", "Docker"],
-                github_languages={"Python": 500_000, "Go": 300_000},
-                github_llm_skills=["SQL"],
-            ),
-            preferences=UserPreferences(target_job_titles=["Engineer"], additional_skills=["Python"]),
-        )
-        config = generate_search_config(profile)
-        all_skills = config.primary_skills + config.secondary_skills + config.tertiary_skills
-        assert all_skills.count("python") == 1
-        assert all_skills.count("sql") == 1
-        assert "docker" in all_skills
-        assert "go" in all_skills
-
 
 # ---------------------------------------------------------------------------
 # Async context manager helper for mocking aiohttp

@@ -115,9 +115,6 @@ export default function ReceiptDetailPage() {
           {receipt.profile_version != null && (
             <Badge variant="outline">profile v{receipt.profile_version}</Badge>
           )}
-          <Link href={`/jobs/${receipt.job_id}`} className="text-primary hover:underline">
-            Open the job
-          </Link>
           {receipt.job_apply_url && (
             <a
               href={safeUrl(receipt.job_apply_url)}

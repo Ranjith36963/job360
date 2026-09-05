@@ -2,13 +2,13 @@
 
 Secrets are pasted into a dashboard by hand, so trailing whitespace rides along
 more often than anyone expects. It is invisible in every UI, and fatal wherever
-the value is concatenated rather than form-encoded: jooble builds
-`https://jooble.org/api/{key}`, so a trailing newline makes a different URL.
+the value is concatenated rather than form-encoded — a key in a URL path
+or a header becomes a DIFFERENT key.
 
 Measured on production 2026-08-24 by fingerprinting each Railway service's
-environment: SERPAPI_KEY and JSEARCH_API_KEY both carried surrounding whitespace
-on the worker service, while google_jobs was returning HTTP 401 — which reads as
-"your key is wrong" rather than "your key has a space on the end".
+environment: two live keys both carried surrounding whitespace, while the
+source using one was returning HTTP 401 — which reads as "your key is wrong"
+rather than "your key has a space on the end".
 
 TWO RULES THIS FILE OBEYS, both learned the hard way when the first draft printed
 real key fragments into a terminal:
@@ -29,17 +29,14 @@ import importlib
 
 import pytest
 
-CREDENTIALS = [
-    "REED_API_KEY",
-    "ADZUNA_APP_ID",
-    "ADZUNA_APP_KEY",
-    "JSEARCH_API_KEY",
-    "JOOBLE_API_KEY",
-    "SERPAPI_KEY",
-    "CAREERJET_AFFID",
-    "FINDWORK_API_KEY",
-    "DFE_APPRENTICESHIPS_API_KEY",
-]
+# Slice 5 (#483) deleted the nine job-board keys this file used to sweep, with
+# the sources that read them. `_secret()` itself survives — `GITHUB_TOKEN` is
+# its remaining caller — so the guard now tests the HELPER directly, under a
+# name no scanner and no real environment can collide with. Testing the
+# function rather than one constant is the stronger shape anyway: the next
+# credential added through `_secret()` is covered without editing this file.
+_PROBE = "JOB360_TEST_ONLY_CREDENTIAL"
+CREDENTIALS = [_PROBE]
 
 
 @pytest.fixture
@@ -61,7 +58,7 @@ def reload_settings(monkeypatch):
 @pytest.mark.parametrize("name", CREDENTIALS)
 def test_surrounding_whitespace_is_stripped(name, monkeypatch, reload_settings):
     monkeypatch.setenv(name, "  abc123\n")
-    value = getattr(reload_settings(), name)
+    value = reload_settings()._secret(name)
     if value != "abc123":
         pytest.fail(
             f"{name} was not stripped (got {len(value)} chars, expected 6) — "
@@ -78,7 +75,7 @@ def test_a_whitespace_only_value_reads_as_absent(name, monkeypatch, reload_setti
     rejects it — the loud failure path instead of the honest self-skip.
     """
     monkeypatch.setenv(name, "   \n")
-    value = getattr(reload_settings(), name)
+    value = reload_settings()._secret(name)
     if value != "":
         pytest.fail(f"{name} read a whitespace-only value as configured ({len(value)} chars)")
 
@@ -87,7 +84,7 @@ def test_a_whitespace_only_value_reads_as_absent(name, monkeypatch, reload_setti
 def test_an_unset_credential_is_still_empty_string(name, monkeypatch, reload_settings):
     """Absence must stay an empty string, never None — every caller does bool()."""
     monkeypatch.delenv(name, raising=False)
-    value = getattr(reload_settings(), name)
+    value = reload_settings()._secret(name)
     if not isinstance(value, str):
         pytest.fail(f"{name} is {type(value).__name__}, not str — bool() callers would break")
     if value != "":
@@ -117,6 +114,19 @@ _CLEAN_FIXTURE_VALUE = "not-a-real-key-only-a-test-fixture"
 
 
 def test_a_clean_credential_is_untouched(monkeypatch, reload_settings):
-    monkeypatch.setenv("SERPAPI_KEY", _CLEAN_FIXTURE_VALUE)
-    if reload_settings().SERPAPI_KEY != _CLEAN_FIXTURE_VALUE:
+    monkeypatch.setenv(_PROBE, _CLEAN_FIXTURE_VALUE)
+    if reload_settings()._secret(_PROBE) != _CLEAN_FIXTURE_VALUE:
         pytest.fail("a clean credential must pass through unchanged")
+
+
+def test_the_helper_is_actually_wired_to_a_real_setting(reload_settings):
+    """Non-vacuity: `_secret` is only worth testing while something reads it.
+    `GITHUB_TOKEN` is its one remaining caller after slice 5 (#483)."""
+    import inspect
+
+    settings = reload_settings()
+    assert isinstance(settings.GITHUB_TOKEN, str)
+    assert "GITHUB_TOKEN = _secret(" in inspect.getsource(settings), (
+        "GITHUB_TOKEN no longer goes through _secret() — this file now tests "
+        "a helper nothing uses"
+    )

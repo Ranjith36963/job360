@@ -13,32 +13,10 @@ _VALID_COL_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,63}$")
 # see 0032_universal_shelf.up.sql for why.
 _VALID_COL_TYPES = {"TEXT", "INTEGER", "REAL", "BLOB", "NUMERIC", "BOOLEAN", "JSONB"}
 
-from src.core.settings import USER_BROUGHT_SOURCE  # noqa: E402
 from src.models import Job  # noqa: E402  # after the regex constants to avoid circular import
 from src.utils.logger import get_logger  # noqa: E402
 
 _log = get_logger("db.repo")  # job360.db.repo → data/logs/
-
-# Child tables purged alongside a `jobs` row (docs/fable/02 D4 — orphan cleanup).
-# The pg shim strips EVERY foreign-key clause, including ON DELETE CASCADE, so the
-# DB will never cascade for us; purge_old_jobs must delete these explicitly.
-#
-# ONLY catalog-DERIVED rows belong here — data that is meaningless once the job is
-# gone and that the pipeline can regenerate. `user_feed` dominates the bloat: one
-# row per user per job.
-#
-# Deliberately NOT purged (rule #3 — purging them would be real data loss):
-#   applications, application_stage_history, tailored_documents, tailored_usage,
-#   user_actions, notification_ledger
-# Those are the USER's own records and audit trail. A user's Kanban entry or
-# tailored CV must survive the shared catalog aging out, so they may keep an
-# orphan job_id by design.
-_PURGE_CASCADE_TABLES = (
-    "job_enrichment",
-    "job_embeddings",
-    "user_feed",
-    "user_notification_digests",
-)
 
 
 class JobDatabase:
@@ -131,14 +109,6 @@ class JobDatabase:
                 deadline_source TEXT,
                 UNIQUE(normalized_company, normalized_title)
             );
-            CREATE TABLE IF NOT EXISTS run_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                total_found INTEGER DEFAULT 0,
-                new_jobs INTEGER DEFAULT 0,
-                sources_queried INTEGER DEFAULT 0,
-                per_source TEXT DEFAULT '{}'
-            );
             CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
             CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
             CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
@@ -221,23 +191,6 @@ class JobDatabase:
             ("salary_max_gbp_annual", "REAL"),
             ("shelf_provenance", "JSONB NOT NULL DEFAULT '{}'"),
         ]
-        run_log_migrations = [
-            # Step-0 pre-flight — migration 0010 observability columns.
-            # Mirrored here so init_db() alone produces the full run_log
-            # schema even when the external migration runner hasn't run.
-            ("run_uuid", "TEXT"),
-            ("per_source_errors", "TEXT DEFAULT '{}'"),
-            ("per_source_duration", "TEXT DEFAULT '{}'"),
-            ("total_duration", "REAL"),
-            ("user_id", "TEXT"),
-            ("matcher_stats", "TEXT DEFAULT '{}'"),  # backlog #9 — LLM judge telemetry
-            # Migration 0032 — JOB SOURCE ENRICHMENT spend counter. Same shape
-            # as matcher_stats: a whole-blob JSON payload written by
-            # services/shelf_enrichment.py so "what did last night cost?" has
-            # an answer at all (docs/pillars/UNIVERSAL_SHELF.md §7).
-            ("enrichment_stats", "TEXT DEFAULT '{}'"),
-        ]
-
         applications_migrations = [
             # Step-3 B-06 — stage history + interview dates + notes versioning.
             # Mirrors migration 0014_application_history so init_db() alone
@@ -248,7 +201,6 @@ class JobDatabase:
         ]
 
         await self._add_missing_columns("jobs", jobs_migrations)
-        await self._add_missing_columns("run_log", run_log_migrations)
         await self._add_missing_columns("applications", applications_migrations)
 
         # Ensure application_stage_history table exists (migration 0014).
@@ -390,14 +342,6 @@ class JobDatabase:
         rows = await cursor.fetchall()
         return [row[0] for row in rows]
 
-    async def is_job_seen(self, normalized_key: tuple[str, str]) -> bool:
-        company, title = normalized_key
-        cursor = await self._db.execute(
-            "SELECT 1 FROM jobs WHERE normalized_company = ? AND normalized_title = ?",
-            (company, title),
-        )
-        return await cursor.fetchone() is not None
-
     async def insert_job(self, job: Job) -> bool:
         """Insert job, returning True if it was actually inserted (not a duplicate).
 
@@ -412,23 +356,18 @@ class JobDatabase:
         now = datetime.now(timezone.utc).isoformat()
         first_seen_at = job.first_seen_at if job.first_seen_at is not None else now
         last_seen_at = job.last_seen_at if job.last_seen_at is not None else now
+        # Slice 5 (#483): the score, dim and shelf columns are no longer
+        # written. Nothing computes them any more — the columns stay on the
+        # table (dropping them is its own migration) but a brought ad leaves
+        # them at their defaults rather than storing invented zeroes.
         cursor = await self._db.execute(
             """INSERT OR IGNORE INTO jobs
             (title, company, location, salary_min, salary_max, description,
-             apply_url, source, date_found, match_score, visa_flag,
+             apply_url, source, date_found, visa_flag,
              experience_level, normalized_company, normalized_title, first_seen,
              posted_at, first_seen_at, last_seen_at, date_confidence,
-             date_posted_raw,
-             role, skill, seniority_score, experience, credentials,
-             location_score, recency, semantic, penalty,
-             deadline, deadline_source,
-             employment_type, workplace_mode, seniority, category, source_tags,
-             visa_status, salary_currency, salary_period, salary_is_estimated,
-             salary_min_gbp_annual, salary_max_gbp_annual,
-             shelf_provenance)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             date_posted_raw, deadline, deadline_source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.title,
                 job.company,
@@ -439,7 +378,6 @@ class JobDatabase:
                 job.apply_url,
                 job.source,
                 job.date_found,
-                job.match_score,
                 int(job.visa_flag),
                 job.experience_level,
                 company,
@@ -450,36 +388,8 @@ class JobDatabase:
                 last_seen_at,
                 job.date_confidence,
                 job.date_posted_raw,
-                job.role,
-                job.skill,
-                job.seniority_score,
-                job.experience,
-                job.credentials,
-                job.location_score,
-                job.recency,
-                job.semantic,
-                job.penalty,
                 job.deadline,
                 job.deadline_source,
-                # Universal Shelf (migration 0031). salary_min_gbp_annual /
-                # salary_max_gbp_annual are DERIVED by
-                # services/shelf_gate.py::_fill_salary — annualised and
-                # converted to GBP from the source's own unit sidecars. They
-                # stay NULL when the gate could not honestly convert (no
-                # amount, or a currency core/fx cannot price), which is the
-                # correct rule #29 state for a value nobody could derive.
-                job.employment_type,
-                job.workplace_mode,
-                job.seniority,
-                job.category,
-                json.dumps(job.source_tags or []),
-                job.visa_status,
-                job.salary_currency,
-                job.salary_period,
-                job.salary_is_estimated,
-                job.salary_min_gbp_annual,
-                job.salary_max_gbp_annual,
-                json.dumps(job.shelf_provenance or {}),
             ),
         )
         inserted = cursor.rowcount > 0
@@ -523,40 +433,15 @@ class JobDatabase:
             )
         return inserted
 
-    async def update_job_scores(self, job: Job) -> None:
-        """Persist a re-scored job's match_score + dim columns to the catalog.
-
-        Used after enrichment, when a job is re-scored with its DB ``id`` set so
-        the enrichment dims (seniority/salary/visa/workplace, folded into
-        match_score) actually land on the stored row. No-op without ``job.id``.
-        """
-        job_id = getattr(job, "id", None)
-        if job_id is None:
-            return
-        await self._db.execute(
-            """UPDATE jobs SET
-                   match_score = ?, role = ?, skill = ?, seniority_score = ?,
-                   experience = ?, credentials = ?, location_score = ?,
-                   recency = ?, semantic = ?, penalty = ?, visa_flag = ?
-               WHERE id = ?""",
-            (
-                job.match_score,
-                job.role,
-                job.skill,
-                job.seniority_score,
-                job.experience,
-                job.credentials,
-                job.location_score,
-                job.recency,
-                job.semantic,
-                job.penalty,
-                int(job.visa_flag),
-                job_id,
-            ),
-        )
-
     async def update_last_seen(self, normalized_key: tuple[str, str]) -> None:
-        """Mark a job as re-seen this scrape cycle. Resets ghost-detection counters."""
+        """Mark a job as seen NOW, clearing the stale marks a long-dead ghost
+        sweep may have left on it.
+
+        Its old caller (the scrape cycle) is gone. `POST /jobs/bring` is the
+        only one left: re-bringing an ad that matches a legacy scraped row must
+        make that row usable again, because `POST /pipeline/{job_id}` still
+        refuses a `confirmed_expired` one — the last read of that column.
+        """
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             "UPDATE jobs SET last_seen_at = ?, consecutive_misses = 0, "
@@ -565,106 +450,6 @@ class JobDatabase:
             (now, normalized_key[0], normalized_key[1]),
         )
         await self._db.commit()
-
-    async def update_staleness_state(self, job_id: int, new_state: str) -> None:
-        """Persist a single job's staleness_state. Step-1.5 S1.5-B helper.
-
-        No commit here — the caller batches commits (see
-        :meth:`mark_missed_for_source`) so a multi-job sweep stays atomic.
-        """
-        await self._db.execute(
-            "UPDATE jobs SET staleness_state = ? WHERE id = ?",
-            (new_state, job_id),
-        )
-
-    async def mark_missed_for_source(self, source: str, seen_keys: set[tuple[str, str]]) -> int:
-        """Increment consecutive_misses for every job of `source` not in `seen_keys`,
-        then recompute `staleness_state` via the ghost-detection state machine.
-
-        Scrape-completeness gates (rolling-average checks) are the CALLER's
-        responsibility — only call this after a scrape is deemed healthy, per
-        pillar_3_batch_1.md §3 Step 1.
-
-        Step-1.5 S1.5-C: prior to this batch the row's misses counter went up
-        but its `staleness_state` never advanced past 'active' — the
-        :func:`src.services.ghost_detection.transition` function existed but
-        was never called from a write path. Now every missed job is run
-        through `transition(misses+1, age_hours_since_last_seen)` and the
-        resulting state is persisted. CONFIRMED_EXPIRED is treated as sticky
-        (set elsewhere by direct-URL verification) — never demoted here.
-
-        Returns the count of jobs marked missed.
-        """
-        # Lazy import — pure function, no transitive heavy deps, but the
-        # import sits inside ``services`` and we keep ``database.py`` free
-        # of services-layer top-level imports.
-        from src.services.ghost_detection import StalenessState, transition  # noqa: PLC0415
-
-        cursor = await self._db.execute(
-            "SELECT id, normalized_company, normalized_title, "
-            "consecutive_misses, last_seen_at, staleness_state, first_seen_at "
-            "FROM jobs WHERE source = ?",
-            (source,),
-        )
-        rows = await cursor.fetchall()
-        now = datetime.now(timezone.utc)
-        missed_count = 0
-        # M7 — wrap the whole sweep in ONE transaction. Under autocommit each
-        # UPDATE committed on its own, so a crash (or a connection drop) part-way
-        # through left the source half-swept: some jobs with an incremented
-        # consecutive_misses and a new staleness_state, the rest untouched. The
-        # next run would then re-increment only the survivors, drifting the two
-        # halves apart. A ghost sweep is one logical decision about one source;
-        # it should land completely or not at all.
-        async with self._db.transaction():
-            for row in rows:
-                job_id = row[0]
-                key = (row[1], row[2])
-                if key in seen_keys:
-                    continue
-                current_state = row[5] or StalenessState.ACTIVE.value
-                # Sticky: confirmed_expired never demoted by absence sweep.
-                if current_state == StalenessState.CONFIRMED_EXPIRED.value:
-                    await self._db.execute(
-                        "UPDATE jobs SET consecutive_misses = consecutive_misses + 1 WHERE id = ?",
-                        (job_id,),
-                    )
-                    missed_count += 1
-                    continue
-
-                new_misses = int(row[3] or 0) + 1
-                # M6 (second path): last_seen_at can be NULL. Pre-fix, age_hours
-                # stayed 0.0, so transition(misses, 0.0) could NEVER promote and a
-                # repeatedly-missed job stayed ACTIVE forever — the same bug the
-                # nightly sweep's evaluate_job_state was fixed for, here in the
-                # more-frequent pipeline path. Mirror that fallback: use
-                # first_seen_at as the age proxy, and if there is no timestamp at
-                # all, let consecutive_misses alone decide.
-                last_seen = row[4] or row[6]  # last_seen_at, else first_seen_at
-                if not last_seen:
-                    if new_misses >= 3:
-                        next_state = StalenessState.LIKELY_STALE.value
-                    elif new_misses >= 2:
-                        next_state = StalenessState.POSSIBLY_STALE.value
-                    else:
-                        next_state = StalenessState.ACTIVE.value
-                else:
-                    age_hours = 0.0
-                    try:
-                        last_seen_dt = datetime.fromisoformat(last_seen)
-                        if last_seen_dt.tzinfo is None:
-                            last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
-                        age_hours = (now - last_seen_dt).total_seconds() / 3600
-                    except (ValueError, TypeError):
-                        age_hours = 0.0
-                    next_state = transition(new_misses, age_hours).value
-                await self._db.execute(
-                    "UPDATE jobs SET consecutive_misses = ?, staleness_state = ? " "WHERE id = ?",
-                    (new_misses, next_state, job_id),
-                )
-                missed_count += 1
-        # (transaction() above commits on exit — no explicit commit here)
-        return missed_count
 
     async def commit(self) -> None:
         """Commit pending changes."""
@@ -675,337 +460,6 @@ class JobDatabase:
         cursor = await self._db.execute("SELECT COUNT(*) FROM jobs")
         row = await cursor.fetchone()
         return int(row[0])
-
-    async def count_unexpired_jobs_for_source(self, source: str) -> int:
-        """How many of ``source``'s jobs are still being served as live.
-
-        Used only for observability: when a source's fetch fails, the absence
-        sweep is skipped for it (a failed scrape is not evidence that jobs
-        vanished), which means every one of these rows stops ageing and keeps
-        being presented as ``active``. Logging the COUNT turns "a source
-        failed" into "N live listings stopped ageing", which is the thing a
-        user actually feels.
-        """
-        # THE SAME PREDICATE THE APP SERVES BY, not a looser one.
-        # This counted "anything not confirmed_expired", which sweeps in
-        # `possibly_stale` and `likely_stale` — rows `get_recent_jobs` does NOT
-        # serve (it takes `staleness_state IS NULL OR = 'active'`, database.py
-        # :761). So the warning overstated how many LIVE listings had stopped
-        # ageing: an instrument built to say what a user actually feels was
-        # counting rows no user can see. An instrument must count the way its
-        # consumer counts. (CodeRabbit, PR #387.)
-        cursor = await self._db.execute(
-            "SELECT COUNT(*) FROM jobs WHERE source = ? "
-            "AND (staleness_state IS NULL OR staleness_state = 'active')",
-            (source,),
-        )
-        row = await cursor.fetchone()
-        return int(row[0])
-
-    async def log_run(
-        self,
-        stats: dict[str, Any],
-        *,
-        run_uuid: str | None = None,
-        per_source_errors: dict[str, Any] | None = None,
-        per_source_duration: dict[str, Any] | None = None,
-        total_duration: float | None = None,
-        user_id: str | None = None,
-        matcher_stats: dict[str, Any] | None = None,
-    ) -> None:
-        """Insert a run-log row.
-
-        Extra keyword-only params were added by migration 0010
-        (``run_uuid``, ``per_source_errors``, ``per_source_duration``,
-        ``total_duration``, ``user_id``). All default to ``None`` so legacy
-        callers that pass only ``stats`` continue to work unchanged. Dict
-        payloads are JSON-encoded; None is stored as SQL NULL for the text
-        columns and as NULL for REAL.
-        """
-        now = datetime.now(timezone.utc).isoformat()
-        errors_json = json.dumps(per_source_errors) if per_source_errors is not None else None
-        duration_json = json.dumps(per_source_duration) if per_source_duration is not None else None
-        matcher_json = json.dumps(matcher_stats) if matcher_stats is not None else None
-        await self._db.execute(
-            "INSERT INTO run_log ("
-            " timestamp, total_found, new_jobs, sources_queried, per_source,"
-            " run_uuid, per_source_errors, per_source_duration,"
-            " total_duration, user_id, matcher_stats"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                now,
-                stats.get("total_found", 0),
-                stats.get("new_jobs", 0),
-                stats.get("sources_queried", 0),
-                json.dumps(stats.get("per_source", {})),
-                run_uuid,
-                errors_json,
-                duration_json,
-                total_duration,
-                user_id,
-                matcher_json,
-            ),
-        )
-        await self._db.commit()
-
-    async def get_run_logs(self, limit: int = 100) -> list[dict[str, Any]]:
-        cursor = await self._db.execute(
-            "SELECT timestamp, total_found, new_jobs, per_source FROM run_log ORDER BY id DESC LIMIT ?",
-            (limit,),
-        )
-        rows = await cursor.fetchall()
-        return [
-            {
-                "timestamp": row[0],
-                "total_found": row[1],
-                "new_jobs": row[2],
-                "per_source": json.loads(row[3]),
-            }
-            for row in rows
-        ]
-
-    async def get_new_jobs_since(self, hours: int = 12) -> list[dict[str, Any]]:
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        cursor = await self._db.execute(
-            "SELECT * FROM jobs WHERE first_seen >= ? ORDER BY match_score DESC",
-            (cutoff,),
-        )
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-
-    async def purge_old_jobs(self, days: int = 30) -> int:
-        """Delete jobs not seen in the last `days`. Returns count deleted.
-
-        Keys on LIVENESS (last_seen_at), not ingestion (first_seen) — docs/fable/02:
-        a posting still live after 30 days should be kept, not deleted-then-re-inserted
-        (which reset its score + re-notified). COALESCE falls back to first_seen for
-        legacy rows whose last_seen_at is NULL, so nothing accumulates un-purgeable.
-
-        Also deletes the catalog-derived child rows (docs/fable/02 D4). The pg shim
-        strips EVERY foreign-key clause — including ``ON DELETE CASCADE`` — so there
-        is no DB-level cascade; without this, every purge orphaned rows forever.
-        ``user_feed`` is the big one: one row per user per job.
-        """
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        # R2 amendment (spec 2026-09-04-application-spine, hard rule #3): a
-        # `user_brought` row is never a scrape aging out — the user is
-        # tracking it, and the application snapshot needs the live catalog
-        # row for the detail page. Both the direct DELETE below AND this
-        # `stale` subquery (which feeds the cascade-child DELETEs) exclude
-        # it, so neither the job row nor its user_feed/enrichment children
-        # are purged out from under a brought application.
-        stale = (
-            "SELECT id FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ? "
-            "AND source <> ?"
-        )
-        # Children first (the subquery needs the jobs rows to still exist).
-        #
-        # Skip a child table that does not exist IN THIS SCHEMA. EVERY table in
-        # _PURGE_CASCADE_TABLES is created by a MIGRATION (job_enrichment is 0008,
-        # user_feed is 0011 …), but ``init_db()`` above only creates the legacy
-        # pre-Batch-2 tables — migration 0000's header spells this split out. So a
-        # DB built by init_db() ALONE, with no runner.up(), is a legitimate state
-        # (several tests do exactly that) in which these children are absent, and
-        # an unguarded DELETE dies with UndefinedTable. Production always migrates
-        # on boot (api/dependencies.py lifespan), so this skips nothing there.
-        #
-        # ``current_schema()``, NOT to_regclass(): to_regclass resolves through the
-        # whole search_path, which in test mode is ``"t_xxx", public``. An
-        # init_db-only test in its own ``mem_*``/``t_*`` schema would then resolve
-        # ``user_feed`` via the PUBLIC fallback the moment a dev has run
-        # ``python main.py`` (default DSN → same Postgres, writes ``public``) — and
-        # the DELETE would silently wipe real ``public`` rows whose job_id collides
-        # with the test's ids (1–2 in a fresh schema — near-certain). Pinning to the
-        # ACTIVE schema means "exists here", never "exists somewhere on the path".
-        # Same current_schema() discipline as runner.py's sequence resync. NOT a
-        # try/except UndefinedTable: an explicit check can't also swallow a REAL
-        # error from the DELETE.
-        existing = await self._db.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = current_schema()"
-        )
-        present = {r[0] for r in await existing.fetchall()}
-        for table in _PURGE_CASCADE_TABLES:
-            if table not in present:
-                continue
-            await self._db.execute(
-                f"DELETE FROM {table} WHERE job_id IN ({stale})",  # noqa: S608 — table name is a module constant, never user input
-                (cutoff, USER_BROUGHT_SOURCE),
-            )
-        cursor = await self._db.execute(
-            "DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < ? AND source <> ?",
-            (cutoff, USER_BROUGHT_SOURCE),
-        )
-        await self._db.commit()
-        _log.info(
-            "purge_old_jobs",
-            extra={"event": "purge_old_jobs", "deleted": cursor.rowcount, "days": days, "cutoff": cutoff},
-        )
-        return cursor.rowcount
-
-    async def get_recent_jobs(self, days: int = 7, min_score: int = 0) -> list[dict[str, Any]]:
-        """Return jobs from the last `days` with match_score >= min_score.
-
-        Step-1 B9: filters out rows marked ``staleness_state='expired'`` by
-        ghost-detection (Pillar-3 Batch-1). NULL is treated as "not yet
-        classified" → still served (defence-in-depth until the staleness
-        writer lands in Batch S1.5).
-        """
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        cursor = await self._db.execute(
-            "SELECT * FROM jobs WHERE first_seen >= ? AND match_score >= ? "
-            "AND (staleness_state IS NULL OR staleness_state = 'active') "
-            "ORDER BY date_found DESC",
-            (cutoff, min_score),
-        )
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-
-    async def get_catalog_jobs_for_rescore(self, limit: int = 50000) -> list[dict[str, Any]]:
-        """Return the most-recently-found jobs from the shared catalog for rescoring.
-
-        Read-only. Returns a list of plain dicts with the columns that
-        ``score_catalog_row`` (``src/services/rescore.py``) needs to reconstruct
-        a ``Job`` for scoring. Respects ``limit`` so callers can cap memory use.
-
-        THE LIMIT MUST EXCEED THE CATALOG, or a "full re-score" silently is not
-        one. It was 5,000 while the catalog had grown to 6,457, so the oldest
-        1,457 jobs were never re-scored when a profile changed: 43 of one real
-        user's feed rows still carried scores computed on 2026-07-02 against a
-        profile he had since replaced. Those sit on a different scale from
-        everything around them, so they sort wrongly and mislead every threshold
-        that reads them — and the gap widened every single day.
-
-        purge_old_jobs() caps the catalog at 30 days of live postings, so 50,000
-        is far above any real size while still bounding memory if that ever
-        changes. The data-invariants detector alarms if the catalog approaches
-        it (`rescore_covers_whole_catalog`), so this cannot silently rot again.
-        """
-        cursor = await self._db.execute(
-            "SELECT id, title, company, apply_url, source, date_found, location, "
-            "description, salary_min, salary_max, posted_at, date_confidence "
-            "FROM jobs ORDER BY date_found DESC LIMIT ?",
-            (limit,),
-        )
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-
-    async def get_last_source_counts(self, n: int = 5) -> dict[str, list[int]]:
-        """Get per-source job counts from the last N runs for health tracking."""
-        cursor = await self._db.execute("SELECT per_source FROM run_log ORDER BY id DESC LIMIT ?", (n,))
-        rows = await cursor.fetchall()
-        source_history: dict[str, list[int]] = {}
-        for row in rows:
-            per_source = json.loads(row[0]) if row[0] else {}
-            for name, count in per_source.items():
-                source_history.setdefault(name, []).append(count)
-        return source_history
-
-    async def get_silently_dead_sources(
-        self, hours: int = 48, min_runs: int = 2
-    ) -> dict[str, int]:
-        """Sources that USED to return jobs but have returned zero for `hours`.
-
-        The whole failure mode this guards against is silent: a 404 makes
-        `_get_json` return None, a renamed XML tag makes the parse loop never
-        run — the source returns `[]`, nothing raises, and the circuit breaker
-        never trips. Two sources sat at zero for months before anyone noticed.
-
-        Deliberately reports only REGRESSIONS — a source that has never
-        produced a job (keyed source with no API key, permanently dead
-        upstream) is excluded. Alarming on those every run is how an alert
-        becomes noise and stops being read.
-
-        Returns {source_name: peak_jobs_seen_historically}.
-        """
-        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-
-        cursor = await self._db.execute(
-            "SELECT per_source FROM run_log WHERE timestamp >= ? ORDER BY id DESC",
-            (cutoff,),
-        )
-        recent_rows = await cursor.fetchall()
-        if len(recent_rows) < min_runs:
-            return {}  # not enough evidence in the window to judge
-
-        recent: dict[str, list[int]] = {}
-        for row in recent_rows:
-            for name, count in (json.loads(row[0]) if row[0] else {}).items():
-                recent.setdefault(name, []).append(int(count or 0))
-
-        # Historical peak, so we only flag sources that have actually worked.
-        cursor = await self._db.execute("SELECT per_source FROM run_log")
-        peak: dict[str, int] = {}
-        for row in await cursor.fetchall():
-            for name, count in (json.loads(row[0]) if row[0] else {}).items():
-                peak[name] = max(peak.get(name, 0), int(count or 0))
-
-        return {
-            name: peak.get(name, 0)
-            for name, counts in recent.items()
-            if len(counts) >= min_runs
-            and not any(counts)          # zero in every run in the window
-            and peak.get(name, 0) > 0    # but it has produced jobs before
-        }
-
-    # --- User Actions ---
-    #
-    # Batch 3.5 Deliverable C: every method now takes user_id and scopes
-    # queries by it. Schema UNIQUE(user_id, job_id) is from migration
-    # 0002_multi_tenant; this layer is the matching read/write surface.
-
-    async def insert_action(self, job_id: int, action: str, user_id: str, notes: str = "") -> dict[str, Any]:
-        now = datetime.now(timezone.utc).isoformat()
-        await self._db.execute(
-            """INSERT INTO user_actions (user_id, job_id, action, notes, created_at)
-               VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(user_id, job_id)
-               DO UPDATE SET action = excluded.action,
-                             notes = excluded.notes,
-                             created_at = excluded.created_at""",
-            (user_id, job_id, action, notes, now),
-        )
-        await self._db.commit()
-        return {"job_id": job_id, "action": action, "notes": notes, "created_at": now}
-
-    async def delete_action(self, job_id: int, user_id: str) -> None:
-        await self._db.execute(
-            "DELETE FROM user_actions WHERE user_id = ? AND job_id = ?",
-            (user_id, job_id),
-        )
-        await self._db.commit()
-
-    async def get_actions(self, user_id: str) -> list[dict[str, Any]]:
-        cursor = await self._db.execute(
-            """SELECT job_id, action, notes, created_at
-               FROM user_actions
-               WHERE user_id = ?
-               ORDER BY created_at DESC""",
-            (user_id,),
-        )
-        return [{"job_id": r[0], "action": r[1], "notes": r[2], "created_at": r[3]} for r in await cursor.fetchall()]
-
-    async def get_action_counts(self, user_id: str) -> dict[str, int]:
-        cursor = await self._db.execute(
-            """SELECT action, COUNT(*) FROM user_actions
-               WHERE user_id = ? GROUP BY action""",
-            (user_id,),
-        )
-        return {r[0]: r[1] for r in await cursor.fetchall()}
-
-    async def get_action_for_job(self, job_id: int, user_id: str) -> str | None:
-        cursor = await self._db.execute(
-            "SELECT action FROM user_actions WHERE user_id = ? AND job_id = ?",
-            (user_id, job_id),
-        )
-        row = await cursor.fetchone()
-        return row[0] if row else None
-
-    # --- Applications (Pipeline) ---
-    #
-    # Batch 3.5 Deliverable C: same user_id-scoping treatment as actions.
-
-    # ── Tailored CV / cover letter (migration 0023) ──────────────────────────
 
     def _tailored_row_to_dict(self, row: Any) -> dict[str, Any]:
         import json as _json
@@ -1187,29 +641,6 @@ class JobDatabase:
             return ""
         row = await cursor.fetchone()
         return (row[0] or "") if row else ""
-
-    async def get_user_feed_verdict(self, user_id: str, job_id: int) -> dict[str, Any]:
-        """The judge's (E4) per-user verdict for (user, job): ``llm_fit_score``,
-        ``llm_verdict``, ``llm_reason``. Returns an empty dict when the job isn't in
-        this user's feed or the judge hasn't run — so the single-job read stays
-        None-safe (mirrors the list read's ``get_user_feed_jobs`` llm columns).
-        """
-        try:
-            cursor = await self._db.execute(
-                "SELECT llm_fit_score, llm_verdict, llm_reason FROM user_feed "
-                "WHERE user_id = ? AND job_id = ?",
-                (user_id, job_id),
-            )
-        except Exception:  # noqa: BLE001 — user_feed may not exist in minimal test DBs
-            return {}
-        row = await cursor.fetchone()
-        if not row:
-            return {}
-        return {
-            "llm_fit_score": row[0],
-            "llm_verdict": row[1],
-            "llm_reason": row[2],
-        }
 
     async def create_application(self, job_id: int, user_id: str) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
@@ -1492,6 +923,27 @@ class JobDatabase:
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
+    async def insert_action(self, job_id: int, action: str, user_id: str, notes: str = "") -> dict[str, Any]:
+        """Record the user's own action on a job in ``user_actions``.
+
+        Slice 5 (#483) deleted the save/dismiss ROUTES and every other reader
+        of this table, but `POST /receipts/{job_id}` still stamps `applied`
+        here, so the writer stays. `user_actions` itself is retired in a later
+        slice, once nothing writes it (spec §Out of scope).
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        await self._db.execute(
+            """INSERT INTO user_actions (user_id, job_id, action, notes, created_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, job_id)
+               DO UPDATE SET action = excluded.action,
+                             notes = excluded.notes,
+                             created_at = excluded.created_at""",
+            (user_id, job_id, action, notes, now),
+        )
+        await self._db.commit()
+        return {"job_id": job_id, "action": action, "notes": notes, "created_at": now}
+
     async def get_job_by_id(self, job_id: int) -> dict[str, Any] | None:
         cursor = await self._db.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
         row = await cursor.fetchone()
@@ -1504,188 +956,6 @@ class JobDatabase:
         assert cursor.description is not None
         cols = [d[0] for d in cursor.description]
         return dict(zip(cols, row))
-
-    # ------------------------------------------------------------------
-    # Step-1 B6 — JOIN-once enrichment prefetch.
-    #
-    # The jobs API surfaces a 13-field enrichment slice on every JobResponse
-    # (see src/api/models.py::JobResponse + src/api/routes/jobs.py).
-    # Issuing one SELECT per job to load enrichment would N+1-explode on a
-    # 100-job list. Instead the route reads jobs LEFT JOIN job_enrichment
-    # in a single query — this method encapsulates the column aliasing
-    # (every job_enrichment column is prefixed `enr_` to avoid collisions
-    # with `experience_level` and `salary` on the jobs side).
-    #
-    # The `job_enrichment` table is shared catalog (rule #10) — no user_id
-    # filter. Per-user state (actions / pipeline) is looked up separately
-    # in the route, not joined here.
-    # ------------------------------------------------------------------
-
-    _JOBS_ENRICHMENT_JOIN_COLS = (
-        "j.*, "
-        "je.title_canonical AS enr_title_canonical, "
-        "je.category AS enr_category, "
-        "je.employment_type AS enr_employment_type, "
-        "je.workplace_type AS enr_workplace_type, "
-        "je.salary AS enr_salary, "
-        "je.required_skills AS enr_required_skills, "
-        "je.preferred_skills AS enr_preferred_skills, "
-        "je.experience_min_years AS enr_experience_min_years, "
-        "je.experience_level AS enr_experience_level, "
-        "je.visa_sponsorship AS enr_visa_sponsorship, "
-        "je.seniority AS enr_seniority"
-    )
-
-    async def get_recent_jobs_with_enrichment(self, days: int = 7, min_score: int = 0) -> list[dict[str, Any]]:
-        """Same as :meth:`get_recent_jobs` plus a LEFT JOIN to job_enrichment.
-
-        Returns one row per job; enrichment columns appear with the ``enr_``
-        prefix and are ``None`` when no enrichment row exists. Falls back
-        to the bare ``SELECT * FROM jobs`` if the enrichment table is
-        missing (fresh test DB without migration 0008 — the jobs route
-        must keep working). Mirrors the Step-1 B9 staleness filter on
-        :meth:`get_recent_jobs` so JobResponse doesn't surface jobs that
-        ghost-detection has marked ``expired``.
-        """
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        # _JOBS_ENRICHMENT_JOIN_COLS is a class constant, not user input — S608 is a false positive here.
-        sql = (
-            f"SELECT {self._JOBS_ENRICHMENT_JOIN_COLS} "  # noqa: S608
-            "FROM jobs j "
-            "LEFT JOIN job_enrichment je ON je.job_id = j.id "
-            "WHERE j.first_seen >= ? AND j.match_score >= ? "
-            "AND (j.staleness_state IS NULL OR j.staleness_state = 'active') "
-            "ORDER BY j.date_found DESC"
-        )
-        try:
-            cursor = await self._db.execute(sql, (cutoff, min_score))
-        except pg.OperationalError:
-            return await self.get_recent_jobs(days=days, min_score=min_score)
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-
-    async def get_user_feed_jobs(self, user_id: str, days: int = 7, min_score: int = 0) -> list[dict[str, Any]]:
-        """Per-user dashboard read: the user's OWN ``user_feed`` rows joined to
-        the shared ``jobs`` catalog (+ enrichment).
-
-        This is what makes the dashboard multi-tenant: John sees only the jobs
-        in John's feed, Paul only Paul's. The shared ``jobs`` table is the
-        universal pool/cache; ``user_feed`` is the isolated per-user view
-        (blueprint §3). Each row's ``match_score`` is the user's feed score
-        (not the shared, last-writer-wins ``jobs.match_score``).
-
-        Returns ``[]`` if ``user_feed`` is absent (fresh DB without the Batch-2
-        migration) — the caller treats that as "no personalised feed yet".
-        """
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        # _JOBS_ENRICHMENT_JOIN_COLS is a class constant, not user input — S608 false positive.
-        sql = (
-            f"SELECT {self._JOBS_ENRICHMENT_JOIN_COLS}, f.score AS feed_score, "  # noqa: S608
-            "f.llm_fit_score AS llm_fit_score, f.llm_verdict AS llm_verdict, "
-            "f.llm_reason AS llm_reason "
-            "FROM user_feed f "
-            "JOIN jobs j ON j.id = f.job_id "
-            "LEFT JOIN job_enrichment je ON je.job_id = j.id "
-            "WHERE f.user_id = ? AND f.status = 'active' "
-            "AND j.first_seen >= ? AND f.score >= ? "
-            "AND (j.staleness_state IS NULL OR j.staleness_state = 'active') "
-            # Judge outranks funnel: matcher fit when present, else keyword score.
-            # All-NULL llm_fit_score (flag off) keeps this identical to the old order.
-            "ORDER BY COALESCE(f.llm_fit_score, f.score) DESC, j.date_found DESC"
-        )
-        try:
-            cursor = await self._db.execute(sql, (user_id, cutoff, min_score))
-        except pg.OperationalError:
-            return []
-        rows = await cursor.fetchall()
-        out: list[dict[str, Any]] = []
-        for row in rows:
-            d = dict(row)
-            # Surface the per-user feed score as the job's match_score.
-            d["match_score"] = d.get("feed_score", d.get("match_score"))
-            out.append(d)
-        return out
-
-    async def get_job_by_id_with_enrichment(
-        self, job_id: int, user_id: str | None = None
-    ) -> dict[str, Any] | None:
-        """Same as :meth:`get_job_by_id` plus a LEFT JOIN to job_enrichment.
-
-        C-1 fix: mirrors the staleness filter from
-        :meth:`get_recent_jobs_with_enrichment` so a single-job lookup
-        cannot surface a ghost-detected expired posting that the list
-        path correctly hides.
-
-        BUT A JOB THE USER ALREADY ACTED ON IS THEIRS TO OPEN. When ``user_id``
-        is given, a job they applied to or acted on is returned even if it has
-        since gone stale.
-
-        Found 2026-08-03: a real user's own application (job 56, stage
-        "applied") could no longer be opened — clicking your own application and
-        getting "not found" reads as data loss, on the highest-intent object in
-        the product. Hiding a ghost from BROWSING is right; hiding a person's
-        own history from them is not, and staleness is a guess about the
-        employer, not a fact about the user's record.
-        """
-        # _JOBS_ENRICHMENT_JOIN_COLS is a class constant, not user input — S608 is a false positive here.
-        own = ""
-        params: tuple[Any, ...] = (job_id,)
-        if user_id:
-            own = (
-                " OR EXISTS (SELECT 1 FROM applications a "
-                "WHERE a.job_id = j.id AND a.user_id = ?)"
-                " OR EXISTS (SELECT 1 FROM user_actions ua "
-                "WHERE ua.job_id = j.id AND ua.user_id = ?)"
-            )
-            params = (job_id, user_id, user_id)
-        sql = (
-            f"SELECT {self._JOBS_ENRICHMENT_JOIN_COLS} "  # noqa: S608
-            "FROM jobs j "
-            "LEFT JOIN job_enrichment je ON je.job_id = j.id "
-            "WHERE j.id = ? "
-            f"AND (j.staleness_state IS NULL OR j.staleness_state = 'active'{own})"
-        )
-        try:
-            cursor = await self._db.execute(sql, params)
-        except pg.OperationalError:
-            # Fallback for fresh DBs without migration 0008 — still apply
-            # the staleness filter so the read path stays consistent.
-            fb_own = (
-                " OR EXISTS (SELECT 1 FROM applications a "
-                "WHERE a.job_id = jobs.id AND a.user_id = ?)"
-                " OR EXISTS (SELECT 1 FROM user_actions ua "
-                "WHERE ua.job_id = jobs.id AND ua.user_id = ?)"
-            ) if user_id else ""
-            cursor = await self._db.execute(
-                "SELECT * FROM jobs WHERE id = ? "
-                f"AND (staleness_state IS NULL OR staleness_state = 'active'{fb_own})",
-                (job_id, user_id, user_id) if user_id else (job_id,),
-            )
-            row = await cursor.fetchone()
-            if not row:
-                return None
-            # `description` is Optional on the cursor protocol, but a row was
-            # just fetched above, so it is always populated here. Assert rather
-            # than `or []`: if this ever IS None something is badly wrong, and
-            # silently returning {} would hide it.
-            assert cursor.description is not None
-            cols = [d[0] for d in cursor.description]
-            return dict(zip(cols, row))
-        row = await cursor.fetchone()
-        if not row:
-            return None
-        return dict(row)
-
-    # ------------------------------------------------------------------
-    # Step-1.5 S3-D — notification_ledger reader.
-    #
-    # ``notification_ledger`` was created by migration 0004 as the per-
-    # channel idempotency + retry audit table; until Step 1.5 there was
-    # no SELECT-based reader for it. The new GET /notifications endpoint
-    # consumes the two helpers below. Both scope by user_id (CLAUDE.md
-    # rule #12). Optional ``channel`` / ``status`` filters short-circuit
-    # to the user-only WHERE when None.
-    # ------------------------------------------------------------------
 
     async def get_notification_ledger(
         self,
@@ -1880,10 +1150,8 @@ class JobDatabase:
 
         Deletes the user's rows from every per-user table (CVs, profile versions,
         channel creds, feed, actions, applications, tailored docs, tokens, …),
-        anonymises the shared observability ``run_log`` (keeps aggregate ops data,
-        severs the personal link), removes the email-keyed ``magic_link_tokens``,
-        and drops the ``users`` row last. NEVER touches the shared catalog
-        (``jobs``/``job_enrichment``/``job_embeddings``) — rules #10/#17.
+        removes the email-keyed ``magic_link_tokens``, and drops the ``users``
+        row last. NEVER touches the shared ``jobs`` catalog — rule #10.
 
         Replaces the old soft-delete (which only set ``deleted_at`` and left CVs +
         embeddings + actions in place, and could be resurrected on a later
@@ -1961,14 +1229,6 @@ class JobDatabase:
                 await self._db.execute(f"DELETE FROM {tbl} WHERE user_id = ?", (user_id,))
             except Exception as exc:  # noqa: BLE001 — recorded, then verified below
                 deletion_errors.append(f"{tbl}: {type(exc).__name__}: {exc}")
-
-        # run_log is shared observability: anonymise rather than delete.
-        try:
-            await self._db.execute(
-                "UPDATE run_log SET user_id = NULL WHERE user_id = ?", (user_id,)
-            )
-        except Exception:  # noqa: BLE001
-            pass
 
         # audit_log (migration 0025): same retention pattern — the security
         # history (a login happened, from this IP) is kept for legitimate
@@ -2050,24 +1310,8 @@ class JobDatabase:
         return [dict(row) for row in rows]
 
     # ── Discovery (Step-3 B-09, B-15) ────────────────────────────────────────────
-    async def get_duplicate_jobs(
-        self, job_id: int, normalized_company: str, normalized_title: str
-    ) -> list[dict[str, Any]]:
-        """Return jobs with same normalized key, excluding the given job_id."""
-        cursor = await self._db.execute(
-            """SELECT id, title, company, source, location, match_score, apply_url, date_found
-               FROM jobs
-               WHERE normalized_company = ? AND normalized_title = ? AND id != ?
-               ORDER BY match_score DESC, date_found DESC""",
-            (normalized_company, normalized_title, job_id),
-        )
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-
-    # ── Application notes update (Step-3 B-08) ───────────────────────────────────
     async def update_application_notes(self, job_id: int, user_id: str, new_notes: str) -> dict[str, Any] | None:
         """Append current notes to notes_history, set notes = new_notes."""
-        import json
         from datetime import datetime, timezone
 
         # Fetch current notes
@@ -2289,37 +1533,6 @@ class JobDatabase:
             count = int(row[2])
             result.setdefault(channel, {})[status] = count
         return result
-
-    async def get_recent_runs(
-        self, user_id: str, limit: int = 20, offset: int = 0
-    ) -> list[dict[str, Any]]:
-        """Return recent pipeline runs scoped to ``user_id``, newest first.
-
-        Per CLAUDE.md rule #12 the run_log is per-user operational metadata —
-        rows without a user_id (legacy, pre-Batch-2) are not exposed.
-        """
-        try:
-            cursor = await self._db.execute(
-                "SELECT * FROM run_log WHERE user_id = ? "
-                "ORDER BY timestamp DESC LIMIT ? OFFSET ?",
-                (user_id, limit, offset),
-            )
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
-        except pg.OperationalError:
-            return []
-
-    async def count_recent_runs(self, user_id: str) -> int:
-        """Return run_log row count for the given user."""
-        try:
-            cursor = await self._db.execute(
-                "SELECT COUNT(*) FROM run_log WHERE user_id = ?",
-                (user_id,),
-            )
-            row = await cursor.fetchone()
-            return int(row[0]) if row else 0
-        except pg.OperationalError:
-            return 0
 
     async def close(self) -> None:
         if self._conn:

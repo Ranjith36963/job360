@@ -40,11 +40,11 @@ STALE_DAYS = 45
 # LIVING docs (DOC-MAINTENANCE.md §1): must match code AND carry a fresh stamp.
 LIVING_DOCS = [
     "CLAUDE.md",
-    # Added 2026-08-25 with the CLAUDE.md diet: the 31 hard rules moved here
-    # so they load on demand instead of before every session. They carry
-    # guarded facts (SCORER_VERSION, the registry counts), so the checker has
-    # to follow them -- the checker reported "claim not found in any doc" the
-    # moment they moved, which is the guard-watches-nothing alarm working.
+    # Added 2026-08-25 with the CLAUDE.md diet: the hard rules moved here so
+    # they load on demand instead of before every session. They carried
+    # guarded facts, so the checker has to follow them -- the checker
+    # reported "claim not found in any doc" the moment they moved, which is
+    # the guard-watches-nothing alarm working.
     ".claude/skills/hard-rules/SKILL.md",
     "README.md",
     "ARCHITECTURE.md",
@@ -57,46 +57,24 @@ LIVING_DOCS = [
     "frontend/README.md",
     # Added 2026-08-24 by the coverage half of doc_sync_mutation_test.py, which
     # asks the question this list could never ask itself: which docs state a
-    # guarded fact while sitting OUTSIDE it? All three were lying.
+    # guarded fact while sitting OUTSIDE it? Two were lying.
     #   CONTRIBUTING.md         "the 26 hard rules"        (31)
     #   backend/README.md       "list all 47 sources"      (41)
-    #   .../03-job-providers.md "SOURCE_REGISTRY (47"      (41), in ten places
-    # The last one is the worst: root CLAUDE.md calls docs/product/pillars/ the
-    # AUTHORITATIVE code-verified architecture reference, and it carried the
-    # pre-2026-08-17 source counts that started this whole audit.
+    # A third pillar doc was worse still, carrying a stale source-registry
+    # count in ten places while root CLAUDE.md called docs/product/pillars/
+    # the AUTHORITATIVE code-verified architecture reference. That whole doc
+    # was archived 2026-09-05 with the code it described (slice 5, #483).
     "CONTRIBUTING.md",
     "backend/README.md",
-    "docs/product/pillars/03-job-providers.md",
-    # Added 2026-08-24 (second batch). Root CLAUDE.md calls docs/product/pillars/
-    # the AUTHORITATIVE code-verified reference, yet only 03 was watched -- and
-    # only since this morning. The glossary is the densest concentration of
-    # countable facts in the repo (registry size, instance count, RATE_LIMITS,
-    # JobEnrichment shape, Job field count) and not one of them had ever been
-    # checked: it claimed 18 fields / 8 enums against 16 / 7, and ~256 ATS slugs
-    # against 302.
-    "docs/product/pillars/01-user-pillar.md",
-    "docs/product/pillars/02-search-and-match-engine.md",
-    "docs/product/pillars/glossary.md",
-    # Added 2026-08-25 with the Universal Shelf. `pillar-unwatched` exists
-    # precisely so a new AUTHORITATIVE doc cannot arrive unchecked, and it
-    # fired on all three of these the moment they landed — the guard catching
-    # its own blind spot being widened, which is the point of it.
-    "docs/product/pillars/CATALOG_STATE.md",
-    "docs/product/pillars/SHELF_FILL_MEASURED.md",
-    "docs/product/pillars/UNIVERSAL_SHELF.md",
-    # Added 2026-08-24 (third batch) after the nightly routine found
-    # runbook.md still telling operators to run `sqlite3 data/jobs.db` against a
-    # database that has been Postgres since 2026-07-02 -- five dead commands in
-    # the one file whose whole job is "I see a problem, what do I type".
-    #
-    # It survived every guard because it was one of TWO files in this folder
-    # with no doc-type header and no place on this list. Adding files here one
-    # at a time is what let that happen: four of six were watched, and the
-    # drift landed in one of the other two. pillars_fully_watched() below now
-    # asserts the whole folder is covered, so the list cannot fall behind the
-    # directory again.
+    # 01-user-pillar.md, 02-search-and-match-engine.md, 03-job-providers.md,
+    # glossary.md, runbook.md, CATALOG_STATE.md, SHELF_FILL_MEASURED.md and
+    # UNIVERSAL_SHELF.md were all watched here until 2026-09-05 (slice 5,
+    # #483), when they were archived to docs/_archive/sourcing-era/ with the
+    # FROZEN header — they described the job-search-and-score product that no
+    # longer exists. `pillars_fully_watched()` below asserts every remaining
+    # *.md under docs/product/pillars/ is on this list, so the folder is now
+    # just the one pointer doc.
     "docs/product/pillars/README.md",
-    "docs/product/pillars/runbook.md",
 ]
 
 # Prose lies that numbers can't catch. Each = (forbidden phrase, why).
@@ -132,75 +110,6 @@ _LINK_RE = re.compile(r"\]\(([^)#\s]+?\.md)(?:#[^)]*)?\)")
 
 # Dirs holding docs whose links we sweep (node_modules etc. excluded).
 LINK_SWEEP_DIRS = [".", "docs", "backend", "frontend"]
-
-
-def registry_counts() -> tuple[int, int]:
-    """(registry entries, unique source classes) from SOURCE_REGISTRY in src/main.py.
-
-    Strict on purpose: only a module-top-level plain dict literal of
-    Name/Attribute values counts. Anything cleverer must crash the checker
-    (exit 2) rather than silently under-count.
-    """
-    tree = ast.parse((ROOT / "backend/src/main.py").read_text(encoding="utf-8"))
-    for node in tree.body:  # top level only — never a dict inside a function
-        targets = []
-        if isinstance(node, ast.Assign):
-            targets = node.targets
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets = [node.target]
-        for t in targets:
-            if getattr(t, "id", None) == "SOURCE_REGISTRY":
-                if not isinstance(node.value, ast.Dict):
-                    raise RuntimeError("SOURCE_REGISTRY is not a plain dict literal")
-                classes = set()
-                for k, v in zip(node.value.keys, node.value.values):
-                    if k is None or not isinstance(k, ast.Constant):
-                        raise RuntimeError("SOURCE_REGISTRY has a non-literal / **spread key")
-                    name = getattr(v, "id", None) or getattr(v, "attr", None)
-                    if not name:
-                        raise RuntimeError("SOURCE_REGISTRY value is not a class Name/Attribute")
-                    classes.add(name)
-                return len(node.value.keys), len(classes)
-    raise RuntimeError("SOURCE_REGISTRY dict literal not found at top level of backend/src/main.py")
-
-
-def built_source_classes() -> set[str]:
-    """Class names `_build_sources()` actually INSTANTIATES.
-
-    CodeRabbit, third round on PR #394, correcting a false claim this file made
-    in its previous revision. `_build_sources()` does NOT iterate
-    SOURCE_REGISTRY -- it hand-writes `all_sources = [ReedSource(...), ...]`
-    (`backend/src/main.py:251-303`). The registry is a SEPARATE surface, used by
-    the CLI `--source` choices and `GET /api/sources`.
-
-    That gap is the whole point of CLAUDE.md rules #8/#13: registry and
-    `_build_sources()` are two of the five surfaces that must move together
-    precisely BECAUSE nothing makes them move together automatically. A source
-    can sit in the registry, have a module on disk, and still never be polled.
-
-    So "is this platform polled?" has exactly one honest answer: is its class in
-    this list. Reading the registry instead was a guard pointed at the wrong
-    authority -- the same mistake, one layer up, as reading the directory.
-    """
-    tree = ast.parse((ROOT / "backend/src/main.py").read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.FunctionDef) and node.name == "_build_sources"):
-            continue
-        for st in ast.walk(node):
-            if not isinstance(st, ast.Assign):
-                continue
-            if not any(getattr(x, "id", None) == "all_sources" for x in st.targets):
-                continue
-            if not isinstance(st.value, ast.List):
-                raise RuntimeError("_build_sources: all_sources is not a list literal")
-            names = {
-                e.func.id for e in st.value.elts
-                if isinstance(e, ast.Call) and isinstance(e.func, ast.Name)
-            }
-            if not names:
-                raise RuntimeError("_build_sources: all_sources instantiates nothing")
-            return names
-    raise RuntimeError("all_sources list not found in _build_sources() in backend/src/main.py")
 
 
 def _migration_pairs() -> dict[int, str]:
@@ -255,208 +164,22 @@ def migration_head() -> int:
     return max(_migration_pairs())
 
 
-def locations_count() -> int:
-    """Entries in LOCATIONS (backend/src/core/keywords.py). AST-strict.
-
-    Added 2026-08-25, and the reason matters more than the number. This repo
-    already had a `disagree:LOCATIONS` guard, and it was GREEN: it asks "do two
-    docs agree?", and five LIVING docs agreed perfectly -- on 25, when the list
-    holds 26. Cycle 14 caught it by counting the source.
-
-    Consensus is not verification. A doc-vs-doc check can only ever find
-    disagreement, never a shared falsehood, and shared falsehoods are exactly
-    what documentation drifts toward, because docs get copied from each other.
-    So this one counts the CODE, and the disagreement guard stays as the
-    cheaper net for facts no extractor owns.
-
-    The 26 includes "Remote" and "Hybrid", which `_location_score` skips when
-    matching (skill_matcher.py:277-278) -- they are workplace modes living in a
-    place list. Counted anyway: this guard reports what the list HOLDS, and a
-    doc wanting to say "24 places" should say so in those words.
-    """
-    tree = ast.parse((ROOT / "backend/src/core/keywords.py").read_text(encoding="utf-8"))
-    for node in tree.body:
-        targets: list[ast.expr] = []
-        if isinstance(node, ast.Assign):
-            targets = list(node.targets)
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets = [node.target]
-        for t in targets:
-            if getattr(t, "id", None) == "LOCATIONS":
-                if not isinstance(node.value, ast.List):
-                    raise RuntimeError("LOCATIONS is not a plain list literal")
-                return len(node.value.elts)
-    raise RuntimeError("LOCATIONS list literal not found in backend/src/core/keywords.py")
-
-
-def rate_limit_count() -> int:
-    """Entries in RATE_LIMITS. Same AST-strict style as registry_counts().
-
-    Promoted from the nightly routine 2026-08-24 (second batch). Docs claimed
-    46 and 47 in three places while the dict held 41. It must equal the
-    registry key count -- every source needs a limit -- so a mismatch between
-    THIS and registry is itself a bug worth seeing.
-    """
-    tree = ast.parse((ROOT / "backend/src/core/settings.py").read_text(encoding="utf-8"))
-    for node in tree.body:
-        targets: list[ast.expr] = []
-        if isinstance(node, ast.Assign):
-            targets = list(node.targets)
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets = [node.target]
-        for t in targets:
-            if getattr(t, "id", None) == "RATE_LIMITS":
-                if not isinstance(node.value, ast.Dict):
-                    raise RuntimeError("RATE_LIMITS is not a plain dict literal")
-                return len(node.value.keys)
-    raise RuntimeError("RATE_LIMITS dict literal not found in backend/src/core/settings.py")
-
-
-def source_subclass_count() -> int:
-    """Files declaring `class X(BaseJobSource)`.
-
-    Should equal unique source classes. The docs said "all 49 subclasses" in
-    rule #2's neighbourhood while 40 existed -- an over-count that makes the
-    five-surface rule read as bigger than it is.
-    """
-    n = 0
-    for p in (ROOT / "backend/src/sources").rglob("*.py"):
-        n += len(re.findall(r"^class \w+\(BaseJobSource\)", p.read_text(encoding="utf-8"), re.M))
-    return n
-
-
-def ats_slug_count() -> tuple[int, int]:
-    """(total ATS company slugs, number of *_COMPANIES lists).
-
-    Third promotion batch, 2026-08-24. The glossary said "~256 slugs across 11
-    platforms" against a real 302. A tilde is not a measurement -- it is a
-    number nobody intends to keep true.
-    """
-    tree = ast.parse((ROOT / "backend/src/core/companies.py").read_text(encoding="utf-8"))
-    total = lists = 0
-    for node in tree.body:
-        targets: list[ast.expr] = []
-        if isinstance(node, ast.Assign):
-            targets = list(node.targets)
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets = [node.target]
-        for t in targets:
-            name = getattr(t, "id", None)
-            if name and name.endswith("_COMPANIES") and isinstance(node.value, (ast.List, ast.Tuple)):
-                total += len(node.value.elts)
-                lists += 1
-    if not lists:
-        raise RuntimeError("no *_COMPANIES list literals found in backend/src/core/companies.py")
-    return total, lists
-
-
-def ats_platform_slugs() -> dict[str, int]:
-    """{'GREENHOUSE': 82, 'LEVER': 35, ...} — slugs per *_COMPANIES list.
-
-    ats_slug_count() returns only the TOTAL, which is why README's per-platform
-    breakdown table rotted invisibly: the total guard was satisfied by the
-    glossary's one-line claim while the table beneath it disagreed on six of
-    eleven rows (Greenhouse 80/82, Workable 25/21, Pinpoint 15/39,
-    Recruitee 20/31, Personio 18/26, total ~264/302).
-
-    Promoted 2026-08-24 after CodeRabbit flagged the stale total. The rows are
-    worse than the total: someone reading "Pinpoint 15" plans against a quarter
-    of the real board list.
-    """
-    tree = ast.parse((ROOT / "backend/src/core/companies.py").read_text(encoding="utf-8"))
-    out: dict[str, int] = {}
-    for node in tree.body:
-        targets: list[ast.expr] = []
-        if isinstance(node, ast.Assign):
-            targets = list(node.targets)
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets = [node.target]
-        for t in targets:
-            name = getattr(t, "id", None)
-            if name and name.endswith("_COMPANIES") and isinstance(node.value, (ast.List, ast.Tuple)):
-                out[name[: -len("_COMPANIES")]] = len(node.value.elts)
-    if not out:
-        raise RuntimeError("no *_COMPANIES list literals found in backend/src/core/companies.py")
-    return out
-
-
-def active_ats_inventory() -> tuple[int, int]:
-    """(ATS source classes, slugs those classes actually poll).
-
-    CONFIGURED is not ACTIVE, and the gap is load-bearing: companies.py holds
-    302 slugs across 11 platform lists, but `RIPPLING_COMPANIES` has had no
-    source class since the 2026-08-10 rotation, so 10 boards poll 297. Docs
-    state BOTH numbers, and only the configured one was ever guarded — a
-    rotation that retires another platform would leave "297" stale and green.
-
-    Added 2026-08-24 at CodeRabbit's request on PR #394. Derived, not typed: a
-    platform counts as active when it is actually POLLED, so retiring one moves
-    both numbers automatically.
-
-    "Polled" is read from the classes `_build_sources()` INSTANTIATES, and it
-    took two corrections to get there. Draft 1 scanned module filenames in
-    `sources/ats/`, so a module left on disk counted forever. Draft 2 switched
-    to SOURCE_REGISTRY on the belief that `_build_sources()` iterates it -- it
-    does not (CodeRabbit, third round): the registry is a separate surface for
-    the CLI and `GET /api/sources`, while `_build_sources()` hand-writes its own
-    `all_sources` list. A source can be in the registry, have a module on disk,
-    and still never be fetched.
-
-    Both drafts made the same mistake at different depths: guarding a proxy for
-    the behaviour instead of the behaviour. `built_source_classes()` is the list
-    the pipeline actually constructs, so it is the only one that answers
-    "does this platform get polled?".
-    """
-    per_platform = ats_platform_slugs()
-    # GREENHOUSE -> greenhousesource; a platform is active when some class the
-    # pipeline builds starts with its name. RIPPLING_COMPANIES has no
-    # RipplingSource, which is exactly why 302 configured and 297 polled differ.
-    built = {c.lower().replace("_", "") for c in built_source_classes()}
-    active = {
-        k: v for k, v in per_platform.items()
-        if any(c.startswith(k.lower().replace("_", "")) for c in built)
-    }
-    return len(active), sum(active.values())
-
-
-def dataclass_field_count(rel: str, cls: str) -> int:
-    """Annotated fields on a dataclass. Used for Job and JobEnrichment.
-
-    The glossary described `Job` as "~27 fields" (31) and `JobEnrichment` as
-    "18 fields, 8 enums" (16, 7). These are the shapes every source and the
-    whole scorer are written against, so a wrong count teaches the wrong model.
-    """
-    tree = ast.parse((ROOT / rel).read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef) and node.name == cls:
-            return len([x for x in node.body if isinstance(x, ast.AnnAssign)])
-    raise RuntimeError(f"class {cls} not found in {rel}")
-
-
-def enrichment_enum_count() -> int:
-    """Enum classes in the JobEnrichment schema module."""
-    tree = ast.parse(
-        (ROOT / "backend/src/services/job_enrichment_schema.py").read_text(encoding="utf-8")
-    )
-    return len([
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.ClassDef)
-        and any(getattr(b, "id", "") == "str" or getattr(b, "attr", "") == "Enum" for b in n.bases)
-    ])
-
-
 def landing_page_source_claims() -> list[tuple[int, int]]:
-    """(line, claimed count) for every source-count claim on the landing page.
+    """(line, claimed count) for any lingering source-count claim on user-facing copy.
 
-    Added 2026-08-24. This is the only guard here that watches CODE rather than
-    a doc, and it exists because the doc was RIGHT and the code was LYING:
+    RETIRED as a code-vs-doc comparison 2026-09-05 (slice 5, #483): Job360 no
+    longer sources, ranks or recommends a job (product rule 4), so there is no
+    live registry to compare a claim against any more. The regression guard
+    stays, in a stricter form -- no page may EVER advertise a job-source count
+    again. The frontend has its own backstop
+    (`frontend/src/app/__tests__/landing-sources-count.test.tsx`, added by the
+    application-spine slice, R14); this is the doc-sync-side net.
+
+    Was added 2026-08-24 because the doc was RIGHT and the code was LYING:
     01-user-pillar.md faithfully quoted the landing page as "47 sources", and
     the page really did say 47 -- to every visitor of job360.uk -- while the
-    registry held 41. Six sources were pruned on 2026-08-17 and the marketing
-    copy never moved.
-
-    Doc-sync found it by looking at the seam between doc and code. The nightly
-    routine never could: it may only edit *.md.
+    registry held 41. Doc-sync found it by looking at the seam between doc and
+    code; the nightly routine never could, because it may only edit *.md.
     """
     # Not just the landing page. The first sweep found five copies there and
     # stopped; a wider grep then found the SAME stale number in the site
@@ -467,7 +190,6 @@ def landing_page_source_claims() -> list[tuple[int, int]]:
         "frontend/src/app/page.tsx",
         "frontend/src/app/layout.tsx",
         "frontend/src/components/layout/Footer.tsx",
-        "frontend/src/lib/catalog.ts",
     ]
     out: list[tuple[int, int]] = []
     pat = re.compile(r"(\d+)\s+(?:[Jj]ob\s+)?[Ss]ources?\b|SOURCE_COUNT\s*=\s*(\d+)")
@@ -1284,49 +1006,6 @@ def migration_file_count() -> int:
     return len(_migration_pairs())
 
 
-# The source subfolders that MUST exist. Named explicitly rather than
-# discovered, so a deleted or renamed folder is drift instead of a guard that
-# quietly stops existing -- see source_subfolder_counts().
-EXPECTED_SOURCE_SUBFOLDERS = (
-    "apis_keyed", "apis_free", "ats", "feeds", "other", "scrapers",
-)
-
-
-def source_subfolder_counts() -> dict[str, int]:
-    """{'apis_keyed': N, 'apis_free': N, 'ats': N, 'feeds': N, 'other': N, 'scrapers': N}
-
-    File count per source subfolder, excluding ``__init__.py`` and ``base.py``.
-    Docs everywhere use a tree diagram of ``apis_keyed/ (8)  apis_free/ (9) ...``
-    — the numbers rot every rotation, and until today no guard watched them.
-
-    Promoted 2026-08-24 by the nightly routine. README.md said ``ats/ (12)``
-    against 10, ``feeds/ (8)`` against 4, ``scrapers/ (7)`` against 5.
-
-    CodeRabbit, on the PR that added this: the first draft DISCOVERED the
-    folders by iterating the directory, so deleting ``ats/`` deleted the
-    ``subfolder-ats`` guard along with it and left ``ats/ (10)`` green forever
-    — a check that cannot be made to go red on demand. The expected set is now
-    named as a constant and a missing folder yields a count of 0, which the
-    docs' non-zero claim then contradicts loudly. A NEW folder is still
-    discovered (and, having no doc claim, trips the "claim not found in any
-    doc" alarm), so the set can grow without editing this file.
-    """
-    out: dict[str, int] = {}
-    base = ROOT / "backend/src/sources"
-    # A missing folder scores 0 rather than vanishing: the guard must survive
-    # the deletion of the thing it guards.
-    for name in EXPECTED_SOURCE_SUBFOLDERS:
-        out[name] = 0
-    if not base.is_dir():
-        return out
-    for d in base.iterdir():
-        if d.is_dir() and d.name != "__pycache__":
-            out[d.name] = len([
-                p for p in d.glob("*.py") if p.name not in {"__init__.py", "base.py"}
-            ])
-    return out
-
-
 def frontend_versions() -> tuple[str, str]:
     """(next, react) exact versions from frontend/package.json.
 
@@ -1340,41 +1019,6 @@ def frontend_versions() -> tuple[str, str]:
     deps = pkg.get("dependencies", {})
     clean = lambda v: str(v).lstrip("^~>=< ")  # noqa: E731
     return clean(deps.get("next", "")), clean(deps.get("react", ""))
-
-
-def scorer_version() -> int:
-    """SCORER_VERSION from backend/src/services/skill_matcher.py.
-
-    Added 2026-08-23. CLAUDE.md rule #19 stated 4 while the code had already
-    moved to 7 — a load-bearing constant that rotted through three bumps
-    because no pattern here guarded it, and the daily tripwire stayed green
-    the whole time. Same lesson as the 2026-08-03 batch: this checker only
-    ever guards what someone remembered to teach it.
-    """
-    tree = ast.parse(
-        (ROOT / "backend/src/services/skill_matcher.py").read_text(encoding="utf-8")
-    )
-    for node in tree.body:  # top level only
-        targets: list[ast.expr] = []
-        if isinstance(node, ast.Assign):
-            targets = list(node.targets)
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets = [node.target]
-        for t in targets:
-            if getattr(t, "id", None) == "SCORER_VERSION":
-                # CodeRabbit: `isinstance(True, int)` is True in Python, so
-                # `SCORER_VERSION = True` slipped through a check whose own
-                # error message promises "a plain int literal" — and then
-                # compared equal to a documented 1. `type(...) is int`
-                # rejects bool without rejecting anything else.
-                if not isinstance(node.value, ast.Constant) or (
-                    type(node.value.value) is not int
-                ):
-                    raise RuntimeError("SCORER_VERSION is not a plain int literal")
-                return node.value.value
-    raise RuntimeError(
-        "SCORER_VERSION not found at top level of backend/src/services/skill_matcher.py"
-    )
 
 
 def dead_links() -> list[tuple[str, str]]:
@@ -1539,31 +1183,18 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
     duplicated pattern list stops testing this checker the moment the two
     drift apart — which is the exact failure mode this whole file exists for.
     """
-    registry, unique_classes = registry_counts()
-    ats_slugs, ats_lists = ats_slug_count()
-    job_fields = dataclass_field_count("backend/src/models.py", "Job")
-    enr_fields = dataclass_field_count(
-        "backend/src/services/job_enrichment_schema.py", "JobEnrichment"
-    )
-    enr_enums = enrichment_enum_count()
-    active_boards, active_slugs = active_ats_inventory()
-
     # (fact-name, actual-value, regex-with-one-capture-group). Patterns are
     # deliberately SPECIFIC phrases so unrelated numbers never false-match.
+    #
+    # Every job-source / scoring-engine / ATS-catalog / dataclass-shape fact
+    # this file used to guard was RETIRED 2026-09-05 (slice 5, #483) along
+    # with the code it measured — Job360 no longer sources, ranks or
+    # recommends a job (product rule 4), so there is nothing left in the old
+    # orchestrator, the rate-limit table, the ATS company catalog or the
+    # source classes to count. `landing-source-count` below is the one
+    # survivor: it no longer compares to a live registry, it just refuses any
+    # source-count claim from ever reappearing.
     checks = [
-        ("registry", registry, r"SOURCE_REGISTRY`?\s*\((\d+)"),
-        ("registry", registry, r"aggregates jobs from (\d+) sources"),
-        ("registry", registry, r"Current count: \*\*(\d+)\*\*"),
-        ("registry", registry, r"[Ll]ist all (\d+) sources"),
-        ("registry", registry, r"(\d+) SOURCE_REGISTRY entries"),
-        # Added 2026-08-24 by scripts/doc_sync_mutation_test.py on its first
-        # full run. CLAUDE.md:44 phrases it "`SOURCE_REGISTRY` has 41 entries",
-        # which matched none of the five patterns above. Other docs DID claim
-        # it in a matching form, so the "nobody claims this fact" alarm stayed
-        # quiet and the number in the most-read doc in the repo was guarded by
-        # nothing at all.
-        ("registry", registry, r"SOURCE_REGISTRY`?\s+has\s+(\d+)\s+entries"),
-        ("unique-classes", unique_classes, r"(\d+) unique source classes"),
         # Added 2026-08-03. The checker tracked THREE facts, so every other
         # number in the docs rotted silently — an audit found the rule count,
         # the route/endpoint counts and three mutually-contradictory test counts
@@ -1572,126 +1203,12 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         ("hard-rules", hard_rule_count(), r"the (\d+) hard rules"),
         ("route-modules", route_module_count(), r"(\d+) route modules"),
         ("endpoints", endpoint_count(), r"\((\d+) endpoints"),
-        # Added 2026-08-23. Docs said SCORER_VERSION = 4, code said 7. Every
-        # score-affecting change is supposed to bump it, so a stale claim here
-        # misleads on exactly the constant that decides whether a user's feed
-        # gets re-scored. `\*{0,2}` because the docs bold it.
-        ("scorer-version", scorer_version(), r"SCORER_VERSION`?\s*=\s*\*{0,2}(\d+)"),
         # Promoted from the nightly doc-truth routine 2026-08-24. Each of these
         # was drift the LLM found by reading; they are countable, so they belong
         # here where they cost nothing and are caught on every push.
         ("workflows", workflow_count(), r"(\d+) workflows in"),
         ("test-files", test_file_count(), r"across (\d+) `?test_\*\.py`? files"),
-        # Second promotion batch, 2026-08-24, all found by the nightly routine
-        # in the pillar docs and glossary -- the densest concentration of
-        # countable facts in the repo, and until today none of them watched.
-        # Counted from the CODE, deliberately alongside the doc-vs-doc
-        # `disagree:LOCATIONS` net. That net was green while five LIVING docs
-        # agreed on 25 and the list held 26 -- agreement is not truth.
-        # UPPERCASE only, and that is the whole rule. A looser second pattern
-        # allowing the lowercase word fired on "top 8 titles x top 2 locations"
-        # (ARCHITECTURE.md:474, 01-user-pillar.md:286) -- a search-query fan-out
-        # that has nothing to do with the constant. Same lesson as the SOURCE
-        # guard, opposite direction: there, case-insensitivity hid a real lie;
-        # here, it invented two.
-        ("locations", locations_count(), r"`?LOCATIONS`?\s*\((\d+)\)"),
-        ("locations", locations_count(), r"(\d+)\s+entries in `?LOCATIONS`?\b"),
-        ("rate-limits", rate_limit_count(), r"`?RATE_LIMITS`?[^.\n]{0,40}?\((\d+) entries"),
-        ("rate-limits", rate_limit_count(), r"`?RATE_LIMITS`? dict in `?settings\.py`? \((\d+) entries"),
-        ("subclasses", source_subclass_count(), r"checking all (\d+) subclasses"),
-        ("registry", registry, r"from a (\d+)-key `?SOURCE_REGISTRY"),
-        ("registry", registry, r"The (\d+)-key dict in `?main\.py`?"),
-        ("unique-classes", unique_classes, r"[Bb]uilds (\d+) instances"),
-        # Third batch, 2026-08-24: the remaining countable facts in the glossary,
-        # the densest such file in the repo. Each was wrong until today.
-        ("ats-slugs", ats_slugs, r"\((\d+) slugs across \d+ platforms\)"),
-        ("ats-platforms", ats_lists, r"\(\d+ slugs across (\d+) platforms\)"),
-        ("job-fields", job_fields, r"every source must produce: (\d+) fields"),
-        ("enrichment-fields", enr_fields, r"shape with (\d+) strict-typed fields"),
-        ("enrichment-enums", enr_enums, r"strict-typed fields, (\d+) enums"),
-        # Deliberately NOT matching `SOURCE_INSTANCE_COUNT = N`. That is a
-        # verbatim code quote, and docs legitimately cite it -- including dated
-        # decision notes that are correct at the time of writing. Guarding it
-        # fires on every honest citation, and a permanent false alarm is how a
-        # loop dies. The prose form above covers the claim that matters.
-        #
-        # Fourth batch, 2026-08-24 -- promoted from the nightly routine after
-        # ARCHITECTURE.md read "25-migration forward-compat schema" and the
-        # search-and-match-engine pillar read "14-migration" against 31 actual
-        # forward migrations. The existing `migration-head` guard watches only
-        # "0000 → NNNN" phrasing, so both stale numbers slid past for weeks.
-        # The same COUNT, stated two other ways in the directory trees. Found by
-        # CodeRabbit on PR #394: both lines end "(0000 → 0030)", so
-        # `migration-head` matched them and they LOOKED guarded -- but that guard
-        # reads the HEAD, not the count beside it. Adding migration 0031 would
-        # correctly force the head to 0031 while "31 forward/reverse SQL
-        # migrations" quietly stayed 31. A guard on the same line is not a guard
-        # on the same fact.
-        # RETIRED 2026-08-25, and this is the flywheel arriving. The migration
-        # head and the migration COUNT are both produced by gen_doc_blocks.py
-        # into ARCHITECTURE.md's code-facts block, so they cannot drift at all
-        # -- and the hand-written copies these patterns watched are deleted.
-        # A guard watching a claim nobody writes any more is not free: it is a
-        # green tick asserting nothing, which is the failure this whole file
-        # exists to prevent. Generation retires its own guards; that is the
-        # point of preferring it.
-        # Sixth batch, 2026-08-24, at CodeRabbit's request on PR #394.
-        # CONFIGURED (302 slugs / 11 lists) was guarded; ACTIVE (10 boards
-        # polling 297) was not, though the docs state both. A rotation that
-        # retires another platform would leave "297" stale and green.
-        ("ats-boards-active", active_boards, r"\*\*(\d+) ATS boards\*\* polling"),
-        ("ats-boards-active", active_boards, r"ATS Boards \((\d+), \d+ slugs polled\)"),
-        ("ats-boards-active", active_boards, r"so (\d+) ATS boards poll"),
-        ("ats-slugs-active", active_slugs, r"polling (\d+) company slugs"),
-        ("ats-slugs-active", active_slugs, r"ATS Boards \(\d+, (\d+) slugs polled\)"),
-        ("ats-slugs-active", active_slugs, r"ATS boards poll (\d+) company slugs"),
-        # A THIRD wording of the same two numbers, added to the companies.py
-        # tree comment in ARCHITECTURE.md:54 / README.md:379 while this PR was
-        # open: "297 polled across 10 ATS sources". Found by CodeRabbit.
-        #
-        # This is the failure mode the "claim not found in any doc" alarm cannot
-        # catch, and the reason it cannot is worth stating: that alarm is keyed
-        # on the FACT NAME, not the site. Both facts already had other matching
-        # claims elsewhere, so matches_per_fact stayed non-zero and the checker
-        # reported a clean run while two fresh, unwatched copies of the same
-        # numbers sat in the two most-read files in the repo. Every new phrasing
-        # of a guarded fact needs its own pattern.
-        ("ats-boards-active", active_boards, r"\d+ polled across (\d+) ATS sources"),
-        ("ats-slugs-active", active_slugs, r"(\d+) polled across \d+ ATS sources"),
     ]
-
-    # Per-platform ATS slug counts. The TOTAL was guarded; the breakdown table
-    # under it was not, and six of its eleven rows were stale (Greenhouse
-    # 80/82, Workable 25/21, Pinpoint 15/39, Recruitee 20/31, Personio 18/26).
-    # A reader planning against "Pinpoint 15" is off by a factor of two and a
-    # half. Matches the README table row `| Pinpoint | 39 | ... |`.
-    #
-    # The negative lookahead is load-bearing, not tidiness. 03-job-providers.md
-    # has a RATE-LIMIT table whose rows are `| personio | 1 | 3.0 | XML feed |`
-    # — same shape, different meaning — and the matcher below runs IGNORECASE,
-    # so the first draft read that "1" as a slug count and reported personio as
-    # 1-vs-26 drift on a doc that was perfectly correct. Requiring the third
-    # column NOT to open with a decimal separates the two tables: slug rows
-    # carry prose notes or nothing, rate rows carry a delay like `3.0`.
-    # A permanent false alarm is how a loop dies (see the module docstring).
-    for _plat, _n in ats_platform_slugs().items():
-        _label = re.escape(_plat.title().replace("_", ""))
-        checks.append((
-            f"ats-slugs-{_plat.lower()}",
-            _n,
-            rf"^\|\s*{_label}\s*\|\s*(\d+)\s*\|(?!\s*\d+\.\d)",
-        ))
-
-    # Per-subfolder source counts. Docs everywhere use a tree diagram
-    # `apis_keyed/ (8)  ats/ (10) ...` and the numbers rot every rotation;
-    # until today no guard watched them and README.md carried three drifted
-    # values (ats/12, feeds/8, scrapers/7) against real 10/4/5.
-    for _name, _count in source_subfolder_counts().items():
-        checks.append((
-            f"subfolder-{_name}",
-            _count,
-            rf"\b{re.escape(_name)}/\s*\((\d+)\)",
-        ))
 
     # String-valued facts. Kept separate because the numeric loop below does
     # int(m.group(1)); a version like "16.3.0" is not an int and must be
@@ -1707,7 +1224,6 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
 
 def main() -> int:
     checks, text_checks = build_checks()
-    registry, unique_classes = registry_counts()
     mig_head = migration_head()
 
     drift: list[tuple[str, str, str, str, str]] = []  # file, line, fact, doc-says, code-says
@@ -1834,14 +1350,16 @@ def main() -> int:
                     f"{agreed:,} collected — docs must agree with each other",
                 ))
 
-    # The landing page is a claim to USERS, and it drifted the same way a doc
-    # does — it advertised 47 sources against a registry of 41 for a week.
+    # The landing page is a claim to USERS. It drifted this way once already —
+    # it advertised 47 sources against a registry of 41 for a week — and since
+    # slice 5 (#483) there is no registry left to advertise a count OF, so any
+    # claim at all is now the drift.
     for line_no, claimed in landing_page_source_claims():
-        if claimed != registry:
-            drift.append((
-                "frontend (user-facing copy)", str(line_no), "landing-source-count",
-                str(claimed), str(registry),
-            ))
+        drift.append((
+            "frontend (user-facing copy)", str(line_no), "landing-source-count",
+            f"{claimed} sources",
+            "0 — Job360 no longer sources, ranks or recommends jobs (VISION rule 4)",
+        ))
 
     # Skills are executed, not read. A dead path there sends an agent's whole
     # output into a directory that does not exist.
@@ -1878,9 +1396,7 @@ def main() -> int:
     drift.extend(size_budget_drift())
 
     print("# Doc-sync drift report (Loop 3)\n")
-    print(f"Code facts: SOURCE_REGISTRY entries = **{registry}**, "
-          f"unique source classes = **{unique_classes}**, "
-          f"migration head = **{mig_head:04d}**\n")
+    print(f"Code facts: migration head = **{mig_head:04d}**\n")
 
     # The haystack. Never a failure -- a trend line. Findings-per-night can
     # fall because the scout got lazy; this cannot.

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import Link from "next/link";
 import { Bell } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -215,9 +214,9 @@ export default function NotificationsPage() {
                     className="border-b border-foreground/5 transition-colors last:border-0 hover:bg-foreground/[0.02]"
                   >
                     <td className="px-4 py-3">
-                      <Link href={`/jobs/${n.job_id}`} className="font-mono text-primary hover:underline">
-                        #{n.job_id}
-                      </Link>
+                      {/* Plain text since slice 5 (#483): the `/jobs/{id}` page went with the
+                          sourcing era, and nothing writes this ledger any more. */}
+                      <span className="font-mono text-foreground/80">#{n.job_id}</span>
                     </td>
                     <td className="px-4 py-3 capitalize text-foreground/80">{n.channel}</td>
                     <td className="px-4 py-3">

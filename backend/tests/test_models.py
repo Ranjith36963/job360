@@ -28,9 +28,7 @@ def test_job_defaults():
     assert job.salary_min is None
     assert job.salary_max is None
     assert job.description == ""
-    assert job.match_score == 0
     assert job.visa_flag is False
-    assert job.is_new is True
     # Pillar 3 Batch 1 — 5-column date model default fields
     assert job.posted_at is None
     assert job.date_confidence == "low"
@@ -38,7 +36,13 @@ def test_job_defaults():
 
 
 def test_job_accepts_lifecycle_timestamp_fields():
-    """Step-1 B1: Job dataclass must accept first_seen_at / last_seen_at / staleness_state."""
+    """Step-1 B1: Job must accept first_seen_at / last_seen_at.
+
+    `staleness_state` left the dataclass with the ghost detector that wrote it
+    (slice 5, #483). The `jobs` COLUMN stays — `POST /pipeline/{job_id}` still
+    refuses a `confirmed_expired` row — but nothing constructs a Job carrying
+    one any more.
+    """
     job = Job(
         title="ML Engineer",
         company="Test Co",
@@ -47,11 +51,9 @@ def test_job_accepts_lifecycle_timestamp_fields():
         date_found="2024-01-01T00:00:00Z",
         first_seen_at="2020-01-01T00:00:00Z",
         last_seen_at="2020-06-01T00:00:00Z",
-        staleness_state="active",
     )
     assert job.first_seen_at == "2020-01-01T00:00:00Z"
     assert job.last_seen_at == "2020-06-01T00:00:00Z"
-    assert job.staleness_state == "active"
 
 
 def test_job_lifecycle_fields_default_to_none():
@@ -65,7 +67,6 @@ def test_job_lifecycle_fields_default_to_none():
     )
     assert job.first_seen_at is None
     assert job.last_seen_at is None
-    assert job.staleness_state is None
 
 
 def test_job_accepts_five_column_date_fields():
@@ -172,90 +173,36 @@ def test_html_decode_company():
     assert job.company == "Smith & Sons"
 
 
-# ---- Salary outlier tests ----
+# ---- Salary is stored as stated, never clamped ----
 #
-# THE CLAMP MOVED (Universal Shelf step 2). These three cases used to be
-# enforced inside `Job.__post_init__`, which judged every number as if it
-# were GBP-annual. The SAME policy now runs in
-# `services/shelf_gate.py::_fill_salary`, but AFTER the band has been
-# annualised and converted to GBP — so the tests below still pin the exact
-# same outcomes for a GBP-annual job (nothing was loosened), and the two new
-# tests at the end pin what the old home could not express at all: an hourly
-# rate and a foreign currency now survive instead of being nulled or stored
-# as a wrong number.
+# A clamp used to live in `Job.__post_init__` and judged every number as if it
+# were GBP-annual: it destroyed an NHS hourly rate (30.27 < 10,000) while
+# waving that job's maximum through untouched (45 is not > 500,000), so the row
+# advertised "45" as a salary. Universal Shelf step 2 moved the policy into the
+# gate, which annualised and converted first; slice 5 (#483) deleted the gate
+# with the rest of the sourcing era.
+#
+# What remains is the invariant that survived all three states and is the one
+# the product still needs: a brought ad's salary is stored EXACTLY as the ad
+# stated it. Job360 does not reinterpret the number.
 
 
-def _gated(**kwargs):
-    """Build a Job and put it through the gate, exactly as the pipeline does
-    (`main._score_dedup_and_filter` calls `fill_shelves` on every job before
-    anything else touches it)."""
-    from src.services.shelf_gate import fill_shelves
-
-    base = dict(title="AI Engineer", company="Test", apply_url="x", source="a", date_found="x")
-    base.update(kwargs)
-    return fill_shelves(Job(**base))
-
-
-def test_salary_low_nullified():
-    job = _gated(salary_min=50, salary_max=80000)
-    assert job.salary_min is None
-    assert job.salary_max == 80000
-
-
-def test_salary_high_nullified():
-    job = _gated(salary_min=50000, salary_max=999999)
-    assert job.salary_min == 50000
-    assert job.salary_max is None
-
-
-def test_salary_normal_unchanged():
-    job = _gated(salary_min=60000, salary_max=90000)
-    assert job.salary_min == 60000
-    assert job.salary_max == 90000
-
-
-def test_salary_boundary_kept():
-    """10000 and 500000 are at the boundary and should be kept."""
-    job = _gated(salary_min=10000, salary_max=500000)
-    assert job.salary_min == 10000
-    assert job.salary_max == 500000
-
-
-def test_job_itself_no_longer_clamps_the_raw_source_numbers():
-    """A source is a DUMB MAPPER: it hands over what upstream said. The Job
-    dataclass must not silently null those numbers any more — an hourly rate
-    is not a broken salary, it is a salary in another unit, and only the gate
-    knows the unit."""
+def test_job_stores_the_stated_salary_untouched():
     job = Job(
-        title="Pharmacist", company="NHS", apply_url="x", source="nhs_jobs",
+        title="Pharmacist", company="NHS", apply_url="x", source="user_brought",
         date_found="x", salary_min=30.27, salary_max=45.0,
     )
     assert job.salary_min == 30.27
     assert job.salary_max == 45.0
-    assert job.salary_min_gbp_annual is None  # nothing derived until the gate runs
 
 
-def test_gate_annualises_an_hourly_rate_instead_of_nulling_it():
-    """The old unit-blind clamp destroyed this job's minimum (30.27 < 10,000)
-    while waving its maximum through untouched (45 is not > 500,000) — the
-    row ended up advertising "45" as a salary. Annualised first, both bounds
-    are real numbers and both survive."""
-    job = _gated(salary_min=30.27, salary_max=45.0, salary_period="per hour",
-                 salary_currency="GBP")
-    assert job.salary_min == 62962.0   # 30.27 x 2080 h, rounded
-    assert job.salary_max == 93600.0   # 45.00 x 2080 h
-    assert job.salary_min_gbp_annual == 62962.0
-    assert job.salary_period == "annual"  # the stored unit describes the stored number
-
-
-def test_gate_converts_a_foreign_currency_instead_of_storing_it_as_gbp():
-    """landingjobs: 0 of 50 live jobs were GBP (46 EUR), yet every one was
-    stored as if it were sterling."""
-    job = _gated(salary_min=60000, salary_max=80000, salary_currency="EUR",
-                 salary_period="year")
-    assert job.salary_min == 51600.0   # 60,000 EUR x 0.86
-    assert job.salary_max == 68800.0
-    assert job.salary_currency == "GBP"
+def test_job_stores_a_normal_annual_band_untouched():
+    job = Job(
+        title="AI Engineer", company="Test", apply_url="x", source="user_brought",
+        date_found="x", salary_min=60000, salary_max=90000,
+    )
+    assert job.salary_min == 60000
+    assert job.salary_max == 90000
 
 
 # ---- Region suffix stripping tests ----
@@ -288,9 +235,10 @@ def test_normalized_key_consistency():
 def test_normalized_key_does_not_strip_seniority():
     """normalized_key() intentionally does NOT strip seniority prefixes.
 
-    The deduplicator's _normalize_title() does strip seniority for within-run grouping,
-    but normalized_key() preserves it for the DB UNIQUE constraint. This divergence is
-    by design — see deduplicator.py docstring and CLAUDE.md Rule 1.
+    Hard rule #1: this function IS the DB UNIQUE constraint. "Senior AI
+    Engineer" and "AI Engineer" at the same company are two different ads and
+    must stay two rows — collapsing them would make one user's paste land on
+    another's job.
     """
     j1 = Job(title="Senior AI Engineer", company="DeepMind", apply_url="x", source="a", date_found="x")
     j2 = Job(title="AI Engineer", company="DeepMind", apply_url="x", source="a", date_found="x")
@@ -303,8 +251,8 @@ def test_normalized_key_caps_component_length():
     UNIQUE(normalized_company, normalized_title)) and that single poison row
     aborted the ENTIRE catalog insert — the whole 257s fetch thrown away.
 
-    Rule #1 safety: dedup layer 1 and the DB constraint both consume this one
-    function, so capping here keeps them agreeing.
+    Rule #1 safety: the DB UNIQUE constraint is the one consumer of this
+    function, so capping here caps exactly what the index sees.
     """
     monster = Job(
         title="Senior Engineer " * 300,  # ~4,800 chars of scraped garbage

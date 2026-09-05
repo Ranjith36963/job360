@@ -6,8 +6,8 @@ This backend runs one asyncio event loop. Any CPU-heavy synchronous call made
 directly from ``async def`` freezes EVERY other user's request while it runs.
 The bug has shipped three times already:
 
-* PR #123 — ``run_search`` scored + deduped inline; the UI showed "Lost contact
-  with the server while searching" (the search was fine; the loop was busy).
+* PR #123 — the old search scored + deduped inline; the UI showed "Lost
+  contact with the server" (the search was fine; the loop was busy).
 * ``tests/test_upload_does_not_block_loop.py`` — pdfplumber inline; a measured
   2,399 ms stall took ``/api/health`` to connection-refused.
 * ``backfill_feed_from_catalog`` — a synchronous 50,000-row scoring loop, run on

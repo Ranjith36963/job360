@@ -17,16 +17,18 @@ import { toast } from "@/lib/toast";
 const URL_FETCH_UI_ENABLED = process.env.NEXT_PUBLIC_URL_FETCH_ENABLED !== "false";
 
 /**
- * Bring a job — the product's front door after the pivot
- * (docs/plans/2026-09-02-bring-a-job/intent.md), plus the URL-fetch web
+ * Bring a job — the product's front door
+ * (docs/plans/2026-09-05-delete-sourcing-era), plus the URL-fetch web
  * fallback (docs/plans/2026-09-04-url-fetch/spec.md, R12).
  *
- * Job360 never sources jobs. The user pastes the ad they found, OR pastes a
- * link and lets us try to fill the form for them; either way the backend
- * stores it, scores it against their profile and lands it in their feed on
- * success. Paste is always the fallback — a fetch pre-fills the form, it
- * never submits it, and a fetch that fails (or is disabled) always leaves
- * the paste box ready with the link kept (intent constraint 4).
+ * Job360 never sources, scores or ranks jobs (VISION rule 4). The user
+ * pastes the ad they found, OR pastes a link and lets us try to fill the
+ * form for them; either way the backend stores it and births the
+ * Application. On success we go straight to that application's page —
+ * where the tailor fallback and the receipt live. Paste is always the
+ * fallback — a fetch pre-fills the form, it never submits it, and a fetch
+ * that fails (or is disabled) always leaves the paste box ready with the
+ * link kept (intent constraint 4).
  */
 export default function BringJobPage() {
   const router = useRouter();
@@ -63,9 +65,9 @@ export default function BringJobPage() {
         description,
       });
       if (res.existing) {
-        toast.success("Already in the catalog — opening it.");
+        toast.success("Already brought — opening it.");
       }
-      router.push(`/jobs/${res.job.id}`);
+      router.push(`/applications/${res.application_id}`);
     } catch (err) {
       toast.apiError(err, "Couldn't save this job — please check the fields and try again.");
       setSubmitting(false);
@@ -97,7 +99,7 @@ export default function BringJobPage() {
         setApplyUrl(res.final_url || url);
         setFilledFields(res.found ?? []);
         // The form is NOT submitted — the user still reviews and presses
-        // "Score this job" themselves (intent constraint 4).
+        // "Bring this job" themselves (intent constraint 4).
         titleInputRef.current?.focus();
       } else {
         // Never touch title/company/location/description here — a failed
@@ -123,8 +125,8 @@ export default function BringJobPage() {
       <div className="mb-6">
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Bring a job</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Paste a link and we&apos;ll try to fill the form, or paste the ad you found. We score it
-          against your profile, tailor your CV, and keep a receipt of exactly what you sent.
+          Paste a link and we&apos;ll try to fill the form, or paste the ad you found. We keep
+          it, tailor your CV, and keep a receipt of exactly what you sent.
         </p>
       </div>
 
@@ -297,7 +299,7 @@ export default function BringJobPage() {
             ) : (
               <ClipboardPaste className="h-4 w-4" />
             )}
-            {submitting ? "Scoring…" : "Score this job"}
+            {submitting ? "Saving…" : "Bring this job"}
           </Button>
           <p className="text-xs text-muted-foreground">
             Nothing is sent anywhere. You apply; we keep the record.

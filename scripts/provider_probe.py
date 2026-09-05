@@ -196,26 +196,6 @@ def main() -> int:
     else:
         absent.append("RESEND_API_KEY")
 
-    # ── Keyed job sources ────────────────────────────────────────────────────
-    # These fail SILENTLY in the pipeline: a bad key returns [] and the source
-    # simply contributes nothing, which is indistinguishable from a quiet day.
-    if env("REED_API_KEY"):
-        import base64
-        tok = base64.b64encode(f"{env('REED_API_KEY')}:".encode()).decode()
-        results.append(("reed", *_probe(
-            "https://www.reed.co.uk/api/1.0/search?keywords=engineer&resultsToTake=1",
-            {"Authorization": f"Basic {tok}"})))
-    else:
-        absent.append("REED_API_KEY")
-
-    if env("ADZUNA_APP_ID") and env("ADZUNA_APP_KEY"):
-        results.append(("adzuna", *_probe(
-            "https://api.adzuna.com/v1/api/jobs/gb/search/1"
-            f"?app_id={env('ADZUNA_APP_ID')}&app_key={env('ADZUNA_APP_KEY')}&results_per_page=1",
-            {})))
-    else:
-        absent.append("ADZUNA_APP_ID/KEY")
-
     if FORCE_RED:
         results.append(("DRILL", "DEAD", "forced red to prove the chain — no key is actually broken"))
 

@@ -319,32 +319,3 @@ def test_seed_failure_never_breaks_signup(client, monkeypatch, temp_db):
 # ── the cron can finally see somebody ────────────────────────────────────────
 
 
-def test_notification_tick_finds_a_seeded_user(client, temp_db):
-    """The exact inversion of the live worker log this issue was filed on.
-
-    Production, 2026-08-19, every five minutes forever::
-
-        cron:notification_tick ● {'checked': 0, 'enqueued': 0}
-
-    `notification_tick` selects ``FROM notification_rules WHERE enabled = 1``.
-    With zero rows it checked nobody — the cron was healthy and had simply
-    nobody to deliver to. After signup seeds a rulebook, it must see the user.
-    """
-    import asyncio as _asyncio
-
-    from src.workers.tasks import notification_tick
-
-    r = client.post(
-        "/api/auth/register",
-        json={"email": "ticked@example.com", "password": "hunter2-hunter2"},
-    )
-    assert r.status_code == 201, r.text
-
-    async def _tick():
-        async with pg.connect(temp_db) as db:
-            return await notification_tick({"db": db, "enqueue": lambda *a: None})
-
-    result = _asyncio.run(_tick())
-    assert result["checked"] >= 1, (
-        f"notification_tick still sees nobody: {result} — issue #318 not fixed"
-    )

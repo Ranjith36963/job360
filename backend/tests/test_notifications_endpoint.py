@@ -97,38 +97,3 @@ async def test_notifications_filter_by_status(authenticated_async_context, fixtu
     body = resp.json()
     assert all(e["status"] == "failed" for e in body["notifications"])
     assert body["total"] == 1
-
-
-@pytest.mark.asyncio
-async def test_jobs_response_dedup_group_ids_field_present(authenticated_async_context):
-    """S3-F field-presence: JobResponse.dedup_group_ids exists and defaults
-    to None until the dedup-group writer batch lands. The frontend Step 2
-    type contract relies on this field shape being stable — populating
-    it later is additive and won't break Step 2's wired consumer."""
-    db = await api_deps.get_db()
-    from datetime import datetime, timezone
-
-    now = datetime(2026, 4, 25, tzinfo=timezone.utc).isoformat()
-    cur = await db._conn.execute(
-        "INSERT INTO jobs (title, company, apply_url, source, date_found, "
-        "normalized_company, normalized_title, first_seen) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            "Engineer",
-            "Acme",
-            "https://example.test/x",
-            "test",
-            now,
-            "acme",
-            "engineer",
-            now,
-        ),
-    )
-    await db._conn.commit()
-    job_id = cur.lastrowid
-    async with authenticated_async_context() as client:
-        resp = await client.get(f"/api/jobs/{job_id}")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "dedup_group_ids" in body
-    assert body["dedup_group_ids"] is None

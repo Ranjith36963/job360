@@ -105,10 +105,8 @@ def test_p2_every_extraction_writer_reads_the_base():
                profile_route.upload_github, profile_route.upsert_preferences):
         src = inspect.getsource(fn)
         assert "with_overlay=False" in src, f"{fn.__name__} must read the base profile"
-    import pathlib
-
-    script = pathlib.Path(profile_route.__file__).parents[3] / "scripts" / "reextract_stale_profiles.py"
-    assert "with_overlay=False" in script.read_text(encoding="utf-8")
+    # scripts/reextract_stale_profiles.py used to be pinned here too; it left with
+    # the sourcing era (slice 5), so the routes above are the only writers now.
 
 
 @pytest.mark.asyncio

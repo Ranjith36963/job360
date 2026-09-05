@@ -23,36 +23,17 @@ export const ROUTES = [
   { path: "/contact", name: "contact" },
 
   // ── authed ────────────────────────────────────────────────────────────────
-  { path: "/dashboard", name: "dashboard", auth: true },
-  // Deliberate alias, not a bug: src/app/jobs/page.tsx redirect()s to /dashboard
-  // as a safety net for old bookmarks. Expect `-> /dashboard` in the report.
-  { path: "/jobs", name: "jobs", auth: true, expectRedirect: "/dashboard" },
+  // /dashboard, /jobs, /jobs/:id and /admin/sources were deleted in slice 5
+  // (delete-sourcing-era) — Job360 never sources or ranks jobs (VISION rule 4),
+  // so there is no catalog left to review.
   { path: "/profile", name: "profile", auth: true },
   { path: "/pipeline", name: "pipeline", auth: true },
+  { path: "/applications", name: "applications", auth: true },
   { path: "/channels", name: "channels", auth: true },
   { path: "/notifications", name: "notifications", auth: true },
   { path: "/settings", name: "settings", auth: true },
   { path: "/settings/account", name: "settings-account", auth: true },
   { path: "/settings/notifications", name: "settings-notifications", auth: true },
-  { path: "/admin/sources", name: "admin-sources", auth: true },
-
-  // A job detail page only exists if the catalog has one; `resolve` asks the
-  // API for a real id at run time rather than hardcoding one that will rot.
-  {
-    path: "/jobs/:id",
-    name: "job-detail",
-    auth: true,
-    dynamic: true,
-    async resolve({ apiBase, cookieHeader }) {
-      const res = await fetch(`${apiBase}/api/jobs?limit=1`, {
-        headers: cookieHeader ? { cookie: cookieHeader } : {},
-      });
-      if (!res.ok) return null;
-      const body = await res.json();
-      const first = Array.isArray(body) ? body[0] : (body.jobs ?? body.items ?? [])[0];
-      return first?.id ? `/jobs/${first.id}` : null;
-    },
-  },
 
   // ── not reviewed ──────────────────────────────────────────────────────────
   // /auth/magic consumes a one-time token and redirects; screenshotting it

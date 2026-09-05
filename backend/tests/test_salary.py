@@ -1,11 +1,37 @@
-"""Pillar 2 Batch 2.9 — tests for the salary normaliser."""
+"""Tests for the salary normaliser and the FX table it rides on.
+
+Slice 5 (#483) moved `normalize_salary` from `services/salary.py` into
+`core/fx.py` (its one remaining reader is the notification decision card) and
+deleted the `SalaryBand` / `SalaryFrequency` Pydantic models with the rest of
+the enrichment schema. The function always accepted a plain dict as well as a
+model — `_pick` tolerates both — so the fixtures below are dicts now, which is
+also the only shape a caller can still produce.
+"""
 from __future__ import annotations
 
 import pytest
 
-from src.core.fx import to_gbp
-from src.services.job_enrichment_schema import SalaryBand, SalaryFrequency
-from src.services.salary import normalize_salary
+from src.core.fx import normalize_salary, to_gbp
+
+
+class SalaryFrequency:
+    """The four frequency words `normalize_salary` annualises, plus the
+    "unknown" it treats as already-annual. Was a str-Enum on the deleted
+    enrichment schema; kept here as literal strings so the tests still assert
+    against the exact vocabulary the function reads."""
+
+    HOURLY = "hourly"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+    ANNUAL = "annual"
+    UNKNOWN = "unknown"
+
+
+def SalaryBand(*, min=None, max=None, currency="GBP", frequency=SalaryFrequency.ANNUAL):  # noqa: A002, N802
+    """The dict shape `normalize_salary` reads. Named like the old model so the
+    cases below read unchanged."""
+    return {"min": min, "max": max, "currency": currency, "frequency": frequency}
 
 # ---------------------------------------------------------------------------
 # FX

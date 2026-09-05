@@ -6,7 +6,7 @@
 // human can see WHAT broke and WHY, in the same logs, without watching it live.
 //
 //   Public corners (landing, login, register, legal)  → always run.
-//   Authed corners (dashboard, CV upload→extraction, jobs, tailor, pipeline, …)
+//   Authed corners (applications, CV upload→extraction, bring, pipeline, …)
 //        → run only when the robot can LOG ITSELF IN as a dedicated synthetic
 //          account, and only after the backend confirms that is whose account it is.
 //          See session-gate.mjs for both gates and why they exist.
@@ -215,45 +215,16 @@ async function scanPoison(where) {
 }
 
 const AUTHED = [
-  ["dashboard loads", async () => { await gotoAuthed("/dashboard"); await page.waitForTimeout(2500); }],
+  // The seeker's home since slice 5 (#483): the application list. `/dashboard`
+  // and `/jobs` went with the sourcing era — a corner that walks a deleted
+  // page turns this monitor permanently red, and a red nobody trusts is a
+  // dead monitor.
+  ["applications loads", async () => { await gotoAuthed("/applications"); await page.waitForTimeout(2500); }],
 
-  ["dashboard renders no impossible text", async () => {
-    await gotoAuthed("/dashboard");
+  ["applications renders no impossible text", async () => {
+    await gotoAuthed("/applications");
     await page.waitForTimeout(2500);
-    await scanPoison("dashboard");
-  }],
-
-  ["dashboard counts agree with each other", async () => {
-    // TWO USER-VISIBLE NUMBERS ON ONE SCREEN MUST NOT CONTRADICT.
-    //
-    // 2026-08-03: the header said "4078 jobs matched your profile" while the
-    // All tab said 100. Both the DB and the API were CORRECT — `total` is
-    // computed before the page slice (jobs.py) — but the time-bucket tabs are
-    // derived client-side from a second query that inherits the API's default
-    // limit=100. So the screen contradicted itself while every backend check
-    // passed. No SQL invariant can ever catch this shape; only reading the
-    // rendered page can.
-    await gotoAuthed("/dashboard");
-    await page.waitForTimeout(2500);
-    const text = await page.evaluate(() => document.body.innerText || "");
-
-    const header = text.match(/([\d,]+)\s+jobs?\s+matched/i);
-    const allTab = text.match(/\bAll\s+([\d,]+)/i);
-    if (!header || !allTab) return; // empty feed / layout change — not this check's business
-
-    const num = (s) => parseInt(s.replace(/,/g, ""), 10);
-    const total = num(header[1]);
-    const shown = num(allTab[1]);
-
-    // A cap is fine — SAYING one number and SHOWING another without telling the
-    // user is not. Either they agree, or the page admits it is truncating.
-    const admitsTruncation = /showing|first\s+\d|of\s+[\d,]+|see all|show all/i.test(text);
-    if (total !== shown && !admitsTruncation) {
-      throw new Error(
-        `header claims ${total} matches but the All tab shows ${shown}, and nothing on ` +
-        `the page tells the user it is truncated. One of these numbers is lying to them.`
-      );
-    }
+    await scanPoison("applications");
   }],
 
   [ALLOW_WRITES ? "profile + CV upload → extraction" : "profile page renders (read-only)", async () => {
@@ -279,7 +250,7 @@ const AUTHED = [
     // extraction is a real LLM call on prod — wait, then assert a skill from the sample CV shows up
     await page.getByText(/python|airflow|data engineer/i).first().waitFor({ timeout: 90000 });
   }],
-  ["jobs / search", async () => { await gotoAuthed("/jobs"); await page.waitForTimeout(2500); }],
+  ["bring a job (form renders)", async () => { await gotoAuthed("/bring"); await page.waitForTimeout(1500); }],
   ["pipeline (kanban)", async () => { await gotoAuthed("/pipeline"); await page.waitForTimeout(1500); }],
   ["channels", async () => { await gotoAuthed("/channels"); await page.waitForTimeout(1500); }],
   ["settings", async () => { await gotoAuthed("/settings"); await page.waitForTimeout(1500); }],

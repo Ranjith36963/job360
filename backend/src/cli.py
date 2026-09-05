@@ -1,99 +1,20 @@
-"""Job360 CLI — command-line interface for the job search system."""
+"""Job360 CLI — the two commands the product still has.
+
+Slice 5 (#483) deleted `run`, `status`, `view` and `sources`: there is no
+search pipeline to run, no run log to report and no feed to view. What is
+left is the server and the single-tenant profile setup.
+"""
 
 import asyncio
 from typing import Optional
 
 import click
 
-from src.main import SOURCE_REGISTRY, run_search
-
 
 @click.group()
 @click.version_option(version="1.0.0", prog_name="job360")
 def cli() -> None:
-    """Job360 — Automated UK job search aggregator."""
-
-
-@cli.command()
-@click.option("--source", type=click.Choice(sorted(SOURCE_REGISTRY.keys()), case_sensitive=False),
-              default=None, help="Run a single source only.")
-@click.option("--dry-run", is_flag=True, help="Fetch and score jobs without saving to DB or sending notifications.")
-@click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
-              default="INFO", help="Set logging verbosity.")
-@click.option("--db-path", default=None, help="Override database file path.")
-@click.option("--no-email", is_flag=True, help="Skip all notifications (email, webhook).")
-def run(
-    source: Optional[str],
-    dry_run: bool,
-    log_level: str,
-    db_path: Optional[str],
-    no_email: bool,
-) -> None:
-    """Run the job search pipeline."""
-    try:
-        stats = asyncio.run(run_search(
-            db_path=db_path,
-            source_filter=source,
-            dry_run=dry_run,
-            log_level=log_level,
-            no_notify=no_email,
-        ))
-        # C1: Exit with error message if no profile was found
-        if stats.get("error") == "no_profile":
-            click.secho("\nERROR: No user profile found. Job360 needs your CV to match jobs.", fg="red", err=True)
-            click.echo("")
-            click.echo("  python -m src.cli setup-profile --cv path/to/your_cv.pdf")
-            click.echo("  Or use the frontend at http://localhost:3000/profile")
-            raise SystemExit(2)
-        click.echo(f"Done: {stats['total_found']} found, {stats['new_jobs']} new, {stats['sources_queried']} sources.")
-    except KeyboardInterrupt:
-        click.echo("\nJob360: Search interrupted. Exiting gracefully.")
-        raise SystemExit(130)
-
-
-@cli.command()
-def status() -> None:
-    """Show the last run stats from the database."""
-    from src.core.settings import DB_PATH
-    from src.repositories import pgsync
-    conn = pgsync.connect(str(DB_PATH))
-    conn.row_factory = pgsync.Row
-    try:
-        try:
-            row = conn.execute("SELECT * FROM run_log ORDER BY id DESC LIMIT 1").fetchone()
-        except pgsync.Error:
-            click.echo("No database found. Run 'job360 run' first.")
-            return
-        if not row:
-            click.echo("No runs recorded yet.")
-            return
-        click.echo(f"Last run: {row['timestamp']}")
-        click.echo(f"  Total found: {row['total_found']}")
-        click.echo(f"  New jobs:    {row['new_jobs']}")
-
-        total_jobs = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-        click.echo(f"  Total in DB: {total_jobs}")
-    finally:
-        conn.close()
-
-
-@cli.command()
-@click.option("--hours", default=168, type=int, help="Show jobs from last N hours (default 168 = 7 days).")
-@click.option("--min-score", default=30, type=int, help="Minimum match score to display.")
-@click.option("--source", default=None, help="Filter by source name.")
-@click.option("--visa-only", is_flag=True, help="Show only visa-flagged jobs.")
-@click.option("--db-path", default=None, help="Override database file path.")
-def view(
-    hours: int,
-    min_score: int,
-    source: Optional[str],
-    visa_only: bool,
-    db_path: Optional[str],
-) -> None:
-    """View jobs in a time-bucketed Rich terminal table."""
-    from src.cli_view import display_jobs
-    display_jobs(hours=hours, min_score=min_score, source=source,
-                 visa_only=visa_only, db_path=db_path)
+    """Job360 — the memory and context layer for your job-search agent."""
 
 
 @cli.command()
@@ -104,14 +25,6 @@ def api(port: int, host: str) -> None:
     import uvicorn
     click.echo(f"Starting Job360 API on {host}:{port}")
     uvicorn.run("src.api.main:app", host=host, port=port, reload=True)
-
-
-@cli.command("sources")
-def list_sources() -> None:
-    """List all available job sources."""
-    click.echo("Available sources:")
-    for name in sorted(SOURCE_REGISTRY.keys()):
-        click.echo(f"  - {name}")
 
 
 @cli.command("setup-profile")
@@ -227,51 +140,7 @@ def setup_profile(
     profile = UserProfile(cv_data=cv_data, preferences=prefs)
     save_profile(profile, DEFAULT_TENANT_ID)
     click.echo("\nProfile saved to user_profiles table (DEFAULT_TENANT_ID).")
-    click.echo("Next pipeline run will use your personalised keywords.")
-
-
-@cli.command("rescore-backfill")
-@click.option("--batch-size", default=25, type=int, show_default=True,
-              help="Users selected per DB round-trip.")
-@click.option("--max-users", default=0, type=int, show_default=True,
-              help="Hard ceiling for one run (0 = no ceiling).")
-@click.option("--throttle", default=2.0, type=float, show_default=True,
-              help="Seconds to pause between batches.")
-def rescore_backfill_cmd(batch_size: int, max_users: int, throttle: float) -> None:
-    """Queue the one-off re-score backfill for users with a stale feed (issue #271).
-
-    This does NOT do the work here — it puts ``rescore_backfill`` on the ARQ
-    queue, and that job in turn queues one bounded ``rescore_user_feed_task``
-    per affected user. Deliberate by design: nothing this expensive fires on a
-    cron or on boot.
-
-    Needs ``REDIS_URL`` and a running worker. Safe to re-run: the job ids are
-    keyed on (user, current profile version), so ARQ drops a duplicate rather
-    than paying for the same re-score twice.
-    """
-    from src.workers.queue import enqueue_job
-
-    queued = asyncio.run(
-        enqueue_job(
-            "rescore_backfill",
-            batch_size=batch_size,
-            max_users=max_users,
-            throttle_seconds=throttle,
-        )
-    )
-    if queued:
-        click.echo(
-            f"Queued rescore_backfill (batch_size={batch_size}, "
-            f"max_users={max_users or 'all'}, throttle={throttle}s). "
-            "Watch the worker logs for 'rescore_backfill_done'."
-        )
-    else:
-        click.echo(
-            "Could not queue rescore_backfill — check REDIS_URL and that the "
-            "worker service is up. Nothing was run.",
-            err=True,
-        )
-        raise SystemExit(1)
+    click.echo("Your agent can read it over MCP, or the web app at /profile.")
 
 
 if __name__ == "__main__":

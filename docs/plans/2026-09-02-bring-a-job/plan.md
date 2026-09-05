@@ -1,4 +1,6 @@
 # Plan: bring a job, keep the receipt
+<!-- doc: PLAN -->
+> **PLAN — shipped.** A design record, not live truth; the code and `docs/product/VISION.md` win. <!-- banner: auto -->
 Reads: `intent.md`, `spec.md`. Honest note: the backend code below was written BEFORE this plan (session of
 2026-09-02, interrupted). The plan is written now and the diff is checked against it — see "Diff vs plan".
 

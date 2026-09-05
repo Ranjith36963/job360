@@ -55,40 +55,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/actions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Actions */
-        get: operations["list_actions_api_actions_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/actions/counts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Action Counts */
-        get: operations["action_counts_api_actions_counts_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/applications": {
         parameters: {
             query?: never;
@@ -115,6 +81,37 @@ export interface paths {
         };
         /** Export History */
         get: operations["export_history_api_applications_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/job/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Job
+         * @description Read back an ad THIS user brought, by its `job_id`.
+         *
+         *     Slice 5 (#483) deleted the public `GET /api/jobs/{id}`. That route served
+         *     the shared catalog to anyone with an id, which stopped being defensible
+         *     the moment `jobs` held nothing but ads individual people pasted (S1). This
+         *     is its per-user replacement: the row is returned only when the caller has
+         *     an application for it, so an id they never brought reads as 404, never as
+         *     somebody else's paste.
+         *
+         *     Declared BEFORE `/applications/{application_id}` for the same reason
+         *     `/applications/export` is — a literal segment must not be swallowed by the
+         *     dynamic one.
+         */
+        get: operations["get_job_api_applications_job__job_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -646,23 +643,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/jobs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Jobs */
-        get: operations["list_jobs_api_jobs_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/jobs/bring": {
         parameters: {
             query?: never;
@@ -674,31 +654,14 @@ export interface paths {
         put?: never;
         /**
          * Bring Job
-         * @description Store the pasted ad, score it against the caller's profile, put it in
-         *     their feed. Returns the job exactly as GET /jobs/{id} would, so the
-         *     frontend can route straight to the detail page.
+         * @description Store the pasted ad and birth the Application for it.
+         *
+         *     Nothing is scored: the caller (the user's agent) already decided this ad
+         *     is worth keeping, and product rule 4 forbids us judging fit. Returns the
+         *     stored job plus the `application_id` the caller should work against from
+         *     here on.
          */
         post: operations["bring_job_api_jobs_bring_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/jobs/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Export Jobs
-         * @description Download the caller's own recent matches as CSV.
-         */
-        get: operations["export_jobs_api_jobs_export_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -726,64 +689,6 @@ export interface paths {
          *     transport error (spec R1).
          */
         post: operations["fetch_url_route_api_jobs_fetch_url_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/jobs/{job_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Job */
-        get: operations["get_job_api_jobs__job_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/jobs/{job_id}/action": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Set Action */
-        post: operations["set_action_api_jobs__job_id__action_post"];
-        /** Delete Action */
-        delete: operations["delete_action_api_jobs__job_id__action_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/jobs/{job_id}/duplicates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Job Duplicates
-         * @description Return alternate listings for the same job across sources (Option A: query-time grouping).
-         *
-         *     Uses normalized_key() grouping: jobs with same normalized company + normalized title
-         *     are considered duplicates. Public endpoint — same auth policy as GET /jobs/{id}.
-         */
-        get: operations["get_job_duplicates_api_jobs__job_id__duplicates_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1072,10 +977,16 @@ export interface paths {
          * Create Application
          * @description Add a job to the caller's application pipeline (stage: applied).
          *
-         *     R-2: ``get_job_by_id`` does not filter on ``staleness_state`` (only
-         *     ``get_job_by_id_with_enrichment`` carries the C-1 fix). Refuse to
-         *     create a pipeline row for a confirmed-expired listing — return 410
-         *     Gone so the frontend can drop the stale card from the UI.
+         *     R-2: ``get_job_by_id`` does not filter on ``staleness_state``, so this
+         *     route checks it by hand — refuse to create a pipeline row for a
+         *     confirmed-expired listing and return 410 Gone, so the frontend can drop
+         *     the stale card from the UI.
+         *
+         *     This is the LAST remaining read of ``staleness_state`` after slice 5
+         *     (#483) deleted the ghost detector that wrote it, and it is why
+         *     ``bring.py`` still calls ``update_last_seen``: re-bringing a legacy
+         *     scraped row that a long-dead sweep marked stale must make it usable
+         *     again.
          */
         post: operations["create_application_api_pipeline__job_id__post"];
         delete?: never;
@@ -1535,109 +1446,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/runs/recent": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Recent Runs
-         * @description Return paginated pipeline run history from run_log, newest first.
-         *
-         *     Step-3 B-15.  Requires authentication (rule #12) — the run log is
-         *     operational metadata, not a public catalog surface.
-         */
-        get: operations["recent_runs_api_runs_recent_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/runs/source-health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Source Health
-         * @description Aggregate per-source job-count + error stats across recent runs.
-         *
-         *     Reads existing run_log columns (per_source, per_source_errors,
-         *     per_source_duration) populated by migrations 0000 + 0010 — no new
-         *     schema. Returns one row per source observed in any of the last ``runs``
-         *     pipeline passes.
-         *
-         *     Empty response is valid — fresh installs with zero runs return
-         *     ``{"sources": [], "runs_considered": 0}``.
-         */
-        get: operations["source_health_api_runs_source_health_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start Search
-         * @description Start an async job search run. Returns a run_id to poll for status.
-         *
-         *     The run_id record is tagged with `user.id`; only the creating user
-         *     can later read its status.
-         *
-         *     Step-1 B12: enforces ``MAX_CONCURRENT_SEARCHES_PER_USER``. If the
-         *     caller already has that many runs with status ``pending``/``running``
-         *     queued, returns HTTP 429. Counting is per-user, so other users are
-         *     unaffected by one user's burst.
-         */
-        post: operations["start_search_api_search_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/search/{run_id}/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Search Status
-         * @description Poll the status of a running or completed search.
-         *
-         *     Existence-hiding: unknown run_id OR run owned by a different user
-         *     both return 404 with the same body. An attacker enumerating run_ids
-         *     cannot distinguish "does not exist" from "exists but not mine".
-         */
-        get: operations["search_status_api_search__run_id__status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/settings/channels": {
         parameters: {
             query?: never;
@@ -1736,23 +1544,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/sources": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Sources */
-        get: operations["sources_api_sources_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/status": {
         parameters: {
             query?: never;
@@ -1760,7 +1551,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Status */
+        /**
+         * Status
+         * @description How much is stored, and has this deployment been set up at all.
+         *
+         *     Slice 5 (#483) took the source counters and the last-run block off this
+         *     response: nothing fetches jobs any more, so there is no run to report.
+         */
         get: operations["status_api_status_get"];
         put?: never;
         post?: never;
@@ -1961,30 +1758,6 @@ export interface components {
         AccountDeleteRequest: {
             /** Current Password */
             current_password: string;
-        };
-        /** ActionRequest */
-        ActionRequest: {
-            /** Action */
-            action: string;
-            /**
-             * Notes
-             * @default
-             */
-            notes: string;
-        };
-        /** ActionResponse */
-        ActionResponse: {
-            /** Action */
-            action: string;
-            /** Job Id */
-            job_id: number;
-            /** Ok */
-            ok: boolean;
-        };
-        /** ActionsListResponse */
-        ActionsListResponse: {
-            /** Actions */
-            actions: components["schemas"]["ActionResponse"][];
         };
         /**
          * AddContactRequest
@@ -2313,8 +2086,6 @@ export interface components {
             /** Existing */
             existing: boolean;
             job: components["schemas"]["JobResponse"];
-            /** Scored */
-            scored: boolean;
             /** Status */
             status: string;
         };
@@ -2714,40 +2485,20 @@ export interface components {
             /** Version */
             version: string;
         };
-        /** JobListResponse */
-        JobListResponse: {
-            /** Filters Applied */
-            filters_applied: {
-                [key: string]: unknown;
-            };
-            /** Jobs */
-            jobs: components["schemas"]["JobResponse"][];
-            /** Total */
-            total: number;
-            /**
-             * Total Unfiltered
-             * @default 0
-             */
-            total_unfiltered: number;
-        };
-        /** JobResponse */
+        /**
+         * JobResponse
+         * @description The ad the user brought, exactly as it is stored.
+         *
+         *     Slice 5 (#483) took the score off this model. Job360 never judges fit
+         *     (product rule 4) — the user's own agent does, and records its verdict with
+         *     `save_fit`. Every field below is read straight off the `jobs` row; nothing
+         *     here is computed about the user.
+         */
         JobResponse: {
-            /** Action */
-            action?: string | null;
             /** Apply Url */
             apply_url: string;
-            /**
-             * Bucket
-             * @default
-             */
-            bucket: string;
             /** Company */
             company: string;
-            /**
-             * Credentials
-             * @default 0
-             */
-            credentials: number;
             /** Date Confidence */
             date_confidence?: string | null;
             /** Date Found */
@@ -2756,22 +2507,8 @@ export interface components {
             deadline?: string | null;
             /** Deadline Source */
             deadline_source?: string | null;
-            /** Dedup Group Ids */
-            dedup_group_ids?: number[] | null;
             /** Description */
             description?: string | null;
-            /**
-             * Dims Active
-             * @default false
-             */
-            dims_active: boolean;
-            /** Employment Type */
-            employment_type?: string | null;
-            /**
-             * Experience
-             * @default 0
-             */
-            experience: number;
             /**
              * Experience Level
              * @default
@@ -2781,8 +2518,6 @@ export interface components {
             first_seen_at?: string | null;
             /** Id */
             id: number;
-            /** Industry */
-            industry?: string | null;
             /**
              * Job Type
              * @default
@@ -2790,120 +2525,18 @@ export interface components {
             job_type: string;
             /** Last Seen At */
             last_seen_at?: string | null;
-            /** Llm Fit Score */
-            llm_fit_score?: number | null;
-            /** Llm Reason */
-            llm_reason?: string | null;
-            /** Llm Verdict */
-            llm_verdict?: string | null;
             /** Location */
             location: string;
-            /**
-             * Location Score
-             * @default 0
-             */
-            location_score: number;
-            /** Match Score */
-            match_score: number;
-            /**
-             * Matched Skills
-             * @default []
-             */
-            matched_skills: string[];
-            /**
-             * Missing Required
-             * @default []
-             */
-            missing_required: string[];
-            /** Nice To Have Skills */
-            nice_to_have_skills?: string[] | null;
-            /**
-             * Penalty
-             * @default 0
-             */
-            penalty: number;
             /** Posted At */
             posted_at?: string | null;
-            /**
-             * Recency
-             * @default 0
-             */
-            recency: number;
-            /** Required Skills */
-            required_skills?: string[] | null;
-            /**
-             * Role
-             * @default 0
-             */
-            role: number;
             /** Salary */
             salary: string | null;
-            /** Salary Currency Original */
-            salary_currency_original?: string | null;
-            /** Salary Max Gbp */
-            salary_max_gbp?: number | null;
-            /** Salary Min Gbp */
-            salary_min_gbp?: number | null;
-            /** Salary Period */
-            salary_period?: string | null;
-            /**
-             * Salary Score
-             * @default 0
-             */
-            salary_score: number;
-            /**
-             * Semantic
-             * @default 0
-             */
-            semantic: number;
-            /** Seniority */
-            seniority?: string | null;
-            /**
-             * Seniority Score
-             * @default 0
-             */
-            seniority_score: number;
-            /**
-             * Skill
-             * @default 0
-             */
-            skill: number;
             /** Source */
             source: string;
-            /** Staleness State */
-            staleness_state?: string | null;
             /** Title */
             title: string;
-            /** Title Canonical */
-            title_canonical?: string | null;
-            /**
-             * Transferable Skills
-             * @default []
-             */
-            transferable_skills: string[];
             /** Visa Flag */
             visa_flag: boolean;
-            /**
-             * Visa Score
-             * @default 0
-             */
-            visa_score: number;
-            /** Visa Sponsorship */
-            visa_sponsorship?: boolean | null;
-            /**
-             * Visa Status
-             * @default unknown
-             */
-            visa_status: string;
-            /**
-             * Workplace Score
-             * @default 0
-             */
-            workplace_score: number;
-            /** Workplace Type */
-            workplace_type?: string | null;
-            /** Years Experience Min */
-            years_experience_min?: number | null;
         };
         /**
          * JsonResumeResponse
@@ -3235,11 +2868,6 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
-             * Search Titles
-             * @default []
-             */
-            search_titles: string[];
-            /**
              * Skill Esco
              * @default {}
              */
@@ -3549,49 +3177,6 @@ export interface components {
              */
             status: string;
         };
-        /**
-         * RunEntry
-         * @description Single ``run_log`` row exposed over the API.
-         *
-         *     Maps every column from the baseline + migration-0010 schema.  Optional
-         *     fields may be NULL on rows inserted before the observability migration
-         *     ran; Pydantic coerces them to None rather than raising.
-         */
-        RunEntry: {
-            /** Id */
-            id: number;
-            /** New Jobs */
-            new_jobs?: number | null;
-            /** Per Source */
-            per_source?: string | null;
-            /** Per Source Duration */
-            per_source_duration?: string | null;
-            /** Per Source Errors */
-            per_source_errors?: string | null;
-            /** Run Uuid */
-            run_uuid?: string | null;
-            /** Sources Queried */
-            sources_queried?: number | null;
-            /** Timestamp */
-            timestamp: string;
-            /** Total Duration */
-            total_duration?: number | null;
-            /** Total Found */
-            total_found?: number | null;
-            /** User Id */
-            user_id?: string | null;
-        };
-        /** RunsListResponse */
-        RunsListResponse: {
-            /** Limit */
-            limit: number;
-            /** Offset */
-            offset: number;
-            /** Runs */
-            runs: components["schemas"]["RunEntry"][];
-            /** Total */
-            total: number;
-        };
         /** SaveArtifactRequest */
         SaveArtifactRequest: {
             /** Kind */
@@ -3645,71 +3230,6 @@ export interface components {
             /** Event Id */
             event_id: number;
             fit: components["schemas"]["ApplicationFitOut"];
-        };
-        /** SearchStartResponse */
-        SearchStartResponse: {
-            /** Run Id */
-            run_id: string;
-            /** Status */
-            status: string;
-        };
-        /** SearchStatusResponse */
-        SearchStatusResponse: {
-            /** Progress */
-            progress: string;
-            /** Result */
-            result?: {
-                [key: string]: unknown;
-            } | null;
-            /** Run Id */
-            run_id: string;
-            /** Status */
-            status: string;
-        };
-        /**
-         * SourceHealthEntry
-         * @description Per-source aggregate across the last N runs.
-         */
-        SourceHealthEntry: {
-            /** Avg Duration Seconds */
-            avg_duration_seconds?: number | null;
-            /** Health */
-            health: string;
-            /** Last Error */
-            last_error?: string | null;
-            /** Last Job Count */
-            last_job_count?: number | null;
-            /** Runs Errored */
-            runs_errored: number;
-            /** Runs Observed */
-            runs_observed: number;
-            /** Runs Zero Jobs */
-            runs_zero_jobs: number;
-            /** Source */
-            source: string;
-        };
-        /** SourceHealthResponse */
-        SourceHealthResponse: {
-            /** Runs Considered */
-            runs_considered: number;
-            /** Sources */
-            sources: components["schemas"]["SourceHealthEntry"][];
-        };
-        /** SourceInfo */
-        SourceInfo: {
-            /** Health */
-            health: {
-                [key: string]: unknown;
-            };
-            /** Name */
-            name: string;
-            /** Type */
-            type: string;
-        };
-        /** SourcesResponse */
-        SourcesResponse: {
-            /** Sources */
-            sources: components["schemas"]["SourceInfo"][];
         };
         /** StatsCvVersionGroupOut */
         StatsCvVersionGroupOut: {
@@ -3804,16 +3324,8 @@ export interface components {
         StatusResponse: {
             /** Jobs Total */
             jobs_total: number;
-            /** Last Run */
-            last_run: {
-                [key: string]: unknown;
-            } | null;
             /** Profile Exists */
             profile_exists: boolean;
-            /** Sources Active */
-            sources_active: number;
-            /** Sources Total */
-            sources_total: number;
         };
         /** TailorBundle */
         TailorBundle: {
@@ -4077,74 +3589,6 @@ export interface operations {
             };
         };
     };
-    list_actions_api_actions_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActionsListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    action_counts_api_actions_counts_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_applications_api_applications_get: {
         parameters: {
             query?: {
@@ -4206,6 +3650,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExportHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_job_api_applications_job__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                job_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5075,53 +4554,6 @@ export interface operations {
             };
         };
     };
-    list_jobs_api_jobs_get: {
-        parameters: {
-            query?: {
-                hours?: number | null;
-                min_score?: number | null;
-                source?: string | null;
-                bucket?: string | null;
-                action?: string | null;
-                /** @description SPOTLIGHT, not a wall (product rule #31). True keeps every job and lifts confirmed sponsors to the top; it does NOT hide the 58%% of the catalog whose visa position is simply unstated. Use visa_strict=true for the old hard-filter behaviour. */
-                visa_only?: boolean | null;
-                /** @description Opt-in hard filter: show ONLY confirmed sponsors. */
-                visa_strict?: boolean | null;
-                /** @description 'keyword' | 'hybrid' (Batch 2.7) */
-                mode?: string | null;
-                limit?: number;
-                offset?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JobListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     bring_job_api_jobs_bring_post: {
         parameters: {
             query?: never;
@@ -5159,39 +4591,6 @@ export interface operations {
             };
         };
     };
-    export_jobs_api_jobs_export_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     fetch_url_route_api_jobs_fetch_url_post: {
         parameters: {
             query?: never;
@@ -5216,152 +4615,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FetchUrlResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_job_api_jobs__job_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                job_id: number;
-            };
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["JobResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    set_action_api_jobs__job_id__action_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                job_id: number;
-            };
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ActionRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_action_api_jobs__job_id__action_delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                job_id: number;
-            };
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_job_duplicates_api_jobs__job_id__duplicates_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                job_id: number;
-            };
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
             /** @description Validation Error */
@@ -6513,148 +5766,6 @@ export interface operations {
             };
         };
     };
-    recent_runs_api_runs_recent_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-                offset?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RunsListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    source_health_api_runs_source_health_get: {
-        parameters: {
-            query?: {
-                /** @description How many recent runs to aggregate over. */
-                runs?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SourceHealthResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    start_search_api_search_post: {
-        parameters: {
-            query?: {
-                source?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SearchStartResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    search_status_api_search__run_id__status_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                run_id: string;
-            };
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SearchStatusResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_channels_api_settings_channels_get: {
         parameters: {
             query?: never;
@@ -6859,26 +5970,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    sources_api_sources_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SourcesResponse"];
                 };
             };
         };

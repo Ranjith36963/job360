@@ -1,10 +1,9 @@
 // ---------------------------------------------------------------------------
 // Job360 Frontend — TypeScript types
 //
-// Generated aliases: 28 names aliased from the backend OpenAPI schema
+// Generated aliases: names aliased from the backend OpenAPI schema
 // (TailoredDocOut / TailorBundle narrow doc_kind/status to literal unions).
-// Frontend-only: JobFilters, DuplicateJobsResponse, DuplicateJobSummary,
-//                ProfileVersionDiff, PreferencesRequest, SkillProvenance,
+// Frontend-only: ProfileVersionDiff, PreferencesRequest, SkillProvenance,
 //                SkillTiers, TailorDocKind
 // ---------------------------------------------------------------------------
 
@@ -14,16 +13,12 @@ type Schemas = components["schemas"];
 
 // ---- Generated aliases ----
 
-export type ActionRequest = Schemas["ActionRequest"];
-export type ActionResponse = Schemas["ActionResponse"];
 export type ApplicationTimelineResponse = Schemas["ApplicationTimelineResponse"];
 export type BringJobRequest = Schemas["BringJobRequest"];
 export type BringJobResponse = Schemas["BringJobResponse"];
 export type CreateReceiptRequest = Schemas["CreateReceiptRequest"];
 export type CVDetail = Schemas["CVDetail"];
 export type HealthResponse = Schemas["HealthResponse"];
-export type JobListResponse = Schemas["JobListResponse"];
-export type JobResponse = Schemas["JobResponse"];
 export type JsonResumeResponse = Schemas["JsonResumeResponse"];
 export type NotificationLedgerEntry = Schemas["NotificationLedgerEntry"];
 export type NotificationLedgerListResponse = Schemas["NotificationLedgerListResponse"];
@@ -38,11 +33,6 @@ export type Receipt = Schemas["Receipt"];
 export type ReceiptListResponse = Schemas["ReceiptListResponse"];
 export type ReceiptSummary = Schemas["ReceiptSummary"];
 export type ProfileVersionSummary = Schemas["ProfileVersionSummary"];
-export type RunEntry = Schemas["RunEntry"];
-export type SearchStartResponse = Schemas["SearchStartResponse"];
-export type SearchStatusResponse = Schemas["SearchStatusResponse"];
-export type SourceInfo = Schemas["SourceInfo"];
-export type StatusResponse = Schemas["StatusResponse"];
 export type TimelineEntry = Schemas["TimelineEntry"];
 
 // `doc_kind`/`status` are narrowed from `string` to literal unions — the
@@ -59,58 +49,7 @@ export type TailorBundle = Omit<Schemas["TailorBundle"], "documents"> & {
   documents: TailoredDocOut[];
 };
 
-// ---- Name bridge: frontend name differs from schema name ----
-
-// The backend schema is RunsListResponse (includes limit + offset pagination).
-// The old hand-written RecentRunsResponse only had { runs, total }.
-// Callers in api.ts and dashboard only use .runs — the extra fields are benign.
-export type RecentRunsResponse = Schemas["RunsListResponse"];
-
 // ---- Frontend-only types (NOT in the backend schema) ----
-
-// T4: 10 new filter fields added
-export interface JobFilters {
-  hours?: number;
-  min_score?: number;
-  source?: string;
-  bucket?: string;
-  action?: string;
-  visa_only?: boolean;
-  visa_sponsorship?: boolean;
-  limit?: number;
-  offset?: number;
-  mode?: string;
-  // Step-2 T4 — new filter fields
-  seniority?: string;
-  employment_type?: string;
-  workplace_type?: string;
-  salary_min?: number;
-  salary_max?: number;
-  required_skills?: string[];
-  title_canonical?: string;
-  industry?: string;
-  posted_after?: string;
-  posted_before?: string;
-  staleness_state?: string;
-  sort_by?: "score" | "date" | "salary" | "staleness";
-}
-
-// ---- Step-3: Duplicate jobs (C-05) — not in backend OpenAPI schema ----
-
-export interface DuplicateJobSummary {
-  id: number;
-  title: string;
-  company: string;
-  source: string;
-  match_score: number;
-  apply_url: string;
-}
-
-export interface DuplicateJobsResponse {
-  job_id: number;
-  duplicates: DuplicateJobSummary[];
-  total: number;
-}
 
 // ---- Step-3: Profile version diff (C-06) — not in backend OpenAPI schema ----
 

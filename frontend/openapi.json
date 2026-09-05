@@ -14,63 +14,6 @@
         "title": "AccountDeleteRequest",
         "type": "object"
       },
-      "ActionRequest": {
-        "properties": {
-          "action": {
-            "title": "Action",
-            "type": "string"
-          },
-          "notes": {
-            "default": "",
-            "title": "Notes",
-            "type": "string"
-          }
-        },
-        "required": [
-          "action"
-        ],
-        "title": "ActionRequest",
-        "type": "object"
-      },
-      "ActionResponse": {
-        "properties": {
-          "action": {
-            "title": "Action",
-            "type": "string"
-          },
-          "job_id": {
-            "title": "Job Id",
-            "type": "integer"
-          },
-          "ok": {
-            "title": "Ok",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "ok",
-          "job_id",
-          "action"
-        ],
-        "title": "ActionResponse",
-        "type": "object"
-      },
-      "ActionsListResponse": {
-        "properties": {
-          "actions": {
-            "items": {
-              "$ref": "#/components/schemas/ActionResponse"
-            },
-            "title": "Actions",
-            "type": "array"
-          }
-        },
-        "required": [
-          "actions"
-        ],
-        "title": "ActionsListResponse",
-        "type": "object"
-      },
       "AddContactRequest": {
         "additionalProperties": false,
         "description": "Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md \u00a7Tool contracts).\n\nNo length/shape constraints declared here (unlike ``SaveArtifactRequest``'s\n``label``): every cap is a live ``settings`` value a test can monkeypatch,\nso ``contacts.add_contact`` checks them at call time \u2014 the same pattern\n``SaveFitRequest.clamp_reasoning``/``RecordEventRequest.clamp_detail`` use.\n``added_by`` is deliberately ABSENT \u2014 ``extra=\"forbid\"`` rejects it (S2).",
@@ -932,10 +875,6 @@
           "job": {
             "$ref": "#/components/schemas/JobResponse"
           },
-          "scored": {
-            "title": "Scored",
-            "type": "boolean"
-          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -944,7 +883,6 @@
         "required": [
           "job",
           "existing",
-          "scored",
           "application_id",
           "status"
         ],
@@ -1783,68 +1721,16 @@
         "title": "HealthResponse",
         "type": "object"
       },
-      "JobListResponse": {
-        "properties": {
-          "filters_applied": {
-            "additionalProperties": true,
-            "title": "Filters Applied",
-            "type": "object"
-          },
-          "jobs": {
-            "items": {
-              "$ref": "#/components/schemas/JobResponse"
-            },
-            "title": "Jobs",
-            "type": "array"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          },
-          "total_unfiltered": {
-            "default": 0,
-            "title": "Total Unfiltered",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "jobs",
-          "total",
-          "filters_applied"
-        ],
-        "title": "JobListResponse",
-        "type": "object"
-      },
       "JobResponse": {
+        "description": "The ad the user brought, exactly as it is stored.\n\nSlice 5 (#483) took the score off this model. Job360 never judges fit\n(product rule 4) \u2014 the user's own agent does, and records its verdict with\n`save_fit`. Every field below is read straight off the `jobs` row; nothing\nhere is computed about the user.",
         "properties": {
-          "action": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Action"
-          },
           "apply_url": {
             "title": "Apply Url",
-            "type": "string"
-          },
-          "bucket": {
-            "default": "",
-            "title": "Bucket",
             "type": "string"
           },
           "company": {
             "title": "Company",
             "type": "string"
-          },
-          "credentials": {
-            "default": 0,
-            "title": "Credentials",
-            "type": "integer"
           },
           "date_confidence": {
             "anyOf": [
@@ -1883,20 +1769,6 @@
             ],
             "title": "Deadline Source"
           },
-          "dedup_group_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dedup Group Ids"
-          },
           "description": {
             "anyOf": [
               {
@@ -1907,27 +1779,6 @@
               }
             ],
             "title": "Description"
-          },
-          "dims_active": {
-            "default": false,
-            "title": "Dims Active",
-            "type": "boolean"
-          },
-          "employment_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Employment Type"
-          },
-          "experience": {
-            "default": 0,
-            "title": "Experience",
-            "type": "integer"
           },
           "experience_level": {
             "default": "",
@@ -1949,17 +1800,6 @@
             "title": "Id",
             "type": "integer"
           },
-          "industry": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Industry"
-          },
           "job_type": {
             "default": "",
             "title": "Job Type",
@@ -1976,86 +1816,9 @@
             ],
             "title": "Last Seen At"
           },
-          "llm_fit_score": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Fit Score"
-          },
-          "llm_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Reason"
-          },
-          "llm_verdict": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Verdict"
-          },
           "location": {
             "title": "Location",
             "type": "string"
-          },
-          "location_score": {
-            "default": 0,
-            "title": "Location Score",
-            "type": "integer"
-          },
-          "match_score": {
-            "title": "Match Score",
-            "type": "integer"
-          },
-          "matched_skills": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Matched Skills",
-            "type": "array"
-          },
-          "missing_required": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Missing Required",
-            "type": "array"
-          },
-          "nice_to_have_skills": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Nice To Have Skills"
-          },
-          "penalty": {
-            "default": 0,
-            "title": "Penalty",
-            "type": "integer"
           },
           "posted_at": {
             "anyOf": [
@@ -2068,30 +1831,6 @@
             ],
             "title": "Posted At"
           },
-          "recency": {
-            "default": 0,
-            "title": "Recency",
-            "type": "integer"
-          },
-          "required_skills": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Required Skills"
-          },
-          "role": {
-            "default": 0,
-            "title": "Role",
-            "type": "integer"
-          },
           "salary": {
             "anyOf": [
               {
@@ -2103,170 +1842,17 @@
             ],
             "title": "Salary"
           },
-          "salary_currency_original": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Salary Currency Original"
-          },
-          "salary_max_gbp": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Salary Max Gbp"
-          },
-          "salary_min_gbp": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Salary Min Gbp"
-          },
-          "salary_period": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Salary Period"
-          },
-          "salary_score": {
-            "default": 0,
-            "title": "Salary Score",
-            "type": "integer"
-          },
-          "semantic": {
-            "default": 0,
-            "title": "Semantic",
-            "type": "integer"
-          },
-          "seniority": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Seniority"
-          },
-          "seniority_score": {
-            "default": 0,
-            "title": "Seniority Score",
-            "type": "integer"
-          },
-          "skill": {
-            "default": 0,
-            "title": "Skill",
-            "type": "integer"
-          },
           "source": {
             "title": "Source",
             "type": "string"
-          },
-          "staleness_state": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Staleness State"
           },
           "title": {
             "title": "Title",
             "type": "string"
           },
-          "title_canonical": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title Canonical"
-          },
-          "transferable_skills": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Transferable Skills",
-            "type": "array"
-          },
           "visa_flag": {
             "title": "Visa Flag",
             "type": "boolean"
-          },
-          "visa_score": {
-            "default": 0,
-            "title": "Visa Score",
-            "type": "integer"
-          },
-          "visa_sponsorship": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Visa Sponsorship"
-          },
-          "visa_status": {
-            "default": "unknown",
-            "title": "Visa Status",
-            "type": "string"
-          },
-          "workplace_score": {
-            "default": 0,
-            "title": "Workplace Score",
-            "type": "integer"
-          },
-          "workplace_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workplace Type"
-          },
-          "years_experience_min": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Years Experience Min"
           }
         },
         "required": [
@@ -2275,7 +1861,6 @@
           "company",
           "location",
           "salary",
-          "match_score",
           "source",
           "date_found",
           "apply_url",
@@ -3034,14 +2619,6 @@
             "title": "Preferences",
             "type": "object"
           },
-          "search_titles": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Search Titles",
-            "type": "array"
-          },
           "skill_esco": {
             "additionalProperties": {
               "type": "string"
@@ -3765,155 +3342,6 @@
         "title": "RegisterResponse",
         "type": "object"
       },
-      "RunEntry": {
-        "description": "Single ``run_log`` row exposed over the API.\n\nMaps every column from the baseline + migration-0010 schema.  Optional\nfields may be NULL on rows inserted before the observability migration\nran; Pydantic coerces them to None rather than raising.",
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
-          "new_jobs": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "New Jobs"
-          },
-          "per_source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Per Source"
-          },
-          "per_source_duration": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Per Source Duration"
-          },
-          "per_source_errors": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Per Source Errors"
-          },
-          "run_uuid": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Run Uuid"
-          },
-          "sources_queried": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sources Queried"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "total_duration": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Duration"
-          },
-          "total_found": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Found"
-          },
-          "user_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "User Id"
-          }
-        },
-        "required": [
-          "id",
-          "timestamp"
-        ],
-        "title": "RunEntry",
-        "type": "object"
-      },
-      "RunsListResponse": {
-        "properties": {
-          "limit": {
-            "title": "Limit",
-            "type": "integer"
-          },
-          "offset": {
-            "title": "Offset",
-            "type": "integer"
-          },
-          "runs": {
-            "items": {
-              "$ref": "#/components/schemas/RunEntry"
-            },
-            "title": "Runs",
-            "type": "array"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "runs",
-          "total",
-          "limit",
-          "offset"
-        ],
-        "title": "RunsListResponse",
-        "type": "object"
-      },
       "SaveArtifactRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4096,187 +3524,6 @@
           "event_id"
         ],
         "title": "SaveFitResponse",
-        "type": "object"
-      },
-      "SearchStartResponse": {
-        "properties": {
-          "run_id": {
-            "title": "Run Id",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run_id",
-          "status"
-        ],
-        "title": "SearchStartResponse",
-        "type": "object"
-      },
-      "SearchStatusResponse": {
-        "properties": {
-          "progress": {
-            "title": "Progress",
-            "type": "string"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Result"
-          },
-          "run_id": {
-            "title": "Run Id",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run_id",
-          "status",
-          "progress"
-        ],
-        "title": "SearchStatusResponse",
-        "type": "object"
-      },
-      "SourceHealthEntry": {
-        "description": "Per-source aggregate across the last N runs.",
-        "properties": {
-          "avg_duration_seconds": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Avg Duration Seconds"
-          },
-          "health": {
-            "title": "Health",
-            "type": "string"
-          },
-          "last_error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Error"
-          },
-          "last_job_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Job Count"
-          },
-          "runs_errored": {
-            "title": "Runs Errored",
-            "type": "integer"
-          },
-          "runs_observed": {
-            "title": "Runs Observed",
-            "type": "integer"
-          },
-          "runs_zero_jobs": {
-            "title": "Runs Zero Jobs",
-            "type": "integer"
-          },
-          "source": {
-            "title": "Source",
-            "type": "string"
-          }
-        },
-        "required": [
-          "source",
-          "runs_observed",
-          "runs_zero_jobs",
-          "runs_errored",
-          "health"
-        ],
-        "title": "SourceHealthEntry",
-        "type": "object"
-      },
-      "SourceHealthResponse": {
-        "properties": {
-          "runs_considered": {
-            "title": "Runs Considered",
-            "type": "integer"
-          },
-          "sources": {
-            "items": {
-              "$ref": "#/components/schemas/SourceHealthEntry"
-            },
-            "title": "Sources",
-            "type": "array"
-          }
-        },
-        "required": [
-          "sources",
-          "runs_considered"
-        ],
-        "title": "SourceHealthResponse",
-        "type": "object"
-      },
-      "SourceInfo": {
-        "properties": {
-          "health": {
-            "additionalProperties": true,
-            "title": "Health",
-            "type": "object"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "type": {
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "type",
-          "health"
-        ],
-        "title": "SourceInfo",
-        "type": "object"
-      },
-      "SourcesResponse": {
-        "properties": {
-          "sources": {
-            "items": {
-              "$ref": "#/components/schemas/SourceInfo"
-            },
-            "title": "Sources",
-            "type": "array"
-          }
-        },
-        "required": [
-          "sources"
-        ],
-        "title": "SourcesResponse",
         "type": "object"
       },
       "StatsCvVersionGroupOut": {
@@ -4618,36 +3865,13 @@
             "title": "Jobs Total",
             "type": "integer"
           },
-          "last_run": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Run"
-          },
           "profile_exists": {
             "title": "Profile Exists",
             "type": "boolean"
-          },
-          "sources_active": {
-            "title": "Sources Active",
-            "type": "integer"
-          },
-          "sources_total": {
-            "title": "Sources Total",
-            "type": "integer"
           }
         },
         "required": [
           "jobs_total",
-          "last_run",
-          "sources_active",
-          "sources_total",
           "profile_exists"
         ],
         "title": "StatusResponse",
@@ -5264,140 +4488,6 @@
         ]
       }
     },
-    "/api/actions": {
-      "get": {
-        "operationId": "list_actions_api_actions_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ActionsListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Actions",
-        "tags": [
-          "actions"
-        ]
-      }
-    },
-    "/api/actions/counts": {
-      "get": {
-        "operationId": "action_counts_api_actions_counts_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "integer"
-                  },
-                  "title": "Response Action Counts Api Actions Counts Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Action Counts",
-        "tags": [
-          "actions"
-        ]
-      }
-    },
     "/api/applications": {
       "get": {
         "operationId": "list_applications_api_applications_get",
@@ -5604,6 +4694,81 @@
           }
         },
         "summary": "Export History",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/job/{job_id}": {
+      "get": {
+        "description": "Read back an ad THIS user brought, by its `job_id`.\n\nSlice 5 (#483) deleted the public `GET /api/jobs/{id}`. That route served\nthe shared catalog to anyone with an id, which stopped being defensible\nthe moment `jobs` held nothing but ads individual people pasted (S1). This\nis its per-user replacement: the row is returned only when the caller has\nan application for it, so an id they never brought reads as 404, never as\nsomebody else's paste.\n\nDeclared BEFORE `/applications/{application_id}` for the same reason\n`/applications/export` is \u2014 a literal segment must not be swallowed by the\ndynamic one.",
+        "operationId": "get_job_api_applications_job__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job",
         "tags": [
           "applications"
         ]
@@ -7149,232 +6314,9 @@
         ]
       }
     },
-    "/api/jobs": {
-      "get": {
-        "operationId": "list_jobs_api_jobs_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "hours",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Hours"
-            }
-          },
-          {
-            "in": "query",
-            "name": "min_score",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Min Score"
-            }
-          },
-          {
-            "in": "query",
-            "name": "source",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Source"
-            }
-          },
-          {
-            "in": "query",
-            "name": "bucket",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Bucket"
-            }
-          },
-          {
-            "in": "query",
-            "name": "action",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Action"
-            }
-          },
-          {
-            "description": "SPOTLIGHT, not a wall (product rule #31). True keeps every job and lifts confirmed sponsors to the top; it does NOT hide the 58%% of the catalog whose visa position is simply unstated. Use visa_strict=true for the old hard-filter behaviour.",
-            "in": "query",
-            "name": "visa_only",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "SPOTLIGHT, not a wall (product rule #31). True keeps every job and lifts confirmed sponsors to the top; it does NOT hide the 58%% of the catalog whose visa position is simply unstated. Use visa_strict=true for the old hard-filter behaviour.",
-              "title": "Visa Only"
-            }
-          },
-          {
-            "description": "Opt-in hard filter: show ONLY confirmed sponsors.",
-            "in": "query",
-            "name": "visa_strict",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Opt-in hard filter: show ONLY confirmed sponsors.",
-              "title": "Visa Strict"
-            }
-          },
-          {
-            "description": "'keyword' | 'hybrid' (Batch 2.7)",
-            "in": "query",
-            "name": "mode",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "'keyword' | 'hybrid' (Batch 2.7)",
-              "title": "Mode"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Jobs",
-        "tags": [
-          "jobs"
-        ]
-      }
-    },
     "/api/jobs/bring": {
       "post": {
-        "description": "Store the pasted ad, score it against the caller's profile, put it in\ntheir feed. Returns the job exactly as GET /jobs/{id} would, so the\nfrontend can route straight to the detail page.",
+        "description": "Store the pasted ad and birth the Application for it.\n\nNothing is scored: the caller (the user's agent) already decided this ad\nis worth keeping, and product rule 4 forbids us judging fit. Returns the\nstored job plus the `application_id` the caller should work against from\nhere on.",
         "operationId": "bring_job_api_jobs_bring_post",
         "parameters": [
           {
@@ -7445,70 +6387,6 @@
         "summary": "Bring Job",
         "tags": [
           "bring"
-        ]
-      }
-    },
-    "/api/jobs/export": {
-      "get": {
-        "description": "Download the caller's own recent matches as CSV.",
-        "operationId": "export_jobs_api_jobs_export_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Export Jobs",
-        "tags": [
-          "jobs"
         ]
       }
     },
@@ -7585,313 +6463,6 @@
         "summary": "Fetch Url Route",
         "tags": [
           "bring"
-        ]
-      }
-    },
-    "/api/jobs/{job_id}": {
-      "get": {
-        "operationId": "get_job_api_jobs__job_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Job",
-        "tags": [
-          "jobs"
-        ]
-      }
-    },
-    "/api/jobs/{job_id}/action": {
-      "delete": {
-        "operationId": "delete_action_api_jobs__job_id__action_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ActionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Action",
-        "tags": [
-          "actions"
-        ]
-      },
-      "post": {
-        "operationId": "set_action_api_jobs__job_id__action_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ActionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ActionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Set Action",
-        "tags": [
-          "actions"
-        ]
-      }
-    },
-    "/api/jobs/{job_id}/duplicates": {
-      "get": {
-        "description": "Return alternate listings for the same job across sources (Option A: query-time grouping).\n\nUses normalized_key() grouping: jobs with same normalized company + normalized title\nare considered duplicates. Public endpoint \u2014 same auth policy as GET /jobs/{id}.",
-        "operationId": "get_job_duplicates_api_jobs__job_id__duplicates_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Job Duplicates Api Jobs  Job Id  Duplicates Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Job Duplicates",
-        "tags": [
-          "jobs"
         ]
       }
     },
@@ -8755,7 +7326,7 @@
     },
     "/api/pipeline/{job_id}": {
       "post": {
-        "description": "Add a job to the caller's application pipeline (stage: applied).\n\nR-2: ``get_job_by_id`` does not filter on ``staleness_state`` (only\n``get_job_by_id_with_enrichment`` carries the C-1 fix). Refuse to\ncreate a pipeline row for a confirmed-expired listing \u2014 return 410\nGone so the frontend can drop the stale card from the UI.",
+        "description": "Add a job to the caller's application pipeline (stage: applied).\n\nR-2: ``get_job_by_id`` does not filter on ``staleness_state``, so this\nroute checks it by hand \u2014 refuse to create a pipeline row for a\nconfirmed-expired listing and return 410 Gone, so the frontend can drop\nthe stale card from the UI.\n\nThis is the LAST remaining read of ``staleness_state`` after slice 5\n(#483) deleted the ghost detector that wrote it, and it is why\n``bring.py`` still calls ``update_last_seen``: re-bringing a legacy\nscraped row that a long-dead sweep marked stale must make it usable\nagain.",
         "operationId": "create_application_api_pipeline__job_id__post",
         "parameters": [
           {
@@ -10254,332 +8825,6 @@
         ]
       }
     },
-    "/api/runs/recent": {
-      "get": {
-        "description": "Return paginated pipeline run history from run_log, newest first.\n\nStep-3 B-15.  Requires authentication (rule #12) \u2014 the run log is\noperational metadata, not a public catalog surface.",
-        "operationId": "recent_runs_api_runs_recent_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunsListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Recent Runs",
-        "tags": [
-          "runs"
-        ]
-      }
-    },
-    "/api/runs/source-health": {
-      "get": {
-        "description": "Aggregate per-source job-count + error stats across recent runs.\n\nReads existing run_log columns (per_source, per_source_errors,\nper_source_duration) populated by migrations 0000 + 0010 \u2014 no new\nschema. Returns one row per source observed in any of the last ``runs``\npipeline passes.\n\nEmpty response is valid \u2014 fresh installs with zero runs return\n``{\"sources\": [], \"runs_considered\": 0}``.",
-        "operationId": "source_health_api_runs_source_health_get",
-        "parameters": [
-          {
-            "description": "How many recent runs to aggregate over.",
-            "in": "query",
-            "name": "runs",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "description": "How many recent runs to aggregate over.",
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Runs",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SourceHealthResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Source Health",
-        "tags": [
-          "runs"
-        ]
-      }
-    },
-    "/api/search": {
-      "post": {
-        "description": "Start an async job search run. Returns a run_id to poll for status.\n\nThe run_id record is tagged with `user.id`; only the creating user\ncan later read its status.\n\nStep-1 B12: enforces ``MAX_CONCURRENT_SEARCHES_PER_USER``. If the\ncaller already has that many runs with status ``pending``/``running``\nqueued, returns HTTP 429. Counting is per-user, so other users are\nunaffected by one user's burst.",
-        "operationId": "start_search_api_search_post",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "source",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Source"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SearchStartResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Start Search",
-        "tags": [
-          "search"
-        ]
-      }
-    },
-    "/api/search/{run_id}/status": {
-      "get": {
-        "description": "Poll the status of a running or completed search.\n\nExistence-hiding: unknown run_id OR run owned by a different user\nboth return 404 with the same body. An attacker enumerating run_ids\ncannot distinguish \"does not exist\" from \"exists but not mine\".",
-        "operationId": "search_status_api_search__run_id__status_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "run_id",
-            "required": true,
-            "schema": {
-              "title": "Run Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "job360_session",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Job360 Session"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SearchStatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Search Status",
-        "tags": [
-          "search"
-        ]
-      }
-    },
     "/api/settings/channels": {
       "get": {
         "operationId": "list_channels_api_settings_channels_get",
@@ -11012,29 +9257,9 @@
         ]
       }
     },
-    "/api/sources": {
-      "get": {
-        "operationId": "sources_api_sources_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SourcesResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Sources",
-        "tags": [
-          "health"
-        ]
-      }
-    },
     "/api/status": {
       "get": {
+        "description": "How much is stored, and has this deployment been set up at all.\n\nSlice 5 (#483) took the source counters and the last-run block off this\nresponse: nothing fetches jobs any more, so there is no run to report.",
         "operationId": "status_api_status_get",
         "responses": {
           "200": {

@@ -1,39 +1,26 @@
-"""Tests for CV-derived seniority inference (services/profile/seniority.py)
-and its wiring into scoring_dimensions.resolve_experience_level.
+"""Tests for CV-derived seniority inference (services/profile/seniority.py).
 
-Covers the product design rule #29 guarantee explicitly: with BOTH the
-user-typed and the CV-inferred experience level empty, seniority_score must
-return the exact same neutral constant it always has — an inference module
-existing must never change behaviour for a profile it has nothing to say
-about.
+Covers a manager-review regression (2026-08-07): the first cut of this module
+walked positions most-recent-first and returned the first title with a tier
+word, which let a short recent internship outrank years of sustained senior
+work. The fixtures below (anonymised from two real production profiles that
+both wrongly inferred "intern") pin the fix.
 
-Also covers a manager-review regression (2026-08-07): the first cut of this
-module walked positions most-recent-first and returned the first title with
-a tier word, which let a short recent internship outrank years of sustained
-senior work — actively harmful given seniority_score's negative penalty
-tail. The fixtures below (anonymised from two real production profiles that
-both wrongly inferred "intern") pin the fix: a short recent internship must
-not outrank years of sustained senior work.
+Slice 5 (#483) dropped the `resolve_experience_level` / `seniority_score`
+half of this file: the job scorer they belonged to is deleted. What the
+module produces is now profile DATA — a fact read off the CV that the user's
+own agent reads — so the tests that survive are the ones about the inference
+itself.
 """
 from __future__ import annotations
 
 import datetime
 
-from src.core.settings import SENIORITY_WEIGHT
-from src.services.job_enrichment_schema import JobCategory, JobEnrichment, SeniorityLevel
-from src.services.profile.models import UserPreferences
 from src.services.profile.seniority import infer_experience_level
-from src.services.scoring_dimensions import resolve_experience_level, seniority_score
 
 # Pinned reference "today" so any fixture using an ongoing ("Present") role
 # is deterministic regardless of when the suite actually runs.
 _TODAY = datetime.date(2026, 1, 1)
-
-
-def _enrichment(**overrides) -> JobEnrichment:
-    base = dict(title_canonical="X", category=JobCategory.SOFTWARE_ENGINEERING)
-    base.update(overrides)
-    return JobEnrichment(**base)
 
 
 def _position(title: str, dates: str, **overrides) -> dict:
@@ -173,45 +160,3 @@ def test_malformed_position_entries_do_not_raise():
     # Not a dict, missing keys entirely, wrong types — none of this may crash.
     garbage = ["not-a-dict", {}, {"title": None, "dates": None}, 42, None]
     assert infer_experience_level(garbage) == ""
-
-
-# ---------------------------------------------------------------------------
-# resolve_experience_level — typed vs inferred precedence
-# ---------------------------------------------------------------------------
-
-
-def test_typed_value_always_beats_inferred():
-    prefs = UserPreferences(experience_level="mid", experience_level_inferred="senior")
-    assert resolve_experience_level(prefs) == "mid"
-
-
-def test_inferred_used_only_when_typed_is_empty():
-    prefs = UserPreferences(experience_level="", experience_level_inferred="senior")
-    assert resolve_experience_level(prefs) == "senior"
-
-
-def test_resolve_handles_none_profile():
-    assert resolve_experience_level(None) == ""
-
-
-# ---------------------------------------------------------------------------
-# THE RULE #29 PIN — both empty -> seniority_score is byte-identical to today
-# ---------------------------------------------------------------------------
-
-
-def test_both_empty_seniority_score_is_unchanged_neutral_constant():
-    """The guarantee this whole feature is not allowed to break.
-
-    With neither a typed nor an inferred experience level, resolving must
-    yield "" — the exact same input seniority_score has always accepted for
-    "user said nothing" — and the score must be the documented neutral
-    half-weight, identical to calling seniority_score(e, "") directly (the
-    behaviour before this module existed).
-    """
-    prefs = UserPreferences()  # both experience_level and _inferred are ""
-    resolved = resolve_experience_level(prefs)
-    assert resolved == ""
-
-    e = _enrichment(seniority=SeniorityLevel.SENIOR)
-    assert seniority_score(e, resolved) == SENIORITY_WEIGHT // 2
-    assert seniority_score(e, resolved) == seniority_score(e, "")

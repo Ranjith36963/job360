@@ -1,0 +1,14 @@
+# seniority_noise.txt — one `noise<TAB><phrase>` pair per line.
+# Compound phrases that CONTAIN a tier word but mean something else:
+# "junior school" is a school type, "head of year" a pastoral post, "lead
+# generation" a marketing function. seniority.py strips these from a title
+# BEFORE any tier match runs, so they can feed neither the tier they
+# resemble nor any other. Whitespace inside a phrase matches any run of
+# whitespace. A new trap phrase is a line here, never a code change
+# (CLAUDE.md rule #28). Lines starting with # and blank lines are ignored.
+noise	junior school
+noise	junior schools
+noise	head of year
+noise	head of house
+noise	head of sixth form
+noise	lead generation

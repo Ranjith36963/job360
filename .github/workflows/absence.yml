@@ -1,30 +1,22 @@
-name: Absence check (did anything STOP?)
+name: Watchdog (did the WATCHERS stop?)
 
-# ISSUE #142 — the detector class this repo had ZERO of.
+# ISSUE #144 — one level up from "did the product stop?": this asks "did the
+# harness itself stop watching?". A workflow that stops running looks
+# identical to one that passes — no red X, no email — and GitHub silently
+# auto-disables schedules after ~60 days of repo inactivity. So the entire
+# monitoring layer can switch itself off with every dashboard still green.
 #
-# Every other workflow is a PRESENCE detector: it fires when something breaks —
-# an error, a failed test, a non-2xx probe. None can see a process that simply
-# STOPPED. That is not theoretical; it is the failure that hurt most:
+# Free: read-only GitHub API, no LLM. Needs no DB secret, so it keeps working
+# even if PROD_DATABASE_URL is missing or rotated.
 #
-#   Measured 2026-07-27: nothing fetched jobs on a timer, so the shared catalog
-#   drained via the 30-day purge. run_log held 11 rows in 25 days; most users
-#   saw an empty feed. Throughout, EVERY instrument stayed green — 200s, no
-#   errors, uptime fine. Silence was the only signal, and nothing was listening.
-#
-# Free: read-only SQL, no LLM. Runs at 08:00 UTC, four hours after the 04:00
-# catalog cron, so "did last night's refresh actually happen?" is answerable.
-
-# PAUSED 2026-09-03 — sourcing era. This detector watches the search feed /
-# catalog / scorer, which the product no longer has (docs/product/VISION.md,
-# roadmap slice 5 deletes the code). Schedule removed; workflow_dispatch kept
-# so it can still be fired by hand until the code it watches is gone.
+# The sourcing-specific absence check that used to live in this file (did
+# anything stop FETCHING jobs?) was deleted 2026-09-05 along with the product
+# it watched (slice 5, #483). This job is unrelated to that product — it
+# watches the harness's own workflows — so it survives.
 on:
-  workflow_dispatch:
-    inputs:
-      drill:
-        description: "FIRE DRILL — force the check red to prove the escalation path still works end to end"
-        type: boolean
-        default: false
+  schedule:
+    - cron: "30 7 * * *" # 07:30 UTC daily — a watchdog with no schedule is the very silence it exists to catch
+  workflow_dispatch: {} # the drill entrance — every loop must be fireable on purpose
 
 permissions:
   contents: read
@@ -41,173 +33,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  absence:
-    name: Did anything stop?
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-
-      - name: Install psycopg
-        run: python -m pip install "psycopg[binary]>=3.2"
-
-      - name: Check whether the DSN secret exists
-        id: dsn
-        run: echo "have=${{ secrets.PROD_DATABASE_URL != '' }}" >> "$GITHUB_OUTPUT"
-
-      - name: Say so loudly if it cannot run
-        if: steps.dsn.outputs.have != 'true'
-        run: |
-          echo "::error::PROD_DATABASE_URL is not set — the absence check cannot run."
-          echo "A silent skip here would recreate the exact failure this workflow exists to catch."
-          exit 1
-
-      - name: Run the absence check
-        id: check
-        env:
-          PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
-          DRILL: ${{ inputs.drill }}
-        run: |
-          # FIRE DRILL: an alarm nobody has ever heard ring is not known to work.
-          # The canary below proves the DETECTOR can go red; this proves the whole
-          # ESCALATION PATH downstream of it — issue opened, triage woken, human
-          # notified — which otherwise only ever gets exercised during a real
-          # outage, i.e. the worst possible moment to discover it is broken.
-          if [ "$DRILL" = "true" ]; then
-            echo "::warning::FIRE DRILL — forcing the absence check red on purpose. Nothing is actually wrong with production."
-            export ABSENCE_MIN_JOBS=999999999
-          fi
-          set +e
-          python scripts/absence_check.py > absence.md 2>&1
-          code=$?
-          set -e
-          cat absence.md
-          cat absence.md >> "$GITHUB_STEP_SUMMARY"
-          echo "stopped=$code" >> "$GITHUB_OUTPUT"
-          # exit 2 = the checker itself broke — fail LOUD
-          [ "$code" -le 1 ] || exit "$code"
-
-      # ── CANARY (issue #143) ────────────────────────────────────────────────
-      # A detector nobody has seen fail is not known to work — "green" might
-      # just mean blind. This re-runs the SAME script with an impossible
-      # threshold and fails the job if it does NOT go red. It proves, every
-      # single day, that a green result above was a real observation.
-      - name: Canary — prove the detector can still go red
-        id: canary
-        env:
-          PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
-          ABSENCE_MIN_JOBS: "999999999"
-        run: |
-          set +e
-          python scripts/absence_check.py > canary.md 2>&1
-          code=$?
-          set -e
-          if [ "$code" -ne 1 ]; then
-            echo "::error::CANARY FAILED — the absence check did NOT go red against an impossible threshold (exit $code). The detector is blind; today's green result means nothing."
-            cat canary.md
-            exit 1
-          fi
-          echo "canary ok — the detector still fails when it should" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Open, update or close the tracking issue
-        id: raise
-        if: always() && steps.check.outputs.stopped != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CANARY_OUTCOME: ${{ steps.canary.outcome }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          if [ "${{ inputs.drill }}" = "true" ]; then
-            # A drill gets its OWN title so it can never be mistaken for a real
-            # outage, and can never suppress one by colliding with its issue.
-            title="DRILL: escalation path test — not a real outage"
-          else
-            title="ABSENCE: something in the pipeline has stopped"
-          fi
-          num=$(gh issue list --state open --json number,title \
-                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
-          if [ "${{ steps.check.outputs.stopped }}" = "1" ]; then
-            {
-              if [ "${{ inputs.drill }}" = "true" ]; then
-                echo "> **This is a FIRE DRILL. Production is fine.**"
-                echo ">"
-                echo "> The absence check was forced red on purpose to prove the escalation"
-                echo "> path still works: detector -> issue -> triage -> human. Close this"
-                echo "> issue when the chain has been observed."
-                echo
-              fi
-              cat absence.md
-              echo
-              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            } > body.md
-            if [ -z "$num" ]; then
-              new=$(gh issue create --title "$title" --body-file body.md --label harness)
-              # Hand off to the triage loop EXPLICITLY. An issue opened with the
-              # automatic GITHUB_TOKEN raises no `issues: opened` run — GitHub
-              # blocks that to stop workflows recursing — so relying on the event
-              # would leave every alarm undiagnosed. `workflow_dispatch` is the
-              # documented way back in. A failure here must not sink the alarm
-              # itself: a raised-but-undiagnosed issue still reaches a human,
-              # which is the whole point.
-              n="${new##*/}"
-              echo "raised=$n" >> "$GITHUB_OUTPUT"
-              if gh workflow run triage.yml -f issue="$n"; then
-                echo "woken=yes" >> "$GITHUB_OUTPUT"
-              else
-                # Triage will not run, so it cannot send the alert either.
-                # Record that so the fallback step emails the owner directly:
-                # a broken handoff must never mean a silent alarm, which is
-                # the one outcome this entire chain exists to prevent.
-                echo "woken=no" >> "$GITHUB_OUTPUT"
-                echo "::warning::issue #$n was raised but triage could not be woken - diagnose it by hand"
-              fi
-            else
-              gh issue comment "$num" --body-file body.md
-            fi
-          # CANARY-GATED: never close an outage issue when the canary FAILED.
-          # A failed canary means the detector could not go red on demand —
-          # it is BLIND, and 'all clear' from a blind detector is not evidence
-          # of health. Under the old `if: always()` gate a detector that had
-          # just proved it cannot see would close its own alarm as 'Restarted',
-          # destroying the only record of the outage.
-          elif [ -n "$num" ] && [ "${CANARY_OUTCOME:-success}" = "success" ]; then
-            gh issue close "$num" \
-              --comment "Restarted — nothing is stopped as of run ${{ github.run_id }}. (auto-close)"
-          fi
-
-  # ── DEAD-MAN'S SWITCH (issue #144) ──────────────────────────────────────────
-  # One level up from the job above: that asks "did the PRODUCT stop?", this asks
-  # "did the WATCHERS stop?". A workflow that stops running looks identical to
-  # one that passes — no red X, no email — and GitHub silently auto-disables
-  # schedules after ~60 days of repo inactivity. So the entire monitoring layer
-  # can switch itself off with every dashboard still green.
-  # Independent of the absence job on purpose: it needs no DB secret, so it keeps
-  # working even if PROD_DATABASE_URL is missing or rotated.
-
-      # FALLBACK last mile: normally triage sends the email, because its alert
-      # carries the diagnosis. But if the handoff failed, triage never runs and
-      # never alerts — so the alarm would be silent. That is precisely the 403
-      # bug found on 2026-07-27, which stayed invisible because the failing call
-      # was the last thing the job did. Email directly in that case.
-      - name: Email the owner directly (only if triage could not be woken)
-        if: always() && steps.raise.outputs.woken == 'no'
-        uses: ./.github/actions/alert
-        with:
-          subject: "[job360 harness] #${{ steps.raise.outputs.raised }} raised - TRIAGE COULD NOT BE WOKEN"
-          body: |
-            The absence detector raised issue #${{ steps.raise.outputs.raised }}, but the handoff to
-            the triage loop FAILED, so nothing has diagnosed it. Go and look.
-
-            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.raise.outputs.raised }}
-            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          resend_api_key: ${{ secrets.RESEND_API_KEY }}
-          to_email: ${{ secrets.OWNER_ALERT_EMAIL }}
-
   watchdog:
     name: Are the watchers still running?
     runs-on: ubuntu-latest
@@ -223,7 +48,6 @@ jobs:
         id: watch
         env:
           GH_TOKEN: ${{ github.token }}
-          CANARY_OUTCOME: ${{ steps.canary.outcome }}
         run: |
           set +e
           python scripts/watchdog_check.py > watchdog.md 2>&1
@@ -239,7 +63,6 @@ jobs:
         if: always() && steps.watch.outputs.stopped != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          CANARY_OUTCOME: ${{ steps.canary.outcome }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -269,13 +92,10 @@ jobs:
             else
               gh issue comment "$num" --body-file wbody.md
             fi
-          # CANARY-GATED: never close an outage issue when the canary FAILED.
-          # A failed canary means the detector could not go red on demand —
-          # it is BLIND, and 'all clear' from a blind detector is not evidence
-          # of health. Under the old `if: always()` gate a detector that had
-          # just proved it cannot see would close its own alarm as 'Restarted',
-          # destroying the only record of the outage.
-          elif [ -n "$num" ] && [ "${CANARY_OUTCOME:-success}" = "success" ]; then
+          # Never close an outage issue on a canary-blind run — kept simple
+          # here: this job has no canary of its own (the sourcing job that
+          # provided CANARY_OUTCOME was deleted with the absence check).
+          elif [ -n "$num" ]; then
             gh issue close "$num" \
               --comment "All watchers reporting again as of run ${{ github.run_id }}. (auto-close)"
           fi

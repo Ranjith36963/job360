@@ -185,10 +185,10 @@ async def register(
         if created:
             # #318 — give the new account a notification rulebook. Without this
             # the user is created into permanent silence: every delivery path
-            # (run_search's _enqueue_notifications, the notification_tick cron,
-            # dispatch itself) short-circuits on a missing notification_rules
-            # row, and only a human clicking through two separate settings
-            # screens in the right order could ever create one.
+            # (the notification_tick cron, dispatch itself) short-circuits on
+            # a missing notification_rules row, and only a human clicking
+            # through two separate settings screens in the right order could
+            # ever create one.
             #
             # Rulebook ONLY — no delivery channel. At this point the address is
             # UNPROVEN, so seeding a channel here would let anyone register with

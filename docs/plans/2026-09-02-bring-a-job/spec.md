@@ -1,4 +1,6 @@
 # Spec: bring a job, keep the receipt
+<!-- doc: PLAN -->
+> **PLAN — shipped.** A design record, not live truth; the code and `docs/product/VISION.md` win. <!-- banner: auto -->
 Reads: `intent.md`. Skills applied: `hard-rules` (31 invariants), `verify-job360`. Status: draft.
 
 ## Requirements

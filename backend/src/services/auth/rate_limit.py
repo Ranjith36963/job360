@@ -105,7 +105,7 @@ def _redis_client() -> Any:
         import redis  # noqa: PLC0415 — heavy/optional, lazy per rules #11/#16
 
         # redis-py ships py.typed but from_url() itself is unannotated.
-        _redis_singleton = redis.from_url(  # type: ignore[no-untyped-call]
+        _redis_singleton = redis.from_url(
             redis_url,
             socket_connect_timeout=0.5,
             socket_timeout=0.5,

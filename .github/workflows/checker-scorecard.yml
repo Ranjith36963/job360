@@ -43,34 +43,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Shelf X-ray — both sides of the match, one picture. The matching model
-      # is a product (user shelf x job shelf per dimension); a dimension can
-      # only fire when BOTH sides hold data. Weekly, committed, so an empty
-      # shelf is SEEN — not rediscovered weeks later. Born 2026-08-07 after a
-      # day of blindness incidents: scoring dims were built job-side while
-      # their user-side partners were empty for every user. Report-only by
-      # design (exit code ignored): coverage is a trend, not an alarm — the
-      # data-invariants loop owns alarms. Identities are masked (u1/u2/...)
-      # because this lands in a PUBLIC repo.
-      - name: Shelf X-ray (user side x job side)
-        if: ${{ !cancelled() }}
-        env:
-          PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
-        run: |
-          set -uo pipefail
-          if [ -z "$PROD_DATABASE_URL" ]; then
-            echo "::warning::PROD_DATABASE_URL not set - shelf X-ray skipped."
-            exit 0
-          fi
-          python -m pip install --quiet "psycopg[binary]>=3.2"
-          {
-            echo ""
-            echo "## Shelf X-ray ($(date -u +%F))"
-            echo '```'
-            DATABASE_URL="$PROD_DATABASE_URL" python backend/scripts/shelf_xray.py 2>&1
-            echo '```'
-          } >> docs/harness/maintenance/CHECKER-SCORECARD.md
-
       - name: Measure the checker
         env:
           GH_TOKEN: ${{ github.token }}

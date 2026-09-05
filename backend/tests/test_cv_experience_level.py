@@ -166,26 +166,3 @@ class TestEveryCvScalarSurvivesTheMerge:
         )
 
 
-class TestTheJudgeSeesIt:
-    def test_the_level_reaches_the_candidate_text(self) -> None:
-        from src.services.llm_matcher import profile_to_matcher_text
-
-        profile = UserProfile(
-            cv_data=CVData(raw_text="x", job_titles=["ML Engineer"],
-                           cv_experience_level="senior"),
-            preferences=UserPreferences(),
-        )
-        text = profile_to_matcher_text(profile)
-        assert "senior" in text.lower(), (
-            "the judge cannot answer the seniority question its own rubric asks "
-            "if the candidate text never states a level"
-        )
-
-    def test_it_stays_silent_when_unknown(self) -> None:
-        from src.services.llm_matcher import profile_to_matcher_text
-
-        profile = UserProfile(
-            cv_data=CVData(raw_text="x", job_titles=["ML Engineer"]),
-            preferences=UserPreferences(),
-        )
-        assert "seniority" not in profile_to_matcher_text(profile).lower()

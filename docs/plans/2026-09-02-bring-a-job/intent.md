@@ -1,4 +1,6 @@
 # Intent: bring a job, keep the receipt
+<!-- doc: PLAN -->
+> **PLAN — shipped.** A design record, not live truth; the code and `docs/product/VISION.md` win. <!-- banner: auto -->
 Author: Ranjith (owner), captured from chat 2026-09-02 by Claude. Status: shipped as PR #469 (slice one).
 
 > **Superseded in part by [`docs/product/VISION.md`](../../product/VISION.md) (2026-09-03):** "we score it

@@ -1,4 +1,6 @@
 # Intent: Job360 as a tool any agent can call (MCP)
+<!-- doc: PLAN -->
+> **PLAN — shipped.** A design record, not live truth; the code and `docs/product/VISION.md` win. <!-- banner: auto -->
 Author: Ranjith (owner), captured from chat 2026-09-03 by Claude ("I suggest just you build mcp").
 Status: draft — owner approves by merging.
 

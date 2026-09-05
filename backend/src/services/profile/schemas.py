@@ -213,7 +213,8 @@ def cv_schema_to_cvdata(schema: CVSchema, raw_text: str) -> CVData:
     # `_maybe_normalise_skills_via_esco` since it was built. THIS adapter —
     # the one every successful extraction actually returns through — never
     # did, so `CVData(...)` below had no `cv_skills_esco=` argument at all.
-    # Prod runs `SEMANTIC_ENABLED=true` and every profile shipped with
+    # Prod set `SEMANTIC_ENABLED=true` (now `ESCO_SKILL_NORMALISATION_ENABLED`)
+    # and every profile shipped with
     # `cv_skills_esco={}` regardless. Same shape as the `cv_positions` bug:
     # one adapter fixed, the other silently isn't. Graceful no-op (skills
     # unchanged, empty map) when the flag is off or the ESCO index isn't on

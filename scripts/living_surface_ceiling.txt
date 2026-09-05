@@ -73,4 +73,13 @@
 # itself, before this branch touches anything. Raising a ratchet to cover a gap
 # somebody else opened is how a ratchet stops meaning anything; that gap is its
 # own piece of work, and it is not this PR.
-8764
+# 5133 (2026-09-05, slice 5 #483): lowered by 3,631. The sourcing era's docs
+# (pillars, runbook, glossary, catalog reports) were archived FROZEN and
+# README.md was rewritten from 469 lines to 140. The mutation drill proved
+# the old number had become slack: a planted 40-line regression in STATUS.md
+# went unreported under 8764. A ceiling above the real number is a ratchet
+# that has stopped ratcheting.
+# 4951 (2026-09-05, slice 5 review): the review fix batch trimmed stale skill
+# and STATUS lines after 5133 was measured, leaving 182 lines of slack — the
+# same shape the previous entry warns about. Re-measured, not estimated.
+4951

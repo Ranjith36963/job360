@@ -111,7 +111,7 @@ describe("AuthProvider — account switch clears the previous account's data", (
   beforeEach(() => {
     mockPush.mockClear();
     capturedListener = null;
-    mockPathname = "/dashboard";
+    mockPathname = "/applications";
   });
 
   afterEach(() => {

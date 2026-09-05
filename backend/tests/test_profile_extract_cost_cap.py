@@ -46,10 +46,6 @@ async def test_cap_allows_normal_use_then_refuses(monkeypatch):
     monkeypatch.setattr(profile_routes, "run_two_pass_extraction", _fake_extract)
     monkeypatch.setattr(profile_routes, "save_profile", lambda *a, **k: None)
 
-    async def _noop(_user_id):
-        return None
-
-    monkeypatch.setattr(profile_routes, "_maybe_trigger_rescore", _noop)
     monkeypatch.setattr(profile_routes, "PROFILE_EXTRACT_MAX_PER_HOUR", 12)
 
     for i in range(12):
@@ -77,10 +73,6 @@ async def test_cap_is_per_user(monkeypatch):
     monkeypatch.setattr(profile_routes, "run_two_pass_extraction", _fake_extract)
     monkeypatch.setattr(profile_routes, "save_profile", lambda *a, **k: None)
 
-    async def _noop(_user_id):
-        return None
-
-    monkeypatch.setattr(profile_routes, "_maybe_trigger_rescore", _noop)
     monkeypatch.setattr(profile_routes, "PROFILE_EXTRACT_MAX_PER_HOUR", 2)
 
     for _ in range(2):
@@ -104,10 +96,6 @@ async def test_cap_can_be_disabled_with_zero(monkeypatch):
     monkeypatch.setattr(profile_routes, "run_two_pass_extraction", _fake_extract)
     monkeypatch.setattr(profile_routes, "save_profile", lambda *a, **k: None)
 
-    async def _noop(_user_id):
-        return None
-
-    monkeypatch.setattr(profile_routes, "_maybe_trigger_rescore", _noop)
     monkeypatch.setattr(profile_routes, "PROFILE_EXTRACT_MAX_PER_HOUR", 0)
 
     for _ in range(25):

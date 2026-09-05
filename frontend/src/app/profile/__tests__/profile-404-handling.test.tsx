@@ -31,7 +31,7 @@ describe("ProfilePage — L7 typed 404 handling", () => {
     render(<ProfilePage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /search latest jobs/i })).toBeInTheDocument();
+      expect(screen.getByText(/no profile/i)).toBeInTheDocument();
     });
 
     expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();

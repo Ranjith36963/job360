@@ -96,10 +96,16 @@ async def create_application(
 ) -> PipelineApplication:
     """Add a job to the caller's application pipeline (stage: applied).
 
-    R-2: ``get_job_by_id`` does not filter on ``staleness_state`` (only
-    ``get_job_by_id_with_enrichment`` carries the C-1 fix). Refuse to
-    create a pipeline row for a confirmed-expired listing — return 410
-    Gone so the frontend can drop the stale card from the UI.
+    R-2: ``get_job_by_id`` does not filter on ``staleness_state``, so this
+    route checks it by hand — refuse to create a pipeline row for a
+    confirmed-expired listing and return 410 Gone, so the frontend can drop
+    the stale card from the UI.
+
+    This is the LAST remaining read of ``staleness_state`` after slice 5
+    (#483) deleted the ghost detector that wrote it, and it is why
+    ``bring.py`` still calls ``update_last_seen``: re-bringing a legacy
+    scraped row that a long-dead sweep marked stale must make it usable
+    again.
     """
     job = await db.get_job_by_id(job_id)
     if job is None:

@@ -12,11 +12,11 @@ reading, not inventing. The one thing this module must never do is let that
 reading masquerade as something the user typed: see
 ``UserPreferences.experience_level`` (typed) vs
 ``UserPreferences.experience_level_inferred`` (read off the CV) in
-`services/profile/models.py`, and the resolution order in
-``scoring_dimensions.resolve_experience_level`` — typed always wins,
-inferred only fills a genuine blank, and an empty result from this module
-leaves the seniority dimension at its documented neutral half-weight,
-exactly as it behaved before this module existed.
+`services/profile/models.py`. Typed always wins; inferred only ever fills a
+genuine blank, and an empty result from this module leaves the field unset —
+absent, never zero (rule #29). (Until slice 5 the reader was the job
+scorer's ``scoring_dimensions.resolve_experience_level``; the scorer is
+gone, so today the inferred level is profile data the agent reads.)
 
 WHY A WRONG-LOW GUESS IS WORSE THAN NO GUESS (manager review, 2026-08-07).
 The first version of this module walked positions most-recent-first and
@@ -24,10 +24,9 @@ returned the first title with a tier word — which put a 3-month internship
 ahead of a 3-year engineering role simply because it happened to be listed
 last, and (separately) put an old internship title ahead of a title-neutral
 recent role for the same reason. Measured on two real production profiles,
-both came out "intern". That is actively harmful, not merely unhelpful:
-`scoring_dimensions.seniority_score` has a NEGATIVE tail (down to -100% at
-4+ ranks apart), so an under-called level doesn't just fail to help — it
-penalises every mid/senior job for a user who never typed anything. The
+both came out "intern". That is actively harmful, not merely unhelpful: an
+under-called level is a wrong FACT on the user's profile, and every reader
+of that profile — the user's own agent included — inherits it. The
 redesign below fixes that with two structural rules:
 
   * DURATION GATES CONFIDENCE. A role has to be held for at least
@@ -48,8 +47,8 @@ SIGNAL ORDERING (most to least trusted — see `infer_experience_level`):
 
   1+2. Highest rank SUSTAINED (>= `_SUSTAINED_MONTHS`) by any role, where a
      role's own rank is the higher of (a) a seniority word in its title —
-     `job_signals.detect_seniority`, the SAME data-backed detector the job
-     side already uses (CLAUDE.md rule #28: no parallel word list) — and
+     `detect_seniority` below, backed by the committed vocabulary file, not
+     a hand-typed list (CLAUDE.md rule #28) — and
      (b) a per-role duration-derived rank (`_years_to_rank`) when the role
      ran long enough to be informative on its own, e.g. a 3-year plainly-
      titled "Software Development Engineer" earns "mid" even though its
@@ -101,11 +100,235 @@ never-raise contract, which is what calls this module).
 from __future__ import annotations
 
 import datetime
+import logging
 import re
+from dataclasses import dataclass
+from enum import Enum
+from functools import cache, lru_cache
+from pathlib import Path
 from typing import Any, Optional
 
-from src.services.job_signals import detect_seniority
-from src.services.scoring_dimensions import _USER_EXPERIENCE_RANK
+logger = logging.getLogger(__name__)
+
+# ── The seniority detector, moved here by slice 5 (#483) ────────────────────
+# `detect_seniority` and the `_USER_EXPERIENCE_RANK` table used to live in
+# `services/job_signals.py` and `services/scoring_dimensions.py` — the job
+# SCORER's side of the house, deleted with the sourcing era. Profile
+# extraction is the only remaining reader, so the code moved to its reader
+# rather than the module being kept alive for it (spec D1: "move the needed
+# function, never keep the module"). The data file did NOT move: it is
+# package data declared in pyproject (`src/data/job_signals/*.txt`, issue
+# #260 — see `_load_terms`), and moving it would re-open that packaging bug.
+
+
+class SeniorityLevel(str, Enum):
+    """The seven-rung ladder a title can name, plus "unknown".
+
+    Was `job_enrichment_schema.SeniorityLevel`; the values are the LEFT column
+    of `src/data/job_signals/seniority_terms.txt`, so the enum and the
+    vocabulary file must keep the same words.
+    """
+
+    INTERN = "intern"
+    JUNIOR = "junior"
+    MID = "mid"
+    SENIOR = "senior"
+    STAFF = "staff"
+    PRINCIPAL = "principal"
+    DIRECTOR = "director"
+    UNKNOWN = "unknown"
+
+
+# THE DATA LIVES INSIDE THE PACKAGE, AND THAT IS LOAD-BEARING (issue #260).
+# `pip install .` copies only what `[tool.setuptools.package-data]` declares,
+# so the vocabulary must stay under `src/data/` — from this file that is
+# `parents[2]` (src/services/profile → src).
+_DATA = Path(__file__).resolve().parents[2] / "data" / "job_signals"
+
+
+def _report_empty(path: Path, why: str) -> None:
+    """Say loudly that the vocabulary is empty. See `_load_terms`."""
+    logger.error(
+        "SENIORITY VOCABULARY DEGRADED — empty at %s (%s). detect_seniority "
+        "will answer 'unknown' for every title, so an experience level is "
+        "never inferred from a CV. This is the issue-#260 packaging shape — "
+        "check that src/data/job_signals/*.txt ships with the installed "
+        "package ([tool.setuptools.package-data] in backend/pyproject.toml).",
+        path, why,
+    )
+
+
+def _load_terms(filename: str) -> dict[str, tuple[str, ...]]:
+    """Parse one `value<TAB>phrase` file into ``{value: (phrase, ...)}``.
+
+    Blank lines and `#`-prefixed comment lines are skipped. A missing or
+    unreadable file returns an empty dict rather than raising — callers then
+    fall through to UNKNOWN, so a forgotten data file degrades the feature
+    instead of crashing a profile save. But it SAYS SO (`_report_empty`):
+    silent degradation is what let issue #260 ship blind.
+    """
+    path = _DATA / filename
+    terms: dict[str, list[str]] = {}
+    if not path.exists():
+        _report_empty(path, "file not found")
+        return {}
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        _report_empty(path, f"unreadable ({exc})")
+        return {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "\t" not in line:
+            continue
+        value, _, phrase = line.partition("\t")
+        value = value.strip()
+        phrase = phrase.strip()
+        if value and phrase:
+            terms.setdefault(value, []).append(phrase)
+    if not terms:
+        # Present but useless — the nastier half: any existence check looks
+        # healthy while the vocabulary is still empty.
+        _report_empty(path, "file present but no `value<TAB>phrase` lines parsed")
+        return {}
+    return {k: tuple(v) for k, v in terms.items()}
+
+
+@lru_cache(maxsize=1)
+def _seniority_terms() -> dict[str, tuple[str, ...]]:
+    return _load_terms("seniority_terms.txt")
+
+
+@cache
+def _phrase_pattern(phrases: tuple[str, ...]) -> Optional[re.Pattern[str]]:
+    """Compile one tier's phrases into a single word-boundary alternation.
+
+    Longest phrase first: regex alternation is first-match not longest-match,
+    so without ordering a short phrase could shadow a longer one starting the
+    same way.
+    """
+    if not phrases:
+        return None
+    ordered = sorted(set(phrases), key=len, reverse=True)
+    body = "|".join(re.escape(p) for p in ordered)
+    return re.compile(rf"\b(?:{body})\b", re.IGNORECASE)
+
+
+@lru_cache(maxsize=1)
+def _seniority_noise() -> Optional[re.Pattern[str]]:
+    """Compound phrases that CONTAIN a tier word but mean something else
+    ("junior school", "head of year", "lead generation"), stripped BEFORE
+    any tier match runs. Same committed-file shape as the tier vocabulary
+    (`src/data/job_signals/seniority_noise.txt`, rule #28) — a new trap
+    phrase is a data line, not a code change. Whitespace inside a phrase
+    matches any run of whitespace; longest phrase first, as in
+    `_phrase_pattern`. None when the file is missing or empty (already
+    reported by `_load_terms`), which degrades to "strip nothing".
+    """
+    phrases = _load_terms("seniority_noise.txt").get("noise", ())
+    if not phrases:
+        return None
+    ordered = sorted(set(phrases), key=len, reverse=True)
+    body = "|".join(r"\s+".join(re.escape(w) for w in p.split()) for p in ordered)
+    return re.compile(rf"\b(?:{body})\b", re.IGNORECASE)
+
+# Most-senior-first. A text naming two tiers picks the more senior one — that
+# ordering also reads "graduate degree required, 5 years' experience"
+# correctly, because SENIOR is checked before JUNIOR.
+_SENIORITY_RANK: tuple[SeniorityLevel, ...] = (
+    SeniorityLevel.DIRECTOR,
+    SeniorityLevel.PRINCIPAL,
+    SeniorityLevel.STAFF,
+    SeniorityLevel.SENIOR,
+    SeniorityLevel.MID,
+    SeniorityLevel.JUNIOR,
+    SeniorityLevel.INTERN,
+)
+
+
+@dataclass(frozen=True)
+class SenioritySignal:
+    """The verdict AND why — a bare enum makes a wrong answer as hard to
+    debug as a bare boolean."""
+
+    value: SeniorityLevel
+    reason: str
+
+
+def _match_seniority_tier(
+    text: str, terms: dict[str, tuple[str, ...]]
+) -> Optional[SeniorityLevel]:
+    """Return the highest-ranked tier whose vocabulary matches `text`, or
+    None. Noise is stripped first so a compound trap phrase can't feed
+    either the tier it superficially resembles or any other.
+    """
+    if not text.strip():
+        return None
+    noise = _seniority_noise()
+    cleaned = noise.sub(" ", text) if noise else text
+    for level in _SENIORITY_RANK:
+        pattern = _phrase_pattern(terms.get(level.value, ()))
+        if pattern and pattern.search(cleaned):
+            return level
+    return None
+
+
+def detect_seniority(
+    title: Optional[str] = "",
+    description: Optional[str] = "",
+    *,
+    enrichment_value: Optional[str] = None,
+) -> SenioritySignal:
+    """Classify a role's seniority: intern / junior / mid / senior / staff /
+    principal / director.
+
+    ``enrichment_value`` wins outright when present and not 'unknown'.
+
+    Reads the TITLE first, description second, as two independent passes (not
+    one merged blob): seniority almost always sits in the title, and a
+    description-only mention should never outrank a clear title signal.
+    """
+    if enrichment_value:
+        ev = enrichment_value.strip().lower()
+        if ev and ev != SeniorityLevel.UNKNOWN.value:
+            for member in SeniorityLevel:
+                if ev == member.value:
+                    return SenioritySignal(member, "enrichment")
+
+    terms = _seniority_terms()
+
+    title_hit = _match_seniority_tier(title or "", terms)
+    if title_hit is not None:
+        return SenioritySignal(title_hit, "title")
+
+    description_hit = _match_seniority_tier(description or "", terms)
+    if description_hit is not None:
+        return SenioritySignal(description_hit, "description")
+
+    return SenioritySignal(SeniorityLevel.UNKNOWN, "no_signal")
+
+
+# The words a user may have TYPED as their experience level, mapped onto the
+# same 0-6 rank scale the detector returns. Was
+# `scoring_dimensions._USER_EXPERIENCE_RANK`.
+_USER_EXPERIENCE_RANK = {
+    "intern": 0,
+    "internship": 0,
+    "junior": 1,
+    "entry": 1,
+    "graduate": 1,
+    "mid": 2,
+    "intermediate": 2,
+    "senior": 3,
+    "sr": 3,
+    "staff": 4,
+    "lead": 4,
+    "principal": 5,
+    "director": 6,
+    "head": 6,
+    "vp": 6,
+    "executive": 6,
+}
 
 # A role must run at least this long before it is trusted to set the
 # "sustained" floor (signal 1+2) — see the module docstring's "DURATION
@@ -241,7 +464,7 @@ def infer_experience_level(
 ) -> str:
     """Derive the user's current seniority level from dated positions.
 
-    Returns one of the vocabulary words `scoring_dimensions._USER_EXPERIENCE_RANK`
+    Returns one of the vocabulary words `_USER_EXPERIENCE_RANK`
     already understands (e.g. "senior", "junior", "staff") or ``""`` when
     nothing could be inferred — an empty result is a legitimate, expected
     outcome (no positions, no dates anywhere, no title signal), not a

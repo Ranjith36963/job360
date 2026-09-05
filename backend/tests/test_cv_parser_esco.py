@@ -24,8 +24,8 @@ class _StubMatch:
 
 @pytest.fixture
 def fake_esco(monkeypatch):
-    """Pretend SEMANTIC_ENABLED=true and ESCO index is loaded."""
-    monkeypatch.setattr("src.core.settings.SEMANTIC_ENABLED", True)
+    """Pretend ESCO_SKILL_NORMALISATION_ENABLED=true and ESCO index is loaded."""
+    monkeypatch.setattr("src.core.settings.ESCO_SKILL_NORMALISATION_ENABLED", True)
     table = {
         "py": _StubMatch(uri="esco://skill/python", label="Python"),
         "python": _StubMatch(uri="esco://skill/python", label="Python"),
@@ -58,20 +58,20 @@ def test_unmatched_skill_passes_through_unchanged(fake_esco):
 
 
 def test_no_op_when_semantic_disabled(monkeypatch):
-    """SEMANTIC_ENABLED=false → identity transform, empty URI map.
+    """ESCO_SKILL_NORMALISATION_ENABLED=false → identity transform, empty URI map.
 
     Defends rule #18: default-off behaviour must be byte-identical to
     the pre-Pillar-2 path.
     """
-    monkeypatch.setattr("src.core.settings.SEMANTIC_ENABLED", False)
+    monkeypatch.setattr("src.core.settings.ESCO_SKILL_NORMALISATION_ENABLED", False)
     canonical, esco_map = _maybe_normalise_skills_via_esco(["Python", "JavaScript"])
     assert canonical == ["Python", "JavaScript"]
     assert esco_map == {}
 
 
 def test_no_op_when_esco_index_unavailable(monkeypatch):
-    """SEMANTIC_ENABLED=true but ESCO data missing → graceful pass-through."""
-    monkeypatch.setattr("src.core.settings.SEMANTIC_ENABLED", True)
+    """ESCO_SKILL_NORMALISATION_ENABLED=true but ESCO data missing → graceful pass-through."""
+    monkeypatch.setattr("src.core.settings.ESCO_SKILL_NORMALISATION_ENABLED", True)
     monkeypatch.setattr("src.services.profile.skill_normalizer.is_available", lambda: False)
     canonical, esco_map = _maybe_normalise_skills_via_esco(["Python"])
     assert canonical == ["Python"]
@@ -86,7 +86,7 @@ def test_normalise_handles_blank_strings(fake_esco):
 
 def test_normalise_swallows_normaliser_exceptions(monkeypatch):
     """A raising normaliser must not crash CV parsing — fall back to raw."""
-    monkeypatch.setattr("src.core.settings.SEMANTIC_ENABLED", True)
+    monkeypatch.setattr("src.core.settings.ESCO_SKILL_NORMALISATION_ENABLED", True)
     monkeypatch.setattr("src.services.profile.skill_normalizer.is_available", lambda: True)
 
     def boom(_raw):

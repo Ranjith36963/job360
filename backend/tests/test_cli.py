@@ -1,18 +1,34 @@
+"""The CLI's two surviving commands.
+
+Slice 5 (#483) deleted `run`, `status`, `view`, `sources` and
+`rescore-backfill` with the pipeline they drove — and with them the
+five-surface source contract (old rule #8) this file used to pin. What is
+left is `api` (start the server) and `setup-profile` (single-tenant profile
+setup, `DEFAULT_TENANT_ID`).
+"""
 
 from click.testing import CliRunner
 
-from src.cli import SOURCE_REGISTRY, cli
+from src.cli import cli
 
 runner = CliRunner()
 
 
 def test_cli_help():
-    """CLI --help should show available commands."""
+    """--help lists exactly the two commands that still exist."""
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
-    assert "run" in result.output
-    assert "status" in result.output
-    assert "sources" in result.output
+    assert "api" in result.output
+    assert "setup-profile" in result.output
+
+
+def test_the_deleted_commands_are_really_gone():
+    """The sourcing-era commands are DELETED, not hidden behind a flag —
+    invoking one must be an unknown-command error, not a no-op that looks
+    like it worked."""
+    for gone in ("run", "status", "view", "sources", "rescore-backfill"):
+        result = runner.invoke(cli, [gone, "--help"])
+        assert result.exit_code != 0, f"`{gone}` still exists"
 
 
 def test_cli_version():
@@ -22,80 +38,12 @@ def test_cli_version():
     assert "1.0.0" in result.output
 
 
-def test_run_help():
-    """run --help should show source, dry-run, log-level options."""
-    result = runner.invoke(cli, ["run", "--help"])
+def test_api_help():
+    """api --help should show the host/port options."""
+    result = runner.invoke(cli, ["api", "--help"])
     assert result.exit_code == 0
-    assert "--source" in result.output
-    assert "--dry-run" in result.output
-    assert "--log-level" in result.output
-    assert "--db-path" in result.output
-
-
-def test_sources_command():
-    """sources command should list all 12 sources."""
-    result = runner.invoke(cli, ["sources"])
-    assert result.exit_code == 0
-    for name in SOURCE_REGISTRY:
-        assert name in result.output
-
-
-def test_source_registry_has_41_sources():
-    """SOURCE_REGISTRY: 46 after the 2026-06 M6 rotation (-4 dead), then 47
-    after gov_apprenticeships was restored 2026-06-16 against the DfE
-    Display Advert API v2 (keyed), then 41 after the 2026-08-10 rotation
-    dropped 6 permanently-dead upstreams (verified live): aijobs,
-    jobs_ac_uk, biospace, rippling, nhs_jobs_xml, workanywhere.
-    NOTE: nhs_jobs (the non-XML source) is alive and stays.
-
-    Per CLAUDE.md rule #8: when adding/removing sources, update this
-    assertion AND the expected set AND RATE_LIMITS entry AND
-    _build_sources() list. All four must agree.
-    """
-    assert len(SOURCE_REGISTRY) == 41
-    expected = {"reed", "adzuna", "jsearch", "arbeitnow", "remoteok",
-                "jobicy", "himalayas", "greenhouse", "lever", "workable",
-                "ashby", "remotive", "jooble", "linkedin",
-                "smartrecruiters", "pinpoint", "recruitee", "indeed", "glassdoor",
-                "workday", "google_jobs", "devitjobs", "landingjobs",
-                "themuse", "hackernews", "careerjet", "findwork",
-                "nofluffjobs",
-                # Phase 4 new sources (minus Batch 3 drops: yc_companies, nomis, findajob)
-                "hn_jobs", "nhs_jobs",
-                "personio", "weworkremotely", "realworkfromanywhere",
-                "climatebase", "eightykhours",
-                "bcs_jobs", "uni_jobs", "successfactors",
-                "aijobs_ai",
-                # Batch 3 additions (jobtensor, comeet dropped 2026-06 M6)
-                "teaching_vacancies",
-                # Restored 2026-06-16 on the DfE Display Advert API v2 (keyed)
-                "gov_apprenticeships"}
-    assert set(SOURCE_REGISTRY.keys()) == expected
-
-
-def test_run_help_shows_new_flags():
-    """run --help should show --no-email flag."""
-    result = runner.invoke(cli, ["run", "--help"])
-    assert result.exit_code == 0
-    assert "--no-email" in result.output
-
-
-def test_view_help():
-    """view --help should show all expected options."""
-    result = runner.invoke(cli, ["view", "--help"])
-    assert result.exit_code == 0
-    assert "--hours" in result.output
-    assert "--min-score" in result.output
-    assert "--source" in result.output
-    assert "--visa-only" in result.output
-    assert "--db-path" in result.output
-
-
-def test_cli_help_shows_view():
-    """CLI --help should list the view command."""
-    result = runner.invoke(cli, ["--help"])
-    assert result.exit_code == 0
-    assert "view" in result.output
+    assert "--port" in result.output
+    assert "--host" in result.output
 
 
 def test_setup_profile_help():

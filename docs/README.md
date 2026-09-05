@@ -31,9 +31,9 @@ docs at the repo root). Start here to find the right doc fast.
 | **Pick up where work left off** | [`IMPLEMENTATION_LOG.md`](harness/IMPLEMENTATION_LOG.md) (read first) → [`../STATUS.md`](../STATUS.md) |
 | **Run it locally** | [`../backend/README.md`](../backend/README.md) · [`../frontend/README.md`](../frontend/README.md) |
 | **Contribute / open a PR** | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
-| **Debug a runtime problem** | [`troubleshooting.md`](product/troubleshooting.md) → [`pillars/runbook.md`](product/pillars/runbook.md) |
+| **Debug a runtime problem** | [`troubleshooting.md`](product/troubleshooting.md) |
 | **Know what to build next** | [`plans/2026-09-03-mission-roadmap.md`](plans/2026-09-03-mission-roadmap.md) — slices 0–6, one issue each |
-| **Understand the architecture deeply** | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) (product path vs legacy path) → [`pillars/`](product/pillars/README.md) (sourcing era, dated) |
+| **Understand the architecture deeply** | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) — the only architecture reference; the old pillar manuals are archived |
 | **Know what's verified working** | [`CHECKLIST_KANBAN.md`](harness/CHECKLIST_KANBAN.md) |
 
 ---
@@ -56,19 +56,21 @@ docs at the repo root). Start here to find the right doc fast.
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Deep technical reference: directory tree, DB schema, data-flow diagrams, dependencies. |
 | [`product/VISION.md`](product/VISION.md) | **The mission.** Agent thinks, Job360 remembers; never source/rank; build order; decision log Q1–Q18. |
 | [`plans/2026-09-03-mission-roadmap.md`](plans/2026-09-03-mission-roadmap.md) | The work list that follows from VISION.md — one issue per slice (#479–#483). |
-| [`pillars/`](product/pillars/README.md) | Per-pillar deep reference for the **sourcing era** (code-verified 2026-08, now dated). Slice 5 archives it. |
+| [`pillars/README.md`](product/pillars/README.md) | Pointer to the archived pillar manuals (the sourcing-era architecture reference). Archived 2026-09-05, slice 5. |
 | [`troubleshooting.md`](product/troubleshooting.md) | Dev-environment FAQ: port conflicts, Postgres connection/schema errors in tests, missing LLM keys, Redis on Windows. |
-| [`pillars/runbook.md`](product/pillars/runbook.md) | "I see a problem at 2am" operational guide — SQL queries + CLI commands. |
-| [`pillars/glossary.md`](product/pillars/glossary.md) | Plain-English definitions of every domain term. |
 
-### The three pillars (`pillars/`)
+### The three pillars — archived 2026-09-05 (slice 5, #483)
 
-| Doc | Covers |
-|---|---|
-| [`pillars/README.md`](product/pillars/README.md) | Pillar overview + connection diagram (entry point). |
-| [`pillars/01-user-pillar.md`](product/pillars/01-user-pillar.md) | Auth, profile, feed, dashboard, notifications. |
-| [`pillars/02-search-and-match-engine.md`](product/pillars/02-search-and-match-engine.md) | The 6-stage pipeline: prefilter → scoring → dedup → enrich → store. |
-| [`pillars/03-job-providers.md`](product/pillars/03-job-providers.md) | 40 source classes / 41 registry keys, `BaseJobSource`, ATS catalog. |
+The pillar manuals, glossary and runbook described the job-search-and-score
+product deleted in slice 5. Kept as history, FROZEN, pointing at `VISION.md`:
+[`_archive/sourcing-era/01-user-pillar.md`](_archive/sourcing-era/01-user-pillar.md) ·
+[`_archive/sourcing-era/02-search-and-match-engine.md`](_archive/sourcing-era/02-search-and-match-engine.md) ·
+[`_archive/sourcing-era/03-job-providers.md`](_archive/sourcing-era/03-job-providers.md) ·
+[`_archive/sourcing-era/glossary.md`](_archive/sourcing-era/glossary.md) ·
+[`_archive/sourcing-era/runbook.md`](_archive/sourcing-era/runbook.md) ·
+[`_archive/sourcing-era/CATALOG_STATE.md`](_archive/sourcing-era/CATALOG_STATE.md) ·
+[`_archive/sourcing-era/SHELF_FILL_MEASURED.md`](_archive/sourcing-era/SHELF_FILL_MEASURED.md) ·
+[`_archive/sourcing-era/UNIVERSAL_SHELF.md`](_archive/sourcing-era/UNIVERSAL_SHELF.md)
 
 ## 📘 Product & strategy
 
@@ -83,9 +85,10 @@ docs at the repo root). Start here to find the right doc fast.
 | [`post_application.md`](product/post_application.md) | 🗄️ "After you apply" co-pilot design — the agent does this now (rule 5); we store what happened. |
 | [`plans/2026-06-21-free-premium-plans.md`](product/plans/2026-06-21-free-premium-plans.md) | 🗄️ Free/Premium tier design — not planned (rule 6). |
 | [`plans/2026-09-03-oauth-mcp/`](plans/2026-09-03-oauth-mcp/) | Slice 1 of the pivot (shipped, PR #488): OAuth 2.1 authorization server for MCP clients (intent / spec with security section / plan + diff-vs-plan). |
-| [`plans/2026-09-04-application-spine/`](plans/2026-09-04-application-spine/) | Slice 2 of the pivot (branch `feat/application-spine`, awaiting review/PR): one Application object, an append-only typed event log, versioned artifacts, the stored (never computed) fit verdict, `whats_new` / `export_history`, the applications home (intent / spec with security section / plan). |
+| [`plans/2026-09-04-application-spine/`](plans/2026-09-04-application-spine/) | Slice 2 of the pivot (shipped, PR #480): one Application object, an append-only typed event log, versioned artifacts, the stored (never computed) fit verdict, `whats_new` / `export_history`, the applications home (intent / spec with security section / plan). |
 | [`plans/2026-09-04-url-fetch/`](plans/2026-09-04-url-fetch/) | Slice 3 of the pivot (shipped, PR #496): `POST /jobs/fetch-url` fills the `/bring` form from a pasted link under a from-scratch SSRF guard (`src/services/fetch/`), drilled ten ways by `scripts/ssrf_drill.py`; paste stays the fallback, no MCP tool (intent / spec with security section / plan). |
-| [`plans/2026-09-05-contacts-stats/`](plans/2026-09-05-contacts-stats/) | Slice 4 of the pivot (branch `feat/contacts-stats`, awaiting review/PR): recruiter contacts per application, `stats` (reply / interview rate per CV version and per role — counts, never judgement), `update_profile` as an append-only overlay the human can see and clear (intent / spec with security section / plan). |
+| [`plans/2026-09-05-contacts-stats/`](plans/2026-09-05-contacts-stats/) | Slice 4 of the pivot (shipped, PR #498): recruiter contacts per application, `stats` (reply / interview rate per CV version and per role — counts, never judgement), `update_profile` as an append-only overlay the human can see and clear (intent / spec with security section / plan). |
+| [`plans/2026-09-05-delete-sourcing-era/`](plans/2026-09-05-delete-sourcing-era/) | Slice 5 of the pivot (#483, draft PR #499): delete the search/score pipeline, its tables, workflows and docs; what survives and why (intent / spec / plan). |
 | [`References.md`](harness/References.md) | Source-of-truth list of external references and research links. |
 
 ## 📘 Engine evaluation
@@ -149,6 +152,6 @@ Retrievable with `git show d3cbceb:docs/_archive/<name>`.
 ---
 
 > **Conventions.** `IMPLEMENTATION_LOG.md` is **append-only** — never edit past entries; append a
-> revert note instead. `pillars/` is the authoritative architecture reference (supersedes the older
-> `ARCHITECTURE.md` where they differ). Code is the proof, not docs — verify counts/claims against
-> source before trusting any doc.
+> revert note instead. `../ARCHITECTURE.md` is the authoritative architecture reference; `pillars/`
+> now only points at the archived sourcing-era manuals. Code is the proof, not docs — verify
+> counts/claims against source before trusting any doc.

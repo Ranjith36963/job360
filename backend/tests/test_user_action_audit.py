@@ -1,8 +1,9 @@
 """User-action audit events (full-lifecycle logging piece C).
 
 The audit log used to carry only auth events. Now the key "user did something"
-mutations — liking a job, adding/advancing a pipeline application — also emit an
-audit line (who / what / when), so we can reconstruct a user's actions.
+mutations also emit an audit line (who / what / when), so we can reconstruct a
+user's actions. Slice 5 (#483) deleted the like/dismiss routes, so what is left
+to pin here is the pipeline mutation.
 
 The audit logger is `propagate=False`, so we attach caplog's handler to it
 directly to capture its records.
@@ -101,20 +102,17 @@ def _register_verified(client, db_path, email):
     assert lr.status_code == 200, lr.text
 
 
-def test_like_and_pipeline_emit_audit_events(client, temp_db, caplog):
+def test_pipeline_mutation_emits_an_audit_event(client, temp_db, caplog):
     audit = logging.getLogger("job360.audit")
     audit.addHandler(caplog.handler)
     audit.setLevel(logging.INFO)
     caplog.handler.setLevel(logging.INFO)
     try:
         _register_verified(client, temp_db, "auditme@example.com")
-        r = client.post("/api/jobs/1/action", json={"action": "liked"})
-        assert r.status_code == 200, r.text
         r = client.post("/api/pipeline/1", json={})
         assert r.status_code in (200, 201), r.text
     finally:
         audit.removeHandler(caplog.handler)
 
     events = {getattr(rec, "event", "") for rec in caplog.records}
-    assert "job_action" in events, f"job_action not audited; saw {events}"
     assert "pipeline_create" in events, f"pipeline_create not audited; saw {events}"

@@ -21,14 +21,10 @@
 -- UNIVERSAL_SHELF.md §3 "Values live in typed columns; provenance lives in
 -- JSONB."
 --
--- WHAT SHIPS WITH THIS MIGRATION (corrected 2026-08-25): steps 1, 2 and 3 now
--- land together, so these columns are LIVE the moment this runs. Source
--- mappers write them (lever.py, recruitee.py, smartrecruiters.py and others)
--- and services/shelf_enrichment.py calls fill_shelves(). The paragraph that
--- stood here said the opposite — written when step 1 was going to ship alone —
--- and it is the paragraph an operator reads before deciding whether the down
--- migration is safe. It is not: see 0032_universal_shelf.down.sql.
--- (CodeRabbit, PR #388.)
+-- HISTORICAL NOTE (slice 5, #483): the code that filled these columns — the
+-- job sources and the shelf gate — was deleted in 2026-09. The columns still
+-- hold what those runs wrote, so the down migration is still destructive; see
+-- 0032_universal_shelf.down.sql. Nothing writes them any more.
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS employment_type TEXT;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS workplace_mode TEXT;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS seniority TEXT;

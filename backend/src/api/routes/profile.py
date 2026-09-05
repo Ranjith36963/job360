@@ -71,137 +71,6 @@ router = APIRouter(tags=["profile"])
 # root logger, which has no job360 handler, so its INFO lines vanish.
 logger = logging.getLogger("job360.api.profile")
 
-# FIX 2 — keep a strong reference to every background re-score task so the
-# GC cannot collect it before it finishes (asyncio.create_task returns a weak
-# ref; without this set the task can be garbage-collected mid-run).
-_rescore_bg_tasks: set[Any] = set()
-
-
-def _rescore_finished(task: Any) -> None:
-    """Discard the task reference AND say something when it failed.
-
-    The previous callback was ``_rescore_bg_tasks.discard`` — it dropped the
-    reference and never touched ``task.exception()``. asyncio only reports an
-    unretrieved exception when the task object is garbage-collected, and by then
-    the message is detached from the user it belonged to. The surrounding
-    ``except`` covers SCHEDULING, not execution, so a re-score that started and
-    then died left the feed permanently stale with nothing in the logs.
-
-    Measured in production 2026-08-11: 9,708 user_feed rows carry a
-    profile_version older than their user's current one, and all 9,708 point at
-    jobs still in the catalog (0 orphans) — so every one of them was reachable
-    and simply never got re-scored. One user sits at profile_version 10 while
-    their current version is 15: five profile changes, no completed re-score,
-    no error anywhere.
-
-    This does not FIX that (see the note in _maybe_trigger_rescore); it makes the
-    failure visible, which is the difference between a bug you can find and one
-    you cannot.
-    """
-    _rescore_bg_tasks.discard(task)
-    if task.cancelled():
-        logger.warning("rescore: background re-score was CANCELLED — feed left stale")
-        return
-    exc = task.exception()
-    if exc is not None:
-        logger.error(
-            "rescore: background re-score FAILED, feed left on a stale "
-            "profile_version: %r",
-            exc,
-            exc_info=exc,
-        )
-
-
-def _run_rescore_in_process(user_id: str) -> None:
-    """LAST RESORT: run the re-score inside the web process.
-
-    This is the OLD behaviour and the cause of issue #271 — a fire-and-forget
-    task with no queue entry, no retry and no completion record, which any
-    deploy kills (``main`` auto-deploys on every merge). It survives only as the
-    fallback for "Redis is unreachable", because losing the work outright would
-    be worse than doing it fragilely. Every caller must log that it happened.
-
-    The task reference is pinned to ``_rescore_bg_tasks`` so the GC cannot
-    collect it mid-run, and ``_rescore_finished`` makes a failure audible
-    (PR #315).
-    """
-    import asyncio  # noqa: PLC0415
-
-    # Extraction now happens INLINE in the upload routes (one combined pass), so
-    # the background job only needs to re-SCORE the feed against the
-    # already-extracted profile — it must NOT re-extract.
-    from src.services.rescore import rescore_user_feed  # noqa: PLC0415
-
-    task = asyncio.create_task(rescore_user_feed(user_id))
-    _rescore_bg_tasks.add(task)
-    task.add_done_callback(_rescore_finished)
-
-
-async def _maybe_trigger_rescore(user_id: str) -> None:
-    """Queue a durable re-score when the profile content actually changed.
-
-    THE FIX FOR ISSUE #271. This used to call ``asyncio.create_task`` in the web
-    process: no queue entry, no retry, no completion record
-    (``grep -c rescore src/workers/tasks.py`` was 0), so a deploy alone dropped
-    the work. Measured in prod 2026-08-11: 9,708 ``user_feed`` rows on a
-    profile_version older than their user's current one, ALL of them pointing at
-    jobs still in the catalog — reachable work that simply never ran.
-
-    Now it enqueues ``rescore_user_feed_task`` for the ARQ worker, which retries
-    with a backoff and survives a redeploy of the API.
-
-    Two guarantees, both tested:
-
-    * **The profile save never 500s because of this.** Enqueue failures are
-      caught, and the whole body is wrapped besides.
-    * **A dead Redis does not LOSE the work.** It falls back to the old
-      in-process task and says ``QUEUE UNAVAILABLE`` at WARNING — a degraded
-      path you can find in the logs, not a silent one.
-
-    Lazy imports keep the hot GET/POST paths import-cycle-free (rule #16).
-    """
-    try:
-        from src.services.profile.storage import (  # noqa: PLC0415
-            profile_content_changed_since_previous,
-        )
-
-        if not profile_content_changed_since_previous(user_id):
-            return
-
-        # Module (not symbol) import so the enqueue door is patchable in tests
-        # and resolved at call time.
-        from src.workers import queue as _queue  # noqa: PLC0415
-
-        try:
-            queued = await _queue.enqueue_job("rescore_user_feed_task", user_id)
-        except Exception as exc:  # noqa: BLE001 — belt and braces; enqueue_job
-            # already swallows its own failures, but a queue outage must never
-            # be the reason a profile save fails.
-            queued = False
-            logger.warning(
-                "rescore: enqueue raised for user %s: %r", user_id, exc
-            )
-
-        if queued:
-            logger.info(
-                "rescore: queued a durable re-score for user %s (ARQ)", user_id
-            )
-            return
-
-        logger.warning(
-            "rescore: QUEUE UNAVAILABLE — running the re-score in the web "
-            "process for user %s. This copy dies on the next deploy (issue "
-            "#271); check REDIS_URL and the worker service.",
-            user_id,
-        )
-        _run_rescore_in_process(user_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "rescore: failed to schedule background re-score for user %s: %s",
-            user_id,
-            exc,
-        )
-
 
 def _build_profile_response(
     profile: UserProfile, user_id: str, agent_edits: list[ProfileEditOut]
@@ -257,7 +126,7 @@ def _build_profile_response(
         cv_projects=getattr(cv, "cv_projects", []) or [],
         cv_experience_level=getattr(cv, "cv_experience_level", "") or "",
         cv_right_to_work=getattr(cv, "cv_right_to_work", "") or "",
-        # Finding 11 — extracted and matched on (JobScorer), never shown.
+        # Finding 11 — extracted off the CV, and once never shown.
         cv_industries=getattr(cv, "cv_industries", []) or [],
         highlights=cv.highlights if hasattr(cv, "highlights") else cv.skills,
     )
@@ -380,23 +249,6 @@ def _build_profile_response(
         "profile_readme": getattr(cv, "github_profile_readme", "") or "",
     }
 
-    # The real board queries, made visible. `generate_search_config` is the
-    # SAME call the pipeline makes (src/main.py:760) and the job-detail
-    # re-score makes (api/routes/jobs.py:751), so what the user reads here is
-    # what the boards were actually asked — not a second, drifting
-    # reconstruction of it. Best-effort by design: a generator failure must
-    # cost the user a quiet line, never their whole profile page.
-    search_titles: list[str] = []
-    try:
-        from src.services.profile.keyword_generator import (  # noqa: PLC0415 — lazy (rule #16)
-            generate_search_config,
-        )
-
-        search_titles = list(generate_search_config(profile).search_titles)
-    except Exception:
-        logger.warning("search_titles unavailable for user %s", user_id, exc_info=True)
-        search_titles = []
-
     # Step-1.5 S3-E — current_version_id surfaces the newest snapshot id
     # from user_profile_versions. Best-effort: a stale DB without 0007
     # migration just returns None.
@@ -421,7 +273,6 @@ def _build_profile_response(
         github_temporal=github_temporal,
         github_detail=github_detail,
         current_version_id=current_version_id,
-        search_titles=search_titles,
         # Slice 4 (spec R11) — the current agent-edit overlay, so the web
         # profile page and every other caller of _build_profile_response see
         # provenance without a second call.
@@ -867,9 +718,9 @@ def _retire_overlaid_preferences(
 
 
 async def _extract_save_trigger(
-    profile: UserProfile, user_id: str, *, trigger_rescore: bool = True
+    profile: UserProfile, user_id: str
 ) -> None:
-    """Shared pipeline tail: ONE extraction, save one version, schedule re-score.
+    """Shared pipeline tail: ONE extraction, save one version.
 
     Used by every profile-input route so the merged single-extraction flow is
     defined once.
@@ -889,19 +740,6 @@ async def _extract_save_trigger(
     Reuses the existing limiter rather than inventing a counter: it already
     supports a shared Redis backend (RATE_LIMIT_REDIS), so the cap holds across
     replicas instead of being multiplied by replica count.
-
-    ``trigger_rescore=False`` runs the extraction and the save but leaves the
-    re-score to the caller. CodeRabbit, on the LinkedIn re-upload route: that
-    route clears the old LinkedIn fields, calls this, and only THEN checks
-    whether extraction produced anything. On a rejection it rolls the fields
-    back and re-saves — but the re-score had already been queued against the
-    CLEARED snapshot, so the worker could score every job for that user with
-    the LinkedIn shelf empty and store the result as final.
-
-    The rollback comment in that route already recognised the save-ordering
-    problem ("an in-memory rollback would be undone by the save that already
-    happened above") and patched the save. The same ordering leaked the
-    re-score too — fixing one consequence of a bad order leaves the others.
     """
     if PROFILE_EXTRACT_MAX_PER_HOUR > 0 and not auth_rate_limit.check_and_record(
         f"profile_extract:{user_id}",
@@ -923,8 +761,6 @@ async def _extract_save_trigger(
         )
     await run_two_pass_extraction(profile)
     save_profile(profile, user_id)
-    if trigger_rescore:
-        await _maybe_trigger_rescore(user_id)
 
 
 @router.post("/profile/cv", response_model=ProfileResponse)
@@ -1096,7 +932,7 @@ async def upload_linkedin(
         # below says extraction produced real signal. Queueing it here
         # scores the whole catalog against a CLEARED LinkedIn shelf on
         # every rejected re-upload.
-        await _extract_save_trigger(profile, user.id, trigger_rescore=False)
+        await _extract_save_trigger(profile, user.id)
 
         # merged = did extraction actually PRODUCE LinkedIn signal — not "did
         # the file merely resemble a LinkedIn export". Mirrors has_linkedin.
@@ -1131,8 +967,6 @@ async def upload_linkedin(
         cv.linkedin_filename = os.path.basename(file.filename or "")[:255]
         cv.linkedin_uploaded_at = datetime.now(timezone.utc).isoformat()
         save_profile(profile, user.id, "linkedin_upload")
-        # Accepted — only now is the stored profile worth scoring against.
-        await _maybe_trigger_rescore(user.id)
     finally:
         try:
             os.unlink(tmp_path)

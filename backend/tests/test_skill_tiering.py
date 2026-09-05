@@ -4,13 +4,10 @@ Covers:
   * SkillEvidence weight arithmetic
   * tier_skills_by_evidence thresholds + stable ordering
   * collect_evidence_from_profile across the 5 CVData source fields
-  * keyword_generator integration — user_declared lands in primary,
-    lone github_lang lands in tertiary
 """
 
 from __future__ import annotations
 
-from src.services.profile.keyword_generator import generate_search_config
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 from src.services.profile.skill_tiering import (
     PRIMARY_THRESHOLD,
@@ -254,66 +251,3 @@ def test_collect_evidence_ignores_empty_strings():
     profile = UserProfile(cv_data=cv, preferences=prefs)
     names = [e.name for e in collect_evidence_from_profile(profile)]
     assert names == ["Real Skill"]
-
-
-# ── keyword_generator integration ───────────────────────────────────
-
-
-def test_keyword_generator_user_declared_lands_in_primary():
-    # Batch 2.3 — skill lists exit the SearchConfig in canonical (lower-case) form.
-    prefs = UserPreferences(additional_skills=["Product Strategy"])
-    cv = CVData()
-    profile = UserProfile(cv_data=cv, preferences=prefs)
-    cfg = generate_search_config(profile)
-    assert "product strategy" in cfg.primary_skills
-    assert "product strategy" not in cfg.secondary_skills
-    assert "product strategy" not in cfg.tertiary_skills
-
-
-def test_keyword_generator_lone_github_lang_lands_in_tertiary():
-    # A lone significant GitHub language = github_lang (1.0) → tertiary.
-    prefs = UserPreferences()
-    cv = CVData(github_languages={"Haskell": 200_000})
-    profile = UserProfile(cv_data=cv, preferences=prefs)
-    cfg = generate_search_config(profile)
-    assert "haskell" in cfg.tertiary_skills
-    assert "haskell" not in cfg.primary_skills
-
-
-def test_keyword_generator_multi_source_skill_lands_in_primary():
-    """CV + LinkedIn = 4.0 → primary, beating lone user_declared of a different skill.
-
-    Batch 2.3 — canonical (lower-case) skill assertion.
-    """
-    prefs = UserPreferences(additional_skills=["Marketing"])
-    cv = CVData(skills=["Kubernetes"], linkedin_skills=["Kubernetes"])
-    profile = UserProfile(cv_data=cv, preferences=prefs)
-    cfg = generate_search_config(profile)
-    # Kubernetes (4.0) should be ordered before Marketing (3.0) within primary
-    assert cfg.primary_skills.index("kubernetes") < cfg.primary_skills.index("marketing")
-
-
-def test_keyword_generator_no_skills_yields_empty_tiers():
-    profile = UserProfile(cv_data=CVData(), preferences=UserPreferences())
-    cfg = generate_search_config(profile)
-    assert cfg.primary_skills == []
-    assert cfg.secondary_skills == []
-    assert cfg.tertiary_skills == []
-
-
-def test_keyword_generator_excludes_raw_github_frameworks():
-    """TRUST fix: raw dependency package names (github_frameworks) are build
-    metadata, NOT skills, and must NOT flow into the search config. The meaningful
-    frameworks are recovered via the LLM repo-skills pass instead."""
-    prefs = UserPreferences()
-    cv = CVData(
-        github_frameworks=["pytest", "@capacitor/core", "django"],  # raw deps → excluded
-        github_llm_skills=["Django", "React"],                       # LLM-read → included
-    )
-    profile = UserProfile(cv_data=cv, preferences=prefs)
-    cfg = generate_search_config(profile)
-    all_skills = set(cfg.primary_skills) | set(cfg.secondary_skills) | set(cfg.tertiary_skills)
-    assert "pytest" not in all_skills
-    assert "@capacitor/core" not in all_skills
-    # the LLM-read frameworks ARE present (github_llm = 1.5 → secondary)
-    assert {"django", "react"} <= all_skills

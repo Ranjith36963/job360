@@ -26,152 +26,44 @@ class ReadyzResponse(BaseModel):
     checks: ReadyzChecks
 
 
-class SourceInfo(BaseModel):
-    name: str
-    type: str
-    health: dict[Any, Any]
-
-
-class SourcesResponse(BaseModel):
-    sources: list[SourceInfo]
-
-
 class StatusResponse(BaseModel):
     jobs_total: int
-    last_run: Optional[dict[Any, Any]]
-    sources_active: int
-    sources_total: int
     profile_exists: bool
 
 
 class JobResponse(BaseModel):
+    """The ad the user brought, exactly as it is stored.
+
+    Slice 5 (#483) took the score off this model. Job360 never judges fit
+    (product rule 4) — the user's own agent does, and records its verdict with
+    `save_fit`. Every field below is read straight off the `jobs` row; nothing
+    here is computed about the user.
+    """
+
     id: int
     title: str
     company: str
     location: str
     salary: Optional[str]
-    match_score: int
     source: str
     date_found: str
     apply_url: str
     visa_flag: bool
-    # THREE-state visa fact: "sponsors" | "no_sponsorship" | "unknown".
-    # `visa_flag` above is a bool and therefore cannot distinguish "this ad
-    # says it will NOT sponsor" from "this ad never mentions visas" — opposite
-    # facts for a candidate who needs sponsorship (a dead end vs a question
-    # worth asking). Product rule #31: visa is a SPOTLIGHT, not a wall — the
-    # UI badges all three states and never hides the 58% that are unknown.
-    visa_status: str = "unknown"
     job_type: str = ""
     experience_level: str = ""
-    # ── Score-dim breakdown ─────────────────────────────────────────────
-    # These are the EIGHT dimensions the engine actually computes, with the
-    # weights it actually uses (skill_matcher.TITLE/SKILL/LOCATION/RECENCY_WEIGHT
-    # = 40/40/10/10 and settings.{SENIORITY,SALARY,VISA,WORKPLACE}_WEIGHT =
-    # 8/10/6/6). `role`/`skill`/`location_score`/`recency`/`seniority_score`
-    # are ALSO persisted on `jobs` (migration 0011); salary/visa/workplace are
-    # computed per-request only — they depend on the CALLER's preferences, so
-    # persisting them on the shared catalog would leak one user's salary target
-    # into another user's row (rules #10/#17).
-    #
-    # NEVER sum these to derive the total: the raw max is 130 clamped to 100
-    # (rule #27), and the title/location penalties (−30/−15) land on no
-    # dimension at all. `match_score` is the only truth for the total.
-    role: int = 0
-    skill: int = 0
-    location_score: int = 0
-    recency: int = 0
-    seniority_score: int = 0
-    salary_score: int = 0
-    visa_score: int = 0
-    workplace_score: int = 0
-    # Did the enrichment-driven dims (seniority/salary/visa/workplace) actually
-    # run for this job+user? MUST be explicit — a 0 is ambiguous: it can mean
-    # "not measured" OR a real, earned 0 (e.g. visa_score=0 because the caller
-    # needs sponsorship and this job offers none). The UI greys the four dims
-    # out when this is False instead of drawing a truthful-looking 0%.
-    dims_active: bool = False
-    # Legacy dead columns (migration 0011) — the engine never produced these.
-    # Kept only so existing consumers don't break; scheduled for removal.
-    experience: int = 0
-    credentials: int = 0
-    semantic: int = 0
-    penalty: int = 0
-    matched_skills: list[str] = []
-    missing_required: list[str] = []
-    transferable_skills: list[str] = []
-    action: Optional[str] = None
-    bucket: str = ""
-    # The stored ad text. Filled by the single-job read and by POST /jobs/bring
-    # only — never by the list route, where N × 8k chars would dwarf the cards.
-    # A user-brought job has no source website to read the ad on, so the detail
-    # page must be able to show what they pasted.
+    # The stored ad text. A user-brought job has no source website to read the
+    # ad on, so the caller must be able to get back what they pasted.
     description: Optional[str] = None
-    # Step-1 B6 — date-model fields (Pillar 3 Batch 1). Persisted on the
-    # `jobs` table; `posted_at` is None when no trustworthy source field
-    # was found, `staleness_state` flips to 'stale' / 'expired' as the
-    # ghost detector runs. Frontend lib/types.ts must mirror these.
+    # Date model (Pillar 3 Batch 1). `posted_at` is when the ad was brought
+    # (confidence 'low' — see routes/bring.py); the two _seen_at fields bound
+    # how long we have held it.
     posted_at: Optional[str] = None
     first_seen_at: Optional[str] = None
     last_seen_at: Optional[str] = None
     date_confidence: Optional[str] = None
-    staleness_state: Optional[str] = None
-    # Step-1 B6 — enrichment fields (Pillar 2 Batch 2.5 subset). Sourced
-    # from the `job_enrichment` row via a LEFT JOIN — None when no row
-    # exists. Mirrors a 13-of-18 user-facing slice of `JobEnrichment`.
-    title_canonical: Optional[str] = None
-    seniority: Optional[str] = None
-    employment_type: Optional[str] = None
-    workplace_type: Optional[str] = None
-    visa_sponsorship: Optional[bool] = None
-    salary_min_gbp: Optional[int] = None
-    salary_max_gbp: Optional[int] = None
-    salary_period: Optional[str] = None
-    salary_currency_original: Optional[str] = None
-    required_skills: Optional[list[str]] = None
-    nice_to_have_skills: Optional[list[str]] = None
-    industry: Optional[str] = None
-    years_experience_min: Optional[int] = None
-    # Step-1.5 S3-F — surface the "also posted on Indeed + Reed" badge
-    # ID list. Optional because the dedup-group writer is deferred to a
-    # follow-up batch (see plan §non-scope). Defaults to None today; the
-    # frontend renders a fallback "no group info" badge until populated.
-    dedup_group_ids: Optional[list[int]] = None
-    # Funnel->judge (LLM matcher) — per-user verdict from user_feed. None for
-    # unauthenticated reads, unjudged jobs, or MATCHER_ENABLED=false.
-    llm_fit_score: Optional[int] = None
-    llm_verdict: Optional[str] = None
-    llm_reason: Optional[str] = None
     # Application deadline — None means "no deadline listed".
     deadline: Optional[str] = None           # ISO date YYYY-MM-DD
     deadline_source: Optional[str] = None    # "listing" | "description" | None
-
-
-class JobListResponse(BaseModel):
-    jobs: list[JobResponse]
-    total: int
-    # Rows before min_score was applied. `total - total_unfiltered` is what the
-    # filter removed, which the UI shows as "N hidden by filters". Without it a
-    # filter tuned above the score distribution looks identical to an empty feed —
-    # exactly how 2,830 of one user's 3,236 jobs vanished with nothing on screen
-    # to say so. Defaults to 0 for back-compat with older clients.
-    total_unfiltered: int = 0
-    filters_applied: dict[Any, Any]
-
-
-class ActionRequest(BaseModel):
-    action: str
-    notes: str = ""
-
-
-class ActionResponse(BaseModel):
-    ok: bool
-    job_id: int
-    action: str
-
-
-class ActionsListResponse(BaseModel):
-    actions: list[ActionResponse]
 
 
 class ProfileSummary(BaseModel):
@@ -231,9 +123,8 @@ class CVDetail(BaseModel):
     # one commit later on the shelves that replaced it.
     cv_experience_level: str = ""
     cv_right_to_work: str = ""
-    # Extracted AND used for matching (JobScorer reads it) since before this
-    # field existed here — audit finding 11 (2026-08-16): a shelf scored on
-    # but shown nowhere, the same "stored but not shown" gap as cv_positions.
+    # Audit finding 11 (2026-08-16): extracted from the CV, but shown
+    # nowhere — the same "stored but not shown" gap as cv_positions.
     cv_industries: list[str] = []
     # Aggregated highlights for the CV viewer — merges skills + titles +
     # companies + achievements + name/headline/location for in-text highlighting
@@ -314,16 +205,6 @@ class ProfileResponse(BaseModel):
     # surfaces "current version" alongside the history list. None when
     # the version table is empty / unavailable.
     current_version_id: Optional[int] = None
-    # THE ACTUAL QUERIES WE SEND TO JOB BOARDS, in the order we send them.
-    # Mirrors ``SearchConfig.search_titles`` — the ONLY titles a board ever
-    # sees (`sources/base.py::search_titles`). Until 2026-08-13 this list
-    # existed solely inside the engine: zero references in `src/api/`, zero in
-    # the frontend. So when the results were wrong the user could only conclude
-    # "this product does not understand me" — unrecoverable — instead of
-    # "wrong setting", which they fix themselves in one click on the Target Job
-    # Titles field. Empty list when the profile yields no usable title or the
-    # generator raises; the UI renders nothing rather than an empty label.
-    search_titles: list[str] = []
     # Slice 4 (spec R11) — the current agent-edit overlay: every path an
     # agent has SET and not since cleared, as {path, value, set_by, set_at}.
     # Provenance made visible: the web profile page renders each overlaid
@@ -391,17 +272,6 @@ class NotificationLedgerListResponse(BaseModel):
     offset: int
 
 
-class DedupGroupSummary(BaseModel):
-    """``GET /jobs/{id}/dedup-group`` shape — placeholder for the upcoming
-    dedup-group writer batch. Not exposed by any route in Step 1.5; the
-    model is shipped now so the frontend agent can wire the type-safe
-    consumer in Step 2 without a Pydantic round-trip change later."""
-
-    group_id: int
-    job_ids: list[int]
-    canonical_job_id: int
-
-
 class LinkedInResponse(BaseModel):
     ok: bool
     merged: bool
@@ -410,18 +280,6 @@ class LinkedInResponse(BaseModel):
 class GitHubResponse(BaseModel):
     ok: bool
     merged: bool
-
-
-class SearchStartResponse(BaseModel):
-    run_id: str
-    status: str
-
-
-class SearchStatusResponse(BaseModel):
-    run_id: str
-    status: str
-    progress: str
-    result: Optional[dict[Any, Any]] = None
 
 
 class PipelineApplication(BaseModel):
