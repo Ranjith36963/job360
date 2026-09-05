@@ -302,6 +302,17 @@ REGISTRY: dict[str, Guard] = {
         # guard, and it would be the worst one — it would certify the other ten.
         drill=[sys.executable, "scripts/drill_registry.py", "--drill"],
     ),
+    # ── THE GUARD THIS PR WIRES UP (docs/plans/2026-09-04-url-fetch) ────────
+    # A guard and its declaration land together, always — same rule as the
+    # lane.py/repairable.py pair above. The guard on the ONE route that makes
+    # outbound requests to a URL a stranger chose. Ten mutations, each a real
+    # bypass, plus a negative control: a guard that denies every host passes
+    # all ten breaks and is useless. Offline — the resolver is injected, no
+    # DNS, no sockets.
+    "scripts/ssrf_drill.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "scripts/ssrf_drill.py", "--drill"],
+    ),
     # ── owed: real guards, no fire-test yet, and here is exactly why ────────
     "scripts/absence_check.py": Guard(
         status="owed",
