@@ -1,13 +1,13 @@
 # Job360
 <!-- doc: LIVING | last-verified: 2026-09-03 by the mission sweep -->
 
-**Job360 is the memory and context layer for the seeker's own AI agent.** Job boards find jobs. Agents (Claude Code, ChatGPT, Grok) think and act — judge fit, write the CV, read Gmail, find the recruiter, fill the form. Job360 remembers: the structured profile, every artifact version, every typed event with its author, and the receipt of what was sent. Agents connect over MCP (`/api/mcp`) with OAuth 2.1 (slice 1) or a personal token; the web app is the same record with a screen.
+**Job360 is the memory and context layer for the seeker's own AI agent.** Job boards find jobs. Agents (Claude Code, ChatGPT, Grok) think and act — judge fit, write the CV, read Gmail, find the recruiter, fill the form. Job360 remembers: the structured profile, every artifact version, every typed event with its author, and the receipt of what was sent. Agents connect over MCP (`/api/mcp`) with OAuth 2.1 or a personal token; the web app is the same record with a screen.
 
 **We never source, rank or recommend jobs.** The user (or their agent) brings the job — a link or pasted text — and Job360 keeps everything that happens after the click. Read [`docs/product/VISION.md`](./docs/product/VISION.md) first; the work list with an issue per slice is [`docs/plans/2026-09-03-mission-roadmap.md`](./docs/plans/2026-09-03-mission-roadmap.md).
 
-> **What is live on `main` today:** magic-link login, profile extraction (CV / LinkedIn / GitHub / preferences), `POST /api/jobs/bring`, application receipts, a CV tailor kept as the web fallback, and an 8-tool MCP server. Three Railway services: `backend`, `frontend`, `Postgres` (worker + Redis deleted 2026-09-02).
+> **What is live on `main` today:** the generated API Routes table in [`ARCHITECTURE.md`](./ARCHITECTURE.md#api-routes) is the answer — it is built from the routers, so it cannot disagree with them.
 
-> **Everything below the API-docs section is the sourcing era** — the 40-source aggregator, the 0–100 scorer, the four-layer dedup, the search dashboard. That code still runs on `main` today; slice 2 (#480) hides it behind a flag and slice 5 (#483) deletes it. Kept here as history until then. A profile is still required — extraction is the part that survives.
+> **Everything below the API-docs section is the sourcing era** — the aggregator, the scorer, the dedup cascade, the search dashboard. It is off by default behind `core/settings.SEARCH_UI_ENABLED` and `core/settings.CATALOG_CRONS_ENABLED`; slice 5 (#483) deletes it. Kept here as history until then. A profile is still required — extraction is the part that survives.
 
 ### API docs (auto-generated)
 
@@ -18,7 +18,6 @@ Once the backend is running (`cd backend && python main.py`), interactive API do
 ```mermaid
 flowchart TD
     CLI["CLI (Click)\njob360 run / view / api / status / sources / setup-profile"]
-    Cron["Cron 4AM/4PM\nEurope/London"]
 
     subgraph Sources["41 Job Sources (40 live instances)"]
         direction LR
@@ -31,7 +30,6 @@ flowchart TD
     end
 
     CLI -->|"--source / --dry-run / --no-email"| Orchestrator["Orchestrator\nsrc/main.py"]
-    Cron -->|triggers| Orchestrator
     Sources -->|async fetch\nrate-limited + retries| Orchestrator
     Orchestrator --> Scorer["Scorer\nTitle 40 + Skills 40\nLocation 10 + Recency 10\n− Negative penalty 30"]
     Scorer --> OptEngines["Enrichment + Semantic +\nLLM Judge (opt-in flags)"]

@@ -11,7 +11,7 @@
 ## What this is
 
 The Job360 backend: Python 3.10+ (`mcp` needs it; CI and prod run 3.12), FastAPI, Postgres via psycopg3 (`pg.py` — an aiosqlite-shaped shim). No worker: the ARQ code in `src/workers/` is dead since the worker + Redis services were deleted 2026-09-02.
-**Product path:** `src/api/routes/bring.py` → `receipts.py` → `tailor.py` (web fallback) → `src/api/mcp_server.py`; `src/services/profile/` feeds it. Everything else under `src/sources/`, `src/main.py`, `services/skill_matcher.py`, `services/enrichment/` is the sourcing era — still runs, slated for deletion (roadmap slice 5, #483). Never add to it.
+**Product path:** root [`../CLAUDE.md`](../CLAUDE.md) § Architecture — one copy, not two. Everything under `src/sources/`, `src/main.py`, `services/skill_matcher.py`, `services/enrichment/` is the sourcing era, slated for deletion (roadmap slice 5, #483). Never add to it.
 Entry points: `main.py` (uvicorn) and `python -m src.cli`. Runtime data (gitignored)
 lives in `data/` (`exports/`, `reports/`, `logs/`, `chroma/`, and the legacy `user_profile.json` that
 `storage.py` migrates once then deletes). There is **no `data/jobs.db`** — the store is

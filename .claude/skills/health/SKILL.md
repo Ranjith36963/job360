@@ -34,14 +34,12 @@ You are the Job360 health checker. You ignore the backlog and missions entirely 
 ### Pillar 3 — Delivery
 - Auth round-trip: POST /api/auth/register (new account) **then always** POST /api/auth/login,
   and only then GET /api/auth/me carrying the `job360_session` cookie.
-  - `/register` deliberately does **not** log you in — `backend/src/api/routes/auth.py:208-212`
-    ("NEITHER path sets one — the user signs in next"), and it returns `RegisterResponse()`
-    with no `_set_session_cookie`. The only cookie-setter on this flow is `/login`
-    (`backend/src/api/routes/auth.py:296`). Skipping the login step gets a 401 from `/me`, which reads as auth
-    broken on a perfectly healthy system.
-  - The route is `/api/auth/me` — `backend/src/api/routes/auth.py:39` `APIRouter(prefix="/auth")`
-    + `backend/src/api/routes/auth.py:336` `@router.get("/me")`, mounted under `/api`. There is no bare `/api/me`; it 404s.
-- Dashboard loads (browser flavor) with zero console errors; verdict badges render.
+  - `/register` deliberately does **not** log you in: `api/routes/auth.register` sets no
+    cookie, only `api/routes/auth.login` calls `_set_session_cookie`. Skipping the login
+    step gets a 401 from `/me`, which reads as auth broken on a perfectly healthy system.
+- The applications home (`/applications`) loads with zero console errors. **`/dashboard`
+  and bare `/jobs` 404 by design** — `frontend/src/middleware.ts` `SEARCH_UI_EXACT_PATHS`,
+  off unless `NEXT_PUBLIC_SEARCH_UI_ENABLED=true`. Never grade that 404 RED.
 - Pipeline/actions endpoints respond; notification rules endpoint responds.
 - GREEN: all respond 2xx, console clean. RED: any 5xx on the happy path or auth broken.
 

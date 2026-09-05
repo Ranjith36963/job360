@@ -68,7 +68,7 @@ npm run dev | build | lint | type-check | test:unit | test:e2e
 
 ## Architecture (one paragraph + pointers)
 
-**Product path (current):** `POST /jobs/bring` (`api/routes/bring.py`) → `jobs` row + application receipt (`api/routes/receipts.py`, append-only) → tailoring as web fallback (`api/routes/tailor.py`) → MCP server `api/mcp_server.py` (8 tools, bearer tokens `j360_…`, `/api/mcp`). Slice 2 turns this into one Application object + event log.
+**Product path (current):** `POST /jobs/bring` (`api/routes/bring.py`) → `services/applications/spine.py` + `api/routes/applications.py` → `api/routes/receipts.py` (append-only) → `api/routes/tailor.py` (web fallback) → `api/mcp_server.build_server` (bearer `j360_…`, `/api/mcp`; measure the tool set, never quote it).
 **Legacy path (hidden, slice 5 deletes):** `src/main.py` `run_search()` → `SOURCE_REGISTRY` sources → `skill_matcher.JobScorer` → `deduplicator.py` → feed.
 
 - `src/repositories/pg.py` is the single DB door — an `aiosqlite`-shaped async driver whose `translate()` rewrites legacy SQLite SQL to Postgres at runtime. It is production-critical, not test-only (guard: `tests/test_pg_translate.py`). Every module does `from src.repositories import pg as aiosqlite`.
