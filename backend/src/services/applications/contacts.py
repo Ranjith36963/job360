@@ -31,8 +31,21 @@ if TYPE_CHECKING:  # pragma: no cover — type-only, same reasoning as spine.py
     from src.repositories.database import JobDatabase
 
 # S5 — the simple shape check the spec names; not a full RFC 5322 validator
-# (this is a contact's stated email, not a login credential).
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# (this is a contact's stated email, not a login credential). Structural, not a
+# regex: `^[^@\s]+@[^@\s]+\.[^@\s]+$` is what it means, but that pattern backtracks
+# polynomially on `a@!.!.!.…` (CodeQL py/polynomial-redos), and this is O(n).
+_WHITESPACE_RE = re.compile(r"\s")
+
+
+def _looks_like_email(email: str) -> bool:
+    """Same set as the old regex: no whitespace, one `@`, non-empty local part,
+    and a dot inside the domain that is neither its first nor its last char."""
+    if _WHITESPACE_RE.search(email):
+        return False
+    local, sep, domain = email.partition("@")
+    if not sep or not local or not domain or "@" in domain:
+        return False
+    return "." in domain[1:-1]
 
 
 def _validate_name(raw: str) -> str:
@@ -57,7 +70,7 @@ def _validate_email(raw: str) -> str:
         return ""
     if len(email) > settings.CONTACT_EMAIL_MAX_CHARS:
         raise SpineError(422, f"email exceeds CONTACT_EMAIL_MAX_CHARS ({settings.CONTACT_EMAIL_MAX_CHARS} chars)")
-    if not _EMAIL_RE.match(email):
+    if not _looks_like_email(email):
         raise SpineError(422, "email must look like a real address (e.g. name@example.com)")
     # R2 — stored lower-cased + trimmed so identity is case/whitespace-insensitive.
     return email.lower()

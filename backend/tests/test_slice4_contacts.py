@@ -305,13 +305,45 @@ async def test_linkedin_url_must_be_http_or_https(authenticated_async_context, l
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("email", ["not-an-email", "a@b", "a b@c.example", "@c.example"])
+@pytest.mark.parametrize(
+    "email",
+    ["not-an-email", "a@b", "a b@c.example", "@c.example", "a@.com", "a@b.", "a@@b.c", "a@b@c.d", "a@b\tc.d"],
+)
 async def test_email_shape_is_checked(authenticated_async_context, email):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         resp = await _add_contact(client, app_id, email=email)
         assert resp.status_code == 422, resp.text
         assert "email" in resp.text
+
+
+@pytest.mark.parametrize(
+    "email",
+    ["name@example.com", "first.last+tag@sub.example.co.uk", "x@y.z", "a!#$%@b.c"],
+)
+def test_email_shape_accepts_what_the_old_regex_accepted(email):
+    # The check was `^[^@\s]+@[^@\s]+\.[^@\s]+$`; CodeQL flagged it as polynomial-time
+    # (py/polynomial-redos). The structural replacement must accept the same set.
+    from src.services.applications.contacts import _validate_email
+
+    assert _validate_email(email) == email.lower()
+
+
+@pytest.mark.real_sleep
+def test_email_check_is_linear_time():
+    # Pathological input for the old regex: many `!.` pairs after `@` and no final
+    # match. Bounded by CONTACT_EMAIL_MAX_CHARS (254) in the route, but the check
+    # itself must not backtrack regardless of the cap.
+    import time
+
+    from src.services.applications.contacts import _looks_like_email
+
+    bad = "a@" + "!." * 5000 + "!"
+    t0 = time.perf_counter()
+    assert _looks_like_email(bad) is True  # dots exist inside the domain → shape ok
+    assert _looks_like_email("a@" + "!" * 10000) is False
+    assert _looks_like_email("a@" + "!." * 5000 + " ") is False  # whitespace anywhere → reject
+    assert time.perf_counter() - t0 < 0.05
 
 
 @pytest.mark.asyncio
