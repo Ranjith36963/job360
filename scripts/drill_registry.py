@@ -188,6 +188,30 @@ REGISTRY: dict[str, Guard] = {
         # still names an old one. The guard that makes a file MOVE safe.
         drill=[sys.executable, "scripts/stale_path_check.py", "--drill"],
     ),
+    "scripts/worktree_reaper.py": Guard(
+        status="drilled",
+        # The ENTRANCE worktree_census.py and branch_prune.sh never had. Both are
+        # correct and both are manual, and between them being written and this the
+        # estate went 14 -> 62 -> 98 worktrees: a cleanup tool nobody runs is
+        # indistinguishable from no cleanup tool.
+        #
+        # It adds no classifier -- `no_second_classifier` parses this file's own
+        # AST and fails if any `run([...])` call reaches for `status`, `cherry`,
+        # `merge-base` or `--merged`, because two brains disagreeing about SAFE is
+        # worse than one being wrong: the disagreement is invisible until it
+        # deletes something. Watched RED by planting exactly that call.
+        #
+        # What it does add is drilled: the idle floor (the census asks whether a
+        # folder holds WORK, and cannot see an idle session sitting in a clean
+        # one), prune-before-remove (pinned against a real temp repo -- `git
+        # worktree remove` REFUSES once a merge has broken the .git link, which is
+        # the majority case), the throttle, and the remote half.
+        #
+        # Every group carries a negative control. A reaper that refuses everything
+        # passes every safety case and collects nothing, which is precisely how
+        # branch_prune.sh looked correct while 98 worktrees piled up behind it.
+        drill=[sys.executable, "scripts/worktree_reaper.py", "--drill"],
+    ),
     "scripts/worktree_census.py": Guard(
         status="drilled",
         # Sorts 62 worktrees / 209 local branches into SAFE / KEEP / ASK. The
