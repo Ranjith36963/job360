@@ -13,9 +13,7 @@ Read the actual code and extract current facts. **The mission is `docs/product/V
 
 - **Product path**: which routes exist in `backend/src/api/routes/bring.py`, `receipts.py`, `tailor.py`; which tools `backend/src/api/mcp_server.py` registers (count them); which Railway services exist (three: backend, frontend, Postgres — worker + Redis deleted 2026-09-02)
 - **Roadmap state**: which slices in `docs/plans/2026-09-03-mission-roadmap.md` have merged (check the issue #479–#483 state with `gh issue view`)
-- **Source count (legacy, only while `src/sources/` exists)**: Count classes in `backend/src/sources/` that extend `BaseJobSource`, count entries in `SOURCE_REGISTRY` in `backend/src/main.py` (`indeed` and `glassdoor` both map to `JobSpySource`). Never let a doc call this "the product".
 - **Test count**: Run (from `backend/`) `python -m pytest tests/ --collect-only -q 2>&1 | tail -3` to get exact test count
-- **Scoring rules (legacy)**: Read `backend/src/services/skill_matcher.py` only to confirm docs call it legacy/off for the product path
 - **DB schema**: Read `backend/src/repositories/database.py` + `backend/migrations/` for table definitions (jobs, applications, application_receipts, tailored_documents, user_actions), column names, UNIQUE constraints, indexes
 - **Features**: Check what modules exist in `backend/src/services/`, `backend/src/services/profile/`, `backend/src/services/notifications/`, `backend/src/api/` — what's actually implemented
 - **Commands**: Read `backend/src/cli.py` for actual CLI commands and flags
@@ -30,7 +28,7 @@ Read the actual code and extract current facts. **The mission is `docs/product/V
 Read each MD file and flag every mismatch:
 
 - `CLAUDE.md` — mission block points at VISION.md + roadmap; product path vs legacy path split; commands; test count; three services
-- `backend/CLAUDE.md` — thin backend pointer; product-path module lines + the legacy `SOURCE_REGISTRY (N)` count
+- `backend/CLAUDE.md` — thin backend pointer; product-path module lines
 - `ARCHITECTURE.md` — deep system description, module relationships, data flow
 - `STATUS.md` — what's done, what's in progress, what's next
 - `README.md` — quickstart, features overview, usage examples

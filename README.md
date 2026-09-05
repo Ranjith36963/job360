@@ -1,469 +1,140 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-09-03 by the mission sweep -->
+<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
 
-**Job360 is the memory and context layer for the seeker's own AI agent.** Job boards find jobs. Agents (Claude Code, ChatGPT, Grok) think and act — judge fit, write the CV, read Gmail, find the recruiter, fill the form. Job360 remembers: the structured profile, every artifact version, every typed event with its author, and the receipt of what was sent. Agents connect over MCP (`/api/mcp`) with OAuth 2.1 (slice 1) or a personal token; the web app is the same record with a screen.
+**Job360 is the memory and context layer for the seeker's own AI agent.** Job boards find jobs. Agents (Claude Code, ChatGPT, Grok, Gemini, a browser agent) think and act — judge fit, write the CV, find the recruiter, read the inbox, fill the form. Job360 remembers: the structured profile, every artifact version, every typed event with its author, and the receipt of what was sent.
 
-**We never source, rank or recommend jobs.** The user (or their agent) brings the job — a link or pasted text — and Job360 keeps everything that happens after the click. Read [`docs/product/VISION.md`](./docs/product/VISION.md) first; the work list with an issue per slice is [`docs/plans/2026-09-03-mission-roadmap.md`](./docs/plans/2026-09-03-mission-roadmap.md).
+**We never source, rank or recommend jobs** (product rule 4). The user, or their agent, brings the job — a link or pasted text — and Job360 keeps everything that happens after the click. Read [`docs/product/VISION.md`](./docs/product/VISION.md) first; the work list with an issue per slice is [`docs/plans/2026-09-03-mission-roadmap.md`](./docs/plans/2026-09-03-mission-roadmap.md).
 
-> **What is live on `main` today:** magic-link login, profile extraction (CV / LinkedIn / GitHub / preferences), `POST /api/jobs/bring`, application receipts, a CV tailor kept as the web fallback, and an 8-tool MCP server. Three Railway services: `backend`, `frontend`, `Postgres` (worker + Redis deleted 2026-09-02).
-
-> **Everything below the API-docs section is the sourcing era** — the 40-source aggregator, the 0–100 scorer, the four-layer dedup, the search dashboard. That code still runs on `main` today; slice 2 (#480) hides it behind a flag and slice 5 (#483) deletes it. Kept here as history until then. A profile is still required — extraction is the part that survives.
+> **What is live on `main` today:** magic-link login, profile extraction (CV / LinkedIn / GitHub / preferences), `POST /api/jobs/bring`, the application spine (one Application object, typed events, versioned artifacts, append-only receipts), a CV tailor kept as the web fallback, and an MCP server at `/api/mcp`. Three Railway services: `backend`, `frontend`, `Postgres` (worker + Redis were deleted 2026-09-02, so nothing runs in the background — no notifications, no crons).
+>
+> **The sourcing era was deleted 2026-09-05** (slice 5, #483): the 40-source aggregator, the 0–100 scorer, the four-layer dedup, the search dashboard. None of that code exists in this repo any more — its docs are kept, FROZEN, as history under [`docs/_archive/sourcing-era/`](./docs/_archive/sourcing-era/).
 
 ### API docs (auto-generated)
 
 Once the backend is running (`cd backend && python main.py`), interactive API docs are served at **http://localhost:8000/docs** (Swagger UI) and **http://localhost:8000/redoc** (ReDoc). Both are generated from the FastAPI route decorators + Pydantic models — no separate maintenance.
 
+## How an agent uses Job360
+
+Point any MCP-capable client (Claude Code, Claude, ChatGPT, Grok) at `https://job360.uk/api/mcp` (or `http://localhost:8000/api/mcp` in dev). Two ways to authenticate:
+
+- **OAuth 2.1** — the client discovers the authorization server from `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource` and runs the standard flow. This is how ChatGPT- and Grok-style connectors add Job360.
+- **Personal token** — sign in to the web app, go to **Settings → Connect an agent**, and mint a token (`j360_…`). It is shown once; the backend stores only a hash. Good for CLI clients and Claude Code.
+
+Once connected, the agent reads and writes the candidate's profile, brings a job, saves CV/cover-letter/answer versions, records typed events, and pulls `whats_new` — all through MCP tools backed by the same REST routes the web app uses. The agent still does the finding, judging and writing; Job360 only stores.
+
+## What Job360 stores
+
+Bringing a job (a link or pasted text) births one **Application**, status `considering`. Everything else hangs off it:
+
+- **Job snapshot** — title, company, location, URL, the ad text as it read that day
+- **Artifacts** — CV, cover letter, answers, outreach; every version kept, stamped with who/when and which profile version made it
+- **Events** — an append-only, typed history (`brought`, `fit_judged`, `artifact_saved`, `applied`, `replied`, `interview_scheduled`, `offer`, `rejected`, and more); the current status is just the last status event
+- **Contacts** — recruiter or hiring-manager details the agent found
+- **Receipt** — frozen the moment "I applied" happens: artifact versions sent, fields filled, confirmation text, channel, timestamp — never edited afterwards
+
+Nothing here is scored, ranked or recommended. The candidate profile (CV + LinkedIn + GitHub + preferences) is the one piece of context every application draws from; see [`docs/product/VISION.md`](./docs/product/VISION.md) for the full object model and the event-type list.
+
 ## Architecture
 
-```mermaid
-flowchart TD
-    CLI["CLI (Click)\njob360 run / view / api / status / sources / setup-profile"]
-    Cron["Cron 4AM/4PM\nEurope/London"]
-
-    subgraph Sources["41 Job Sources (40 live instances)"]
-        direction LR
-        KeyedAPIs["Keyed APIs (8)\nReed, Adzuna, JSearch, Jooble\nGoogle Jobs, Careerjet, Findwork\nGov Apprenticeships"]
-        FreeJSON["Free JSON APIs (8)\nArbeitnow, RemoteOK, Jobicy, Himalayas\nRemotive, DevITjobs, Landing.jobs\nHN Jobs"]
-        ATSBoards["ATS Boards (10, 297 slugs polled)\nGreenhouse, Lever, Workable, Ashby\nSmartRecruiters, Pinpoint, Recruitee\nWorkday, Personio, SuccessFactors"]
-        RSSFeeds["RSS/XML Feeds (5)\nNHS Jobs, WeWorkRemotely\nRealWorkFromAnywhere\nUniversity Jobs, Teaching Vacancies"]
-        HTMLScrapers["HTML Scrapers (5)\nLinkedIn, Climatebase\n80000Hours, BCS Jobs, AIJobs AI"]
-        OtherSources["Other (4 classes / 5 keys)\nIndeed+Glassdoor (JobSpySource)\nHackerNews, TheMuse, NoFluffJobs"]
-    end
-
-    CLI -->|"--source / --dry-run / --no-email"| Orchestrator["Orchestrator\nsrc/main.py"]
-    Cron -->|triggers| Orchestrator
-    Sources -->|async fetch\nrate-limited + retries| Orchestrator
-    Orchestrator --> Scorer["Scorer\nTitle 40 + Skills 40\nLocation 10 + Recency 10\n− Negative penalty 30"]
-    Scorer --> OptEngines["Enrichment + Semantic +\nLLM Judge (opt-in flags)"]
-    OptEngines --> Dedup[Deduplicator\nnormalized company+title]
-    Dedup --> DB[(Postgres\nSeen Jobs + Run Log)]
-
-    DB --> Channels{Apprise dispatcher}
-    Channels --> Email[Email\nThe product]
-    Channels --> Webhook[Webhook\nRaw JSON, unsupported]
-
-    DB --> CSV[CSV Export]
-    DB --> Report[Markdown Report]
-    DB --> RichTable[Rich Terminal Table\ncli view]
-    DB --> NextJS[Next.js Frontend\nvia FastAPI]
-```
-
-## Features
-
-### Job Sources (40 classes / 41 registry keys / 40 instances)
-
-> The reconciliation: 40 *class files* on disk → 41 *registry keys* (`indeed`+`glassdoor` both map to `JobSpySource`) → 40 *live instances* per run. Test assertions pin all three (`test_cli.py` requires `len(SOURCE_REGISTRY) == 41`).
-
-- **8 keyed APIs**: Reed, Adzuna, JSearch, Jooble, Google Jobs (SerpApi), Careerjet, Findwork, Gov Apprenticeships (DfE) — skip gracefully if no API key set
-- **8 free JSON APIs** (`category="free_json"`): Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, HN Jobs — no auth required; Teaching Vacancies *(Batch 3)* is a 9th file in `apis_free/` but runs on the 15-min RSS scheduler tier (`category="rss"`) not the free_json tier, so it is counted under RSS/XML below
-- **10 ATS boards** polling 297 company slugs: Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors — see `backend/src/core/companies.py`, which holds **302** slugs across 11 platform lists; `RIPPLING_COMPANIES` (5) has had no source class since the 2026-08-10 rotation, so 10 boards poll the other 297
-- **5 RSS/XML feeds** (`category="rss"`): NHS Jobs (keyword search), WeWorkRemotely, RealWorkFromAnywhere, University Jobs, plus Teaching Vacancies *(lives in `apis_free/` but runs on the 15-min RSS tier)*
-- **5 HTML scrapers**: LinkedIn (guest API), Climatebase, 80000Hours, BCS Jobs, AIJobs AI
-- **4 other**: Indeed/Glassdoor (via optional `python-jobspy`), HackerNews (Algolia), TheMuse, NoFluffJobs
-
-**Dropped in Batch 3**: `yc_companies` (covered by HN Jobs + Ashby), `findajob` (duplicate of Adzuna), `nomis` (UK ONS *statistics*, not vacancy listings). **Dropped in M6 rotation (2026-06)**: `jobtensor` (pivoted to JS-only German app), `comeet` (token-gated API), `aijobs_global` (board abandoned Oct 2023). `gov_apprenticeships` was briefly dropped but **restored 2026-06-16** on the DfE Display Advert API v2 (`DFE_APPRENTICESHIPS_API_KEY`; `category="keyed_api"`).
-
-**Domain routing**: each source has a `.DOMAINS` set (`tech`, `healthcare`, `academia`, `education`, `climate`, or `general`). `classify_user_domain(profile)` filters sources to the user's domain set so a teacher doesn't get healthcare jobs and vice versa. See `docs/product/pillars/03-job-providers.md` §4.7.
-
-### Profile System (any domain)
-- **CV parsing**: Upload PDF or DOCX, extracts skills, job titles, education, certifications
-- **LinkedIn enrichment**: Import a LinkedIn profile PDF (profile → More → Save to PDF) — positions, skills, education
-- **GitHub enrichment**: Fetch public repos, infer skills from languages and topics
-- **Interactive preferences**: Target titles, skills, locations, salary range, work arrangement
-- **Dynamic keywords**: Profile generates personalised search queries, relevance keywords, and scoring criteria
-- **Profile required**: As of 2026-04-09 the keyword fallback lists are empty — `setup-profile` must run before the engine can produce meaningful scores
-
-### Scoring (0-100)
-- **Title match** (0-40 pts) — exact match = 40, partial = 20, keyword overlap = 5 each
-- **Skill match** (0-40 pts) — primary skills 3pts, secondary 2pts, tertiary 1pt (capped at 40)
-- **Location** (0-10 pts) — target UK location = 10, remote = 8
-- **Recency** (0-10 pts) — 0-1 days = 10, 1-3 days = 8, 3-5 days = 6, 5-7 days = 4, 7+ days = 0
-- **Negative keyword penalty** (-30 pts) — titles matching irrelevant roles (sales, nursing, etc.) are penalised
-- **No foreign-location penalty** — deleted 2026-08-12 (rule #30): a non-UK job is refused at the door (`services/uk_gate.check_uk`), never docked points
-- **Experience level detection** — parses Senior, Lead, Junior, Principal, etc. from title
-
-### Data Quality
-- **HTML entity decoding** — cleans `&amp;`, `&lt;`, etc. from job descriptions
-- **Company name cleaning** — strips suffixes like "Ltd", "Inc", "Limited", and region tags like "UK", "EMEA" for consistent dedup
-- **Salary outlier filtering** — ignores unrealistic salary values (<10k or >500k)
-
-### Notifications (email + webhook only)
-- **Email** — the product. The daily shortlist, built from the same `DecisionCard` the dashboard renders (score, verdict, reason, salary). **Resend's HTTPS API is the production transport** (Railway blocks outbound SMTP ports 25/465/587); a local or self-hosted SMTP relay remains supported as a fallback when no Resend key is configured — see `backend/src/services/channels/email_url.py`
-- **Webhook** — unsupported escape hatch. Raw JSON for a technical user's own tooling; no design, no promises
-- **Apprise dispatcher** — per-user channels stored in the DB. Slack, Discord and Telegram were removed 2026-08-24 (never configured in production, zero users ever connected one) — see `docs/plans/2026-08-24-email-webhook-only-delivery.md`
-
-### CLI (Click)
-- `run` — full pipeline with `--source`, `--dry-run`, `--log-level`, `--no-email` options
-- `view` — Rich terminal table with `--hours`, `--min-score`, `--source`, `--visa-only` filters
-- `setup-profile` — interactive profile wizard with `--cv`, `--linkedin`, `--github` options
-- `api` — start the FastAPI backend server (consumed by the Next.js frontend)
-- `status` — show last run stats from database
-- `sources` — list all 41 registry sources (40 live instances)
-- `rescore-backfill` — enqueue the resumable re-score drainer for stale `user_feed` rows, with `--batch-size`, `--max-users`, `--throttle`
-
-### Frontend (Next.js + FastAPI)
-- Next.js 16 + React 19 + Tailwind 4 + shadcn at `frontend/`
-- Talks to FastAPI (`backend/src/api/`) over HTTP — 13 route modules, 65 endpoints (health, jobs, actions, profile, search, pipeline, tailor, channels, notifications, runs)
-- Job list with filters, score radar, time buckets
-- Profile setup: CV upload, LinkedIn profile PDF import, GitHub username, preferences form
-- Application pipeline Kanban board
-
-### Infrastructure
-- **Deduplication** — same job from different sources merged by normalised company+title
-- **Persistent tracking** — Postgres database prevents duplicate notifications across runs
-- **Visa flagging** — automatically flags jobs mentioning visa/sponsorship keywords
-- **Async rate limiting** — per-source concurrency + delay (configurable in settings.py)
-- **Retry logic** — 3 attempts with exponential backoff (1s, 2s, 4s) + 30s timeout per request; per-source fetch ceiling 240s (ATS) / 60s (others) via `TieredScheduler.resolve_fetch_timeout()`
-- **Cron scheduling** — `cron_setup.sh` sets up 4AM/4PM UK time (Europe/London)
-- **Logging** — rotating file handler (5MB max, 3 backups) + console output
-- **Dry-run mode** — fetch and score without writing to DB or sending notifications
-- **Auto-purge** — jobs older than 30 days are automatically deleted on each run
-- **Split requirements** — prod deps in `backend/pyproject.toml` `[project.dependencies]`, dev/test in the same file's `[project.optional-dependencies] dev` extra (`pip install -e ".[dev]"`). There is no `requirements*.txt` in the repo
-- **Hardened setup** — Python 3.9+ version check, idempotent installs, .env validation
-
-### Testing (2 `live` tests deselected offline)
-
-> **The collected-test count is not written down anywhere on purpose.** Measure it:
-> `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`.
-> `scripts/doc_sync_check.py` deliberately does not guard it (it needs Postgres, and
-> parametrization makes any cheap check flaky), so any total committed to a doc is
-> unguarded and silently rots — this table has carried a wrong one before.
->
-> Per-file counts below are a **snapshot taken 2026-08-24**, not a live invariant; re-measure
-> with `python -m pytest tests/<file>.py --collect-only -q -p no:randomly | tail -1`.
-> `test_main.py` **is** in the canonical run — do not add `--ignore=tests/test_main.py`
-> (root CLAUDE.md rule).
-
-| Test file | Collected count | What it covers |
-|-----------|-------|----------------|
-| `test_profile.py` | 112 | CV parser, preferences, keyword generator, JobScorer |
-| `test_sources.py` | 110 | All 41 sources with mocked HTTP |
-| `test_scorer.py` | 92 | Scoring algorithm, penalties, recency tiers, edge cases |
-| `test_linkedin_github.py` | 64 | LinkedIn PDF parsing (section-split + LLM), GitHub API enrichment |
-| `test_deduplicator.py` | 35 | Cross-source dedup (incl. marketing-suffix B-4 tests) |
-| `test_time_buckets.py` | 33 | Time bucket grouping logic |
-| `test_api.py` | 27 | FastAPI endpoints (health, jobs, actions, profile, search, pipeline) |
-| `test_models.py` | 25 | Job dataclass, normalisation, company cleaning |
-| `test_main.py` | 18 | Orchestrator (IS in the canonical run — carries no `live` marker) |
-| `test_llm_provider.py` | 18 | Multi-provider LLM client for CV parsing |
-| `test_decision_card.py` | 22 | What a matched job *says* — one definition shared by dashboard and email |
-| `test_database.py` | 16 | Postgres operations, migrations, source history |
-| `test_channels_dispatcher.py` | 16 | Apprise dispatch, quiet hours, digest queueing |
-| `test_digest_email_body.py` | 12 | How the daily email reads (verdict first, the honest "no", empty days) |
-| `test_cli.py` | 11 | CLI commands + SOURCE_REGISTRY assertions |
-| `test_notification_rules.py` | 11 | One-rulebook-per-user rules + routes |
-| `test_reports.py` | 6 | Markdown + HTML report generation |
-| `test_cli_view.py` | 6 | Rich terminal table viewer |
-| `test_rate_limiter.py` | 5 | Async rate limiter |
-| `test_cron.py` | 5 | cron_setup.sh validation |
-| `test_setup.py` | 4 | setup.sh validation |
-| `test_csv_export.py` | 4 | CSV export format |
-| (every other `test_*.py` file) | measure it | auth, feed, prefilter, channels, scheduler, circuit_breaker, enrichment, embeddings, retrieval, IDOR, account-mgmt, application history, llm_matcher, uk_gate, visa_signal, shelf registry, harness guards |
-
-## Quick Start
-
-```bash
-# 1. Clone and setup
-git clone https://github.com/Ranjith36963/job360.git
-cd job360
-bash setup.sh
-
-# 2. Configure API keys (optional — free sources work without any keys)
-nano .env
-
-# 3. Run job search
-source venv/bin/activate
-python -m src.cli run
-
-# 4. Single source / dry run
-python -m src.cli run --source arbeitnow
-python -m src.cli run --dry-run --log-level DEBUG
-
-# 5. Set up a personalised profile
-python -m src.cli setup-profile --cv path/to/cv.pdf
-python -m src.cli setup-profile --cv cv.pdf --linkedin linkedin-profile.pdf --github yourusername
-
-# 6. View results in terminal
-python -m src.cli view --hours 24 --min-score 50
-
-# 7. Start the API + frontend
-python -m src.cli api            # FastAPI on :8000
-# (in another terminal) cd frontend && npm run dev   # Next.js on :3000
-
-# 8. Schedule (optional)
-bash cron_setup.sh
-```
-
-## CLI Usage
-
-```bash
-# Full pipeline — fetch from all 41 sources (40 live instances), score, deduplicate, notify
-python -m src.cli run
-
-# Single source only
-python -m src.cli run --source arbeitnow
-python -m src.cli run --source reed
-
-# Dry run — fetch and score, skip DB writes and notifications
-python -m src.cli run --dry-run
-
-# Skip email notifications
-python -m src.cli run --no-email
-
-# Debug logging
-python -m src.cli run --log-level DEBUG
-
-# Combine options
-python -m src.cli run --source greenhouse --dry-run --log-level DEBUG
-
-# Set up user profile (personalise for any domain)
-python -m src.cli setup-profile --cv path/to/cv.pdf
-python -m src.cli setup-profile --cv cv.pdf --linkedin linkedin-profile.pdf
-python -m src.cli setup-profile --cv cv.pdf --github yourusername
-python -m src.cli setup-profile --linkedin linkedin-profile.pdf --github user
-
-# View jobs in Rich terminal table
-python -m src.cli view
-python -m src.cli view --hours 24 --min-score 50
-python -m src.cli view --source reed --visa-only
-
-# Start the FastAPI backend (consumed by the Next.js frontend)
-python -m src.cli api
-
-# Show last run stats
-python -m src.cli status
-
-# List all available sources
-python -m src.cli sources
-```
-
-## API Key Setup
-
-| Source | Signup | ENV Variable |
-|--------|--------|-------------|
-| Reed.co.uk | [reed.co.uk/developers](https://www.reed.co.uk/developers/jobseeker) | `REED_API_KEY` |
-| Adzuna | [developer.adzuna.com](https://developer.adzuna.com/) | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` |
-| JSearch | [rapidapi.com/jsearch](https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch) | `JSEARCH_API_KEY` |
-| Jooble | [jooble.org/api](https://jooble.org/api/about) | `JOOBLE_API_KEY` |
-| Google Jobs | [serpapi.com](https://serpapi.com/) | `SERPAPI_KEY` |
-| Careerjet | [careerjet.com/partners](https://www.careerjet.com/partners/) | `CAREERJET_AFFID` |
-| Findwork | [findwork.dev](https://findwork.dev/) | `FINDWORK_API_KEY` |
-| GitHub | [github.com/settings/tokens](https://github.com/settings/tokens) | `GITHUB_TOKEN` (optional, for profile enrichment) |
-| Email delivery | [resend.com](https://resend.com/) | `RESEND_API_KEY` (+ `SMTP_FROM`). Powers magic-link email AND the per-user email alert channel. Falls back to `SMTP_EMAIL`/`SMTP_PASSWORD`/`SMTP_HOST`/`SMTP_PORT` over SMTP where the host allows it — Railway does not |
-
-> **`NOTIFY_EMAIL` no longer notifies anyone.** It is still declared in
-> `backend/src/core/settings.py:78` and read by nothing under `backend/src/`,
-> `backend/tests/` or `scripts/`. It belonged to the pre-Batch-2 single-tenant
-> notifier, which was deleted.
->
-> **`SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL` and the `TELEGRAM_*` settings are
-> gone entirely** — deleted on 2026-08-24 along with the chat channels themselves
-> (never configured in production, zero users ever connected one). Delivery is
-> email + webhook only; see `docs/plans/2026-08-24-email-webhook-only-delivery.md`.
->
-> One name survives elsewhere and it is a DIFFERENT system: CI sends its own build
-> alerts through a `SLACK_WEBHOOK_URL` **repository secret**
-> (`.github/actions/slack`), which pages the owner when `main` goes red. That is
-> untouched. Setting either name in the *app's* environment delivers nothing.
-
-**Free sources (no key needed)**: Arbeitnow, RemoteOK, Jobicy, Himalayas, Remotive, DevITjobs, Landing.jobs, HN Jobs, Teaching Vacancies, LinkedIn, Greenhouse, Lever, Workable, Ashby, SmartRecruiters, Pinpoint, Recruitee, Workday, Personio, SuccessFactors, NHS Jobs, WeWorkRemotely, RealWorkFromAnywhere, University Jobs, Climatebase, 80000Hours, BCS Jobs, AIJobs AI, Indeed/Glassdoor (if python-jobspy installed), HackerNews, TheMuse, NoFluffJobs, Gov Apprenticeships (DFE_APPRENTICESHIPS_API_KEY — key required) — **33 of 41 sources work without any API keys** (8 keyed). Dropped in Batch 3: yc_companies, findajob, nomis. Dropped in M6: jobtensor, comeet, aijobs_global. Dropped 2026-08-10 (dead upstreams): aijobs, rippling, biospace, jobs_ac_uk, workanywhere, nhs_jobs_xml.
-
-## Scoring Algorithm
-
-| Component | Points | How it works |
-|-----------|--------|-------------|
-| **Title match** | 0-40 | Exact match to target titles = 40pts. Partial match = 20pts. Keyword overlap = 5pts each |
-| **Skill match** | 0-40 | Primary skills = 3pts each. Secondary = 2pts each. Tertiary = 1pt each. Capped at 40 |
-| **Location** | 0-10 | Target UK location = 10pts. Remote = 8pts |
-| **Recency** | 0-10 | Posted 0-1 days ago = 10pts, 1-3 days = 8pts, 3-5 days = 6pts, 5-7 days = 4pts, 7+ days = 0pts |
-| **Negative keyword** | -30 | Titles matching irrelevant roles (sales engineer, recruiter, nurse, etc.) get a 30-point penalty |
-
-There is **no foreign-location penalty**. It was deleted 2026-08-12 (rule #30): a non-UK job is refused at the door (`services/uk_gate.check_uk`), never docked points.
-
-**Total: 0-100** — minimum score threshold is 30 (configurable in `settings.py`)
-
-The scorer uses dynamic keywords from the user's profile (`SearchConfig`). Hard-coded default keyword lists in `core/keywords.py` are empty since 2026-04-09 — a profile is mandatory for the engine to produce meaningful scores. The 4-component formula above runs alongside the **Batch-2.9 multi-dimensional scoring** (seniority + salary + visa + workplace, each weighted via env vars `SENIORITY_WEIGHT`/`SALARY_WEIGHT`/`VISA_WEIGHT`/`WORKPLACE_WEIGHT`) whenever the user has filled in preferences — the dims are gated on `user_preferences` alone, and a job the enrichment pipeline has not reached yet scores each dim at its NEUTRAL half rather than zero (rule #20/#29). Final 9-field `ScoreBreakdown` documented in `docs/product/pillars/02-search-and-match-engine.md`.
-
-## Matching engines (keyword → dimensions → hybrid → LLM judge)
-
-Four engines, all opt-in except the keyword engine. **Engines 2–4 default OFF.**
-
-**Engine 1 — Keyword** (always on): `services/skill_matcher.py` `JobScorer`. Title 40 / Skill 40 / Location 10 / Recency 10 formula (0–100), gates MIN_TITLE_GATE/MIN_SKILL_GATE (default 0.15), single −30 negative-title penalty.
-
-**Engine 2 — Dimensions** (opt-in, `ENGINE2_ENABLED=true` / `ENRICHMENT_ENABLED=true`): `services/scoring_dimensions.py`, wired into `JobScorer` at `skill_matcher.py:582-617`. Adds four dimension scorers on top of the keyword score — Salary 10 / Seniority 8 / Visa 6 / Workplace 6 (raw max 130, clamped to [0, 100]). Its data is supplied by the **enrichment** step (`services/job_enrichment.py`): jobs scoring >= `ENRICHMENT_THRESHOLD` (default **10**, not 60 — `settings.py:152-155`) go to the OpenAI→Gemini→Groq→Cerebras LLM chain, stored in the shared `job_enrichment` table (16-field `JobEnrichment` schema, 7 enums, idempotent). Both halves are gated the same way — `ENGINE2_ENABLED or ENRICHMENT_ENABLED` (`main.py:853`, `main.py:1137`, `services/rescore.py:85`), so either name switches Engine 2 on (rule #18).
-
-**Engine 3 — Hybrid retrieval** (opt-in, `SEMANTIC_ENABLED=true` / `ENGINE3_ENABLED=true`): `services/embeddings.py` encodes jobs via `all-MiniLM-L6-v2` (384-dim), stored in Postgres as `job_embeddings.embedding` (pgvector, migration `0027`) via `services/pg_vector_index.py`. The older ChromaDB wrapper `services/vector_index.py` still exists, but no production call site builds it — the on-disk store could not be shared between the backend and worker containers, so the scheduled run could never add an embedding and coverage froze at 284. Note the two flags are not interchangeable: `ENGINE3_ENABLED or SEMANTIC_ENABLED` opens the hybrid READ path (`api/routes/jobs.py:368-369`), but the embedding WRITES read `SEMANTIC_ENABLED` alone (`main.py:1292,1348`). Query path (`services/retrieval.py` `retrieve_for_user`, wired live via `_hybrid_reorder_rows` in `api/routes/jobs.py`) fuses three rankings via RRF (k=60) — keyword `match_score`, **BM25** (`bm25_rank`), and an **exact vector scan** (`ORDER BY cosine_distance(...) LIMIT k` — no ANN index exists yet, see migration `0027`) — then **cross-encoder reranks** the top survivors (`cross_encoder_rerank`, `ms-marco-MiniLM-L-6-v2`). Surfaced via `GET /api/jobs?mode=hybrid`. The BM25 leg is pure-Python, so it still applies even if the semantic leg or the reranker degrade.
-
-**Engine 4 — LLM judge** (opt-in, `ENGINE4_ENABLED=true` / `MATCHER_ENABLED=true`, gate at `main.py:352`): `services/llm_matcher.py`. Per-user `MatchVerdict{fit_score 0-100, verdict, reason}` persisted onto `user_feed` (migration 0017). Runs after the per-user feed write (`_run_matcher_stage`). Feed reads rank by `COALESCE(llm_fit_score, score) DESC`. Dashboard shows AI-verdict badge. Measured: 18/18 jobs judged in 89.8 s (concurrency 3, Groq/Cerebras), judge spread 20–92 vs keyword 30–43, 10/10 fit accuracy on labeled sample.
-
-## Notification Channels
-
-Notification delivery goes through the **Apprise dispatcher** at
-`backend/src/services/channels/dispatcher.py`. It handles per-user delivery on the two
-supported channels — **email** (the product) and **webhook** (an unsupported raw-JSON escape
-hatch) — and applies each user's single rulebook: score threshold, timezone-aware quiet
-hours, and digest mode (rule #23 — one `notification_rules` row per user governs every
-channel they've connected, never one row per channel). Slack, Discord and Telegram channels
-were removed 2026-08-24 — never configured in production, zero users ever connected one. See
-`docs/plans/2026-08-24-email-webhook-only-delivery.md`.
-
-> ⚠️ **The `NotificationChannel` ABC is GONE — do not write against it.** It used to live at
-> `backend/src/services/notifications/base.py`. That file, the auto-discovery helpers
-> (`get_all_channels()` / `get_configured_channels()`) and the per-channel classes were all
-> REMOVED. What is left under `backend/src/services/notifications/` is `__init__.py`,
-> `report_generator.py` and `defaults.py` (the signup rulebook seeder + the one source of
-> truth for `NOTIFY_SCORE_THRESHOLD`) — no channel classes, no discovery.
-
-Channels are **per-user rows in the database**, not env-var-configured classes. The
-dispatcher's public surface:
-
-```python
-from src.services.channels import dispatcher
-
-channels = await dispatcher.load_user_channels(db, user_id)  # the user's configured channels
-await dispatcher.dispatch(...)                               # deliver, honouring the user's rules
-await dispatcher.test_send(db, channel_id)                   # one-off "does this work?" send
-```
-
-**Adding a new channel:** delivery is deliberately email + webhook only — see
-`.claude/skills/add-source/SKILL.md` ("do not add one" — zero users ever connected a third
-channel, and the earlier five-channel surface was cut for exactly that reason). If a real need
-appears, Apprise already speaks most services, so a channel is normally a new Apprise URL
-stored against the user, not a new Python class; the recipe is in that same skill file.
-
-## Adding a New Job Source
-
-1. Create `backend/src/sources/yoursource.py`, extend `BaseJobSource`
-2. Implement `async fetch_jobs() -> list[Job]`
-3. Use `self.relevance_keywords` and `self.job_titles` for filtering (not direct imports)
-4. If custom `__init__`, accept `search_config=None` and pass to `super().__init__(session, search_config=search_config)`
-5. Register in `SOURCE_REGISTRY` dict in `backend/src/main.py`
-6. Add to `_build_sources()` list in `backend/src/main.py` (passing `search_config=sc`)
-7. Add rate limit entry in `RATE_LIMITS` dict in `backend/src/core/settings.py`
-8. Add mocked tests in `backend/tests/test_sources.py`
-9. Update the `len(SOURCE_REGISTRY) == N` assertion and expected source set in `backend/tests/test_cli.py` **and** the `== N` count checks in `backend/tests/test_api.py` (five surfaces total — see CLAUDE.md rule #8/#13)
-10. If keyed: add env var to `backend/src/core/settings.py` and `.env.example`
-
-## Configuration
-
-### Default Keywords (`backend/src/core/keywords.py`)
-
-**All AI/ML keyword lists were emptied on 2026-04-09 (commit `3ba1342`).** The following lists are now `[]`: `JOB_TITLES`, `PRIMARY_SKILLS`, `SECONDARY_SKILLS`, `TERTIARY_SKILLS`, `RELEVANCE_KEYWORDS`, `NEGATIVE_TITLE_KEYWORDS`. Without a user profile, sources iterate empty lists and return near-zero results — `setup-profile` is a mandatory first step.
-
-What `keywords.py` still contains (domain-agnostic, applies to any profession):
-- **24 UK place/country names** + `Remote` + `Hybrid` — 26 entries in the `LOCATIONS` list (`backend/src/core/keywords.py:28-55`). `_location_score` skips the two non-places, so only the 24 can score the full 10
-- **8 visa/sponsorship keywords** (the `VISA_KEYWORDS` list: "visa sponsorship", "tier 2", "skilled worker visa", etc.)
-
-**LLM-only CV parsing** is at `backend/src/services/profile/llm_provider.py` (multi-provider: **OpenAI (PRIMARY, `gpt-4o-mini`)** → Gemini → Groq → Cerebras fallback chain — `llm_provider.py:329-334`). The earlier 391-entry `KNOWN_SKILLS` regex set and all keyword defaults were removed in commits `804725c` and `3ba1342`.
-
-### ATS Companies (`backend/src/core/companies.py`)
-
-Full slug lists are in `backend/src/core/companies.py`. Batch 3 expanded slugs significantly; slug counts as of 2026-06:
-
-| Platform | Slugs | Notes |
-|----------|-------|-------|
-| Greenhouse | 82 | |
-| Lever | 35 | |
-| Workable | 21 | |
-| Ashby | 25 | |
-| SmartRecruiters | 15 | |
-| Pinpoint | 39 | |
-| Recruitee | 31 | |
-| Workday | 20 | dict format: tenant/wd/site |
-| Personio | 26 | |
-| SuccessFactors | 3 | BAE Systems, QinetiQ, Thales UK (sitemap format; MBDA removed: DNS failure) |
-| Rippling | 5 | **not polled** — no source class since the 2026-08-10 rotation |
-| **Total** | **(302 slugs across 11 platforms)** | `RIPPLING_COMPANIES` has no source class, so 10 ATS boards poll 297 company slugs |
-
-## Project Structure
+Two deployables share one Postgres database. The backend is a FastAPI app whose product path is `POST /api/jobs/bring` (`api/routes/bring.py`) → the application spine (`services/applications/spine.py`, append-only events/artifacts/receipts) → tailoring as a web fallback (`api/routes/tailor.py`) → the MCP server (`api/mcp_server.py`), with `services/profile/` feeding profile data into all of it. `src/repositories/pg.py` is the single DB door — an aiosqlite-shaped async driver that rewrites legacy SQLite SQL to Postgres at runtime; every module imports it as `from src.repositories import pg as aiosqlite`. The frontend is a Next.js app that is a thin screen over the same routes.
 
 ```
 job360/
 ├── backend/
 │   ├── main.py                  # FastAPI uvicorn entry (thin)
-│   ├── pyproject.toml           # Deps + [dev] extras; ruff/mypy/pytest config
-│   ├── data/                    # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — Postgres since 2026-07-02
-│   ├── migrations/              # forward/reverse SQL migration pairs + runner.py (counts: ARCHITECTURE.md code-facts)
 │   └── src/
-│       ├── main.py              # Orchestrator: run_search(), SOURCE_REGISTRY (41), _build_sources()
-│       ├── cli.py               # Click CLI: run, api, status, sources, view, setup-profile, rescore-backfill
-│       ├── models.py            # Job dataclass + normalized_key()
-│       ├── api/                 # FastAPI app + 13 route modules (65 endpoints)
-│       │   └── routes/          # health, jobs, actions, profile, search, pipeline, auth, channels, notifications, notification_rules, runs, tailor, client_log
-│       ├── core/                # (renamed from config/)
-│       │   ├── settings.py      # Env vars, RATE_LIMITS, feature flags (ENRICHMENT/SEMANTIC/MATCHER)
-│       │   ├── keywords.py      # LOCATIONS (26) + VISA_KEYWORDS (8); all other lists [] since 3ba1342
-│       │   ├── companies.py     # ATS company slugs (297 polled across 10 ATS sources; RIPPLING_COMPANIES has slugs but no source class)
-│       │   ├── skill_synonyms.py
-│       │   ├── fx.py
-│       │   └── tenancy.py
-│       ├── services/            # (merged from filters/ + notifications/ + profile/)
-│       │   ├── skill_matcher.py
-│       │   ├── scoring_dimensions.py
-│       │   ├── deduplicator.py
-│       │   ├── llm_matcher.py   # Engine #4 — LLM judge (MATCHER_ENABLED flag)
-│       │   ├── job_enrichment.py
-│       │   ├── embeddings.py
-│       │   ├── pg_vector_index.py  # the live vector store (job_embeddings.embedding)
-│       │   ├── vector_index.py     # legacy Chroma wrapper, no production caller
-│       │   ├── retrieval.py
-│       │   ├── scheduler.py
-│       │   ├── circuit_breaker.py
-│       │   ├── feed.py
-│       │   ├── auth/
-│       │   ├── channels/        # dispatcher (Apprise), crypto, email_url, ssrf_guard
-│       │   ├── notifications/   # defaults (signup rulebook seeder), report_generator
-│       │   └── profile/         # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, keyword_generator
-│       ├── repositories/        # (renamed from storage/)
-│       │   ├── database.py
-│       │   └── csv_export.py
-│       ├── sources/             # 40 source files in 6 category subfolders; 41 SOURCE_REGISTRY keys
-│       │   ├── base.py
-│       │   ├── apis_keyed/  (8)
-│       │   ├── apis_free/   (9)   # 8 free_json + 1 rss (teaching_vacancies)
-│       │   ├── ats/         (10)
-│       │   ├── feeds/       (4)   # all rss-tier
-│       │   ├── scrapers/    (5)
-│       │   └── other/       (4 classes / 5 keys)   # indeed+glassdoor share JobSpySource
-│       ├── workers/             # ARQ tasks + WorkerSettings
+│       ├── api/
+│       │   └── routes/          # bring, receipts, applications, tailor, profile, pipeline,
+│       │                        # auth, channels, notifications, notification_rules, tokens,
+│       │                        # oauth, well_known, health, client_log
+│       ├── services/
+│       │   ├── applications/    # the Application object + append-only event/artifact log
+│       │   ├── profile/         # CV / LinkedIn / GitHub extraction
+│       │   ├── channels/        # Apprise dispatcher, Fernet crypto, SSRF guard
+│       │   └── notifications/   # signup rulebook seeder
+│       ├── repositories/        # Postgres via psycopg3 (aiosqlite-shaped shim)
 │       └── utils/
-├── backend/tests/               # counts live in ARCHITECTURE.md — measure them, never quote them
-├── frontend/                    # Next.js 16 + React 19 + Tailwind 4 + shadcn 4
-│   └── src/
-│       ├── app/                 # App Router pages
-│       ├── components/
-│       └── lib/
-├── .env.example
-├── setup.sh
-└── cron_setup.sh
+├── backend/migrations/          # forward/reverse SQL migration pairs + runner.py
+└── frontend/
+    └── src/
+        ├── app/                 # Next.js App Router pages
+        ├── components/
+        └── lib/                 # fetch wrapper, generated API types, query keys
 ```
+
+Every path above exists today; a fuller tree with the generated fact table (migration head, route/hard-rule counts, etc.) lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md) — read that for the deep reference, not this file.
+
+## Quick Start
+
+```bash
+# 1. Clone
+git clone https://github.com/Ranjith36963/job360.git
+cd job360
+
+# 2. Backend deps (installs the dev extra: pytest, ruff, mypy)
+cd backend
+pip install -e ".[dev]"
+
+# 3. Local Postgres (pgvector image, host port 5433)
+cd ..
+docker compose -f docker-compose.dev.yml up -d postgres
+
+# 4. Configure env
+cp .env.example .env   # edit DATABASE_URL / DATABASE_PUBLIC_URL and any API keys
+
+# 5. Run the backend — FastAPI on :8000, MCP at /api/mcp
+cd backend
+python main.py
+
+# 6. Run the frontend — Next.js on :3000
+cd ../frontend
+npm run dev
+```
+
+## Profile setup
+
+The CLI can bootstrap a single-tenant profile from the command line:
+
+```bash
+cd backend
+python -m src.cli setup-profile --cv cv.pdf --linkedin linkedin-profile.pdf --github yourusername
+```
+
+`--cv`, `--linkedin` and `--github` are all optional and independent — run with just one, any combination, or none (the wizard still walks through preferences). Per-user profiles for signed-in accounts go through the web app at `/profile` or the `update_profile` MCP tool instead; the CLI always writes to the single dev tenant.
 
 ## Testing
 
 ```bash
-# Run the full test suite
-python -m pytest backend/tests/ -v
-
-# Run specific test file
-python -m pytest backend/tests/test_scorer.py -v
-
-# Run with output
-python -m pytest backend/tests/ -v -s
+# Backend — canonical pre-commit run, needs the dev Postgres up
+cd backend
+python -m pytest -q -p no:randomly
 ```
 
-The suite runs against a real Postgres and 2 `live`-marked tests are deselected offline. **Measure the collected count, never quote one** — `cd backend && python -m pytest --collect-only -q -p no:randomly | tail -1`; `scripts/doc_sync_check.py` deliberately does not guard it (needs Postgres, and parametrization makes any cheap check flaky), so any number written here is unguarded and rots. Every source is tested with mocked HTTP responses (aioresponses). No network access required. 3 tests skip on Windows (bash-only tests for `setup.sh` and `cron_setup.sh`).
+The suite runs against a real Postgres (not SQLite) via the shims in `tests/conftest.py`, schema-per-test, with HTTP mocked by `aioresponses` — it must run offline. **Never quote a test count from a doc — measure it**: `python -m pytest --collect-only -q -p no:randomly | tail -1`. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the generated, code-verified counts.
 
-## Output
+```bash
+# Frontend
+cd frontend
+npm run test:unit   # vitest
+npm run test:e2e    # playwright
+```
 
-Each run produces:
+## Infrastructure
 
-| Output | Location | Description |
-|--------|----------|-------------|
-| CSV | `backend/data/exports/jobs_YYYYMMDD_HHMMSS.csv` | Full job data with scores |
-| Markdown | `backend/data/reports/report_YYYYMMDD_HHMMSS.md` | Ranked job tables |
-| Rich table | Terminal (`python -m src.cli view`) | Time-bucketed terminal table with filters |
-| Email | Inbox | The daily shortlist — same `DecisionCard` data the dashboard shows |
-| Webhook | Configured endpoint | Raw JSON, unsupported escape hatch |
-| Frontend | `http://localhost:3000` | Next.js UI (requires FastAPI on `:8000`) |
-| Console | Terminal | Time-bucketed summary of new jobs found |
-| Logs | `backend/data/logs/job360.log` | Rotating log file (5MB, 3 backups) |
+Live on Railway at job360.uk since 2026-07-02. Three services: `backend`, `frontend`, `Postgres`. The `worker` and `Redis` services were deleted 2026-09-02 — nothing runs in the background, so there are no scheduled jobs and no async notification delivery; anything that sends mail does it synchronously from the API process. Login is passwordless, by magic link, delivered through Resend on the verified `job360.uk` domain.
+
+## Notifications
+
+Delivery goes through the Apprise dispatcher (`backend/src/services/channels/dispatcher.py`) on two channels: **email** (the product; via Resend's HTTPS API — Railway blocks outbound SMTP, so a local/self-hosted SMTP relay is only a fallback) and **webhook** (an unsupported raw-JSON escape hatch, guarded against SSRF by `ssrf_guard.py`). Channel credentials are Fernet-encrypted per-user rows (`crypto.py`), not env-var-configured classes. Because the worker and Redis are gone, any send happens synchronously in the request that triggers it — there is no queued or scheduled delivery today.
+
+## Configuration
+
+Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL` / `DATABASE_PUBLIC_URL`, `FRONTEND_ORIGIN`, `SITE_BASE_URL`, and `RESEND_API_KEY` (magic-link login and the email channel both need it). The full, current env-var table lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md) — do not trust an older list, several variables were retired with the sourcing era.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branch naming, commit style, and the PR flow.
+
+## History
+
+The sourcing era's docs (the deleted job-search-and-score product) are kept, FROZEN, under [`docs/_archive/sourcing-era/`](./docs/_archive/sourcing-era/) as history only — never rebuild it.

@@ -61,20 +61,17 @@ API_PREFIX = "/api"
 ROUTE_MODULES = [
     "health",
     "client_log",
-    "jobs",
-    "actions",
     "profile",
-    "search",
     "pipeline",
     "auth",
     "channels",
     "notifications",
     "notification_rules",
-    "runs",
     "tailor",
     "tokens",
     "bring",
     "receipts",
+    "applications",
     "oauth",
 ]
 
@@ -103,18 +100,18 @@ PUBLIC_ROUTES: dict[str, str] = {
     "/api/auth/password-reset/confirm": "reset confirmation, authenticated by its token",
     "/api/auth/verify-email/confirm": "email verification, authenticated by its token",
     # --- deliberately public product surface ---
-    "/api/jobs": (
-        "shared catalog read via optional_user — sitemap and link-unfurl bots read it "
-        "anonymously (routes/jobs.py::list_jobs). Per-user MUTATIONS on jobs are NOT "
-        "public and are covered by test_api_idor.py."
-    ),
+    # `/api/jobs` and `/api/sources` used to sit here. Slice 5 (#483) DELETED
+    # them rather than re-scoping (spec S1): once `jobs` held nothing but ads
+    # individual people pasted, a public read of it by sequential id was a
+    # cross-user leak waiting to happen. The replacement,
+    # `GET /api/applications/job/{id}`, is `require_user` and is covered by
+    # test_api_idor.py.
     "/api/client-log": "browser error beacon — fires before or without a session",
-    "/api/sources": "the list of 47 job sources; public product info, no per-user data",
     "/api/status": (
-        "catalog totals + source counts, no per-user data (routes/health.py:103). "
-        "FLAGGED for owner review, not a blocker: it returns the last run_log row "
-        "VERBATIM as `last_run`, so any source error string captured there is served "
-        "publicly. Worth confirming no source ever records a keyed URL in that field."
+        "how many jobs are stored and whether the deployment has a profile at all "
+        "(routes/health.py). No per-user data. Slice 5 also removed the `last_run` "
+        "block that served a run_log row verbatim — the one thing here that could "
+        "ever have leaked a keyed URL."
     ),
     # --- OAuth 2.1 authorization server (docs/plans/2026-09-03-oauth-mcp/spec.md) ---
     # An MCP client (ChatGPT, Claude.ai) has NO Job360 identity when it starts the

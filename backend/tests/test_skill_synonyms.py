@@ -4,16 +4,13 @@ Covers:
   - canonicalize_skill(): alias resolution, case/whitespace normalization,
     unknown-term pass-through, idempotence.
   - aliases_for(): reverse lookup returns canonical + all surface aliases.
-  - Integration: skill_matcher._text_contains_skill matches via aliases,
-    and JobScorer gives the same score to a job whose description uses the
-    alias ("k8s") as one that uses the canonical form ("kubernetes").
-  - Profile flow: keyword_generator collapses aliases before they hit
-    the SearchConfig, so duplicated skills (["JS", "JavaScript"]) coalesce.
+
+Rule #28 carve-out: this table is scoring/search VOCABULARY and reads no CV
+input, so it survives the sourcing deletion even though its two biggest
+consumers (the scorer and the keyword generator) do not.
 """
 
 from __future__ import annotations
-
-from datetime import datetime, timezone
 
 import pytest
 
@@ -158,116 +155,6 @@ def test_aliases_for_unknown_skill_returns_just_itself():
     term wrapped in a single-element tuple."""
     result = aliases_for("Haskell")
     assert result == ("haskell",)
-
-
-# ---------------------------------------------------------------------------
-# Integration with skill_matcher — the user-visible payoff
-# ---------------------------------------------------------------------------
-
-
-def test_text_contains_skill_matches_via_alias():
-    """_text_contains_skill is what _skill_score calls; it must find the
-    canonical term when the text contains an alias, and vice versa."""
-    from src.services.skill_matcher import _text_contains_skill
-
-    assert _text_contains_skill("We use k8s heavily", "kubernetes") is True
-    assert _text_contains_skill("Looking for kubernetes expertise", "k8s") is True
-
-
-def test_text_contains_skill_respects_word_boundaries():
-    """Aliases must still match as whole words — "ai" in "sustain" must not
-    false-match even though "ai" is an alias key (it isn't in the table, but
-    the invariant matters for short aliases like "ts", "py", "ml")."""
-    from src.services.skill_matcher import _text_contains_skill
-
-    assert _text_contains_skill("Python developer", "py") is True
-    assert _text_contains_skill("proudly claim", "py") is False  # substring trap
-
-
-def test_jobscorer_scores_same_for_alias_and_canonical():
-    """End-to-end: a job described with 'k8s' should score the same as one
-    described with 'kubernetes', given the same profile requesting either."""
-    from src.models import Job
-    from src.services.profile.models import SearchConfig
-    from src.services.skill_matcher import JobScorer
-
-    config = SearchConfig(
-        job_titles=["SRE"],
-        primary_skills=["kubernetes", "terraform"],
-    )
-    scorer = JobScorer(config)
-
-    def make(desc: str) -> Job:
-        return Job(
-            title="SRE",
-            company="Co",
-            apply_url="https://example.com",
-            source="greenhouse",
-            location="London, UK",
-            description=desc,
-            date_found=datetime.now(timezone.utc).isoformat(),
-        )
-
-    score_alias = scorer.score(make("Seeking k8s and tf expertise")).match_score
-    score_canonical = scorer.score(make("Seeking kubernetes and terraform expertise")).match_score
-    assert score_alias == score_canonical
-
-
-def test_jobscorer_profile_side_alias_matches_canonical_text():
-    """The profile can ALSO use an alias — a user who wrote "k8s, tf" in
-    their CV must match a job description written in canonical form."""
-    from src.models import Job
-    from src.services.profile.models import SearchConfig
-    from src.services.skill_matcher import JobScorer
-
-    config = SearchConfig(
-        job_titles=["SRE"],
-        primary_skills=["k8s", "tf"],  # profile uses aliases
-    )
-    scorer = JobScorer(config)
-    job = Job(
-        title="SRE",
-        company="Co",
-        apply_url="https://example.com",
-        source="greenhouse",
-        location="London, UK",
-        description="Seeking kubernetes and terraform experts",
-        date_found=datetime.now(timezone.utc).isoformat(),
-    )
-    assert scorer.score(job).match_score > 25  # gate passes + skill hits canonical form
-
-
-# ---------------------------------------------------------------------------
-# Integration with keyword_generator — profile-side canonicalization
-# ---------------------------------------------------------------------------
-
-
-def test_keyword_generator_deduplicates_aliases():
-    """UserProfile skills ["JS", "JavaScript"] should collapse to a single
-    'javascript' entry in the SearchConfig, not two separate scoring terms."""
-    from src.services.profile.keyword_generator import _canonicalize_skill_list
-
-    result = _canonicalize_skill_list(["JS", "JavaScript", "js", "TypeScript", "TS"])
-    assert result == ["javascript", "typescript"]
-
-
-def test_keyword_generator_preserves_unknown_skills():
-    """Domain-specific or niche skills still flow through — only known aliases
-    are collapsed. Unknown terms are only case/whitespace normalised."""
-    from src.services.profile.keyword_generator import _canonicalize_skill_list
-
-    result = _canonicalize_skill_list(["Haskell", "Echocardiography", "Welding"])
-    assert result == ["haskell", "echocardiography", "welding"]
-
-
-def test_keyword_generator_preserves_order_of_first_occurrence():
-    """Canonicalisation must be order-preserving — the primary/secondary/tertiary
-    tier semantics encode "more important first"."""
-    from src.services.profile.keyword_generator import _canonicalize_skill_list
-
-    result = _canonicalize_skill_list(["Python", "JS", "Haskell", "js"])
-    # Second 'js' is dedup'd; Python/javascript/haskell stay in order.
-    assert result == ["python", "javascript", "haskell"]
 
 
 # ---------------------------------------------------------------------------

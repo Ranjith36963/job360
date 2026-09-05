@@ -54,14 +54,14 @@ describe("MagicLinkPage — scanner safety (no consume without a click)", () => 
     expect(consumeMagicLinkMock).not.toHaveBeenCalled();
   });
 
-  it("consumes the token and redirects to /dashboard only after the click", async () => {
+  it("consumes the token and redirects to /applications only after the click", async () => {
     mockGet.mockReturnValue("good-token");
     consumeMagicLinkMock.mockResolvedValue(undefined);
 
     render(<MagicLinkPage />);
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/dashboard"));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/applications"));
     expect(consumeMagicLinkMock).toHaveBeenCalledTimes(1);
     expect(consumeMagicLinkMock).toHaveBeenCalledWith("good-token");
   });

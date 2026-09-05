@@ -7,14 +7,10 @@ import { test, expect, type Page } from "@playwright/test";
  * "The owner brings a job, saves two CV versions, records 'applied' with the
  * second... and the web home show exactly that, every version still readable."
  *
- * Neither `/applications` nor `/applications/[id]` exist on this branch yet —
- * this spec is expected to FAIL (timeouts waiting for content that is never
- * rendered) until slice 2 ships those pages. That is the intended RED state.
- *
- * Hermetic (frontend-only), same pattern as feed-visibility.spec.ts: fake the
+ * Hermetic (frontend-only), same pattern as the other e2e specs: fake the
  * session cookie (middleware only checks presence) and mock every API call
- * with `page.route`. `NEXT_PUBLIC_SEARCH_UI_ENABLED` defaults to false, so the
- * Dashboard nav link must be gone (R12/R14).
+ * with `page.route`. The Dashboard nav link is gone for good (R12/R14; the
+ * route itself was deleted outright in slice 5, delete-sourcing-era).
  */
 
 const SESSION_COOKIE = {

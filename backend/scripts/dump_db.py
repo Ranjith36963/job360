@@ -1,4 +1,7 @@
-"""Dev helper: dump useful summaries from the Job360 SQLite DB.
+"""Dev helper: dump useful summaries from the Job360 DB.
+
+(`run_log` went with the sourcing era — migration 0038, slice 5 #483 — so the
+run summary this script used to print is gone with it.)
 
 Usage:
     python backend/scripts/dump_db.py
@@ -7,7 +10,6 @@ Usage:
 
 Prints:
     * Tables present + row counts
-    * Latest 5 run_log rows (with run_uuid + per_source_errors if non-empty)
     * Top 10 recently-seen jobs by match_score
     * If --user given and found: their recent user_feed + user_actions rows
 """
@@ -15,7 +17,6 @@ Prints:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -72,37 +73,6 @@ def _table_counts(conn: pgsync.Connection) -> list[tuple[str, int]]:
     return out
 
 
-def _latest_runs(conn: pgsync.Connection, limit: int = 5) -> list[tuple]:
-    cur = conn.execute("PRAGMA table_info(run_log)")
-    cols = {row[1] for row in cur.fetchall()}
-    has_uuid = "run_uuid" in cols
-    has_errs = "per_source_errors" in cols
-    select = ["id", "timestamp", "total_found", "new_jobs", "sources_queried"]
-    if has_uuid:
-        select.append("run_uuid")
-    if has_errs:
-        select.append("per_source_errors")
-    q = f"SELECT {', '.join(select)} FROM run_log ORDER BY id DESC LIMIT ?"
-    rows = conn.execute(q, (limit,)).fetchall()
-    formatted: list[tuple] = []
-    for row in rows:
-        row = list(row)
-        if has_errs:
-            raw = row[-1]
-            if raw:
-                try:
-                    parsed = json.loads(raw)
-                    # Only keep non-empty error entries.
-                    non_empty = {k: v for k, v in parsed.items() if v}
-                    row[-1] = json.dumps(non_empty) if non_empty else ""
-                except Exception:
-                    row[-1] = str(raw)[:80]
-            else:
-                row[-1] = ""
-        formatted.append(tuple(row))
-    return select, formatted  # type: ignore[return-value]
-
-
 def _top_jobs(conn: pgsync.Connection, limit: int = 10) -> list[tuple]:
     q = (
         "SELECT id, match_score, title, company, location, first_seen"
@@ -156,9 +126,6 @@ def main() -> int:
     try:
         counts = _table_counts(conn)
         _print_rows("Tables", ["table", "rows"], counts)
-
-        cols, runs = _latest_runs(conn)  # type: ignore[assignment]
-        _print_rows("Latest 5 run_log rows", cols, runs)
 
         jobs = _top_jobs(conn)
         _print_rows(

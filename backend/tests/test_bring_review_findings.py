@@ -27,10 +27,11 @@ async def _bring(client) -> int:
 
 @pytest.mark.asyncio
 async def test_bring_reactivates_a_stale_catalog_row(authenticated_async_context, fixture_user_id):
-    """P0. The pasted ad matches a scraped row the ghost detector already marked
-    stale. Before: `get_job_by_id_with_enrichment` filters on staleness_state,
-    returned None, and a bare `assert` turned it into a 500. The user is
-    reading the ad NOW, so the row is live again: 200, active, in the feed."""
+    """P0. The pasted ad matches a legacy scraped row a long-dead ghost sweep
+    marked stale. The user is reading the ad NOW, so the row is live again:
+    200, `staleness_state='active'`, and the application page is reachable.
+    (`POST /pipeline/{job_id}` still refuses a `confirmed_expired` row, which
+    is the read that keeps `update_last_seen` load-bearing after slice 5.)"""
     async with authenticated_async_context() as client:
         job_id = await _bring(client)
         db = await api_deps.get_db()
@@ -53,78 +54,28 @@ async def test_bring_reactivates_a_stale_catalog_row(authenticated_async_context
         assert state == "active" and misses == 0
 
         # The page the user is sent to must not be empty.
-        detail = await client.get(f"/api/jobs/{job_id}")
+        detail = await client.get(f"/api/applications/job/{job_id}")
         assert detail.status_code == 200, detail.text
-        cur = await db._conn.execute(
-            "SELECT status FROM user_feed WHERE user_id = ? AND job_id = ?",
-            (fixture_user_id, job_id),
-        )
-        assert (await cur.fetchone())[0] == "active"
 
 
 @pytest.mark.asyncio
 async def test_pasted_ad_text_is_not_readable_anonymously(authenticated_async_context):
-    """P1. Job ids are sequential and the single-job read is public. The
+    """P1. Job ids are sequential, and the read used to be PUBLIC. The
     description of a `user_brought` row is text a person pasted; it must ride
-    only for a logged-in user (rule #12/#25: no cross-user leak)."""
+    only for the user who brought it (rule #12/#25: no cross-user leak).
+
+    Slice 5 (#483) closed this at the route, not the field: the public
+    `GET /api/jobs/{id}` is deleted and its replacement,
+    `GET /api/applications/job/{id}`, is `Depends(require_user)` and scoped by
+    the caller's own application."""
     async with authenticated_async_context() as client:
         job_id = await _bring(client)
-        mine = await client.get(f"/api/jobs/{job_id}")
+        mine = await client.get(f"/api/applications/job/{job_id}")
         assert mine.status_code == 200 and mine.json()["description"] == _AD["description"]
 
         client.cookies.clear()
-        anon = await client.get(f"/api/jobs/{job_id}")
-        if anon.status_code == 200:
-            assert anon.json().get("description") in (None, ""), anon.text
-        else:
-            assert anon.status_code in (401, 403), anon.text
-
-
-@pytest.mark.asyncio
-async def test_brought_job_survives_candidate_selection(authenticated_async_context, fixture_user_id):
-    """P1. The next search runs `backfill_feed_from_catalog`, which caps the
-    feed and evicts rows outside the selection unless they are protected.
-    A brought job has no like/apply row and may score under the store floor,
-    so it was evicted. Now it is protected like a liked job.
-
-    Bound: exercises `_load_action_sets` + `apply_candidate_selection` — the
-    exact pair backfill uses (rescore.py) — not the full backfill, which needs
-    a complete profile."""
-    from src.services.feed import FeedService
-    from src.services.rescore import _load_action_sets
-
-    async with authenticated_async_context() as client:
-        job_id = await _bring(client)
-        db = await api_deps.get_db()
-
-        # A second, unrelated feed row is the only thing selection keeps.
-        other = await client.post(
-            "/api/jobs/bring", json={**_AD, "title": "Data Analyst", "company": "Initech"}
-        )
-        other_id = int(other.json()["job"]["id"])
-        await db._conn.execute("UPDATE jobs SET source = 'adzuna' WHERE id = ?", (other_id,))
-        await db._conn.commit()
-
-        protected, rejected = await _load_action_sets(db, fixture_user_id)
-        assert job_id in protected and other_id not in protected and not rejected
-
-        evicted = await FeedService(db._db).apply_candidate_selection(
-            fixture_user_id, {other_id} | protected
-        )
-        assert evicted == 0
-        cur = await db._conn.execute(
-            "SELECT status FROM user_feed WHERE user_id = ? AND job_id = ?",
-            (fixture_user_id, job_id),
-        )
-        assert (await cur.fetchone())[0] == "active"
-
-        # Control: without the protection the same call evicts it.
-        await FeedService(db._db).apply_candidate_selection(fixture_user_id, {other_id})
-        cur = await db._conn.execute(
-            "SELECT status FROM user_feed WHERE user_id = ? AND job_id = ?",
-            (fixture_user_id, job_id),
-        )
-        assert (await cur.fetchone())[0] != "active"
+        anon = await client.get(f"/api/applications/job/{job_id}")
+        assert anon.status_code in (401, 403), anon.text
 
 
 @pytest.mark.asyncio

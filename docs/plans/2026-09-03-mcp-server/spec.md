@@ -1,4 +1,6 @@
 # Spec: personal tokens + MCP server
+<!-- doc: PLAN -->
+> **PLAN — shipped.** A design record, not live truth; the code and `docs/product/VISION.md` win. <!-- banner: auto -->
 Reads: `intent.md`. Skills applied: `hard-rules` (#10 shared catalog, #12/#25 auth on every route,
 #16 lazy imports, #26 current-password for account changes). Status: draft.
 

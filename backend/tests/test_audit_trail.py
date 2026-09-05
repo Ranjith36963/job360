@@ -14,8 +14,8 @@ import pytest
 
 from src.repositories import pgsync
 from src.repositories.database import JobDatabase
-from src.services import audit_trail
-from src.services.audit_trail import _DBAuditHandler
+from src.utils import audit_trail
+from src.utils.audit_trail import _DBAuditHandler
 
 
 def _make_record(**extras) -> logging.LogRecord:

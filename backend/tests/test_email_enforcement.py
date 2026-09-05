@@ -27,8 +27,14 @@ async def test_require_verified_user_blocks_when_unverified():
 
 
 @pytest.mark.asyncio
-async def test_search_route_blocks_unverified_user(authenticated_async_context):
-    """Unverified user → POST /api/search → 403 (before any pipeline runs)."""
+async def test_a_gated_route_blocks_an_unverified_user(authenticated_async_context):
+    """Unverified user → a `require_verified_user` route → 403, before the
+    route body runs.
+
+    The route under test was `POST /api/search`; slice 5 (#483) deleted it.
+    The tailor is the gate's remaining holder — and the reason the gate exists
+    at all is unchanged: it guards the routes that SPEND a paid LLM call.
+    """
     uid = authenticated_async_context.fixture_user_id
     # conftest verifies the fixture user by default; un-verify for this test.
     conn = pgsync.connect(str(settings_mod.DB_PATH))
@@ -37,6 +43,6 @@ async def test_search_route_blocks_unverified_user(authenticated_async_context):
     conn.close()
 
     async with authenticated_async_context() as client:
-        resp = await client.post("/api/search", json={})
+        resp = await client.post("/api/tailor/1/generate", json={})
     assert resp.status_code == 403
     assert resp.json()["detail"] == "email_not_verified"

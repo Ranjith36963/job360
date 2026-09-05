@@ -5,13 +5,8 @@
 // 1. All keys are arrays (never strings) for consistent prefix-matching.
 // 2. Top-level domain is always the first element.
 // 3. Sub-resources follow: ["domain", "sub", ...specifics].
-// 4. Invalidate by prefix: queryClient.invalidateQueries({ queryKey: ["jobs"] })
-//    clears ALL jobs queries regardless of their filter sub-key.
 //
 // Key map:
-//   ["jobs", "list", filters?]   — paginated/filtered job list (dashboard)
-//   ["jobs", "detail", id]       — single job details (job/:id page)
-//   ["status"]                   — pipeline run status (last_run, sources)
 //   ["pipeline", "applications"] — Kanban application rows
 //   ["pipeline", "counts"]       — per-stage counts
 //   ["pipeline", "reminders"]    — overdue application reminders
@@ -20,22 +15,7 @@
 //   ["channels"]                 — notification channel list
 // ---------------------------------------------------------------------------
 
-import type { JobFilters } from "./types";
-
 export const queryKeys = {
-  /** All jobs queries — use as invalidation prefix */
-  jobs: (): readonly ["jobs"] => ["jobs"],
-
-  /** Filtered/paginated job list */
-  jobList: (filters?: JobFilters): readonly unknown[] =>
-    filters ? ["jobs", "list", filters] : ["jobs", "list"],
-
-  /** Single job detail */
-  jobDetail: (id: number): readonly unknown[] => ["jobs", "detail", id],
-
-  /** Pipeline status (last run info) */
-  status: (): readonly ["status"] => ["status"],
-
   /** All pipeline queries */
   pipeline: (): readonly ["pipeline"] => ["pipeline"],
 

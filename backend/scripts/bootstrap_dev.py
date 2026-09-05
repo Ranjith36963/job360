@@ -10,9 +10,9 @@ Workflow:
   2. Generate a tiny PDF CV with fpdf2
   3. POST /api/auth/register with a timestamp-suffixed email (idempotent reruns)
   4. POST /api/profile multipart (CV + preferences JSON form field)
-  5. POST /api/search?source=arbeitnow (cheap single-source run)
-  6. Poll GET /api/search/{run_id}/status up to 60s
-  7. GET /api/jobs?min_score=30 and print the feed count
+  5. POST /api/jobs/bring with a small ad (the product path: store + birth
+     an Application; nothing is scored)
+  6. GET /api/applications/job/{job_id} and print the application id + status
 
 Usage:
     python scripts/bootstrap_dev.py
@@ -27,7 +27,6 @@ import argparse
 import io
 import json
 import sys
-import time
 from datetime import datetime, timezone
 
 import httpx
@@ -75,17 +74,6 @@ def main() -> None:
         "--api-url",
         default="http://localhost:8000",
         help="Backend base URL (default: http://localhost:8000)",
-    )
-    parser.add_argument(
-        "--source",
-        default="arbeitnow",
-        help="Single source to run for cheap smoke (default: arbeitnow)",
-    )
-    parser.add_argument(
-        "--poll-timeout",
-        type=int,
-        default=60,
-        help="Max seconds to poll search status (default: 60)",
     )
     args = parser.parse_args()
 
@@ -143,46 +131,37 @@ def main() -> None:
             flush=True,
         )
 
-        # ----- Step 5: kick off search -----------------------------------
-        banner(5, f"Starting search (source={args.source})")
-        r = client.post("/api/search", params={"source": args.source})
+        # ----- Step 5: bring a job --------------------------------------
+        banner(5, "Bringing a job (POST /api/jobs/bring)")
+        r = client.post(
+            "/api/jobs/bring",
+            json={
+                "title": "Senior Software Engineer",
+                "company": "Bootstrap Ltd",
+                "location": "London, UK",
+                "description": "Python, FastAPI and Postgres. Remote-friendly. "
+                "This ad exists only to prove a fresh clone is wired end to end.",
+            },
+        )
         if r.status_code != 200:
-            fail("Search start failed", r)
-        run_id = r.json().get("run_id")
-        if not run_id:
-            fail("Search response missing run_id")
-        print(f"    ok: run_id={run_id}", flush=True)
+            fail("Bring failed", r)
+        brought = r.json()
+        application_id = brought.get("application_id")
+        job_id = (brought.get("job") or {}).get("id")
+        if not application_id or not job_id:
+            fail("Bring response missing application_id / job.id")
+        print(f"    ok: job_id={job_id} application_id={application_id} existing={brought.get('existing')}", flush=True)
 
-        # ----- Step 6: poll status ---------------------------------------
-        banner(6, f"Polling /api/search/{run_id}/status (up to {args.poll_timeout}s)")
-        deadline = time.monotonic() + args.poll_timeout
-        last_status = None
-        terminal = {"completed", "done", "failed"}
-        while time.monotonic() < deadline:
-            r = client.get(f"/api/search/{run_id}/status")
-            if r.status_code != 200:
-                fail("Status poll failed", r)
-            body = r.json()
-            last_status = body.get("status")
-            progress = body.get("progress", "")
-            print(f"    status={last_status} progress={progress}", flush=True)
-            if last_status in terminal:
-                break
-            time.sleep(2)
-        else:
-            fail(f"Search did not reach terminal state within {args.poll_timeout}s")
-
-        if last_status == "failed":
-            fail(f"Search run failed: {body.get('progress')}")
-
-        # ----- Step 7: fetch jobs ----------------------------------------
-        banner(7, "Fetching feed rows (min_score=30)")
-        r = client.get("/api/jobs", params={"min_score": 30})
+        # ----- Step 6: read the application back ------------------------
+        banner(6, f"Reading /api/applications/job/{job_id}")
+        r = client.get(f"/api/applications/job/{job_id}")
         if r.status_code != 200:
-            fail("Jobs fetch failed", r)
-        jobs = r.json().get("jobs", [])
+            fail("Application read failed", r)
+        application = r.json()
+        if application.get("id") != application_id:
+            fail(f"Application mismatch: bring said {application_id}, read back {application.get('id')}")
 
-    print(f"Bootstrap complete. {len(jobs)} feed rows.", flush=True)
+    print(f"Bootstrap complete. application_id={application_id} status={application.get('status')}", flush=True)
     sys.exit(0)
 
 

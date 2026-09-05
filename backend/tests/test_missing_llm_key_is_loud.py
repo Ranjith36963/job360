@@ -205,25 +205,6 @@ async def test_a_real_provider_outage_is_still_not_a_missing_key(monkeypatch):
             await lp.llm_extract("x")
 
 
-# ---------------------------------------------------------------------------
-# 3. The instruments that report on the judge must not inherit the masquerade
-# ---------------------------------------------------------------------------
-
-
-def test_eval_ranking_reuses_the_shared_key_list_instead_of_its_own_copy():
-    """The weekly accuracy instrument kept its own private copy of the four
-    names. Two lists drift; then a fifth provider is alarmed on by one and not
-    the other. Static check on purpose: importing the script sets a Windows
-    event-loop policy at module level."""
-    text = (_REPO_ROOT / "backend" / "scripts" / "eval_ranking.py").read_text(
-        encoding="utf-8"
-    )
-    assert "from src.services.profile.llm_provider import" in text
-    assert "NO_LLM_KEY_MESSAGE" in text and "configured_llm_keys" in text
-    assert '"OPENAI_API_KEY", "GEMINI_API_KEY"' not in text, \
-        "the private duplicate of the key list is still there"
-
-
 def _load_provider_probe():
     """Import scripts/provider_probe.py by path (it is stdlib-only, no package)."""
     path = _REPO_ROOT / "scripts" / "provider_probe.py"

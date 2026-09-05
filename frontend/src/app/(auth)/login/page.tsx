@@ -39,7 +39,7 @@ function MagicLinkForm({ onUsePassword }: { onUsePassword: () => void }) {
   // Carry `next` through the emailed link (spec R9) so e.g. an OAuth consent
   // page keeps working after a magic-link round trip. An external/malformed
   // `next` is dropped here rather than substituted with a fallback — the
-  // backend treats an absent `next` as "no preference", not "/dashboard".
+  // backend treats an absent `next` as "no preference", not "/applications".
   const next = safeNextOrUndefined(searchParams.get("next"));
 
   const [serverError, setServerError] = useState<string | null>(null);
@@ -246,7 +246,7 @@ export default function LoginPage() {
         <CardHeader>
           <CardTitle>Sign in to Job360</CardTitle>
           <CardDescription>
-            Welcome back. Your dashboard, notifications, and channels are one step away.
+            Welcome back. Your applications are one step away.
           </CardDescription>
         </CardHeader>
         <CardContent>

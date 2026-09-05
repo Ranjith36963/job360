@@ -124,19 +124,23 @@ async def _applied_map(db: pg.Connection) -> dict[str, str]:
     return {row[0]: row[1] for row in await cur.fetchall()}
 
 
-def _discover_pairs(migrations_dir: Path) -> list[str]:
-    """Return migration stems (``NNNN_name``) sorted lexically.
+def _discover_pairs(migrations_dir: Optional[Path] = None) -> list[tuple[str, Path]]:
+    """Return ``(stem, up_file)`` for every migration, sorted lexically.
 
-    A migration is only included if BOTH its .up.sql and .down.sql exist.
+    A migration is only included if BOTH its .up.sql and .down.sql exist — a
+    forward file with no reverse is not a migration this runner will apply.
+
+    ``migrations_dir`` defaults to this package's own directory so a caller
+    that just wants "what migrations exist?" (tests, the doc-sync guard) does
+    not have to know where they live.
     """
-    ups = sorted(migrations_dir.glob("*.up.sql"))
-    stems = []
-    for u in ups:
-        stem = u.name[: -len(".up.sql")]
-        down = migrations_dir / f"{stem}.down.sql"
-        if down.exists():
-            stems.append(stem)
-    return stems
+    mdir = migrations_dir or MIGRATIONS_DIR
+    pairs: list[tuple[str, Path]] = []
+    for up_file in sorted(mdir.glob("*.up.sql")):
+        stem = up_file.name[: -len(".up.sql")]
+        if (mdir / f"{stem}.down.sql").exists():
+            pairs.append((stem, up_file))
+    return pairs
 
 
 def _split_sql_statements(sql: str) -> list[str]:
@@ -194,9 +198,9 @@ async def up(
 
     Concurrent-boot safety (Step-1 B11)
     -----------------------------------
-    FastAPI (``src/api/dependencies.py`` lifespan) and the ARQ worker
-    (``src/workers/settings.py``) both call this on startup. If two processes
-    race against the same database, the naive path had them both read an
+    FastAPI (``src/api/dependencies.py`` lifespan) calls this on startup, and
+    so does any operator running the CLI. If two processes race against the
+    same database, the naive path had them both read an
     identical "applied" set, both run the same migration body, and both
     INSERT into ``_schema_migrations`` — the second INSERT tripped the
     ``UNIQUE(id)`` constraint and the process crashed.
@@ -229,7 +233,7 @@ async def up(
         try:
             await _ensure_table(db)
             applied_set = set(await _applied_ids(db))
-            for stem in _discover_pairs(mdir):
+            for stem, _up_file in _discover_pairs(mdir):
                 if stem in applied_set:
                     if target is not None and stem == target:
                         break
@@ -326,7 +330,7 @@ async def status(
     async with pg.connect(db_path) as db:
         await _ensure_table(db)
         applied = await _applied_ids(db)
-    all_pairs = _discover_pairs(mdir)
+    all_pairs = [stem for stem, _ in _discover_pairs(mdir)]
     pending = [s for s in all_pairs if s not in set(applied)]
     return {"applied": applied, "pending": pending}
 
@@ -351,7 +355,7 @@ async def _status_rows(
         had_table = (await cur.fetchone()) is not None
         await _ensure_table(db)
         applied = await _applied_map(db)
-    all_pairs = _discover_pairs(mdir)
+    all_pairs = [stem for stem, _ in _discover_pairs(mdir)]
     rows: list[tuple[str, str, str]] = []
     for stem in all_pairs:
         if stem in applied:

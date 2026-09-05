@@ -5,17 +5,11 @@
 import { ApiError } from "./api-error";
 import type { components } from "./api-types";
 import type {
-  ActionRequest,
-  ActionResponse,
   ApplicationTimelineResponse,
   BringJobRequest,
   BringJobResponse,
   CreateReceiptRequest,
-  DuplicateJobsResponse,
   HealthResponse,
-  JobFilters,
-  JobListResponse,
-  JobResponse,
   JsonResumeResponse,
   NotificationLedgerListResponse,
   NotificationRule,
@@ -28,11 +22,6 @@ import type {
   ProfileVersionsListResponse,
   Receipt,
   ReceiptListResponse,
-  RecentRunsResponse,
-  SearchStartResponse,
-  SearchStatusResponse,
-  SourceInfo,
-  StatusResponse,
   TailorBundle,
   TailorDocKind,
   TailoredDocOut,
@@ -147,75 +136,11 @@ function qs(params: Record<string, unknown>): string {
 }
 
 // ---------------------------------------------------------------------------
-// Health / Status / Sources
+// Health
 // ---------------------------------------------------------------------------
 
 export async function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/api/health");
-}
-
-export async function getStatus(): Promise<StatusResponse> {
-  return request<StatusResponse>("/api/status");
-}
-
-export async function getSources(): Promise<SourceInfo[]> {
-  const data = await request<{ sources: SourceInfo[] }>("/api/sources");
-  return data.sources;
-}
-
-// ---------------------------------------------------------------------------
-// Jobs
-// ---------------------------------------------------------------------------
-
-export async function getJobs(filters: JobFilters = {}): Promise<JobListResponse> {
-  return request<JobListResponse>(`/api/jobs${qs(filters as Record<string, unknown>)}`);
-}
-
-export async function getJob(id: number): Promise<JobResponse> {
-  return request<JobResponse>(`/api/jobs/${id}`);
-}
-
-export async function exportJobsCsv(): Promise<void> {
-  const res = await fetch(`${API}/api/jobs/export`, { credentials: "include" });
-  if (!res.ok) {
-    throw new ApiError(res.status, `CSV export failed`);
-  }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `job360_export_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-// ---------------------------------------------------------------------------
-// Actions
-// ---------------------------------------------------------------------------
-
-export async function setJobAction(
-  jobId: number,
-  body: ActionRequest
-): Promise<ActionResponse> {
-  return request<ActionResponse>(`/api/jobs/${jobId}/action`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-export async function removeJobAction(jobId: number): Promise<ActionResponse> {
-  return request<ActionResponse>(`/api/jobs/${jobId}/action`, {
-    method: "DELETE",
-  });
-}
-
-export async function getActions(): Promise<{ actions: ActionResponse[] }> {
-  return request<{ actions: ActionResponse[] }>("/api/actions");
-}
-
-export async function getActionCounts(): Promise<Record<string, number>> {
-  return request<Record<string, number>>("/api/actions/counts");
 }
 
 // ---------------------------------------------------------------------------
@@ -302,28 +227,6 @@ export async function restoreProfileVersion(
 
 export async function getJsonResume(): Promise<JsonResumeResponse> {
   return request<JsonResumeResponse>("/api/profile/json-resume");
-}
-
-// ---------------------------------------------------------------------------
-// Search
-// ---------------------------------------------------------------------------
-
-export async function startSearch(options?: {
-  source?: string;
-  safe?: boolean;
-}): Promise<SearchStartResponse> {
-  const params: Record<string, unknown> = {};
-  if (options?.source) params.source = options.source;
-  if (options?.safe !== undefined) params.safe = options.safe;
-  return request<SearchStartResponse>(`/api/search${qs(params)}`, {
-    method: "POST",
-  });
-}
-
-export async function getSearchStatus(
-  runId: string
-): Promise<SearchStatusResponse> {
-  return request<SearchStatusResponse>(`/api/search/${runId}/status`);
 }
 
 // ---------------------------------------------------------------------------
@@ -601,12 +504,6 @@ export async function getNotificationStats(): Promise<Record<string, Record<stri
   return request<Record<string, Record<string, number>>>("/api/notifications/stats");
 }
 
-// ---- Step-3: Duplicate jobs ----
-
-export async function getJobDuplicates(id: number): Promise<DuplicateJobsResponse> {
-  return request<DuplicateJobsResponse>(`/api/jobs/${id}/duplicates`);
-}
-
 // ---- Step-3: Profile version diff ----
 
 export async function getProfileVersionDiff(
@@ -635,35 +532,7 @@ export async function updateApplicationNotes(
   });
 }
 
-// ---- Step-3: Recent runs ----
-
-export async function getRecentRuns(
-  limit = 10,
-  offset = 0
-): Promise<RecentRunsResponse> {
-  return request<RecentRunsResponse>(`/api/runs/recent?limit=${limit}&offset=${offset}`);
-}
-
-// ---- Phase −2 item D: per-source health ----
-//
-// Both types derive non-tightened fields from the generated schema so they
-// can't drift. Only `health` (SourceHealthEntry) is intentionally narrowed
-// from `string` to a literal union — the backend OpenAPI declares it as string
-// but the runtime always emits one of the three values below.
-
 type _Schemas = components["schemas"];
-
-export type SourceHealthEntry = Omit<_Schemas["SourceHealthEntry"], "health"> & {
-  health: "ok" | "warning" | "critical";
-};
-
-export type SourceHealthResponse = Omit<_Schemas["SourceHealthResponse"], "sources"> & {
-  sources: SourceHealthEntry[];
-};
-
-export async function getSourceHealth(runs = 20): Promise<SourceHealthResponse> {
-  return request<SourceHealthResponse>(`/api/runs/source-health?runs=${runs}`);
-}
 
 // ---- Tailored docs ----
 //
@@ -728,9 +597,9 @@ export function tailorDownloadUrl(
 }
 
 /**
- * Fetch the tailored doc as a PDF or DOCX and trigger a browser download — same
- * fetch-blob-anchor pattern as `exportJobsCsv`. credentials:'include' so the
- * session cookie rides on the request.
+ * Fetch the tailored doc as a PDF or DOCX and trigger a browser download — a
+ * fetch-blob-anchor pattern. credentials:'include' so the session cookie
+ * rides on the request.
  */
 export async function downloadTailored(
   jobId: number,
@@ -767,7 +636,7 @@ export async function downloadTailored(
 // Bring a job + application receipts (career-ops pivot, slice one)
 // ---------------------------------------------------------------------------
 
-/** The user pastes the ad; the backend stores, scores and feeds it. */
+/** The user pastes the ad; the backend stores it and births the Application. */
 export async function bringJob(body: BringJobRequest): Promise<BringJobResponse> {
   return request<BringJobResponse>(`/api/jobs/bring`, {
     method: "POST",

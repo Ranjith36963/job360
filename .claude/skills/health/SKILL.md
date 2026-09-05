@@ -28,8 +28,8 @@ You are the Job360 health checker. You ignore the backlog and missions entirely 
 - Upload the test CV → extraction completes; profile fields are non-empty for what the CV contains (value-presence, rule #21); an unset preference is absent, not zero (rule #29).
 - GREEN: extraction returns within 120s and the profile shows the CV's skills. RED: extraction throws or an empty preference shows as a default.
 
-### Retired (sourcing era — do not run)
-- ~~Trigger one fresh pipeline run (POST /api/search), count productive sources, grade ranking against `llm_fit_score`, run the accuracy harness.~~ Slice 5 (#483) deletes this code.
+### Retired (sourcing era — deleted 2026-09-05, slice 5, #483)
+- The pipeline-run / productive-source / ranking-grade checks went with the code. There is nothing to run; this section stays empty on purpose.
 
 ### Pillar 3 — Delivery
 - Auth round-trip: POST /api/auth/register (new account) **then always** POST /api/auth/login,

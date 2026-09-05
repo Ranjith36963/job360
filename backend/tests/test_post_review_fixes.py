@@ -22,7 +22,6 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
-from src.api.routes import runs as runs_route
 from src.repositories import pg
 from src.services.auth import email_verification, password_reset, rate_limit, tokens
 from src.services.channels import crypto
@@ -329,36 +328,6 @@ def test_password_reset_url_token_is_percent_encoded():
     # Both bodies should contain percent-encoded version.
     assert "raw%26token%3Devil" in text
     assert "raw%26token%3Devil" in html_body
-
-
-# ─── fix #5: _classify docstring matches actual behavior ───────────────────
-
-
-def test_classify_single_error_not_streak_is_ok():
-    """Sanity check: the docstring previously implied a single error
-    triggers warning; the actual behavior (post-fix) requires either
-    >50% error rate or a zero-streak. A 1-error-in-5 run with no zeros
-    stays 'ok'.
-    """
-    assert runs_route._classify(zero_streak=0, total=5, errored=1) == "ok"
-
-
-def test_classify_critical_on_three_zero_streak():
-    assert runs_route._classify(zero_streak=3, total=10, errored=0) == "critical"
-
-
-def test_classify_warning_on_high_error_rate():
-    # 6 errors out of 10 = 60% — above 50% threshold.
-    assert runs_route._classify(zero_streak=0, total=10, errored=6) == "warning"
-
-
-def test_classify_warning_on_one_third_zero_rate():
-    # Exercise the zero-rate warning branch (clause 2b): zero_streak >= 1 AND
-    # zero_streak/total >= 0.33. The streak must stay BELOW the critical
-    # threshold (>= 3), otherwise clause 1 returns "critical" first. So use
-    # zero_streak=2/total=6 (= 33%, streak < 3) — the original 4/10 was buggy:
-    # streak=4 trips critical, contradicting test_classify_critical (streak=3).
-    assert runs_route._classify(zero_streak=2, total=6, errored=0) == "warning"
 
 
 # ─── rate_limit module sanity ───────────────────────────────────────────────

@@ -1,11 +1,12 @@
-<!-- doc: LIVING | last-verified: 2026-09-03 by the mission sweep -->
+<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
 # Job360 Backend
 
 FastAPI backend for Job360 — the memory layer for the seeker's own AI agent
 (`../docs/product/VISION.md`): profile extraction, bring-a-job, application
 receipts, the CV tailor (web fallback) and the MCP server at `/api/mcp`.
-The legacy search pipeline (41 sources + scoring + semantic retrieval) is still
-in the tree and runs only on demand; it is slated for deletion (roadmap slice 5).
+The legacy search-and-score pipeline (job sources, scoring, semantic retrieval)
+was deleted 2026-09-05 (roadmap slice 5, #483) — see
+`../docs/_archive/sourcing-era/` for its history.
 Notifications (email via Resend + webhook) are sent synchronously from the API
 process — the ARQ worker and Redis services were deleted 2026-09-02, and there
 are no background jobs.
@@ -46,8 +47,7 @@ copy ..\.env.example ..\.env   # Windows
 ```
 
 Edit `../.env` to set your API keys, webhook URLs, and `FRONTEND_ORIGIN`.
-Free sources (33 of 41) work without any keys. See [`CLAUDE.md`](../CLAUDE.md)
-for the full env-var table.
+See [`ARCHITECTURE.md`](../ARCHITECTURE.md) for the full env-var table.
 
 ## Run the API
 
@@ -66,17 +66,15 @@ Production-style:
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-## Run the pipeline (CLI)
+## CLI
 
 ```bash
-python -m src.cli run                          # all 41 sources
-python -m src.cli run --source arbeitnow       # single source
-python -m src.cli run --dry-run --log-level DEBUG
-python -m src.cli status                       # last-run summary
-python -m src.cli sources                      # list all 41 sources
-python -m src.cli view --hours 24 --min-score 50
-python -m src.cli setup-profile --cv path/to/cv.pdf
+python -m src.cli setup-profile --cv path/to/cv.pdf --linkedin li.pdf --github user
+python -m src.cli api                          # same as `python main.py`
 ```
+
+`run` / `status` / `view` / `sources` / `rescore-backfill` were deleted with the
+sourcing era (slice 5, #483) — there is nothing left to search, score or list.
 
 ## Tests
 
@@ -122,5 +120,6 @@ The dashboard reaches the API via `NEXT_PUBLIC_API_URL` (frontend env, default
 ## Further reading
 
 - [`docs/README.md`](../docs/README.md) — full docs index
-- [`CLAUDE.md`](../CLAUDE.md) — architecture, hard rules, scoring algorithm
+- [`CLAUDE.md`](../CLAUDE.md) — mission, hard rules
+- [`ARCHITECTURE.md`](../ARCHITECTURE.md) — directory tree, DB schema, env vars
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md) — branch / commit / PR conventions

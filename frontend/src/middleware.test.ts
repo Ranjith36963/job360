@@ -12,12 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { middleware } from "./middleware";
 
-// R12 (docs/plans/2026-09-04-application-spine) — /dashboard now 404s ahead
-// of the auth check when NEXT_PUBLIC_SEARCH_UI_ENABLED is off (unset here),
-// which would short-circuit every test below before it reached the outage/
-// bypass logic these tests actually exercise. /profile is protected the same
-// way (PROTECTED_PATHS) without the search-flag gate, so it stands in as
-// "any protected route" here.
+// /profile stands in as "any protected route" here (PROTECTED_PATHS).
 function protectedRequest(): NextRequest {
   return new NextRequest("http://localhost:3000/profile", {
     headers: { cookie: "job360_session=some-session-value" },

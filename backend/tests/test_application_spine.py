@@ -154,8 +154,10 @@ async def test_bring_creates_one_application_considering(authenticated_async_con
         body = await _bring(client)
         assert isinstance(body["application_id"], int)
         assert body["status"] == "considering"
-        # constraint 4 — legacy shape untouched (also pinned standalone below).
-        assert "job" in body and "existing" in body and "scored" in body
+        # constraint 4 — the caller-facing shape (also pinned standalone below).
+        # `scored` went with the scorer in slice 5 (#483).
+        assert "job" in body and "existing" in body
+        assert "scored" not in body
 
         detail = await _get_application(client, body["application_id"])
         assert detail.status_code == 200, detail.text
@@ -178,7 +180,7 @@ async def test_bringing_twice_reuses_the_application(authenticated_async_context
 
 
 @pytest.mark.asyncio
-async def test_the_job_snapshot_survives_a_purge(authenticated_async_context):
+async def test_the_job_snapshot_survives_the_catalog_row_going(authenticated_async_context):
     from src.api import dependencies as api_deps
 
     async with authenticated_async_context() as client:
@@ -199,52 +201,16 @@ async def test_the_job_snapshot_survives_a_purge(authenticated_async_context):
 
 
 @pytest.mark.asyncio
-async def test_purge_spares_a_brought_job(authenticated_async_context):
-    """Hard rule #3 amendment (R2): ``purge_old_jobs`` must not delete a
-    ``user_brought`` row even when it is old, while an equally-old scraped row
-    is still deleted on schedule."""
-    from datetime import datetime, timedelta, timezone
-
-    from src.api import dependencies as api_deps
-    from src.core.settings import USER_BROUGHT_SOURCE
-    from src.models import Job
-
-    old = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
-
-    async with authenticated_async_context():
-        pass
-    db = await api_deps.get_db()
-
-    scraped = Job(
-        title="Old Scraped Role", company="Acme Scrape", apply_url="https://acme.test/scraped",
-        source="reed", date_found=old, last_seen_at=old, first_seen_at=old,
-    )
-    brought = Job(
-        title="Old Brought Role", company="Acme Brought", apply_url="https://acme.test/brought",
-        source=USER_BROUGHT_SOURCE, date_found=old, last_seen_at=old, first_seen_at=old,
-    )
-    await db.insert_job(scraped)
-    await db.insert_job(brought)
-    await db.commit()
-    scraped_id = await db.get_job_id_by_key(scraped.normalized_key())
-    brought_id = await db.get_job_id_by_key(brought.normalized_key())
-    assert scraped_id and brought_id
-
-    await db.purge_old_jobs(days=30)
-
-    assert await db.get_job_by_id(scraped_id) is None, "an old SCRAPED row must still be purged"
-    assert await db.get_job_by_id(brought_id) is not None, "an old USER_BROUGHT row must survive the purge"
-
-
-@pytest.mark.asyncio
 async def test_legacy_bring_response_shape_is_unchanged(authenticated_async_context):
-    """Constraint 4 — job/existing/scored keep working for any existing caller."""
+    """Constraint 4 — job/existing/application_id/status keep working for any
+    existing caller. `scored` went with the scorer (slice 5, #483); the PR body
+    lists it as a removed response field."""
     async with authenticated_async_context() as client:
         body = await _bring(client)
-        assert set(("job", "existing", "scored")).issubset(body)
+        assert {"job", "existing", "application_id", "status"}.issubset(body)
         assert isinstance(body["job"]["id"], int)
         assert body["existing"] is False
-        assert isinstance(body["scored"], bool)
+        assert "scored" not in body
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -538,19 +504,26 @@ async def test_save_fit_stores_the_verdict_and_keeps_both_judgements(authenticat
 
 
 @pytest.mark.asyncio
-async def test_save_fit_computes_nothing(authenticated_async_context, monkeypatch):
-    import sys
+async def test_save_fit_computes_nothing(authenticated_async_context):
+    """The verdict stored is the one the AGENT sent, byte for byte — Job360
+    never computes a fit (product rule 4).
 
-    class _Explosive:
-        def __getattr__(self, name: str) -> Any:
-            raise AssertionError(f"save_fit touched skill_matcher.{name} — it must never score")
-
+    This used to poison `src.services.skill_matcher` in `sys.modules` to prove
+    the route never reached for the scorer. Slice 5 (#483) deleted that module
+    outright, so the stronger statement is now structural: there is no scorer
+    to reach for. What is left to check is that nothing is invented on the way
+    through.
+    """
     async with authenticated_async_context() as client:
-        app_id = (await _bring(client))["application_id"]  # bring is allowed to score; poison AFTER
-        monkeypatch.setitem(sys.modules, "src.services.skill_matcher", _Explosive())
+        app_id = (await _bring(client))["application_id"]
 
         resp = await _save_fit(client, app_id, score=70, verdict="looks fine", reasoning="agent's own read")
         assert resp.status_code == 200, resp.text
+
+        detail = await _get_application(client, app_id)
+        fit = detail.json()["fit"]
+        assert fit["score"] == 70 and fit["verdict"] == "looks fine"
+        assert fit["reasoning"] == "agent's own read"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -133,9 +133,6 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
-          REED_API_KEY: ${{ secrets.REED_API_KEY }}
-          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
-          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
           PROBE_FORCE_RED: ${{ inputs.drill && '1' || '' }}
         run: |
           set +e

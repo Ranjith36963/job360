@@ -1,18 +1,8 @@
-import os
 
-# --- Rule #18 test hermeticity (Pillar-2 feature flags) --------------------
-# The running app enables ENRICHMENT_ENABLED / SEMANTIC_ENABLED via the repo
-# .env so the dashboard uses all three engines. The test suite must NOT inherit
-# that — rule #18 says behaviour with the flags OFF must be the verified
-# baseline. settings.py calls load_dotenv(override=False), which will not
-# clobber a value already present in os.environ, so seeding "false" here (before
-# any `src.*`/`migrations` import binds the module-level constants) blocks the
-# .env value from leaking into tests. setdefault keeps an explicit shell export
-# (SEMANTIC_ENABLED=true pytest ...) working for ad-hoc debugging, and any test
-# that needs a flag ON opts in via its own monkeypatch.
-os.environ.setdefault("SEMANTIC_ENABLED", "false")
-os.environ.setdefault("ENRICHMENT_ENABLED", "false")
-os.environ.setdefault("MATCHER_ENABLED", "false")
+# The Pillar-2 engine flags that used to be forced OFF at the top of this
+# file (semantic / enrichment / matcher, and later the search-UI switch) went
+# with the engines themselves — slice 5, #483. Nothing in the product reads a
+# scoring flag any more, so there is nothing left to make hermetic here.
 
 import asyncio
 import contextlib
@@ -149,24 +139,6 @@ def _loop_guard_strict(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _search_ui_enabled_for_legacy_suite(monkeypatch):
-    """R12 (spec 2026-09-04-application-spine) — SEARCH_UI_ENABLED defaults to
-    OFF in production, but the legacy search suite (hundreds of tests,
-    slated for deletion in slice 5) still exercises the real routes. Force
-    it ON for the whole suite here; tests/test_search_flag.py pins BOTH
-    positions of the flag explicitly via monkeypatch.setattr(settings, ...).
-
-    Its own fixture (C6, split out of ``_loop_guard_strict``, which is about
-    the event-loop guard and unrelated): same autouse/function scope, so this
-    changes nothing about schema isolation between tests — only which fixture
-    function the setattr call lives in.
-    """
-    from src.core import settings as _settings
-
-    monkeypatch.setattr(_settings, "SEARCH_UI_ENABLED", True, raising=False)
-
-
-@pytest.fixture(autouse=True)
 def _offline_openai(monkeypatch):
     """Keep the WHOLE suite offline for LLMs (rule #4).
 
@@ -226,77 +198,6 @@ def _close_leaked_app_db():
             asyncio.run(dependencies.close_db())
         except Exception:
             dependencies._db = None
-
-
-def cancel_pending_rescores(tasks) -> int:
-    """Cancel every unfinished task in `tasks`, clear it, return how many.
-
-    Split out of the fixture below so it can be TESTED. A teardown hook that
-    only ever runs as a side effect of other tests is exactly the kind of guard
-    this repo keeps finding dead — see scripts/drill_registry.py.
-
-    Each task's loop is the request loop, not this thread's, so the cancel is
-    posted with `call_soon_threadsafe` rather than called directly.
-    """
-    if not tasks:
-        return 0
-    cancelled = 0
-    for task in list(tasks):
-        if task.done():
-            continue
-        try:
-            loop = task.get_loop()
-            if loop.is_closed():
-                continue
-            loop.call_soon_threadsafe(task.cancel)
-            cancelled += 1
-        except (RuntimeError, AttributeError):
-            # Loop already stopping or closed between the check and the call,
-            # or an object that is not a task. Either way there is nothing left
-            # to cancel.
-            continue
-    tasks.clear()
-    return cancelled
-
-
-@pytest.fixture(autouse=True)
-def _drain_leaked_rescore_tasks():
-    """Stop a re-score task from outliving the test whose schema it queries.
-
-    THE FLAKE THIS FIXES (issue #369). Three gate runs on 2026-08-23 failed with
-    ``relation "users" does not exist`` / ``relation "user_profiles" does not
-    exist``, each blaming a DIFFERENT test in ``test_profile_upload.py``, each
-    passing when that file ran alone. The gate log carries the whole chain:
-
-        queue.py:67   enqueue skipped: REDIS_URL is not set, so
-                      rescore_user_feed_task cannot be queued
-        profile.py:94 rescore: background re-score FAILED, feed left on a stale
-                      profile_version: OperationalError('relation
-                      "user_profiles" does not exist')
-
-    i.e. no Redis in tests -> `_run_rescore_in_process` -> `asyncio.create_task`,
-    pinned in `_rescore_bg_tasks` and never awaited. The test ends, the per-test
-    schema is dropped, and the orphan then queries a schema that is gone. The
-    failure is attributed to WHATEVER TEST IS RUNNING NOW, which is why it looked
-    random: the blamed test is innocent.
-
-    It is a RACE, not a certainty — a task that finishes inside its own request
-    is harmless, which is why the same batch passes and fails on different runs.
-
-    The fallback itself is correct and deliberate (issue #271: losing the work is
-    worse than doing it fragilely). What was missing is that nothing collected
-    the tasks it leaves behind.
-
-    Cancelling rather than draining: the task's loop belongs to the request and
-    this synchronous teardown cannot drive it, and a full-feed re-score is not
-    work a unit test needs finished. `_rescore_finished` logs the cancellation,
-    so the tasks stay audible rather than vanishing.
-    """
-    yield
-
-    from src.api.routes import profile as _profile
-
-    cancel_pending_rescores(getattr(_profile, "_rescore_bg_tasks", None))
 
 
 # Pinned test timestamp — avoid non-determinism from datetime.now() leaking

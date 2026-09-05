@@ -43,7 +43,7 @@ def _is_missing_table(exc: Exception) -> bool:
     Postgres says ``relation "..." does not exist``. The profile-version helpers
     below degrade gracefully on a pre-migration schema — but only if they
     recognise the error. The old check matched SQLite wording only, so on
-    Postgres the "tolerated" error re-raised instead (crashing run_search).
+    Postgres the "tolerated" error re-raised instead, crashing the caller.
     """
     msg = str(exc).lower()
     return "no such table" in msg or "does not exist" in msg

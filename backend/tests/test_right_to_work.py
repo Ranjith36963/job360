@@ -20,7 +20,7 @@ put a wall in front of the one candidate who most needs the door open.
 """
 from __future__ import annotations
 
-from src.services.profile.models import CVData, UserPreferences, UserProfile
+from src.services.profile.models import UserPreferences
 from src.services.profile.schemas import CVSchema, cv_schema_to_cvdata
 
 
@@ -47,24 +47,6 @@ class TestTheCvsStatementSurvives:
         assert cv.cv_right_to_work == "requires sponsorship"
 
 
-class TestTheJudgeSeesIt:
-    def _text(self, **cv_kw) -> str:
-        from src.services.llm_matcher import profile_to_matcher_text
-
-        return profile_to_matcher_text(
-            UserProfile(
-                cv_data=CVData(raw_text="x", job_titles=["ML Engineer"], **cv_kw),
-                preferences=UserPreferences(),
-            )
-        )
-
-    def test_a_stated_status_reaches_the_candidate_text(self) -> None:
-        assert "indefinite leave to remain" in self._text(
-            cv_right_to_work="Indefinite Leave to Remain"
-        ).lower()
-
-    def test_nothing_is_said_when_the_cv_did_not_say_it(self) -> None:
-        assert "right to work" not in self._text().lower()
 
 
 class TestThePromptAsksForIt:

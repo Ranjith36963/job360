@@ -139,13 +139,19 @@ async def test_bring_then_read_then_record_then_list_round_trip(authenticated_as
             job_id = brought["job_id"]
             assert brought["title"] == JOB["title"] and brought["company"] == JOB["company"]
             assert brought["existing"] is False
-            assert brought["url"].endswith(f"/jobs/{job_id}")
+            # Slice 5 (#483): the public /jobs/{id} page is gone; the link is
+            # the user's own application page.
+            application_id = brought["application_id"]
+            assert brought["url"].endswith(f"/applications/{application_id}")
+            assert "/jobs/" not in brought["url"]
 
             again = _payload(await mcp.call_tool("bring_job", JOB))
             assert again["job_id"] == job_id and again["existing"] is True, "same ad twice = same job"
 
             job = _payload(await mcp.call_tool("get_job", {"job_id": job_id}))
             assert job["job_id"] == job_id and "description" in job
+            assert job["application_id"] == application_id
+            assert job["url"].endswith(f"/applications/{application_id}")
 
             # C1 (application-spine review) — record_application is rewired onto
             # the rich `POST /applications/{id}/receipt` route; its response is

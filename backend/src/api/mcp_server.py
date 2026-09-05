@@ -107,10 +107,12 @@ def _audit(tool: str, status: str, **fields: Any) -> None:
     )
 
 
-def _job_url(job_id: int) -> str:
+def _application_url(application_id: int) -> str:
+    """Slice 5 (#483) deleted the public `/jobs/{id}` page; the only web view
+    of a brought ad is now the user's own application page."""
     from src.core.settings import SITE_BASE_URL
 
-    return f"{SITE_BASE_URL}/jobs/{job_id}"
+    return f"{SITE_BASE_URL}/applications/{application_id}"
 
 
 def _receipt_url(receipt_id: int) -> str:
@@ -119,23 +121,21 @@ def _receipt_url(receipt_id: int) -> str:
     return f"{SITE_BASE_URL}/receipts/{receipt_id}"
 
 
-def _job_summary(job: Any) -> dict[str, Any]:
+def _job_summary(job: Any, application_id: int) -> dict[str, Any]:
+    """Slice 5 (#483): no score, no dims, no fit words. Job360 stores the ad;
+    the calling agent judges it and records its verdict with `save_fit`."""
     return {
         "job_id": job.id,
         "title": job.title,
         "company": job.company,
         "location": job.location,
-        "match_score": job.match_score,
-        "bucket": job.bucket,
-        "matched_skills": job.matched_skills,
-        "missing_required": job.missing_required,
-        "action": job.action,
-        "url": _job_url(job.id),
+        "application_id": application_id,
+        "url": _application_url(application_id),
     }
 
 
-def _job_detail(job: Any) -> dict[str, Any]:
-    out = _job_summary(job)
+def _job_detail(job: Any, application_id: int) -> dict[str, Any]:
+    out = _job_summary(job, application_id)
     out.update(
         {
             "description": job.description or "",
@@ -143,21 +143,8 @@ def _job_detail(job: Any) -> dict[str, Any]:
             "salary": job.salary,
             "source": job.source,
             "experience_level": job.experience_level,
-            "workplace_type": job.workplace_type,
-            "required_skills": job.required_skills,
-            "dims": {
-                "role": job.role,
-                "skill": job.skill,
-                "location": job.location_score,
-                "recency": job.recency,
-                "seniority": job.seniority_score,
-                "salary": job.salary_score,
-                "visa": job.visa_score,
-                "workplace": job.workplace_score,
-                "experience": job.experience,
-                "credentials": job.credentials,
-                "active": job.dims_active,
-            },
+            "posted_at": job.posted_at,
+            "deadline": job.deadline,
         }
     )
     return out
@@ -224,7 +211,6 @@ def build_server() -> MCPServer:
 
     from src.api.routes import applications as applications_route
     from src.api.routes import bring as bring_route
-    from src.api.routes import jobs as jobs_route
     from src.api.routes import profile as profile_route
     from src.api.routes import receipts as receipts_route
     from src.api.routes import tailor as tailor_route
@@ -270,9 +256,10 @@ def build_server() -> MCPServer:
         apply_url: str = "",
     ) -> dict[str, Any]:
         """Bring a job ad the user found (paste the full ad text as `description`).
-        Job360 stores it, scores the fit against their profile and returns the job id,
-        match score and skill gaps. Bringing the same title+company again returns the
-        existing job (existing=true). Never use this to search for jobs."""
+        Job360 stores it and starts an application for it, then returns the job id and
+        the application id to work against. It does NOT judge the fit — that is your
+        job; record your own verdict with `save_fit`. Bringing the same title+company
+        again returns the existing job (existing=true). Never use this to search."""
         try:
             body = bring_route.BringJobRequest(
                 title=title, company=company, description=description, location=location, apply_url=apply_url
@@ -286,25 +273,25 @@ def build_server() -> MCPServer:
             _audit("bring_job", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
         _audit("bring_job", "ok", job_id=resp.job.id, existing=resp.existing)
-        out = _job_summary(resp.job)
-        out.update({
-            "existing": resp.existing, "scored": resp.scored,
-            "application_id": resp.application_id, "status": resp.status,
-        })
+        out = _job_summary(resp.job, resp.application_id)
+        out.update({"existing": resp.existing, "status": resp.status})
         return out
 
     @mcp.tool()
     async def get_job(job_id: int) -> dict[str, Any]:
-        """A job the user brought: the ad text, apply link, the per-dimension fit
-        breakdown and what the user has done with it (action)."""
+        """An ad the user brought, by job id: the full text, the apply link and the
+        dates we hold. Only jobs THIS user brought are readable."""
         try:
             async with _request_db() as db:
-                resp = await jobs_route.get_job(job_id, db, _user())
+                resp = await applications_route.get_job(job_id, db, _user())
+                # The route already proved the caller owns an application for
+                # this job (404 otherwise), so this read cannot come back None.
+                app_row = await applications_spine.get_application_by_job(db, _user().id, job_id)
         except HTTPException as exc:
             _audit("get_job", "error", job_id=job_id, http_status=exc.status_code)
             raise _tool_error(exc) from None
         _audit("get_job", "ok", job_id=job_id)
-        return _job_detail(resp)
+        return _job_detail(resp, int(app_row["id"]) if app_row else 0)
 
     @mcp.tool()
     async def tailor_documents(job_id: int) -> dict[str, Any]:

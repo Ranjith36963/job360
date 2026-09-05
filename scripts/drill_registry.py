@@ -74,11 +74,11 @@ ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 # A workflow line invoking a repo script. Both roots are real: ci.yml runs
-# `python scripts/mypy_ratchet.py` under `working-directory: backend`, while
-# checker-scorecard.yml spells the same shape `python backend/scripts/shelf_xray.py`
-# from the repo root. Discovery must resolve both or it silently under-reports —
-# and a discovery step that under-reports is exactly the failure this file exists
-# to stop.
+# `python scripts/mypy_ratchet.py` under `working-directory: backend`, but a
+# step without that working-directory would spell the same script
+# `python backend/scripts/mypy_ratchet.py` from the repo root. Discovery must
+# resolve both or it silently under-reports — and a discovery step that
+# under-reports is exactly the failure this file exists to stop.
 _SCRIPT_REF = re.compile(r"(?:^|[\s\"'/=])((?:backend/)?scripts/[a-zA-Z_0-9./-]*[a-zA-Z_0-9-]+\.(?:py|sh))")
 
 
@@ -303,12 +303,6 @@ REGISTRY: dict[str, Guard] = {
         drill=[sys.executable, "scripts/drill_registry.py", "--drill"],
     ),
     # ── owed: real guards, no fire-test yet, and here is exactly why ────────
-    "scripts/absence_check.py": Guard(
-        status="owed",
-        reason="reads the live GitHub API for loops that have stopped running; a drill "
-        "needs a recorded `gh run list` fixture, which does not exist yet",
-        since="2026-08-16",
-    ),
     "scripts/already_built.py": Guard(
         status="owed",
         reason="offline and therefore the cheapest debt here to clear — a drill can "
@@ -320,12 +314,6 @@ REGISTRY: dict[str, Guard] = {
         reason="measures whether the other checkers fired; it silently measured 0 and "
         "then stopped entirely on 2026-08-10, which is precisely the failure a "
         "drill would have caught — highest-value debt in this list",
-        since="2026-08-16",
-    ),
-    "scripts/data_invariants.py": Guard(
-        status="owed",
-        reason="queries the production database; a drill needs a seeded throwaway "
-        "schema, not prod, and this repo has no staging",
         since="2026-08-16",
     ),
     "scripts/doc_clutter_check.py": Guard(
@@ -366,19 +354,6 @@ REGISTRY: dict[str, Guard] = {
         # going back to being hand-written, which is the sneakier one).
         drill=[sys.executable, "scripts/gen_doc_blocks.py"],
     ),
-    "scripts/journey_probe.py": Guard(
-        status="owed",
-        reason="drives the live signup journey and MUTATES production (it creates real "
-        "accounts); a drill must not run it, and a safe fixture mode does not exist",
-        since="2026-08-16",
-    ),
-    "scripts/product_assertions.py": Guard(
-        status="owed",
-        reason="reads the production catalogue; guard #9 lived here — its decision path "
-        "was unreachable while every unit test passed, so a drill is owed against "
-        "the real exit path, not the function",
-        since="2026-08-16",
-    ),
     "scripts/provider_probe.py": Guard(
         status="owed",
         reason="calls paid LLM providers; a drill would spend money on every CI run "
@@ -390,34 +365,16 @@ REGISTRY: dict[str, Guard] = {
         reason="reads the live Sentry API; needs a recorded issue payload",
         since="2026-08-16",
     ),
-    "scripts/user_journey_audit.py": Guard(
-        status="owed",
-        reason="reads the production database for per-user funnel state",
-        since="2026-08-16",
-    ),
     "scripts/watchdog_check.py": Guard(
         status="owed",
-        reason="watches the other loops via the live GitHub API; same fixture gap as "
-        "absence_check.py, and the two should share one recorded fixture",
-        since="2026-08-16",
-    ),
-    "backend/scripts/eval_ranking.py": Guard(
-        status="owed",
-        reason="scores search quality against a labelled set and needs an LLM key; CI "
-        "has none, which is why it recorded 39%->66%->78% and then went quiet",
+        reason="watches the other loops via the live GitHub API; a drill needs a "
+        "recorded `gh run list` fixture, which does not exist yet",
         since="2026-08-16",
     ),
     "backend/scripts/mypy_ratchet.py": Guard(
         status="owed",
         reason="offline and easy: a drill can add a deliberate type error and demand "
         "the ratchet refuses it",
-        since="2026-08-16",
-    ),
-    "backend/scripts/shelf_xray.py": Guard(
-        status="owed",
-        reason="counts filled profile fields in production; it has already lied in BOTH "
-        "directions (salary 83% vs 52%, skills 69% vs 95%) by counting shapes "
-        "instead of values, so its drill must assert against a known-value fixture",
         since="2026-08-16",
     ),
 }

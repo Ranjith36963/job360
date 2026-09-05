@@ -831,8 +831,8 @@ def _maybe_normalise_skills_via_esco(
     skills: list[str],
 ) -> tuple[list[str], dict[str, str]]:
     """Step-1.5 S1.5-D — ESCO-normalise raw skill strings when the
-    ``SEMANTIC_ENABLED`` flag is on AND the ESCO index artefacts are on
-    disk. Returns ``(canonical_skills, {canonical_label: esco_uri})``.
+    ``ESCO_SKILL_NORMALISATION_ENABLED`` flag is on AND the ESCO index
+    artefacts are on disk. Returns ``(canonical_skills, {label: esco_uri})``.
 
     Skills with no confident match (cosine < 0.55) pass through unchanged
     and contribute no entry to the URI map. The flag-off / no-data path
@@ -842,9 +842,11 @@ def _maybe_normalise_skills_via_esco(
     embedding matrix on first call, then caches both for the process
     lifetime — calling per-skill in a loop is intentional and cheap.
     """
-    from src.core.settings import SEMANTIC_ENABLED  # noqa: PLC0415 — lazy
+    from src.core.settings import (  # noqa: PLC0415 — lazy
+        ESCO_SKILL_NORMALISATION_ENABLED,
+    )
 
-    if not SEMANTIC_ENABLED:
+    if not ESCO_SKILL_NORMALISATION_ENABLED:
         return skills, {}
     try:
         from src.services.profile.skill_normalizer import (  # noqa: PLC0415
@@ -908,7 +910,7 @@ def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
     # Scoring-semantic fields (flow into SearchConfig)
     skills = _coerce_str_list(result.get("skills"))
     # Step-1.5 S1.5-D/E — opt-in ESCO normalisation. No-op when
-    # SEMANTIC_ENABLED is false or the ESCO index is missing.
+    # ESCO_SKILL_NORMALISATION_ENABLED is false or the ESCO index is missing.
     skills, cv_skills_esco = _maybe_normalise_skills_via_esco(skills)
 
     # Display-only fields (NOT used in scoring — kept separate to avoid pollution)

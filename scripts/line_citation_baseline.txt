@@ -13,21 +13,19 @@
 # A per-file ratchet cannot tell a move from a gain. Re-baselining is the
 # honest response; raising a per-file number without checking the total
 # would not be.
+#
+# Re-baselined 2026-09-05 (slice 5, #483). The four pillar docs and the
+# runbook (199 citations between them) were archived as FROZEN, so they
+# left this list; STATUS.md and ARCHITECTURE.md were rewritten with symbol
+# names and dropped to 0 and 11. The mutation drill proved the old rows had
+# become slack: a planted citation in STATUS.md went unreported under 15.
 
-.claude/skills/add-source/SKILL.md 1
-.claude/skills/hard-rules/SKILL.md 4
 .claude/skills/health/SKILL.md 4
 .claude/skills/worker/SKILL.md 1
-ARCHITECTURE.md 49
+ARCHITECTURE.md 11
 README.md 11
-STATUS.md 15
 STORY.md 4
 backend/CLAUDE.md 2
 docs/product/MONETIZATION_GAPS.md 3
-docs/product/pillars/01-user-pillar.md 61
-docs/product/pillars/02-search-and-match-engine.md 70
-docs/product/pillars/03-job-providers.md 30
-docs/product/pillars/glossary.md 15
-docs/product/pillars/runbook.md 23
 docs/product/product_design_rules.md 5
 docs/product/troubleshooting.md 7

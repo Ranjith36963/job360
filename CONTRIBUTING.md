@@ -17,7 +17,7 @@ Branch off `main`. Use one of these prefixes:
 | `test/*`     | Test-only changes (new coverage, flake fixes)       |
 | `chore/*`    | Tooling, deps, CI, config                           |
 
-Example: `feature/adzuna-hourly-tier`, `fix/scorer-visa-negation`.
+Example: `feat/application-export`, `fix/receipt-null-channel`.
 
 ## Commit messages
 
@@ -25,8 +25,8 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/) with an
 imperative subject line (no trailing period, max 72 chars):
 
 ```
-feat(sources): add Comeet ATS source with 5-slug catalog
-fix(scorer): do not penalise remote-friendly visa phrasing
+feat(spine): record_event accepts a recorded_by label
+fix(receipts): keep channel NULL when the agent sends none
 docs(backend): document FRONTEND_ORIGIN + NEXT_PUBLIC_API_URL wiring
 refactor(profile): split keyword_generator tier logic into helpers
 test(api): cover /api/profile IDOR regression
@@ -130,9 +130,9 @@ either live `scripts/` directory.
 ## Architecture + rules
 
 Read [`CLAUDE.md`](CLAUDE.md) at repo root before your first non-trivial change.
-It documents the 31 hard rules (no `user_id` on `jobs`, no lazy-breaking heavy
-imports, mandatory five-surface updates when adding sources, timezone-aware
-quiet-hours dispatch, account-mgmt session invalidation, etc.) plus the
-scoring algorithm and data-flow.
+It points at the hard rules (`.claude/skills/hard-rules/SKILL.md`: no `user_id`
+on `jobs`, no lazy-breaking heavy imports, append-only application history,
+MCP/route gate parity, timezone-aware quiet-hours dispatch, account-mgmt session
+invalidation, etc.) plus the product path and data-flow.
 
 For docs and plans, start at [`docs/README.md`](docs/README.md).

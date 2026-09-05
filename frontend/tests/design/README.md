@@ -1,4 +1,6 @@
 # Design pass — the tooling, and the measurements behind the fixes
+<!-- doc: REFERENCE -->
+> **REFERENCE — how-to for the design tooling.** Numbers quoted here are measurements from the day they were taken, not live claims. <!-- banner: auto -->
 
 Three scripts, one job: stop guessing what the page looks like and measure it.
 

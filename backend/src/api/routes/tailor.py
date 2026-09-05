@@ -3,7 +3,8 @@
 Every endpoint is per-user (rule #12/#25): ``require_verified_user`` + all queries
 scoped by ``user.id`` (never a user_id from the path/body → no IDOR). Generation is
 quota-gated (guardrail #1). The LLM call is done synchronously here (reliable +
-testable, no Redis dependency); an ARQ task mirrors it for a future async path.
+testable, no Redis dependency) — and now that is the ONLY path: the ARQ task
+that used to mirror it went with `src/workers/` in slice 5 (#483).
 
 Test seam: ``llm_extract`` and ``load_profile`` are imported into this module so
 tests monkeypatch them here (``monkeypatch.setattr(tailor, "llm_extract", fake)``).

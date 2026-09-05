@@ -24,7 +24,7 @@ principal	distinguished
 # "Account Executive" / "Sales Executive" / "Customer Service Executive" are
 # common UK ENTRY-level titles despite the word "executive" — only the
 # compounds below ("chief executive", "executive director") are unambiguous.
-# "head of" is guarded in code (_SENIORITY_NOISE) against "head of year" /
+# "head of" is guarded by seniority_noise.txt (same folder) against "head of year" /
 # "head of house" / "head of sixth form" — school pastoral titles, not the
 # department-leadership sense this tier means.
 director	director

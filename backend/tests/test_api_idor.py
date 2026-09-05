@@ -1,16 +1,18 @@
-"""IDOR regression tests for legacy per-user routes.
+"""IDOR regression tests for the per-user routes.
 
-Batch 2 shipped the schema (user_actions + applications now carry
-user_id + UNIQUE(user_id, job_id)) but the repo layer and route
-handlers were tenant-blind — two users hitting /api/jobs/{id}/action
-would alias-collapse onto the placeholder tenant.
-
-Batch 3.5 Deliverable C adds `Depends(require_user)` to every per-user
-endpoint and threads user_id through JobDatabase action+application
-methods. This file proves:
+Batch 2 shipped the schema (user_actions + applications carry user_id +
+UNIQUE(user_id, job_id)) but the repo layer and route handlers were
+tenant-blind — two users could alias-collapse onto the placeholder tenant.
+Batch 3.5 Deliverable C added `Depends(require_user)` to every per-user
+endpoint and threaded user_id through. This file proves:
   1. Unauthenticated requests → 401.
-  2. User A cannot read or mutate user B's action / application rows.
+  2. User A cannot read or mutate user B's application / profile rows.
   3. User A positive control — their own row round-trips fine.
+
+Slice 5 (#483) removed the save/dismiss action routes and the search routes
+this file also covered; the route list below is the surviving per-user
+surface, including `GET /api/applications/job/{id}`, which replaced the
+PUBLIC `GET /api/jobs/{id}` (spec S1 — removed, not re-scoped).
 
 Per CLAUDE.md rule #12 + the audit checklist in docs/batch_prompts.md
 §tenant-isolation.
@@ -152,14 +154,14 @@ def _register(client, email, password="s3cretpassword"):
 
 
 @pytest.mark.parametrize("method,path", [
-    # NB: GET /api/jobs is intentionally PUBLIC (shared catalog read via
-    # optional_user — sitemap + unfurl bots read it unauthenticated; see
-    # routes/jobs.py::list_jobs), so it is NOT a per-user-auth endpoint and is
-    # excluded here. The per-user MUTATIONS below still require auth.
-    ("POST", "/api/jobs/1/action"),
-    ("DELETE", "/api/jobs/1/action"),
-    ("GET",  "/api/actions"),
-    ("GET",  "/api/actions/counts"),
+    # Slice 5 (#483) deleted the last route that served per-user data
+    # PUBLICLY (`GET /api/jobs/{id}`) rather than re-scoping it — a brought ad
+    # is one user's data (spec S1). Its per-user replacement is in this list.
+    ("POST", "/api/jobs/bring"),
+    ("GET",  "/api/applications"),
+    ("GET",  "/api/applications/job/1"),
+    ("GET",  "/api/receipts"),
+    ("GET",  "/api/whats-new"),
     ("GET",  "/api/pipeline"),
     ("GET",  "/api/pipeline/counts"),
     ("GET",  "/api/pipeline/reminders"),
@@ -171,13 +173,9 @@ def _register(client, email, password="s3cretpassword"):
     ("POST", "/api/profile"),
     ("POST", "/api/profile/linkedin"),
     ("POST", "/api/profile/github"),
-    ("POST", "/api/search"),
-    ("GET",  "/api/search/abc123/status"),
 ])
 def test_per_user_endpoint_requires_auth(api, method, path):
-    if method == "POST" and "action" in path:
-        r = api.request(method, path, json={"action": "liked"})
-    elif method == "POST" and "advance" in path:
+    if method == "POST" and "advance" in path:
         r = api.request(method, path, json={"stage": "interview"})
     else:
         r = api.request(method, path)
@@ -188,89 +186,6 @@ def test_per_user_endpoint_requires_auth(api, method, path):
 
 # ---------------------------------------------------------------------------
 # Cross-user isolation — actions
-# ---------------------------------------------------------------------------
-
-
-def test_action_isolation_alice_cannot_see_bobs_actions(api):
-    """Alice creates an action; Bob's /api/actions must not show it."""
-    job_a, job_b = api.__job_ids__  # type: ignore[attr-defined]
-
-    _register(api, "alice@example.com")
-    r = api.post(f"/api/jobs/{job_a}/action", json={"action": "liked"})
-    assert r.status_code == 200, r.text
-
-    # Alice sees it
-    r_alice = api.get("/api/actions")
-    assert r_alice.status_code == 200
-    alice_actions = r_alice.json().get("actions", [])
-    assert any(a["job_id"] == job_a for a in alice_actions)
-
-    # Switch to Bob
-    api.post("/api/auth/logout")
-    api.cookies.clear()
-    _register(api, "bob@example.com")
-
-    # Bob must see empty list (no access to alice's action rows)
-    r_bob = api.get("/api/actions")
-    assert r_bob.status_code == 200
-    bob_actions = r_bob.json().get("actions", [])
-    assert bob_actions == [], f"Bob leaked alice's actions: {bob_actions}"
-
-
-def test_action_counts_scoped_by_user(api):
-    job_a, _ = api.__job_ids__  # type: ignore[attr-defined]
-
-    _register(api, "alice@example.com")
-    api.post(f"/api/jobs/{job_a}/action", json={"action": "liked"})
-
-    r_alice = api.get("/api/actions/counts")
-    assert r_alice.json().get("liked", 0) == 1
-
-    api.post("/api/auth/logout")
-    api.cookies.clear()
-    _register(api, "bob@example.com")
-
-    r_bob = api.get("/api/actions/counts")
-    assert r_bob.json().get("liked", 0) == 0, (
-        f"Bob saw alice's liked count: {r_bob.json()}"
-    )
-
-
-def test_action_delete_is_scoped_by_user(api):
-    """Bob deleting an action on a job he never touched must not affect alice's row."""
-    job_a, _ = api.__job_ids__  # type: ignore[attr-defined]
-
-    _register(api, "alice@example.com")
-    api.post(f"/api/jobs/{job_a}/action", json={"action": "applied"})
-
-    api.post("/api/auth/logout")
-    api.cookies.clear()
-    _register(api, "bob@example.com")
-
-    # Bob tries to delete an action he doesn't own — action should be a no-op
-    # from the repo layer (DELETE ... WHERE user_id = bob matches 0 rows)
-    r_bob_delete = api.delete(f"/api/jobs/{job_a}/action")
-    # Depending on implementation, either 200 (idempotent) or 404 is acceptable —
-    # what matters is that Alice's row survives.
-    assert r_bob_delete.status_code in (200, 204, 404), r_bob_delete.text
-
-    api.post("/api/auth/logout")
-    api.cookies.clear()
-
-    # Alice logs back in and must still see her action
-    r = api.post("/api/auth/login", json={
-        "email": "alice@example.com", "password": "s3cretpassword"
-    })
-    assert r.status_code == 200, r.text
-    r_alice = api.get("/api/actions")
-    alice_actions = r_alice.json().get("actions", [])
-    assert any(a["job_id"] == job_a and a["action"] == "applied"
-               for a in alice_actions), (
-        f"Bob's delete clobbered alice's row: {alice_actions}"
-    )
-
-
-# ---------------------------------------------------------------------------
 # Cross-user isolation — pipeline
 # ---------------------------------------------------------------------------
 
@@ -345,126 +260,6 @@ def test_pipeline_advance_cannot_target_other_users_row(api):
                for a in alice_apps), (
         f"Bob's advance modified alice's row: {alice_apps}"
     )
-
-
-# ---------------------------------------------------------------------------
-# Positive control — same-user round-trip
-# ---------------------------------------------------------------------------
-
-
-def test_action_roundtrip_for_authenticated_user(api):
-    job_a, _ = api.__job_ids__  # type: ignore[attr-defined]
-    _register(api, "alice@example.com")
-
-    r = api.post(f"/api/jobs/{job_a}/action", json={"action": "liked"})
-    assert r.status_code == 200
-
-    r2 = api.get("/api/actions")
-    actions = r2.json().get("actions", [])
-    assert len(actions) == 1
-    assert actions[0]["job_id"] == job_a
-    assert actions[0]["action"] == "liked"
-
-    r3 = api.delete(f"/api/jobs/{job_a}/action")
-    assert r3.status_code == 200
-
-    r4 = api.get("/api/actions")
-    assert r4.json().get("actions", []) == []
-
-
-# ---------------------------------------------------------------------------
-# Batch 3.5.1 — search run_id user-scoping (existence-hiding via 404)
-# ---------------------------------------------------------------------------
-
-
-def test_search_run_id_is_scoped_by_user(api, monkeypatch):
-    """Alice creates a run; Bob hitting that run_id's status must 404.
-
-    The POST handler stores `user_id` on the _runs[run_id] record; the
-    GET handler returns 404 (not 403) when run["user_id"] != user.id,
-    so an attacker cannot distinguish "does not exist" from "exists but
-    not mine" — no oracle for run_id enumeration.
-    """
-    # Stub run_search so the background task completes instantly and
-    # predictably — we are testing the gate, not the pipeline.
-    async def _fake_run_search(**kwargs):
-        return {
-            "total_found": 0,
-            "new_jobs": 0,
-            "sources_queried": 0,
-            "per_source": {},
-        }
-
-    import src.api.routes.search as search_route
-    monkeypatch.setattr(search_route, "run_search", _fake_run_search)
-    # Reset module-level _runs dict so prior tests don't leak run_ids.
-    monkeypatch.setattr(search_route, "_runs", {}, raising=True)
-
-    _register(api, "alice@example.com")
-    r = api.post("/api/search")
-    assert r.status_code == 200, r.text
-    run_id = r.json()["run_id"]
-
-    # Alice can read her own run (positive control)
-    r_alice = api.get(f"/api/search/{run_id}/status")
-    assert r_alice.status_code == 200
-    assert r_alice.json()["run_id"] == run_id
-
-    # Switch to Bob
-    api.post("/api/auth/logout")
-    api.cookies.clear()
-    _register(api, "bob@example.com")
-
-    r_bob = api.get(f"/api/search/{run_id}/status")
-    assert r_bob.status_code == 404, (
-        f"cross-user read of alice's run_id should 404 "
-        f"(existence hiding), got {r_bob.status_code}: {r_bob.text}"
-    )
-
-
-def test_search_status_for_unknown_run_id_returns_404(api, monkeypatch):
-    """Unknown run_id → 404 for an authenticated user."""
-    import src.api.routes.search as search_route
-    monkeypatch.setattr(search_route, "_runs", {}, raising=True)
-
-    _register(api, "alice@example.com")
-    r = api.get("/api/search/nonexistent123/status")
-    assert r.status_code == 404
-
-
-def test_search_failed_progress_hides_internal_error(api, monkeypatch):
-    """N5 — when the background search run blows up, the client-visible
-    `progress` field must be a generic message, not the raw exception text
-    (which can contain secrets like DB DSNs / API keys)."""
-    import time
-
-    async def _raising_run_search(**kwargs):
-        raise RuntimeError("DATABASE_URL=postgresql://job360:supersecret@host/db")
-
-    import src.api.routes.search as search_route
-    monkeypatch.setattr(search_route, "run_search", _raising_run_search)
-    monkeypatch.setattr(search_route, "_runs", {}, raising=True)
-
-    _register(api, "alice@example.com")
-    r = api.post("/api/search")
-    assert r.status_code == 200, r.text
-    run_id = r.json()["run_id"]
-
-    # The failure happens in a fire-and-forget background task; poll briefly
-    # for it to land instead of assuming instant completion.
-    body = None
-    for _ in range(50):
-        status_resp = api.get(f"/api/search/{run_id}/status")
-        assert status_resp.status_code == 200
-        body = status_resp.json()
-        if body["status"] == "failed":
-            break
-        time.sleep(0.05)
-
-    assert body is not None and body["status"] == "failed", f"run never reached failed state: {body}"
-    assert body["progress"] == "Search failed, please try again."
-    assert "supersecret" not in body["progress"]
-    assert "DATABASE_URL" not in body["progress"]
 
 
 # ---------------------------------------------------------------------------

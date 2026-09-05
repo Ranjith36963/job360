@@ -60,7 +60,7 @@ def safe_next(value: Optional[str]) -> Optional[str]:
     Mirrors the frontend's `safeNext`: accepted only when it starts with a
     single ``/`` (never ``//``, which a browser treats as protocol-relative),
     carries no scheme, and is at most 512 chars. Anything else is dropped —
-    the caller falls back to its own default (``/dashboard``). This is what
+    the caller falls back to its own default (``/applications``). This is what
     lets `/oauth/consent/{rid}` survive a login bounce: the rid lives in the
     path (`middleware.ts` keeps only the pathname), so `next` must reach the
     emailed link, not just the login page's query string.

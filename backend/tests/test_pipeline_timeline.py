@@ -236,17 +236,17 @@ async def test_notes_update_404(authenticated_async_context):
 async def test_create_application_rejects_expired_job(authenticated_async_context):
     """R-2 fix: POST /pipeline/{id} on a confirmed-expired job → 410 Gone.
 
-    The C-1 staleness fix only landed on get_job_by_id_with_enrichment;
-    the pipeline create path uses bare get_job_by_id, so an expired
-    listing slipped through. Route layer now checks staleness_state
-    explicitly and returns 410 with a user-readable detail.
+    The route checks `staleness_state` by hand and returns 410 with a
+    user-readable detail. This is the LAST remaining read of that column
+    after slice 5 (#483) deleted the ghost detector that wrote it — which is
+    why the state is set with plain SQL here: `update_staleness_state` was the
+    detector's writer and went with it.
     """
     db = await api_deps.get_db()
     job_id = await _insert_job_row(db, title="Stale Role", company="Ghost Corp")
-    # Mark the job confirmed_expired post-insert. update_staleness_state
-    # deliberately does NOT commit (callers batch); commit explicitly so
-    # the route, which opens its own connection, sees the new state.
-    await db.update_staleness_state(job_id, "confirmed_expired")
+    await db._conn.execute(
+        "UPDATE jobs SET staleness_state = ? WHERE id = ?", ("confirmed_expired", job_id)
+    )
     await db._conn.commit()
 
     async with authenticated_async_context() as client:

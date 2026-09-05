@@ -14,12 +14,13 @@ bitten three times by exactly that gap:
 
 Both loaders degrade silently by design:
 
-    uk_gate._read()           -> frozenset()  when the file is absent
-    job_signals._load_terms() -> {}           when the file is absent
+    seniority._load_terms() -> {}   when the file is absent
 
-so the UK gate (rule #30's entire basis) and the seniority / workplace
-detectors answer "nothing" in production, with no exception, while passing
-every test on a developer machine where the files exist.
+so the seniority detector answers "nothing" in production, with no exception,
+while passing every test on a developer machine where the files exist. (The
+`uk_gazetteer` half of this had the identical shape; its reader went with the
+search pipeline in slice 5, but the files are still committed and shipped, so
+the packaging checks below still cover them.)
 
 TWO MECHANISMS CARRY DATA INTO THE IMAGE, and which one applies depends on
 WHERE the data lives:
@@ -297,23 +298,21 @@ class TestEveryCommittedDataDirHasAWayIntoTheImage:
         assert files, f"{rel} exists but ships no data files"
 
 
-class TestTheLoadersDegradeWithoutRaising:
-    """Pins WHY this needed a test rather than being caught at runtime: neither
-    loader raises. Both now LOG an error (silence is what hid the bug three
-    times), but a lost data file still must not crash the pipeline. If someone
-    later makes them raise, that is a deliberate change and belongs here first.
+class TestTheLoaderDegradesWithoutRaising:
+    """Pins WHY this needed a test rather than being caught at runtime: the
+    loader does not raise. It now LOGS an error (silence is what hid the bug
+    three times), but a lost data file still must not crash a profile save. If
+    someone later makes it raise, that is a deliberate change and belongs here
+    first.
+
+    Slice 5 (#483) deleted `services/uk_gate.py` (the search pipeline's UK
+    door) and `services/job_signals.py`; the seniority half of the second
+    moved to `services/profile/seniority.py`, which is the loader below. The
+    `uk_gazetteer` files stay committed and shipped — see the note on
+    `_shipped_data_dirs` — so the packaging checks above still cover them.
     """
 
-    def test_uk_gate_returns_empty_rather_than_raising(self) -> None:
-        from src.services import uk_gate
-
-        # A missing data directory yields empty sets, not an error — which is
-        # exactly why an image built without them looked healthy.
-        places, foreign, ambiguous = uk_gate._gazetteer()
-        for s in (places, foreign, ambiguous):
-            assert isinstance(s, frozenset)
-
-    def test_job_signals_returns_empty_dict_for_a_missing_file(self) -> None:
-        from src.services.job_signals import _load_terms
+    def test_seniority_loader_returns_empty_dict_for_a_missing_file(self) -> None:
+        from src.services.profile.seniority import _load_terms
 
         assert _load_terms("definitely-not-a-real-file.txt") == {}

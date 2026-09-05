@@ -1,6 +1,11 @@
 # Production compose file.
 # For local dev (Redis + Postgres only) use docker-compose.dev.yml instead.
 #
+# There is no `worker` service: the ARQ worker was deleted with the sourcing
+# era (slice 5, #483) — nothing runs in the background. Redis stays because
+# the auth rate limiter can share its windows across replicas through it
+# (RATE_LIMIT_REDIS).
+#
 # Usage:
 #   cp .env.example .env          # fill in secrets
 #   docker compose -f docker-compose.prod.yml up -d
@@ -65,21 +70,12 @@ services:
       SESSION_SECRET: ${SESSION_SECRET}
       CHANNEL_ENCRYPTION_KEY: ${CHANNEL_ENCRYPTION_KEY}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
-      # LLM provider keys (all optional — sources skip gracefully when empty)
+      # LLM provider keys (all optional — CV parsing and the tailor degrade
+      # to the next provider when one is empty)
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # Keyed job-source API keys (optional — sources skip gracefully when empty)
-      REED_API_KEY: ${REED_API_KEY:-}
-      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
-      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
-      JSEARCH_API_KEY: ${JSEARCH_API_KEY:-}
-      JOOBLE_API_KEY: ${JOOBLE_API_KEY:-}
-      SERPAPI_KEY: ${SERPAPI_KEY:-}
-      CAREERJET_AFFID: ${CAREERJET_AFFID:-}
-      FINDWORK_API_KEY: ${FINDWORK_API_KEY:-}
-      DFE_APPRENTICESHIPS_API_KEY: ${DFE_APPRENTICESHIPS_API_KEY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     depends_on:
       postgres:
@@ -92,31 +88,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
-
-  worker:
-    build: ./backend
-    restart: unless-stopped
-    # ARQ worker — confirmed entry point: arq src.workers.settings.WorkerSettings
-    command: ["arq", "src.workers.settings.WorkerSettings"]
-    environment:
-      DATABASE_URL: postgresql://job360:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/job360
-      REDIS_URL: redis://redis:6379
-      SESSION_SECRET: ${SESSION_SECRET}
-      CHANNEL_ENCRYPTION_KEY: ${CHANNEL_ENCRYPTION_KEY}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      MATCHER_ENABLED: ${MATCHER_ENABLED:-false}
-      MATCHER_THRESHOLD: ${MATCHER_THRESHOLD:-30}
-      MATCHER_MAX_JOBS: ${MATCHER_MAX_JOBS:-30}
-      ENRICHMENT_ENABLED: ${ENRICHMENT_ENABLED:-false}
-      SEMANTIC_ENABLED: ${SEMANTIC_ENABLED:-false}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
   frontend:
     build: ./frontend

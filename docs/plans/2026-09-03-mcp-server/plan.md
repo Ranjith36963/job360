@@ -1,4 +1,6 @@
 # Plan: personal tokens + MCP server
+<!-- doc: PLAN -->
+> **PLAN — shipped.** A design record, not live truth; the code and `docs/product/VISION.md` win. <!-- banner: auto -->
 Reads: `intent.md`, `spec.md`. Branch `feat/mcp-server` off `main@97e6fbc`.
 
 ## Files that change
