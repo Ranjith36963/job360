@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import save_upload_to_temp
@@ -22,13 +23,17 @@ from src.api.models import (
     GitHubResponse,
     JsonResumeResponse,
     LinkedInResponse,
+    ProfileEditOut,
     ProfileResponse,
     ProfileSummary,
     ProfileVersionsListResponse,
     ProfileVersionSummary,
 )
+from src.core import settings
 from src.core.settings import PROFILE_EXTRACT_MAX_PER_HOUR
+from src.services.applications.authorship import actor_for
 from src.services.auth import rate_limit as auth_rate_limit
+from src.services.profile import edits as profile_edits
 from src.services.profile.cv_parser import extract_text
 from src.services.profile.github_enricher import (
     enrich_cv_from_github,
@@ -41,15 +46,23 @@ from src.services.profile.linkedin_parser import (
 from src.services.profile.linkedin_parser import (
     _looks_like_linkedin,
 )
-from src.services.profile.models import CVData, UserPreferences, UserProfile
+from src.services.profile.models import (
+    VALID_EXPERIENCE_LEVELS,
+    VALID_WORK_ARRANGEMENTS,
+    CVData,
+    UserPreferences,
+    UserProfile,
+)
 from src.services.profile.preferences import sanitize_preferences
 from src.services.profile.storage import (
     list_profile_versions,
     load_profile,
+    load_profile_with_overlay,
     restore_profile_version,
     save_profile,
 )
 from src.services.profile.two_pass import reset_cv_owned_fields, run_two_pass_extraction
+from src.utils.logger import get_audit_logger
 
 router = APIRouter(tags=["profile"])
 
@@ -59,7 +72,17 @@ router = APIRouter(tags=["profile"])
 logger = logging.getLogger("job360.api.profile")
 
 
-def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileResponse:
+def _build_profile_response(
+    profile: UserProfile, user_id: str, agent_edits: list[ProfileEditOut]
+) -> ProfileResponse:
+    """Render ``profile`` as the API's ``ProfileResponse``.
+
+    ``agent_edits`` is the CURRENT overlay (spec R11), passed in rather than
+    read here: the caller has just loaded the profile, and
+    ``storage.load_profile_with_overlay`` hands back the rows it applied on
+    the SAME connection. Re-querying here would open a second connection per
+    profile render, on the hottest read in the app (N4).
+    """
     summary = ProfileSummary(
         is_complete=profile.is_complete,
         job_titles=profile.cv_data.job_titles,
@@ -98,6 +121,7 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         headline=getattr(cv, "headline", ""),
         location=getattr(cv, "location", ""),
         achievements=getattr(cv, "achievements", []),
+        links=getattr(cv, "links", []) or [],
         cv_positions=getattr(cv, "cv_positions", []) or [],
         cv_projects=getattr(cv, "cv_projects", []) or [],
         cv_experience_level=getattr(cv, "cv_experience_level", "") or "",
@@ -249,7 +273,30 @@ def _build_profile_response(profile: UserProfile, user_id: str) -> ProfileRespon
         github_temporal=github_temporal,
         github_detail=github_detail,
         current_version_id=current_version_id,
+        # Slice 4 (spec R11) — the current agent-edit overlay, so the web
+        # profile page and every other caller of _build_profile_response see
+        # provenance without a second call.
+        agent_edits=agent_edits,
     )
+
+
+def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
+    """The caller's profile AND its rendered response, from ONE profile read.
+
+    Raises ``HTTPException(404)`` when the user has no profile row — the same
+    error ``GET /profile`` raises, because this IS what it raises.
+
+    Both halves are handed back because two callers need both: the route
+    returns the response, MCP ``get_profile`` also needs the ``UserProfile``
+    object to build its ``fields`` map. Before this existed, MCP called the
+    route (one profile read + one overlay read) and then loaded the profile
+    AGAIN plus the overlay AGAIN — four connections to answer one tool call.
+    """
+    profile, overlay = load_profile_with_overlay(user_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No profile found")
+    rows = [ProfileEditOut(**row) for row in overlay]
+    return profile, _build_profile_response(profile, user_id, rows)
 
 
 # ``_user_id_for(profile)`` used to live here. It did
@@ -270,10 +317,122 @@ async def get_profile(user: CurrentUser = Depends(require_user)) -> ProfileRespo
     in ``user_profiles`` keyed by ``user.id``. No more silent overwrites
     between authenticated users.
     """
-    profile = load_profile(user.id)
-    if profile is None:
-        raise HTTPException(status_code=404, detail="No profile found")
-    return _build_profile_response(profile, user.id)
+    return load_profile_response(user.id)[1]
+
+
+# ── PATCH /profile — the agent-edit overlay (slice 4, spec R8-R12) ──────────
+# One dotted path per edit; `value: null` clears it back to what extraction
+# says. `extra="forbid"` on both models is what makes S2 real: a caller
+# cannot smuggle `set_by`/`actor` into the body and forge authorship — the
+# actor is ALWAYS derived from the resolved user (`actor_for`), never
+# accepted as input.
+
+
+class ProfileEditIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    value: Any = None
+
+
+class UpdateProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # The PER-CALL cap (`PROFILE_EDIT_MAX_PATHS_PER_CALL`) is enforced in the
+    # route body, not as a Pydantic `max_length` here — a `Field(max_length=...)`
+    # bakes the value in AT IMPORT TIME, so a test (or an operator) changing
+    # the setting afterwards would have no effect. `min_length=1` is a fixed
+    # invariant (an edit call with no edits is never meaningful), so it stays
+    # a Pydantic constraint.
+    edits: list[ProfileEditIn] = Field(..., min_length=1)
+
+
+class UpdateProfileResponse(BaseModel):
+    """What ``PATCH /profile`` actually returns.
+
+    Declared as the route's ``response_model`` so the OpenAPI schema — and
+    therefore the frontend's generated ``api-types.ts`` — says so. An
+    undeclared ``dict[str, Any]`` return renders as a bare ``{}`` schema,
+    which tells a generated client nothing about the two keys it is about to
+    read (S2/N3).
+    """
+
+    applied: list[ProfileEditOut]
+    profile: ProfileResponse
+
+
+@router.patch("/profile", response_model=UpdateProfileResponse)
+async def update_profile(
+    body: UpdateProfileRequest, user: CurrentUser = Depends(require_user)  # noqa: B008 — FastAPI DI idiom
+) -> UpdateProfileResponse:
+    """Apply 1..N agent edits to the caller's profile as one atomic overlay write.
+
+    R12 — the same function REST and MCP call: the MCP `update_profile` tool
+    invokes this route function directly with the resolved user (the pattern
+    every other MCP tool in `mcp_server.py` already uses), so there is
+    exactly one place this logic can drift.
+
+    All-or-nothing (S12): every edit is validated before anything is
+    written — one bad path or value means the whole call 422s and NOTHING
+    changes. A user with no profile row yet gets an empty base created first
+    (R8) so the overlay has something to sit on. The response carries the
+    full merged profile (`GET /profile`'s own shape) so the caller sees the
+    effect without a second round trip.
+
+    The audit line for this action names PATHS and the actor only — never a
+    value (S3): an edit can carry a name, an email fragment inside `about_me`,
+    or anything else the agent chose to write, and none of that belongs in a
+    log line.
+    """
+    # Cap check FIRST — no side effect (no profile row created) on a call
+    # that is going to be rejected outright.
+    if len(body.edits) > settings.PROFILE_EDIT_MAX_PATHS_PER_CALL:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"at most {settings.PROFILE_EDIT_MAX_PATHS_PER_CALL} edits per call "
+                f"(PROFILE_EDIT_MAX_PATHS_PER_CALL); {len(body.edits)} given"
+            ),
+        )
+
+    actor = actor_for(user)
+    pairs = [(edit.path, edit.value) for edit in body.edits]
+
+    # VALIDATE BEFORE BOOTSTRAPPING. The blank-profile creation below is a
+    # WRITE — it inserts a `user_profiles` row and a `user_profile_versions`
+    # snapshot. Doing it first meant a rejected first call (a typo'd path,
+    # a wrongly-typed value) left a brand-new empty profile behind: `GET
+    # /profile` then answered 200-with-nothing instead of 404, and the user's
+    # own first CV upload started from a profile they never made. A 422 must
+    # change nothing.
+    try:
+        for path, value in pairs:
+            profile_edits.validate_edit(path, value)
+    except profile_edits.ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    if load_profile(user.id, with_overlay=False) is None:
+        # R8 — "a user with no profile row gets an empty base created first
+        # so the overlay has something to sit on."
+        save_profile(UserProfile(), user.id, source_action="agent_edit")
+
+    try:
+        applied = profile_edits.record_edits(user.id, actor, pairs)
+    except profile_edits.ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    # S3 — audit line names PATHS and the ACTOR only, never a value. Goes to
+    # the dedicated `job360.audit` logger (durable + DB-teed), the same
+    # channel `services.applications.spine` uses for every other write.
+    get_audit_logger().info(
+        "profile_edit",
+        extra={"event": "profile_edit", "paths": [path for path, _ in pairs], "actor": actor},
+    )
+
+    rendered = load_profile_response(user.id)[1]
+    return UpdateProfileResponse(
+        applied=[ProfileEditOut(**row) for row in applied], profile=rendered
+    )
 
 
 # ── Shared profile-input helpers — the upload pipeline in ONE place ──
@@ -368,9 +527,15 @@ def _normalize_work_arrangement(value: object) -> str:
     client too, which a frontend-side fix would not.
 
     Rule #29: an unstated preference is silence. "Any" IS unstated.
+
+    Slice 4 (spec R10) — the allowed set now lives once, in
+    ``services.profile.models.VALID_WORK_ARRANGEMENTS``, shared with the
+    agent-edit validator (``services.profile.edits``) so a value this route
+    silently drops and a value the agent gets a 422 for are checked against
+    the identical vocabulary.
     """
     text = value.strip().lower() if isinstance(value, str) else ""
-    return text if text in {"remote", "hybrid", "onsite"} else ""
+    return text if text in VALID_WORK_ARRANGEMENTS else ""
 
 
 # The closed set this route will accept as a STATED experience level — the
@@ -386,7 +551,11 @@ def _normalize_work_arrangement(value: object) -> str:
 # "graduate" (not offered anywhere in the current UI) reach the DB looking
 # like a deliberate choice, which is the same failure this function exists to
 # stop.
-_VALID_EXPERIENCE_LEVELS = {"entry", "mid", "senior", "lead", "executive"}
+#
+# Slice 4 (spec R10) — sourced from ``services.profile.models.
+# VALID_EXPERIENCE_LEVELS`` so this route and the agent-edit validator share
+# one vocabulary instead of two hand-typed sets drifting apart.
+_VALID_EXPERIENCE_LEVELS = VALID_EXPERIENCE_LEVELS
 
 
 def _normalize_experience_level(value: object) -> str:
@@ -486,6 +655,68 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
     profile.preferences = sanitize_preferences(profile.preferences, profile.cv_data)
 
 
+def _clear_overlay_paths(user: CurrentUser, paths: list[str]) -> None:
+    """Append a CLEARING row (``value = NULL``) for each of ``paths``.
+
+    The overlay is append-only (R8/S12), so "the human took this back" is a
+    new row, not a delete — ``export_history.profile_edits`` keeps the whole
+    story. ``enforce_rate_limit=False``: a person clearing their own profile
+    on the web is not an agent edit, and must not be able to exhaust the
+    agent's hourly edit budget.
+
+    Paths outside the current editable set are skipped rather than sent to
+    the validator: a row recorded under a wider ``PROFILE_EXTRA_EDITABLE_PATHS``
+    that has since narrowed would otherwise 422 inside a route that has
+    already saved, turning a successful clear into a 500. Same defensive
+    stance ``edits.apply_overlay_rows`` takes on the read side.
+    """
+    editable = set(profile_edits.editable_paths())
+    clearable = [path for path in paths if path in editable]
+    if not clearable:
+        return
+    profile_edits.record_edits(
+        user.id, actor_for(user), [(path, None) for path in clearable], enforce_rate_limit=False
+    )
+
+
+def _retire_overlaid_preferences(
+    preferences_json: str, saved: UserProfile, user: CurrentUser
+) -> None:
+    """After a preferences form save: clear the overlay for the fields the
+    human actually CHANGED, and only those.
+
+    The flagged concern in the spec ("web edits vs overlay") is real in one
+    direction only. A form save that leaves a field alone must not disturb
+    the agent's edit of it — the form posts a partial document, and an
+    omitted key means "not touched", not "cleared" (rule #29). But a field
+    the human DID submit with a different value is an explicit correction:
+    the seeker looked at the value the agent set and typed something else.
+    Leaving the overlay in place there would show them their own change being
+    ignored, with no way from the web to take the agent's value back.
+
+    So: for every overlay path ``preferences.X`` where ``X`` is a KEY IN THE
+    SUBMITTED JSON and the value that was actually stored differs from the
+    overlay's, append a clearing row. Comparison is against the SAVED
+    preferences, not the raw JSON, so it accounts for the normalisers
+    (``work_arrangement``/``experience_level``) and ``sanitize_preferences``.
+    """
+    try:
+        submitted = json.loads(preferences_json)
+    except json.JSONDecodeError:  # pragma: no cover — _apply_preferences parsed it already
+        return
+    if not isinstance(submitted, dict):  # pragma: no cover — same
+        return
+
+    to_clear: list[str] = []
+    for row in profile_edits.current_overlay(user.id):
+        head, _, field_name = str(row["path"]).partition(".")
+        if head != "preferences" or field_name not in submitted:
+            continue
+        if getattr(saved.preferences, field_name, None) != row["value"]:
+            to_clear.append(row["path"])
+    _clear_overlay_paths(user, to_clear)
+
+
 async def _extract_save_trigger(
     profile: UserProfile, user_id: str
 ) -> None:
@@ -537,13 +768,19 @@ async def upload_cv(
     cv: UploadFile = File(...),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> ProfileResponse:
-    """Set the caller's CV (PDF/DOCX) — one input, one dedicated route."""
-    profile = load_profile(user.id) or UserProfile()
+    """Set the caller's CV (PDF/DOCX) — one input, one dedicated route.
+
+    Loads the BASE profile (``with_overlay=False``): this route MUTATES and
+    SAVES, and starting from the merged profile would copy the agent's
+    overlay values into the extraction's own JSON — see the note on
+    ``storage.load_profile``.
+    """
+    profile = load_profile(user.id, with_overlay=False) or UserProfile()
     # Bounded read: cap memory even for a malicious oversized upload.
     content = await cv.read(10 * 1024 * 1024 + 1)
     await _capture_cv_raw(content, cv.filename, profile)
     await _extract_save_trigger(profile, user.id)
-    return _build_profile_response(profile, user.id)
+    return load_profile_response(user.id)[1]
 
 
 @router.post("/profile/preferences", response_model=ProfileResponse)
@@ -551,11 +788,17 @@ async def upsert_preferences(
     preferences: str = Form(...),  # noqa: B008 — FastAPI dependency-injection idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> ProfileResponse:
-    """Set the caller's preferences form — one input, one dedicated route."""
-    profile = load_profile(user.id) or UserProfile()
+    """Set the caller's preferences form — one input, one dedicated route.
+
+    Loads the BASE profile (``with_overlay=False``) and, after saving,
+    retires the overlay for any preference the human actually changed —
+    see :func:`_retire_overlaid_preferences`.
+    """
+    profile = load_profile(user.id, with_overlay=False) or UserProfile()
     _apply_preferences(preferences, profile)
     await _extract_save_trigger(profile, user.id)
-    return _build_profile_response(profile, user.id)
+    _retire_overlaid_preferences(preferences, profile, user)
+    return load_profile_response(user.id)[1]
 
 
 @router.post("/profile", response_model=ProfileResponse)
@@ -568,15 +811,20 @@ async def upsert_profile(
 
     The dedicated single-input routes are POST /profile/cv and
     POST /profile/preferences; this endpoint accepts both together.
+
+    Loads the BASE profile (``with_overlay=False``) for the same reason the
+    dedicated routes do — it mutates and saves.
     """
-    profile = load_profile(user.id) or UserProfile()
+    profile = load_profile(user.id, with_overlay=False) or UserProfile()
     if cv is not None:
         content = await cv.read(10 * 1024 * 1024 + 1)
         await _capture_cv_raw(content, cv.filename, profile)
     if preferences is not None:
         _apply_preferences(preferences, profile)
     await _extract_save_trigger(profile, user.id)
-    return _build_profile_response(profile, user.id)
+    if preferences is not None:
+        _retire_overlaid_preferences(preferences, profile, user)
+    return load_profile_response(user.id)[1]
 
 
 @router.post("/profile/linkedin", response_model=LinkedInResponse)
@@ -633,7 +881,9 @@ async def upload_linkedin(
                 ),
             )
 
-        profile = load_profile(user.id) or UserProfile()
+        # BASE profile (``with_overlay=False``) — this route mutates and
+        # saves; see the note on ``storage.load_profile``.
+        profile = load_profile(user.id, with_overlay=False) or UserProfile()
         cv = profile.cv_data
         # Finding 6 — reset what THIS input owns before the new upload lands,
         # exactly as _capture_cv_raw calls reset_cv_owned_fields for the CV
@@ -778,7 +1028,9 @@ async def upload_github(
             ),
         )
     github_data = await fetch_github_profile(clean_username)
-    profile = load_profile(user.id) or UserProfile()
+    # BASE profile (``with_overlay=False``) — this route mutates and saves;
+    # see the note on ``storage.load_profile``.
+    profile = load_profile(user.id, with_overlay=False) or UserProfile()
     # enrich_cv_from_github captures the RAW GitHub signals (repos_brief,
     # languages, deterministic frameworks). The single extractor below then adds
     # the GitHub LLM pass and re-runs the others from stored raw.
@@ -903,13 +1155,26 @@ async def clear_profile_section(
     Deliberately does NOT re-run extraction: there is nothing to extract, and a
     paid LLM round-trip to rebuild an empty profile would be waste. The stored
     snapshot taken by ``save_profile`` is what makes this reversible.
+
+    CLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored
+    profile, so emptying only the base left every agent edit in the cleared
+    scope still showing on the page — the button said "Clear" and the value
+    stayed. Worse, the overlay is what "Clear" exists to remove before a
+    fresh upload: the whole point is a clean experiment. So each cleared
+    scope also appends a clearing row (``value = NULL``, append-only) for
+    every overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``
+    -> ``preferences.*``, ``all`` -> both. ``linkedin`` and ``github`` own no
+    editable path, so they clear nothing in the overlay.
     """
     if section not in _CLEAR_SCOPES:
         raise HTTPException(
             status_code=400,
             detail=f"section must be one of: {', '.join(_CLEAR_SCOPES)}",
         )
-    profile = load_profile(user.id)
+    # BASE profile (``with_overlay=False``) — this route mutates and saves, so
+    # starting from the merged profile would write the agent's values into the
+    # base while clearing it.
+    profile = load_profile(user.id, with_overlay=False)
     if profile is None:
         raise HTTPException(status_code=404, detail="No profile to clear")
 
@@ -935,10 +1200,31 @@ async def clear_profile_section(
 
     profile.preferences = prefs
     save_profile(profile, user.id, f"clear_{section}")
+
+    # The overlay half of the clear. Prefixes, not a hand-written path list —
+    # PROFILE_EDITABLE_PATHS is env-extendable, so anything enumerated here
+    # would fall behind it (the same failure `_clear_prefixed` exists to stop).
+    cleared_prefixes: tuple[str, ...] = ()
+    if section == "cv":
+        cleared_prefixes = ("cv_data.",)
+    elif section == "preferences":
+        cleared_prefixes = ("preferences.",)
+    elif section == "all":
+        cleared_prefixes = ("cv_data.", "preferences.")
+    if cleared_prefixes:
+        _clear_overlay_paths(
+            user,
+            [
+                row["path"]
+                for row in profile_edits.current_overlay(user.id)
+                if str(row["path"]).startswith(cleared_prefixes)
+            ],
+        )
+
     logger.info(
         "profile_cleared", extra={"event": "profile_cleared", "section": section}
     )
-    return _build_profile_response(profile, user.id)
+    return load_profile_response(user.id)[1]
 
 
 # ── Step-1.5 S3-A,B,C — profile version + JSON Resume endpoints. ──
@@ -981,7 +1267,9 @@ async def restore_version(
     restored = restore_profile_version(user.id, version_id)
     if restored is None:
         raise HTTPException(status_code=404, detail="Version not found")
-    return _build_profile_response(restored, user.id)
+    # Re-read so the response is the MERGED profile the user will see on the
+    # page: a restore rewrites the base, it does not touch the overlay.
+    return load_profile_response(user.id)[1]
 
 
 def _get_profile_version_for_user(version_id: int, user_id: str) -> dict[str, Any] | None:

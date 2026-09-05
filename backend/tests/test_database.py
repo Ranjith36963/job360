@@ -35,7 +35,7 @@ def test_init_creates_tables(db):
     tables = asyncio.run(db.get_tables())
     assert "jobs" in tables
     # Slice 5 (#483): `run_log` is not in the boot DDL any more, and migration
-    # 0038 drops it. Its absence is the assertion — a re-added CREATE would
+    # 0039 drops it. Its absence is the assertion — a re-added CREATE would
     # resurrect a table nothing reads.
     assert "run_log" not in tables
 

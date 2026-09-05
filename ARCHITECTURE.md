@@ -16,9 +16,9 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0038** | `backend/migrations/` |
-| Migration files | **39** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **149** | `backend/tests/` |
+| Migration head | **0039** | `backend/migrations/` |
+| Migration files | **40** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **156** | `backend/tests/` |
 | GitHub Actions workflows | **24** | `.github/workflows/` |
 | Hard rules | **17** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -320,9 +320,11 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/api/applications` | `applications.py` |
 | `GET` | `/api/applications/export` | `applications.py` |
 | `GET` | `/api/applications/job/{job_id}` | `applications.py` |
+| `GET` | `/api/applications/stats` | `applications.py` |
 | `GET` | `/api/applications/{application_id}` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/artifacts` | `applications.py` |
 | `GET` | `/api/applications/{application_id}/artifacts/{artifact_id}` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/contacts` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/events` | `applications.py` |
 | `PUT` | `/api/applications/{application_id}/fit` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/receipt` | `applications.py` |
@@ -343,6 +345,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/auth/verify-email/confirm` | `auth.py` |
 | `POST` | `/api/auth/verify-email/request` | `auth.py` |
 | `POST` | `/api/jobs/bring` | `bring.py` |
+| `POST` | `/api/jobs/fetch-url` | `bring.py` |
 | `GET` | `/api/settings/channels` | `channels.py` |
 | `POST` | `/api/settings/channels` | `channels.py` |
 | `DELETE` | `/api/settings/channels/{channel_id:int}` | `channels.py` |
@@ -372,6 +375,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `PATCH` | `/api/pipeline/{job_id}/notes` | `pipeline.py` |
 | `GET` | `/api/pipeline/{job_id}/timeline` | `pipeline.py` |
 | `GET` | `/api/profile` | `profile.py` |
+| `PATCH` | `/api/profile` | `profile.py` |
 | `POST` | `/api/profile` | `profile.py` |
 | `POST` | `/api/profile/clear` | `profile.py` |
 | `POST` | `/api/profile/cv` | `profile.py` |
@@ -398,7 +402,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**80 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**84 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->
 
 ## Configuration
@@ -468,6 +472,19 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `EXPORT_HISTORY_MAX_APPLICATIONS` | No (default `500`) | R10/S8 — `export_history` stops at this many applications and reports `truncated: true` with `next_since` |
 | `EXPORT_HISTORY_MAX_BYTES` | No (default `8388608` = 8 MiB) | R10/S8 — `export_history`'s response-size ceiling; also bounds how much artifact text `get_application(with_artifact_text=true)` will inline (`EXPORT_HISTORY_MAX_BYTES / 4`) |
 | `EXPORT_HISTORY_MAX_PER_HOUR` | No (default `12`) | R10/S8 — `export_history` rate limit, keyed on `user.id` (never per IP — every agent shares the proxy IP behind the Next rewrite unless `JOB360_TRUST_PROXY=1`) |
+| `URL_FETCH_ENABLED` | No (default `true`) | docs/plans/2026-09-04-url-fetch R11 — the kill switch. Off → `POST /jobs/fetch-url` answers 404 on the next restart, no deploy needed; this is the control that actually stops the surface (the frontend flag below only hides the button and needs a rebuild) |
+| `URL_FETCH_MAX_BYTES` / `URL_FETCH_TIMEOUT_S` / `URL_FETCH_TOTAL_BUDGET_S` / `URL_FETCH_EXTRACT_BUDGET_S` | No (default `2097152` / `10` / `20` / `3`) | R7 — decoded-body size cap (2 MiB) and three independent time budgets (per-request, whole-journey across redirects, parse-only) — bytes, per-request time and total time are different attacks and need different ceilings |
+| `URL_FETCH_MAX_REDIRECTS` | No (default `5`) | R6 — hop cap on the manual redirect loop; every hop re-screens the URL and re-resolves the host from scratch |
+| `URL_FETCH_MAX_HTML_DEPTH` | No (default `200`) | A7 — nesting-depth ceiling on the heuristic extractor's own container-frame stack, so a pathologically nested document can't blow up OUR algorithm even though `html.parser` itself would keep streaming |
+| `URL_FETCH_MAX_PER_MINUTE` / `URL_FETCH_MAX_PER_HOUR` | No (default `6` / `60`) | R9 — per-**user** fetch rate limits (never per IP — every browser/agent shares the proxy address behind the Next rewrite unless `JOB360_TRUST_PROXY=1`) |
+| `URL_FETCH_MAX_PER_HOUR_GLOBAL` | No (default `2000`) | R9/A9 — the GLOBAL bucket across every user; what stops a handful of accounts turning Job360 into an open relay/scanner for the whole internet — not redundant with the per-address deny list |
+| `URL_FETCH_ALLOWED_CONTENT_TYPES` | No (default `text/html,application/xhtml+xml`) | R7 — we never sniff content; a server's stated `Content-Type` outside this list is `unsupported_content` and the body is never read |
+| `URL_FETCH_USER_AGENT` | No (default `Job360/1.0 (+https://job360.uk/bot; user-initiated)`) | Constraint 8 — never pretend to be a browser; names Job360 and that the fetch is user-initiated |
+| `URL_FETCH_EXTRA_DENY_NETS` | No (default empty) | S9 — comma-separated CIDRs added to the SSRF deny list without a code change |
+| `URL_FETCH_ALLOW_NETS` | No (default empty) | S9 — the LOUD escape hatch for a self-hosted deployment that genuinely needs to reach an internal careers page. Empty changes nothing; every address it lets through logs a WARNING naming the net — a documented hole with an alarm on it, not a convenience |
+| `NEXT_PUBLIC_URL_FETCH_ENABLED` (frontend) | No (default `true`) | R11/C5 — frontend counterpart to `URL_FETCH_ENABLED`: hides the link/Fetch box on `/bring` when explicitly `false`. Inlined at Next.js **build** time — the backend's 404 is the control that actually stops the surface on a restart |
+| `URL_FETCH_MAX_JSONLD_BYTES` | No (default `262144` = 256 KiB) | Adversarial review B3 — a single `<script type="application/ld+json">` block over this many bytes is skipped before `json.loads` ever sees it, bounding the CPU a hostile nested-array bomb can spend even after the `RecursionError` it raises is caught |
+| `BRING_MAX_TEXT` / `BRING_MAX_FIELD` | No (default `40000` / `300`) | `POST /jobs/bring`'s field caps (a real ad is 500-8,000 chars). Moved here from `api/routes/bring.py` (review C4) so `src/services/fetch/extract.py` — a service, no FastAPI — can read the same caps without importing a route module |
 
 ### Constants (`settings.py`)
 

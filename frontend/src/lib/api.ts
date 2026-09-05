@@ -645,6 +645,23 @@ export async function bringJob(body: BringJobRequest): Promise<BringJobResponse>
   });
 }
 
+/**
+ * Fetch a job-ad URL under the backend's SSRF guard (docs/plans/
+ * 2026-09-04-url-fetch/spec.md). Always resolves with a closed `outcome` —
+ * "the site refused us" is a normal response, not a thrown error. A 404
+ * (URL_FETCH_ENABLED off) or a 429 (rate limited) still throw via the
+ * shared `request()` — the caller shows those the same way any other
+ * ApiError is shown.
+ */
+export type FetchUrlResponse = _Schemas["FetchUrlResponse"];
+
+export async function fetchJobUrl(url: string): Promise<FetchUrlResponse> {
+  return request<FetchUrlResponse>("/api/jobs/fetch-url", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+}
+
 /** "I applied": freeze the job + the CV/cover letter as sent. Append-only. */
 export async function createReceipt(
   jobId: number,
@@ -755,6 +772,17 @@ export type ApplicationJobSnapshot = _Schemas["ApplicationJobOut"];
 export type ApplicationFit = _Schemas["ApplicationFitOut"];
 export type ApplicationDetail = _Schemas["ApplicationDetailOut"];
 
+// ---- Contacts (slice 4, docs/plans/2026-09-05-contacts-stats/spec.md R1-R3) ----
+
+export type Contact = _Schemas["ContactOut"];
+export type AddContactResult = _Schemas["AddContactResponse"];
+
+/** {path, value, set_by, set_at} — one row of the agent-edit overlay (R11).
+ *  `ProfileResponse.agent_edits` itself is an untyped dict (backend `dict[str,
+ *  Any]`), so this borrows the shape from `export_history`'s equivalent typed
+ *  row rather than declaring a duplicate. */
+export type AgentEdit = _Schemas["ProfileEditExportOut"];
+
 export async function listApplications(
   params: { status?: string; updated_since?: string; limit?: number; offset?: number } = {}
 ): Promise<_Schemas["ListApplicationsResponse"]> {
@@ -836,4 +864,25 @@ export async function getWhatsNew(
   params: { since?: string; after_id?: number; limit?: number } = {}
 ): Promise<_Schemas["WhatsNewResponse"]> {
   return request(`/api/whats-new${qs(params as Record<string, unknown>)}`);
+}
+
+/** Add a person to an application (spec R1/R2). 201 for a new row, 200
+ * (`already_existed: true`) for the same non-empty email seen again on this
+ * application — the caller reads the status from the response body, not the
+ * HTTP code, since `request()` doesn't surface it. */
+export async function addContact(
+  applicationId: number,
+  body: {
+    name: string;
+    role?: string;
+    email?: string;
+    linkedin_url?: string;
+    notes?: string;
+    occurred_at?: string;
+  }
+): Promise<AddContactResult> {
+  return request(`/api/applications/${applicationId}/contacts`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }

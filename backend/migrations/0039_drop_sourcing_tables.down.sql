@@ -1,4 +1,4 @@
--- Reverse of 0038 — recreates run_log, job_enrichment and job_embeddings.
+-- Reverse of 0039 — recreates run_log, job_enrichment and job_embeddings.
 --
 -- READ THIS BEFORE RELYING ON IT: IT BRINGS BACK THE SCHEMA, NOT THE DATA.
 -- The rows are gone; a forward migration's reverse restores the shape so the

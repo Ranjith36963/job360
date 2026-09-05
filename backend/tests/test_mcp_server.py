@@ -35,6 +35,11 @@ EXPECTED_TOOLS = {
     "record_event",
     "whats_new",
     "export_history",
+    # Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md §Tool contracts)
+    # — three more tools, 15 -> 18 total.
+    "add_contact",
+    "stats",
+    "update_profile",
 }
 
 JOB = {

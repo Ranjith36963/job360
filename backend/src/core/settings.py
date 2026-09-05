@@ -320,6 +320,85 @@ WHATS_NEW_MAX_EVENTS = int(os.getenv("WHATS_NEW_MAX_EVENTS", "200"))
 EXPORT_HISTORY_MAX_APPLICATIONS = int(os.getenv("EXPORT_HISTORY_MAX_APPLICATIONS", "500"))
 EXPORT_HISTORY_MAX_BYTES = int(os.getenv("EXPORT_HISTORY_MAX_BYTES", str(8 * 1024 * 1024)))
 EXPORT_HISTORY_MAX_PER_HOUR = int(os.getenv("EXPORT_HISTORY_MAX_PER_HOUR", "12"))
+# Slice 4 review (S3) — the export's top-level `profile_edits` blob is bounded
+# like everything else it carries: the NEWEST N rows, rendered oldest-first,
+# with `profile_edits_truncated` saying when the tail was cut.
+EXPORT_HISTORY_MAX_PROFILE_EDITS = int(os.getenv("EXPORT_HISTORY_MAX_PROFILE_EDITS", "500"))
+
+# ── Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md) ─────────────────
+# S4 — every cap a parameter; a breach is a 422 naming the field and the
+# limit, never a silent clip.
+
+# add_contact (R1/R2). Contacts are add-only rows on an application.
+CONTACT_NAME_MAX_CHARS = int(os.getenv("CONTACT_NAME_MAX_CHARS", "200"))
+CONTACT_ROLE_MAX_CHARS = int(os.getenv("CONTACT_ROLE_MAX_CHARS", "200"))
+CONTACT_EMAIL_MAX_CHARS = int(os.getenv("CONTACT_EMAIL_MAX_CHARS", "254"))
+CONTACT_LINKEDIN_URL_MAX_CHARS = int(os.getenv("CONTACT_LINKEDIN_URL_MAX_CHARS", "300"))
+CONTACT_NOTES_MAX_CHARS = int(os.getenv("CONTACT_NOTES_MAX_CHARS", "2000"))
+CONTACTS_PER_APPLICATION_MAX = int(os.getenv("CONTACTS_PER_APPLICATION_MAX", "50"))
+CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 — per USER
+
+# stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
+STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))
+STATS_MAX_PER_HOUR = int(os.getenv("STATS_MAX_PER_HOUR", "60"))  # S7 — per USER
+# S6 — the DRIVING query is bounded too, not just the group list: stats reads
+# the newest N applications for the user and says so (`applications_truncated`).
+# A user with more than this many applications gets an honest partial answer
+# rather than an unbounded fetch.
+STATS_MAX_APPLICATIONS = int(os.getenv("STATS_MAX_APPLICATIONS", "5000"))
+
+
+# ── The event-type vocabulary has ONE home (review finding S4) ───────────────
+# `APPLICATION_STATUS_EVENT_TYPES` above is it. Everything stats counts is
+# DERIVED from that tuple here and bound as a query parameter downstream —
+# `services/applications/stats.py` never re-types an event name as a SQL
+# literal, so a rename in the vocabulary cannot leave a stale string behind in
+# the counting code. Drift refuses to boot rather than counting silently wrong.
+def _status_event(name: str) -> str:
+    """One member of ``APPLICATION_STATUS_EVENT_TYPES``, or a startup error."""
+    if name not in APPLICATION_STATUS_EVENT_TYPES:
+        raise RuntimeError(
+            f"stats names the event type {name!r}, which is not in "
+            f"APPLICATION_STATUS_EVENT_TYPES {APPLICATION_STATUS_EVENT_TYPES}"
+        )
+    return name
+
+
+STATS_APPLIED_EVENT_TYPE = _status_event("applied")
+STATS_REPLIED_EVENT_TYPE = _status_event("replied")
+STATS_OFFER_EVENT_TYPE = _status_event("offer")
+STATS_REJECTED_EVENT_TYPE = _status_event("rejected")
+# The event types that make an application count as "interview" — derived from
+# the status vocabulary by prefix, never a second hand-typed list.
+STATS_INTERVIEW_EVENT_TYPES = tuple(
+    t for t in APPLICATION_STATUS_EVENT_TYPES if t.startswith("interview_")
+)
+if not STATS_INTERVIEW_EVENT_TYPES:  # pragma: no cover — a vocabulary edit would trip this
+    raise RuntimeError(
+        "APPLICATION_STATUS_EVENT_TYPES declares no interview_* event type; "
+        "stats cannot compute an interview count"
+    )
+
+# update_profile (R8-R11). The overlay of agent edits over extraction.
+# R9 — a CLOSED set of dotted paths into UserProfile. Each MUST be a declared
+# dataclass field (S8); src/services/profile/edits.py asserts that at import.
+PROFILE_EDITABLE_PATHS = (
+    "cv_data.name", "cv_data.headline", "cv_data.location", "cv_data.summary",
+    "cv_data.skills", "cv_data.job_titles", "cv_data.education", "cv_data.certifications",
+    "cv_data.achievements", "cv_data.cv_right_to_work", "cv_data.cv_languages", "cv_data.links",
+    "preferences.target_job_titles", "preferences.preferred_locations", "preferences.industries",
+    "preferences.additional_skills", "preferences.excluded_skills", "preferences.negative_keywords",
+    "preferences.salary_min", "preferences.salary_max", "preferences.work_arrangement",
+    "preferences.experience_level", "preferences.about_me", "preferences.needs_visa",
+)
+# Env-added paths must ALSO be declared dataclass fields — an unknown one is a
+# startup error, not an accepted path.
+PROFILE_EXTRA_EDITABLE_PATHS = _env_list("PROFILE_EXTRA_EDITABLE_PATHS", ())
+PROFILE_EDIT_MAX_PATHS_PER_CALL = int(os.getenv("PROFILE_EDIT_MAX_PATHS_PER_CALL", "30"))
+PROFILE_EDIT_MAX_CHARS = int(os.getenv("PROFILE_EDIT_MAX_CHARS", "2000"))
+PROFILE_EDIT_MAX_LIST_ITEMS = int(os.getenv("PROFILE_EDIT_MAX_LIST_ITEMS", "100"))
+PROFILE_EDIT_MAX_ITEM_CHARS = int(os.getenv("PROFILE_EDIT_MAX_ITEM_CHARS", "200"))
+PROFILE_EDIT_MAX_PER_HOUR = int(os.getenv("PROFILE_EDIT_MAX_PER_HOUR", "120"))  # S7 — per USER
 
 
 # Outbound HTTP defaults. Kept through slice 5 (#483) on purpose: the URL
@@ -335,6 +414,82 @@ SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 # --- Production env validation --------------------------------------------
 # These vars must be non-empty when running in production.
 _REQUIRED_PROD_VARS = ["SESSION_SECRET", "CHANNEL_ENCRYPTION_KEY", "DATABASE_URL"]
+
+
+# ---------------------------------------------------------------------------
+# Bring-a-job field caps (docs/plans/2026-09-04-url-fetch/spec.md C4).
+# Originally hand-typed module constants in api/routes/bring.py; moved here so
+# src/services/fetch/extract.py (a SERVICE, no FastAPI) can read them without
+# importing a route module — the only such import that existed in the
+# backend. Bounds are guardrails, not product limits: a real ad is
+# 500-8,000 chars; the cap stops a pasted PDF dump (or a hostile 50MB body)
+# from becoming a catalog row every later read has to carry. Shared by the
+# URL-fetch extraction ladder so the two caps never drift apart.
+# ---------------------------------------------------------------------------
+BRING_MAX_TEXT = int(os.getenv("BRING_MAX_TEXT", "40000"))
+BRING_MAX_FIELD = int(os.getenv("BRING_MAX_FIELD", "300"))
+
+# ---------------------------------------------------------------------------
+# URL fetch on the web (docs/plans/2026-09-04-url-fetch/spec.md) — every cap
+# a parameter (intent constraint 6), never a literal in guard.py/fetcher.py.
+# ---------------------------------------------------------------------------
+
+# The kill switch (R11). Default ON; flipping it OFF 404s the route on the
+# next restart with no code deploy — the control that actually matters if
+# the fetcher is ever implicated in an incident (the frontend's
+# NEXT_PUBLIC_URL_FETCH_ENABLED only hides the button and needs a rebuild).
+URL_FETCH_ENABLED = _env_flag("URL_FETCH_ENABLED", True)
+
+# Decoded-body size cap (2 MiB) — checked BOTH on a declared Content-Length
+# (refuse before reading) and while streaming (catches a lying/absent header
+# and a decompression bomb, since the cap is on decoded bytes).
+URL_FETCH_MAX_BYTES = int(os.getenv("URL_FETCH_MAX_BYTES", str(2 * 1024 * 1024)))
+# Three independent time budgets (R7) — bytes, per-request time and
+# whole-journey time are different attacks and need different ceilings.
+URL_FETCH_TIMEOUT_S = int(os.getenv("URL_FETCH_TIMEOUT_S", "10"))
+URL_FETCH_TOTAL_BUDGET_S = int(os.getenv("URL_FETCH_TOTAL_BUDGET_S", "20"))
+URL_FETCH_EXTRACT_BUDGET_S = float(os.getenv("URL_FETCH_EXTRACT_BUDGET_S", "3"))
+URL_FETCH_MAX_REDIRECTS = int(os.getenv("URL_FETCH_MAX_REDIRECTS", "5"))
+# A7 — the heuristic extractor's container-frame stack never grows past this,
+# so a pathologically nested document can't make our OWN algorithm blow up
+# even though html.parser itself would happily keep streaming.
+URL_FETCH_MAX_HTML_DEPTH = int(os.getenv("URL_FETCH_MAX_HTML_DEPTH", "200"))
+
+# R9 — rate limits: two per-user buckets plus one GLOBAL bucket. Per USER,
+# never per IP (every browser/agent shares the proxy address behind the Next
+# rewrite unless JOB360_TRUST_PROXY=1 — the OAuth slice's own trap). The
+# global bucket is what stops a handful of accounts turning Job360 into an
+# open relay/scanner for the whole internet (A9) — it is not redundant with
+# the per-address deny list.
+URL_FETCH_MAX_PER_MINUTE = int(os.getenv("URL_FETCH_MAX_PER_MINUTE", "6"))
+URL_FETCH_MAX_PER_HOUR = int(os.getenv("URL_FETCH_MAX_PER_HOUR", "60"))
+URL_FETCH_MAX_PER_HOUR_GLOBAL = int(os.getenv("URL_FETCH_MAX_PER_HOUR_GLOBAL", "2000"))
+
+# R7 — we never sniff content; a server's stated Content-Type decides
+# unsupported_content vs. a bounded, tag-stripping, script-free parse.
+URL_FETCH_ALLOWED_CONTENT_TYPES = _env_list(
+    "URL_FETCH_ALLOWED_CONTENT_TYPES", ("text/html", "application/xhtml+xml")
+)
+# Constraint 8 — never pretend to be a browser. Names Job360 and says the
+# fetch is user-initiated; beating a bot wall by lying about who we are is
+# not a decision this header gets to make quietly.
+URL_FETCH_USER_AGENT = os.getenv(
+    "URL_FETCH_USER_AGENT", "Job360/1.0 (+https://job360.uk/bot; user-initiated)"
+)
+# S9 — a self-hosted deployment may legitimately need an internal careers
+# page; EXTRA_DENY_NETS adds a net without a code change, ALLOW_NETS is the
+# loud escape hatch (empty by default, changes nothing, warns every time it
+# lets an address through — a documented hole with an alarm on it, not a
+# convenience).
+URL_FETCH_EXTRA_DENY_NETS = _env_list("URL_FETCH_EXTRA_DENY_NETS", ())
+URL_FETCH_ALLOW_NETS = _env_list("URL_FETCH_ALLOW_NETS", ())
+
+# B3 — a single ``<script type="application/ld+json">`` block is skipped
+# before ``json.loads`` ever sees it once it exceeds this many bytes. A real
+# JobPosting block is a few KB; this bounds the CPU a hostile
+# ``"["*60000``-shaped bomb can spend even after RecursionError is caught,
+# and stops one pathological block from starving the other rungs' budget.
+URL_FETCH_MAX_JSONLD_BYTES = int(os.getenv("URL_FETCH_MAX_JSONLD_BYTES", str(256 * 1024)))
 
 
 def validate_required_env() -> None:

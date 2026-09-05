@@ -64,12 +64,15 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("oauth_states", "user_id"),
     ("oauth_grants", "user_id"),
     ("audit_log", "user_id"),
+    # Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md).
+    ("application_contacts", "user_id"),
+    ("profile_edits", "user_id"),
 )
 
 # The SHARED catalog. These MUST NOT have a user_id — a user_id appearing here
 # is the leak, and its absence is the design working.
 # Slice 5 (#483) dropped `job_enrichment` and `job_embeddings` (migration
-# 0038); `jobs` is all that is left of the shared catalog — and every row
+# 0039); `jobs` is all that is left of the shared catalog — and every row
 # in it is now an ad some user brought.
 SHARED_TABLES: tuple[str, ...] = ("jobs",)
 

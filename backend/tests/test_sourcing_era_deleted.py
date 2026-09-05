@@ -196,10 +196,14 @@ def test_routes_gone() -> None:
     # the raw list has NO /api/* rows -- "nothing sourcing-era is mounted" would
     # hold vacuously and "/api/jobs/bring" would look absent.
     paths = sorted(set(route_paths(app)))
+    # The two /api/jobs/* doors that are the PRODUCT, not the sourcing era:
+    # bring (the front door) and fetch-url (slice 3's web fallback that
+    # pre-fills the bring form — docs/plans/2026-09-04-url-fetch/spec.md).
+    kept = {"/api/jobs/bring", "/api/jobs/fetch-url"}
     bad = [
         p for p in paths
         if p.startswith(("/api/search", "/api/runs", "/api/sources"))
-        or (p.startswith("/api/jobs") and p != "/api/jobs/bring")
+        or (p.startswith("/api/jobs") and p not in kept)
     ]
     assert not bad, f"sourcing-era routes still mounted: {bad}"
     assert "/api/jobs/bring" in paths
@@ -312,17 +316,17 @@ async def test_profile_has_no_search_titles(authenticated_async_context):
         assert "search_titles" not in str(schema["components"]["schemas"]["ProfileResponse"])
 
 
-# ── R6: migration 0038 ──────────────────────────────────────────────────────
+# ── R6: migration 0039 ──────────────────────────────────────────────────────
 _DROPPED = ("run_log", "job_enrichment", "job_embeddings")
 
 
 @pytest.mark.asyncio
-async def test_migration_0038_up_down_up(migrated_db_path):
+async def test_migration_0039_up_down_up(migrated_db_path):
     from migrations import runner
     from src.repositories import pg as _pg
 
     db_path = migrated_db_path
-    # Resolve the migration by NAME, not by number: three open slices share
+    # Resolve the migration by NAME, not by number: three open slices shared
     # the 0038 slot and each rebase renumbers, and any later migration would
     # otherwise turn this test red the day it lands.
     stems = sorted(s for s, _ in runner._discover_pairs())
@@ -339,7 +343,7 @@ async def test_migration_0038_up_down_up(migrated_db_path):
     for t in _DROPPED:
         assert not await _has_table(t), f"{t} present after the fixture's up()"
     for t in ("jobs", "user_feed", "applications", "application_events", "user_actions"):
-        assert await _has_table(t), f"{t} must survive 0038"
+        assert await _has_table(t), f"{t} must survive 0039"
 
     # Walk down through anything newer first, then through the drop itself.
     for expected in reversed(later):
@@ -354,7 +358,7 @@ async def test_migration_0038_up_down_up(migrated_db_path):
 
     up_sql = (BACKEND / "migrations" / f"{drop_stem}.up.sql").read_text(encoding="utf-8")
     drops = re.findall(r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)", up_sql, re.I)
-    assert sorted(drops) == sorted(_DROPPED), f"0038 drops {drops}"
+    assert sorted(drops) == sorted(_DROPPED), f"0039 drops {drops}"
 
 
 # R8 (MCP tool set unchanged) is pinned by tests/test_mcp_server.py::EXPECTED_TOOLS

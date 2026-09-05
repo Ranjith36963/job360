@@ -633,6 +633,12 @@ async def get_application_detail(
     whether the catalog row still exists), the fit slot, every artifact
     version (text omitted unless ``with_artifact_text``), the whole event
     timeline, and receipts. ``None`` for a foreign/unknown id (404, S2)."""
+    # Lazy: contacts.py imports FROM this module (SpineError, append_event,
+    # get_owned_application, parse_occurred_at) — a top-level import here
+    # would be circular. Slice 4 (docs/plans/2026-09-05-contacts-stats/
+    # spec.md R3).
+    from src.services.applications.contacts import list_contacts  # noqa: PLC0415
+
     app_row = await get_owned_application(db, user_id, application_id)
     if app_row is None:
         return None
@@ -672,6 +678,7 @@ async def get_application_detail(
         "artifacts": await _list_artifacts(db, application_id, with_text=with_artifact_text),
         "events": await list_events_for_display(db, application_id),
         "receipts": await _list_receipts_for_application(db, user_id, application_id),
+        "contacts": await list_contacts(db, user_id, application_id),
     }
 
 
@@ -852,10 +859,51 @@ async def _artifact_metadata(db: JobDatabase, application_id: int, *, include_te
     return out
 
 
+async def _list_profile_edits_for_export(
+    db: JobDatabase, user_id: str
+) -> tuple[list[dict[str, Any]], bool]:
+    """Slice 4 R8/R10 — export_history's ``profile_edits``, oldest first,
+    INCLUDING a clear (``value IS NULL``) — unlike
+    ``services.profile.edits.current_overlay`` (the live, non-cleared
+    overlay), this IS the history: "nothing is deleted — the clear is a
+    row" (frozen test ``test_clear_reveals_extraction_and_keeps_the_
+    history``).
+
+    BOUNDED like every other blob this export carries (review finding S3):
+    the query takes the NEWEST ``EXPORT_HISTORY_MAX_PROFILE_EDITS`` rows
+    (``ORDER BY id DESC LIMIT ?``) and the result is reversed so the output
+    stays oldest-first. Newest-wins is the right end to keep — the current
+    overlay is made of the newest row per path, so an export truncated at the
+    old end still explains the profile the caller is looking at. Returns
+    ``(rows, truncated)``.
+    """
+    limit = settings.EXPORT_HISTORY_MAX_PROFILE_EDITS
+    cur = await db._db.execute(
+        "SELECT path, value, set_by, set_at FROM profile_edits WHERE user_id = ? "
+        "ORDER BY id DESC LIMIT ?",
+        (user_id, limit + 1),
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+    truncated = len(rows) > limit
+    rows = rows[:limit]
+    rows.reverse()  # newest N, rendered oldest-first
+    return [
+        {
+            "path": r["path"],
+            "value": json.loads(r["value"]) if r.get("value") is not None else None,
+            "set_by": r["set_by"],
+            "set_at": r["set_at"],
+        }
+        for r in rows
+    ], truncated
+
+
 async def export_history(
     db: JobDatabase, user_id: str, *, since: Optional[str] = None, include_text: bool = False
 ) -> dict[str, Any]:
     """R10/S8 — bounded on applications AND bytes; rate-limited per USER."""
+    from src.services.applications.contacts import list_contacts  # noqa: PLC0415 — see get_application_detail
+
     key = f"export_history:{user_id}"
     if not rate_limit.check_and_record(
         key, max_in_window=settings.EXPORT_HISTORY_MAX_PER_HOUR, window_seconds=3600
@@ -892,6 +940,7 @@ async def export_history(
             "events": await list_events_for_display(db, r["id"]),
             "artifacts": await _artifact_metadata(db, r["id"], include_text=include_text),
             "receipts": await _list_receipts_for_application(db, user_id, r["id"], include_text=include_text),
+            "contacts": await list_contacts(db, user_id, r["id"]),
         }
         blob_size = len(json.dumps(app_blob, default=str).encode("utf-8"))
         if out_apps and total_bytes + blob_size > settings.EXPORT_HISTORY_MAX_BYTES:
@@ -901,7 +950,16 @@ async def export_history(
         out_apps.append(app_blob)
         total_bytes += blob_size
 
-    result: dict[str, Any] = {"applications": out_apps, "truncated": truncated, "bytes": total_bytes}
+    # S3 — the edits blob is part of the payload, so it is part of the byte
+    # figure. Counting only the applications made `bytes` describe something
+    # the caller never receives on its own.
+    profile_edits, edits_truncated = await _list_profile_edits_for_export(db, user_id)
+    total_bytes += len(json.dumps(profile_edits, default=str).encode("utf-8"))
+
+    result: dict[str, Any] = {
+        "applications": out_apps, "truncated": truncated, "bytes": total_bytes,
+        "profile_edits": profile_edits, "profile_edits_truncated": edits_truncated,
+    }
     if truncated:
         result["next_since"] = next_since
     get_audit_logger().info(

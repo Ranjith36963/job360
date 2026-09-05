@@ -1,6 +1,6 @@
 """Dev helper: dump useful summaries from the Job360 DB.
 
-(`run_log` went with the sourcing era — migration 0038, slice 5 #483 — so the
+(`run_log` went with the sourcing era — migration 0039, slice 5 #483 — so the
 run summary this script used to print is gone with it.)
 
 Usage:

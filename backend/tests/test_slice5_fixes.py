@@ -29,7 +29,7 @@ def test_rule_29_unset_preferences_serialise_absent_not_default() -> None:
     that — None / "" / [] — not 0, not a fallback level, not a guessed range.
     A reader (the user's own agent) that sees `salary_min: 0` will treat it as
     a fact the user typed."""
-    resp = _build_profile_response(UserProfile(), "user-1")
+    resp = _build_profile_response(UserProfile(), "user-1", [])
     prefs = resp.preferences
 
     assert prefs["salary_min"] is None
@@ -47,7 +47,7 @@ def test_rule_29_inferred_level_never_masquerades_as_typed() -> None:
     preference the user stated (rule #29's one real trap for this module —
     see `services/profile/seniority.py`'s header)."""
     profile = UserProfile(preferences=UserPreferences(experience_level_inferred="senior"))
-    resp = _build_profile_response(profile, "user-1")
+    resp = _build_profile_response(profile, "user-1", [])
 
     assert resp.summary.experience_level == ""
     assert resp.preferences["experience_level"] == ""
@@ -108,7 +108,7 @@ def test_no_surviving_link_to_deleted_pages() -> None:
 
 
 def test_dump_db_no_longer_reads_run_log() -> None:
-    """Migration 0038 drops `run_log`; the dev dump script queried it before
+    """Migration 0039 drops `run_log`; the dev dump script queried it before
     anything else printed, so it died on line one against every migrated DB."""
     script = (_BACKEND / "scripts" / "dump_db.py").read_text(encoding="utf-8")
     assert "FROM run_log" not in script

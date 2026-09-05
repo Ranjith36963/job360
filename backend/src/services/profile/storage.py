@@ -319,28 +319,63 @@ def profile_content_changed_since_previous(user_id: str) -> bool:
     return changed
 
 
-def load_profile(user_id: str) -> Optional[UserProfile]:
+def load_profile(user_id: str, *, with_overlay: bool = True) -> Optional[UserProfile]:
     """Load the UserProfile for ``user_id``, or None if absent.
 
     Side effect: on first call for ``DEFAULT_TENANT_ID``, if the legacy
     JSON file exists and the DB row is missing, hydrate from JSON and
     delete the file.
+
+    Slice 4 (spec R8) — applies the agent-edit overlay AFTER building the
+    dataclasses from the stored base, so this is the ONE door every reader
+    (this route, the tailor, MCP ``get_profile``) goes through to see the
+    same merged profile.
+
+    ``with_overlay=False`` returns the BASE — extraction's own answer, with no
+    agent edit merged in. Every load->mutate->:func:`save_profile` writer must
+    use it: a writer that starts from the MERGED profile copies the agent's
+    value into the base JSON, so a later clear reveals the edit again instead
+    of the fresh extraction, and the overlay silently becomes permanent. Pure
+    READERS (routes, the tailor, MCP) keep the overlay — that is the point of
+    it.
+    """
+    profile, _ = load_profile_with_overlay(user_id, with_overlay=with_overlay)
+    return profile
+
+
+def load_profile_with_overlay(
+    user_id: str, *, with_overlay: bool = True
+) -> tuple[Optional[UserProfile], list[dict[str, Any]]]:
+    """:func:`load_profile` plus the overlay rows it applied — ONE connection.
+
+    Callers that need both the merged profile AND the provenance list
+    (``GET /profile``'s ``agent_edits``, MCP ``get_profile``) would otherwise
+    read ``profile_edits`` twice, on two more connections. Returns
+    ``(profile, rows)``; ``rows`` is ``[]`` when ``with_overlay=False`` or the
+    user has no edits.
+
+    The overlay query rides the connection already open for the profile row —
+    one extra indexed statement, no N+1, no second connect.
     """
     _maybe_hydrate_legacy_json(user_id)
+    from src.services.profile.edits import apply_overlay_rows, current_overlay
+
     with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
             "SELECT cv_data, preferences FROM user_profiles WHERE user_id = ?",
             (user_id,),
         )
         row = cur.fetchone()
-    if row is None:
-        return None
+        if row is None:
+            return None, []
+        overlay = current_overlay(user_id, conn) if with_overlay else []
     cv_raw = json.loads(row[0]) if row[0] else {}
     pref_raw = json.loads(row[1]) if row[1] else {}
-    return UserProfile(
+    profile = UserProfile(
         cv_data=CVData(**_filter_fields(cv_raw, CVData)),
         preferences=UserPreferences(**_filter_fields(pref_raw, UserPreferences)),
     )
+    return apply_overlay_rows(profile, overlay), overlay
 
 
 def list_profile_user_ids() -> list[str]:

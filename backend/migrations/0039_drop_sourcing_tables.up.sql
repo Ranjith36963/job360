@@ -1,4 +1,4 @@
--- 0038_drop_sourcing_tables: the sourcing era's three tables go
+-- 0039_drop_sourcing_tables: the sourcing era's three tables go
 -- (docs/plans/2026-09-05-delete-sourcing-era/spec.md R6, issue #483).
 --
 -- WHY. Slice 5 deleted every reader and every writer of these three tables:
@@ -30,7 +30,7 @@
 --
 -- DATA LOSS IS REAL AND INTENDED. These hold scraped-era rows produced by code
 -- that no longer exists; nothing can regenerate them. `db-backup.yml` runs
--- daily, and `0038_drop_sourcing_tables.down.sql` recreates the three tables
+-- daily, and `0039_drop_sourcing_tables.down.sql` recreates the three tables
 -- EMPTY (schema only — see its header).
 --
 -- Indexes are dropped explicitly before their tables. Postgres would drop them

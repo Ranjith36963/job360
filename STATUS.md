@@ -16,14 +16,18 @@
 > the background (no notifications, no crons; Redis-unreachable log lines are expected).
 >
 > **The five slices (VISION.md), where each one is:** 1 OAuth 2.1 for ChatGPT/Grok
-> clients — draft PR #488, owner merges → 2 the application spine — **merged to main**
+> clients — **shipped (PR #488)** → 2 the application spine — **shipped (PR #480)**
 > (one Application object, typed event log, versioned artifacts, `save_artifact` /
 > `record_event` / `whats_new` / `export_history`; home = your applications) → 3 URL
-> fetch on the web (link or text, paste as fallback) — draft PR #496 → 4 contacts /
-> outreach, stats, `update_profile` — draft PR #498 → 5 **delete the sourcing era
-> (#483) — this branch**, the flag and the code it hid go together. Merge order is
-> #488 → #496 → #498 → slice 5 (the last three share migration `0038`; each rebase
-> renumbers). Measure: the owner uses it daily for his own hunt.
+> fetch on the web — **shipped (PR #496)**: `POST /jobs/fetch-url` fills `/bring` from a
+> link (JSON-LD → meta → heuristic ladder) under a new `src/services/fetch/` SSRF guard
+> drilled ten ways (`scripts/ssrf_drill.py`); paste stays the fallback, no MCP tool → 4
+> contacts/outreach, stats, `update_profile` — **shipped (PR #498)** (`add_contact` /
+> `stats` / `update_profile` MCP tools, `profile_edits` overlay the web shows and
+> clears, People section on the application page) → 5 **delete the sourcing era
+> (#483) — this branch**, the flag and the code it hid go together (migration
+> `0039_drop_sourcing_tables`, after slice 4's `0038`). Measure: the owner uses it
+> daily for his own hunt.
 
 ## Sourcing era — deleted 2026-09-05 (slice 5, #483)
 

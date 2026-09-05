@@ -105,6 +105,9 @@ class CVDetail(BaseModel):
     headline: str = ""
     location: str = ""
     achievements: list[str] = []
+    # Portfolio / personal-site / other links — new CVData field (slice 4,
+    # spec R9), agent-editable via `PATCH /profile` path `cv_data.links`.
+    links: list[str] = []
     # Dated work history {company, title, dates, location, bullets}. Stored
     # since 2026-08-06 but never exposed to the frontend, so the user could
     # never SEE their parsed experience — only a "Roles: N" count. Part of
@@ -131,6 +134,27 @@ class CVDetail(BaseModel):
     # artifact — the person whose profile it is has no way to know we only
     # understood a fraction of their document, and no way to correct it.
     extraction_score: dict[str, Any] = {}
+
+
+class ProfileEditOut(BaseModel):
+    """One row of the agent-edit overlay (slice 4, spec R8/R11).
+
+    The SAME shape everywhere an edit appears: ``GET /profile``'s
+    ``agent_edits``, ``PATCH /profile``'s ``applied``, and
+    ``export_history``'s ``profile_edits``. Declared once, here, so the
+    generated ``api-types.ts`` gives the frontend real field names instead of
+    the ``{[key: string]: unknown}[]`` an untyped ``dict`` renders as — the
+    profile page reads ``set_by`` and ``set_at`` off every one of these
+    (``components/profile/EditedMark.tsx``).
+
+    ``value`` is ``Any``: the overlay carries whatever the path's dataclass
+    field holds — a string, a list of strings, a number, a bool.
+    """
+
+    path: str
+    value: Any = None
+    set_by: str
+    set_at: str
 
 
 class ProfileResponse(BaseModel):
@@ -181,6 +205,12 @@ class ProfileResponse(BaseModel):
     # surfaces "current version" alongside the history list. None when
     # the version table is empty / unavailable.
     current_version_id: Optional[int] = None
+    # Slice 4 (spec R11) — the current agent-edit overlay: every path an
+    # agent has SET and not since cleared, as {path, value, set_by, set_at}.
+    # Provenance made visible: the web profile page renders each overlaid
+    # field in place with an "Edited by <set_by> on <date>" mark instead of
+    # keeping a second list to reconcile. Empty when no edit is active.
+    agent_edits: list[ProfileEditOut] = []
 
 
 # ── Step-1.5 S3-G — six new Pydantic models for Cohort Z endpoints. ──
