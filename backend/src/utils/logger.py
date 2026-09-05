@@ -75,6 +75,18 @@ class CRLFScrubFilter(logging.Filter):
     argument before any handler formats the record. The JSON handler was already
     safe (json.dumps escapes newlines); this closes the plain-text console/file
     handlers, which are what operators actually read.
+
+    SCOPE — ``record.msg`` and ``record.args``, deliberately nothing else.
+    Values passed as ``extra={...}`` land in ``record.__dict__`` and are NOT
+    touched here, so "CRLFScrubFilter covers it" is not an answer to a finding
+    about an ``extra`` field. That channel is safe for two other reasons:
+    ``JSONFormatter`` emits extras through ``json.dumps`` (which escapes CR/LF)
+    and the plain-text formatter never renders them at all. Scrubbing them here
+    would also be worse than useless: this filter MUTATES the record in place
+    and filters run per handler, so the audit logger's DB tee
+    (``audit_trail._DBAuditHandler``, registered after the file handler) would
+    start storing ``\\n`` where the caller passed a newline. Pinned by
+    ``tests/test_log_injection.py::test_extra_fields_are_escaped_by_the_json_formatter``.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401 — short
