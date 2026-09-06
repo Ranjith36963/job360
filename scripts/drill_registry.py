@@ -262,6 +262,16 @@ REGISTRY: dict[str, Guard] = {
         # known-bad string, so a NEW way of writing the same bug is still caught.
         drill=[sys.executable, "scripts/check_alert_paths.py", "--drill"],
     ),
+    "scripts/check_lock_sync.py": Guard(
+        status="drilled",
+        # Says "Missing: X from lock file" before Linux `npm ci` does. #503
+        # shipped a lock npm-on-Windows had pruned; every local check ran
+        # against installed node_modules and stayed green while Railway + CI
+        # died at `npm ci`. Drill deletes a depended-on lock entry from a copy
+        # of the real lock and demands that exact edge is reported; the
+        # untouched lock is the negative control.
+        drill=[sys.executable, "scripts/check_lock_sync.py", "--drill"],
+    ),
     "scripts/check_workflow_slack_wiring.py": Guard(
         status="drilled",
         # Checks the CALLERS, not the sender: every slack step passes a token, a

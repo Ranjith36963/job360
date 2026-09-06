@@ -234,6 +234,13 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # Lock ⇄ package.json sync, on the JSON, before npm ci. npm ci catches the
+      # same drift itself, but with 40 lines of usage text; this names the edge.
+      # It exists mainly for the local commit gate (scripts/agent-gate.sh), which
+      # runs against installed node_modules and cannot see a pruned lock (#503).
+      - name: Lockfile sync (scripts/check_lock_sync.py)
+        run: python scripts/check_lock_sync.py frontend
+
       - name: Install frontend deps
         working-directory: frontend
         run: npm ci

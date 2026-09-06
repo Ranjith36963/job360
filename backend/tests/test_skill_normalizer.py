@@ -11,11 +11,17 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
-from src.services.profile import skill_normalizer
-from src.services.profile.skill_normalizer import (
+# numpy lives only in the optional `semantic` extra (pyproject). It used to
+# arrive transitively via scikit-learn; the cleanup audit (#503) removed that,
+# so a plain `pip install .[dev]` — what CI does — has no numpy. The normalizer
+# itself is disabled without it (skill_normalizer._load), so skipping is the
+# honest verdict, not a hidden failure.
+np = pytest.importorskip("numpy")
+
+from src.services.profile import skill_normalizer  # noqa: E402
+from src.services.profile.skill_normalizer import (  # noqa: E402
     ESCOMatch,
     index_status,
     normalize_skill,
@@ -81,7 +87,7 @@ def test_normalize_returns_none_when_encoder_unavailable(fake_esco_dir):
 # ── matching paths ──────────────────────────────────────────────────
 
 
-def _fake_encoder(query_vec: np.ndarray):
+def _fake_encoder(query_vec: list[float]):
     """Return a fake encoder whose ``.encode`` returns ``query_vec``."""
     enc = MagicMock()
     enc.encode = MagicMock(return_value=np.array([query_vec], dtype="float32"))

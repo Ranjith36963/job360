@@ -242,6 +242,10 @@ fi
 
 if [ "$FRONTEND_CHANGED" -gt 0 ]; then
   echo "[gate] frontend gates..."
+  # Lock-sync FIRST: every check below runs against the already-installed
+  # node_modules and cannot see a lock that Linux `npm ci` will refuse (#503
+  # shipped one; Railway + CI both died at `npm ci` while this gate was green).
+  python scripts/check_lock_sync.py frontend
   (cd frontend && npm run -s test:unit && npm run -s type-check && npm run -s lint)
 fi
 
