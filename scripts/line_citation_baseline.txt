@@ -20,10 +20,16 @@
 # names and dropped to 0 and 11. The mutation drill proved the old rows had
 # become slack: a planted citation in STATUS.md went unreported under 15.
 
+# Lowered 2026-09-06: worker/SKILL.md 1 -> 0. Its only raw citation was
+# `skill_matcher.py:587`, inside a paragraph naming seven src/services modules,
+# a guard test and rules #18/#19/#20/#27 — every one of them deleted with the
+# sourcing era (#499). The paragraph was DELETED rather than re-pointed.
+
+
 .claude/skills/health/SKILL.md 4
-.claude/skills/worker/SKILL.md 1
+.claude/skills/worker/SKILL.md 0
 ARCHITECTURE.md 11
-README.md 11
+README.md 0
 STORY.md 4
 backend/CLAUDE.md 2
 docs/product/MONETIZATION_GAPS.md 3
