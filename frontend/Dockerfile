@@ -7,6 +7,12 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+# public/ must exist for the runner's COPY below. Git drops empty directories:
+# #503 deleted the last files in public/ and the next two Railway builds died
+# at that COPY ("/app/public": not found) while CI — which never builds this
+# image — stayed green. public/.gitkeep holds the dir; this line holds it even
+# if that file goes.
+RUN mkdir -p public
 # next.config.ts reads BACKEND_ORIGIN when it builds the /api proxy rewrite, and
 # NEXT_PUBLIC_* are inlined into the client bundle — BOTH happen at BUILD time, so
 # they must be present here, not just at runtime. Railway passes service variables
