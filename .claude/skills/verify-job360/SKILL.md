@@ -136,9 +136,8 @@ search journey is legacy — verify it only when the change touched `src/sources
 5. **MCP** — call the `/api/mcp` mount (streamable HTTP, not a `@router` route) with a personal `j360_…` token: `tools/list`, then `get_profile` and the
    receipt-listing tool return the same data the web showed.
 
-A good E2E run produces a short report: what works, what's broken (with the exact file:line
-and the DB/log evidence), severity, and the fix. See `E2E_TEST_REPORT.md` at the repo root
-for the format and the two real bugs this methodology already caught.
+A good E2E run produces a short report: what works, what's broken (with the DB/log
+evidence), severity, and the fix.
 
 ---
 
