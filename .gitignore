@@ -55,8 +55,9 @@ test-*.png
 # Claude Code schedule skill runtime lock
 .claude/scheduled_tasks.lock
 
-# Python build artifacts
+# Python build artifacts (`pip install .` in backend/ leaves build/lib/ behind)
 *.egg-info/
+backend/build/
 # E2E verification artifacts: ignore everything under test-artifacts/ EXCEPT the
 # two committed fixtures (README + sample CV). The old `test-artifacts/*.png`
 # glob only caught top-level PNGs, letting nested screenshot dirs (design/,
