@@ -275,6 +275,12 @@ mypy_path = "backend"
 module = [
     "sentence_transformers.*",
     "sentence_transformers",
+    # numpy is only in the optional `semantic`/`esco` extras and is lazy-imported
+    # behind an ImportError guard (skill_normalizer._load). CI's `.[dev]` install
+    # has none, so mypy there reports import-not-found (#508, after #503 removed
+    # the scikit-learn path that used to drag it in).
+    "numpy.*",
+    "numpy",
     "rapidfuzz.*",
     "rapidfuzz",
     "apprise.*",
