@@ -103,9 +103,8 @@ async def create_receipt(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI DI idiom
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> Receipt:
-    """"I applied": freeze the receipt, then mark the job applied in BOTH
-    existing per-user tables (`user_actions` for the card, `applications` for
-    the pipeline) so every surface agrees.
+    """"I applied": freeze the receipt, then mark the job applied on the
+    application spine's `applications` row so every surface agrees.
     """
     from src.services.applications import spine as applications_spine  # noqa: PLC0415
     from src.services.profile.storage import current_profile_version_id  # noqa: PLC0415
@@ -117,13 +116,12 @@ async def create_receipt(
     cv_text, cv_origin = _sent_text(await db.get_tailored_doc(user.id, job_id, "cv"))
     cl_text, cl_origin = _sent_text(await db.get_tailored_doc(user.id, job_id, "cover_letter"))
 
-    # Mark applied on the existing surfaces FIRST — `create_application` is an
-    # upsert (INSERT OR IGNORE), so the application row (and its id) exists
-    # before the receipt does. R8's `application_id` is then part of the
-    # receipt's own INSERT (below), never a later UPDATE:
-    # tests/test_receipts.py::test_receipts_are_append_only greps
-    # `backend/src/` for any UPDATE/DELETE against `application_receipts`.
-    await db.insert_action(job_id, "applied", user.id)
+    # Mark applied FIRST — `create_application` is an upsert (INSERT OR
+    # IGNORE), so the application row (and its id) exists before the receipt
+    # does. R8's `application_id` is then part of the receipt's own INSERT
+    # (below), never a later UPDATE: tests/test_receipts.py::
+    # test_receipts_are_append_only greps `backend/src/` for any
+    # UPDATE/DELETE against `application_receipts`.
     await db.create_application(job_id, user.id)
     application = await applications_spine.get_application_by_job(db, user.id, job_id)
 

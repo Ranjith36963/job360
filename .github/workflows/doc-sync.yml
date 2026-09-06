@@ -262,15 +262,15 @@ jobs:
           # "Markdown only" is NOT a sufficient cage, because the files that
           # CAGE EVERY OTHER LOOP ARE MARKDOWN.
           #
-          # CLAUDE.md holds the 31 Hard Rules, and repair.yml + pr-repair.yml
-          # feed exactly that text to their blind checker as INVARIANTS. Every
-          # `.claude/**` file is agent instruction. So under the old rule this
-          # loop's model could edit the constraints that every other loop's
-          # model is judged against — and then SQUASH-MERGE IT TO main, which
-          # is production, with no human in the path. That was the only route
-          # by which model-authored text reached prod unreviewed, and it
-          # inverts repair.yml's own stated principle: an agent must not
-          # rewrite the rules that constrain it.
+          # CLAUDE.md holds the Hard Rules, and pr-repair.yml feeds exactly
+          # that text to its blind checker as INVARIANTS. Every `.claude/**`
+          # file is agent instruction. So under the old rule this loop's model
+          # could edit the constraints that every other loop's model is judged
+          # against — and then SQUASH-MERGE IT TO main, which is production,
+          # with no human in the path. That was the only route by which
+          # model-authored text reached prod unreviewed, and it inverts
+          # pr-repair.yml's own stated principle: an agent must not rewrite
+          # the rules that constrain it.
           #
           # These files may still be EDITED by the fixer (drift in them is real
           # and worth fixing) — they simply cannot be SELF-MERGED. Marking the

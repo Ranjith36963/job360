@@ -1,9 +1,10 @@
 <!-- doc: PLAN | status: ACTIVE | pr: — -->
 # Spec: OAuth 2.1 authorization server for MCP clients
-Reads: `intent.md`. Skills applied: `hard-rules` (M4 free/pull/OAuth 2.1 with personal-token
+Skills applied: `hard-rules` (M4 free/pull/OAuth 2.1 with personal-token
 fallback, M5 gate parity in `mcp_server.py`, #12/#25 every per-user route scopes by `user.id`,
-#16 lazy imports, #26 credential management is session-only). Status: draft, revised after the
-Opus adversarial review (11 Important + 17 nits folded in; see §Review log).
+#16 lazy imports, #26 credential management is session-only). Status: shipped (PR #488), revised
+after the Opus adversarial review (11 Important + 17 nits folded in; see §Review log). (The
+`intent.md` this spec read from is deleted scaffolding, 2026-09-05 — git history holds it.)
 
 ## What the clients need (verified against live docs 2026-09-03)
 Sources: MCP Authorization spec rev 2025-11-25; claude.com/docs/connectors/building/authentication;
@@ -260,7 +261,7 @@ S3. **Redirect allow-list at registration — host-anchored, never a string pref
     **Loopback** (RFC 8252) is decided on the parsed hostname only: exactly `127.0.0.1`,
     `::1` or `localhost` (case-insensitive, no trailing dot), scheme `http`, any port —
     `localhost.evil.com` is not loopback. `OAUTH_ALLOW_LOOPBACK_REDIRECTS` **defaults to 0**;
-    nothing in production needs it (Claude Code keeps a personal token, intent.md).
+    nothing in production needs it (Claude Code keeps a personal token instead).
     Anything else → `invalid_redirect_uri`. Adding a client = editing the env var, no deploy.
 S4. **Codes and tokens are opaque 256-bit randoms stored as SHA-256** (`secrets.token_urlsafe(32)`;
     lookup by hash, `UNIQUE`-indexed; no timing channel on a random value). The plaintext

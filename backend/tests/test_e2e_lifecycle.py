@@ -12,15 +12,6 @@ malformed CV) and 4xx-reason logging. Offline + deterministic (root rule #4): th
 LLM and the source-fetching search are mocked, so this runs in the gate every time.
 
 What it does NOT cover (needs infra, documented for honesty):
-  - real notification DELIVERY. The prerequisites differ per channel, and the
-    old blanket "needs Redis + SMTP creds" was wrong for both:
-      * webhook — the instant path sends inline; the queued path has had no
-        worker to run on since 2026-09-02.
-      * email — needs EITHER ``RESEND_API_KEY`` (the production path; Railway
-        blocks outbound SMTP ports 25/465/587) OR real SMTP credentials for a
-        local/self-hosted relay. See ``services/channels/email_url.py``.
-    This text is documentation only — it does not gate pytest. The dispatch
-    *logic* is covered by test_dispatch_logging.
   - the browser UI — that's the Playwright suite (frontend/tests/e2e).
 """
 from __future__ import annotations
@@ -32,12 +23,10 @@ import sys
 from contextlib import asynccontextmanager
 
 import pytest
-from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
 from src.repositories import pgsync
-from src.services.channels import crypto
 
 _PW = "Correct-Horse-9"
 
@@ -73,7 +62,6 @@ def app_db(monkeypatch, tmp_path):
         if name.startswith(("src.", "migrations")) and getattr(mod, "DB_PATH", None) is not None:
             monkeypatch.setattr(mod, "DB_PATH", patched, raising=False)
 
-    crypto.set_test_key(Fernet.generate_key().decode("ascii"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret-" + "z" * 40)
     yield db_path
 
@@ -200,26 +188,10 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
             json={"score": 72, "verdict": "worth applying"},
         ).status_code == 200
 
-        # a receipt, and the kanban row
+        # a receipt
         assert client.post(
             f"/api/applications/{application_id}/receipt", json={"channel": "company site"}
         ).status_code == 201
-        assert client.post(f"/api/pipeline/{job_id}", json={}).status_code in (200, 201)
-
-        # channel create + test-send
-        ch = client.post(
-            "/api/settings/channels",
-            json={"channel_type": "webhook", "display_name": "t", "credential": "https://example.com/h"},
-        )
-        assert ch.status_code == 201, ch.text
-        cid = ch.json()["id"]
-        assert client.post(f"/api/settings/channels/{cid}/test").status_code == 200
-
-        # notification rule
-        assert client.put(
-            "/api/settings/notification-rule",
-            json={"score_threshold": 60, "notify_mode": "instant", "enabled": True},
-        ).status_code == 200
 
         # frontend → server log bridge
         assert client.post(
@@ -242,10 +214,6 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
         "session_created",       # K
         "session_revoked",       # K
         "job_brought",           # C — the product's front door
-        "pipeline_create",       # C
-        "channel_created",       # L
-        "channel_test_send",     # L
-        "notification_rule_saved",  # L
         "client_event",          # D
         "http_error",            # 3b (the 404)
         "validation_error",      # 3b (the 422)

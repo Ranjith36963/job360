@@ -66,15 +66,12 @@ LIVING_DOCS = [
     # was archived 2026-09-05 with the code it described (slice 5, #483).
     "CONTRIBUTING.md",
     "backend/README.md",
-    # 01-user-pillar.md, 02-search-and-match-engine.md, 03-job-providers.md,
-    # glossary.md, runbook.md, CATALOG_STATE.md, SHELF_FILL_MEASURED.md and
-    # UNIVERSAL_SHELF.md were all watched here until 2026-09-05 (slice 5,
-    # #483), when they were archived to docs/_archive/sourcing-era/ with the
-    # FROZEN header — they described the job-search-and-score product that no
-    # longer exists. `pillars_fully_watched()` below asserts every remaining
-    # *.md under docs/product/pillars/ is on this list, so the folder is now
-    # just the one pointer doc.
-    "docs/product/pillars/README.md",
+    # docs/product/pillars/ (01-user-pillar.md, 02-search-and-match-engine.md,
+    # 03-job-providers.md, glossary.md, runbook.md, CATALOG_STATE.md,
+    # SHELF_FILL_MEASURED.md, UNIVERSAL_SHELF.md and its own README.md) was
+    # deleted whole 2026-09-05 (slice 5, #483) along with the job-search-and-
+    # score product it described — there is no pillars folder to watch any
+    # more, and `pillars_fully_watched()` went with it.
 ]
 
 # Prose lies that numbers can't catch. Each = (forbidden phrase, why).
@@ -930,33 +927,6 @@ def skill_dead_paths() -> list[tuple[str, str, str]]:
     return out
 
 
-def pillars_fully_watched() -> list[str]:
-    """Every *.md under docs/product/pillars/ must be in LIVING_DOCS.
-
-    Root CLAUDE.md calls that folder the AUTHORITATIVE code-verified
-    architecture reference. A file sitting in it that nothing checks is a
-    contradiction in terms, and it has now happened twice: 03-job-providers.md
-    carried the pre-prune source counts for a week, and runbook.md told
-    operators to run `sqlite3 data/jobs.db` against a Postgres database.
-
-    Both times the fix was "add that file to the list", which fixes one file and
-    leaves the next one exposed -- four of six were watched when the second bug
-    landed in one of the other two. This asserts the WHOLE folder instead, so a
-    new pillar doc is guarded the day it appears rather than the day someone
-    remembers it.
-    """
-    folder = ROOT / "docs/product/pillars"
-    if not folder.exists():
-        return []
-    watched = {w.replace("\\", "/") for w in LIVING_DOCS}
-    missing = []
-    for p in sorted(folder.glob("*.md")):
-        rel = p.relative_to(ROOT).as_posix()
-        if rel not in watched:
-            missing.append(rel)
-    return missing
-
-
 def workflow_count() -> int:
     """Number of GitHub Actions workflow files.
 
@@ -1367,13 +1337,6 @@ def main() -> int:
         drift.append((
             skill, line_no, "skill-dead-path", claimed,
             "path does not exist — skills are instructions agents ACT on",
-        ))
-
-    # The authoritative folder must be watched in full, not file by file.
-    for rel in pillars_fully_watched():
-        drift.append((
-            rel, "-", "pillar-unwatched", "not in LIVING_DOCS",
-            "docs/product/pillars/ is the AUTHORITATIVE reference — every file in it must be checked",
         ))
 
     # Dead relative links anywhere in the doc tree (archive moves, renames).

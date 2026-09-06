@@ -24,12 +24,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import pytest
-from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
 from src.repositories import pg
-from src.services.channels import crypto
 
 
 @asynccontextmanager
@@ -87,7 +85,6 @@ def api(monkeypatch, tmp_path):
 
     from src.api import auth_deps, dependencies
     from src.api.routes import auth as auth_route
-    from src.api.routes import channels as channels_route
     from src.core import settings
 
     patched = Path(db_path)
@@ -95,12 +92,10 @@ def api(monkeypatch, tmp_path):
     monkeypatch.setattr(dependencies, "DB_PATH", patched, raising=True)
     monkeypatch.setattr(auth_deps, "DB_PATH", patched, raising=True)
     monkeypatch.setattr(auth_route, "DB_PATH", patched, raising=True)
-    monkeypatch.setattr(channels_route, "DB_PATH", patched, raising=True)
 
     # Reset the JobDatabase singleton so it lazy-binds to the patched path
     monkeypatch.setattr(dependencies, "_db", None, raising=False)
 
-    crypto.set_test_key(Fernet.generate_key().decode("ascii"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret-" + "y" * 40)
 
     # Seed two shared-catalog jobs we can reference by id.
@@ -162,11 +157,6 @@ def _register(client, email, password="s3cretpassword"):
     ("GET",  "/api/applications/job/1"),
     ("GET",  "/api/receipts"),
     ("GET",  "/api/whats-new"),
-    ("GET",  "/api/pipeline"),
-    ("GET",  "/api/pipeline/counts"),
-    ("GET",  "/api/pipeline/reminders"),
-    ("POST", "/api/pipeline/1"),
-    ("POST", "/api/pipeline/1/advance"),
     # Batch 3.5.1 — close the profile + search gaps the 2026-04-19
     # CurrentStatus re-audit §7 identified.
     ("GET",  "/api/profile"),
@@ -181,84 +171,6 @@ def test_per_user_endpoint_requires_auth(api, method, path):
         r = api.request(method, path)
     assert r.status_code == 401, (
         f"{method} {path} returned {r.status_code} instead of 401: {r.text}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Cross-user isolation — actions
-# Cross-user isolation — pipeline
-# ---------------------------------------------------------------------------
-
-
-def test_pipeline_isolation_alice_cannot_see_bobs_applications(api):
-    job_a, _ = api.__job_ids__  # type: ignore[attr-defined]
-
-    _register(api, "alice@example.com")
-    r = api.post(f"/api/pipeline/{job_a}")
-    assert r.status_code == 200, r.text
-
-    r_alice = api.get("/api/pipeline")
-    assert r_alice.status_code == 200
-    alice_apps = r_alice.json().get("applications", [])
-    assert any(a["job_id"] == job_a for a in alice_apps)
-
-    api.post("/api/auth/logout")
-    api.cookies.clear()
-    _register(api, "bob@example.com")
-
-    r_bob = api.get("/api/pipeline")
-    bob_apps = r_bob.json().get("applications", [])
-    assert bob_apps == [], f"Bob leaked alice's applications: {bob_apps}"
-
-
-def test_pipeline_counts_scoped_by_user(api):
-    job_a, _ = api.__job_ids__  # type: ignore[attr-defined]
-
-    _register(api, "alice@example.com")
-    api.post(f"/api/pipeline/{job_a}")
-
-    r_alice = api.get("/api/pipeline/counts")
-    assert r_alice.json().get("applied", 0) == 1
-
-    api.post("/api/auth/logout")
-    api.cookies.clear()
-    _register(api, "bob@example.com")
-
-    r_bob = api.get("/api/pipeline/counts")
-    assert r_bob.json().get("applied", 0) == 0
-
-
-def test_pipeline_advance_cannot_target_other_users_row(api):
-    """Bob calling advance on a job_id he never added must 404, not update alice's row."""
-    job_a, _ = api.__job_ids__  # type: ignore[attr-defined]
-
-    _register(api, "alice@example.com")
-    api.post(f"/api/pipeline/{job_a}")
-
-    api.post("/api/auth/logout")
-    api.cookies.clear()
-    _register(api, "bob@example.com")
-
-    r_bob = api.post(
-        f"/api/pipeline/{job_a}/advance",
-        json={"stage": "interview"},
-    )
-    # Acceptable results: 404 (Bob has no application for this job) or
-    # 200 with a newly-created-for-bob row. NOT acceptable: advancing
-    # alice's row.
-    assert r_bob.status_code in (200, 404), r_bob.text
-
-    # Log alice back in and check her row is untouched
-    api.post("/api/auth/logout")
-    api.cookies.clear()
-    api.post("/api/auth/login", json={
-        "email": "alice@example.com", "password": "s3cretpassword"
-    })
-    r_alice = api.get("/api/pipeline")
-    alice_apps = r_alice.json().get("applications", [])
-    assert any(a["job_id"] == job_a and a["stage"] == "applied"
-               for a in alice_apps), (
-        f"Bob's advance modified alice's row: {alice_apps}"
     )
 
 

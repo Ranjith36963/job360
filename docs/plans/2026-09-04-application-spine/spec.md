@@ -1,9 +1,10 @@
 <!-- doc: PLAN | status: ACTIVE | pr: — -->
 # Spec: the application spine
-Reads: `intent.md`. Skills applied: `hard-rules` (M1 never source/rank, M2 store-not-do,
+Skills applied: `hard-rules` (M1 never source/rank, M2 store-not-do,
 M3 one door for history, M5 MCP gate parity, #3 purge, #10 no `user_id` on `jobs`,
 #12/#25 every per-user route scopes by `user.id`, #16 lazy imports, #21 value-presence
-tests). Status: draft, pre-adversarial-review.
+tests). Status: shipped (PR #480). (The `intent.md` this spec read from is deleted
+scaffolding, 2026-09-05 — git history holds it.)
 
 ## Measured starting point (2026-09-04, `railway run -s Postgres`)
 `applications` 3 · `application_stage_history` 0 · `application_receipts` 0 ·

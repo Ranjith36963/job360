@@ -5,11 +5,13 @@ name: Finding watch (a finding wakes the fixer)
 # Measured 2026-08-24, and this is the whole reason this file exists:
 #
 #   `pr-repair.yml`  on: workflow_dispatch          <- a human clicks it
-#   `repair.yml`     on: issues: [labeled]          <- a human labels it
 #
-# Both fixers are real, caged, and good. NOTHING STARTS EITHER OF THEM. The
-# harness could see a problem and could fix a problem, and the only wire between
-# those two facts was the owner noticing and pressing a button.
+# The fixer is real, caged, and good. NOTHING STARTED IT. The harness could
+# see a problem and could fix a problem, and the only wire between those two
+# facts was the owner noticing and pressing a button. (`repair.yml`, the
+# issue-triggered sibling this file was written alongside, was removed
+# 2026-09-05 as unwired harness scaffolding — triage.yml is diagnose-and-
+# comment only now, so pr-repair.yml is the one fixer left.)
 #
 # THE SNEAKIER HALF. On PR #375 every CI check was SUCCESS, CodeRabbit's own
 # status check was SUCCESS, and SIX OF SIX review threads were unresolved -- one

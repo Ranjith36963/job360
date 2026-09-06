@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 };
 
 // A legal document states when it changed; never derive this at render time.
-const LAST_UPDATED = "24 August 2026";
+const LAST_UPDATED = "5 September 2026";
 
 const SUBPROCESSORS: {
   name: string;
@@ -35,16 +35,16 @@ const SUBPROCESSORS: {
   },
   {
     name: "Resend",
-    purpose: "Transactional email (login links, verification, notifications)",
+    purpose: "Transactional email (login links, email verification, password reset)",
     dataShared: "Your email address and message content",
     location: "USA",
   },
   {
     name: "Cloudflare R2",
-    purpose: "Encrypted database backups",
+    purpose: "Nightly encrypted database backups (kept as the newest 30)",
     dataShared:
-      "Ciphertext only — backups are encrypted before upload; Cloudflare never sees readable data",
-    location: "EU",
+      "Ciphertext only — backups are encrypted (AES-256) before upload; Cloudflare never sees readable data",
+    location: "Global (Cloudflare network)",
   },
   {
     name: "PostHog (EU)",
@@ -107,19 +107,20 @@ export default function PrivacyPage() {
               timezone.
             </li>
             <li>
-              <span className="text-foreground">Activity data</span> — jobs you
-              save or dismiss, applications you track, notification settings,
-              and documents you generate.
+              <span className="text-foreground">Job and application data</span>{" "}
+              — every job you (or your connected AI agent) bring in by
+              pasting the ad or a link, plus your applications: a timeline of
+              events, every version of your tailored CV and cover letter, any
+              fit notes you or your agent recorded, contacts you add for a
+              role (name, role, email, notes), and receipts of what you
+              submitted.
             </li>
             <li>
               <span className="text-foreground">Technical data</span> — request
-              logs, error traces, and product-usage analytics.
+              logs, error traces, and (only if you accept the analytics
+              banner) product-usage analytics.
             </li>
           </ul>
-          <p className="mt-2">
-            Job listings themselves are aggregated from public third-party
-            sources and are not personal data about you.
-          </p>
         </section>
 
         <section>
@@ -128,19 +129,20 @@ export default function PrivacyPage() {
           </h2>
           <ul className="mt-2 list-disc space-y-2 pl-5">
             <li>
-              <span className="text-foreground">Contract</span> — matching and
-              scoring jobs against your profile, generating tailored documents
-              you request, and operating your account.
+              <span className="text-foreground">Contract</span> — storing the
+              jobs and applications you bring, generating tailored documents
+              you request, serving your own connected AI agent&rsquo;s
+              requests, and operating your account.
             </li>
             <li>
-              <span className="text-foreground">Consent</span> — sending
-              notifications to channels you connect (email or a webhook you
-              control). You can disconnect a channel at any time.
+              <span className="text-foreground">Consent</span> — product
+              analytics (PostHog) only run after you accept the cookie
+              banner; declining or not answering means no analytics event is
+              ever sent.
             </li>
             <li>
               <span className="text-foreground">Legitimate interest</span> —
-              keeping the service secure, fixing errors, and understanding
-              which features are used.
+              keeping the service secure and fixing errors (Sentry).
             </li>
           </ul>
           <p className="mt-2">
@@ -157,11 +159,11 @@ export default function PrivacyPage() {
             When you upload a CV or LinkedIn PDF, or generate a tailored CV or
             cover letter, the text is sent to the AI providers listed below to
             be parsed or drafted. This is core to how Job360 works — without
-            it, we cannot build your profile or score jobs. We use these
-            providers&rsquo; business APIs, which contractually do not use your
-            content to train their models. Your original files and the
-            extracted profile stay on our servers; the AI providers process
-            text transiently.
+            it, we cannot build your profile or draft a tailored document. We
+            use these providers&rsquo; business APIs, which contractually do
+            not use your content to train their models. Your original files
+            and the extracted profile stay on our servers; the AI providers
+            process text transiently.
           </p>
         </section>
 
@@ -208,16 +210,19 @@ export default function PrivacyPage() {
           </h2>
           <ul className="mt-2 list-disc space-y-2 pl-5">
             <li>
-              Aggregated job listings are deleted after 30 days automatically.
+              Your account, jobs, and application data are kept until you
+              delete your account — Job360 has no automatic deletion of your
+              content.
             </li>
             <li>
-              Your account and profile data are kept until you delete your
-              account.
+              Security tokens expire automatically and are not renewable:
+              magic sign-in links after 15 minutes, an AI agent&rsquo;s OAuth
+              access token after 1 hour (its refresh token after 30 days).
             </li>
             <li>
-              Encrypted backups are retained on a rolling basis and expire
-              automatically; deleted accounts age out of backups with that
-              cycle.
+              Encrypted database backups run nightly and only the newest 30
+              are kept; older ones are deleted automatically. A deleted
+              account ages out of backups within that same window.
             </li>
           </ul>
         </section>
@@ -228,8 +233,10 @@ export default function PrivacyPage() {
           </h2>
           <p className="mt-2">
             All traffic is encrypted in transit (HTTPS/HSTS). Passwords are
-            argon2id-hashed. Notification-channel credentials (webhooks, bot
-            tokens) are encrypted at rest. Database backups are encrypted
+            argon2id-hashed — we cannot read them. Your AI agent&rsquo;s
+            connection tokens (personal API tokens and OAuth tokens) are
+            stored only as a hash, never in plain text, so we cannot recover
+            or read them either. Database backups are encrypted (AES-256)
             before they leave our infrastructure, so the backup-storage
             provider only ever holds ciphertext.
           </p>
@@ -266,9 +273,9 @@ export default function PrivacyPage() {
             Changes to this policy
           </h2>
           <p className="mt-2">
-            If we make material changes, we will update the date at the top
-            and notify registered users by email before the changes take
-            effect.
+            If we make material changes, we post them here and update the
+            date at the top — this page is the single source of truth for
+            what changed and when.
           </p>
         </section>
       </div>

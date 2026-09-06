@@ -3,24 +3,20 @@
 `.gitignore` ignores `data/` and then un-ignores specific directories — those
 `!` lines are the only reason those files are in the repository at all. But
 being committed is not the same as being deployed, and the repo has now been
-bitten three times by exactly that gap:
+bitten twice by exactly that gap:
 
     ESCO           — never built or shipped at all
-    uk_gazetteer   — issue #260 / PR #312: `pip install .` ships only `src*`,
-                     so `backend/data/uk_gazetteer` resolved to
-                     `<site-packages>/data/uk_gazetteer` and the UK gate ran
-                     blind for four days while logging "blocked N jobs"
-    job_signals    — the same bug, same shape, found while fixing the second
+    job_signals    — issue #260 / #321: `pip install .` ships only `src*`, so
+                     `backend/data/job_signals` resolved to
+                     `<site-packages>/data/job_signals` and the detectors ran
+                     blind, answering UNKNOWN with no error
 
-Both loaders degrade silently by design:
+The loader degrades silently by design:
 
     seniority._load_terms() -> {}   when the file is absent
 
 so the seniority detector answers "nothing" in production, with no exception,
-while passing every test on a developer machine where the files exist. (The
-`uk_gazetteer` half of this had the identical shape; its reader went with the
-search pipeline in slice 5, but the files are still committed and shipped, so
-the packaging checks below still cover them.)
+while passing every test on a developer machine where the files exist.
 
 TWO MECHANISMS CARRY DATA INTO THE IMAGE, and which one applies depends on
 WHERE the data lives:
@@ -45,13 +41,12 @@ directory beneath it is committable with no `!` line of its own. Measured:
 
 So the `!`-derived list above never sees such a directory, while
 `[tool.setuptools.package-data]` — an explicit per-directory list with no
-wildcard — does not ship it. Committed, unshipped, unchecked: instance four,
+wildcard — does not ship it. Committed, unshipped, unchecked: instance three,
 pre-armed. The file-level check below therefore derives from what git actually
 TRACKS and matches every committed file against the real packaging globs. That
 also catches a new EXTENSION inside an already-declared directory: the only
-patterns are `*.txt` and `NOTICE`, so a `uk_places.json` added tomorrow would
-be dropped from the wheel exactly as silently, and no directory-level check
-could ever see it.
+pattern is `*.txt`, so a `terms.json` added tomorrow would be dropped from the
+wheel exactly as silently, and no directory-level check could ever see it.
 """
 from __future__ import annotations
 
@@ -195,10 +190,10 @@ class TestEveryCommittedDataFileReachesTheWheel:
     def test_it_is_reading_real_committed_files(self) -> None:
         """Non-vacuity: an empty file list would pass every assertion below."""
         files = _committed_src_data_files()
-        assert "src/data/uk_gazetteer/uk_places.txt" in files, (
-            "the gazetteer rule #30 is built on is not in the git index — either "
-            "the data moved and this check must move with it, or it really is "
-            f"uncommitted. Saw: {files}"
+        assert "src/data/job_signals/seniority_terms.txt" in files, (
+            "the seniority vocabulary this check is built on is not in the git "
+            "index — either the data moved and this check must move with it, "
+            f"or it really is uncommitted. Saw: {files}"
         )
 
     def test_the_globs_were_actually_parsed(self) -> None:
@@ -229,19 +224,19 @@ class TestEveryCommittedDataFileReachesTheWheel:
         ) == ["src/data/newthing/terms.txt"]
 
     def test_it_catches_a_new_extension_in_a_declared_directory(self) -> None:
-        """Teeth. `*.txt` and `NOTICE` are the only patterns for the gazetteer,
-        so a JSON build output beside them would be dropped from the wheel — a
-        directory-level check calls that directory covered and moves on."""
+        """Teeth. `*.txt` is the only pattern for job_signals, so a JSON build
+        output beside them would be dropped from the wheel — a directory-level
+        check calls that directory covered and moves on."""
         assert _uncovered(
-            ["src/data/uk_gazetteer/uk_places.json"], _package_data_globs()
-        ) == ["src/data/uk_gazetteer/uk_places.json"]
+            ["src/data/job_signals/terms.json"], _package_data_globs()
+        ) == ["src/data/job_signals/terms.json"]
 
     def test_a_star_does_not_cross_a_slash(self) -> None:
         """Teeth on the matcher itself: a lenient `*` would call every nested
         path covered and turn the whole class into a rubber stamp."""
-        rx = _glob_to_regex("src/data/uk_gazetteer/*.txt")
-        assert rx.match("src/data/uk_gazetteer/places.txt")
-        assert not rx.match("src/data/uk_gazetteer/nested/places.txt")
+        rx = _glob_to_regex("src/data/job_signals/*.txt")
+        assert rx.match("src/data/job_signals/seniority_terms.txt")
+        assert not rx.match("src/data/job_signals/nested/seniority_terms.txt")
 
 
 class TestEveryCommittedDataDirHasAWayIntoTheImage:
@@ -301,15 +296,13 @@ class TestEveryCommittedDataDirHasAWayIntoTheImage:
 class TestTheLoaderDegradesWithoutRaising:
     """Pins WHY this needed a test rather than being caught at runtime: the
     loader does not raise. It now LOGS an error (silence is what hid the bug
-    three times), but a lost data file still must not crash a profile save. If
+    twice), but a lost data file still must not crash a profile save. If
     someone later makes it raise, that is a deliberate change and belongs here
     first.
 
     Slice 5 (#483) deleted `services/uk_gate.py` (the search pipeline's UK
     door) and `services/job_signals.py`; the seniority half of the second
-    moved to `services/profile/seniority.py`, which is the loader below. The
-    `uk_gazetteer` files stay committed and shipped — see the note on
-    `_shipped_data_dirs` — so the packaging checks above still cover them.
+    moved to `services/profile/seniority.py`, which is the loader below.
     """
 
     def test_seniority_loader_returns_empty_dict_for_a_missing_file(self) -> None:

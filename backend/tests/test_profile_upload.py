@@ -11,11 +11,9 @@ import io
 from contextlib import asynccontextmanager
 
 import pytest
-from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
-from src.services.channels import crypto
 
 
 @asynccontextmanager
@@ -43,7 +41,6 @@ def api(monkeypatch, tmp_path):
     from src.api import auth_deps, dependencies
     from src.api.main import app
     from src.api.routes import auth as auth_route
-    from src.api.routes import channels as channels_route
     from src.core import settings
 
     patched = Path(db_path)
@@ -51,7 +48,6 @@ def api(monkeypatch, tmp_path):
     monkeypatch.setattr(dependencies, "DB_PATH", patched, raising=True)
     monkeypatch.setattr(auth_deps, "DB_PATH", patched, raising=True)
     monkeypatch.setattr(auth_route, "DB_PATH", patched, raising=True)
-    monkeypatch.setattr(channels_route, "DB_PATH", patched, raising=True)
     monkeypatch.setattr(dependencies, "_db", None, raising=False)
 
     for _mod in list(_sys.modules.values()):
@@ -59,7 +55,6 @@ def api(monkeypatch, tmp_path):
         if _name.startswith(("src.", "migrations")) and getattr(_mod, "DB_PATH", None) is not None:
             monkeypatch.setattr(_mod, "DB_PATH", patched, raising=False)
 
-    crypto.set_test_key(Fernet.generate_key().decode("ascii"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret-" + "y" * 40)
 
     app.router.lifespan_context = _noop_lifespan  # type: ignore[assignment]

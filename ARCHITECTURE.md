@@ -3,9 +3,9 @@
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
-> This file describes the one path the app has: `api/routes/bring.py` (`POST /jobs/bring`, link or text) → `api/routes/receipts.py` (append-only `application_receipts`) → `api/routes/tailor.py` (CV tailor, web fallback only) → `api/mcp_server.py` (the MCP tools at `/api/mcp` — count them with `grep -c "@mcp.tool()"`; bearer `j360_…`, OAuth 2.1). The FastAPI app behind it is 15 route modules (80 endpoints). Profile extraction (`services/profile/`) feeds it, and the application spine (`applications`, `application_events`, `application_artifacts`, `application_receipts`) records everything that happens to a brought job.
+> This file describes the one path the app has: `api/routes/bring.py` (`POST /jobs/bring`, link or text) → `api/routes/receipts.py` (append-only `application_receipts`) → `api/routes/tailor.py` (CV tailor, web fallback only) → `api/mcp_server.py` (the MCP tools at `/api/mcp` — count them with `grep -c "@mcp.tool()"`; bearer `j360_…`, OAuth 2.1). The FastAPI app behind it is 11 route modules (69 endpoints). Profile extraction (`services/profile/`) feeds it, and the application spine (`applications`, `application_events`, `application_artifacts`, `application_receipts`) records everything that happens to a brought job.
 >
-> **The sourcing-era pipeline was deleted 2026-09-05** (slice 5, #483): job search, keyword-driven scoring, four-layer dedup, LLM enrichment, embeddings, the search dashboard, and the 40 job-source classes that fed them. None of that code exists in this repo any more. Its architecture is preserved as history, FROZEN, under [`docs/_archive/sourcing-era/`](docs/_archive/sourcing-era/) — read it to understand what USED to be built here, never as a guide for what to build next.
+> **The sourcing-era pipeline was deleted 2026-09-05** (slice 5, #483): job search, keyword-driven scoring, four-layer dedup, LLM enrichment, embeddings, the search dashboard, and the 40 job-source classes that fed them. **The per-user notification-channel system (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) was deleted the same day.** None of that code exists in this repo any more, and nothing archives its history in-tree — git history is the record.
 >
 > Three Railway services: `backend`, `frontend`, `Postgres`. The `worker` and `Redis` services were deleted 2026-09-02, and `src/workers/` was deleted with the sourcing era — nothing runs in the background (no notifications, no crons).
 
@@ -16,11 +16,11 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0039** | `backend/migrations/` |
-| Migration files | **40** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **156** | `backend/tests/` |
-| GitHub Actions workflows | **24** | `.github/workflows/` |
-| Hard rules | **17** | `.claude/skills/hard-rules/SKILL.md` |
+| Migration head | **0040** | `backend/migrations/` |
+| Migration files | **41** | `backend/migrations/*.up.sql` |
+| `test_*.py` files | **135** | `backend/tests/` |
+| GitHub Actions workflows | **23** | `.github/workflows/` |
+| Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
 
 ---
@@ -40,21 +40,17 @@ job360/
 │   │   ├── cli.py                    # Click CLI: api, setup-profile
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE constraint, still used by a brought ad
 │   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, route modules (counts: repo facts above)
-│   │   │   └── routes/               # health, actions, applications, profile, pipeline, auth, channels, notifications, notification_rules, tailor, client_log, tokens, bring, receipts, oauth, well_known (root-mounted)
+│   │   │   └── routes/               # health, applications, profile, auth, tailor, client_log, tokens, bring, receipts, oauth, well_known (root-mounted)
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, rate limits, the ESCO flag
 │   │   │   ├── observability.py      # Sentry init
 │   │   │   ├── skill_synonyms.py     # alias dict (k8s↔kubernetes, ...), profile-side skill normalisation — a vocabulary table, reads no CV input
-│   │   │   ├── fx.py                 # currency → GBP rates + normalize_salary()
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
 │   │   ├── services/                 # (post-Phase-4 merge of filters/ + notifications/ + profile/)
-│   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies)
-│   │   │   ├── channels/             # dispatcher (Apprise lazy), crypto (Fernet), email_url, ssrf_guard
-│   │   │   ├── notifications/        # defaults (signup rulebook seeder), report_generator — dead code, no worker to run it (hard rule 24)
-│   │   │   ├── applications/         # application-spine services (events, artifacts, authorship)
-│   │   │   ├── delivery/             # decision_card, email_body — the pull-side rendering of an application
+│   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies), magic-link + system email (Resend/SMTP)
+│   │   │   ├── applications/         # application-spine services (events, artifacts, authorship, contacts, stats)
+│   │   │   ├── fetch/                # the URL-fetch web fallback (extract, fetcher, ssrf guard.py, outcomes)
 │   │   │   ├── tailoring/            # generator, prompts, provenance, integrity, docx, pdf — the tailor web fallback
-│   │   │   ├── deadline.py           # deadline extractor (tested; no runtime caller yet — the `jobs.deadline` column stays NULL for a brought ad)
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, seniority, skill_normalizer
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
 │   │   │   └── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + forward-compat migration schema
@@ -62,14 +58,13 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
-│   └── tests/                        # across 148 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 135 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
-│   ├── src/components/{ui,applications,tailor,profile,pipeline,layout}/
+│   ├── src/components/{ui,applications,tailor,profile,layout}/
 │   └── src/lib/{api.ts,types.ts,utils.ts}
 ├── docs/
-│   ├── product/                      # VISION.md (the mission), product_design_rules.md, plans/
-│   └── _archive/sourcing-era/        # the deleted product's architecture, FROZEN, evidence only
+│   └── product/                      # VISION.md (the mission), product_design_rules.md
 ├── .env.example
 └── CLAUDE.md                         # Canonical AI agent instructions
 ```
@@ -222,33 +217,11 @@ candidate's seniority band from job titles, independent of any job search.
 
 ## Notification System
 
-> ⚠️ **DEAD CODE — do not write against it.** `notify_mode` = `instant` |
-> `daily` | `every_n_hours` used to queue non-instant sends into
-> `user_notification_digests` for an ARQ cron. The `worker` + `Redis` services
-> were deleted 2026-09-02 and `src/workers/` was deleted with the sourcing era
-> (slice 5), so nothing drains that queue — `daily`/`every_n_hours` never
-> deliver in prod. Push is gone by decision 11 (pull via `whats_new` instead);
-> kept only so nobody rebuilds a queue nothing runs.
-
-### The Apprise dispatcher (the real path)
-
-All delivery goes through `src/services/channels/dispatcher.py`. Channels are **per-user rows
-in the database**, not env-var-configured classes, so one user's Slack webhook is independent
-of another's.
-
-```python
-async def load_user_channels(db, user_id) -> list[...]   # the user's configured channels
-async def dispatch(...) -> list[ChannelSendResult]       # deliver, honouring the user's rules
-async def test_send(db, channel_id, *, user_id=None)     # one-off "does this work?" send
-```
-
-`dispatch()` applies the single `notification_rules` row per user (rule #23): score threshold,
-timezone-aware quiet hours (stdlib `zoneinfo`), and `notify_mode`
-(`instant` | `daily` | `every_n_hours`). Anything not sent inline is queued into
-`user_notification_digests`, which nothing drains (see the dead-code note above).
-
-Apprise itself is **lazy-imported** inside `_get_apprise_cls()` (rules #11/#16) — it is ~30 MB
-and must never be imported at module top level.
+Job360 is **pull, not push** (VISION.md decision 11, `docs/product/VISION.md:133`): the
+seeker reads `GET /whats-new` and the web home; there is no background delivery, no
+per-user notification channels, and no queue. The Apprise dispatcher, the per-user
+channel CRUD, the digest queue and `notification_rules` were all deleted 2026-09-05 along
+with the sourcing era — do not rebuild them.
 
 ---
 
@@ -346,19 +319,11 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/auth/verify-email/request` | `auth.py` |
 | `POST` | `/api/jobs/bring` | `bring.py` |
 | `POST` | `/api/jobs/fetch-url` | `bring.py` |
-| `GET` | `/api/settings/channels` | `channels.py` |
-| `POST` | `/api/settings/channels` | `channels.py` |
-| `DELETE` | `/api/settings/channels/{channel_id:int}` | `channels.py` |
-| `POST` | `/api/settings/channels/{channel_id:int}/test` | `channels.py` |
 | `POST` | `/api/client-log` | `client_log.py` |
 | `GET` | `/api/health` | `health.py` |
 | `GET` | `/api/livez` | `health.py` |
 | `GET` | `/api/readyz` | `health.py` |
 | `GET` | `/api/status` | `health.py` |
-| `GET` | `/api/settings/notification-rule` | `notification_rules.py` |
-| `PUT` | `/api/settings/notification-rule` | `notification_rules.py` |
-| `GET` | `/api/notifications` | `notifications.py` |
-| `GET` | `/api/notifications/stats` | `notifications.py` |
 | `GET` | `/api/oauth/authorize` | `oauth.py` |
 | `GET` | `/api/oauth/authorize/{rid}` | `oauth.py` |
 | `POST` | `/api/oauth/authorize/{rid}/decision` | `oauth.py` |
@@ -367,13 +332,6 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/oauth/register` | `oauth.py` |
 | `POST` | `/api/oauth/revoke` | `oauth.py` |
 | `POST` | `/api/oauth/token` | `oauth.py` |
-| `GET` | `/api/pipeline` | `pipeline.py` |
-| `GET` | `/api/pipeline/counts` | `pipeline.py` |
-| `GET` | `/api/pipeline/reminders` | `pipeline.py` |
-| `POST` | `/api/pipeline/{job_id}` | `pipeline.py` |
-| `POST` | `/api/pipeline/{job_id}/advance` | `pipeline.py` |
-| `PATCH` | `/api/pipeline/{job_id}/notes` | `pipeline.py` |
-| `GET` | `/api/pipeline/{job_id}/timeline` | `pipeline.py` |
 | `GET` | `/api/profile` | `profile.py` |
 | `PATCH` | `/api/profile` | `profile.py` |
 | `POST` | `/api/profile` | `profile.py` |
@@ -402,7 +360,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**84 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**69 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->
 
 ## Configuration
@@ -421,12 +379,10 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | Variable | Required | Used by |
 |----------|----------|---------|
 | `GITHUB_TOKEN` | No | Higher GitHub API rate limit (5000/hr vs 60/hr) |
-| `SMTP_EMAIL` + `SMTP_PASSWORD` (+ `SMTP_HOST` / `SMTP_PORT`) | No | The PLATFORM's SMTP credentials — the `mailtos://` fallback for both system email and the per-user email channel (`services/channels/email_url.py:121-140`). Prefer `RESEND_API_KEY` (row below): Railway blocks SMTP 25/465/587 |
-| ~~`NOTIFY_EMAIL`~~ / ~~`SLACK_WEBHOOK_URL`~~ / ~~`DISCORD_WEBHOOK_URL`~~ | **DEAD** | Declared at `core/settings.py` and imported by nothing in `src/`, `tests/` or `scripts/`. They drove the pre-Batch-2 single-tenant notifier, which was deleted; setting them has no effect. Slack/Discord/Telegram are per-user channels via the Connect flow now |
+| `SMTP_EMAIL` + `SMTP_PASSWORD` (+ `SMTP_HOST` / `SMTP_PORT`) | No | The PLATFORM's SMTP credentials — system email only (magic links, password reset: `services/auth/email_sender.py`). Prefer `RESEND_API_KEY` (row below): Railway blocks SMTP 25/465/587. The per-user notification-channel system this once also fed was deleted 2026-09-05 |
 | `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default `postgresql://job360:job360dev@localhost:5433/job360` (settings.py:25). Enforced by `validate_required_env()` |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks (settings.py:60-71) |
 | `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
-| `CHANNEL_ENCRYPTION_KEY` | Yes in prod | Fernet encryption of channel credentials |
 | `APP_ENV` / `RAILWAY_ENVIRONMENT` | No | Prod detection for HSTS + required-env validation (`APP_ENV=production` OR any `RAILWAY_ENVIRONMENT`) |
 | `SENTRY_DSN` | No | Sentry error tracking; empty = disabled |
 | `ESCO_SKILL_NORMALISATION_ENABLED` | No (default `false`) | Slice 5 renamed `SEMANTIC_ENABLED`; the old name is deliberately not read. Even `true` turns nothing on until an ESCO index is actually built (hard rule #28) |
@@ -446,16 +402,11 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `OAUTH_TOKEN_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `/api/oauth/token` exchanges per IP (and per IP+client) per minute before 429 |
 | `OAUTH_BEARER_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `Authorization: Bearer j360a_…` attempts per IP per minute — its own bucket, only a hash matching **no** row counts (an expired token is normal, not an attack) |
 | `OAUTH_CLIENT_PRUNE_DAYS` / `OAUTH_MAX_CLIENTS` / `OAUTH_PRUNE_SAMPLE` | No (default `7` / `10000` / `20`) | Housekeeping: a registered client with no grant ever is dropped after N days; the client table is capped (prune-at-ceiling, then 503); the prune runs after 1-in-N `/token` calls, in its own transaction, never delaying the exchange |
-| Slack/Discord/Telegram OAuth (`SLACK_CLIENT_ID`/`_SECRET`, `DISCORD_CLIENT_ID`/`_SECRET`, `TELEGRAM_BOT_TOKEN`/`_USERNAME`, `OAUTH_REDIRECT_BASE`) | No | One-click channel connect flows (skip endpoint when blank) |
 | `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
 | `REDIS_URL` | No | Optional Redis backend for `RATE_LIMIT_REDIS` (auth rate limiting holds across replicas). The ARQ worker this used to also serve was deleted with `src/workers/` (slice 5) |
 | `RUN_MIGRATIONS_ON_BOOT` | No (default `true`) | H6 — set `false` ONLY once a deploy release-phase step owns `python -m migrations.runner up`. Default keeps today's behaviour (migrations apply inside the FastAPI lifespan, `api/dependencies.py`). Existing mitigations: `runner.up()` takes a Postgres advisory lock so concurrent replicas serialise, and `backend/railway.json`'s healthcheck + `ON_FAILURE` restart keeps the old container serving if a migration fails |
-| `RESEND_API_KEY` | Recommended in prod | Resend HTTPS API key. Used for BOTH system email (magic links, `auth/email_sender.py`) and per-user email alert channels (`services/channels/email_url.py`). **Railway blocks outbound SMTP ports 25/465/587**, so `mailtos://` cannot deliver there — with this set, email channels are built as `resend://` over 443 instead. A key placed in `SMTP_PASSWORD` (recognised by its `re_` prefix) is honoured too. |
-| `SMTP_FROM` | No (falls back to `SMTP_EMAIL`, then `onboarding@resend.dev`) | From-address for system email and alert digests |
-| `NOTIFY_SCORE_THRESHOLD` | No (default `30`) | Legacy threshold read by the dead digest path (see the Notification System dead-code note above) |
-| `NOTIFY_SEED_DEFAULTS` | No (default on; `0`/`false`/`no`/`off` disables) | Master switch for seeding a `notification_rules` row (and, once the address is verified, an account-email channel) at signup |
-| `NOTIFY_DEFAULT_MODE` | No (default `daily`) | `notify_mode` given to a seeded rulebook |
-| `NOTIFY_DEFAULT_SEND_TIME` / `NOTIFY_DEFAULT_INTERVAL_HOURS` | No (default `08:00` / `6`) | Seeded digest send time and every-N-hours interval |
+| `RESEND_API_KEY` | Recommended in prod | Resend HTTPS API key. Used for system email only (magic links, password reset: `auth/email_sender.py`). **Railway blocks outbound SMTP ports 25/465/587**, so `resend://` over 443 is the path that actually delivers there. A key placed in `SMTP_PASSWORD` (recognised by its `re_` prefix) is honoured too |
+| `SMTP_FROM` | No (falls back to `SMTP_EMAIL`, then `onboarding@resend.dev`) | From-address for system email |
 | `APPLICATION_EXTRA_EVENT_TYPES` | No (default empty) | Comma-separated list extending the application-spine's event vocabulary (R7) with NON-status note-type events only — a status event also needs an R4 status mapping, which an env var cannot add. Unknown types still 422 naming the allowed list |
 | `APPLICATION_ARTIFACT_MAX_CHARS` | No (default `60000`) | Per-artifact-version character cap (`POST /applications/{id}/artifacts`, S5) — over the cap is a 422 naming this variable |
 | `APPLICATION_ARTIFACT_MAX_VERSIONS` | No (default `200`) | Per-`(application_id, kind)` version-count cap — over the cap is a 429 naming this variable, never a silent drop |
@@ -522,8 +473,7 @@ The scorer's `MIN_STORE_SCORE` catalog floor and the engine thresholds went with
 | httpx | >=0.27.0 | Async HTTP client (used by API + LLM providers) |
 | openai | >=1.0.0 | **PRIMARY** CV-parsing LLM provider |
 | google-generativeai / groq / cerebras-cloud-sdk | >=0.8.0 / >=0.11.0 / >=1.0.0 | Fallback LLM providers for CV parsing |
-| argon2-cffi / itsdangerous / cryptography / email-validator | >=23.1.0 / >=2.2.0 / >=42.0.0 / >=2.1.0 | Auth + signed sessions + Fernet channel-credential encryption |
-| apprise | >=1.7.0 | Multi-channel notification dispatch (**lazy-imported**, rule #11) |
+| argon2-cffi / itsdangerous / email-validator | >=23.1.0 / >=2.2.0 / >=2.1.0 | Password hashing (argon2id) + signed session cookies + pydantic `EmailStr`. `cryptography` (Fernet channel-credential encryption) was dropped with the notification-channel system, 2026-09-05 |
 | rapidfuzz | >=3.0 | Tailor integrity check + two-pass profile merge (**lazy-imported**, rule #16) |
 | scikit-learn | >=1.4 | **No importer left** — it was the dedup TF-IDF layer (deleted, slice 5). Still declared because the `[semantic]` stack expects it; dropping it is a follow-up |
 | sentry-sdk | >=1.40.0 | Error tracking + performance monitoring |

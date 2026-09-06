@@ -1,7 +1,7 @@
 # Spec: bring a job, keep the receipt
 <!-- doc: PLAN -->
 > **PLAN — shipped.** A design record, not live truth; the code and `docs/product/VISION.md` win. <!-- banner: auto -->
-Reads: `intent.md`. Skills applied: `hard-rules` (31 invariants), `verify-job360`. Status: draft.
+Skills applied: `hard-rules`, `verify-job360`. Status: shipped. (The `intent.md` this spec read from is deleted scaffolding, 2026-09-05 — git history holds it.)
 
 ## Requirements
 R1. `POST /api/jobs/bring` {title, company, description, location?, apply_url?} → the job exactly as

@@ -165,7 +165,11 @@ async def generate(
             detail="No CV on file — upload your CV on the Profile page before tailoring.",
         )
 
-    fit_reason = await db.get_fit_reason(user.id, job_id)
+    # Slice 5 (#483) deleted the judge/scorer that computed a "why it fits"
+    # reason (user_feed.llm_reason); the mission sweep dropped user_feed
+    # itself. Job360 never computes fit — the agent does — so this is
+    # always empty now.
+    fit_reason = ""
 
     # PROVENANCE — which profile snapshot produced these documents.
     #

@@ -18,8 +18,9 @@ of text — say what happened, what I did, what's next.
 
 The Job360 web app: **Next.js 16.3.3 (App Router) + React 19.2.8 + Tailwind 4 +
 shadcn 4**. Talks to the FastAPI backend on `:8000`. State via **TanStack Query 5**;
-forms via **react-hook-form 7 + zod 4**; Kanban drag via **@dnd-kit**; charts via
-**recharts**; toasts via **sonner**. Auth is cookie-session — guarded in `src/middleware.ts`.
+forms via **react-hook-form 7 + zod 4**; toasts via **sonner**. Auth is cookie-session —
+guarded in `src/middleware.ts`. No charts, no drag-and-drop libraries (the Kanban went
+with the pipeline page).
 
 ## Owner rule #29 — empty preferences stay SILENT (never default, never require)
 
@@ -71,15 +72,14 @@ backend route/response change: run `npm run gen:types`, commit the regenerated
 
 ## Where things are
 
-- `src/app/` — App Router pages: `(auth)/`, `bring/`, `applications/[id]/`, `receipts/`, `pipeline/`,
-  `profile/`, `settings/{notifications,account,connect}/` (+ `layout.tsx`, `page.tsx`, `_tabs.tsx`),
-  `channels/`, `notifications/`. **Channels is a TOP-LEVEL page (`/channels`), not
-  `settings/channels/`** — the Settings gear holds only Notifications + Account (nav IA
-  change, 2026-06-20).
-- `src/components/` — `ui/` (shadcn primitives), `applications/`, `tailor/`, `pipeline/` (KanbanBoard),
-  `profile/`, `layout/`, `providers/`.
-- `src/lib/` — `api.ts` (fetch wrapper), `api-types.ts` (generated), `queryKeys.ts`
-  (TanStack Query keys), `api-error.ts`, `types.ts`, `utils.ts`.
+- `src/app/` — App Router pages: `(auth)/`, `bring/`, `applications/[id]/`, `receipts/`,
+  `profile/`, `settings/{account,connect}/` (+ `layout.tsx`, `page.tsx`, `_tabs.tsx`),
+  `oauth/` (consent screen for MCP clients), `privacy/`, `terms/`, `contact/`.
+  `/settings` redirects to `/settings/account`.
+- `src/components/` — `ui/` (shadcn primitives), `applications/`, `tailor/`,
+  `profile/`, `layout/`, `providers/`, `consent/`.
+- `src/lib/` — `api.ts` (fetch wrapper), `api-types.ts` (generated), `api-error.ts`,
+  `types.ts`, `utils.ts`, `consent.ts`, `agent-edits.ts`.
 - `src/middleware.ts` — session-cookie auth guard (redirects unauthed → login).
 
 ## Verify, don't assume (root rule + verify-job360 skill)

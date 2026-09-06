@@ -6,13 +6,18 @@
 > Nothing else is allowed to exist. This file defines how that stays true
 > while the codebase changes every day.
 
-> **Deletion authority (2026-07-27):** what may be removed, and by whom, is
-> governed by [`DELETION-POLICY.md`](DELETION-POLICY.md) — it wins over this
-> file on any deletion question. The rules below stay correct and unchanged:
-> archiving an implemented plan (§2) is that policy's **Lane B** — archived *is*
-> the record, so "never deleted" still holds for archived plans. "Never silently
-> delete an intention" (§4) is **Lane C** — unshipped plans remain human-only,
-> permanently.
+> **Deletion authority.** `DELETION-POLICY.md` (a DRAFT, never wired) and
+> `loop1_safe_reenable.md` were retired 2026-09-05 — their still-true rules
+> fold in here: (1) never auto-delete what has no durable copy elsewhere —
+> git history is the copy for merged work, a pushed tag/branch is the copy for
+> unmerged work; (2) ground truth (`CLAUDE.md`, `ARCHITECTURE.md`, `README`,
+> `STATUS.md`, `CONTRIBUTING`, `SECURITY`) and permanent records
+> (`IMPLEMENTATION_LOG.md`, decision records, reviews) are never auto-touched;
+> (3) an unshipped plan is never silently deleted — park it, don't ticket-and-
+> forget; (4) any loop may read freely, but a loop that **writes** lands only
+> through a PR a human merges — never a direct push to `main` — the Loop-1
+> lesson (2026-06-21: an unsupervised write+merge agent wiped worktrees,
+> branches and the test DB).
 
 ## 1. Doc taxonomy — every doc gets exactly ONE type
 
@@ -49,9 +54,10 @@ DRAFT ──► ACTIVE ──► IMPLEMENTED ──► ARCHIVED
 ```
 
 - A plan whose code has merged gets stamped at the top —
-  `> **IMPLEMENTED** in PR #N (`<sha>`) — archived <date>` — and moved to
-  `docs/_archive/` — NOT `docs/archive/`, which holds only a README and is an
-  accident of an unfinished restructure.
+  `> **IMPLEMENTED** in PR #N (`<sha>`) — archived <date>` — and moved to an
+  archive location under `docs/`. (`docs/_archive/` and `docs/archive/` were
+  both deleted 2026-09-05 — the next archived plan re-creates whichever
+  location the framework's next revival picks.)
 
   It is never UPDATED (honesty): a stale number in a dated record is correct for
   its date, and rewriting it falsifies the record.
@@ -92,8 +98,8 @@ matters.
    two legal outcomes: the doc was stale → fix the doc; or the feature is
    missing → record it in `docs/harness/maintenance/PARKED.md` (never silently delete
    an intention, never "fix" a doc to describe code that doesn't exist).
-2. **Doc edits land by PR only.** The agent proposes, a human lands —
-   the `loop1_safe_reenable.md` rule. No loop ever pushes doc edits to main.
+2. **Doc edits land by PR only.** The agent proposes, a human lands (the
+   Loop-1 lesson, folded in above). No loop ever pushes doc edits to main.
 3. **Implemented plans are archived, not updated.**
 4. **Logs are append-only.**
 5. **Every code PR declares its doc impact** — one line in the PR body:
@@ -126,7 +132,7 @@ report, but never edits them — memory hygiene is the session's own job.
 | Dedicated technical writers | Loop 3 tooling is the writer; you are the editor who merges |
 | Freshness SLAs + staleness dashboards | Tier-1 daily check + `DOC-HEALTH.md` scorecard |
 | ADRs (architecture decision records) | `docs/product/plans/batch-2-decisions.md` pattern — keep appending |
-| Archive-over-delete retention | `docs/_archive/` + stamps. Nothing deleted EXCEPT merged scaffolding, per the 2026-08-25 amendment in §2 |
+| Archive-over-delete retention | An archive location under `docs/` + stamps (none exists today — see §2). Nothing deleted EXCEPT merged scaffolding, per the 2026-08-25 amendment in §2 |
 | Doc impact required in code review | Rule 5 above |
 
 ## 6. Outputs this framework maintains
@@ -137,4 +143,6 @@ report, but never edits them — memory hygiene is the session's own job.
   docs checked, drifts fixed, plans archived, gaps parked, modules undocumented.
 - `docs/harness/maintenance/PARKED.md` — the "code is behind the doc" list: intentions
   found in docs that are not yet implemented, each with source doc + date.
-- `docs/_archive/` — stamped, frozen, implemented/superseded plans.
+- Archived plans, when this framework is active again, live under `docs/`
+  with an `> **IMPLEMENTED**` stamp — there is no archive directory today
+  (`docs/_archive/` and `docs/archive/` were both deleted 2026-09-05).

@@ -20,13 +20,11 @@ import asyncio
 from contextlib import asynccontextmanager
 
 import pytest
-from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from migrations import runner
 from src.repositories import pg
 from src.services.auth import rate_limit
-from src.services.channels import crypto
 
 
 @asynccontextmanager
@@ -86,7 +84,6 @@ def temp_db(monkeypatch, tmp_path):
     monkeypatch.setattr(auth_deps, "DB_PATH", patched, raising=True)
     monkeypatch.setattr(auth_route, "DB_PATH", patched, raising=True)
 
-    crypto.set_test_key(Fernet.generate_key().decode("ascii"))
     monkeypatch.setenv("SESSION_SECRET", "test-secret-" + "x" * 40)
 
     yield db_path

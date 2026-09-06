@@ -93,18 +93,23 @@ def test_seniority_noise_missing_file_degrades_to_strip_nothing(monkeypatch) -> 
 
 
 def test_no_surviving_link_to_deleted_pages() -> None:
-    """`/dashboard` and `/jobs/{id}` went with the sourcing era. Two spots
-    kept pointing at them (the prod smoke walk and the notifications ledger)
-    — a link to a 404 is a bug the user finds, and a monitor that walks a
-    deleted page is permanently red."""
+    """`/dashboard` and `/jobs/{id}` went with the sourcing era. The prod
+    smoke walk kept pointing at them — a monitor that walks a deleted page is
+    permanently red.
+
+    This test used to also check `frontend/src/app/notifications/page.tsx`
+    for the same stale `/jobs/${...}` link, but the mission sweep deleted the
+    whole notifications page (and route) — there is no longer a page there
+    to carry a stale link."""
     smoke = (_ROOT / "frontend" / "tests" / "synthetic" / "live-smoke.mjs").read_text(encoding="utf-8")
     walked = set(re.findall(r'gotoAuthed\("(/[^"]*)"\)', smoke))
     assert "/dashboard" not in walked
     assert "/jobs" not in walked
     assert "/applications" in walked
-
-    notifications = (_ROOT / "frontend" / "src" / "app" / "notifications" / "page.tsx").read_text(encoding="utf-8")
-    assert "/jobs/${" not in notifications
+    assert not (_ROOT / "frontend" / "src" / "app" / "notifications").exists(), (
+        "the notifications page was deleted in the mission sweep — this test "
+        "should not need to check its content for a stale link any more"
+    )
 
 
 def test_dump_db_no_longer_reads_run_log() -> None:

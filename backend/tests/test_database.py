@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from src.models import Job
-from src.repositories import pg
 from src.repositories.database import JobDatabase
 
 
@@ -162,45 +161,6 @@ async def _create_user_feed_table(db: JobDatabase) -> None:
     await db._conn.commit()
 
 
-
-
-# ── Channels & Notifications overhaul — Task 1: single-rule schema ──────────
-
-
-def test_notification_rules_single_per_user_schema(db):
-    """After migration 0020 the table is one-row-per-user with the new columns."""
-
-    async def _cols():
-        cur = await db._conn.execute("PRAGMA table_info(notification_rules)")
-        return {r[1] for r in await cur.fetchall()}
-
-    cols = asyncio.run(_cols())
-    assert "interval_hours" in cols
-    assert "daily_send_time" in cols
-    assert "last_sent_at" in cols
-    assert "channel" not in cols          # per-channel column removed
-    assert "digest_send_time" not in cols  # renamed to daily_send_time
-
-
-def test_notification_rules_unique_user(db):
-    """A second insert for the same user must conflict (UNIQUE(user_id))."""
-
-    async def _insert_first():
-        await db._conn.execute(
-            "INSERT INTO notification_rules(user_id, notify_mode) VALUES('u1','instant')"
-        )
-        await db._conn.commit()
-
-    async def _insert_duplicate():
-        await db._conn.execute(
-            "INSERT INTO notification_rules(user_id, notify_mode) VALUES('u1','daily')"
-        )
-        await db._conn.commit()
-
-    asyncio.run(_insert_first())
-
-    with pytest.raises(pg.IntegrityError):
-        asyncio.run(_insert_duplicate())
 
 
 @pytest.mark.asyncio

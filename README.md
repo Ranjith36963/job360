@@ -7,7 +7,7 @@
 
 > **What is live on `main` today:** magic-link login, profile extraction (CV / LinkedIn / GitHub / preferences), `POST /api/jobs/bring`, the application spine (one Application object, typed events, versioned artifacts, append-only receipts), a CV tailor kept as the web fallback, and an MCP server at `/api/mcp`. Three Railway services: `backend`, `frontend`, `Postgres` (worker + Redis were deleted 2026-09-02, so nothing runs in the background — no notifications, no crons).
 >
-> **The sourcing era was deleted 2026-09-05** (slice 5, #483): the 40-source aggregator, the 0–100 scorer, the four-layer dedup, the search dashboard. None of that code exists in this repo any more — its docs are kept, FROZEN, as history under [`docs/_archive/sourcing-era/`](./docs/_archive/sourcing-era/).
+> **The sourcing era was deleted 2026-09-05** (slice 5, #483): the 40-source aggregator, the 0–100 scorer, the four-layer dedup, the search dashboard. **The per-user notification-channel system** (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) was deleted the same day. None of that code exists in this repo any more — git history is the record.
 
 ### API docs (auto-generated)
 
@@ -44,14 +44,13 @@ job360/
 │   ├── main.py                  # FastAPI uvicorn entry (thin)
 │   └── src/
 │       ├── api/
-│       │   └── routes/          # bring, receipts, applications, tailor, profile, pipeline,
-│       │                        # auth, channels, notifications, notification_rules, tokens,
-│       │                        # oauth, well_known, health, client_log
+│       │   └── routes/          # bring, receipts, applications, tailor, profile,
+│       │                        # auth, tokens, oauth, well_known, health, client_log
 │       ├── services/
 │       │   ├── applications/    # the Application object + append-only event/artifact log
 │       │   ├── profile/         # CV / LinkedIn / GitHub extraction
-│       │   ├── channels/        # Apprise dispatcher, Fernet crypto, SSRF guard
-│       │   └── notifications/   # signup rulebook seeder
+│       │   ├── fetch/           # the URL-fetch web fallback + its SSRF guard
+│       │   └── tailoring/       # the CV/cover-letter tailor web fallback
 │       ├── repositories/        # Postgres via psycopg3 (aiosqlite-shaped shim)
 │       └── utils/
 ├── backend/migrations/          # forward/reverse SQL migration pairs + runner.py
@@ -125,11 +124,11 @@ Live on Railway at job360.uk since 2026-07-02. Three services: `backend`, `front
 
 ## Notifications
 
-Delivery goes through the Apprise dispatcher (`backend/src/services/channels/dispatcher.py`) on two channels: **email** (the product; via Resend's HTTPS API — Railway blocks outbound SMTP, so a local/self-hosted SMTP relay is only a fallback) and **webhook** (an unsupported raw-JSON escape hatch, guarded against SSRF by `ssrf_guard.py`). Channel credentials are Fernet-encrypted per-user rows (`crypto.py`), not env-var-configured classes. Because the worker and Redis are gone, any send happens synchronously in the request that triggers it — there is no queued or scheduled delivery today.
+Job360 is **pull, not push** (VISION.md decision 11): the seeker reads `GET /whats-new` and the web home. There is no background delivery, no per-user channels, and no digest queue — that system was deleted 2026-09-05 with the sourcing era.
 
 ## Configuration
 
-Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL` / `DATABASE_PUBLIC_URL`, `FRONTEND_ORIGIN`, `SITE_BASE_URL`, and `RESEND_API_KEY` (magic-link login and the email channel both need it). The full, current env-var table lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md) — do not trust an older list, several variables were retired with the sourcing era.
+Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL` / `DATABASE_PUBLIC_URL`, `FRONTEND_ORIGIN`, `SITE_BASE_URL`, and `RESEND_API_KEY` (system email — magic-link login and password reset — needs it). The full, current env-var table lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md) — do not trust an older list, several variables were retired with the sourcing era.
 
 ## Contributing
 
@@ -137,4 +136,4 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branch naming, commit style, and 
 
 ## History
 
-The sourcing era's docs (the deleted job-search-and-score product) are kept, FROZEN, under [`docs/_archive/sourcing-era/`](./docs/_archive/sourcing-era/) as history only — never rebuild it.
+The sourcing era (job search, scoring, dedup, enrichment) and the per-user notification-channel system were both deleted 2026-09-05 (slice 5, #483). Neither is archived in-tree — git history is the record. Never rebuild either.

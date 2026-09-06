@@ -1,9 +1,9 @@
 <!-- doc: PLAN | status: ACTIVE | pr: — -->
 # Spec: URL fetch on the web
-Reads: `intent.md`. Skills applied: `hard-rules` (M1 never source/rank, M2 store-not-do,
+Skills applied: `hard-rules` (M1 never source/rank, M2 store-not-do,
 M5 MCP gate parity, #4 the suite runs offline, #12/#25 every per-user route scopes by
-`user.id`, #16 lazy imports, #21 assert values not shapes). Status: draft,
-pre-adversarial-review.
+`user.id`, #16 lazy imports, #21 assert values not shapes). Status: shipped (PR #496). (The
+`intent.md` this spec read from is deleted scaffolding, 2026-09-05 — git history holds it.)
 
 ## Measured starting point (2026-09-04, this tree)
 

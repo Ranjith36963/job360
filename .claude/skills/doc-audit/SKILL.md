@@ -7,11 +7,14 @@ You are running the full document-lifecycle audit defined in
 `docs/harness/maintenance/DOC-MAINTENANCE.md`. Read that file first — it is the
 contract. The code is the only truth.
 
-**TWO-PHASE CONTRACT — AMENDED 2026-07-27.** The old contract made *every*
-action wait on the user. He never ran Phase B, so nothing was ever archived:
-`docs/archive/` stayed empty, zero docs carried an IMPLEMENTED stamp, and 75% of
+**TWO-PHASE CONTRACT — AMENDED 2026-07-27, deletion authority folded into
+DOC-MAINTENANCE.md 2026-09-05.** The old contract made *every* action wait on
+the user. He never ran Phase B, so nothing was ever archived: an archive
+directory stayed empty, zero docs carried an IMPLEMENTED stamp, and 75% of
 plan docs describing shipped work piled up. The gate is now **per-lane**, per
-[`docs/harness/maintenance/DELETION-POLICY.md`](../../../docs/harness/maintenance/DELETION-POLICY.md):
+the deletion-authority note at the top of
+[`docs/harness/maintenance/DOC-MAINTENANCE.md`](../../../docs/harness/maintenance/DOC-MAINTENANCE.md)
+(the retired `DELETION-POLICY.md`'s lanes, folded in there):
 
 - **Phase A — REPORT.** Run Steps 1–4 without changing ANY file. Present the
   findings, classifying every item into Lane A (auto-delete), Lane B
@@ -21,9 +24,9 @@ plan docs describing shipped work piled up. The gate is now **per-lane**, per
   approval** (they are predicate-proven and reversible — reflog/git history).
   **Lane C items are NEVER applied**: list them in the PR body and stop. The
   human's only job is deciding Lane C.
-- **While `DELETION-POLICY.md` is marked `DRAFT — NOT IN FORCE`, treat every
-  item as Lane C** — i.e. the old report-only behaviour — until its status
-  reads `ACTIVE`. That one word is the switch.
+- **The retired `DELETION-POLICY.md` was never flipped out of `DRAFT — NOT IN
+  FORCE`** — treat every item as Lane C (the old report-only behaviour) until
+  a human writes and activates a replacement policy.
 
   When applying the classification,
   also write each doc's type header on line 2 (spec in DOC-MAINTENANCE.md):
@@ -35,8 +38,9 @@ plan docs describing shipped work piled up. The gate is now **per-lane**, per
   PR — never commit to main. Rebase on freshly-fetched `origin/main` right
   before pushing. **Only one doc-writing session (sync or audit) at a time** —
   check for an open `docs:` PR first; if one exists, stop and say so.
-  If `docs/_archive/` or `docs/harness/maintenance/PARKED.md` are missing, create them
-  first (with a one-line header explaining their purpose).
+  If an archive directory (see DOC-MAINTENANCE.md §2) or
+  `docs/harness/maintenance/PARKED.md` are missing, create them first (with a
+  one-line header explaining their purpose).
 
 **AHEAD docs are untouchable (user's rule):** a doc describing something not
 yet built (a plan, a promise, a design) is the product backlog. LIST it in the
@@ -66,7 +70,8 @@ history (not the doc's own claims):
 
 - **IMPLEMENTED** (the code it describes exists and is merged) → stamp the top
   with `> **IMPLEMENTED** in PR #N (<sha>) — archived <date>` and `git mv` it
-  to `docs/_archive/`. Do not edit its content. **After EVERY move, grep the
+  to an archive directory under `docs/` (see DOC-MAINTENANCE.md §2 — none
+  exists today). Do not edit its content. **After EVERY move, grep the
   whole repo for the old path** (`grep -rn "<old path>" --include="*.md"`) and
   update each referrer — `docs/README.md` (the plan index) and CLAUDE.md's
   "Related documentation" section link to plan files; a move without a link
@@ -111,12 +116,14 @@ it goes to PARKED.md or a GitHub issue — not into this PR.
 **Deletion — REPEALED 2026-07-27.** This list used to read "delete any doc",
 a blanket ban. That ban is why 75% of plan docs describing already-shipped work
 piled up: destruction was centralised on one human who never ran Phase B, so
-every agent correctly obeyed and the pile grew. Deletion is now governed solely
-by [`docs/harness/maintenance/DELETION-POLICY.md`](../../../docs/harness/maintenance/DELETION-POLICY.md):
+every agent correctly obeyed and the pile grew. Deletion is now governed by
+the deletion-authority note in
+[`docs/harness/maintenance/DOC-MAINTENANCE.md`](../../../docs/harness/maintenance/DOC-MAINTENANCE.md)
+(the retired `DELETION-POLICY.md`'s lanes):
 
 - **Lane A / Lane B** (completed work, generated junk, merged-branch artifacts) —
   act by predicate, no approval needed.
 - **Lane C** (anything unmerged, unpushed, uncommitted, ground truth, permanent
   record, PII, or needing judgment) — still human-only. Report, never act.
-- **While that policy is marked `DRAFT — NOT IN FORCE`, nothing auto-deletes.**
-  Treat everything as Lane C until its status is `ACTIVE`.
+- **No replacement policy has been activated.** Nothing auto-deletes — treat
+  everything as Lane C until a human writes and activates one.

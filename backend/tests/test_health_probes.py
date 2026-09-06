@@ -182,7 +182,6 @@ def test_validate_required_env_noop_in_dev(monkeypatch):
     monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
     # Even with missing secrets, should not raise in dev.
     monkeypatch.delenv("SESSION_SECRET", raising=False)
-    monkeypatch.delenv("CHANNEL_ENCRYPTION_KEY", raising=False)
 
     from src.core.settings import validate_required_env
 
@@ -194,7 +193,6 @@ def test_validate_required_env_raises_in_production_with_missing_vars(monkeypatc
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("DATABASE_URL", "postgresql://job360:job360dev@localhost:5433/job360")
     monkeypatch.delenv("SESSION_SECRET", raising=False)
-    monkeypatch.delenv("CHANNEL_ENCRYPTION_KEY", raising=False)
 
     from src.core.settings import validate_required_env
 
@@ -203,7 +201,6 @@ def test_validate_required_env_raises_in_production_with_missing_vars(monkeypatc
 
     msg = str(exc_info.value)
     assert "SESSION_SECRET" in msg
-    assert "CHANNEL_ENCRYPTION_KEY" in msg
     assert "Missing required environment variables for production" in msg
 
 
@@ -212,7 +209,6 @@ def test_validate_required_env_raises_for_railway_environment(monkeypatch):
     monkeypatch.delenv("APP_ENV", raising=False)
     monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
     monkeypatch.delenv("SESSION_SECRET", raising=False)
-    monkeypatch.delenv("CHANNEL_ENCRYPTION_KEY", raising=False)
     monkeypatch.setenv("DATABASE_URL", "postgresql://x:y@host/db")
 
     from src.core.settings import validate_required_env
@@ -227,7 +223,6 @@ def test_validate_required_env_passes_when_all_set(monkeypatch):
     """No error when all required vars are present in production."""
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("SESSION_SECRET", "a" * 32)
-    monkeypatch.setenv("CHANNEL_ENCRYPTION_KEY", "b" * 32)
     monkeypatch.setenv("DATABASE_URL", "postgresql://job360:job360dev@localhost:5433/job360")
 
     from src.core.settings import validate_required_env
@@ -239,7 +234,6 @@ def test_validate_required_env_error_message_is_human_readable(monkeypatch):
     """Error message lists ALL missing vars at once, not one at a time."""
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.delenv("SESSION_SECRET", raising=False)
-    monkeypatch.delenv("CHANNEL_ENCRYPTION_KEY", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     from src.core.settings import validate_required_env
@@ -248,7 +242,6 @@ def test_validate_required_env_error_message_is_human_readable(monkeypatch):
         validate_required_env()
 
     msg = str(exc_info.value)
-    # All three vars listed in one message.
+    # Both vars listed in one message.
     assert "SESSION_SECRET" in msg
-    assert "CHANNEL_ENCRYPTION_KEY" in msg
     assert "DATABASE_URL" in msg

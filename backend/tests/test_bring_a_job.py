@@ -27,9 +27,7 @@ _AD = {
 
 
 @pytest.mark.asyncio
-async def test_bring_stores_the_ad_and_births_the_application(
-    authenticated_async_context, fixture_user_id
-):
+async def test_bring_stores_the_ad_and_births_the_application(authenticated_async_context):
     async with authenticated_async_context() as client:
         resp = await client.post("/api/jobs/bring", json=_AD)
         assert resp.status_code == 200, resp.text
@@ -58,11 +56,8 @@ async def test_bring_stores_the_ad_and_births_the_application(
     cur = await db._conn.execute("SELECT source FROM jobs WHERE id = ?", (job["id"],))
     assert (await cur.fetchone())[0] == "user_brought"
     # The per-user fact is the APPLICATION now — bring writes no feed row.
-    cur = await db._conn.execute(
-        "SELECT COUNT(*) FROM user_feed WHERE user_id = ? AND job_id = ?",
-        (fixture_user_id, job["id"]),
-    )
-    assert (await cur.fetchone())[0] == 0
+    # `user_feed` itself was dropped by the mission-sweep migration (0040), so
+    # that now holds by construction rather than by query.
 
 
 @pytest.mark.asyncio

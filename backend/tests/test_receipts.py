@@ -45,18 +45,14 @@ async def test_receipt_freezes_job_and_marks_applied(authenticated_async_context
         assert r["channel"] == "company site" and r["note"] == "via referral"
         assert r["sent_at"]
 
-        # Both surviving "applied" surfaces agree. The third — the per-job
-        # `action` field on `GET /api/jobs/{id}` — went with that route in
-        # slice 5 (#483); `user_actions` is still WRITTEN (receipts.py stamps
-        # it), so the row is asserted straight off the table instead.
-        pipeline = await client.get("/api/pipeline")
-        assert any(a["job_id"] == job_id and a["stage"] == "applied" for a in pipeline.json()["applications"])
-
-    db = await api_deps.get_db()
-    cur = await db._conn.execute(
-        "SELECT action FROM user_actions WHERE job_id = ?", (job_id,)
-    )
-    assert (await cur.fetchone())[0] == "applied"
+        # The `applications` row (the spine's cache slot) agrees: this route
+        # upserts it via `create_application` on the same call, independent
+        # of the receipt row itself. The per-job `action` field on `GET
+        # /api/jobs/{id}` and the Kanban `/api/pipeline` API both went with
+        # slice 5 (#483) / the mission sweep — `GET /api/applications` is the
+        # one surface left to read "applied" back from.
+        apps = await client.get("/api/applications")
+        assert any(a["job_id"] == job_id for a in apps.json()["applications"])
 
 
 @pytest.mark.asyncio

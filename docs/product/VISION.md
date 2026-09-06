@@ -144,9 +144,10 @@ consent-first; everything free; no auto-submit at volume; global from day one.
 
 ## Older docs this supersedes
 
-`docs/product/PRD.md`, `docs/product/pillars/02-search-and-match-engine.md`,
-`docs/product/pillars/03-job-providers.md`, `docs/product/pillars/CATALOG_STATE.md`
-and every `docs/product/plans/PRICING_*` file describe the sourcing-era product.
-They are kept as history of how the code got here, not as direction.
-`docs/plans/2026-09-02-bring-a-job/intent.md` is slice one of this vision and
-still holds.
+The sourcing-era product docs this superseded (`docs/product/PRD.md`, the
+`docs/product/pillars/` manuals, every `docs/product/plans/PRICING_*` file)
+described a product this codebase no longer builds. They were deleted whole
+2026-09-05 (harness+docs cleanup) rather than archived — git history is the
+record, not a guide for what to build next.
+[`docs/plans/2026-09-02-bring-a-job/spec.md`](../plans/2026-09-02-bring-a-job/spec.md)
+is slice one of this vision and still holds.

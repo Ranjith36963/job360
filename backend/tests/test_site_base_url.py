@@ -1,9 +1,8 @@
 """SITE_BASE_URL must never resolve to an empty origin.
 
-Every job link in a delivered email is built from this value
-(``workers/tasks.py`` → ``build_decision_card(..., site_base_url=SITE_BASE_URL)``).
-If it is empty, the link becomes ``/jobs/147`` — a path with no host, which
-resolves to nothing from someone's inbox and is unrecoverable once sent.
+OAuth and email-verification links are built from this value. If it is
+empty, a link becomes a bare path with no host, which resolves to nothing
+from someone's inbox or browser and is unrecoverable once sent.
 
 Two ways it has already been got wrong, both guarded below:
 

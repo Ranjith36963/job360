@@ -3,8 +3,8 @@
 # ── CI GUARD — MUST BE FIRST EXECUTABLE LINE ────────────────────────────────
 # Project .claude/settings.json hooks are loaded by the Claude CLI that
 # claude-code-action runs; no workflow passes a --settings override. Inside
-# repair.yml / pr-repair.yml this hook would tell the agent to append to
-# docs/harness/maintenance/claude-md-proposals.md — and those workflows exit 1 on ANY
+# pr-repair.yml this hook would tell the agent to append to
+# docs/harness/maintenance/claude-md-proposals.md — and that workflow exits 1 on ANY
 # changed file outside backend/ or frontend/, throwing away a working fix.
 # Headless CI has no human to act on a proposal anyway. Never run there.
 if [ -n "${GITHUB_ACTIONS:-}${CI:-}" ]; then exit 0; fi

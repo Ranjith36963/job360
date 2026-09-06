@@ -1,25 +1,24 @@
-"""The five heavy dependencies never appear at MODULE scope — rules #11 + #16.
+"""The heavy dependencies never appear at MODULE scope — rules #11 + #16.
 
 WHY A TEST AND NOT A LINT RULE
 ------------------------------
 The obvious mechanisation is ruff's ``flake8-tidy-imports`` banned-api. It is the
 wrong tool, and trying it is what proved it (2026-08-11): ``TID251`` flags an
 import wherever it appears, so all 12 hits it produced were the **correct** lazy
-imports *inside* functions — including ``dispatcher.py:54``, which is the exact
-pattern CLAUDE.md tells you to copy. A guard that fires on the right answer gets
+imports *inside* functions. A guard that fires on the right answer gets
 silenced with ``# noqa``, and a codebase trained to add ``# noqa`` to this rule is
 worse off than one with no rule at all.
 
-The rule is not "never import apprise". It is "never import it **at module
+The rule is not "never import it". It is "never import it **at module
 scope**". So the guard has to measure module scope — hence an AST walk, where
 "top level" is a structural fact rather than a text pattern.
 
 WHAT IT COSTS WHEN IT REGRESSES
 -------------------------------
-apprise alone is ~30 MB. A single top-level import adds 150 ms - 2 s to *every*
-pytest collection and every FastAPI cold start. Nobody attributes that to the
-commit that caused it, which is why this is a ratchet: measured 2026-08-11, all
-five are clean, and this test is what keeps them that way.
+A single top-level import of one of these adds 150 ms - 2 s to *every* pytest
+collection and every FastAPI cold start. Nobody attributes that to the commit
+that caused it, which is why this is a ratchet: measured 2026-08-11, all are
+clean, and this test is what keeps them that way.
 """
 
 from __future__ import annotations
@@ -33,7 +32,6 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 
 # CLAUDE.md rules #11 + #16.
 HEAVY = {
-    "apprise": "~30 MB. Pattern to copy: dispatcher._get_apprise_cls",
     "sentence_transformers": "heavy ML import",
     "chromadb": "heavy vector-store import",
     "rapidfuzz": "heavy native import",
@@ -109,9 +107,7 @@ def test_no_heavy_import_at_module_scope() -> None:
         + "\n  ".join(offenders)
         + "\n\nMove the import INSIDE the function that uses it. Every one of these "
         "executes on import, so it is paid by every pytest collection and every "
-        "FastAPI cold start — apprise alone is ~30 MB.\n"
-        "Copy the pattern at src/services/channels/dispatcher.py "
-        "(`_get_apprise_cls`)."
+        "FastAPI cold start."
     )
 
 

@@ -13,19 +13,12 @@ type Schemas = components["schemas"];
 
 // ---- Generated aliases ----
 
-export type ApplicationTimelineResponse = Schemas["ApplicationTimelineResponse"];
 export type BringJobRequest = Schemas["BringJobRequest"];
 export type BringJobResponse = Schemas["BringJobResponse"];
 export type CreateReceiptRequest = Schemas["CreateReceiptRequest"];
 export type CVDetail = Schemas["CVDetail"];
 export type HealthResponse = Schemas["HealthResponse"];
 export type JsonResumeResponse = Schemas["JsonResumeResponse"];
-export type NotificationLedgerEntry = Schemas["NotificationLedgerEntry"];
-export type NotificationLedgerListResponse = Schemas["NotificationLedgerListResponse"];
-export type NotificationRule = Schemas["NotificationRule"];
-export type NotificationRuleUpdate = Schemas["NotificationRuleUpdate"];
-export type PipelineAdvanceRequest = Schemas["PipelineAdvanceRequest"];
-export type PipelineApplication = Schemas["PipelineApplication"];
 export type ProfileResponse = Schemas["ProfileResponse"];
 export type ProfileSummary = Schemas["ProfileSummary"];
 export type ProfileVersionsListResponse = Schemas["ProfileVersionsListResponse"];
@@ -33,11 +26,10 @@ export type Receipt = Schemas["Receipt"];
 export type ReceiptListResponse = Schemas["ReceiptListResponse"];
 export type ReceiptSummary = Schemas["ReceiptSummary"];
 export type ProfileVersionSummary = Schemas["ProfileVersionSummary"];
-export type TimelineEntry = Schemas["TimelineEntry"];
 
 // `doc_kind`/`status` are narrowed from `string` to literal unions — the
 // backend OpenAPI declares them as string but only these values are valid
-// (docs/product/peruser_cv_coverletter.md). Same pattern as `Channel` in api.ts.
+// (docs/product/peruser_cv_coverletter.md).
 export type TailorDocKind = "cv" | "cover_letter";
 
 export type TailoredDocOut = Omit<Schemas["TailoredDocOut"], "doc_kind" | "status"> & {

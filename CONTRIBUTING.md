@@ -111,12 +111,13 @@ instructions.
 Two `scripts/` directories exist by design:
 
 - **`scripts/`** at repo root — repo-wide tooling that must not import from
-  `backend/src/`: **32 Python files + 7 shell files** today, not two shell
+  `backend/src/`: **28 Python files + 4 shell files** today, not two shell
   scripts. Most of it is the CI/harness guard estate (`doc_sync_check.py`,
   `doc_sync_mutation_test.py`, `merge_cage.py`, `ruleset_gate.py`, …), which
   `.github/workflows/` runs directly; the Makefile shells out to
   `migration_roundtrip.sh`, and `agent-gate.sh` is the commit gate. Add new
-  cross-service tooling here, in **either** language.
+  cross-service tooling here, in **either** language. (Measure it, never quote
+  it: `ls scripts/*.py | wc -l` / `ls scripts/*.sh | wc -l`.)
 - **`backend/scripts/`** — backend-only Python helpers, run via
   `cd backend && python scripts/X.py`. Add ESCO-index builders, dev
   bootstrappers, verification scripts, dump/inspection tools, and any
@@ -124,8 +125,10 @@ Two `scripts/` directories exist by design:
   `scripts/* = [...]` in `backend/pyproject.toml` covers this folder.
 
 If a script is a one-shot phase migrator (touches the tree, run-once,
-then dead), drop it under `docs/_archive/one-shot-scripts/` instead of
-either live `scripts/` directory.
+then dead), delete it once its migration has run rather than leaving it in
+either live `scripts/` directory — git history is the record. There is no
+archive directory for one-shot scripts; the two doc-archive directories this
+repo once had were both removed 2026-09-05.
 
 ## Architecture + rules
 

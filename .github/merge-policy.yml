@@ -143,11 +143,6 @@ lanes:
       - "CONTRIBUTING.md"
       - "SECURITY.md"
       - "STATUS.md"
-      - "ENGINES_KANBAN.md"
-      - "LAUNCH_PLAN.md"
-      - "2030.md"
-      - "PLAN-?-*.md"
-      - "anthropic-patterns-upgrade.md"
       - "scrapingdesccion.md"
       # Repo plumbing. Measured over the last 60 merges, these three alone
       # pushed PRs into the owner lane purely because nobody had ever named
@@ -328,7 +323,6 @@ lanes:
       # while merge_cage.py itself sits owner-locked. That is the "cage may not
       # edit the cage" rule being broken through an import rather than a filename.
       - "scripts/cage_blockers.py"
-      - "scripts/cage_replay.py"
       - "scripts/gate_wiring_check.py"
       # The gate agents are made to run before they may commit.
       - "scripts/agent-gate.sh"
@@ -365,9 +359,12 @@ lanes:
       #                    `case` pattern there is enough to let a stranger's
       #                    issue text start a write-capable agent -- the exact
       #                    thing its own 30-line comment says must never happen.
-      #   repair.yml       the write-capable agent's own path cage.
-      #   pr-repair.yml    the same, plus the test-revert guard that stops an
-      #                    agent editing its own exam.
+      #   pr-repair.yml    the write-capable agent's own path cage, plus the
+      #                    test-revert guard that stops an agent editing its
+      #                    own exam. (repair.yml, the issue-triggered sibling,
+      #                    was removed 2026-09-05 -- triage.yml is now
+      #                    diagnose-and-comment only, no write-capable agent
+      #                    is auto-launched from an issue.)
       #   finding-watch.yml  the new doorbell: it decides which PRs get a fixer
       #                    dispatched at them, and holds the attempt ceiling
       #                    that stops the fix->push->fix loop running forever.
@@ -377,7 +374,6 @@ lanes:
       # This costs the owner one hand-merge whenever a loop's own cage changes,
       # which is the correct price and a rare event.
       - ".github/workflows/triage.yml"
-      - ".github/workflows/repair.yml"
       - ".github/workflows/pr-repair.yml"
       - ".github/workflows/finding-watch.yml"
       - ".github/workflows/security-watch.yml"

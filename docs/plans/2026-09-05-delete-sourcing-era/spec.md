@@ -1,6 +1,7 @@
 <!-- doc: PLAN | status: ACTIVE | pr: — -->
 # Spec: delete the sourcing era (#483)
-Companion to `intent.md`. Measured on `origin/main` `1fba085`. Every path is relative to
+Measured on `origin/main` `1fba085`. (Its companion `intent.md` is deleted scaffolding,
+2026-09-05 — git history holds it.) Every path is relative to
 the repo root unless it starts with `backend/` or `frontend/`.
 
 Words: **DELETE** = `git rm`. **TRIM** = edit a file that mixes keep + legacy. **MOVE** =

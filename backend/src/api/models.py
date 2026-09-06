@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class HealthResponse(BaseModel):
@@ -248,30 +248,6 @@ class JsonResumeResponse(BaseModel):
     resume: dict[Any, Any]
 
 
-class NotificationLedgerEntry(BaseModel):
-    """One row of ``notification_ledger`` exposed via the API. ``body`` is
-    intentionally absent — Step-1.5 plan §non-scope defers the schema
-    column for notification message bodies to a follow-up batch."""
-
-    id: int
-    job_id: int
-    channel: str
-    status: str
-    sent_at: Optional[str] = None
-    error_message: Optional[str] = None
-    retry_count: int = 0
-    created_at: str
-
-
-class NotificationLedgerListResponse(BaseModel):
-    """Paginated ``GET /notifications`` body."""
-
-    notifications: list[NotificationLedgerEntry]
-    total: int
-    limit: int
-    offset: int
-
-
 class LinkedInResponse(BaseModel):
     ok: bool
     merged: bool
@@ -282,72 +258,3 @@ class GitHubResponse(BaseModel):
     merged: bool
 
 
-class PipelineApplication(BaseModel):
-    job_id: int
-    stage: str
-    created_at: str
-    updated_at: str
-    notes: str = ""
-    title: str = ""
-    company: str = ""
-
-
-class PipelineListResponse(BaseModel):
-    applications: list[PipelineApplication]
-
-
-class PipelineAdvanceRequest(BaseModel):
-    stage: str
-
-
-class PipelineRemindersResponse(BaseModel):
-    reminders: list[PipelineApplication]
-
-
-# ── Step-3 B-07 — Application timeline models ──────────────────────────────
-
-
-class TimelineEntry(BaseModel):
-    id: int
-    job_id: int
-    user_id: str
-    from_stage: Optional[str]
-    to_stage: str
-    transitioned_at: str
-    notes: Optional[str]
-
-
-class ApplicationTimelineResponse(BaseModel):
-    job_id: int
-    timeline: list[TimelineEntry]
-
-
-# ── Single-rulebook notification model (migration 0020) ──────────────────────
-# One rule per user, applies to ALL connected channels.
-
-# HH:MM (24-hour) regex for time fields.
-_HHMM_PATTERN = r"^(?:[01]\d|2[0-3]):[0-5]\d$"
-
-
-class NotificationRule(BaseModel):
-    user_id: str
-    score_threshold: int = 60
-    notify_mode: str = "instant"  # instant | daily | every_n_hours
-    interval_hours: int = 6
-    daily_send_time: str = "08:00"
-    quiet_hours_start: Optional[str] = None
-    quiet_hours_end: Optional[str] = None
-    last_sent_at: Optional[str] = None
-    enabled: bool = True
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-
-
-class NotificationRuleUpdate(BaseModel):
-    score_threshold: Optional[int] = Field(default=None, ge=0, le=100)
-    notify_mode: Optional[str] = Field(default=None, pattern="^(instant|daily|every_n_hours)$")
-    interval_hours: Optional[int] = Field(default=None, ge=1, le=24)
-    daily_send_time: Optional[str] = Field(default=None, pattern=_HHMM_PATTERN)
-    quiet_hours_start: Optional[str] = Field(default=None, pattern=_HHMM_PATTERN)
-    quiet_hours_end: Optional[str] = Field(default=None, pattern=_HHMM_PATTERN)
-    enabled: Optional[bool] = None
