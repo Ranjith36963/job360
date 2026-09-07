@@ -26,6 +26,20 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
             </span>
           </div>
           {event.detail && <p className="mt-1 text-muted-foreground">{event.detail}</p>}
+          {event.source && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {"✉ "}
+              {event.source.sender}
+              {event.source.subject && ` — “${event.source.subject}”`}
+              {event.source.received_at &&
+                ` · received ${new Date(event.source.received_at).toLocaleString()}`}
+            </p>
+          )}
+          {event.scheduled_at && (
+            <p className="mt-1 text-xs font-medium text-foreground">
+              Scheduled for {new Date(event.scheduled_at).toLocaleString()}
+            </p>
+          )}
           <p className="mt-1 text-xs text-muted-foreground/70">
             recorded by {event.recorded_by}
             {event.superseded && " · superseded"}

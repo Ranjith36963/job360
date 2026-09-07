@@ -17,6 +17,7 @@ update of the slot is explicitly not history) and, once, a legacy
 from __future__ import annotations
 
 import json
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
@@ -80,32 +81,182 @@ def validate_payload(payload: Any) -> dict[str, Any]:
     return payload
 
 
-def parse_occurred_at(raw: Optional[str]) -> str:
-    """S6 — ISO-8601 with a timezone, bounded on the future side only."""
+def _parse_bounded_iso(
+    raw: str,
+    *,
+    field: str,
+    max_future_seconds: int,
+    max_future_setting: str,
+) -> str:
+    """Slice 6 — the shared guts of ``parse_occurred_at`` (S6), reused by
+    ``validate_source``'s ``received_at`` and ``parse_scheduled_at``'s
+    ``scheduled_at`` (S8): ISO-8601, timezone required, bounded on the future
+    side only. ``field`` and ``max_future_setting`` name themselves in the
+    error so a 422 always points at the right input and the right knob.
+
+    B3 fix — normalise to the canonical +00:00 offset (pg.py:178-184's own
+    convention) before storing. Every one of these columns is a TEXT column
+    that some caller sorts lexically (``list_events_for_display``'s ORDER BY
+    ``occurred_at`` ASC); two instants recorded under different offsets (e.g.
+    "+05:30" vs "+00:00") do NOT compare correctly as strings even though they
+    compare correctly as instants, so every caller's offset must collapse to
+    the same one before it ever reaches SQL.
+    """
     now = datetime.now(timezone.utc)
-    if raw is None:
-        return now.isoformat()
     try:
         parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     except ValueError:
-        raise SpineError(422, "occurred_at must be ISO-8601 (e.g. 2026-09-04T12:00:00+00:00)") from None
+        raise SpineError(422, f"{field} must be ISO-8601 (e.g. 2026-09-04T12:00:00+00:00)") from None
     if parsed.tzinfo is None:
-        raise SpineError(422, "occurred_at must include a timezone offset")
-    max_future = timedelta(seconds=settings.APPLICATION_EVENT_MAX_FUTURE_SECONDS)
+        raise SpineError(422, f"{field} must include a timezone offset")
+    max_future = timedelta(seconds=max_future_seconds)
     if parsed > now + max_future:
         raise SpineError(
             422,
-            f"occurred_at is more than APPLICATION_EVENT_MAX_FUTURE_SECONDS "
-            f"({settings.APPLICATION_EVENT_MAX_FUTURE_SECONDS}s) in the future",
+            f"{field} is more than {max_future_setting} ({max_future_seconds}s) in the future",
         )
-    # B3 fix — normalise to the canonical +00:00 offset (pg.py:178-184's own
-    # convention) before storing. `application_events.occurred_at` is a TEXT
-    # column ordered lexically (list_events_for_display's ORDER BY occurred_at
-    # ASC); two instants recorded under different offsets (e.g. "+05:30" vs
-    # "+00:00") do NOT compare correctly as strings even though they compare
-    # correctly as instants, so every caller's offset must collapse to the
-    # same one before it ever reaches SQL.
     return parsed.astimezone(timezone.utc).isoformat()
+
+
+def parse_occurred_at(raw: Optional[str]) -> str:
+    """S6 — ISO-8601 with a timezone, bounded on the future side only."""
+    if raw is None:
+        return datetime.now(timezone.utc).isoformat()
+    return _parse_bounded_iso(
+        raw,
+        field="occurred_at",
+        max_future_seconds=settings.APPLICATION_EVENT_MAX_FUTURE_SECONDS,
+        max_future_setting="APPLICATION_EVENT_MAX_FUTURE_SECONDS",
+    )
+
+
+# ── Slice 6 (docs/plans/2026-09-07-email-evidence/spec.md) — an event's
+# optional email source and interview datetime ──────────────────────────────
+
+
+_SOURCE_CONTROL_CHAR_FIELDS = ("message_id", "sender", "subject")
+
+# S3 — what "control character" means for a source field. Unicode category
+# Cc is C0 + DEL + C1; Zl/Zp are U+2028/U+2029, real line terminators in
+# JSON/JS contexts, so they poison exports exactly like "\n" does; the bidi
+# embeddings/overrides/isolates flip how the REST of a timeline line renders.
+# Deliberately NOT all of Cf: emoji ZWJ sequences (U+200D) are legal subjects.
+_SOURCE_BANNED_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})
+_SOURCE_BANNED_CHARS = frozenset(
+    chr(cp) for cp in (
+        0x202A, 0x202B, 0x202C, 0x202D, 0x202E,  # LRE RLE PDF LRO RLO
+        0x2066, 0x2067, 0x2068, 0x2069,  # LRI RLI FSI PDI
+    )
+)
+
+
+def _has_control_chars(value: str) -> bool:
+    return any(
+        ch in _SOURCE_BANNED_CHARS or unicodedata.category(ch) in _SOURCE_BANNED_CATEGORIES
+        for ch in value
+    )
+
+
+def validate_source(raw: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """R1/S2/S3 — normalise-and-validate an event's optional email source.
+
+    ``None`` in, ``None`` out (an event with no source). Otherwise: trim the
+    three text fields, reject an empty ``message_id`` (that is the identity
+    R2 dedupes on — it cannot be blank), reject any control character (S3 —
+    a subject cannot legally carry a newline), cap each field's length
+    (S2, naming the setting), and check ``kind`` against the closed set.
+    ``received_at`` is parsed with ``occurred_at``'s rules (S8: ISO-8601,
+    timezone required, normalised to +00:00, same tight future bound — an
+    email cannot arrive in the future).
+    """
+    if raw is None:
+        return None
+
+    kind = raw.get("kind", "email")
+    message_id = str(raw.get("message_id") or "").strip()
+    sender = str(raw.get("sender") or "").strip()
+    subject = str(raw.get("subject") or "").strip()
+    received_at_raw = raw.get("received_at")
+
+    if not message_id:
+        raise SpineError(422, "message_id must not be empty")
+
+    fields = {"message_id": message_id, "sender": sender, "subject": subject}
+    for name in _SOURCE_CONTROL_CHAR_FIELDS:
+        value = fields[name]
+        if _has_control_chars(value):
+            raise SpineError(422, f"{name} must not contain control characters")
+
+    caps = (
+        ("message_id", message_id, settings.APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS,
+         "APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS"),
+        ("sender", sender, settings.APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS,
+         "APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS"),
+        ("subject", subject, settings.APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS,
+         "APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS"),
+    )
+    for name, value, cap, setting_name in caps:
+        if len(value) > cap:
+            raise SpineError(422, f"{name} exceeds {setting_name} ({cap} chars)")
+
+    if kind not in settings.APPLICATION_EVENT_SOURCE_KINDS:
+        raise SpineError(
+            422,
+            f"kind must be one of APPLICATION_EVENT_SOURCE_KINDS {settings.APPLICATION_EVENT_SOURCE_KINDS}",
+        )
+
+    received_at = ""
+    if received_at_raw is not None:
+        received_at = _parse_bounded_iso(
+            str(received_at_raw),
+            field="received_at",
+            max_future_seconds=settings.APPLICATION_EVENT_MAX_FUTURE_SECONDS,
+            max_future_setting="APPLICATION_EVENT_MAX_FUTURE_SECONDS",
+        )
+
+    return {
+        "kind": kind,
+        "message_id": message_id,
+        "sender": sender,
+        "subject": subject,
+        "received_at": received_at,
+    }
+
+
+def parse_scheduled_at(raw: Optional[str], event_type: str) -> str:
+    """R3/S8 — an interview datetime, allowed only on
+    ``settings.APPLICATION_SCHEDULABLE_EVENT_TYPES``. Its own, longer future
+    bound (an interview can be scheduled far ahead; an email cannot arrive in
+    the future)."""
+    if raw is None:
+        return ""
+    if event_type not in settings.APPLICATION_SCHEDULABLE_EVENT_TYPES:
+        raise SpineError(
+            422,
+            f"scheduled_at is only allowed on APPLICATION_SCHEDULABLE_EVENT_TYPES "
+            f"{settings.APPLICATION_SCHEDULABLE_EVENT_TYPES}; got event_type {event_type!r}",
+        )
+    return _parse_bounded_iso(
+        raw,
+        field="scheduled_at",
+        max_future_seconds=settings.APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS,
+        max_future_setting="APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS",
+    )
+
+
+def _event_source(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """R4 — build the ``source`` object a reader emits from the six raw
+    columns; ``None`` when the event carries no source (the 0038/0041
+    convention: ``source_message_id == ''`` means none, never NULL)."""
+    if not row.get("source_message_id"):
+        return None
+    return {
+        "kind": row["source_kind"],
+        "message_id": row["source_message_id"],
+        "sender": row["source_sender"],
+        "subject": row["source_subject"],
+        "received_at": row["source_received_at"] or None,
+    }
 
 
 # ── Ownership lookups ───────────────────────────────────────────────────────
@@ -149,7 +300,8 @@ async def list_events_for_display(db: JobDatabase, application_id: int) -> list[
     """Timeline order — ``occurred_at`` (backdated events included), NOT the
     ``recorded_at`` order the status recompute uses."""
     cur = await db._db.execute(
-        "SELECT id, event_type, detail, payload, occurred_at, recorded_at, recorded_by, corrects_event_id "
+        "SELECT id, event_type, detail, payload, occurred_at, recorded_at, recorded_by, corrects_event_id, "
+        "source_kind, source_message_id, source_sender, source_subject, source_received_at, scheduled_at "
         "FROM application_events WHERE application_id = ? ORDER BY occurred_at ASC, id ASC",
         (application_id,),
     )
@@ -168,9 +320,56 @@ async def list_events_for_display(db: JobDatabase, application_id: int) -> list[
                 "recorded_by": r["recorded_by"],
                 "corrects_event_id": r["corrects_event_id"],
                 "superseded": r["id"] in superseded_ids,
+                "source": _event_source(r),
+                "scheduled_at": r["scheduled_at"] or None,
             }
         )
     return out
+
+
+async def _event_by_source_message_id(
+    db: JobDatabase, application_id: int, message_id: str
+) -> Optional[dict[str, Any]]:
+    """R2 — the identity a duplicate `record_event` call resolves against:
+    ``(application_id, source_message_id)``, backed by the partial UNIQUE
+    index `migrations/0041...up.sql`."""
+    cur = await db._db.execute(
+        "SELECT id, event_type, occurred_at, recorded_at, recorded_by, scheduled_at "
+        "FROM application_events WHERE application_id = ? AND source_message_id = ?",
+        (application_id, message_id),
+    )
+    row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def _duplicate_event_result(
+    db: JobDatabase, application_id: int, recorded_by: str, existing: dict[str, Any]
+) -> dict[str, Any]:
+    """R2/S4 — the same message id has already been recorded: audit ids ONLY
+    (never subject/sender/message_id — S4), write nothing, and hand back the
+    EXISTING event plus the application's current status."""
+    get_audit_logger().info(
+        "application_event_duplicate",
+        extra={
+            "event": "application_event_duplicate",
+            "application_id": application_id,
+            "event_id": existing["id"],
+            "event_type": existing["event_type"],
+            "recorded_by": recorded_by,
+        },
+    )
+    cur = await db._db.execute("SELECT status FROM applications WHERE id = ?", (application_id,))
+    app_row = await cur.fetchone()
+    return {
+        "event_id": existing["id"],
+        "event_type": existing["event_type"],
+        "occurred_at": existing["occurred_at"],
+        "recorded_at": existing["recorded_at"],
+        "recorded_by": existing["recorded_by"],
+        "status": app_row["status"] if app_row else None,
+        "already_existed": True,
+        "scheduled_at": existing["scheduled_at"] or None,
+    }
 
 
 async def append_event(
@@ -184,6 +383,8 @@ async def append_event(
     detail: str = "",
     payload: Optional[dict[str, Any]] = None,
     corrects_event_id: Optional[int] = None,
+    source: Optional[dict[str, Any]] = None,
+    scheduled_at: str = "",
 ) -> dict[str, Any]:
     """R3/R4 — append one event, then recompute + write-through the status
     cache (and its legacy `stage` projection) in the SAME logical operation.
@@ -196,6 +397,14 @@ async def append_event(
     event (or a typo'd id that never existed) and ``list_events_for_display``
     would mark the wrong thing (or nothing) as superseded. 422, not 404 — this
     is a body-field validation error, not a missing resource.
+
+    Slice 6 R2 — ``source`` (already normalised by ``validate_source``) makes
+    ``(application_id, source_message_id)`` the identity: a second call
+    naming a message id already on THIS application returns the existing row
+    untouched (``already_existed: True``) — no insert, no replay, no status
+    change. The UNIQUE index still backstops a race between two concurrent
+    callers (``pg.IntegrityError``): re-read and return the existing row the
+    same way ``save_artifact``'s version race does.
     """
     if corrects_event_id is not None:
         cur = await db._db.execute(
@@ -208,14 +417,46 @@ async def append_event(
                 f"corrects_event_id {corrects_event_id} does not exist on this application",
             )
 
+    if source is not None:
+        existing = await _event_by_source_message_id(db, application_id, source["message_id"])
+        if existing is not None:
+            return await _duplicate_event_result(db, application_id, recorded_by, existing)
+
     now = datetime.now(timezone.utc).isoformat()
     payload_json = json.dumps(payload or {})
-    cur = await db._db.execute(
-        "INSERT INTO application_events "
-        "(user_id, application_id, event_type, detail, payload, occurred_at, recorded_at, "
-        " recorded_by, corrects_event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (user_id, application_id, event_type, detail, payload_json, occurred_at, now, recorded_by, corrects_event_id),
-    )
+    source_kind = source["kind"] if source else ""
+    source_message_id = source["message_id"] if source else ""
+    source_sender = source["sender"] if source else ""
+    source_subject = source["subject"] if source else ""
+    source_received_at = source["received_at"] if source else ""
+    try:
+        # Scoped like contacts.add_contact's INSERT: a bare ``rollback()`` is
+        # forbidden by psycopg inside an outer ``transaction()`` block (and
+        # add_contact calls append_event inside one), which would leave the
+        # transaction ABORTED for the re-read below. The block rolls the
+        # failed INSERT back correctly either way — SAVEPOINT when nested.
+        async with db._db.transaction():
+            cur = await db._db.execute(
+                "INSERT INTO application_events "
+                "(user_id, application_id, event_type, detail, payload, occurred_at, recorded_at, "
+                " recorded_by, corrects_event_id, source_kind, source_message_id, source_sender, "
+                " source_subject, source_received_at, scheduled_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    user_id, application_id, event_type, detail, payload_json, occurred_at, now,
+                    recorded_by, corrects_event_id, source_kind, source_message_id, source_sender,
+                    source_subject, source_received_at, scheduled_at,
+                ),
+            )
+    except pg.IntegrityError:
+        # A race: two callers recorded the same message id at once (same
+        # reasoning as save_artifact's version race — see spine.py). The
+        # UNIQUE index caught it; re-read and return the row that won.
+        if source is not None:
+            existing = await _event_by_source_message_id(db, application_id, source["message_id"])
+            if existing is not None:
+                return await _duplicate_event_result(db, application_id, recorded_by, existing)
+        raise
     event_id = cur.lastrowid
 
     new_status = replay_status(await _events_for_replay(db, application_id))
@@ -248,6 +489,8 @@ async def append_event(
         "recorded_at": now,
         "recorded_by": recorded_by,
         "status": new_status,
+        "already_existed": False,
+        "scheduled_at": scheduled_at or None,
     }
 
 
@@ -657,6 +900,17 @@ async def get_application_detail(
             "recorded_at": app_row.get("fit_recorded_at"),
         }
 
+    events = await list_events_for_display(db, application_id)
+    # R4 — the newest NON-superseded event that carries a scheduled_at (a
+    # rescheduled interview is a correcting event, which is what makes the
+    # old value drop out — see spec §Flagged concerns). `events` is already
+    # ordered oldest-first (occurred_at ASC, id ASC), so the last match IS
+    # the newest one; no extra query.
+    interview_at: Optional[str] = None
+    for ev in events:
+        if ev["scheduled_at"] and not ev["superseded"]:
+            interview_at = ev["scheduled_at"]
+
     return {
         "id": app_row["id"],
         "job_id": job_id,
@@ -676,7 +930,8 @@ async def get_application_detail(
         },
         "fit": fit,
         "artifacts": await _list_artifacts(db, application_id, with_text=with_artifact_text),
-        "events": await list_events_for_display(db, application_id),
+        "events": events,
+        "interview_at": interview_at,
         "receipts": await _list_receipts_for_application(db, user_id, application_id),
         "contacts": await list_contacts(db, user_id, application_id),
     }
@@ -793,7 +1048,8 @@ async def whats_new(
 
     cur = await db._db.execute(
         f"SELECT id, application_id, event_type, detail, payload, occurred_at, recorded_at, "  # noqa: S608
-        f"recorded_by, corrects_event_id FROM application_events WHERE {where_sql} "
+        f"recorded_by, corrects_event_id, source_kind, source_message_id, source_sender, "
+        f"source_subject, source_received_at, scheduled_at FROM application_events WHERE {where_sql} "
         f"ORDER BY recorded_at ASC, id ASC LIMIT ?",
         [*params, limit + 1],
     )
@@ -811,6 +1067,7 @@ async def whats_new(
                 "detail": r["detail"], "payload": json.loads(r["payload"] or "{}"),
                 "occurred_at": r["occurred_at"], "recorded_at": r["recorded_at"],
                 "recorded_by": r["recorded_by"], "corrects_event_id": r["corrects_event_id"],
+                "source": _event_source(r), "scheduled_at": r["scheduled_at"] or None,
             }
         )
         if r["application_id"] not in seen:
