@@ -5,8 +5,8 @@ FastAPI backend for Job360 — the memory layer for the seeker's own AI agent
 (`../docs/product/VISION.md`): profile extraction, bring-a-job, application
 receipts, the CV tailor (web fallback) and the MCP server at `/api/mcp`.
 The legacy search-and-score pipeline (job sources, scoring, semantic retrieval)
-was deleted 2026-09-05 (roadmap slice 5, #483) — see
-`../docs/_archive/sourcing-era/` for its history.
+was deleted 2026-09-05 (roadmap slice 5, #483). It was not archived in-tree —
+git history before that date is the record.
 Notifications (email via Resend + webhook) are sent synchronously from the API
 process — the ARQ worker and Redis services were deleted 2026-09-02, and there
 are no background jobs.
@@ -84,7 +84,7 @@ Must pass from `backend/`:
 python -m pytest -q -p no:randomly
 ```
 
-Invariant: full suite passes, 0 failing, across **218** `test_*.py` files (2 `live`
+Invariant: full suite passes, 0 failing, across **133** `test_*.py` files (2 `live`
 deselected offline). The collected count is deliberately not written down — run
 `python -m pytest --collect-only -q -p no:randomly | tail -1` for it. Any total
 committed to a doc is unguarded (`scripts/doc_sync_check.py` declines to check it

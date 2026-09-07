@@ -1,10 +1,8 @@
-"""Shared observability setup — Sentry init used by BOTH the API and the worker.
+"""Shared observability setup — prod-gated Sentry init + PII scrubber.
 
-docs/fable/09 P0: the ARQ worker process never initialised Sentry, so worker
-crashes (e.g. a failed cron) were invisible — Sentry looked "healthy" precisely
-where the worst failures happened. This module centralises the prod-gated init +
-PII scrubber so the API (`main.py`) and the worker (`workers/settings.py`) share
-one implementation instead of the API being the only observed process.
+Only the API (`src/api/main.py`) calls `init_sentry` today. The ARQ worker that
+once shared this module was deleted with the sourcing era (2026-09-05); the
+`component` tag is kept so a second process can be told apart if one returns.
 """
 
 from __future__ import annotations
@@ -63,8 +61,8 @@ def init_sentry(*, component: str = "api") -> bool:
     environment (``APP_ENV=production`` or ``RAILWAY_ENVIRONMENT``), so local dev
     and the test suite never report — even with a DSN in the shared ``.env``.
 
-    ``component`` ("api" | "worker") is attached as a tag so worker errors are
-    distinguishable from API errors in the same Sentry project.
+    ``component`` is attached as a Sentry tag. The only caller today passes
+    the default ("api"); there is no worker process any more.
     """
     import src.core.settings as _settings  # module attr so tests can monkeypatch
 

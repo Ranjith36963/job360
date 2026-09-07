@@ -285,7 +285,7 @@ jobs:
           if [ "${{ steps.sentry.outputs.tripped }}" = "true" ]; then
             tripped="true"
             reasons+=("${{ steps.sentry.outputs.reason }}")
-            # Sentry is initialised in the backend + ARQ worker only
+            # Sentry is initialised in the backend only
             # (backend/src/core/observability.py) — never the frontend.
             services+=("backend")
           fi

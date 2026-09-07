@@ -97,12 +97,9 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run Playwright UI specs
         working-directory: frontend
-        # GATING (no continue-on-error): a real regression in the 24 passing specs
-        # now fails CI. The 4 pre-existing failures (dashboard-sort x2, landing-cta
-        # sign-in redirect, tailor-cv dialog) are quarantined with `test.fixme` +
-        # FIXME notes — they need a stable Playwright env to debug the live DOM (the
-        # middleware fails OPEN when the backend is unreachable, so those aren't an
-        # auth-guard problem). Real browser coverage of prod lives in synthetic-live.yml.
+        # GATING (no continue-on-error): a real regression in any of the 14 specs
+        # in tests/e2e/ now fails CI — none are quarantined with `test.fixme` any
+        # more. Real browser coverage of prod lives in synthetic-live.yml.
         run: npx playwright test
       - name: Upload Playwright report (on failure)
         if: failure()

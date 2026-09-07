@@ -253,8 +253,9 @@ function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
     // value (fed to the auto-save baseline below), so it stays the server's
     // own word -- "" for "not chosen" -- not the Select's display sentinel.
     // Substituting "mid" here used to post a seniority the user never chose:
-    // it drives real scoring at SENIORITY_WEIGHT=8, is stated to the LLM
-    // judge, and goes into the semantic vector.
+    // it would be stored on the profile as though the user had stated it,
+    // and the agent reading the profile has no way to tell a guess from a
+    // real answer.
     experience_level:
       typeof raw.experience_level === "string" ? raw.experience_level : "",
     negative_keywords: asArr(raw.negative_keywords),
@@ -334,7 +335,7 @@ export function PreferencesForm({
     setSalaryMin(p.salary_min != null ? String(p.salary_min) : "");
     setSalaryMax(p.salary_max != null ? String(p.salary_max) : "");
     // `||`, not `??`: the server now stores "I don't mind" as "" rather than the
-    // literal "any", because "any" was reaching the LLM judge as a stated
+    // literal "any", because "any" was being stored on the profile as a stated
     // constraint. `??` only falls back on null/undefined, so an empty string
     // would leave this select showing nothing at all.
     setWorkArrangement(p.work_arrangement || "any");
@@ -480,9 +481,9 @@ export function PreferencesForm({
         />
 
         {/* Excluded Skills input removed from UI (owner, 2026-08-08) — the
-            excluded_skills field, scoring penalty, and payload key are kept
-            fully intact; every existing user's value is empty in prod, so
-            hiding the control drops no data and changes no live score. */}
+            excluded_skills field and payload key are kept fully intact;
+            every existing user's value is empty in prod, so hiding the
+            control drops no data. */}
 
         <Separator />
 
@@ -503,7 +504,7 @@ export function PreferencesForm({
           tags={industries}
           onChange={setIndustries}
           placeholder="e.g. FinTech, Healthcare, AI"
-          description="Used only for AI similarity matching today — most jobs are not affected by this at all."
+          description="Context for your agent — most jobs are not affected by this at all."
           trailing={<EditedMark edit={editOf("industries")} />}
         />
 
@@ -594,10 +595,11 @@ export function PreferencesForm({
         </div>
 
         {/* ── Visa sponsorship ──────────────────────
-            Gates the backend VISA scoring dimension. Before this control
-            existed the field was always the default False, so sponsors could
-            never be ranked up for the people who need them. Empty/unchecked is
-            a real answer ("I don't need sponsorship"), not a missing one. */}
+            Stored on the profile so the user's agent knows whether
+            sponsorship is required before it judges a job's fit. Before this
+            control existed the field was always the default False, so the
+            agent had no way to know a user needed one. Empty/unchecked is a
+            real answer ("I don't need sponsorship"), not a missing one. */}
         <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
           <input
             type="checkbox"
@@ -613,17 +615,16 @@ export function PreferencesForm({
 
         {/* ── Words to avoid in job titles ────────── */}
         {/* Restored 2026-08-13 with copy that matches what the code does.
-            Verified in skill_matcher.py: the check reads job.title ONLY (never
-            the description), matches whole words (so "sales" does not match
-            "Wholesale"), and subtracts a flat 30 points on the first match —
-            it never hides the job. The old label "Negative Keywords" implied a
-            filter, which is why the copy below says "ranked lower" instead. */}
+            These are titles/roles the user does not want. Job360 no longer
+            scores or filters jobs itself (the user's own agent does that) —
+            this list is stored on the profile so the agent can read it when
+            judging whether a job fits. */}
         <TagInput
           label="Words to avoid in job titles"
           tags={negativeKeywords}
           onChange={setNegativeKeywords}
           placeholder="e.g. sales, recruiter"
-          description="A job whose TITLE contains one of these drops 30 points. It still shows up — this pushes it down the list, it doesn't hide it."
+          description="Titles or roles you don't want. Your agent reads this when judging fit."
           variant="destructive"
           trailing={<EditedMark edit={editOf("negative_keywords")} />}
         />
@@ -635,7 +636,7 @@ export function PreferencesForm({
             <EditedMark edit={editOf("about_me")} />
           </Label>
           <p className="text-xs text-muted-foreground -mt-1">
-            Brief professional summary used for semantic matching
+            Brief professional summary — your agent uses it as context
           </p>
           <Textarea
             value={aboutMe}

@@ -141,9 +141,9 @@ jobs:
   # PRODUCTION build (`playwright.config.ts` deliberately does not use `npm run
   # dev` — dev-mode per-route compilation blew the 30s timeout on CI runners).
   #
-  # 13 specs already exist. They cover login, the dashboard, job rendering,
-  # sorting, uploads, the pipeline, sharing, settings, and — the one that
-  # matters most — two-account isolation.
+  # 14 specs already exist. They cover auth, profile + extraction, bring a job
+  # (paste and URL), the applications spine, tailoring, receipts, contacts,
+  # sharing, connecting an agent, and OAuth consent.
   #
   # When it fails, the trace and the screenshot are uploaded. That is the
   # honesty mechanism: you do not have to take my word for what the page looked
@@ -173,12 +173,10 @@ jobs:
         run: npx playwright test
 
       # ── WHAT THIS EYE CANNOT SEE ────────────────────────────────────────
-      # Four specs are quarantined with `test.fixme` (dashboard-sort x2,
-      # landing-cta sign-in redirect, tailor-cv dialog). A green `verify`
-      # therefore does NOT mean those four flows work — it means every
-      # UNQUARANTINED spec passed. Printing the bound is the point: a verdict
-      # from a narrower test than it implies is misinformation, and this is the
-      # cheapest place to say so out loud.
+      # No specs are quarantined right now — every spec in tests/e2e/ runs.
+      # Printing the count is still the point: a green `verify` covers every
+      # spec that RAN, and the day one gets quarantined again this step is
+      # what says so out loud instead of a doc going quietly stale.
       - name: State the coverage bound
         if: always()
         working-directory: frontend
@@ -189,8 +187,9 @@ jobs:
             echo ""
             echo "Spec files containing a quarantined (\`test.fixme\`) case: **$fixmes**"
             echo ""
-            echo "A green verify covers every spec that RAN. It says nothing about the"
-            echo "quarantined ones. Do not read this tag as 'the frontend works'."
+            echo "A green verify covers every spec that RAN. Any quarantined spec is"
+            echo "NOT covered by it — do not read this tag as 'the frontend works' if"
+            echo "the count above is non-zero."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Keep the evidence
@@ -230,7 +229,7 @@ jobs:
             echo "| eye | result |"
             echo "|---|---|"
             echo "| backend (routes, IDOR, product rules, journey) | \`$be\` |"
-            echo "| frontend (13 specs, real Chromium) | \`$fe\` |"
+            echo "| frontend (14 specs, real Chromium) | \`$fe\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$be" != "success" ] || [ "$fe" != "success" ]; then

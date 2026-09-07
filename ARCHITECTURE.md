@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | Migration head | **0040** | `backend/migrations/` |
 | Migration files | **41** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **135** | `backend/tests/` |
+| `test_*.py` files | **133** | `backend/tests/` |
 | GitHub Actions workflows | **23** | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -34,7 +34,6 @@ job360/
 ├── backend/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev extras, ruff/mypy/pytest config
-│   ├── data/                         # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — the store is Postgres; DB_PATH is a connection selector, not a file (settings.py:15-20, pg.py:732-737)
 │   ├── migrations/                   # forward/reverse SQL migration pairs + runner.py (counts: repo facts above)
 │   ├── src/
 │   │   ├── cli.py                    # Click CLI: api, setup-profile
@@ -44,7 +43,6 @@ job360/
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, rate limits, the ESCO flag
 │   │   │   ├── observability.py      # Sentry init
-│   │   │   ├── skill_synonyms.py     # alias dict (k8s↔kubernetes, ...), profile-side skill normalisation — a vocabulary table, reads no CV input
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
 │   │   ├── services/                 # (post-Phase-4 merge of filters/ + notifications/ + profile/)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies), magic-link + system email (Resend/SMTP)
@@ -58,7 +56,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
-│   └── tests/                        # across 135 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 133 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,applications,tailor,profile,layout}/
@@ -68,6 +66,8 @@ job360/
 ├── .env.example
 └── CLAUDE.md                         # Canonical AI agent instructions
 ```
+
+> **Not in the tree because it is not in the checkout:** `backend/data/` is runtime-only and gitignored — `setup.sh` creates it (`exports/`, `reports/`, `logs/`) and it also holds the legacy `user_profile.json` (`services/profile/storage.py`). There is NO `jobs.db`: the store is Postgres and `DB_PATH` is a connection selector, not a file (`settings.py:12-19`).
 
 ---
 
@@ -229,7 +229,7 @@ with the sourcing era — do not rebuild them.
 
 > **The SQL below is SQLite-flavoured, and is never executed as written.** It is the legacy baseline `init_db()` hands to `executescript()`, which pushes every statement through `pg.translate()` first (`repositories/pg.py:670-674`) — `INTEGER PRIMARY KEY AUTOINCREMENT` becomes a Postgres identity column (`pg.py:193-195`), and `?` placeholders, `datetime('now')`, `INSERT OR IGNORE` and FK clauses are rewritten or stripped the same way. Read it as the *shape* of the baseline, not as DDL you could run against Postgres by hand.
 >
-> This section shows the baseline schema. The full schema is built by the forward migrations in `backend/migrations/` — see the repo-facts table above for the current count and head. Migration `0039_drop_sourcing_tables` (slice 5, #483) drops `run_log`, `job_enrichment` and `job_embeddings` — the three tables nothing left in the codebase reads. `jobs`, `user_feed`, `applications`, `application_events`, `user_actions` and every profile/auth/receipt table are untouched; the down migration recreates the three dropped tables empty.
+> This section shows the baseline schema. The full schema is built by the forward migrations in `backend/migrations/` — see the repo-facts table above for the current count and head. Migration `0039_drop_sourcing_tables` (slice 5, #483) drops `run_log`, `job_enrichment` and `job_embeddings`. Migration `0040_drop_notification_tables` (same slice) drops `notification_rules`, `notification_ledger`, `user_channels`, `user_notification_digests`, `user_actions` and `user_feed` — nothing left in the codebase reads or writes any of these nine tables. `jobs`, `applications`, `application_events`, `application_artifacts`, `application_receipts` and every profile/auth/OAuth table are untouched; both down migrations recreate their dropped tables empty.
 
 ```sql
 CREATE TABLE IF NOT EXISTS jobs (

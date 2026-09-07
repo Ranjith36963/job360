@@ -3,12 +3,14 @@ name: verify-job360
 description: >-
   Verify Job360 changes by actually running the app and watching the behavior — not by
   assuming tests or a clean compile prove it works. Use this AGGRESSIVELY: any time you
-  touch backend (FastAPI, scoring, sources, DB, scheduler) or frontend (Next.js pages,
-  API calls, auth) code, before saying something is "done" or "fixed", before opening a
-  PR, and whenever the user asks to verify / test / confirm / "does it actually work" /
-  "prove it". Drives a real browser with Playwright for UX, hits routes with curl and
-  queries the Postgres DB for backend, and walks the full register→CV→search→jobs journey
-  for end-to-end. If you changed Job360 code and haven't run it, this skill applies.
+  touch backend (FastAPI, profile extraction, auth/OAuth/tokens, bring/URL fetch, the
+  applications spine, receipts, tailor, MCP, DB) or frontend (Next.js pages, API calls,
+  auth) code, before saying something is "done" or "fixed", before opening a PR, and
+  whenever the user asks to verify / test / confirm / "does it actually work" / "prove
+  it". Drives a real browser with Playwright for UX, hits routes with curl and queries
+  the Postgres DB for backend, and walks the full register→CV→bring→tailor→receipt
+  journey for end-to-end. If you changed Job360 code and haven't run it, this skill
+  applies.
 ---
 <!-- doc: LIVING -->
 
@@ -35,7 +37,7 @@ that landed, a log line that proves the code path ran. "It should work now" is n
 Choose based on what you touched. When unsure, do the broader one.
 
 - **Frontend / UX** — you changed a page, component, API call, or auth flow → drive a real browser, screenshot.
-- **Backend** — you changed a route, scorer, source, DB, scheduler, worker → run the service, hit the route, query the DB, read the logs.
+- **Backend** — you changed a route, profile extraction, auth/OAuth/tokens, bring/URL fetch, the applications spine, receipts, tailor, MCP, or the DB → run the service, hit the route, query the DB, read the logs.
 - **End-to-end** — you changed something that spans both, or the user wants the whole journey proven → walk register → CV → search → jobs.
 
 `$ARGUMENTS` may name a flavor (`backend`, `frontend`, `e2e`) or a specific feature to focus on. If given, scope to that.
@@ -98,7 +100,7 @@ For per-user routes you need a session cookie — register via `POST /api/auth/r
   ```
   Against PROD instead of local dev: `railway run -s Postgres python <script>`
   (never print the DSN).
-  Useful tables: `jobs` (shared catalog), `user_feed`, `user_profiles`, `users`, `sessions`, `applications`, `run_log`.
+  Useful tables: `jobs` (shared catalog), `user_profiles`, `users`, `sessions`, `applications`, `application_events`, `application_artifacts`, `application_receipts`.
 - **Did the path run?** Read the server's stdout/log. When you launched it as a background
   Bash task, its output goes to a task file — `tail` that file and grep for your route,
   for `ERROR`/`WARNING`, and for the run UUID. If a code path's execution is ambiguous,
@@ -140,8 +142,7 @@ search journey is legacy — verify it only when the change touched `src/sources
    receipt-listing tool return the same data the web showed.
 
 A good E2E run produces a short report: what works, what's broken (with the exact file:line
-and the DB/log evidence), severity, and the fix. See `E2E_TEST_REPORT.md` at the repo root
-for the format and the two real bugs this methodology already caught.
+and the DB/log evidence), severity, and the fix.
 
 ---
 
@@ -159,10 +160,8 @@ These cost real time the first time. Reading them here saves the next run.
   aiosqlite thread holding the file lock — are obsolete: SQLite is gone.)
 - **Auth needs secrets in the root `.env`.** Registration creates the user row, then fails
   to mint the session cookie if `SESSION_SECRET` is missing → "Failed to fetch" + a
-  half-created account that then 409s "already registered". Both `SESSION_SECRET` and
-  `CHANNEL_ENCRYPTION_KEY` (a Fernet key) must be set. Generate: `SESSION_SECRET` =
-  `python -c "import secrets;print(secrets.token_urlsafe(64))"`; `CHANNEL_ENCRYPTION_KEY` =
-  `python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"`.
+  half-created account that then 409s "already registered". Generate:
+  `SESSION_SECRET` = `python -c "import secrets;print(secrets.token_urlsafe(64))"`.
 - **Editable install (`pip install -e`) may resolve `import src` to a git worktree** under
   `.claude/worktrees/…`, not the main checkout. If a standalone script imports the wrong
   copy, force it: `sys.path.insert(0, r'D:\dev\job360\backend')` and `os.chdir` to backend.

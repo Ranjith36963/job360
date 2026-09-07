@@ -80,14 +80,16 @@ redeploy the previous SUCCESS build, then fix forward on a branch.
 
 ## Test-before-merge gate
 
-**Invariant baseline: 3,297 collected / 3,295 selected (2 `live` deselected), 0 failing.**
+**Invariant baseline: 1,683 collected, 0 failing** (measured 2026-09-07 on this branch;
+the `live` marker is still excluded by default but no test carries it any more).
 
 A PR is mergeable only when:
 
 - `cd backend && python -m pytest -q -p no:randomly` reports **0 failing** and
-  **>= 3,297 collected**. (The suite expands with every new source / feature;
-  the floor only moves up — Step-0 baseline was 600, Step-3 close-out ~1,409,
-  and it stands at 3,297 as of 2026-08-24. Measure it, never quote it.)
+  **>= 1,683 collected**. (The floor was 3,297 on 2026-08-24; slice 5 deleted the
+  sourcing era — sources, scorer, worker, notifications — and their tests with it
+  on 2026-09-05, so the floor was reset. From here it only moves up again.
+  Measure it, never quote it.)
 - `pre-commit run --all-files` is clean.
 - CI is green on the PR branch.
 - At least one reviewer has approved (or owner self-approval on
@@ -111,7 +113,7 @@ instructions.
 Two `scripts/` directories exist by design:
 
 - **`scripts/`** at repo root — repo-wide tooling that must not import from
-  `backend/src/`: **28 Python files + 4 shell files** today, not two shell
+  `backend/src/`: **30 Python files + 4 shell files** today, not two shell
   scripts. Most of it is the CI/harness guard estate (`doc_sync_check.py`,
   `doc_sync_mutation_test.py`, `merge_cage.py`, `ruleset_gate.py`, …), which
   `.github/workflows/` runs directly; the Makefile shells out to

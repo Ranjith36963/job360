@@ -39,10 +39,13 @@ examples its author happened to think of.
   weak CV.
 - Quality varies with the provider. Accepted.
 
-## Carve-out
+## Carve-out (retired)
 
-`core/skill_synonyms.py` is **retained** and is not a violation: it is scoring
-and search vocabulary, and it reads no CV input. The rule is about extraction.
+`core/skill_synonyms.py` was never a violation of this rule — it was scoring
+and search vocabulary, and read no CV input; the rule is about extraction.
+It was deleted 2026-09-07: its only consumer was the scorer, and the scorer
+was deleted with the sourcing era (slice 5, 2026-09-05). The module had zero
+importers left, so the carve-out no longer describes anything in the tree.
 
 ## Still valid?
 

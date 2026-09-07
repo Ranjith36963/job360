@@ -326,7 +326,7 @@ export function CVUpload({
             </h3>
             <p className="text-xs text-muted-foreground">
               {hasCV
-                ? "Your CV has been parsed — highlighted text drives your job matching"
+                ? "Your CV has been parsed — highlighted text is what your agent will see"
                 : "PDF or DOCX — we extract skills, titles, and more"}
             </p>
           </div>
@@ -340,9 +340,10 @@ export function CVUpload({
             had written. Nothing on screen said so, so nobody could know their
             profile was thin — they just quietly got worse matches forever.
 
-            Deliberately lives HERE and not in CVViewer: CVViewer is rendered
-            nowhere (a Playwright run proved it), and a warning in a dead
-            component is the same as no warning at all.
+            Deliberately lives HERE and not in CVViewer: this is the card a
+            user looks at right after uploading, so a warning here is seen at
+            the moment it matters. A warning tucked into a panel further down
+            the page is easy to miss.
 
             Silent on a good extraction. A banner that appears every time is a
             banner nobody reads. */}
@@ -526,7 +527,7 @@ export function CVUpload({
               return (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
                   <span className="font-medium">
-                    Highlighted = extracted for job matching:
+                    Highlighted = extracted for your profile:
                   </span>
                   {present.map((l) => (
                     <span key={l.category} className="flex items-center gap-1">
@@ -579,7 +580,7 @@ export function CVUpload({
           Enrich Your Profile
         </h3>
         <p className="text-xs text-muted-foreground mb-4">
-          Optional: add LinkedIn and GitHub data for better matching
+          Optional: add LinkedIn and GitHub data for a fuller profile
         </p>
 
         {/* LinkedIn */}
@@ -724,8 +725,8 @@ export function CVUpload({
           <div className="mt-4 flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/10 p-3">
             <AlertCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" />
             <p className="text-xs text-muted-foreground">
-              Adding LinkedIn or GitHub data improves skill detection and
-              semantic matching accuracy.
+              Adding LinkedIn or GitHub data gives your agent a fuller,
+              more accurate picture of your skills.
             </p>
           </div>
         )}

@@ -87,6 +87,7 @@ describe("Landing page — no false-advertising copy (mission sweep)", () => {
     "scoring",
     "career intelligence",
     "search engine",
+    "job matching",
   ];
 
   it.each(BANNED_WORDS)('never mentions "%s"', (banned) => {

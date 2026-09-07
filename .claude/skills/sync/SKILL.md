@@ -15,7 +15,7 @@ Read the actual code and extract current facts. **The mission is `docs/product/V
 - **Roadmap state**: which slices in `docs/plans/2026-09-03-mission-roadmap.md` have merged (check the issue #479–#483 state with `gh issue view`)
 - **Test count**: Run (from `backend/`) `python -m pytest tests/ --collect-only -q 2>&1 | tail -3` to get exact test count
 - **DB schema**: Read `backend/src/repositories/database.py` + `backend/migrations/` for table definitions (jobs, applications, application_receipts, tailored_documents, user_actions), column names, UNIQUE constraints, indexes
-- **Features**: Check what modules exist in `backend/src/services/`, `backend/src/services/profile/`, `backend/src/services/notifications/`, `backend/src/api/` — what's actually implemented
+- **Features**: Check what modules exist in `backend/src/services/{applications,auth,fetch,profile,tailoring}/`, `backend/src/api/` — what's actually implemented
 - **Commands**: Read `backend/src/cli.py` for actual CLI commands and flags
 - **Dependencies**: Read `backend/pyproject.toml` for actual packages
 

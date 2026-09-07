@@ -1,9 +1,9 @@
 # Job360 Troubleshooting
-<!-- doc: LIVING -->
+<!-- doc: LIVING | last-verified: 2026-09-07 by chore/post-pivot-prune -->
 
 Common **developer-environment** issues and fixes (ports, locks, env-var gotchas, install hiccups). Each entry: **Symptom → Cause → Fix**.
 
-> **For production issues** read prod directly — Sentry, `railway logs`, the Postgres service — as root `CLAUDE.md` describes. The sourcing-era runbook and glossary were archived FROZEN in `docs/_archive/sourcing-era/` (slice 5, #483); their SQL targets tables that no longer exist.
+> **For production issues** read prod directly — Sentry, `railway logs`, the Postgres service — as root `CLAUDE.md` describes. The sourcing-era runbook and glossary were deleted whole with the code they described (slice 5, #483, 2026-09-05) — not archived. Git history is the record; their SQL targeted tables that no longer exist.
 
 ---
 
@@ -100,9 +100,9 @@ Look for `[llm_provider]` lines — they log which provider was tried and why ea
 
 ## 4. Redis missing on Windows
 
-**Symptom:** `ConnectionRefusedError: [WinError 10061]` or `check_worker.py` reports `tcp localhost:6379 unreachable`.
+**Symptom:** `ConnectionRefusedError: [WinError 10061]` when Redis-backed code can't reach `localhost:6379`.
 
-**Cause:** Redis has no native Windows build. The ARQ worker needs a Redis instance.
+**Cause:** Redis has no native Windows build. The worker + ARQ were deleted with the sourcing era (slice 5, 2026-09-05) — nothing runs in the background any more. The one thing left that touches Redis is the **auth rate limiter** (`RATE_LIMIT_REDIS`, shared login/reset-attempt windows across processes); `docker-compose.dev.yml` starts it for exactly that.
 
 **Fix — pick one:**
 
@@ -120,7 +120,7 @@ Look for `[llm_provider]` lines — they log which provider was tried and why ea
 
 - **C. Memurai** (Redis-compatible native Windows fork) — https://www.memurai.com/
 
-- **D. Skip the worker.** The CLI (`python -m src.cli run`), the read-only API, the frontend, and the full test suite all work without ARQ / Redis. Only the live notification dispatcher needs it.
+- **D. Skip it.** Without Redis the rate limiter falls back to an in-process limiter — the API, the frontend, and the full test suite all still run; you only lose shared limiting across multiple processes.
 
 ---
 

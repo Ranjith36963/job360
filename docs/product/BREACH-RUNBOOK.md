@@ -1,6 +1,6 @@
 # Breach Runbook — the 72-hour plan
 
-<!-- doc: LIVING | Fable compliance finding 05:39 — "have a one-page runbook ready before you need it" -->
+<!-- doc: LIVING | last-verified: 2026-09-07 by chore/post-pivot-prune | Fable compliance finding 05:39 — "have a one-page runbook ready before you need it" -->
 
 **Read this top-to-bottom the moment you suspect a breach.** Do the steps in
 order. The legal clock (72 hours to report to the ICO) starts when you
@@ -31,14 +31,9 @@ Variables → edit → redeploy happens automatically.
    `CEREBRAS_API_KEY`, `GITHUB_TOKEN`, R2 backup keys
    (`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` in GitHub Actions secrets),
    job-source API keys. Each provider's dashboard → revoke old, issue new.
-4. **`CHANNEL_ENCRYPTION_KEY` — read this before rotating.** Rotating it
-   makes every stored notification-channel credential (email and webhook
-   credentials) permanently unreadable — users will have to
-   reconnect their channels. In a real breach that trade is CORRECT: rotate
-   it, accept the reconnects. Just don't be surprised.
-5. **If the app itself is compromised** (malicious deploy, defaced page):
+4. **If the app itself is compromised** (malicious deploy, defaced page):
    Railway → Deployments → roll back to the last known-good deploy.
-6. **Do NOT delete or truncate any logs.** They are your evidence and your
+5. **Do NOT delete or truncate any logs.** They are your evidence and your
    timeline. Containment never includes cleanup.
 
 ## Hour 1–24 — Assess (what actually got touched?)
@@ -56,13 +51,22 @@ Variables → edit → redeploy happens automatically.
 
 | Table | What's in it | Sensitivity |
 |---|---|---|
-| `user_profiles`, `user_profile_versions` | CV text, LinkedIn text, GitHub data, preferences | **HIGH — this is the crown jewels** |
-| `tailored_documents` | AI-generated CVs / cover letters | **HIGH** |
-| `users` | email addresses, argon2id password hashes, timezone | Medium (hashes are argon2id — not reversible in practice, but report as exposed) |
-| `applications`, `user_actions`, `user_feed` | job-hunt activity (who applied where) | Medium — sensitive in context (current employer must not learn) |
-| `user_channels` | Fernet-encrypted webhooks/bot tokens | Medium (encrypted at rest; HIGH if `CHANNEL_ENCRYPTION_KEY` also leaked) |
-| `sessions`, `oauth_states` | session + OAuth artifacts | Low once rotated/deleted |
-| `jobs`, `job_enrichment`, `job_embeddings` | public job listings | Not personal data |
+| `application_artifacts` | every version of every CV / cover letter / answers / outreach message the agent saved (`0037_application_spine.up.sql`) | **HIGH — this is the crown jewels** |
+| `user_profiles`, `user_profile_versions` | CV text, LinkedIn text, GitHub data, preferences (`0006_user_profiles.up.sql`, `0007_user_profile_versions.up.sql`) | **HIGH** |
+| `tailored_documents` | AI-generated CVs / cover letters, the web-fallback tailor's output (`0023_tailored_documents.up.sql`) | **HIGH** |
+| `application_receipts` | frozen snapshot of what was actually sent — artifact versions, filled fields, confirmation text (`0034_application_receipts.up.sql`) | **HIGH** |
+| `application_contacts` | recruiter / hiring-manager names, emails found for an application (`0038_contacts_and_profile_edits.up.sql`) | Medium-High — third party's personal data too |
+| `oauth_grants`, `oauth_tokens`, `oauth_authorization_codes`, `oauth_clients`, `oauth_authorization_requests` (`0036_oauth.up.sql`) and `api_tokens` (`0035_api_tokens.up.sql`) | live OAuth 2.1 grants/tokens and personal `j360_…` agent tokens | Medium-High — a live one is account takeover |
+| `users` | email addresses, argon2id password hashes, timezone (`0001_auth.up.sql`) | Medium (hashes are argon2id — not reversible in practice, but report as exposed) |
+| `applications`, `application_events`, `application_stage_history` | job-hunt activity and its full event history — who applied where, every status change (`0002_multi_tenant.up.sql`, `0037_application_spine.up.sql`, `0014_application_history.up.sql`) | Medium — sensitive in context (current employer must not learn) |
+| `profile_edits`, `audit_log` | agent-made profile edits and account-change audit trail (`0038_contacts_and_profile_edits.up.sql`, `0025_audit_log.up.sql`) | Medium |
+| `sessions`, `magic_link_tokens`, `password_resets`, `email_verifications`, `oauth_states` | session + auth artifacts (`0001_auth.up.sql`, `0022_magic_link_tokens.up.sql`, `0015_password_resets.up.sql`, `0016_email_verification.up.sql`, `0019_channel_oauth.up.sql`) | Low once rotated/deleted |
+| `jobs` | the brought ad as it read that day — title, company, description, URL (`0011_score_dimensions.up.sql`) | Not personal data |
+
+`run_log`, `job_enrichment`, `job_embeddings` (dropped `0039_drop_sourcing_tables.up.sql`) and
+`notification_rules`, `notification_ledger`, `user_channels`, `user_notification_digests`,
+`user_actions`, `user_feed` (dropped `0040_drop_notification_tables.up.sql`) no longer exist —
+don't cite them in an incident report.
 
 **Answer these four questions in writing** (the ICO form asks exactly this):
 1. What happened, and how? 2. Whose data and how many people?
@@ -109,6 +113,8 @@ they should do.
 ---
 
 *Owner: Ranjith. Review this page every 6 months or after any incident,
-whichever comes first. Last verified against the real stack: 2026-07-24
-(sessions table + SESSION_SECRET dual kill-switch, Fernet channel-cred
-rotation trade-off, R2 ciphertext-only backups, Resend sender domain).*
+whichever comes first. Last verified against the real stack: 2026-09-07
+(sensitivity map rebuilt after the notification-channel tables and
+`CHANNEL_ENCRYPTION_KEY` were dropped — sessions table + SESSION_SECRET
+dual kill-switch, R2 ciphertext-only backups, Resend sender domain still
+current).*

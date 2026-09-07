@@ -311,7 +311,7 @@ export default function ProfilePage() {
                 </h1>
                 <p className="text-sm text-muted-foreground">
                   {profile?.summary.is_complete
-                    ? "Your profile is ready for job matching"
+                    ? "Your profile is ready for your agent"
                     : "Upload your CV and set preferences to get started"}
                 </p>
               </div>
