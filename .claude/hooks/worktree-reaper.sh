@@ -52,7 +52,24 @@ ROOT="$(dirname "$COMMON")"
 [ -d "$ROOT" ] || exit 0
 
 [ -f "$ROOT/docs/maintenance/REAPER-OFF" ] && exit 0
-[ -f "$ROOT/scripts/worktree_reaper.py" ] || exit 0
+
+# THE SCRIPT SHIPS BESIDE THIS HOOK — take it from here, not from $ROOT.
+#
+# $ROOT is the MAIN repo's WORKING TREE, and that tree is checked out on whatever
+# branch its own session left it on. Measured 2026-09-05: D:/dev/job360 sat on
+# `chore/repo-hygiene`, a branch predating the reaper, so
+# $ROOT/scripts/worktree_reaper.py did not exist and this hook exited 0 —
+# silently, on every session, forever. The feature was live on `main` and could
+# never run.
+#
+# The hook and the script land in the SAME commit, so if this file is executing,
+# its sibling is right there. $ROOT is still where the reaper OPERATES (the
+# script recomputes that itself from --git-common-dir); it is just not where the
+# code is read from.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || exit 0
+REAPER="$HERE/../../scripts/worktree_reaper.py"
+[ -f "$REAPER" ] || REAPER="$ROOT/scripts/worktree_reaper.py"
+[ -f "$REAPER" ] || exit 0
 
 STATE="$COMMON/reaper"
 mkdir -p "$STATE" 2>/dev/null || exit 0
@@ -61,7 +78,7 @@ mkdir -p "$STATE" 2>/dev/null || exit 0
 # anyone ever learns it ran) and tells us whether another run is due.
 # The `if !` matters: a bare call returning 3 would trip the ERR trap above and
 # exit before this line ever read it. Same outcome by luck is not the same thing.
-if ! python "$ROOT/scripts/worktree_reaper.py" \
+if ! python "$REAPER" \
      --hook-tick "$STATE" --throttle-hours "$THROTTLE_HOURS" 2>/dev/null; then
   exit 0   # exit 3 = throttled; anything else = something is wrong, do nothing
 fi
@@ -74,7 +91,7 @@ touch "$STATE/last-run" 2>/dev/null || true
 # session is simply sitting in without typing.
 (
   cd "$ROOT" || exit 0
-  nohup python scripts/worktree_reaper.py \
+  nohup python "$REAPER" \
     --apply --json \
     --max "$MAX_PER_RUN" \
     --max-branches "$MAX_BRANCHES" \

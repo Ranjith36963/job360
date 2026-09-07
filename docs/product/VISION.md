@@ -105,9 +105,15 @@ as a fallback for CLI clients.
    when a site blocks us. SSRF guard mandatory.
 4. Contacts + outreach artifacts; `stats`; `update_profile`.
 5. Delete the hidden search code, the 41 sources and the scorer once step 2
-   has been live for a release.
-6. Later, on evidence only: WhatsApp ("text your agent" + pushes, needs worker
-   + Redis back), multiple named profiles, our own Gmail watcher, recruiters.
+   has been live for a release. *(1–5 shipped by 2026-09-05.)*
+6. **Email evidence on events** — the agent's Gmail connector reads, we store
+   `source` (message id, from, subject) idempotently, plus a real interview
+   datetime. Added 2026-09-07 from the competitor read.
+7. Visa / sponsorship signal supplied by the agent, shown on the card.
+8. CV diff (original vs tailored) with one Keep button, web only.
+9. "Flag for next time" on the web + lessons back through `get_profile`.
+10. Later, on evidence only: WhatsApp ("text your agent" + pushes, needs worker
+   + Redis back), multiple named profiles, recruiters.
 
 ## The one measure
 
@@ -141,6 +147,18 @@ applications and events in the database, not a doc.
 
 Taken from the 2026-09-02 pivot without re-asking: recruiters later and
 consent-first; everything free; no auto-submit at volume; global from day one.
+
+### Additions, 2026-09-07 (the Tsenta read — [`competitor-tsenta.md`](competitor-tsenta.md))
+
+| # | Question | Decision |
+|---|---|---|
+| 19 | Gmail again — the competitor table said "copy" | **Decision 8 stands.** The agent's connector reads; we add email evidence to the event (`source`, idempotent by message id) and a real interview datetime. No Gmail OAuth, no polling. |
+| 20 | Visa signal — the table said "have", the column is dead | **Agent supplies it** on `bring_job` / `save_fit`; we store and show it next to the CV's right-to-work fact. We never extract it. |
+| 21 | "Review before submit" | **Side-by-side diff + one Keep button**, web only. Agents already hold both texts. |
+| 22 | What first | **Email evidence (#513)**, then visa (#514), CV diff (#515), flag-for-next-time (#516). |
+| 23 | WhatsApp | **Wait for a paying signal.** If ever: inbound-only Twilio webhook first, no worker. |
+| 24 | ChatGPT / Grok connectors | **Proved live in prod by a session in a real browser**, findings in `docs/operations/`. Never assumed from the OAuth code. |
+| 25 | The eight pre-pivot `wiring/*` draft PRs | **Closed** (#447–#454). They targeted the deleted notification stack. |
 
 ## Older docs this supersedes
 

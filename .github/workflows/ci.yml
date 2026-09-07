@@ -257,6 +257,13 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      # Build the SAME image Railway builds. Everything above runs on the checkout,
+      # not on the Dockerfile — so a Dockerfile that fails (#503 emptied public/,
+      # its COPY died, two prod deploys failed) never showed here. No push, no
+      # registry: an image that builds is the whole assertion.
+      - name: Docker image builds (frontend/Dockerfile)
+        run: docker build --quiet -t job360-frontend-ci frontend
+
   # ── Make this loop LOUD ───────────────────────────────────────────────────
   # Measured 2026-07-26: of 9 workflows, only doc-sync could ever reach a human —
   # it alone had issue plumbing. live-e2e then failed 8 consecutive nights

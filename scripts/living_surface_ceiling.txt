@@ -93,10 +93,27 @@
 # fold in the reasoning that PILLAR1_EXTRACTION_AUDIT.md and the pillar docs
 # carried before they were deleted whole (no archive left to point at). WHY,
 # not a restatement of code.
+# 3797 (2026-09-07, Tsenta read): +24 net. docs/product/competitor-tsenta.md
+# is 21 owner decisions against a competitor -- copy / refuse / later, each
+# with its reason -- plus VISION.md decisions 19-25 and roadmap slices 6-9
+# with their issue numbers. All WHY: what was rejected and why is exactly the
+# thing the code never shows. The "state on main" column is the one part that
+# CAN drift; it is dated so a reader knows when it was measured. Re-measured,
+# not estimated.
 # 3636 (2026-09-07, daily truth check): lowered by 137. Post-#503 drift was
 # closed by DELETING the prose that carried it -- the dead Redis/worker
 # troubleshooting section, Rule 2's description of the deleted UK gate and
 # gazetteer, ARCHITECTURE's "Notification System" section (the header banner
 # already says it is gone), and the runbook rows naming dropped tables.
 # Re-measured with doc_sync_check.py, not estimated.
-3636
+# MERGE (2026-09-07): the two entries above are independent and both stand --
+# the Tsenta read ADDED 71 lines of WHY to main (3,773 -> 3,844 measured) while
+# this branch DELETES 135 of restatement (3,844 -> 3,709 measured on the merged
+# tree). Neither cancels the other, so the ceiling is neither 3636 nor 3797.
+#
+# NOTE, because it is the thing this file exists to catch: the 3797 entry above
+# was NOT the real number. origin/main measures 3,844 against it, so main is 47
+# lines OVER its own ceiling and `doc_sync_check.py` exits 1 on a clean main
+# checkout today. The entry says "Re-measured, not estimated" -- it was not.
+# 3709 below IS measured, on this merged tree, and it clears the violation.
+3709
