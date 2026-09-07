@@ -93,4 +93,11 @@
 # fold in the reasoning that PILLAR1_EXTRACTION_AUDIT.md and the pillar docs
 # carried before they were deleted whole (no archive left to point at). WHY,
 # not a restatement of code.
-3773
+# 3797 (2026-09-07, Tsenta read): +24 net. docs/product/competitor-tsenta.md
+# is 21 owner decisions against a competitor -- copy / refuse / later, each
+# with its reason -- plus VISION.md decisions 19-25 and roadmap slices 6-9
+# with their issue numbers. All WHY: what was rejected and why is exactly the
+# thing the code never shows. The "state on main" column is the one part that
+# CAN drift; it is dated so a reader knows when it was measured. Re-measured,
+# not estimated.
+3797
