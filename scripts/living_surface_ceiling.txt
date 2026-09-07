@@ -100,4 +100,10 @@
 # thing the code never shows. The "state on main" column is the one part that
 # CAN drift; it is dated so a reader knows when it was measured. Re-measured,
 # not estimated.
-3797
+# 3642 (2026-09-07, post-pivot prune #519): lowered by 155. product_design_rules.md
+# shrank from 300 lines to ~50 (the UK-gate / visa rules it carried guarded code
+# slice 5 deleted), BREACH-RUNBOOK and troubleshooting dropped the notification
+# tables and CHANNEL_ENCRYPTION_KEY, and three of those docs are now in LIVING_DOCS
+# so they are counted (they were not before). Re-measured, not estimated -- the
+# mutation drill failed at 3797 because a planted 40-line regression fit in the slack.
+3642
