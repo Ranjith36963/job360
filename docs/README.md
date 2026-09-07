@@ -17,7 +17,7 @@ every link below resolves; nothing is left out.
 | **Run it locally** | [`../backend/README.md`](../backend/README.md) · [`../frontend/README.md`](../frontend/README.md) |
 | **Contribute / open a PR** | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | **Debug a runtime problem** | [`product/troubleshooting.md`](product/troubleshooting.md) |
-| **Know what to build next** | [`plans/2026-09-03-mission-roadmap.md`](plans/2026-09-03-mission-roadmap.md) — slices 0–6, one issue each |
+| **Know what to build next** | [`plans/2026-09-03-mission-roadmap.md`](plans/2026-09-03-mission-roadmap.md) — slices 0–10, one issue each |
 | **Deploy / run a backup / restore** | [`product/DEPLOY.md`](product/DEPLOY.md) · [`product/RUNBOOK-backups.md`](product/RUNBOOK-backups.md) |
 | **Respond to a security incident** | [`product/BREACH-RUNBOOK.md`](product/BREACH-RUNBOOK.md) |
 
@@ -27,10 +27,11 @@ every link below resolves; nothing is left out.
 
 | Doc | What it is |
 |---|---|
-| [`product/VISION.md`](product/VISION.md) | **The mission.** Agent thinks, Job360 remembers; never source/rank; build order; the 18-decision interview log. |
+| [`product/VISION.md`](product/VISION.md) | **The mission.** Agent thinks, Job360 remembers; never source/rank; build order; the 18-decision interview log + the 2026-09-07 additions. |
 | [`product/product_design_rules.md`](product/product_design_rules.md) | The owner's product rules in full — rules 4–6 (never source, agent thinks, free/pull) are the mission. |
+| [`product/competitor-tsenta.md`](product/competitor-tsenta.md) | Tsenta feature by feature — copy / refuse / later, with what exists on main; the reasoning behind slices 6–9. |
 | [`product/peruser_cv_coverletter.md`](product/peruser_cv_coverletter.md) | Design: per-job AI-tailored CV + cover letter that learns from your edits — the tailor web-fallback feature. |
-| [`plans/2026-09-03-mission-roadmap.md`](plans/2026-09-03-mission-roadmap.md) | The work list that follows from VISION.md — one issue per slice (#479–#483). |
+| [`plans/2026-09-03-mission-roadmap.md`](plans/2026-09-03-mission-roadmap.md) | The work list that follows from VISION.md — one issue per slice (#479–#483 shipped, #513–#516 next). |
 
 ### Slice specs (design records — shipped code + `VISION.md` win over these)
 
