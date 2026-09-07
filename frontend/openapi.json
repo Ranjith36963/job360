@@ -288,6 +288,17 @@
             "title": "Id",
             "type": "integer"
           },
+          "interview_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview At"
+          },
           "job": {
             "$ref": "#/components/schemas/ApplicationJobOut"
           },
@@ -333,6 +344,7 @@
           "fit",
           "artifacts",
           "events",
+          "interview_at",
           "receipts",
           "contacts"
         ],
@@ -382,6 +394,27 @@
             "title": "Recorded By",
             "type": "string"
           },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSourceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "superseded": {
             "title": "Superseded",
             "type": "boolean"
@@ -396,7 +429,9 @@
           "recorded_at",
           "recorded_by",
           "corrects_event_id",
-          "superseded"
+          "superseded",
+          "source",
+          "scheduled_at"
         ],
         "title": "ApplicationEventOut",
         "type": "object"
@@ -1250,6 +1285,88 @@
           "token"
         ],
         "title": "EmailVerificationConfirmRequest",
+        "type": "object"
+      },
+      "EventSource": {
+        "additionalProperties": false,
+        "description": "Slice 6 (docs/plans/2026-09-07-email-evidence/spec.md \u00a7Tool contracts)\n\u2014 the email an event came from. No length caps declared here: every cap\nis a live ``settings`` value ``spine.validate_source`` checks at call\ntime, the same reasoning ``AddContactRequest``'s docstring gives.",
+        "properties": {
+          "kind": {
+            "default": "email",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "received_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received At"
+          },
+          "sender": {
+            "default": "",
+            "title": "Sender",
+            "type": "string"
+          },
+          "subject": {
+            "default": "",
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id"
+        ],
+        "title": "EventSource",
+        "type": "object"
+      },
+      "EventSourceOut": {
+        "description": "Slice 6 \u2014 the ``source`` shape every reader emits (or ``null``, when\nthe event carries none).",
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "received_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received At"
+          },
+          "sender": {
+            "title": "Sender",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message_id",
+          "sender",
+          "subject",
+          "received_at"
+        ],
+        "title": "EventSourceOut",
         "type": "object"
       },
       "ExportApplicationOut": {
@@ -2787,6 +2904,27 @@
             "additionalProperties": true,
             "title": "Payload",
             "type": "object"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2797,6 +2935,10 @@
       },
       "RecordEventResponse": {
         "properties": {
+          "already_existed": {
+            "title": "Already Existed",
+            "type": "boolean"
+          },
           "event_id": {
             "title": "Event Id",
             "type": "integer"
@@ -2817,6 +2959,17 @@
             "title": "Recorded By",
             "type": "string"
           },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -2828,7 +2981,9 @@
           "occurred_at",
           "recorded_at",
           "recorded_by",
-          "status"
+          "status",
+          "already_existed",
+          "scheduled_at"
         ],
         "title": "RecordEventResponse",
         "type": "object"
@@ -3798,6 +3953,27 @@
           "recorded_by": {
             "title": "Recorded By",
             "type": "string"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSourceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3809,7 +3985,9 @@
           "occurred_at",
           "recorded_at",
           "recorded_by",
-          "corrects_event_id"
+          "corrects_event_id",
+          "source",
+          "scheduled_at"
         ],
         "title": "WhatsNewEventOut",
         "type": "object"

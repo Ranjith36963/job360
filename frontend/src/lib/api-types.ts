@@ -1572,6 +1572,8 @@ export interface components {
             fit: components["schemas"]["ApplicationFitOut"] | null;
             /** Id */
             id: number;
+            /** Interview At */
+            interview_at: string | null;
             job: components["schemas"]["ApplicationJobOut"];
             /** Job Id */
             job_id: number;
@@ -1609,6 +1611,9 @@ export interface components {
             recorded_at: string;
             /** Recorded By */
             recorded_by: string;
+            /** Scheduled At */
+            scheduled_at: string | null;
+            source: components["schemas"]["EventSourceOut"] | null;
             /** Superseded */
             superseded: boolean;
         };
@@ -1992,6 +1997,51 @@ export interface components {
         EmailVerificationConfirmRequest: {
             /** Token */
             token: string;
+        };
+        /**
+         * EventSource
+         * @description Slice 6 (docs/plans/2026-09-07-email-evidence/spec.md §Tool contracts)
+         *     — the email an event came from. No length caps declared here: every cap
+         *     is a live ``settings`` value ``spine.validate_source`` checks at call
+         *     time, the same reasoning ``AddContactRequest``'s docstring gives.
+         */
+        EventSource: {
+            /**
+             * Kind
+             * @default email
+             */
+            kind: string;
+            /** Message Id */
+            message_id: string;
+            /** Received At */
+            received_at?: string | null;
+            /**
+             * Sender
+             * @default
+             */
+            sender: string;
+            /**
+             * Subject
+             * @default
+             */
+            subject: string;
+        };
+        /**
+         * EventSourceOut
+         * @description Slice 6 — the ``source`` shape every reader emits (or ``null``, when
+         *     the event carries none).
+         */
+        EventSourceOut: {
+            /** Kind */
+            kind: string;
+            /** Message Id */
+            message_id: string;
+            /** Received At */
+            received_at: string | null;
+            /** Sender */
+            sender: string;
+            /** Subject */
+            subject: string;
         };
         /** ExportApplicationOut */
         ExportApplicationOut: {
@@ -2660,9 +2710,14 @@ export interface components {
             payload?: {
                 [key: string]: unknown;
             };
+            /** Scheduled At */
+            scheduled_at?: string | null;
+            source?: components["schemas"]["EventSource"] | null;
         };
         /** RecordEventResponse */
         RecordEventResponse: {
+            /** Already Existed */
+            already_existed: boolean;
             /** Event Id */
             event_id: number;
             /** Event Type */
@@ -2673,6 +2728,8 @@ export interface components {
             recorded_at: string;
             /** Recorded By */
             recorded_by: string;
+            /** Scheduled At */
+            scheduled_at: string | null;
             /** Status */
             status: string;
         };
@@ -3000,6 +3057,9 @@ export interface components {
             recorded_at: string;
             /** Recorded By */
             recorded_by: string;
+            /** Scheduled At */
+            scheduled_at: string | null;
+            source: components["schemas"]["EventSourceOut"] | null;
         };
         /** WhatsNewResponse */
         WhatsNewResponse: {

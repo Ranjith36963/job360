@@ -16,8 +16,8 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0040** | `backend/migrations/` |
-| Migration files | **41** | `backend/migrations/*.up.sql` |
+| Migration head | **0041** | `backend/migrations/` |
+| Migration files | **42** | `backend/migrations/*.up.sql` |
 | `test_*.py` files | **135** | `backend/tests/` |
 | GitHub Actions workflows | **23** | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
@@ -412,7 +412,12 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `APPLICATION_ARTIFACT_MAX_VERSIONS` | No (default `200`) | Per-`(application_id, kind)` version-count cap — over the cap is a 429 naming this variable, never a silent drop |
 | `APPLICATION_EVENT_DETAIL_MAX_CHARS` | No (default `2000`) | S5 — `detail` char cap on `POST /applications/{id}/events`; over the cap is a 422 naming this variable |
 | `APPLICATION_EVENT_PAYLOAD_MAX_BYTES` | No (default `8192`) | S5 — event `payload` cap, checked on the SERIALISED (`json.dumps`) size, because that is what the column costs; the payload must also be a JSON object, never a list/scalar |
-| `APPLICATION_EVENT_MAX_FUTURE_SECONDS` | No (default `300`) | S6 — how far into the future `occurred_at` may claim to be before it is refused as implausible. No lower bound: backdating is the normal case |
+| `APPLICATION_EVENT_MAX_FUTURE_SECONDS` | No (default `300`) | S6 — how far into the future `occurred_at` may claim to be before it is refused as implausible. No lower bound: backdating is the normal case. Slice 6 reuses it for an email source's `received_at` |
+| `APPLICATION_EVENT_SOURCE_KINDS` | No (default `email`) | Slice 6 — the closed set of `source.kind` values an event may cite; anything else is a 422 naming this variable |
+| `APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS` | No (default `256`) | Slice 6 (S2) — char cap on `source.message_id`, the identity the same-message dedupe keys on |
+| `APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS` | No (default `320`) | Slice 6 (S2) — char cap on `source.sender` |
+| `APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS` | No (default `500`) | Slice 6 (S2) — char cap on `source.subject` |
+| `APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS` | No (default `31622400` = 366 days) | Slice 6 (S8) — how far ahead `scheduled_at` (an interview datetime) may be; past values are allowed |
 | `APPLICATION_RECEIPT_ANSWERS_MAX` | No (default `50`) | S5 — max `answers` items on `POST /applications/{id}/receipt` |
 | `APPLICATION_RECEIPT_ANSWER_MAX_CHARS` | No (default `2000`) | S5 — max chars per receipt answer |
 | `APPLICATION_RECEIPT_FIELDS_MAX_BYTES` | No (default `8192`) | S5 — `fields_filled` cap on the receipt, checked on the serialised size |

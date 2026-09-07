@@ -89,6 +89,11 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary">
             {STATUS_LABEL[detail.status] ?? detail.status}
           </span>
+          {detail.interview_at && (
+            <span className="rounded-full bg-accent/20 px-3 py-1 text-sm font-medium text-accent-foreground">
+              Interview {new Date(detail.interview_at).toLocaleString()}
+            </span>
+          )}
           {detail.status === "considering" && (
             <button
               type="button"
