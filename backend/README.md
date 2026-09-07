@@ -5,11 +5,8 @@ FastAPI backend for Job360 — the memory layer for the seeker's own AI agent
 (`../docs/product/VISION.md`): profile extraction, bring-a-job, application
 receipts, the CV tailor (web fallback) and the MCP server at `/api/mcp`.
 The legacy search-and-score pipeline (job sources, scoring, semantic retrieval)
-was deleted 2026-09-05 (roadmap slice 5, #483) — see
-`../docs/_archive/sourcing-era/` for its history.
-Notifications (email via Resend + webhook) are sent synchronously from the API
-process — the ARQ worker and Redis services were deleted 2026-09-02, and there
-are no background jobs.
+was deleted 2026-09-05 (roadmap slice 5, #483); git history is its only record.
+Nothing runs in the background.
 
 ## Prerequisites
 
@@ -46,7 +43,6 @@ cp ../.env.example ../.env     # Unix
 copy ..\.env.example ..\.env   # Windows
 ```
 
-Edit `../.env` to set your API keys, webhook URLs, and `FRONTEND_ORIGIN`.
 See [`ARCHITECTURE.md`](../ARCHITECTURE.md) for the full env-var table.
 
 ## Run the API
@@ -104,11 +100,6 @@ python -m migrations.runner down       # reverse last migration
 ```
 
 The API also auto-applies on boot via `lifespan`.
-
-## Worker (deleted 2026-09-02)
-
-The ARQ worker and Redis services were deleted. Notifications now send
-synchronously from the API process — there is nothing to run separately.
 
 ## Cross-wiring with the frontend
 

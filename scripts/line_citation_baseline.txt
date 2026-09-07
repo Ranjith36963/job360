@@ -26,7 +26,12 @@
 # citations were rewritten to 0. ARCHITECTURE.md fell 11 -> 10 rewriting the
 # ESCO citation as a symbol name. Re-measured, not estimated.
 
-ARCHITECTURE.md 10
+# Re-baselined 2026-09-07 (daily truth check). troubleshooting.md 7 -> 3: the
+# migrations `down` warning now cites tests/test_migrations_cli_contract.py
+# instead of two runner.py:NN citations that had already rotted (the code moved
+# down ~5 lines and the numbers still looked authoritative). ARCHITECTURE.md
+# 10 -> 8 and product_design_rules.md 5 -> 0 with the prose that carried them.
+
+ARCHITECTURE.md 8
 backend/CLAUDE.md 2
-docs/product/product_design_rules.md 5
-docs/product/troubleshooting.md 7
+docs/product/troubleshooting.md 3

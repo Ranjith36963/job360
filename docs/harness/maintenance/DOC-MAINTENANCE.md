@@ -24,9 +24,9 @@
 | Type | Examples | Rule |
 |------|----------|------|
 | **LIVING** | `CLAUDE.md`, `ARCHITECTURE.md`, `README.md`, `STATUS.md`, `backend/CLAUDE.md`, `frontend/README.md` | Must always match the code. Any drift is a bug, same severity as a failing test. |
-| **PLAN** | `docs/plans/*`, `docs/step_*_plan.md`, design docs for unbuilt features | Has a lifecycle (below). Never silently edited after execution starts — plans are promises, and history must stay honest. |
-| **LOG** | `docs/harness/IMPLEMENTATION_LOG.md`, `docs/harness/maintenance/JOURNAL.md` | Append-only. Never rewritten, so never stale by definition. |
-| **REFERENCE** | decision records (`docs/product/plans/batch-2-decisions.md`), research notes | Updated only when the decision itself changes; superseded ones get a banner pointing to the successor, content stays. |
+| **PLAN** | `docs/plans/*`, design docs for unbuilt features | Has a lifecycle (below). Never silently edited after execution starts — plans are promises, and history must stay honest. |
+| **LOG** | `docs/harness/maintenance/PARKED.md` | Append-only. Never rewritten, so never stale by definition. |
+| **REFERENCE** | decision records, research notes | Updated only when the decision itself changes; superseded ones get a banner pointing to the successor, content stays. |
 
 ### Every doc carries its type on line 2 (machine + human readable)
 
@@ -131,7 +131,7 @@ report, but never edits them — memory hygiene is the session's own job.
 | Docs-as-code: in repo, PR-reviewed, versioned | Already true — keep it |
 | Dedicated technical writers | Loop 3 tooling is the writer; you are the editor who merges |
 | Freshness SLAs + staleness dashboards | Tier-1 daily check + `DOC-HEALTH.md` scorecard |
-| ADRs (architecture decision records) | `docs/product/plans/batch-2-decisions.md` pattern — keep appending |
+| ADRs (architecture decision records) | `docs/decisions/` — keep appending |
 | Archive-over-delete retention | An archive location under `docs/` + stamps (none exists today — see §2). Nothing deleted EXCEPT merged scaffolding, per the 2026-08-25 amendment in §2 |
 | Doc impact required in code review | Rule 5 above |
 
@@ -139,7 +139,7 @@ report, but never edits them — memory hygiene is the session's own job.
 
 - `docs/harness/maintenance/DOC-HEALTH.md` — **written by the first Tier-3 audit; absent
   until one runs**, so an unresolved link here is expected, not rot. This is the
-  destination `.claude/skills/doc-audit/SKILL.md:89` writes to. Scorecard from each audit:
+  destination `.claude/skills/doc-audit/SKILL.md`'s Step 5 writes to. Scorecard from each audit:
   docs checked, drifts fixed, plans archived, gaps parked, modules undocumented.
 - `docs/harness/maintenance/PARKED.md` — the "code is behind the doc" list: intentions
   found in docs that are not yet implemented, each with source doc + date.

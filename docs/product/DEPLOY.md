@@ -5,7 +5,7 @@
 
 **Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. Every merge ships to real users.** There is no manual deploy step and no staging gate. Merging is a release — never merge "to tidy up".
 
-Live at **job360.uk**. Five services: `backend`, `frontend`, `worker`, `Postgres`, `Redis`.
+Live at **job360.uk**.
 
 ### How to check what is actually deployed
 
@@ -23,21 +23,21 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 
 ---
 
-> **Status: ✅ LIVE since 2026-07-02.** Railway Hobby active. Project `job360`, 5 services all Online.
+> **Status: ✅ LIVE since 2026-07-02.** Railway Hobby active. Project `job360`.
+> Which services exist and which commit each is on is only ever true when
+> measured: `railway deployment list --service <svc> --json`.
 > - **Custom domain:** https://job360.uk
 > - **Frontend:** https://frontend-production-c608f.up.railway.app
 > - **Backend API:** https://backend-production-80e8e.up.railway.app
-> - Verified live: `/readyz` → `{db:ok, redis:ok}`, security headers, full register→login→/me auth flow.
-> - Worker running 10 ARQ functions + 2 crons. Managed Postgres + Redis attached.
 
 ## 🟢 What's already done (no action needed)
-- Backend + frontend **Dockerfiles**, **`docker-compose.prod.yml`** (5 services) — validated.
+- Backend + frontend **Dockerfiles**, **`docker-compose.prod.yml`** — validated.
 - App runs on **Postgres**. (Test count deliberately not quoted here — measure it:
   `cd backend && python -m pytest --collect-only -q | tail -1`. The
   merge-gate floor lives in one place, `CONTRIBUTING.md`, and only there.)
 - **`/health`, `/livez`, `/readyz`** + **env validation at boot** (fail-fast on missing prod secrets).
-- **DB backup script** (`backend/scripts/backup_db.py`).
-- All prod env values staged in the local `.env` (LLM keys, `SESSION_SECRET`, `CHANNEL_ENCRYPTION_KEY`, `SENTRY_DSN`, `NEXT_PUBLIC_POSTHOG_KEY`).
+- **Nightly encrypted DB backup, verified by restore** — `.github/workflows/db-backup.yml`; restore procedure in [`RUNBOOK-backups.md`](./RUNBOOK-backups.md).
+- All prod env values staged in the local `.env` — the current names are the table in [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
 
 ## First-time provisioning (HISTORICAL — already done 2026-07-02)
 
@@ -50,19 +50,13 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 # From repo root, logged in as rahulranjith369@gmail.com
 railway init --name job360 --workspace "ranjith36963's Projects" --json
 railway add --database postgres      # managed Postgres → DATABASE_URL
-railway add --database redis         # managed Redis → REDIS_URL
 
 # Backend service (uploads backend/, builds backend/Dockerfile)
+# Env names: the table in ARCHITECTURE.md, which is the only current list.
 railway add --service backend
-railway variables --service backend --set "DATABASE_URL=${{Postgres.DATABASE_URL}}" \
-  --set "REDIS_URL=${{Redis.REDIS_URL}}" --set "SESSION_SECRET=..." \
-  --set "CHANNEL_ENCRYPTION_KEY=..." --set "GEMINI_API_KEY=..." --set "APP_ENV=production" ...
+railway variables --service backend --set "DATABASE_URL=${{Postgres.DATABASE_URL}}" ...
 cd backend && railway up --service backend --detach && cd ..
 railway domain --service backend     # → public API URL
-
-# Worker service (same image, ARQ start command)
-railway add --service worker
-# set start command: arq src.workers.settings.WorkerSettings + same env
 
 # Frontend service
 railway add --service frontend
@@ -70,10 +64,10 @@ railway variables --service frontend --set "NEXT_PUBLIC_API_URL=https://<backend
 cd frontend && railway up --service frontend --detach && cd ..
 railway domain --service frontend    # → public site URL
 
-# Smoke test: register → CV → search on the live URL
+# Smoke test: register → CV → bring a job on the live URL
 ```
 
 ## Verify after deploy
-- `curl https://<backend-url>/livez` → 200; `/readyz` → `{db:ok, redis:ok}`
+- `curl https://<backend-url>/livez` → 200; `/readyz` → `db:ok`
 - Register + upload CV on the live frontend; confirm a row in the managed Postgres.
 - Sentry receives a test error; PostHog receives a pageview.

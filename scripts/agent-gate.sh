@@ -58,7 +58,11 @@ FP_START="$(tree_fingerprint)"
 # with the connection, so a hard-killed gate can never leave a stale lockfile.
 LOCK_HELD=""
 if command -v python >/dev/null 2>&1; then
-  LOCK_OUT="$(cd backend 2>/dev/null && python - <<'PYLOCK' 2>/dev/null || true
+  # `|| true` must NOT sit on the heredoc line: bash 5.2 re-parses the body of a
+  # command substitution and rejects an operator after `<<'TAG'` there, so the
+  # whole gate died with "syntax error near unexpected token `||'" before running
+  # a single test. Guard the assignment instead — same effect, portable.
+  LOCK_OUT="$(cd backend 2>/dev/null && python - <<'PYLOCK' 2>/dev/null
 import sys
 try:
     import psycopg
@@ -79,7 +83,7 @@ try:
 except Exception:
     print("UNKNOWN")
 PYLOCK
-)"
+)" || LOCK_OUT="UNKNOWN"
   if [ "$LOCK_OUT" = "BUSY" ]; then
     echo "[gate] ABORT: another gate is already running against this Postgres." >&2
     echo "[gate] Wait for it — do NOT run a second gate. Concurrent suites share" >&2

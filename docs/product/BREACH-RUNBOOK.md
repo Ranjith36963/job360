@@ -29,16 +29,11 @@ Variables → edit → redeploy happens automatically.
 3. **Rotate the rest of the keys** (names only, values live in Railway):
    `RESEND_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`,
    `CEREBRAS_API_KEY`, `GITHUB_TOKEN`, R2 backup keys
-   (`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` in GitHub Actions secrets),
-   job-source API keys. Each provider's dashboard → revoke old, issue new.
-4. **`CHANNEL_ENCRYPTION_KEY` — read this before rotating.** Rotating it
-   makes every stored notification-channel credential (email and webhook
-   credentials) permanently unreadable — users will have to
-   reconnect their channels. In a real breach that trade is CORRECT: rotate
-   it, accept the reconnects. Just don't be surprised.
-5. **If the app itself is compromised** (malicious deploy, defaced page):
+   (`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` in GitHub Actions secrets).
+   Each provider's dashboard → revoke old, issue new.
+4. **If the app itself is compromised** (malicious deploy, defaced page):
    Railway → Deployments → roll back to the last known-good deploy.
-6. **Do NOT delete or truncate any logs.** They are your evidence and your
+5. **Do NOT delete or truncate any logs.** They are your evidence and your
    timeline. Containment never includes cleanup.
 
 ## Hour 1–24 — Assess (what actually got touched?)
@@ -59,10 +54,9 @@ Variables → edit → redeploy happens automatically.
 | `user_profiles`, `user_profile_versions` | CV text, LinkedIn text, GitHub data, preferences | **HIGH — this is the crown jewels** |
 | `tailored_documents` | AI-generated CVs / cover letters | **HIGH** |
 | `users` | email addresses, argon2id password hashes, timezone | Medium (hashes are argon2id — not reversible in practice, but report as exposed) |
-| `applications`, `user_actions`, `user_feed` | job-hunt activity (who applied where) | Medium — sensitive in context (current employer must not learn) |
-| `user_channels` | Fernet-encrypted webhooks/bot tokens | Medium (encrypted at rest; HIGH if `CHANNEL_ENCRYPTION_KEY` also leaked) |
-| `sessions`, `oauth_states` | session + OAuth artifacts | Low once rotated/deleted |
-| `jobs`, `job_enrichment`, `job_embeddings` | public job listings | Not personal data |
+| `applications` + the `application_*` spine tables | job-hunt activity (who applied where) | Medium — sensitive in context (current employer must not learn) |
+| `sessions`, `api_tokens`, the `oauth_*` tables | session + OAuth artifacts | Low once rotated/deleted |
+| `jobs` | public job listings | Not personal data |
 
 **Answer these four questions in writing** (the ICO form asks exactly this):
 1. What happened, and how? 2. Whose data and how many people?
@@ -109,6 +103,4 @@ they should do.
 ---
 
 *Owner: Ranjith. Review this page every 6 months or after any incident,
-whichever comes first. Last verified against the real stack: 2026-07-24
-(sessions table + SESSION_SECRET dual kill-switch, Fernet channel-cred
-rotation trade-off, R2 ciphertext-only backups, Resend sender domain).*
+whichever comes first. Last verified against the real stack: 2026-09-07.*
