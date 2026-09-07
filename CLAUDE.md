@@ -4,7 +4,7 @@
      rules moved to a skill -- a budget left above the real size is slack, not
      headroom). This file is auto-loaded before every session,
      so it is POINTERS + CRITICAL GOTCHAS ONLY. Long-form history belongs in
-     docs/harness/IMPLEMENTATION_LOG.md, reference tables in ARCHITECTURE.md, recipes in
+     git log, reference tables in ARCHITECTURE.md, recipes in
      .claude/skills/. If you are about to add a paragraph here, add it there and
      leave a one-line pointer. CI enforces this (doc_sync_check.py). -->
 
@@ -39,7 +39,7 @@ Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. **Every merge 
 
 - Branch: `main`. Multi-commit work demands a preflight: verify `git branch --show-current`, clean tree, and `git fetch origin <branch>` HEAD alignment. Halt and surface on divergence — never silent rebase.
 - **Canonical pre-commit verification:** `cd backend && python -m pytest -q -p no:randomly`. **Never quote a test count from a doc — measure it** (`python -m pytest --collect-only -q | tail -1`); three docs once disagreed by 400–800 tests. Runs against a **real Postgres** (docker-compose.dev.yml, port 5433) via the `sqlite3`/`aiosqlite` shims in `tests/conftest.py`, schema-per-test. HTTP is mocked with `aioresponses`; the suite must run offline. Never add `--ignore=` for a test file; fix or delete the test.
-- Two deployables: `backend/` (Python 3.10+, FastAPI, Postgres via psycopg3) and `frontend/` (Next.js 16, React 19). Runtime data in `backend/data/`. Live on Railway at job360.uk since 2026-07-02; three services: `backend`, `frontend`, `Postgres` — `worker` + `Redis` were deleted 2026-09-02, so nothing runs in the background (no notifications, no crons; Redis-unreachable log lines are expected).
+- Two deployables: `backend/` (Python 3.10+, FastAPI, Postgres via psycopg3) and `frontend/` (Next.js 16, React 19). Live on Railway at job360.uk since 2026-07-02; three services: `backend`, `frontend`, `Postgres` — `worker` + `Redis` were deleted 2026-09-02, so nothing runs in the background (no notifications, no crons; Redis-unreachable log lines are expected).
 - What automation is actually running: the GitHub Actions harness — 23 workflows in `.github/workflows/` (triage, doc-sync, ci, ci-offline, codeql, security, uptime, db-backup, pr-shepherd, branch-reaper…; measure with `ls`). The old agent loop (scout/worker/integrator) was disabled 2026-06-21 and its files deleted 2026-09-05 — there is no background agent to wait on.
 - What surprises new sessions: the sourcing era (sources, scorer, dedup, enrichment, ARQ worker, dashboard) was **deleted 2026-09-05** (slice 5, #483) and the notification/channel/Kanban stack followed in the cleanup audit — git history is the only record; never rebuild them. Heavy deps must be lazy-imported (top-level imports cost every CLI run and every pytest collection). Next.js 15 made `params` a Promise and 16 removed synchronous access — await it. MCP tools call route *functions*, so any new route gate must be re-applied in `mcp_server.py` (parity test enforces). Migrations auto-apply on boot: `api.dependencies.init_db()`, called by `api.main.lifespan`.
 

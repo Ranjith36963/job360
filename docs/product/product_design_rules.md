@@ -67,100 +67,40 @@ country, that is a product fault. How can we solve it rather than penalty?"*
 
 **The rule.** Job360 is a UK-market product. A job the user cannot take
 because it is in another country is a **catalog defect**, not a low-ranking
-job. It is refused at ingestion; it never reaches storage, a feed, an
-enrichment budget, an embedding, or a candidate-shelf slot.
+job — refuse it at the door rather than admitting it and arguing about its
+rank, which still spends every downstream budget and can still surface when
+the other dimensions score well. Measured 2026-08-07 under the old −15
+penalty: 156 clearly foreign jobs were live in prod.
 
-**Why not the penalty.** The legacy scorer applied −15 for a foreign location
-(deleted 2026-08-12). That admits the job and then argues about its rank — so it still consumes
-every downstream budget and can still surface when the other dimensions score
-well. Measured 2026-08-07: 156 clearly foreign jobs were live in prod
-(Shanghai, São Paulo, Lima, Ottawa, München) despite the penalty existing.
-
-**How the gate decides** (`src/services/uk_gate.py`, one chokepoint in
-`main.py` — never per-source). Order is load-bearing:
-
-1. A named foreign **country or admin division** → **blocked**, whoever listed it.
-2. Remote fenced to another region ("Remote — US only") → **blocked**.
-3. An explicit UK country name or a **full UK postcode** → allowed.
-4. A hit in the **UK gazetteer** (~52k places) → allowed.
-5. Genuine remote → allowed.
-6. Otherwise **who said it decides**: a UK-native source keeps it; a global
-   source needs evidence (£, right-to-work language, a UK city in the body).
+> **The gate this rule described is gone.** `services/uk_gate.py`, the GeoNames
+> gazetteer and its builder were deleted with the sourcing era (slice 5, #483)
+> — there is no ingestion to gate, because Job360 no longer sources jobs
+> (Rule 4). The rule below is kept for its reasoning, not as a description of
+> anything running.
 
 ### THE RULE THIS ENCODES: never hand-enumerate an UNBOUNDED set
 
 The first version listed ~120 **foreign cities** by hand. The owner rejected
 it: *"How many will you hard-code like that? What if there is a city out of
 this list? Then you missed that."* He is right — foreign cities are unbounded,
-so a hand-written **sample** of them rots silently and misses forever.
-
-So the polarity is inverted. **UK places are FINITE** (~52k populated places,
-published; settlements do not churn), compiled from GeoNames by
-`scripts/build_uk_gazetteer.py` into `src/data/uk_gazetteer/`. Every future miss is
-a data refresh, never a code edit.
+so a hand-written **sample** of them rots silently and misses forever. Invert
+the polarity instead: UK places are FINITE (~52k populated places, published;
+settlements do not churn), so every future miss is a data refresh, never a
+code edit.
 
 **The distinction that matters:** countries (~250) and first-level admin
 divisions (~4.5k — US states, Canadian provinces) stay enumerated *on purpose*,
 because those are **CLOSED** sets. A COMPLETE closed set is not the same
 mistake as a SAMPLE of an open one. Both are built from data, so neither drifts.
 
-**Why the foreign check survives inversion:** positive-only matching has a
-fatal hole — `"Cambridge (USA)"` contains "cambridge", a real UK town, so a
-pure gazetteer lookup would **admit** it. The country override runs first.
-
 **Ambiguity is COMPUTED, not typed.** Boston, Cambridge and Perth name real
-places here and abroad. `ambiguous.txt` is derived at build time by comparing
-UK populations against **world cities *and* the closed country / first-level
-admin-division sets** — London survives (London, Ontario is ~4% the size);
-Boston does not. Hand-listing collisions would repeat the original sin.
-
-The country/admin1 half was added for issue #330 (2026-08-19) and it is the
-whole reason the escape below finally holds. The first version compared against
-`cities500` alone — world *city* primary names — and the UK has hamlets called
-New York (pop 0), California (830) and Canada (0). None of those three is a
-cities500 primary name (GeoNames calls NYC "New York City"; California is a US
-state; Canada is a country), so all three scored as *trusted, unambiguous* UK
-places and carried 153 of the 190 live foreign rows straight through the
-dual-site escape. Countries and admin1 divisions were already downloaded and
-already closed sets, so they now feed the same computation at a flat weight —
-`FOREIGN_ADMIN_WEIGHT = 20_000` (`backend/scripts/build_uk_gazetteer.py:95,181-186`).
-The weight is measured, not chosen by taste: the 84 UK names colliding with a
-foreign country or admin1 have exactly one population gap, between Warwick
-(37,267) and Portsmouth (47,350), so a 40,000-effective cut-off keeps
-Manchester, Southampton and Canterbury while dropping the hamlets. **Those
-figures are a dated measurement, not something you can re-derive from this
-repo:** they were taken on 2026-08-19 and are recorded in the builder's own
-comment (`backend/scripts/build_uk_gazetteer.py:90-95`); the GeoNames snapshot
-they came from is fetched at build time and never checked in, so `--check`
-validates file counts and canaries, not these populations. Treat them as the
-recorded basis for the threshold, and re-measure rather than re-cite if the
-gazetteer is ever rebuilt against newer GeoNames data. No branch
-was added to `check_uk` and no city was typed — the fix is DATA, which is the
-rule. Still admitted on purpose: `"London, Ontario"` — a big UK city beside a
-foreign region is how both a foreign address and a genuine two-site ad get
-written, and `london` never enters `ambiguous.txt`, so the escape still speaks
-for it (`backend/src/services/uk_gate.py:367-382`; root `CLAUDE.md:57` rule #30
-records this as the remaining gap). **No test pins that exact input** —
-`backend/tests/test_uk_gate.py:161` asserts only bare `check_uk("London", …)`,
-and `backend/tests/test_scorer.py:673-679` names "London, Ontario" expressly to say it is
-*not* asserted there. The behaviour above is read off the gate logic and the
-shipped gazetteer data (`ontario` in `foreign_admin.txt`, absent from
-`uk_places.txt`; `london` in neither ambiguity list), so treat it as
-documented-and-unguarded until a test claims it.
-
-**Traps found by dry-running over the live catalog** (do this before shipping
-any location rule):
-- The naive "no UK token → reject" blocked **48%**, including Telford and
-  Northampton — `UK_TERMS` only held 26 cities.
-- **devitjobs** was misclassified as global; its endpoint is devitjobs.**uk**.
-  That alone was 1,409 wrongly blocked jobs.
-- `"Sydney, Australia"` was **allowed**: the UK has a hamlet called Sydney, so
-  a bare gazetteer hit triggered the dual-site escape. Dual-site now demands an
-  *unambiguous* UK signal.
-- `"Indianapolis, IN, USA"` was not blocked — the country data holds "United
-  States", not "USA"/"US". ISO2 + ISO3 codes are now included.
-
-Measured after: 799 blocked of 4,544 (18%), **2 potential false drops**.
+places here and abroad; hand-listing the collisions would repeat the original
+sin. Derive them by comparing UK populations against the world-city and closed
+country/admin1 sets — London survives (London, Ontario is ~4% the size), Boston
+does not. Two corollaries that cost real bugs to learn: a positive-only
+gazetteer match **admits** `"Cambridge (USA)"`, so the country check must run
+first; and comparing against city primary names alone lets UK hamlets called
+New York, California and Canada score as trusted UK places.
 
 **Ambiguity favours the user:** a dual-site posting ("London / New York") is
 kept — the user can take the UK half.
@@ -190,7 +130,7 @@ failed to detect. The badge gives the user the fact without the deletion.
 **Three states, never a boolean.** `jobs.visa_flag` is a bool, so "this ad says
 it will not sponsor" and "this ad never mentions visas" are the same value.
 Those are opposite facts for a candidate: a dead end versus a question worth
-asking. Use `services/visa_signal.detect_visa_status()`.
+asking. Anything that reads visa status must model all three.
 
 **Precedence is load-bearing:** "we cannot offer visa sponsorship" *contains*
 "visa sponsorship", so refusal must be tested before offer. And a signal that

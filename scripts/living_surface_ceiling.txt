@@ -93,4 +93,10 @@
 # fold in the reasoning that PILLAR1_EXTRACTION_AUDIT.md and the pillar docs
 # carried before they were deleted whole (no archive left to point at). WHY,
 # not a restatement of code.
-3773
+# 3636 (2026-09-07, daily truth check): lowered by 137. Post-#503 drift was
+# closed by DELETING the prose that carried it -- the dead Redis/worker
+# troubleshooting section, Rule 2's description of the deleted UK gate and
+# gazetteer, ARCHITECTURE's "Notification System" section (the header banner
+# already says it is gone), and the runbook rows naming dropped tables.
+# Re-measured with doc_sync_check.py, not estimated.
+3636

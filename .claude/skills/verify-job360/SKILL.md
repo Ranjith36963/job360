@@ -35,8 +35,8 @@ that landed, a log line that proves the code path ran. "It should work now" is n
 Choose based on what you touched. When unsure, do the broader one.
 
 - **Frontend / UX** — you changed a page, component, API call, or auth flow → drive a real browser, screenshot.
-- **Backend** — you changed a route, scorer, source, DB, scheduler, worker → run the service, hit the route, query the DB, read the logs.
-- **End-to-end** — you changed something that spans both, or the user wants the whole journey proven → walk register → CV → search → jobs.
+- **Backend** — you changed a route, the spine, the DB, or profile extraction → run the service, hit the route, query the DB, read the logs.
+- **End-to-end** — you changed something that spans both, or the user wants the whole journey proven → walk the 5 steps below.
 
 `$ARGUMENTS` may name a flavor (`backend`, `frontend`, `e2e`) or a specific feature to focus on. If given, scope to that.
 
@@ -94,11 +94,13 @@ For per-user routes you need a session cookie — register via `POST /api/auth/r
   storage layer is psycopg3; `src/repositories/pg.py` only *shapes* itself like
   aiosqlite):
   ```
-  cd backend && python -c "import os,psycopg; dsn=os.getenv('DATABASE_URL','postgresql://job360:job360dev@localhost:5433/job360'); c=psycopg.connect(dsn); print(c.execute('SELECT COUNT(*) FROM jobs').fetchone()); [print(r) for r in c.execute('SELECT match_score,title FROM jobs ORDER BY match_score DESC LIMIT 5')]"
+  cd backend && python -c "import os,psycopg; dsn=os.getenv('DATABASE_URL','postgresql://job360:job360dev@localhost:5433/job360'); c=psycopg.connect(dsn); print(c.execute('SELECT COUNT(*) FROM jobs').fetchone()); [print(r) for r in c.execute('SELECT id,title FROM jobs ORDER BY date_found DESC LIMIT 5')]"
   ```
   Against PROD instead of local dev: `railway run -s Postgres python <script>`
   (never print the DSN).
-  Useful tables: `jobs` (shared catalog), `user_feed`, `user_profiles`, `users`, `sessions`, `applications`, `run_log`.
+  Useful tables: `jobs` (shared catalog), `applications` + the `application_*`
+  spine, `user_profiles`, `users`, `sessions`. For anything else, read
+  `backend/migrations/` — it is the head, and tables get dropped.
 - **Did the path run?** Read the server's stdout/log. When you launched it as a background
   Bash task, its output goes to a task file — `tail` that file and grep for your route,
   for `ERROR`/`WARNING`, and for the run UUID. If a code path's execution is ambiguous,
@@ -124,14 +126,13 @@ For per-user routes you need a session cookie — register via `POST /api/auth/r
 > buttons + the LinkedIn/GitHub gates). Report its PASS/FAIL/GATED table.
 
 Run **both** servers, then walk the real journey with the browser and watch the DB/logs in parallel.
-**The journey is the product path (`docs/product/VISION.md`): bring → tailor → receipt → MCP. The old
-search journey is legacy — verify it only when the change touched `src/sources/` or the scorer.**
+**The journey is the product path (`docs/product/VISION.md`): bring → tailor → receipt → MCP.**
 
 1. **Register** a fresh account (UI: `/register`, or `POST /api/auth/register`).
 2. **Upload a CV** on `/profile` — use `test-artifacts/sample_cv.pdf` (a realistic ML-engineer CV).
    Confirm the profile populates (skills/titles chips, Skill Tiers) and the log shows
    `Profile saved for user …`.
-3. **Bring a job** on `/bring` (paste an ad; a link too once slice 3 lands) or `POST /api/jobs/bring`.
+3. **Bring a job** on `/bring` (paste an ad, or a link — `POST /api/jobs/fetch-url` pre-fills the form) or `POST /api/jobs/bring`.
    The job page must open from the response.
 4. **Tailor + "I applied"** — tailor the CV on the job page, click "I applied", then open `/receipts`:
    the receipt shows the ad as it read, the exact CV/cover letter, the date. Re-tailor and confirm
@@ -159,10 +160,8 @@ These cost real time the first time. Reading them here saves the next run.
   aiosqlite thread holding the file lock — are obsolete: SQLite is gone.)
 - **Auth needs secrets in the root `.env`.** Registration creates the user row, then fails
   to mint the session cookie if `SESSION_SECRET` is missing → "Failed to fetch" + a
-  half-created account that then 409s "already registered". Both `SESSION_SECRET` and
-  `CHANNEL_ENCRYPTION_KEY` (a Fernet key) must be set. Generate: `SESSION_SECRET` =
-  `python -c "import secrets;print(secrets.token_urlsafe(64))"`; `CHANNEL_ENCRYPTION_KEY` =
-  `python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"`.
+  half-created account that then 409s "already registered". Generate one:
+  `python -c "import secrets;print(secrets.token_urlsafe(64))"`.
 - **Editable install (`pip install -e`) may resolve `import src` to a git worktree** under
   `.claude/worktrees/…`, not the main checkout. If a standalone script imports the wrong
   copy, force it: `sys.path.insert(0, r'D:\dev\job360\backend')` and `os.chdir` to backend.

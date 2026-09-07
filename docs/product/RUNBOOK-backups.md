@@ -64,5 +64,5 @@ rm -f "job360-${TS}.sql.gz.gpg"
 - **Restore into a fresh DB first**, verify, then repoint the app — never blind-restore over live prod.
 - The dump is `--no-owner --no-privileges`, so it restores cleanly into a DB with a different role/owner than prod.
 - The pg client must be **≥ the prod server major version** (prod Postgres is 18.x — use psql 18).
-- **Retention is ~30 newest** (nightly ⇒ ~30 days). If you need older, it's already gone — there is no long-term archive. (Gap flagged in `docs/harness/fable/04-OPS-AND-RELIABILITY.md`: consider a second region + a monthly cold copy.)
+- **Retention is ~30 newest** (nightly ⇒ ~30 days). If you need older, it's already gone — there is no long-term archive, no second region and no monthly cold copy. That gap is accepted, not overlooked.
 - **Do a restore drill quarterly** into a scratch DB so this procedure stays true and you stay practiced.
