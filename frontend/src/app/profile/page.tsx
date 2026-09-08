@@ -311,7 +311,7 @@ export default function ProfilePage() {
                 </h1>
                 <p className="text-sm text-muted-foreground">
                   {profile?.summary.is_complete
-                    ? "Your profile is ready for job matching"
+                    ? "Your profile is ready for your agent"
                     : "Upload your CV and set preferences to get started"}
                 </p>
               </div>
@@ -573,40 +573,6 @@ export default function ProfilePage() {
                 </div>
               );
             })()}
-
-            {/* ── Skill ESCO Mappings ───────────────────── */}
-            {profile?.skill_esco &&
-              Object.keys(profile.skill_esco).length > 0 && (
-                <div className="animate-fade-in-up glass-card rounded-xl p-6">
-                  <h2 className="font-heading text-base font-semibold mb-1 text-foreground">
-                    Skill Mappings
-                  </h2>
-                  <p className="mb-4 text-xs text-muted-foreground">
-                    Raw skills extracted from your CV mapped to canonical ESCO
-                    identifiers.
-                  </p>
-                  <ul className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
-                    {Object.entries(profile.skill_esco).map(
-                      ([raw, canonical]) => (
-                        <li
-                          key={raw}
-                          className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs"
-                        >
-                          <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                            {raw}
-                          </span>
-                          <span className="shrink-0 text-muted-foreground/50">
-                            →
-                          </span>
-                          <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-                            {canonical}
-                          </span>
-                        </li>
-                      )
-                    )}
-                  </ul>
-                </div>
-              )}
 
           </div>
         )}

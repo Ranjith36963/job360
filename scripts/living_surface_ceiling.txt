@@ -115,5 +115,10 @@
 # was NOT the real number. origin/main measures 3,844 against it, so main is 47
 # lines OVER its own ceiling and `doc_sync_check.py` exits 1 on a clean main
 # checkout today. The entry says "Re-measured, not estimated" -- it was not.
-# 3709 below IS measured, on this merged tree, and it clears the violation.
-3709
+# 3709 was measured on that merged tree and cleared the violation.
+# 3710 (2026-09-07, second merge of main): +1, and the raise is named as this
+# file requires. docs/README.md gained ONE index row pointing at slice 6's spec
+# (#513, email evidence on events). An index row is navigation, not a
+# restatement of code: it cannot drift into a lie about behaviour, and the
+# dead-link guard already proves the target exists. Re-measured, not estimated.
+3710

@@ -326,7 +326,7 @@ export function CVUpload({
             </h3>
             <p className="text-xs text-muted-foreground">
               {hasCV
-                ? "Your CV has been parsed — highlighted text drives your job matching"
+                ? "Your CV has been parsed — this is what your agent reads"
                 : "PDF or DOCX — we extract skills, titles, and more"}
             </p>
           </div>
@@ -526,7 +526,7 @@ export function CVUpload({
               return (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
                   <span className="font-medium">
-                    Highlighted = extracted for job matching:
+                    Highlighted = what your agent reads:
                   </span>
                   {present.map((l) => (
                     <span key={l.category} className="flex items-center gap-1">

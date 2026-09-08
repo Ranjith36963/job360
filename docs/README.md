@@ -42,6 +42,7 @@ every link below resolves; nothing is left out.
 | 3 — URL fetch on the web | [`plans/2026-09-04-url-fetch/spec.md`](plans/2026-09-04-url-fetch/spec.md) | PR #496 |
 | 4 — Contacts, stats, `update_profile` | [`plans/2026-09-05-contacts-stats/spec.md`](plans/2026-09-05-contacts-stats/spec.md) | PR #498 |
 | 5 — Delete the sourcing era | [`plans/2026-09-05-delete-sourcing-era/spec.md`](plans/2026-09-05-delete-sourcing-era/spec.md) | #483 |
+| 6 — Email evidence on events + interview datetime | [`plans/2026-09-07-email-evidence/spec.md`](plans/2026-09-07-email-evidence/spec.md) | #513 |
 | — Bring a job, keep the receipt | [`plans/2026-09-02-bring-a-job/spec.md`](plans/2026-09-02-bring-a-job/spec.md) | PR #469 |
 | — Personal tokens + MCP server | [`plans/2026-09-03-mcp-server/spec.md`](plans/2026-09-03-mcp-server/spec.md) | PR #473 |
 

@@ -11,19 +11,9 @@ import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
 import { FitPanel } from "@/components/applications/FitPanel";
 import { TailorSection } from "@/components/tailor/TailorSection";
 import { Contacts } from "@/components/applications/Contacts";
-
-const STATUS_LABEL: Record<string, string> = {
-  considering: "Considering",
-  applied: "Applied",
-  replied: "Replied",
-  interview_requested: "Interview requested",
-  interview_scheduled: "Interview scheduled",
-  interview_done: "Interview done",
-  offer: "Offer",
-  rejected: "Rejected",
-  withdrawn: "Withdrawn",
-  ghosted: "Ghosted",
-};
+import { Receipts } from "@/components/applications/Receipts";
+import { NoteForm } from "@/components/applications/NoteForm";
+import { STATUS_LABEL } from "@/lib/event-labels";
 
 /** The application record: status, the durable job snapshot (spec R2 —
  * survives the catalog purging the live row), every artifact version, the
@@ -89,6 +79,11 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary">
             {STATUS_LABEL[detail.status] ?? detail.status}
           </span>
+          {detail.interview_at && (
+            <span className="rounded-full bg-accent/20 px-3 py-1 text-sm font-medium text-accent-foreground">
+              Interview {new Date(detail.interview_at).toLocaleString()}
+            </span>
+          )}
           {detail.status === "considering" && (
             <button
               type="button"
@@ -112,7 +107,15 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         </div>
       </div>
 
-      <section>
+      <section data-testid="section-timeline">
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Timeline
+        </h2>
+        <Timeline events={detail.events} />
+        <NoteForm applicationId={detail.id} onRecorded={load} />
+      </section>
+
+      <section data-testid="section-fit">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fit</h2>
         <FitPanel fit={detail.fit} />
       </section>
@@ -135,12 +138,14 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         <ArtifactVersions applicationId={detail.id} artifacts={detail.artifacts} />
       </section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Timeline
-        </h2>
-        <Timeline events={detail.events} />
-      </section>
+      {detail.receipts.length > 0 && (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Receipts
+          </h2>
+          <Receipts receipts={detail.receipts} />
+        </section>
+      )}
     </div>
   );
 }

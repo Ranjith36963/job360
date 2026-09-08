@@ -298,3 +298,65 @@ async def test_record_application_writes_a_rich_receipt_through_the_new_route(au
         # The event log recorded it too — not just the receipts table.
         statuses = [e["event_type"] for e in detail.json()["events"]]
         assert "applied" in statuses
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Slice 6 (#513): email evidence + interview datetime
+# docs/plans/2026-09-07-email-evidence/spec.md — test 11 of §Frozen tests.
+# Written RED first (the tool had neither parameter, so the call failed
+# MCP-side input validation), green since the tool grew `source` and
+# `scheduled_at`. `received_at` is a past date on purpose — it shares
+# `occurred_at`'s tight future bound (S8).
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_record_event_tool_passes_source_and_scheduled_at(authenticated_async_context):
+    from src.api.mcp_server import mcp_runtime
+
+    token = await _mint_token(authenticated_async_context)
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            brought = _payload(await mcp.call_tool("bring_job", JOB))
+            application_id = brought["application_id"]
+            source = {
+                "kind": "email",
+                "message_id": "mcp-msg-1",
+                "sender": "recruiter@acme.example",
+                "subject": "Interview invite",
+                "received_at": "2026-09-01T08:00:00+00:00",
+            }
+
+            recorded = _payload(
+                await mcp.call_tool(
+                    "record_event",
+                    {
+                        "application_id": application_id,
+                        "event_type": "interview_scheduled",
+                        "source": source,
+                        "scheduled_at": "2026-09-15T10:00:00+01:00",
+                    },
+                )
+            )
+            assert recorded["already_existed"] is False
+
+            again = _payload(
+                await mcp.call_tool(
+                    "record_event",
+                    {
+                        "application_id": application_id,
+                        "event_type": "interview_scheduled",
+                        "source": source,
+                        "scheduled_at": "2026-09-15T10:00:00+01:00",
+                    },
+                )
+            )
+            assert again["already_existed"] is True
+            assert again["event_id"] == recorded["event_id"]
+
+            detail = _payload(
+                await mcp.call_tool("get_application", {"application_id": application_id})
+            )
+            evt = next(e for e in detail["events"] if e["id"] == recorded["event_id"])
+            assert evt["source"]["message_id"] == "mcp-msg-1"
+            assert evt["scheduled_at"] == "2026-09-15T09:00:00+00:00"

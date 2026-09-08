@@ -370,7 +370,7 @@ function VerifyEmailCard() {
       <CardHeader>
         <CardTitle>Verify your email</CardTitle>
         <CardDescription>
-          Some features (like running a job search) need a verified email. Resend the
+          Some features (like connecting an agent) need a verified email. Resend the
           verification link if you didn&apos;t get it.
         </CardDescription>
       </CardHeader>

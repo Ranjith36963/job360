@@ -11,6 +11,7 @@ import {
   Clock,
   Shield,
   Sparkles,
+  Plug,
 } from "lucide-react";
 
 // R14 (docs/plans/2026-09-04-application-spine/spec.md) — the landing copy
@@ -180,6 +181,18 @@ export default function Landing() {
               <Upload className="h-4 w-4" />
               Get Started
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+            </Link>
+            {/* Second, secondary path — the whole product depends on the user
+                connecting their own agent, so it belongs beside the primary
+                CTA, not buried behind a gear icon. A signed-out visitor is
+                bounced to /login?next=/settings/connect by middleware.ts,
+                same as any other protected route. */}
+            <Link
+              href="/settings/connect"
+              className="inline-flex h-12 items-center gap-2 rounded-xl border border-border/60 bg-transparent px-8 text-sm font-semibold text-foreground transition-colors hover:border-primary/60 hover:text-primary"
+            >
+              <Plug className="h-4 w-4" />
+              Connect an agent
             </Link>
           </div>
         </div>
@@ -372,6 +385,13 @@ export default function Landing() {
                 <Upload className="h-5 w-5" />
                 Upload Your CV
                 <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+              </Link>
+              <Link
+                href="/settings/connect"
+                className="inline-flex h-14 items-center gap-3 rounded-xl border border-border/60 bg-transparent px-10 text-base font-semibold text-foreground transition-colors hover:border-primary/60 hover:text-primary"
+              >
+                <Plug className="h-5 w-5" />
+                Connect an agent
               </Link>
             </div>
             <p className="animate-fade-in-up stagger-4 mt-6 text-xs text-muted-foreground/60">

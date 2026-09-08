@@ -284,6 +284,37 @@ APPLICATION_EVENT_PAYLOAD_MAX_BYTES = int(os.getenv("APPLICATION_EVENT_PAYLOAD_M
 # refused as implausible. No lower bound: backdating is the normal case.
 APPLICATION_EVENT_MAX_FUTURE_SECONDS = int(os.getenv("APPLICATION_EVENT_MAX_FUTURE_SECONDS", "300"))
 
+# ── Slice 6 (docs/plans/2026-09-07-email-evidence/spec.md) — an event may
+# carry the email it came from, and an interview may carry a real datetime
+# instead of prose in `detail`. Every cap a parameter; a breach is 422 naming
+# the setting (S2).
+APPLICATION_EVENT_SOURCE_KINDS = _env_list("APPLICATION_EVENT_SOURCE_KINDS", ("email",))
+APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS = int(
+    os.getenv("APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS", "256")
+)
+APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS", "320"))
+APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS = int(os.getenv("APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS", "500"))
+
+# R3 — which status event types accept a `scheduled_at`. Derived from
+# APPLICATION_STATUS_EVENT_TYPES the way STATS_INTERVIEW_EVENT_TYPES (below)
+# is, so a vocabulary rename cannot leave a stale name behind here.
+_SCHEDULABLE_NAMES = {"interview_requested", "interview_scheduled"}
+APPLICATION_SCHEDULABLE_EVENT_TYPES = tuple(
+    t for t in APPLICATION_STATUS_EVENT_TYPES if t in _SCHEDULABLE_NAMES
+)
+_schedulable_mismatch = set(APPLICATION_SCHEDULABLE_EVENT_TYPES) != _SCHEDULABLE_NAMES
+if _schedulable_mismatch:  # pragma: no cover — a vocabulary edit would trip this
+    raise RuntimeError(
+        f"APPLICATION_SCHEDULABLE_EVENT_TYPES expected {sorted(_SCHEDULABLE_NAMES)} inside "
+        f"APPLICATION_STATUS_EVENT_TYPES {APPLICATION_STATUS_EVENT_TYPES}, got {APPLICATION_SCHEDULABLE_EVENT_TYPES}"
+    )
+# S8 — the mirror of `occurred_at`'s future bound: an interview can be
+# scheduled far ahead (an email cannot arrive in the future — `received_at`
+# reuses APPLICATION_EVENT_MAX_FUTURE_SECONDS instead).
+APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS = int(
+    os.getenv("APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS", str(366 * 86400))
+)
+
 # R5 — artifact versions. Storage decision: TEXT in Postgres, not a file store
 # (spec §Data model) — a tailored CV measured on this codebase is 2-8 KB.
 APPLICATION_ARTIFACT_KINDS = ("cv", "cover_letter", "answers", "outreach")

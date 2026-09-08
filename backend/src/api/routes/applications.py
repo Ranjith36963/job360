@@ -72,6 +72,21 @@ class SaveFitRequest(BaseModel):
         return self.reasoning
 
 
+class EventSource(BaseModel):
+    """Slice 6 (docs/plans/2026-09-07-email-evidence/spec.md §Tool contracts)
+    — the email an event came from. No length caps declared here: every cap
+    is a live ``settings`` value ``spine.validate_source`` checks at call
+    time, the same reasoning ``AddContactRequest``'s docstring gives."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = "email"
+    message_id: str
+    sender: str = ""
+    subject: str = ""
+    received_at: Optional[str] = None
+
+
 class RecordEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -80,6 +95,8 @@ class RecordEventRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     occurred_at: Optional[str] = None
     corrects_event_id: Optional[int] = None
+    source: Optional[EventSource] = None
+    scheduled_at: Optional[str] = None
 
     def clamp_detail(self) -> str:
         cap = settings.APPLICATION_EVENT_DETAIL_MAX_CHARS
@@ -166,6 +183,17 @@ class ApplicationFitOut(BaseModel):
     recorded_at: str
 
 
+class EventSourceOut(BaseModel):
+    """Slice 6 — the ``source`` shape every reader emits (or ``null``, when
+    the event carries none)."""
+
+    kind: str
+    message_id: str
+    sender: str
+    subject: str
+    received_at: Optional[str]
+
+
 class ApplicationEventOut(BaseModel):
     """The timeline shape (``list_events_for_display``) — used by
     ``get_application`` and ``export_history``. Carries ``superseded``;
@@ -180,6 +208,8 @@ class ApplicationEventOut(BaseModel):
     recorded_by: str
     corrects_event_id: Optional[int]
     superseded: bool
+    source: Optional[EventSourceOut]
+    scheduled_at: Optional[str]
 
 
 class ApplicationArtifactOut(BaseModel):
@@ -260,6 +290,7 @@ class ApplicationDetailOut(BaseModel):
     fit: Optional[ApplicationFitOut]
     artifacts: list[ApplicationArtifactOut]
     events: list[ApplicationEventOut]
+    interview_at: Optional[str]
     receipts: list[ApplicationReceiptOut]
     contacts: list[ContactOut]
 
@@ -306,6 +337,8 @@ class RecordEventResponse(BaseModel):
     recorded_at: str
     recorded_by: str
     status: str
+    already_existed: bool
+    scheduled_at: Optional[str]
 
 
 class RecordApplicationReceiptResponse(BaseModel):
@@ -333,6 +366,8 @@ class WhatsNewEventOut(BaseModel):
     recorded_at: str
     recorded_by: str
     corrects_event_id: Optional[int]
+    source: Optional[EventSourceOut]
+    scheduled_at: Optional[str]
 
 
 class WhatsNewApplicationOut(BaseModel):
@@ -654,13 +689,15 @@ async def record_event(
         detail = body.clamp_detail()
         payload = spine.validate_payload(body.payload)
         occurred_at = spine.parse_occurred_at(body.occurred_at)
+        source = spine.validate_source(body.source.model_dump() if body.source else None)
+        scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
         app_row = await spine.get_owned_application(db, user.id, application_id)
         if app_row is None:
             raise SpineError(404, "application not found")
         return await spine.append_event(
             db, user_id=user.id, application_id=application_id, event_type=body.event_type,
             detail=detail, payload=payload, occurred_at=occurred_at, recorded_by=actor_for(user),
-            corrects_event_id=body.corrects_event_id,
+            corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
         )
     except SpineError as exc:
         _raise(exc)

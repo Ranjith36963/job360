@@ -512,17 +512,29 @@ def build_server() -> MCPServer:
         payload: Optional[dict[str, Any]] = None,
         occurred_at: Optional[str] = None,
         corrects_event_id: Optional[int] = None,
+        source: Optional[dict[str, Any]] = None,
+        scheduled_at: Optional[str] = None,
     ) -> dict[str, Any]:
         """Append one event to this application's history — replied, an
         interview stage, a note, a lesson learned. `occurred_at` may be in the
         past (backdating a reply you just found is normal); it may not be
         implausibly in the future. A status event (applied/replied/interview_*/
         offer/rejected/withdrawn/ghosted) moves the application's status; a
-        note-family event never does."""
+        note-family event never does.
+
+        `source` names the email an event came from (kind/message_id/sender/
+        subject/received_at) — the same message_id on the same application is
+        the same event, so you get the first one back with
+        already_existed=true and nothing is written; re-reading an inbox is
+        safe. `scheduled_at` is the real interview datetime (ISO-8601 with a
+        timezone) and is only accepted on interview_requested/
+        interview_scheduled."""
         try:
             body = applications_route.RecordEventRequest(
                 event_type=event_type, detail=detail, payload=payload or {},
                 occurred_at=occurred_at, corrects_event_id=corrects_event_id,
+                source=applications_route.EventSource(**source) if source else None,
+                scheduled_at=scheduled_at,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
