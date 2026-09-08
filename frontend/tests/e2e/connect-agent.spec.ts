@@ -73,6 +73,7 @@ test.describe("Connect an agent", () => {
     await page.goto("/settings/connect");
     await expect(page).not.toHaveURL(/\/login/);
     await expect(page.getByRole("heading", { name: "Connect an agent" })).toBeVisible();
+    await expect(page.getByTestId("mcp-url")).toHaveValue(/\/api\/mcp$/);
     await expect(page.getByTestId("tokens-empty")).toBeVisible({ timeout: 10_000 });
 
     // --- 1. Create -------------------------------------------------------
