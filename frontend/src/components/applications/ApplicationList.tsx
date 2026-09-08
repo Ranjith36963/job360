@@ -5,22 +5,13 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { listApplications, recordApplicationReceipt } from "@/lib/api";
 import type { ApplicationSummary } from "@/lib/api";
+import { STATUS_LABEL } from "@/lib/event-labels";
+import { relativeTime } from "@/lib/utils";
 
 // The status vocabulary is closed in the backend (src/core/settings.py
-// APPLICATION_STATUS_EVENT_TYPES) — this is display copy only, never a
-// second source of truth for which statuses exist.
-const STATUS_LABEL: Record<string, string> = {
-  considering: "Considering",
-  applied: "Applied",
-  replied: "Replied",
-  interview_requested: "Interview requested",
-  interview_scheduled: "Interview scheduled",
-  interview_done: "Interview done",
-  offer: "Offer",
-  rejected: "Rejected",
-  withdrawn: "Withdrawn",
-  ghosted: "Ghosted",
-};
+// APPLICATION_STATUS_EVENT_TYPES) — STATUS_LABEL (src/lib/event-labels.ts)
+// is display copy only, never a second source of truth for which statuses
+// exist.
 
 /**
  * The applications home + the `/applications` list page share this list —
@@ -91,7 +82,16 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
 
   return (
     <ul className="flex flex-col gap-3">
-      {applications.map((app) => (
+      {applications.map((app) => {
+        const artifactCount = Object.values(app.artifacts ?? {}).reduce((a, b) => a + b, 0);
+        const activityParts = [
+          relativeTime(app.last_event_at),
+          app.events > 0 ? `${app.events} event${app.events === 1 ? "" : "s"}` : "",
+          artifactCount > 0 ? `${artifactCount} artifact${artifactCount === 1 ? "" : "s"}` : "",
+          app.receipts > 0 ? `${app.receipts} receipt${app.receipts === 1 ? "" : "s"}` : "",
+        ].filter(Boolean);
+
+        return (
         <li
           key={app.id}
           className="glass-card flex items-center justify-between gap-4 rounded-xl p-4"
@@ -99,6 +99,11 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           <Link href={`/applications/${app.id}`} className="min-w-0 flex-1">
             <p className="truncate font-semibold">{app.job_title || "Untitled role"}</p>
             <p className="truncate text-sm text-muted-foreground">{app.job_company}</p>
+            {activityParts.length > 0 && (
+              <p data-testid="row-activity" className="mt-0.5 truncate text-xs text-muted-foreground/70">
+                {activityParts.join(" · ")}
+              </p>
+            )}
           </Link>
           <div className="flex shrink-0 items-center gap-3">
             <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
@@ -116,7 +121,8 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
             )}
           </div>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }

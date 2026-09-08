@@ -705,9 +705,13 @@ export async function recordApplicationReceipt(
   });
 }
 
+export type WhatsNewResponse = _Schemas["WhatsNewResponse"];
+export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
+export type WhatsNewApplication = _Schemas["WhatsNewApplicationOut"];
+
 export async function getWhatsNew(
   params: { since?: string; after_id?: number; limit?: number } = {}
-): Promise<_Schemas["WhatsNewResponse"]> {
+): Promise<WhatsNewResponse> {
   return request(`/api/whats-new${qs(params as Record<string, unknown>)}`);
 }
 
