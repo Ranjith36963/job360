@@ -5,11 +5,10 @@ FastAPI backend for Job360 — the memory layer for the seeker's own AI agent
 (`../docs/product/VISION.md`): profile extraction, bring-a-job, application
 receipts, the CV tailor (web fallback) and the MCP server at `/api/mcp`.
 The legacy search-and-score pipeline (job sources, scoring, semantic retrieval)
-was deleted 2026-09-05 (roadmap slice 5, #483) — see
-`../docs/_archive/sourcing-era/` for its history.
-Notifications (email via Resend + webhook) are sent synchronously from the API
-process — the ARQ worker and Redis services were deleted 2026-09-02, and there
-are no background jobs.
+was deleted 2026-09-05 (roadmap slice 5, #483); git history is its only record.
+Nothing runs in the background — the ARQ worker and Redis services were deleted
+2026-09-02, and the per-user notification stack followed on 2026-09-05. The only
+mail left is system email (magic link, password reset): `services/auth/email_sender`.
 
 ## Prerequisites
 
@@ -84,14 +83,11 @@ Must pass from `backend/`:
 python -m pytest -q -p no:randomly
 ```
 
-Invariant: full suite passes, 0 failing, across **218** `test_*.py` files (2 `live`
-deselected offline). The collected count is deliberately not written down — run
-`python -m pytest --collect-only -q -p no:randomly | tail -1` for it. Any total
-committed to a doc is unguarded (`scripts/doc_sync_check.py` declines to check it
-on purpose: it needs Postgres, and parametrization makes a cheap check flaky) and
-rots silently — this line carried a stale one. The
-`-p no:randomly` flag keeps the default order deterministic (pytest-randomly is
-installed but opt-in).
+Invariant: the full suite passes with 0 failing. No count is written down here —
+measure it with `python -m pytest --collect-only -q -p no:randomly | tail -1`. A
+total committed to a doc is unguarded and rots silently; this line carried a stale
+one twice. `-p no:randomly` keeps the default order deterministic (pytest-randomly
+is installed but opt-in).
 
 ## Database migrations
 
@@ -104,11 +100,6 @@ python -m migrations.runner down       # reverse last migration
 ```
 
 The API also auto-applies on boot via `lifespan`.
-
-## Worker (deleted 2026-09-02)
-
-The ARQ worker and Redis services were deleted. Notifications now send
-synchronously from the API process — there is nothing to run separately.
 
 ## Cross-wiring with the frontend
 

@@ -64,5 +64,5 @@ server. Step-3 close-out invariant: ≥44 unit tests, ≥5 E2E specs.
 
 ## Further reading
 
-- [`../backend/README.md`](../backend/README.md) — API, CLI, worker, migrations
+- [`../backend/README.md`](../backend/README.md) — API, CLI, migrations
 - [`../docs/README.md`](../docs/README.md) — full docs index
