@@ -2,20 +2,15 @@
 
 import {
   Briefcase,
-  Search,
   FileText,
   GraduationCap,
-  Target,
-  BarChart3,
   Users,
   Globe,
   Star,
   Award,
-  TrendingUp,
   Handshake,
   Building2,
   MapPin,
-  Radar,
   Layers,
   Mail,
   Clock,
@@ -35,9 +30,8 @@ import {
 } from "lucide-react";
 
 const ICON_SET: LucideIcon[] = [
-  Briefcase, Search, FileText, GraduationCap, Target,
-  BarChart3, Users, Globe, Star, Award,
-  TrendingUp, Handshake, Building2, MapPin, Radar,
+  Briefcase, FileText, GraduationCap, Users, Globe,
+  Star, Award, Handshake, Building2, MapPin,
   Layers, Mail, Clock, CheckCircle, Shield,
   Zap, BookOpen, PenTool, Laptop, Coffee,
   Lightbulb, Rocket, Heart, Send, UserCheck,
