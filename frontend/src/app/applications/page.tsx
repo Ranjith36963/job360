@@ -1,6 +1,7 @@
 "use client";
 
 import { ApplicationList } from "@/components/applications/ApplicationList";
+import { WhatsNewStrip } from "@/components/applications/WhatsNewStrip";
 
 // spec R14 — the applications list. Protected by middleware.ts
 // (`/applications` is in PROTECTED_PATHS). No metadata/SSR needs here, so a
@@ -14,6 +15,7 @@ export default function ApplicationsPage() {
           Every job you&apos;ve brought, its status, and its whole history.
         </p>
       </div>
+      <WhatsNewStrip />
       <ApplicationList />
     </div>
   );
