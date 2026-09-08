@@ -10,6 +10,7 @@ import {
   ClipboardPaste,
   FolderClock,
   Settings,
+  Plug,
   LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,10 +23,15 @@ import { useAuth } from "@/components/layout/AuthProvider";
 // Channels/notifications outright (VISION:133 — notifications are pull-not-
 // push) — Job360 never sources or ranks jobs (VISION rule 4), so there is no
 // catalog left to browse either.
+//
+// Agentic UX audit (2026-09-08) — the whole product depends on the user
+// connecting their own agent, but /settings/connect was reachable only via
+// the gear icon. It is a first-class destination now, not a settings tab.
 const NAV_LINKS = [
   { href: "/profile", label: "Profile", icon: User },
   { href: "/bring", label: "Bring a job", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },
+  { href: "/settings/connect", label: "Connect an agent", icon: Plug },
 ] as const;
 
 export function Navbar() {
@@ -43,6 +49,12 @@ export function Navbar() {
   // the session resolves. While unknown, the header shows the logo only.
   const signedIn = Boolean(user);
   const signedOut = !loading && !user;
+
+  // /settings/connect is now its own NAV_LINKS entry (see above), so the gear
+  // must not also light up for it — otherwise two nav controls look active
+  // at once on that page.
+  const settingsActive =
+    pathname.startsWith("/settings") && !pathname.startsWith("/settings/connect");
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/30 bg-background/60 backdrop-blur-md">
@@ -85,10 +97,10 @@ export function Navbar() {
           {signedIn && (
             <Link
               href="/settings"
-              aria-current={pathname.startsWith("/settings") ? "page" : undefined}
+              aria-current={settingsActive ? "page" : undefined}
               aria-label="Settings"
               className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-                pathname.startsWith("/settings")
+                settingsActive
                   ? "bg-primary/10 text-primary"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
               }`}
@@ -188,9 +200,9 @@ export function Navbar() {
                 <Link
                   href="/settings"
                   onClick={() => setMobileOpen(false)}
-                  aria-current={pathname.startsWith("/settings") ? "page" : undefined}
+                  aria-current={settingsActive ? "page" : undefined}
                   className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                    pathname.startsWith("/settings")
+                    settingsActive
                       ? "bg-primary/10 text-primary"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                   }`}

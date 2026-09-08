@@ -72,6 +72,18 @@ test.describe("Landing CTA → profile journeys", () => {
     await expect(page).toHaveURL(/\/login\?next=%2Fprofile/, { timeout: 40_000 });
   });
 
+  // Agentic UX audit (2026-09-08) — the hero's secondary CTA links straight
+  // to /settings/connect; href check only, no navigation needed here since
+  // the middleware redirect for a protected route is already covered above.
+  test("hero 'Connect an agent' link points at /settings/connect", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await expect(
+      page.getByRole("link", { name: /connect an agent/i }).first()
+    ).toHaveAttribute("href", "/settings/connect");
+  });
+
   // ── Journey 3: already signed in → straight to /profile ───────────────────
   //
   // R14 (docs/plans/2026-09-04-application-spine) — a signed-in visitor's "/"

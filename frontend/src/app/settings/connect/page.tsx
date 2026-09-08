@@ -145,6 +145,71 @@ function NewTokenReveal({
 }
 
 // ---------------------------------------------------------------------------
+// Connect Claude.ai / ChatGPT — these apps sign in through the OAuth consent
+// screen (/oauth/consent/[rid]), not a pasted token, so the only thing the
+// user needs from this page is the address to paste into the app's own
+// "add connector" flow. Agentic UX audit (2026-09-08) — this is the address
+// step; token minting below is for MCP clients that take a bearer token
+// (Claude Code) instead of doing OAuth.
+// ---------------------------------------------------------------------------
+
+function ConnectAppCard() {
+  const url = mcpUrl();
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Connect Claude.ai or ChatGPT</CardTitle>
+        <CardDescription>
+          These apps connect with a sign-in, not a token. Paste this address
+          as a custom connector; when the app asks, sign in with your Job360
+          email.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-1">
+          <Label htmlFor="mcp-url">Address</Label>
+          <div className="flex gap-2">
+            <Input
+              id="mcp-url"
+              readOnly
+              value={url}
+              className="font-mono text-xs"
+              data-testid="mcp-url"
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => copyText(url, "Address")}
+            >
+              Copy
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-3 text-xs text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Claude.ai</span> —
+            Settings → Connectors → Add custom connector → paste the address →
+            Connect.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">
+              ChatGPT (Plus/Pro)
+            </span>{" "}
+            — Settings → turn on Developer mode → Connectors → Create → paste
+            the address → Create.
+          </p>
+          <p>
+            Claude Code and other MCP clients use a personal token instead —
+            create one below.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Connected apps — OAuth grants (ChatGPT, Claude.ai, any spec-following MCP
 // client that signed in through the consent screen at /oauth/consent/[rid]).
 // One active grant per (user, client); Revoke kills every token under it on
@@ -454,6 +519,7 @@ export default function ConnectAgentPage() {
           applied. A personal token is the key; you can revoke it any time.
         </p>
       </div>
+      <ConnectAppCard />
       <ConnectedAppsCard
         grants={grants}
         loading={grantsLoading}
