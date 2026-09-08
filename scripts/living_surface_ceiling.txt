@@ -100,4 +100,13 @@
 # thing the code never shows. The "state on main" column is the one part that
 # CAN drift; it is dated so a reader knows when it was measured. Re-measured,
 # not estimated.
-3797
+# 3699 (2026-09-08, daily truth check): lowered by 98. The scout deleted prose
+# restating code that no longer exists -- product_design_rules' UK-gate and
+# scorer/prefilter/embeddings implementation detail (all deleted with the
+# sourcing era), troubleshooting's Redis-on-Windows section (ARQ worker deleted
+# 2026-09-02), DEPLOY's five-service/worker/Redis claims, BREACH-RUNBOOK's rows
+# for five dropped tables, and dead pointers in the verify-job360 skill. Five
+# raw file:line citations into deleted files went with them. Left at 3797 this
+# would be 96 lines of slack, and the mutation drill said so: a planted 40-line
+# regression went unreported. Re-measured, not estimated.
+3699

@@ -5,8 +5,8 @@
 feature, page, button, and route, from landing on the site to closing it. A "full sweep"
 is not done until every item below is exercised (or explicitly marked gated, with the reason).
 
-**How to use:** start the full stack (backend + frontend + Redis/ARQ worker when present),
-register a fresh user, then walk the list top to bottom. Prove each with evidence
+**How to use:** start the full stack (backend + frontend), register a fresh user, then
+walk the list top to bottom. Prove each with evidence
 (HTTP code, DB row, screenshot, log line). Report a PASS / FAIL / GATED table.
 
 **Verdict legend:** `LIVE` = exercised against the running app · `CODE` = present + wired but
@@ -15,8 +15,9 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 **Standing gates (note in every report until resolved):**
 - **LinkedIn enrich (#12)** needs a sample LinkedIn PDF in `test-artifacts/`.
 - **GitHub enrich (#13)** hits **live GitHub** (rate-limited; needs a real handle).
-- **LLM CV parse (#11)** uses the Gemini→Groq→Cerebras fallback; free-tier daily quotas can
-  exhaust → extraction may degrade to titles-only or fall back slowly. Not a bug.
+- **LLM CV parse (#11)** walks the provider fallback chain in
+  `services/profile/llm_provider.llm_extract`; free-tier daily quotas can exhaust →
+  extraction may degrade to titles-only or fall back slowly. Not a bug.
 
 ---
 
@@ -77,4 +78,4 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 Produce a table: `# | item | LIVE/CODE/GATED/FAIL | evidence`. End with:
 - counts (e.g. "30 LIVE, 3 CODE, 1 GATED, 1 FAIL")
 - the FIRST real FAIL with exact file:line + error (if any)
-- what's needed to close the gates (install Redis; add LinkedIn sample; set OAuth creds)
+- what's needed to close the gates (add LinkedIn sample; set OAuth creds)

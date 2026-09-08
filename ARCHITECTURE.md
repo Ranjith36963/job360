@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | Migration head | **0041** | `backend/migrations/` |
 | Migration files | **42** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **135** | `backend/tests/` |
+| `test_*.py` files | **136** | `backend/tests/` |
 | GitHub Actions workflows | **23** | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -34,7 +34,6 @@ job360/
 ├── backend/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev extras, ruff/mypy/pytest config
-│   ├── data/                         # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — the store is Postgres; DB_PATH is a connection selector, not a file (settings.py:15-20, pg.py:732-737)
 │   ├── migrations/                   # forward/reverse SQL migration pairs + runner.py (counts: repo facts above)
 │   ├── src/
 │   │   ├── cli.py                    # Click CLI: api, setup-profile
@@ -58,7 +57,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
-│   └── tests/                        # across 135 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 136 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,applications,tailor,profile,layout}/
