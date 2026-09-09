@@ -571,6 +571,15 @@ def doc_tree_dead_paths() -> list[tuple[str, str, str]]:
             # a smaller true claim beats a larger false one.
             if not parent or not (ROOT / parent).is_dir():
                 continue
+            # A path the tree ITSELF discloses as gitignored (e.g.
+            # `data/  # Runtime (gitignored): ...`) is correctly absent from a
+            # fresh checkout -- that is what gitignored means. Found live on
+            # PR #529, the first PR run under the new BLOCKING gate: this line
+            # was already true and had sat unenforced while the check was
+            # report-only on PRs, so a truthful "(gitignored)" disclosure was
+            # reported as a dead path.
+            if "(gitignored)" in line.lower():
+                continue
             if not (ROOT / full).exists():
                 out.append((rel, str(i), full))
     return out
