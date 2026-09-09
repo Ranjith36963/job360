@@ -58,7 +58,12 @@ where the previous fifteen left it flat.
 
 ## Enforced by
 
-`living_surface()` and its ratchet in `scripts/doc_sync_check.py` (CI fails if
-the prose grows), the line-citation ratchet, and `scripts/gen_doc_blocks.py`
+`living_surface()` in `scripts/doc_sync_check.py` (reports the LIVING-doc line
+count on every run, as a trend to watch by eye), the line-citation ratchet
+(CI fails on a new raw line-number citation), and `scripts/gen_doc_blocks.py`
 (CI fails if a generated block is stale **or** its marker was deleted). The
-contract itself lives in the nightly routine's prompt.
+standalone growth ratchet (`living_surface_ceiling.txt` / `surface_regression()`)
+was retired 2026-09-09 when the owner moved doc-sync to a PR-time gate only —
+drift is fixed in the PR that caused it, so a separate haystack-growth ceiling
+was no longer pulling its weight. The "delete, do not reword" contract itself
+lives in this decision and in `/sync`'s instructions.
