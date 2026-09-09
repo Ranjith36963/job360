@@ -28,15 +28,14 @@ locations, remote/hybrid/office, experience level, and about_me.
 
 | Layer | Compliant behaviour |
 |---|---|
-| Dim scorers (`scoring_dimensions.py`) | Empty user side → a **constant** for every job (neutral half-weight or 0). A constant cannot change ranking order — that is what "silent" means. Never a per-job penalty for a preference that was never stated. |
-| Prefilter (`prefilter.py`) | Empty `preferred_locations` / `work_arrangement` / `experience_level` → the stage **passes everything**. A filter you didn't fill is a filter that doesn't exist. |
-| LLM judge (`llm_matcher.profile_to_matcher_text`) | Empty prefs are **not mentioned** in the prompt at all — the judge cannot penalise what it never sees. |
-| Embeddings (`embeddings.py`) | Empty fields contribute no text. |
-| Frontend | Preference inputs are **optional and say so**. Never block a search on unfilled preferences; never silently write a default value the user didn't choose (a written default is indistinguishable from a choice — see the contradiction below). |
+| The profile the agent reads | An unset field is **absent**, not zero and not a default we invented. |
+| Frontend | Preference inputs are **optional and say so**; never silently write a default value the user didn't choose (a written default is indistinguishable from a choice — see the contradiction below). |
 | Extraction (Pillar 1) | The mirror rule: extract everything offered, invent nothing. An input the user didn't provide (no LinkedIn, no GitHub) produces empty fields, not guesses. |
 
-**Audited 2026-08-07:** prefilter, judge, embeddings, and all four dim scorers
-comply. One contradiction found and reported:
+(The scorer/prefilter/judge/embeddings rows this table used to carry described
+the sourcing pipeline deleted in slice 5, #483.)
+
+One contradiction found 2026-08-07 and still open:
 
 - **`needs_visa: bool` cannot say "unset".** `False` conflates "I don't need
   sponsorship" with "I never answered". Every other preference has an empty
@@ -76,16 +75,10 @@ every downstream budget and can still surface when the other dimensions score
 well. Measured 2026-08-07: 156 clearly foreign jobs were live in prod
 (Shanghai, São Paulo, Lima, Ottawa, München) despite the penalty existing.
 
-**How the gate decides** (`src/services/uk_gate.py`, one chokepoint in
-`main.py` — never per-source). Order is load-bearing:
-
-1. A named foreign **country or admin division** → **blocked**, whoever listed it.
-2. Remote fenced to another region ("Remote — US only") → **blocked**.
-3. An explicit UK country name or a **full UK postcode** → allowed.
-4. A hit in the **UK gazetteer** (~52k places) → allowed.
-5. Genuine remote → allowed.
-6. Otherwise **who said it decides**: a UK-native source keeps it; a global
-   source needs evidence (£, right-to-work language, a UK city in the body).
+**There is no gate in the code today.** It stood at ingestion, and slice 5
+(#483) deleted ingestion: the user brings the job, so nothing of ours decides
+whether a job may enter. The rule below is what the gate encoded, and it binds
+the next thing that ever filters anything.
 
 ### THE RULE THIS ENCODES: never hand-enumerate an UNBOUNDED set
 
@@ -95,9 +88,8 @@ this list? Then you missed that."* He is right — foreign cities are unbounded,
 so a hand-written **sample** of them rots silently and misses forever.
 
 So the polarity is inverted. **UK places are FINITE** (~52k populated places,
-published; settlements do not churn), compiled from GeoNames by
-`scripts/build_uk_gazetteer.py` into `src/data/uk_gazetteer/`. Every future miss is
-a data refresh, never a code edit.
+published; settlements do not churn), so the list was compiled from GeoNames at
+build time. Every future miss is a data refresh, never a code edit.
 
 **The distinction that matters:** countries (~250) and first-level admin
 divisions (~4.5k — US states, Canadian provinces) stay enumerated *on purpose*,
@@ -109,61 +101,18 @@ fatal hole — `"Cambridge (USA)"` contains "cambridge", a real UK town, so a
 pure gazetteer lookup would **admit** it. The country override runs first.
 
 **Ambiguity is COMPUTED, not typed.** Boston, Cambridge and Perth name real
-places here and abroad. `ambiguous.txt` is derived at build time by comparing
-UK populations against **world cities *and* the closed country / first-level
-admin-division sets** — London survives (London, Ontario is ~4% the size);
-Boston does not. Hand-listing collisions would repeat the original sin.
-
-The country/admin1 half was added for issue #330 (2026-08-19) and it is the
-whole reason the escape below finally holds. The first version compared against
-`cities500` alone — world *city* primary names — and the UK has hamlets called
-New York (pop 0), California (830) and Canada (0). None of those three is a
-cities500 primary name (GeoNames calls NYC "New York City"; California is a US
-state; Canada is a country), so all three scored as *trusted, unambiguous* UK
-places and carried 153 of the 190 live foreign rows straight through the
-dual-site escape. Countries and admin1 divisions were already downloaded and
-already closed sets, so they now feed the same computation at a flat weight —
-`FOREIGN_ADMIN_WEIGHT = 20_000` (`backend/scripts/build_uk_gazetteer.py:95,181-186`).
-The weight is measured, not chosen by taste: the 84 UK names colliding with a
-foreign country or admin1 have exactly one population gap, between Warwick
-(37,267) and Portsmouth (47,350), so a 40,000-effective cut-off keeps
-Manchester, Southampton and Canterbury while dropping the hamlets. **Those
-figures are a dated measurement, not something you can re-derive from this
-repo:** they were taken on 2026-08-19 and are recorded in the builder's own
-comment (`backend/scripts/build_uk_gazetteer.py:90-95`); the GeoNames snapshot
-they came from is fetched at build time and never checked in, so `--check`
-validates file counts and canaries, not these populations. Treat them as the
-recorded basis for the threshold, and re-measure rather than re-cite if the
-gazetteer is ever rebuilt against newer GeoNames data. No branch
-was added to `check_uk` and no city was typed — the fix is DATA, which is the
-rule. Still admitted on purpose: `"London, Ontario"` — a big UK city beside a
-foreign region is how both a foreign address and a genuine two-site ad get
-written, and `london` never enters `ambiguous.txt`, so the escape still speaks
-for it (`backend/src/services/uk_gate.py:367-382`; root `CLAUDE.md:57` rule #30
-records this as the remaining gap). **No test pins that exact input** —
-`backend/tests/test_uk_gate.py:161` asserts only bare `check_uk("London", …)`,
-and `backend/tests/test_scorer.py:673-679` names "London, Ontario" expressly to say it is
-*not* asserted there. The behaviour above is read off the gate logic and the
-shipped gazetteer data (`ontario` in `foreign_admin.txt`, absent from
-`uk_places.txt`; `london` in neither ambiguity list), so treat it as
-documented-and-unguarded until a test claims it.
-
-**Traps found by dry-running over the live catalog** (do this before shipping
-any location rule):
-- The naive "no UK token → reject" blocked **48%**, including Telford and
-  Northampton — `UK_TERMS` only held 26 cities.
-- **devitjobs** was misclassified as global; its endpoint is devitjobs.**uk**.
-  That alone was 1,409 wrongly blocked jobs.
-- `"Sydney, Australia"` was **allowed**: the UK has a hamlet called Sydney, so
-  a bare gazetteer hit triggered the dual-site escape. Dual-site now demands an
-  *unambiguous* UK signal.
-- `"Indianapolis, IN, USA"` was not blocked — the country data holds "United
-  States", not "USA"/"US". ISO2 + ISO3 codes are now included.
-
-Measured after: 799 blocked of 4,544 (18%), **2 potential false drops**.
+places here and abroad. The collision list was derived at build time by
+comparing UK populations against world cities *and* the closed country /
+admin-division sets — London survives (London, Ontario is ~4% the size); Boston
+does not. Hand-listing collisions would repeat the original sin.
 
 **Ambiguity favours the user:** a dual-site posting ("London / New York") is
 kept — the user can take the UK half.
+
+**Dry-run any location rule over real data before shipping it.** Every trap the
+first version hit was invisible in review and obvious in a dry run: a naive "no
+UK token → reject" blocked 48% of the catalog, one source was misclassified by
+its own domain, and a hamlet named Sydney let "Sydney, Australia" through.
 
 ---
 

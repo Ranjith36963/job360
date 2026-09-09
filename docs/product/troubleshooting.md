@@ -3,7 +3,7 @@
 
 Common **developer-environment** issues and fixes (ports, locks, env-var gotchas, install hiccups). Each entry: **Symptom → Cause → Fix**.
 
-> **For production issues** read prod directly — Sentry, `railway logs`, the Postgres service — as root `CLAUDE.md` describes. The sourcing-era runbook and glossary were archived FROZEN in `docs/_archive/sourcing-era/` (slice 5, #483); their SQL targets tables that no longer exist.
+> **For production issues** read prod directly — Sentry, `railway logs`, the Postgres service — as root `CLAUDE.md` describes.
 
 ---
 
@@ -44,14 +44,11 @@ one test writes to schema A while another reads schema B.
 **Fix:**
 
 ```bash
-# From the repo root. `make redis-up` starts the redis service ONLY
-# (Makefile:238 → `docker compose ... up -d redis`), so it does NOT fix this
-# symptom — postgres is a separate service in docker-compose.dev.yml:37.
-# `--wait` is load-bearing: plain `up -d` returns as soon as the container is
-# RUNNING, so pytest can start before postgres accepts connections and you get
-# this exact symptom back. `--wait` blocks on the pg_isready healthcheck at
-# docker-compose.dev.yml:50-54.
-docker compose -f docker-compose.dev.yml up -d --wait   # both: postgres + redis
+# From the repo root. `--wait` is load-bearing: plain `up -d` returns as soon as
+# the container is RUNNING, so pytest can start before postgres accepts
+# connections and you get this exact symptom back. `--wait` blocks on the
+# pg_isready healthcheck in docker-compose.dev.yml.
+docker compose -f docker-compose.dev.yml up -d --wait
 cd backend && python -m pytest -q -p no:randomly
 ```
 
@@ -70,22 +67,14 @@ isolation, and the symptom looks like unrelated tests failing.
 
 **Symptom:** `setup-profile --cv ...` errors with `LLMKeyMissing`, `LLMRateLimited` or
 `LLMAllProvidersFailed` — all subclasses of `LLMError`
-(`backend/src/services/profile/llm_provider.py:48,53,62,71`;
-there is no `LLMProviderError`) — or hangs with no output.
+(`services.profile.llm_provider`; there is no `LLMProviderError`) — or hangs with
+no output.
 
 **Cause:** No LLM API key set, or the first provider in the fallback chain is rate-limited.
 
-**Fix:** At least ONE of these four must be set in `.env` — the same four
-`LLM_KEY_VARS` names the key probe reads (`backend/src/services/profile/llm_provider.py:231-236`):
-
-```
-OPENAI_API_KEY=...      # PRIMARY — heads the chain; set this one if you have it
-GEMINI_API_KEY=...      # free tier
-GROQ_API_KEY=...        # free tier
-CEREBRAS_API_KEY=...    # free tier
-```
-
-Fallback chain (`backend/src/services/profile/llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. If every configured provider fails, `llm_extract` raises `LLMRateLimited` (retry later) or `LLMAllProvidersFailed`; with no key at all it raises `LLMKeyMissing`. Callers must NOT persist an empty result on `LLMRateLimited`.
+**Fix:** At least ONE of the keys in `llm_provider.LLM_KEY_VARS` must be set in
+`.env`. Which providers are tried, in what order, and which error each failure
+raises is the docstring of `llm_provider.llm_extract` — read that, not a copy here.
 
 Debug with:
 
@@ -98,33 +87,7 @@ Look for `[llm_provider]` lines — they log which provider was tried and why ea
 
 ---
 
-## 4. Redis missing on Windows
-
-**Symptom:** `ConnectionRefusedError: [WinError 10061]` or `check_worker.py` reports `tcp localhost:6379 unreachable`.
-
-**Cause:** Redis has no native Windows build. The ARQ worker needs a Redis instance.
-
-**Fix — pick one:**
-
-- **A. WSL2 + Ubuntu** (recommended for dev)
-  ```bash
-  wsl --install -d Ubuntu
-  # inside WSL:
-  sudo apt-get install redis-server && sudo service redis-server start
-  ```
-
-- **B. Docker Desktop**
-  ```bash
-  docker run -d -p 6379:6379 --name redis redis:7-alpine
-  ```
-
-- **C. Memurai** (Redis-compatible native Windows fork) — https://www.memurai.com/
-
-- **D. Skip the worker.** The CLI (`python -m src.cli run`), the read-only API, the frontend, and the full test suite all work without ARQ / Redis. Only the live notification dispatcher needs it.
-
----
-
-## 5. `core.hooksPath` blocks pre-commit install
+## 4. `core.hooksPath` blocks pre-commit install
 
 **Symptom:** `pre-commit install` refuses with:
 ```
@@ -143,7 +106,7 @@ pre-commit install
 
 ---
 
-## 6. Unicode CV text crashes fpdf2
+## 5. Unicode CV text crashes fpdf2
 
 **Symptom:** `UnicodeEncodeError: 'latin-1' codec can't encode character` when the test suite builds a sample PDF with fpdf2.
 
@@ -172,7 +135,7 @@ Our `tests/conftest.py` helpers use Option B.
 
 ---
 
-## 7. Pytest suite stalls / zero output on Windows
+## 6. Pytest suite stalls / zero output on Windows
 
 **Symptom:** `python -m pytest tests/` under git-bash / MSYS2 produces no output and never exits.
 
@@ -193,7 +156,7 @@ cd backend && python -m pytest tests\ -v
 
 ---
 
-## 8. Migrations runner "already applied" confusion
+## 7. Migrations runner "already applied" confusion
 
 **Symptom:** `python -m migrations.runner up` prints `no pending migrations` but you expected 0010 to run.
 
@@ -223,20 +186,18 @@ python -m migrations.runner up
 ```
 
 > ⚠️ **`down` takes NO migration stem.** It reverts the *last applied* migration and
-> nothing else — `backend/migrations/runner.py:281-297` reads `applied[-1]` and runs
-> that stem's `.down.sql`. The second positional argument is the **db_path**, not a
-> selector (`backend/migrations/runner.py:395,399`: usage is `[up|down|status] [db_path]`,
-> defaulting to `data/jobs.db`). So `python -m migrations.runner down 0010` does **not**
-> target migration 0010 — it swallows `0010` as a connection path and still reverts
-> whatever is at the head. Against a head of `0030` that reverts `0030`, and following
-> it with `up` re-applies `0030`: it looks like it worked and changes nothing about 0010.
+> nothing else; the second positional argument is the **db_path**. So
+> `python -m migrations.runner down 0010` does **not** target migration 0010 — it
+> swallows `0010` as a connection path and still reverts whatever is at the head, and
+> a following `up` re-applies that: it looks like it worked and changes nothing about
+> 0010. Pinned by `tests/test_migrations_cli_argv.py::test_down_swallows_a_migration_stem_as_the_db_path`.
 
 Migrations are forward-only by default, and `down` is one step at a time — there is
 no `down <stem>` and no `down --all`.
 
 ---
 
-## 9. `pip install -e .` fails on Windows with long-path errors
+## 8. `pip install -e .` fails on Windows with long-path errors
 
 **Symptom:** `OSError: [WinError 206] The filename or extension is too long` during `pip install -e backend/`.
 
@@ -258,7 +219,7 @@ no `down <stem>` and no `down --all`.
 
 ---
 
-## 10. Frontend: "Failed to fetch" from `/api/...` calls
+## 9. Frontend: "Failed to fetch" from `/api/...` calls
 
 **Symptom:** Network panel shows CORS error or `TypeError: Failed to fetch` when the dashboard calls the backend.
 

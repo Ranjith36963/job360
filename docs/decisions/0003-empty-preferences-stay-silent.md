@@ -47,7 +47,7 @@ Yes.
 
 ## Enforced by
 
-`tests/test_design_rules.py`. **Coverage bound, stated honestly:** that test
-covers the dimension scorers and the prefilter only. The judge prompt and the
-frontend are **not** guarded and must be checked by hand — recorded here so the
-gap is a known gap rather than an assumed absence.
+Nothing automated. The test that guarded it (`tests/test_design_rules.py`) covered
+the dimension scorers and the prefilter, and went with them in slice 5 (#483).
+What survives the pivot — an unset profile field reaches the agent as ABSENT, not
+zero — is checked by hand until a test claims it.

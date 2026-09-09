@@ -23,21 +23,19 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 
 ---
 
-> **Status: ✅ LIVE since 2026-07-02.** Railway Hobby active. Project `job360`, 5 services all Online.
+> **Status: ✅ LIVE since 2026-07-02.** Railway Hobby active, project `job360`.
 > - **Custom domain:** https://job360.uk
 > - **Frontend:** https://frontend-production-c608f.up.railway.app
 > - **Backend API:** https://backend-production-80e8e.up.railway.app
-> - Verified live: `/readyz` → `{db:ok, redis:ok}`, security headers, full register→login→/me auth flow.
-> - Worker running 10 ARQ functions + 2 crons. Managed Postgres + Redis attached.
+> - Which services exist, and what each is running: `railway status` — never a list here.
 
 ## 🟢 What's already done (no action needed)
-- Backend + frontend **Dockerfiles**, **`docker-compose.prod.yml`** (5 services) — validated.
+- Backend + frontend **Dockerfiles** and **`docker-compose.prod.yml`** — validated.
 - App runs on **Postgres**. (Test count deliberately not quoted here — measure it:
   `cd backend && python -m pytest --collect-only -q | tail -1`. The
   merge-gate floor lives in one place, `CONTRIBUTING.md`, and only there.)
-- **`/health`, `/livez`, `/readyz`** + **env validation at boot** (fail-fast on missing prod secrets).
-- **DB backup script** (`backend/scripts/backup_db.py`).
-- All prod env values staged in the local `.env` (LLM keys, `SESSION_SECRET`, `CHANNEL_ENCRYPTION_KEY`, `SENTRY_DSN`, `NEXT_PUBLIC_POSTHOG_KEY`).
+- **`/health`, `/livez`, `/readyz`** + **env validation at boot** (fail-fast on missing prod secrets — the list is `settings._REQUIRED_PROD_VARS`).
+- **Nightly encrypted DB backup** — `.github/workflows/db-backup.yml`, restore procedure in `RUNBOOK-backups.md`.
 
 ## First-time provisioning (HISTORICAL — already done 2026-07-02)
 
@@ -74,6 +72,7 @@ railway domain --service frontend    # → public site URL
 ```
 
 ## Verify after deploy
-- `curl https://<backend-url>/livez` → 200; `/readyz` → `{db:ok, redis:ok}`
+- `curl https://<backend-url>/livez` → 200; `/readyz` → every check `ok` (a check with no
+  service configured reports `skipped`, not `error` — see `routes.health.readyz`).
 - Register + upload CV on the live frontend; confirm a row in the managed Postgres.
 - Sentry receives a test error; PostHog receives a pageview.

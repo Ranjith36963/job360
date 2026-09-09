@@ -100,4 +100,13 @@
 # thing the code never shows. The "state on main" column is the one part that
 # CAN drift; it is dated so a reader knows when it was measured. Re-measured,
 # not estimated.
-3797
+# 3699 (2026-09-09, daily truth check): lowered by 98. Deletions only —
+# ARCHITECTURE.md's hand-copied baseline SQL block (it had drifted 14 columns
+# behind `JobDatabase.init_db` and still created `user_actions`, dropped by
+# 0040) plus the `purge_old_jobs` paragraph for a function no code defines;
+# the Redis/ARQ-worker troubleshooting section; CHANNEL_ENCRYPTION_KEY, which
+# nothing in backend/src reads; and product_design_rules' walkthrough of the
+# deleted uk_gate/gazetteer builder. The mutation drill proved 3797 had become
+# slack: a planted 40-line regression went unreported. Re-measured, not
+# estimated.
+3699

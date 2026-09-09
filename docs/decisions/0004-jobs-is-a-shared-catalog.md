@@ -6,12 +6,9 @@
 
 ## Decision
 
-The `jobs` table never gets a `user_id` or `tenant_id` column. Neither do
-`job_enrichment` or `job_embeddings`.
+The `jobs` table never gets a `user_id` or `tenant_id` column.
 
-Per-user state lives in `user_feed`, `user_actions` and `applications`.
-Per-user *scoring* happens at read time, by passing the user's preferences and
-an enrichment lookup into `JobScorer`.
+Per-user state lives in the application spine's tables, keyed by `job_id`.
 
 ## The problem it solved
 

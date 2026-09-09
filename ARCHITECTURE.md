@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | Migration head | **0041** | `backend/migrations/` |
 | Migration files | **42** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **135** | `backend/tests/` |
+| `test_*.py` files | **136** | `backend/tests/` |
 | GitHub Actions workflows | **23** | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -34,7 +34,6 @@ job360/
 ├── backend/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev extras, ruff/mypy/pytest config
-│   ├── data/                         # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — the store is Postgres; DB_PATH is a connection selector, not a file (settings.py:15-20, pg.py:732-737)
 │   ├── migrations/                   # forward/reverse SQL migration pairs + runner.py (counts: repo facts above)
 │   ├── src/
 │   │   ├── cli.py                    # Click CLI: api, setup-profile
@@ -58,7 +57,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
-│   └── tests/                        # across 135 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 136 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,applications,tailor,profile,layout}/
@@ -227,56 +226,11 @@ with the sourcing era — do not rebuild them.
 
 ## Database Schema
 
-> **The SQL below is SQLite-flavoured, and is never executed as written.** It is the legacy baseline `init_db()` hands to `executescript()`, which pushes every statement through `pg.translate()` first (`repositories/pg.py:670-674`) — `INTEGER PRIMARY KEY AUTOINCREMENT` becomes a Postgres identity column (`pg.py:193-195`), and `?` placeholders, `datetime('now')`, `INSERT OR IGNORE` and FK clauses are rewritten or stripped the same way. Read it as the *shape* of the baseline, not as DDL you could run against Postgres by hand.
->
-> This section shows the baseline schema. The full schema is built by the forward migrations in `backend/migrations/` — see the repo-facts table above for the current count and head. Migration `0039_drop_sourcing_tables` (slice 5, #483) drops `run_log`, `job_enrichment` and `job_embeddings` — the three tables nothing left in the codebase reads. `jobs`, `user_feed`, `applications`, `application_events`, `user_actions` and every profile/auth/receipt table are untouched; the down migration recreates the three dropped tables empty.
-
-```sql
-CREATE TABLE IF NOT EXISTS jobs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    company TEXT NOT NULL,
-    location TEXT DEFAULT '',
-    salary_min REAL,
-    salary_max REAL,
-    description TEXT DEFAULT '',
-    apply_url TEXT NOT NULL,
-    source TEXT NOT NULL,
-    date_found TEXT NOT NULL,
-    normalized_company TEXT NOT NULL,
-    normalized_title TEXT NOT NULL,
-    first_seen TEXT NOT NULL,
-    UNIQUE(normalized_company, normalized_title)
-);
-
-CREATE TABLE IF NOT EXISTS user_actions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id INTEGER NOT NULL,
-    action TEXT NOT NULL,            -- save, dismiss, applied, etc.
-    notes TEXT DEFAULT '',
-    created_at TEXT NOT NULL,
-    UNIQUE(job_id)
-);
-
-CREATE TABLE IF NOT EXISTS applications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id INTEGER NOT NULL,
-    stage TEXT NOT NULL DEFAULT 'applied',  -- applied, interview, offer, rejected
-    notes TEXT DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(job_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
-CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
-```
-
-**Pragmas:** none. This was a SQLite-era line (`journal_mode=WAL`, `busy_timeout=5000`); the store has been Postgres since 2026-07-02 and sets neither — `database.py:94` says so in as many words, `db_retry.open_db()` accepts `busy_timeout_ms` only for signature compatibility and ignores it (`db_retry.py:30-31`), and the `pg.py` shim turns any remaining `PRAGMA` into a no-op (`pg.py:316-317`).
-
-**Auto-purge:** `purge_old_jobs(days=30)` deletes jobs by **liveness, not ingestion** — `DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < cutoff` (`repositories/database.py:688,723`), skipping any row whose `source` is the user-brought marker (hard rule 3) — a brought job (and its application snapshot) survives the purge. It also deletes the catalog-derived child rows itself because the shim strips every FK clause, including `ON DELETE CASCADE`.
-
-**first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a database DEFAULT).
+The schema is **built, not described**: the legacy baseline is the SQLite-flavoured
+`executescript()` block in `repositories.database.JobDatabase.init_db` (every statement
+is rewritten for Postgres by `repositories.pg.translate` on the way through), and every
+change since is a forward/reverse pair in `backend/migrations/`. Read those two — a
+copy here is a second source of truth that goes stale the next time either moves.
 
 ---
 
