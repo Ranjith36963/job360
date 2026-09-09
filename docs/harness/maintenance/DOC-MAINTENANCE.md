@@ -134,7 +134,7 @@ report, but never edits them — memory hygiene is the session's own job.
 |---|---|
 | Docs-as-code: in repo, PR-reviewed, versioned | Already true — keep it |
 | Dedicated technical writers | Loop 3 tooling is the writer; you are the editor who merges |
-| Freshness SLAs + staleness dashboards | Tier-1 daily check + `DOC-HEALTH.md` scorecard |
+| Freshness SLAs + staleness dashboards | Tier-1 PR gate + `DOC-HEALTH.md` scorecard |
 | ADRs (architecture decision records) | `docs/product/plans/batch-2-decisions.md` pattern — keep appending |
 | Archive-over-delete retention | An archive location under `docs/` + stamps (none exists today — see §2). Nothing deleted EXCEPT merged scaffolding, per the 2026-08-25 amendment in §2 |
 | Doc impact required in code review | Rule 5 above |
