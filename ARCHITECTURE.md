@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
+<!-- doc: LIVING | last-verified: 2026-09-09 by /sync (dead chroma/ path, restatement trim) -->
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
@@ -34,7 +34,7 @@ job360/
 ├── backend/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev extras, ruff/mypy/pytest config
-│   ├── data/                         # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — the store is Postgres; DB_PATH is a connection selector, not a file (settings.py:15-20, pg.py:732-737)
+│   ├── data/                         # Runtime (gitignored): exports/, reports/, logs/, legacy user_profile.json. NO jobs.db — the store is Postgres; DB_PATH is a connection selector, not a file (settings.py:15-20, pg.py:732-737)
 │   ├── migrations/                   # forward/reverse SQL migration pairs + runner.py (counts: repo facts above)
 │   ├── src/
 │   │   ├── cli.py                    # Click CLI: api, setup-profile
@@ -107,82 +107,20 @@ This key is used for:
 
 ### Data Model
 
-```
-UserProfile
-  +-- cv_data: CVData
-  |     +-- raw_text: str
-  |     +-- skills: list[str]
-  |     +-- job_titles: list[str]
-  |     +-- education: list[str]
-  |     +-- certifications: list[str]
-  |     +-- summary: str
-  |     +-- linkedin_positions: list[dict]      # From LinkedIn profile PDF
-  |     +-- linkedin_skills: list[str]           # From LinkedIn profile PDF
-  |     +-- linkedin_industry: str               # From LinkedIn profile PDF
-  |     +-- github_languages: dict[str, int]     # From GitHub API
-  |     +-- github_topics: list[str]             # From GitHub API
-  |     +-- github_skills_inferred: list[str]    # From GitHub API
-  |     +-- linkedin_raw_text: str               # Two-pass: stored for offline LLM re-run
-  |     +-- github_repos_brief: list[dict]       # Two-pass: name/description/topics for LLM re-run
-  |     +-- github_llm_skills: list[str]         # Two-pass: LLM read repo prose
-  |     +-- about_me_inferred_skills: list[str]  # Two-pass: LLM mined preferences.about_me
-  +-- preferences: UserPreferences
-        +-- target_job_titles: list[str]
-        +-- additional_skills: list[str]
-        +-- excluded_skills: list[str]
-        +-- preferred_locations: list[str]
-        +-- industries: list[str]
-        +-- salary_min/max: float | None
-        +-- work_arrangement: str    # "remote", "hybrid", "onsite", or ""
-        +-- experience_level: str
-        +-- negative_keywords: list[str]
-        +-- about_me: str
-        +-- github_username: str
-```
+`UserProfile` (`cv_data: CVData` + `preferences: UserPreferences`) — read the
+fields in `backend/src/services/profile/models.py`, not a copy here that can
+go stale field-by-field.
 
-### LinkedIn Parser Pipeline
+### LinkedIn, GitHub and CV parser pipelines
 
-```
-LinkedIn profile PDF -> parse_linkedin_pdf() -> dict
-  |
-  +-> pdfplumber text extraction (all pages)
-  +-> is_linkedin_pdf() 2-of-3 heuristic (URL / headings / footer)
-  +-> _split_sections() by known heading vocabulary
-  +-> Deterministic: summary, skills (one per line), headline, industry
-  +-> LLM (Gemini -> Groq -> Cerebras) in parallel for:
-  |     - Experience -> [{title, company, start, end, description}, ...]
-  |     - Education  -> [{school, degree, start, end, notes}, ...]
-  |     - Certifications -> [{name, authority, start, end}, ...]
-  |
-  enrich_cv_from_linkedin(cv_data, linkedin_data) -> CVData
-  # Merges LinkedIn data into existing CVData fields (same as old ZIP path)
-```
-
-### GitHub Enricher Pipeline
-
-```
-GitHub username -> fetch_github_profile(username) -> dict  [async]
-  |
-  +-> GET /users/{username}/repos -> repo list (up to 30)
-  +-> For each repo: languages, topics from API
-  +-> LANGUAGE_TO_SKILL mapping -> inferred skills
-  |
-  enrich_cv_from_github(cv_data, github_data) -> CVData
-  # Adds github_languages, github_topics, github_skills_inferred to CVData
-```
-
-Uses optional `GITHUB_TOKEN` env var for higher API rate limits (60 req/hr unauthenticated, 5000 req/hr authenticated).
-
-### CV Parser Pipeline
-
-```
-PDF/DOCX -> extract_text() -> raw text
-  |
-  +-> _find_sections() -> {skills, experience, education, certifications, summary}
-  |
-  +-> LLM extraction via llm_provider.py (OpenAI PRIMARY, then Gemini/Groq/Cerebras free-tier fallback)
-  |     Returns: skills[], job_titles[], education[], certifications[], summary
-```
+Each parser (`linkedin_parser.py`, `github_enricher.py`, CV extraction via
+`llm_provider.py`) runs a deterministic pass over the raw input, then an LLM
+pass (OpenAI primary, Gemini/Groq/Cerebras fallback for CV; Gemini/Groq/Cerebras
+in parallel for LinkedIn), and merges both into `CVData`. Read the three
+modules in `backend/src/services/profile/` for the exact steps — they're short
+and this restates them without adding anything the code doesn't already say.
+`GITHUB_TOKEN` (optional) raises the GitHub API rate limit from 60 req/hr to
+5000 req/hr.
 
 ### Two-Pass Extraction (`services/profile/two_pass.py`)
 
@@ -231,46 +169,10 @@ with the sourcing era — do not rebuild them.
 >
 > This section shows the baseline schema. The full schema is built by the forward migrations in `backend/migrations/` — see the repo-facts table above for the current count and head. Migration `0039_drop_sourcing_tables` (slice 5, #483) drops `run_log`, `job_enrichment` and `job_embeddings` — the three tables nothing left in the codebase reads. `jobs`, `user_feed`, `applications`, `application_events`, `user_actions` and every profile/auth/receipt table are untouched; the down migration recreates the three dropped tables empty.
 
-```sql
-CREATE TABLE IF NOT EXISTS jobs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    company TEXT NOT NULL,
-    location TEXT DEFAULT '',
-    salary_min REAL,
-    salary_max REAL,
-    description TEXT DEFAULT '',
-    apply_url TEXT NOT NULL,
-    source TEXT NOT NULL,
-    date_found TEXT NOT NULL,
-    normalized_company TEXT NOT NULL,
-    normalized_title TEXT NOT NULL,
-    first_seen TEXT NOT NULL,
-    UNIQUE(normalized_company, normalized_title)
-);
-
-CREATE TABLE IF NOT EXISTS user_actions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id INTEGER NOT NULL,
-    action TEXT NOT NULL,            -- save, dismiss, applied, etc.
-    notes TEXT DEFAULT '',
-    created_at TEXT NOT NULL,
-    UNIQUE(job_id)
-);
-
-CREATE TABLE IF NOT EXISTS applications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id INTEGER NOT NULL,
-    stage TEXT NOT NULL DEFAULT 'applied',  -- applied, interview, offer, rejected
-    notes TEXT DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(job_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
-CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
-```
+The legacy baseline itself (`jobs`, `user_actions`, `applications` tables + two
+indexes) is a restatement of the `CREATE TABLE` statements already in
+`backend/src/repositories/database.py` — read it there; a second copy here
+is one more place for the two to disagree.
 
 **Pragmas:** none. This was a SQLite-era line (`journal_mode=WAL`, `busy_timeout=5000`); the store has been Postgres since 2026-07-02 and sets neither — `database.py:94` says so in as many words, `db_retry.open_db()` accepts `busy_timeout_ms` only for signature compatibility and ignores it (`db_retry.py:30-31`), and the `pg.py` shim turns any remaining `PRAGMA` into a no-op (`pg.py:316-317`).
 
@@ -374,7 +276,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 > and must stay pointers-only. Runtime source of truth is always `backend/src/core/settings.py`.
 
 - `.env` lives in the repo root (see `.env.example`).
-- Data outputs go to `backend/data/` (gitignored): `exports/`, `reports/`, `logs/`, `chroma/`.
+- Data outputs go to `backend/data/` (gitignored): `exports/`, `reports/`, `logs/`.
 
 | Variable | Required | Used by |
 |----------|----------|---------|
