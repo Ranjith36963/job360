@@ -5,7 +5,7 @@
 feature, page, button, and route, from landing on the site to closing it. A "full sweep"
 is not done until every item below is exercised (or explicitly marked gated, with the reason).
 
-**How to use:** start the full stack (backend + frontend + Redis/ARQ worker when present),
+**How to use:** start the full stack (backend + frontend),
 register a fresh user, then walk the list top to bottom. Prove each with evidence
 (HTTP code, DB row, screenshot, log line). Report a PASS / FAIL / GATED table.
 
@@ -26,7 +26,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 
 ## B. Auth (full lifecycle)
 - [ ] 3. Register → `POST /api/auth/register` 201, `users` row lands, cookie issued
-- [ ] 4. Email verify — `POST /verify-email/request`, `/verify-email/confirm`, `GET /me/email-verified` (confirm whether enforcement is on/off — currently `email_verified_at` stays NULL = not enforced)
+- [ ] 4. Email verify — `POST /verify-email/request`, `/verify-email/confirm`, `GET /me/email-verified`; which routes the gate holds is pinned by `tests/test_email_enforcement.py` and `tests/test_token_mint_is_session_only.py`
 - [ ] 5. Login + session — `GET /api/auth/me` resolves the exact user from the cookie
 - [ ] 6. Password reset **request** → 204 (send is SMTP-conditional)
 - [ ] 7. Password reset **confirm** → `/password-reset/confirm` with a token
@@ -77,4 +77,4 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 Produce a table: `# | item | LIVE/CODE/GATED/FAIL | evidence`. End with:
 - counts (e.g. "30 LIVE, 3 CODE, 1 GATED, 1 FAIL")
 - the FIRST real FAIL with exact file:line + error (if any)
-- what's needed to close the gates (install Redis; add LinkedIn sample; set OAuth creds)
+- what's needed to close the gates (add LinkedIn sample; set OAuth creds)

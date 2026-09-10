@@ -5,7 +5,7 @@
 
 **Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. Every merge ships to real users.** There is no manual deploy step and no staging gate. Merging is a release — never merge "to tidy up".
 
-Live at **job360.uk**. Five services: `backend`, `frontend`, `worker`, `Postgres`, `Redis`.
+Live at **job360.uk**. `railway status` lists the services that actually exist.
 
 ### How to check what is actually deployed
 
@@ -23,28 +23,18 @@ The manual `railway up` recipe further down still works, but it is the fallback 
 
 ---
 
-> **Status: ✅ LIVE since 2026-07-02.** Railway Hobby active. Project `job360`, 5 services all Online.
+> **Status: ✅ LIVE since 2026-07-02.** Railway Hobby active, project `job360`.
 > - **Custom domain:** https://job360.uk
-> - **Frontend:** https://frontend-production-c608f.up.railway.app
-> - **Backend API:** https://backend-production-80e8e.up.railway.app
-> - Verified live: `/readyz` → `{db:ok, redis:ok}`, security headers, full register→login→/me auth flow.
-> - Worker running 10 ARQ functions + 2 crons. Managed Postgres + Redis attached.
 
-## 🟢 What's already done (no action needed)
-- Backend + frontend **Dockerfiles**, **`docker-compose.prod.yml`** (5 services) — validated.
-- App runs on **Postgres**. (Test count deliberately not quoted here — measure it:
-  `cd backend && python -m pytest --collect-only -q | tail -1`. The
-  merge-gate floor lives in one place, `CONTRIBUTING.md`, and only there.)
-- **`/health`, `/livez`, `/readyz`** + **env validation at boot** (fail-fast on missing prod secrets).
-- **DB backup script** (`backend/scripts/backup_db.py`).
-- All prod env values staged in the local `.env` (LLM keys, `SESSION_SECRET`, `CHANNEL_ENCRYPTION_KEY`, `SENTRY_DSN`, `NEXT_PUBLIC_POSTHOG_KEY`).
+Which env vars prod needs is the table in `ARCHITECTURE.md`; nightly backups are
+`.github/workflows/db-backup.yml` and restoring them is `RUNBOOK-backups.md`.
 
 ## First-time provisioning (HISTORICAL — already done 2026-07-02)
 
-> These commands **created** the project, databases and services. They are kept as a
-> record of how prod was built, and as the recipe if it ever has to be rebuilt from
-> scratch. **They are NOT how you deploy a code change** — merging to `main` does
-> that automatically (see the banner at the top).
+> These commands **created** the project, databases and services as they stood on
+> 2026-07-02, `worker` and `Redis` included; both were deleted 2026-09-02, so this
+> is a record, not a rebuild recipe. **They are NOT how you deploy a code change** —
+> merging to `main` does that automatically (see the banner at the top).
 
 ```bash
 # From repo root, logged in as rahulranjith369@gmail.com
@@ -74,6 +64,7 @@ railway domain --service frontend    # → public site URL
 ```
 
 ## Verify after deploy
-- `curl https://<backend-url>/livez` → 200; `/readyz` → `{db:ok, redis:ok}`
+- `curl https://<backend-url>/livez` → 200; `/readyz` → 200 (what it checks, and what
+  each check answers when a dependency is absent, is `api/routes/health.readyz`).
 - Register + upload CV on the live frontend; confirm a row in the managed Postgres.
 - Sentry receives a test error; PostHog receives a pageview.

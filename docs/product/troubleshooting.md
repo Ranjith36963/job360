@@ -3,7 +3,7 @@
 
 Common **developer-environment** issues and fixes (ports, locks, env-var gotchas, install hiccups). Each entry: **Symptom → Cause → Fix**.
 
-> **For production issues** read prod directly — Sentry, `railway logs`, the Postgres service — as root `CLAUDE.md` describes. The sourcing-era runbook and glossary were archived FROZEN in `docs/_archive/sourcing-era/` (slice 5, #483); their SQL targets tables that no longer exist.
+> **For production issues** read prod directly — Sentry, `railway logs`, the Postgres service — as root `CLAUDE.md` describes. The sourcing-era runbook and glossary were deleted, not archived (`backend/tests/test_sourcing_era_deleted.py::test_archive_deleted`); git history is the only copy.
 
 ---
 
@@ -44,14 +44,11 @@ one test writes to schema A while another reads schema B.
 **Fix:**
 
 ```bash
-# From the repo root. `make redis-up` starts the redis service ONLY
-# (Makefile:238 → `docker compose ... up -d redis`), so it does NOT fix this
-# symptom — postgres is a separate service in docker-compose.dev.yml:37.
-# `--wait` is load-bearing: plain `up -d` returns as soon as the container is
-# RUNNING, so pytest can start before postgres accepts connections and you get
-# this exact symptom back. `--wait` blocks on the pg_isready healthcheck at
-# docker-compose.dev.yml:50-54.
-docker compose -f docker-compose.dev.yml up -d --wait   # both: postgres + redis
+# From the repo root. `--wait` is load-bearing: plain `up -d` returns as soon as
+# the container is RUNNING, so pytest can start before postgres accepts
+# connections and you get this exact symptom back. `--wait` blocks on the
+# pg_isready healthcheck the compose file declares.
+docker compose -f docker-compose.dev.yml up -d --wait postgres
 cd backend && python -m pytest -q -p no:randomly
 ```
 
@@ -98,29 +95,13 @@ Look for `[llm_provider]` lines — they log which provider was tried and why ea
 
 ---
 
-## 4. Redis missing on Windows
+## 4. `Redis unreachable` in the logs
 
-**Symptom:** `ConnectionRefusedError: [WinError 10061]` or `check_worker.py` reports `tcp localhost:6379 unreachable`.
+**Symptom:** `ConnectionRefusedError` against `localhost:6379`, or a Redis warning at boot.
 
-**Cause:** Redis has no native Windows build. The ARQ worker needs a Redis instance.
-
-**Fix — pick one:**
-
-- **A. WSL2 + Ubuntu** (recommended for dev)
-  ```bash
-  wsl --install -d Ubuntu
-  # inside WSL:
-  sudo apt-get install redis-server && sudo service redis-server start
-  ```
-
-- **B. Docker Desktop**
-  ```bash
-  docker run -d -p 6379:6379 --name redis redis:7-alpine
-  ```
-
-- **C. Memurai** (Redis-compatible native Windows fork) — https://www.memurai.com/
-
-- **D. Skip the worker.** The CLI (`python -m src.cli run`), the read-only API, the frontend, and the full test suite all work without ARQ / Redis. Only the live notification dispatcher needs it.
+**Cause:** Nothing. The `worker` and `Redis` services were deleted 2026-09-02 and
+no background work is left; the auth rate limiter falls back to an in-process
+window when Redis is absent. Do not install Redis to silence it.
 
 ---
 

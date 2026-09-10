@@ -58,7 +58,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
-│   └── tests/                        # across 135 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 136 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,applications,tailor,profile,layout}/
@@ -98,8 +98,9 @@ def normalized_key(self) -> tuple[str, str]:
 
 This key is used for:
 - **Database uniqueness** — `UNIQUE(normalized_company, normalized_title)` constraint
-- **Seen-check** — `is_job_seen()` queries by these columns, so two users pasting
-  the same ad share one `jobs` row
+- **Seen-check** — `bring.py` looks the key up before inserting, so two users
+  pasting the same ad share one `jobs` row
+  (`tests/test_bring_a_job.py::test_bring_twice_lands_on_same_row`)
 
 ---
 
@@ -272,9 +273,9 @@ CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
 CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
 ```
 
-**Pragmas:** none. This was a SQLite-era line (`journal_mode=WAL`, `busy_timeout=5000`); the store has been Postgres since 2026-07-02 and sets neither — `database.py:94` says so in as many words, `db_retry.open_db()` accepts `busy_timeout_ms` only for signature compatibility and ignores it (`db_retry.py:30-31`), and the `pg.py` shim turns any remaining `PRAGMA` into a no-op (`pg.py:316-317`).
+**Pragmas:** none. This was a SQLite-era line (`journal_mode=WAL`, `busy_timeout=5000`); the store has been Postgres since 2026-07-02 and sets neither — `db_retry.open_db` accepts `busy_timeout_ms` only for signature compatibility and ignores it, and the `pg.py` shim turns any remaining `PRAGMA` into a no-op.
 
-**Auto-purge:** `purge_old_jobs(days=30)` deletes jobs by **liveness, not ingestion** — `DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < cutoff` (`repositories/database.py:688,723`), skipping any row whose `source` is the user-brought marker (hard rule 3) — a brought job (and its application snapshot) survives the purge. It also deletes the catalog-derived child rows itself because the shim strips every FK clause, including `ON DELETE CASCADE`.
+**Auto-purge:** none. `purge_old_jobs` went with the sourcing era (`backend/tests/test_sourcing_era_deleted.py`); nothing deletes a `jobs` row on age, and there is no scheduler left to call it if it came back.
 
 **first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a database DEFAULT).
 
