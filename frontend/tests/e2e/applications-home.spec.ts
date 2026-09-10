@@ -124,6 +124,48 @@ async function mockBackend(page: Page) {
     })
   );
 
+  // fix 4/5 (agentic UX audit) — the What's-new strip. One event, recorded by
+  // an MCP personal-token client ("Agent · claude-code" — event-labels.ts's
+  // `whoLabel`), so the strip has something to show without depending on the
+  // spine's own event fixtures below.
+  await page.route("**/api/whats-new**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        now: "2026-09-04T00:00:00Z",
+        since: "2026-08-28T00:00:00Z",
+        next_since: "2026-09-01T00:00:00Z",
+        next_after_id: 1,
+        truncated: false,
+        applications: [
+          {
+            id: APPLICATION_ID,
+            job_title: "Data Engineer",
+            job_company: "Northwind",
+            status: "considering",
+            last_event_at: "2026-09-01T00:00:00Z",
+          },
+        ],
+        events: [
+          {
+            id: 1,
+            application_id: APPLICATION_ID,
+            event_type: "artifact_saved",
+            detail: "",
+            payload: {},
+            occurred_at: "2026-09-01T00:00:00Z",
+            recorded_at: "2026-09-01T00:00:00Z",
+            recorded_by: "token:claude-code",
+            corrects_event_id: null,
+            scheduled_at: null,
+            source: null,
+          },
+        ],
+      }),
+    })
+  );
+
   await page.route("**/api/applications?**", (route) =>
     route.fulfill({
       status: 200,
@@ -183,6 +225,11 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     await expect(page.getByText(/data engineer/i).first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/considering/i).first()).toBeVisible();
 
+    // fix 5 (agentic UX audit) — the What's-new strip shows the mocked
+    // agent-recorded event: its label and the "Agent · claude-code" chip.
+    await expect(page.getByText(/artifact saved/i).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(/agent\s*·\s*claude-code/i).first()).toBeVisible();
+
     // R12/R14 — the search flag is off by default, so the old Dashboard link
     // must not exist on a page a signed-in user can navigate.
     await expect(page.getByRole("link", { name: /^dashboard$/i })).toHaveCount(0);
@@ -209,5 +256,19 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     await expect(page.getByText(CV_TEXT[1])).toBeVisible({ timeout: 10_000 });
     await v2.click();
     await expect(page.getByText(CV_TEXT[2])).toBeVisible({ timeout: 10_000 });
+
+    // fix 3 (agentic UX audit) — Timeline is now the first section, ahead of
+    // Fit (`data-testid` order), and the one receipt in the mock renders.
+    const timelineSection = page.getByTestId("section-timeline");
+    const fitSection = page.getByTestId("section-fit");
+    await expect(timelineSection).toBeVisible();
+    await expect(fitSection).toBeVisible();
+    const timelineBox = await timelineSection.boundingBox();
+    const fitBox = await fitSection.boundingBox();
+    expect(timelineBox).not.toBeNull();
+    expect(fitBox).not.toBeNull();
+    expect(timelineBox!.y).toBeLessThan(fitBox!.y);
+
+    await expect(page.getByTestId("receipt-row")).toHaveCount(1);
   });
 });

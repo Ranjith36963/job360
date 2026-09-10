@@ -1,6 +1,8 @@
 "use client";
 
 import type { ApplicationEvent } from "@/lib/api";
+import { eventLabel } from "@/lib/event-labels";
+import { WhoChip } from "@/components/applications/WhoChip";
 
 /** The whole append-only event log, in `occurred_at` order (spec R3/R11). A
  * superseded event (retired by a correcting event, spec R3) is shown struck
@@ -15,11 +17,12 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
       {events.map((event) => (
         <li
           key={event.id}
+          data-testid="timeline-event"
           className={`glass-card rounded-lg p-3 text-sm ${event.superseded ? "opacity-50" : ""}`}
         >
           <div className="flex items-center justify-between gap-2">
             <span className={`font-medium ${event.superseded ? "line-through" : ""}`}>
-              {event.event_type}
+              {eventLabel(event)}
             </span>
             <span className="text-xs text-muted-foreground">
               {new Date(event.occurred_at).toLocaleString()}
@@ -40,10 +43,12 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
               Scheduled for {new Date(event.scheduled_at).toLocaleString()}
             </p>
           )}
-          <p className="mt-1 text-xs text-muted-foreground/70">
-            recorded by {event.recorded_by}
-            {event.superseded && " · superseded"}
-          </p>
+          <div className="mt-1 flex items-center gap-1.5">
+            <WhoChip recordedBy={event.recorded_by} />
+            {event.superseded && (
+              <span className="text-xs text-muted-foreground/70">superseded</span>
+            )}
+          </div>
         </li>
       ))}
     </ol>

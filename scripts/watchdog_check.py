@@ -38,7 +38,6 @@ EXPECTED: dict[str, tuple[float, str]] = {
     "synthetic-live.yml": (14, "every 6h"),
     "db-backup.yml": (36, "daily 02:17"),
     "ci-offline.yml": (36, "daily 06:00"),
-    "doc-sync.yml": (36, "daily 06:30"),
     "finding-watch.yml": (2, "every 30 min"),
     "absence.yml": (36, "daily 08:00"),
     "security-watch.yml": (36, "daily 08:20"),
@@ -56,7 +55,12 @@ EXPECTED: dict[str, tuple[float, str]] = {
 
 # Event-triggered or PR-only workflows: silence is CORRECT for these, so they
 # are excluded from the roster-drift check below rather than watched.
-NOT_SCHEDULED: set[str] = {"ci.yml", "pr-repair.yml", "triage.yml"}
+# doc-sync.yml moved here 2026-09-09: it dropped its daily cron for a
+# pull_request-only PR gate (owner decision — drift is fixed in the PR that
+# caused it, not by a nightly bot), so a quiet weekend with no PRs is normal
+# silence, not a stopped watcher. Watching it here would fire "STOPPED" every
+# quiet weekend — a permanent false alarm.
+NOT_SCHEDULED: set[str] = {"ci.yml", "pr-repair.yml", "triage.yml", "doc-sync.yml"}
 
 
 def roster_drift(workflow_dir: str = ".github/workflows") -> list[str]:

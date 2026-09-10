@@ -39,11 +39,12 @@ One HTML comment — invisible when the doc renders, parseable by the tripwire:
 <!-- doc: REFERENCE -->
 ```
 
-LIVING headers (tag + freshness date) are owned by the `/sync` auto-fixer.
-All other headers are applied by `/doc-audit` Phase B after the user approves
-the classification. The daily tripwire verifies LIVING docs carry the right
-tag and a fresh date; untagged non-living docs surface in the next audit, not
-as daily alarms.
+LIVING headers (tag + freshness date) are stamped by the `/sync` skill, run by
+hand or by whoever's PR touched the doc. All other headers are applied by
+`/doc-audit` Phase B after the user approves the classification. The PR-time
+tripwire (`doc-sync.yml`) verifies LIVING docs carry the right tag and a
+fresh date on every pull request; untagged non-living docs surface in the
+next audit, not as a standing alarm.
 
 ## 2. Plan lifecycle (fixes the "implemented docs still lying around" problem)
 
@@ -78,19 +79,22 @@ DRAFT ──► ACTIVE ──► IMPLEMENTED ──► ARCHIVED
 
 ## 3. The three tiers (how the loop actually runs)
 
+Owner decision, 2026-09-09: docs are for future Claude sessions, and drift is
+fixed in the SAME PR that caused it — not by a nightly bot editing docs on its
+own schedule. So Tier 1 became a **PR-time gate, not a daily cron**, and the
+CI-driven auto-fixer (a Claude session opening/force-pushing `docs/sync-auto`)
+was deleted along with the monthly hygiene/clutter scan — see ADR history in
+git log for `doc-sync.yml` if you need the old design.
+
 | Tier | What | When | Cost |
 |------|------|------|------|
-| **1 — Tripwire** | `scripts/doc_sync_check.py` compares hard code facts (source count, migration head, …) against every numeric doc claim; opens a GitHub issue on drift | **Daily, automatic** (CI cron, this PR) | Free, no LLM |
-| **2 — Fixer** | The `/sync` skill: scan code → compare LIVING docs → **edit the docs** → docs-only PR. **Runs AUTOMATICALLY in CI** when Tier 1 finds drift (the `auto-fix` job launches a Claude session — needs the one-time `CLAUDE_CODE_OAUTH_TOKEN` repo secret). Can also be run by hand anytime. | Automatic on drift; manual anytime | One Claude session |
+| **1 — Gate** | `scripts/doc_sync_check.py` compares hard code facts (route/endpoint counts, migration head, …) against every numeric doc claim; **blocks the PR** on drift (`.github/workflows/doc-sync.yml`, `pull_request` + manual `workflow_dispatch`) | **Every PR**, plus on demand | Free, no LLM |
+| **2 — Fixer** | The `/sync` skill: scan code → compare LIVING docs → **edit the docs** → docs-only PR. Run it by hand, in the SAME PR whose diff introduced the drift the gate flagged. | Manual, whenever Tier 1 blocks a PR | One Claude session |
 | **3 — Auditor** | The `/doc-audit` skill: full lifecycle pass — classify docs, archive IMPLEMENTED plans, park contradictions, find undocumented modules, write the health report | Weekly, or after a multi-PR day | One Claude session |
 
-Tier 1 watches every day for free; Tier 2 fixes automatically when Tier 1
-fires. The write-loop is caged, not banned: the auto-fixer may edit **only
-`*.md` files**, its PR auto-merges **only when the diff is 100% markdown**
-(a deterministic CI check, not the LLM's own claim), and any non-markdown
-file in the diff blocks the merge and flags the PR for human review. Code
-changes still always require a human — the Loop-1 lesson holds where it
-matters.
+Tier 1 gates every PR for free; Tier 2 is the human (or agent) fixing the doc
+in the PR that broke it, not a background bot. Code changes still always
+require a human — the Loop-1 lesson holds where it matters.
 
 ## 4. Hard rules
 
@@ -130,7 +134,7 @@ report, but never edits them — memory hygiene is the session's own job.
 |---|---|
 | Docs-as-code: in repo, PR-reviewed, versioned | Already true — keep it |
 | Dedicated technical writers | Loop 3 tooling is the writer; you are the editor who merges |
-| Freshness SLAs + staleness dashboards | Tier-1 daily check + `DOC-HEALTH.md` scorecard |
+| Freshness SLAs + staleness dashboards | Tier-1 PR gate + `DOC-HEALTH.md` scorecard |
 | ADRs (architecture decision records) | `docs/product/plans/batch-2-decisions.md` pattern — keep appending |
 | Archive-over-delete retention | An archive location under `docs/` + stamps (none exists today — see §2). Nothing deleted EXCEPT merged scaffolding, per the 2026-08-25 amendment in §2 |
 | Doc impact required in code review | Rule 5 above |

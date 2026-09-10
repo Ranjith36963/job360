@@ -354,11 +354,6 @@ REGISTRY: dict[str, Guard] = {
         "plant a duplicate-looking file and demand it is named",
         since="2026-08-16",
     ),
-    "scripts/doc_clutter_check.py": Guard(
-        status="owed",
-        reason="offline; a drill can plant a cluttered doc tree in a temp copy",
-        since="2026-08-16",
-    ),
     "scripts/doc_sync_check.py": Guard(
         status="drilled",
         # Owed since 2026-08-16 for exactly the reasons below; PAID 2026-08-25.
