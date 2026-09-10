@@ -46,7 +46,6 @@ EXPECTED: dict[str, tuple[float, str]] = {
     "pr-shepherd.yml": (36, "daily 09:45"),
     "security.yml": (9 * 24, "weekly Mon 04:00"),
     "codeql.yml": (9 * 24, "weekly Mon 05:00"),
-    "branch-reaper.yml": (9 * 24, "weekly Mon 04:00"),
     "revert-main.yml": (32 * 24, "monthly, 1st 06:00"),
     # ci.yml is event-triggered only — silence is normal, so it is
     # deliberately NOT watched here. Watching it would produce a permanent
@@ -60,7 +59,12 @@ EXPECTED: dict[str, tuple[float, str]] = {
 # caused it, not by a nightly bot), so a quiet weekend with no PRs is normal
 # silence, not a stopped watcher. Watching it here would fire "STOPPED" every
 # quiet weekend — a permanent false alarm.
-NOT_SCHEDULED: set[str] = {"ci.yml", "pr-repair.yml", "triage.yml", "doc-sync.yml"}
+# branch-reaper.yml moved here 2026-09-10 (slice 2): it dropped its weekly
+# cron for a push-to-main trigger, so it runs exactly when a merge lands and
+# is silent otherwise. Its drill still fires on every PR via ci.yml.
+NOT_SCHEDULED: set[str] = {
+    "ci.yml", "pr-repair.yml", "triage.yml", "doc-sync.yml", "branch-reaper.yml",
+}
 
 
 def roster_drift(workflow_dir: str = ".github/workflows") -> list[str]:
