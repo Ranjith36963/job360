@@ -289,6 +289,21 @@ REGISTRY: dict[str, Guard] = {
         # step goes red and the claim is withdrawn.
         drill=[sys.executable, "scripts/check_workflow_slack_wiring.py", "--drill"],
     ),
+    "scripts/ci_scope.py": Guard(
+        status="drilled",
+        # Decides `docs` / `frontend` / `full` for a PR so ci.yml and
+        # ci-offline.yml can skip the seven minutes of backend tests a
+        # one-component frontend change cannot affect (slice 3, 2026-09-10).
+        # Its danger is one-directional: a wrong `full` costs minutes, a wrong
+        # `docs` skips the gate. So the drill's negative controls come first
+        # (it must be ABLE to say docs/frontend), then precedence (one backend
+        # file beats forty docs), the #503 deploy-shaped set (Dockerfile,
+        # lockfile, next.config, .env -> never fast), and unknown-is-full.
+        # The drill also runs inside the `scope` job itself, before the
+        # verdict: a classifier that cannot pass it fails every job that
+        # needs it, so a broken classifier is a red PR, never a fast one.
+        drill=[sys.executable, "scripts/ci_scope.py", "--drill"],
+    ),
     "scripts/slack_transition.py": Guard(
         status="drilled",
         # The volume rule: announce the TRANSITION, not the state. Its drill
