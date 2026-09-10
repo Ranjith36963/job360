@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | Migration head | **0041** | `backend/migrations/` |
 | Migration files | **42** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **135** | `backend/tests/` |
+| `test_*.py` files | **136** | `backend/tests/` |
 | GitHub Actions workflows | **23** | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
