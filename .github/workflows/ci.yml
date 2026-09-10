@@ -186,9 +186,9 @@ jobs:
         run: python scripts/worktree_census.py --drill
 
       # The broom's ENTRANCE. Same reason this step sits next to the one above and
-      # not in branch-reaper.yml alone: that workflow runs weekly, so a break
-      # would sit undetected for up to seven days in the one component whose whole
-      # job is deleting things.
+      # not in branch-reaper.yml alone: that workflow runs only on merges to
+      # main, so a break would surface only AFTER a merge — too late for the one
+      # component whose whole job is deleting things. Here it fires on every PR.
       - name: The reaper still refuses, and still delegates
         run: python scripts/worktree_reaper.py --drill
 
