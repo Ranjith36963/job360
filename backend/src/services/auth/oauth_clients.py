@@ -22,13 +22,14 @@ import logging
 import secrets
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any, Optional
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from src.core import settings
 from src.repositories import pg
 from src.repositories.db_retry import open_db
+from src.services.auth import oauth_clock
 from src.utils.logger import get_audit_logger
 
 logger = logging.getLogger("job360.oauth.clients")
@@ -44,11 +45,6 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 # format incl. bidi overrides (Cf), surrogate (Cs), private-use (Co), and
 # unassigned (Cn) — everything that isn't a printable/spacing character.
 _STRIPPED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn"})
-
-
-def _now() -> datetime:
-    """Module-level clock so tests can monkeypatch a single function."""
-    return datetime.now(timezone.utc)
 
 
 class RedirectURIError(ValueError):
@@ -296,7 +292,7 @@ async def register(
     name = sanitize_client_name(client_name)
 
     client_id = CLIENT_ID_PREFIX + secrets.token_urlsafe(24)
-    created_at = _now().isoformat()
+    created_at = oauth_clock.now().isoformat()
 
     async with open_db(db_path) as db:
         await _prune_and_check_ceiling(db)
@@ -348,7 +344,7 @@ async def touch_last_used(db_path: str, client_id: str) -> None:
         async with open_db(db_path) as db:
             await db.execute(
                 "UPDATE oauth_clients SET last_used_at = ? WHERE id = ?",
-                (_now().isoformat(), client_id),
+                (oauth_clock.now().isoformat(), client_id),
             )
             await db.commit()
     except Exception as exc:  # noqa: BLE001 — a display hint, never worth failing a request
@@ -363,7 +359,7 @@ async def prune(db_path: str) -> None:
     are already dead (consumed/expired/revoked) and older than 1 day.
     """
     try:
-        now = _now()
+        now = oauth_clock.now()
         now_iso = now.isoformat()
         client_cutoff = (now - timedelta(days=settings.OAUTH_CLIENT_PRUNE_DAYS)).isoformat()
         row_cutoff = (now - timedelta(days=1)).isoformat()
