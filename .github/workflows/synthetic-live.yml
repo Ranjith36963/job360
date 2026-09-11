@@ -49,6 +49,16 @@
 # 3. DELETE the SMOKE_SESSION secret. It exists only as a fallback and it is the chore.
 # 4. Run this workflow by hand once with `drill: dead-session` and confirm it goes RED.
 #    A guard nobody has ever seen fire is a guess.
+# 5. ONLY AFTER 1-4 ARE DONE AND THIS HAS GONE GREEN ONCE: set repo VARIABLE
+#    AUTO_REVERT_ON_SMOKE = on. That arms the auto-revert below (harness
+#    simplification slice 6, owner decision 2026-09-08): on the green->red
+#    EDGE of a scheduled walk, production is rolled back on Railway (both
+#    services, previous deployment's image + variables, no rebuild) and the
+#    reverse gear is asked to open the revert PR that puts `main` back in
+#    agreement. It fires on the transition only — this check has been red for
+#    a month on missing credentials, and a naive "revert when red" would have
+#    reverted every merge since. With the variable unset it REHEARSES: it logs
+#    what it would have rolled back and touches nothing.
 # Magic-link is NOT usable here: an account created that way gets a random unguessable
 # password (services/auth/magic_link.py:180-186), so it can never log in with one.
 name: synthetic-live
@@ -156,7 +166,7 @@ jobs:
     needs: [live-smoke]
     if: always() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10 # was 5; the auto-revert installs the Railway CLI and asks it twice
     permissions:
       contents: read # needed to check out the repo so ./.github/actions/slack resolves
       issues: write
@@ -270,5 +280,108 @@ jobs:
           title: "synthetic-live: back to green"
           body: |
             The synthetic user walk passes again and issue #${{ steps.raise.outputs.issue }} was auto-closed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # ── THE AUTO-REVERT (slice 6) — ON THE GREEN->RED EDGE, AND ONLY THEN ──
+      # Placed AFTER every alert above on purpose (scripts/check_alert_paths.py
+      # rule A): nothing this step does may decide whether the "site is broken"
+      # alarm fires. `announce == 'broken'` is written by `raise` ONLY when the
+      # tracking issue did not exist a moment ago — i.e. the walk was green last
+      # time and is red now. A red->red repeat writes nothing, so a check that
+      # has been red for a month (this one, on missing SMOKE credentials)
+      # cannot trigger a revert on every merge. The gear itself re-confirms
+      # `canRollback` on Railway before it touches the mutation.
+      - name: Auto-revert — roll production back on the green->red edge
+        id: gear
+        if: always() && steps.raise.outputs.announce == 'broken'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          ARMED: ${{ vars.AUTO_REVERT_ON_SMOKE }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          if [ "$ARMED" != "on" ]; then
+            echo "AUTO_REVERT_ON_SMOKE is not 'on' — REHEARSAL: would have rolled back backend,frontend on Railway and opened the revert PR. Nothing touched." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "rolled=rehearsed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN is not set — the auto-revert is ARMED but cannot act. This is a REFUSAL, not a skip."
+            echo "rolled=refused" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          npm i -g @railway/cli --silent 2>&1 | tail -3
+          overall="true"
+          lines=""
+          for svc in backend frontend; do
+            echo "::group::rollback_gear.py --rollback --service $svc"
+            out=$(python scripts/rollback_gear.py --rollback --service "$svc" 2>&1)
+            rc=$?
+            echo "$out"
+            echo "::endgroup::"
+            lines="$lines- \`$svc\`: exit $rc — $(echo "$out" | tail -1)"$'\n'
+            [ "$rc" -eq 0 ] || overall="false"
+          done
+          {
+            echo "### Auto-revert (green->red edge)"
+            printf '%s' "$lines"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$overall" = "true" ]; then
+            echo "rolled=true" >> "$GITHUB_OUTPUT"
+            # Production is back on the previous image; now put `main` back in
+            # agreement. The reverse gear BUILDS the revert PR and a human
+            # merges it (revert-main.yml never pushes main). A dispatch that
+            # fails must not hide the rollback that succeeded, hence `|| echo`.
+            if gh workflow run revert-main.yml -f dry_run=false; then
+              echo "revert_pr=dispatched" >> "$GITHUB_OUTPUT"
+            else
+              echo "revert_pr=failed" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "rolled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Slack — production was rolled back
+        if: always() && steps.gear.outputs.rolled == 'true'
+        uses: ./.github/actions/slack
+        with:
+          channel: production-incidents
+          severity: critical
+          title: "job360: rolled back both services after the live walk went red"
+          body: |
+            The green->red edge fired the auto-revert: backend and frontend are back on their previous
+            Railway deployment (image + variables, no rebuild). Reverse-gear PR dispatch: ${{ steps.gear.outputs.revert_pr }}.
+            `main` is now AHEAD of production until that revert PR is merged.
+
+            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.raise.outputs.issue }}
+            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # The worst cell: the site is broken AND the undo did not happen. Same
+      # channel as the outage, because it IS the outage plus one fact.
+      - name: Slack — the auto-revert could NOT roll back
+        if: always() && (steps.gear.outputs.rolled == 'false' || steps.gear.outputs.rolled == 'refused')
+        uses: ./.github/actions/slack
+        with:
+          channel: production-incidents
+          severity: critical
+          title: "job360: live walk went red and the auto-revert could not roll back"
+          body: |
+            rolled=${{ steps.gear.outputs.rolled }}. Use Railway's dashboard Rollback by hand — previous image + variables, seconds.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE (rule B): the two alerts above key off outputs the
+      # gear step only writes if it REACHES that line.
+      - name: Slack — the auto-revert step itself broke
+        if: always() && steps.gear.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: production-incidents
+          severity: critical
+          title: "job360: live walk went red and the auto-revert step crashed before deciding"
+          body: |
+            No rollback verdict was reached. Production may still be on the broken deploy — use Railway's dashboard Rollback.
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
