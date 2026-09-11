@@ -5,7 +5,7 @@
 feature, page, button, and route, from landing on the site to closing it. A "full sweep"
 is not done until every item below is exercised (or explicitly marked gated, with the reason).
 
-**How to use:** start the full stack (backend + frontend),
+**How to use:** start the full stack (backend + frontend + the dev Postgres),
 register a fresh user, then walk the list top to bottom. Prove each with evidence
 (HTTP code, DB row, screenshot, log line). Report a PASS / FAIL / GATED table.
 

@@ -15,7 +15,7 @@ bugs in the code under review — nothing else.
 - Security: IDOR (a per-user route not scoped by `user.id` — CLAUDE.md rules #12/#25), SQL
   built from user input, secrets in logs/errors, missing auth.
 - Data integrity: anything touching `normalized_key()` (rule #1), purge (rule #3),
-  the shared `jobs`/`job_enrichment`/`job_embeddings` catalog gaining `user_id` (rules #10/#17).
+  the shared `jobs` catalog gaining `user_id` (rules #10/#17).
 - Async/DB: shared-connection concurrency, missing `await`, non-atomic multi-step writes.
 - Silent failures: bare `except`, swallowed errors, tests that mock the thing under test.
 

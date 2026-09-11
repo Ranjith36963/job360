@@ -1,9 +1,10 @@
+<!-- doc: LIVING | last-verified: 2026-09-11 by /sync -->
 # Job360 Troubleshooting
-<!-- doc: LIVING | last-verified: 2026-09-07 by chore/post-pivot-prune -->
+<!-- doc: LIVING -->
 
 Common **developer-environment** issues and fixes (ports, locks, env-var gotchas, install hiccups). Each entry: **Symptom → Cause → Fix**.
 
-> **For production issues** read prod directly — Sentry, `railway logs`, the Postgres service — as root `CLAUDE.md` describes. The sourcing-era runbook and glossary were deleted whole with the code they described (slice 5, #483, 2026-09-05) — not archived. Git history is the record; their SQL targeted tables that no longer exist.
+> **For production issues** read prod directly — Sentry, `railway logs`, the Postgres service — as root `CLAUDE.md` describes.
 
 ---
 
@@ -91,40 +92,17 @@ Debug with:
 
 ```bash
 cd backend
-python -m src.cli setup-profile --cv path/to/cv.pdf --log-level DEBUG
+LOG_LEVEL=DEBUG python -m src.cli setup-profile --cv path/to/cv.pdf
 ```
+
+(`setup_profile` in `src/cli.py` takes only `--cv` / `--linkedin` / `--github`;
+verbosity is the `LOG_LEVEL` env var read by `core.settings`.)
 
 Look for `[llm_provider]` lines — they log which provider was tried and why each failed.
 
 ---
 
-## 4. Redis missing on Windows
-
-**Symptom:** `ConnectionRefusedError: [WinError 10061]` when Redis-backed code can't reach `localhost:6379`.
-
-**Cause:** Redis has no native Windows build. The worker + ARQ were deleted with the sourcing era (slice 5, 2026-09-05) — nothing runs in the background any more. The one thing left that touches Redis is the **auth rate limiter** (`RATE_LIMIT_REDIS`, shared login/reset-attempt windows across processes); `docker-compose.dev.yml` starts it for exactly that.
-
-**Fix — pick one:**
-
-- **A. WSL2 + Ubuntu** (recommended for dev)
-  ```bash
-  wsl --install -d Ubuntu
-  # inside WSL:
-  sudo apt-get install redis-server && sudo service redis-server start
-  ```
-
-- **B. Docker Desktop**
-  ```bash
-  docker run -d -p 6379:6379 --name redis redis:7-alpine
-  ```
-
-- **C. Memurai** (Redis-compatible native Windows fork) — https://www.memurai.com/
-
-- **D. Skip it.** Without Redis the rate limiter falls back to an in-process limiter — the API, the frontend, and the full test suite all still run; you only lose shared limiting across multiple processes.
-
----
-
-## 5. `core.hooksPath` blocks pre-commit install
+## 4. `core.hooksPath` blocks pre-commit install
 
 **Symptom:** `pre-commit install` refuses with:
 ```
@@ -143,7 +121,7 @@ pre-commit install
 
 ---
 
-## 6. Unicode CV text crashes fpdf2
+## 5. Unicode CV text crashes fpdf2
 
 **Symptom:** `UnicodeEncodeError: 'latin-1' codec can't encode character` when the test suite builds a sample PDF with fpdf2.
 
@@ -172,7 +150,7 @@ Our `tests/conftest.py` helpers use Option B.
 
 ---
 
-## 7. Pytest suite stalls / zero output on Windows
+## 6. Pytest suite stalls / zero output on Windows
 
 **Symptom:** `python -m pytest tests/` under git-bash / MSYS2 produces no output and never exits.
 
@@ -193,7 +171,7 @@ cd backend && python -m pytest tests\ -v
 
 ---
 
-## 8. Migrations runner "already applied" confusion
+## 7. Migrations runner "already applied" confusion
 
 **Symptom:** `python -m migrations.runner up` prints `no pending migrations` but you expected 0010 to run.
 
@@ -222,21 +200,21 @@ python -m migrations.runner up
 # call instead; in prod, do neither without a backup (docs/product/RUNBOOK-backups.md).
 ```
 
-> ⚠️ **`down` takes NO migration stem.** It reverts the *last applied* migration and
-> nothing else — `backend/migrations/runner.py:281-297` reads `applied[-1]` and runs
-> that stem's `.down.sql`. The second positional argument is the **db_path**, not a
-> selector (`backend/migrations/runner.py:395,399`: usage is `[up|down|status] [db_path]`,
-> defaulting to `data/jobs.db`). So `python -m migrations.runner down 0010` does **not**
-> target migration 0010 — it swallows `0010` as a connection path and still reverts
-> whatever is at the head. Against a head of `0030` that reverts `0030`, and following
-> it with `up` re-applies `0030`: it looks like it worked and changes nothing about 0010.
+> ⚠️ **`down` takes NO migration stem.** `migrations.runner.down` reverts the *last
+> applied* migration and nothing else; the second positional argument of
+> `migrations.runner._cli` is the **db_path**, not a selector. So
+> `python -m migrations.runner down 0010` does **not** target migration 0010 — it
+> swallows `0010` as a connection path and still reverts whatever is at the head.
+> Against a head of `0030` that reverts `0030`, and following it with `up` re-applies
+> `0030`: it looks like it worked and changes nothing about 0010.
+> Pinned by `backend/tests/test_migrations_runner_cli_contract.py`.
 
 Migrations are forward-only by default, and `down` is one step at a time — there is
 no `down <stem>` and no `down --all`.
 
 ---
 
-## 9. `pip install -e .` fails on Windows with long-path errors
+## 8. `pip install -e .` fails on Windows with long-path errors
 
 **Symptom:** `OSError: [WinError 206] The filename or extension is too long` during `pip install -e backend/`.
 
@@ -258,7 +236,7 @@ no `down <stem>` and no `down --all`.
 
 ---
 
-## 10. Frontend: "Failed to fetch" from `/api/...` calls
+## 9. Frontend: "Failed to fetch" from `/api/...` calls
 
 **Symptom:** Network panel shows CORS error or `TypeError: Failed to fetch` when the dashboard calls the backend.
 

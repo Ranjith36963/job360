@@ -15,7 +15,7 @@ Read the actual code and extract current facts. **The mission is `docs/product/V
 - **Roadmap state**: which slices in `docs/plans/2026-09-03-mission-roadmap.md` have merged (check the issue #479–#483 state with `gh issue view`)
 - **Test count**: Run (from `backend/`) `python -m pytest tests/ --collect-only -q 2>&1 | tail -3` to get exact test count
 - **DB schema**: Read `backend/src/repositories/database.py` + `backend/migrations/` for table definitions (jobs, applications, application_receipts, tailored_documents, user_actions), column names, UNIQUE constraints, indexes
-- **Features**: Check what modules exist in `backend/src/services/{applications,auth,fetch,profile,tailoring}/`, `backend/src/api/` — what's actually implemented
+- **Features**: Check what modules exist under `backend/src/services/` and `backend/src/api/` — what's actually implemented
 - **Commands**: Read `backend/src/cli.py` for actual CLI commands and flags
 - **Dependencies**: Read `backend/pyproject.toml` for actual packages
 
@@ -56,14 +56,12 @@ For each mismatch found in Step 2:
 
 **Then stamp every LIVING doc you verified** (even ones needing no fix):
 add or update `<!-- doc: LIVING | last-verified: YYYY-MM-DD by /sync -->` near
-the top of each file. **Do not type the list from memory — read it from the
-`LIVING_DOCS` constant in `scripts/doc_sync_check.py`**, which is the only
-authority and has grown from 6 files to 15 (it now covers CONTRIBUTING.md,
-frontend/CLAUDE.md, backend/README.md and every file in
-`docs/product/pillars/`). The Loop-3 PR-time gate (`scripts/doc_sync_check.py`,
-run by `.github/workflows/doc-sync.yml` on every pull request) reads both the
-type tag and the date, and flags any doc not verified within 45 days — so
-stamping a hardcoded subset leaves the rest to go red on freshness at the next PR.
+the top of each file. **Do not type the list from memory — measure it.** `doc_sync_check.LIVING_DOCS` is
+the curated list the countable guards read; `doc_sync_check.living_stamped_docs()`
+is the wider set every structural guard reads (every tracked `.md` that stamps
+itself LIVING), and it is the one to stamp. Print both rather than trusting any
+number written down here. Freshness is `doc_sync_check.STALE_DAYS` — stamping a
+subset leaves the rest to go red at the next PR.
 
 **If a doc claims something the code does NOT do** (code is behind the doc —
 an "AHEAD" doc): **leave that doc completely untouched** (user's rule —

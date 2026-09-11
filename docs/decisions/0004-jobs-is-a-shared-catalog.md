@@ -6,12 +6,10 @@
 
 ## Decision
 
-The `jobs` table never gets a `user_id` or `tenant_id` column. Neither do
-`job_enrichment` or `job_embeddings`.
+The `jobs` table never gets a `user_id` or `tenant_id` column.
 
-Per-user state lives in `user_feed`, `user_actions` and `applications`.
-Per-user *scoring* happens at read time, by passing the user's preferences and
-an enrichment lookup into `JobScorer`.
+Per-user state lives in its own tables — today `applications` and its append-only
+event/artifact/receipt children, plus `user_actions`.
 
 ## The problem it solved
 
@@ -38,9 +36,6 @@ The shared catalog makes the expensive work happen **once** and the cheap work
 
 ## Consequences
 
-- Scoring cannot be precomputed and cached in `jobs`. It is a read-time cost,
-  which is why the scorer must stay fast and why the event-loop blocking bug
-  (a synchronous O(n²) dedup starving status polls) was a real outage class.
 - Any feature that wants "this job, but different per user" needs a new table,
   not a new column.
 

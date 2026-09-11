@@ -5,11 +5,8 @@ FastAPI backend for Job360 — the memory layer for the seeker's own AI agent
 (`../docs/product/VISION.md`): profile extraction, bring-a-job, application
 receipts, the CV tailor (web fallback) and the MCP server at `/api/mcp`.
 The legacy search-and-score pipeline (job sources, scoring, semantic retrieval)
-was deleted 2026-09-05 (roadmap slice 5, #483). It was not archived in-tree —
-git history before that date is the record.
-Notifications (email via Resend + webhook) are sent synchronously from the API
-process — the ARQ worker and Redis services were deleted 2026-09-02, and there
-are no background jobs.
+was deleted 2026-09-05 (roadmap slice 5, #483); git history is the only record
+(`backend/tests/test_sourcing_era_deleted.py::test_archive_deleted`).
 
 ## Prerequisites
 
@@ -84,14 +81,10 @@ Must pass from `backend/`:
 python -m pytest -q -p no:randomly
 ```
 
-Invariant: full suite passes, 0 failing, across **136** `test_*.py` files (2 `live`
-deselected offline). The collected count is deliberately not written down — run
-`python -m pytest --collect-only -q -p no:randomly | tail -1` for it. Any total
-committed to a doc is unguarded (`scripts/doc_sync_check.py` declines to check it
-on purpose: it needs Postgres, and parametrization makes a cheap check flaky) and
-rots silently — this line carried a stale one. The
-`-p no:randomly` flag keeps the default order deterministic (pytest-randomly is
-installed but opt-in).
+Invariant: full suite passes, 0 failing. No test total is written down here —
+measure it with `python -m pytest --collect-only -q -p no:randomly | tail -1`.
+The `-p no:randomly` flag keeps the default order deterministic (pytest-randomly
+is installed but opt-in).
 
 ## Database migrations
 
@@ -105,14 +98,9 @@ python -m migrations.runner down       # reverse last migration
 
 The API also auto-applies on boot via `lifespan`.
 
-## Worker (deleted 2026-09-02)
-
-The ARQ worker and Redis services were deleted. Notifications now send
-synchronously from the API process — there is nothing to run separately.
-
 ## Cross-wiring with the frontend
 
-The dashboard reaches the API via `NEXT_PUBLIC_API_URL` (frontend env, default
+The frontend reaches the API via `NEXT_PUBLIC_API_URL` (frontend env, default
 `http://localhost:8000`). The API in turn whitelists the browser origin via
 `FRONTEND_ORIGIN` (backend env, comma-separated, default
 `http://localhost:3000`). Mismatch = CORS preflight failure.
