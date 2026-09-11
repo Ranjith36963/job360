@@ -96,10 +96,8 @@ def normalized_key(self) -> tuple[str, str]:
     return (normalized_company, normalized_title)
 ```
 
-This key is used for:
-- **Database uniqueness** — `UNIQUE(normalized_company, normalized_title)` constraint
-- **Seen-check** — `is_job_seen()` queries by these columns, so two users pasting
-  the same ad share one `jobs` row
+The key backs the `UNIQUE(normalized_company, normalized_title)` constraint, so two
+users pasting the same ad share one `jobs` row.
 
 ---
 
@@ -229,7 +227,7 @@ with the sourcing era — do not rebuild them.
 
 > **The SQL below is SQLite-flavoured, and is never executed as written.** It is the legacy baseline `init_db()` hands to `executescript()`, which pushes every statement through `pg.translate()` first (`repositories/pg.py:670-674`) — `INTEGER PRIMARY KEY AUTOINCREMENT` becomes a Postgres identity column (`pg.py:193-195`), and `?` placeholders, `datetime('now')`, `INSERT OR IGNORE` and FK clauses are rewritten or stripped the same way. Read it as the *shape* of the baseline, not as DDL you could run against Postgres by hand.
 >
-> This section shows the baseline schema. The full schema is built by the forward migrations in `backend/migrations/` — see the repo-facts table above for the current count and head. Migration `0039_drop_sourcing_tables` (slice 5, #483) drops `run_log`, `job_enrichment` and `job_embeddings` — the three tables nothing left in the codebase reads. `jobs`, `user_feed`, `applications`, `application_events`, `user_actions` and every profile/auth/receipt table are untouched; the down migration recreates the three dropped tables empty.
+> This section shows the baseline schema. The full schema is built by the forward migrations in `backend/migrations/` — see the repo-facts table above for the current count and head. Later migrations drop tables as well as add them (`0039_drop_sourcing_tables`, `0040_drop_notification_tables`), so do not read the baseline below as the live table list: ask the database (`SELECT tablename FROM pg_tables WHERE schemaname='public'`).
 
 ```sql
 CREATE TABLE IF NOT EXISTS jobs (
@@ -449,7 +447,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 
 ### Constants (`settings.py`)
 
-The scorer's `MIN_STORE_SCORE` catalog floor and the engine thresholds went with the scorer (slice 5). What is left in `core/settings.py` is rate limits (`RATE_LIMITS`, the per-user profile-extraction and export caps) and the `ESCO_SKILL_NORMALISATION_ENABLED` flag — read the file; nothing there is worth a second copy here.
+Read `core/settings.py` — nothing in it is worth a second copy here.
 
 ---
 
