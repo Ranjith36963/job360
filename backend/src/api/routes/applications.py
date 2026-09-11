@@ -38,6 +38,7 @@ from src.services.applications import diff as diff_service
 from src.services.applications import lessons as lessons_service
 from src.services.applications import spine
 from src.services.applications import stats as stats_service
+from src.services.applications import visa as visa_service
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 
@@ -67,6 +68,12 @@ class SaveFitRequest(BaseModel):
     verdict: Optional[str] = Field(None, max_length=200)
     gaps: Optional[list[str]] = Field(None, max_length=50)
     reasoning: Optional[str] = None
+    # Slice 7 (#514) — the agent's visa reading, optional. `None` = not
+    # judged this time (the slot is left alone); the closed set / alpha-2 /
+    # length rules live in services/applications/visa.py.
+    visa_signal: Optional[str] = Field(None, max_length=32)
+    visa_detail: Optional[str] = Field(None, max_length=4_000)
+    visa_country: Optional[str] = Field(None, max_length=8)
 
     def clamp_reasoning(self) -> Optional[str]:
         if self.reasoning is None:
@@ -195,6 +202,19 @@ class ApplicationFitOut(BaseModel):
     reasoning: Optional[str]
     recorded_by: str
     recorded_at: str
+
+
+class ApplicationVisaOut(BaseModel):
+    """Slice 7 — fact 1 (the agent's reading of the ad) plus the ONE
+    comparison against fact 2 (the candidate's countries). ``needs_sponsorship``
+    is ``null`` whenever either side is silent (rule #29)."""
+
+    signal: str
+    detail: str
+    country: str
+    recorded_by: str
+    recorded_at: str
+    needs_sponsorship: Optional[bool]
 
 
 class EventSourceOut(BaseModel):
@@ -343,6 +363,7 @@ class ApplicationDetailOut(BaseModel):
     last_event_at: Optional[str]
     job: ApplicationJobOut
     fit: Optional[ApplicationFitOut]
+    visa: ApplicationVisaOut
     artifacts: list[ApplicationArtifactOut]
     events: list[ApplicationEventOut]
     interview_at: Optional[str]
@@ -360,6 +381,10 @@ class ApplicationSummaryOut(BaseModel):
     events: int
     artifacts: dict[str, int]
     receipts: int
+    # Slice 7 — enough for the card's badge without a profile read.
+    visa_signal: str = "unknown"
+    visa_country: str = ""
+    needs_sponsorship: Optional[bool] = None
 
 
 class ListApplicationsResponse(BaseModel):
@@ -382,6 +407,8 @@ class SaveArtifactResponse(BaseModel):
 class SaveFitResponse(BaseModel):
     application_id: int
     fit: ApplicationFitOut
+    # Slice 7 — present only when the call carried a visa reading.
+    visa: Optional[ApplicationVisaOut] = None
     event_id: int
 
 
@@ -805,6 +832,41 @@ async def save_fit(
         return await spine.save_fit(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
             score=body.score, verdict=body.verdict, gaps=body.gaps, reasoning=reasoning,
+            visa_signal=body.visa_signal, visa_detail=body.visa_detail, visa_country=body.visa_country,
+        )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+class SetVisaRequest(BaseModel):
+    """Slice 7 — the human door (a person at the browser has no agent to
+    read the ad for them). Same three fields, same rules as bring_job /
+    save_fit; no MCP tool calls this (an agent uses save_fit)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    visa_signal: str = Field(..., max_length=32)
+    visa_detail: Optional[str] = Field(None, max_length=4_000)
+    visa_country: Optional[str] = Field(None, max_length=8)
+
+
+class SetVisaResponse(BaseModel):
+    application_id: int
+    visa: ApplicationVisaOut
+
+
+@router.put("/applications/{application_id}/visa", response_model=SetVisaResponse)
+async def set_visa(
+    application_id: int,
+    body: SetVisaRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    try:
+        return await visa_service.set_visa_signal(
+            db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
+            signal=body.visa_signal, detail=body.visa_detail, country=body.visa_country,
         )
     except SpineError as exc:
         _raise(exc)

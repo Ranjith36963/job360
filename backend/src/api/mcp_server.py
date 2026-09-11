@@ -280,15 +280,27 @@ def build_server() -> MCPServer:
         description: str,
         location: str = "",
         apply_url: str = "",
+        visa_signal: Optional[str] = None,
+        visa_detail: str = "",
+        visa_country: str = "",
     ) -> dict[str, Any]:
         """Bring a job ad the user found (paste the full ad text as `description`).
         Job360 stores it and starts an application for it, then returns the job id and
         the application id to work against. It does NOT judge the fit — that is your
         job; record your own verdict with `save_fit`. Bringing the same title+company
-        again returns the existing job (existing=true). Never use this to search."""
+        again returns the existing job (existing=true). Never use this to search.
+
+        Visa (optional): if the ad SAYS whether the employer sponsors visas, pass
+        `visa_signal` = "sponsors" or "no_sponsorship", quote the sentence in
+        `visa_detail`, and give the job's country as ISO alpha-2 in `visa_country`
+        (e.g. "GB", "DE", "IN"). If the ad says nothing, leave it out — Job360 never
+        guesses. The web compares the country with the user's own list of countries
+        where they need no sponsorship (get_profile → fields →
+        preferences.work_authorization_countries; set it with update_profile)."""
         try:
             body = bring_route.BringJobRequest(
-                title=title, company=company, description=description, location=location, apply_url=apply_url
+                title=title, company=company, description=description, location=location, apply_url=apply_url,
+                visa_signal=visa_signal, visa_detail=visa_detail, visa_country=visa_country,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -492,12 +504,22 @@ def build_server() -> MCPServer:
         verdict: Optional[str] = None,
         gaps: Optional[list[str]] = None,
         reasoning: Optional[str] = None,
+        visa_signal: Optional[str] = None,
+        visa_detail: str = "",
+        visa_country: str = "",
     ) -> dict[str, Any]:
         """Record YOUR OWN fit judgement for this application — never computed
         by Job360 (VISION rule 4). Overwrites the current verdict; the log
-        keeps every past judgement too."""
+        keeps every past judgement too. Visa (optional, same as bring_job): if
+        the ad says whether the employer sponsors, pass `visa_signal`
+        ("sponsors" / "no_sponsorship"), the ad sentence in `visa_detail`, and
+        the job's ISO alpha-2 country in `visa_country`; leave it out when the ad
+        is silent."""
         try:
-            body = applications_route.SaveFitRequest(score=score, verdict=verdict, gaps=gaps, reasoning=reasoning)
+            body = applications_route.SaveFitRequest(
+                score=score, verdict=verdict, gaps=gaps, reasoning=reasoning,
+                visa_signal=visa_signal, visa_detail=visa_detail, visa_country=visa_country,
+            )
         except ValidationError as exc:
             raise _validation_error(exc) from None
         try:

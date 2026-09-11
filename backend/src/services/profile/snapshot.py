@@ -86,6 +86,7 @@ def _raw_input_payload(cv_data: CVData, preferences: UserPreferences) -> dict[st
         "negative_keywords": preferences.negative_keywords,
         "about_me": preferences.about_me,
         "needs_visa": preferences.needs_visa,
+        "work_authorization_countries": preferences.work_authorization_countries,
     }
 
 

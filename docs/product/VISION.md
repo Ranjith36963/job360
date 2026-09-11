@@ -109,7 +109,11 @@ as a fallback for CLI clients.
 6. **Email evidence on events** — the agent's Gmail connector reads, we store
    `source` (message id, from, subject) idempotently, plus a real interview
    datetime. Added 2026-09-07 from the competitor read.
-7. Visa / sponsorship signal supplied by the agent, shown on the card.
+7. Visa / sponsorship signal supplied by the agent, shown on the card —
+   country-agnostic: we store the agent's reading of the ad and the
+   candidate's own list of countries where they need no sponsorship, and
+   compare the two; no country rule of ours anywhere (shipped 2026-09-11,
+   `docs/plans/2026-09-11-visa-signal/spec.md`).
 8. CV diff (original vs tailored), web only, read-only — the receipt names
    the applied version; no Keep button (decision 26, 2026-09-11).
 9. "Flag for next time" on the web + lessons back through `get_profile`
@@ -167,6 +171,7 @@ consent-first; everything free; no auto-submit at volume; global from day one.
 | # | Question | Decision |
 |---|---|---|
 | 26 | "Do we really need the Keep button? Do we always go back and forth between the web and the chat?" | **No Keep button.** The version that counts is the one the receipt names (`record_application`'s `cv_artifact_id` / `cover_letter_artifact_id`) — that fact already exists, and a Keep on the web would be a "do" door (rule 5) forcing a chat ↔ web round trip. The web stays the record: it shows original vs any version and marks the applied one. Version numbers stay internal; the human sees "Original", "Applied". Decision 21's Keep is withdrawn. |
+| 27 | "This is global, not only the UK. Every country has its own visa rules. Only flag it when you see it in the job description." | **Job360 knows nothing about visas.** No country rule, no keyword scan, no guess when the ad is silent. Two stored facts — the agent's reading of the ad (`sponsors` / `no_sponsorship` / `unknown` + the ad sentence + the job's ISO country) and the candidate's own list of countries where they need no sponsorship — and one comparison: list membership. `unknown` or an empty list shows nothing (rule #29). |
 
 ## Older docs this supersedes
 

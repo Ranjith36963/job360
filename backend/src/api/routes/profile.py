@@ -289,6 +289,17 @@ def _build_profile_response(
     )
 
 
+def _countries_or_422(value: Any) -> list[str]:
+    """Slice 7 — ISO alpha-2 list or a 422 naming the bad item; never a
+    silent drop (a dropped code would read as 'needs sponsorship')."""
+    from src.services.applications.visa import normalize_country_codes  # noqa: PLC0415
+
+    try:
+        return normalize_country_codes(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
 def _recent_lessons(user_id: str) -> list[LessonOut]:
     """The last ``PROFILE_LESSONS_MAX`` lessons — one bounded read."""
     from src.services.applications.lessons import list_lessons  # noqa: PLC0415
@@ -660,6 +671,14 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
             pref_dict.get("github_username") or existing.github_username or ""
         ),
         needs_visa=pref_dict.get("needs_visa", existing.needs_visa),
+        # Slice 7 — an OMITTED key keeps the stored list; an explicit [] clears
+        # it (same partial-save shape as work_arrangement above). Codes are
+        # normalised to ISO alpha-2 upper; anything else is a 422, never a
+        # silent drop, so a typo cannot quietly turn "covered" into "needs
+        # sponsorship".
+        work_authorization_countries=_countries_or_422(
+            pref_dict.get("work_authorization_countries", existing.work_authorization_countries)
+        ),
     )
     # Scrub extraction pollution before it is stored. The frontend autosaves the
     # loaded preference chips straight back, so a profile whose additional_skills

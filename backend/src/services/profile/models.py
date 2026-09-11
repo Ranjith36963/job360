@@ -541,6 +541,11 @@ class UserPreferences:
     # `needs_visa` gates the visa scorer — when False the dim returns 0
     # (no reward for something the user doesn't need).
     needs_visa: bool = False
+    # Slice 7 (#514) — ISO 3166-1 alpha-2 codes (upper) where the candidate
+    # can work WITHOUT sponsorship. Empty = "don't care" (rule #29): no
+    # comparison is made and no badge is shown. Job360 holds no country
+    # rule; the only use is "is the job's country in this list".
+    work_authorization_countries: list[str] = field(default_factory=list)
 
     # Values the workplace scorer can actually match. A CLOSED set, because the
     # job side of the comparison (`JobEnrichment.workplace_type`) is an enum —

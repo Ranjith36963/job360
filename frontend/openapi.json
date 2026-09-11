@@ -331,6 +331,9 @@
           "updated_at": {
             "title": "Updated At",
             "type": "string"
+          },
+          "visa": {
+            "$ref": "#/components/schemas/ApplicationVisaOut"
           }
         },
         "required": [
@@ -342,6 +345,7 @@
           "last_event_at",
           "job",
           "fit",
+          "visa",
           "artifacts",
           "events",
           "interview_at",
@@ -754,12 +758,33 @@
             ],
             "title": "Last Event At"
           },
+          "needs_sponsorship": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Sponsorship"
+          },
           "receipts": {
             "title": "Receipts",
             "type": "integer"
           },
           "status": {
             "title": "Status",
+            "type": "string"
+          },
+          "visa_country": {
+            "default": "",
+            "title": "Visa Country",
+            "type": "string"
+          },
+          "visa_signal": {
+            "default": "unknown",
+            "title": "Visa Signal",
             "type": "string"
           }
         },
@@ -775,6 +800,52 @@
           "receipts"
         ],
         "title": "ApplicationSummaryOut",
+        "type": "object"
+      },
+      "ApplicationVisaOut": {
+        "description": "Slice 7 \u2014 fact 1 (the agent's reading of the ad) plus the ONE\ncomparison against fact 2 (the candidate's countries). ``needs_sponsorship``\nis ``null`` whenever either side is silent (rule #29).",
+        "properties": {
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "needs_sponsorship": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Sponsorship"
+          },
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          },
+          "signal": {
+            "title": "Signal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signal",
+          "detail",
+          "country",
+          "recorded_by",
+          "recorded_at",
+          "needs_sponsorship"
+        ],
+        "title": "ApplicationVisaOut",
         "type": "object"
       },
       "ArtifactDiffBaseOut": {
@@ -1039,6 +1110,42 @@
             "minLength": 1,
             "title": "Title",
             "type": "string"
+          },
+          "visa_country": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visa Country"
+          },
+          "visa_detail": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visa Detail"
+          },
+          "visa_signal": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visa Signal"
           }
         },
         "required": [
@@ -3447,6 +3554,42 @@
               }
             ],
             "title": "Verdict"
+          },
+          "visa_country": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visa Country"
+          },
+          "visa_detail": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visa Detail"
+          },
+          "visa_signal": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visa Signal"
           }
         },
         "title": "SaveFitRequest",
@@ -3464,6 +3607,16 @@
           },
           "fit": {
             "$ref": "#/components/schemas/ApplicationFitOut"
+          },
+          "visa": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApplicationVisaOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3472,6 +3625,63 @@
           "event_id"
         ],
         "title": "SaveFitResponse",
+        "type": "object"
+      },
+      "SetVisaRequest": {
+        "additionalProperties": false,
+        "description": "Slice 7 \u2014 the human door (a person at the browser has no agent to\nread the ad for them). Same three fields, same rules as bring_job /\nsave_fit; no MCP tool calls this (an agent uses save_fit).",
+        "properties": {
+          "visa_country": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visa Country"
+          },
+          "visa_detail": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visa Detail"
+          },
+          "visa_signal": {
+            "maxLength": 32,
+            "title": "Visa Signal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "visa_signal"
+        ],
+        "title": "SetVisaRequest",
+        "type": "object"
+      },
+      "SetVisaResponse": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "visa": {
+            "$ref": "#/components/schemas/ApplicationVisaOut"
+          }
+        },
+        "required": [
+          "application_id",
+          "visa"
+        ],
+        "title": "SetVisaResponse",
         "type": "object"
       },
       "StatsCvVersionGroupOut": {
@@ -5522,6 +5732,90 @@
           }
         },
         "summary": "Record Application Receipt",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/visa": {
+      "put": {
+        "operationId": "set_visa_api_applications__application_id__visa_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVisaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetVisaResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Visa",
         "tags": [
           "applications"
         ]
