@@ -96,6 +96,11 @@ def git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 # first-parent line with this marker IS one pull request, landed as one commit.
 _SQUASH_PR_SUBJECT = re.compile(r"\(#\d+\)\s*$")
 
+# The identity the revert commit is written under, passed per-command so it
+# never depends on the runner, the clone or anybody's global config.
+_IDENTITY = ["-c", "user.name=github-actions[bot]",
+             "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com"]
+
 
 def is_merge_commit(sha: str, cwd: Path) -> tuple[bool, str]:
     """(ok, why) — is `sha` something this gear may revert? Two shapes are:
@@ -154,7 +159,19 @@ def build_revert(sha: str, cwd: Path, branch: str) -> Result:
 
     # `-m 1` is only meaningful (and only accepted by git) for a real merge.
     mainline = ["-m", "1"] if _parent_count(sha, cwd) >= 2 else []
-    rev = git(["revert", *mainline, "--no-edit", sha], cwd)
+    # THE GEAR BRINGS ITS OWN IDENTITY. A fresh CI runner has none, and the
+    # first live rehearsal after the squash fix (run 34573024458, 2026-09-11)
+    # died on "Author identity unknown" — reported as a CONFLICT, because the
+    # only thing this branch knew how to say was "does not apply". The drill
+    # had never caught it: it configured an identity for its own temp repo,
+    # testing something adjacent to the thing that breaks.
+    rev = git([*_IDENTITY, "revert", *mainline, "--no-edit", sha], cwd)
+    if rev.returncode != 0 and "tell me who you are" in (rev.stderr + rev.stdout):
+        git(["revert", "--abort"], cwd)
+        return Result(False, (
+            f"the gear itself is misconfigured: git has no author identity here, so it "
+            f"could not write the revert commit. This is NOT a conflict. "
+            f"git said: {(rev.stderr or rev.stdout).strip()[:200]}"), branch=branch)
     if rev.returncode != 0:
         # THE FAILURE THAT ACTUALLY BITES. Say it plainly: you do not have this
         # revert, and you found out now instead of during an outage.
@@ -199,11 +216,12 @@ def _mk_repo(tmp: Path) -> tuple[Path, str, str, str]:
         return subprocess.run(["git", *a], cwd=str(repo), capture_output=True, text=True,
                               encoding="utf-8", errors="replace", env=env, timeout=60)
     g("init", "-b", "main")
-    # A fresh CI runner has no git identity, so commit/revert failed and this
-    # drill read 7/9 there while passing 9/9 locally. A guard that only fires
-    # where its author sits is not a guard.
-    g("config", "user.email", "drill@example.invalid")
-    g("config", "user.name", "revert-gear drill")
+    # NO IDENTITY IS CONFIGURED IN THIS REPO, ON PURPOSE. The drill's own commits
+    # get theirs from the GIT_AUTHOR_*/GIT_COMMITTER_* env above; the GEAR must
+    # bring its own (`_IDENTITY`). The previous version ran `git config user.*`
+    # here, which is why the drill passed 11/11 on 2026-09-11 while the real
+    # rehearsal on a fresh runner died on "Author identity unknown". A guard
+    # that configures away the condition it should catch is not a guard.
     (repo / "a.txt").write_text("one\n", encoding="utf-8")
     g("add", "-A")
     g("commit", "-m", "base")
@@ -231,6 +249,11 @@ def self_drill() -> int:
     print("DRILL — feeding the reverse gear inputs that would revert the wrong thing.")
     print("=" * 72)
     results: list[tuple[str, bool, str]] = []
+    # Run as a fresh CI runner would: no global or system git config. Whatever
+    # identity the author of this file has on their laptop must not leak into
+    # the gear's calls, or the drill certifies a gear that only works at home.
+    os.environ["GIT_CONFIG_GLOBAL"] = os.devnull
+    os.environ["GIT_CONFIG_SYSTEM"] = os.devnull
 
     def ok(name: str, passed: bool, detail: str = "") -> None:
         results.append((name, passed, "" if passed else detail))

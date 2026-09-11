@@ -142,23 +142,25 @@ jobs:
       # A rehearsal nobody hears about is a rehearsal that did not happen — and a
       # FAILED rehearsal is the single most important thing this workflow can
       # ever say, because it means the revert does not apply.
+      # ROUTED TO needs-your-decision, NOT production-incidents (2026-09-11).
+      # A failed REHEARSAL means the owner must act — there is no tested way
+      # back — but no user is hurt right now, and the routing rule for
+      # production-incidents is "broken for a real user right now". The first
+      # live rehearsal after the squash fix posted a :rotating_light: into the
+      # incident channel for a missing git identity on the runner; that is
+      # exactly the message that teaches an owner to stop reading the channel.
+      # Same voice as every other watcher (the composite action, proven live
+      # by slack-drill.yml), so the wiring checker covers it too.
       - name: Say so if the rehearsal failed
         if: failure()
-        env:
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          if [ -z "${SLACK_BOT_TOKEN:-}" ]; then
-            echo "::error::no SLACK_BOT_TOKEN — nobody can be told the reverse gear is broken."
-            exit 1
-          fi
-          text=":rotating_light: *The reverse gear could not build a revert of the newest landing on main.*
-          That means there is currently NO tested way back. Railway's dashboard Rollback is
-          the only remaining path until this is fixed. ${RUN_URL}"
-          resp=$(curl -sS -X POST https://slack.com/api/chat.postMessage \
-            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
-            -H 'Content-Type: application/json; charset=utf-8' \
-            --data "$(jq -nc --arg c production-incidents --arg t "$text" '{channel:$c,text:$t}')")
-          echo "$resp" | jq -e '.ok == true' >/dev/null || {
-            echo "::error::Slack refused: $(echo "$resp" | jq -r '.error')"; exit 1; }
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: critical
+          title: "reverse gear: the rehearsal could not build a revert of the newest landing on main"
+          body: |
+            That means there is currently NO tested way back. Railway's dashboard Rollback is the
+            only remaining path until this is fixed. Read the run — the gear says why in one line.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
