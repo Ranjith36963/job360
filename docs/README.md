@@ -44,6 +44,7 @@ every link below resolves; nothing is left out.
 | 5 — Delete the sourcing era | [`plans/2026-09-05-delete-sourcing-era/spec.md`](plans/2026-09-05-delete-sourcing-era/spec.md) | #483 |
 | 6 — Email evidence on events + interview datetime | [`plans/2026-09-07-email-evidence/spec.md`](plans/2026-09-07-email-evidence/spec.md) | #513 |
 | 8 — CV diff, read-only (no Keep — decision 26) | [`plans/2026-09-11-cv-diff/spec.md`](plans/2026-09-11-cv-diff/spec.md) | #515 |
+| 9 — Flag for next time: lessons written, listed, handed to the agent | [`plans/2026-09-11-lessons/spec.md`](plans/2026-09-11-lessons/spec.md) | #516 |
 | — Bring a job, keep the receipt | [`plans/2026-09-02-bring-a-job/spec.md`](plans/2026-09-02-bring-a-job/spec.md) | PR #469 |
 | — Personal tokens + MCP server | [`plans/2026-09-03-mcp-server/spec.md`](plans/2026-09-03-mcp-server/spec.md) | PR #473 |
 

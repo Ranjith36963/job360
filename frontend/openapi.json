@@ -2081,6 +2081,71 @@
         "title": "JsonResumeResponse",
         "type": "object"
       },
+      "LessonOut": {
+        "description": "One `lesson` event, read back across applications (slice 9, #516).",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "application_id",
+          "job_title",
+          "job_company",
+          "detail",
+          "occurred_at",
+          "recorded_by"
+        ],
+        "title": "LessonOut",
+        "type": "object"
+      },
+      "LessonsResponse": {
+        "properties": {
+          "lessons": {
+            "items": {
+              "$ref": "#/components/schemas/LessonOut"
+            },
+            "title": "Lessons",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lessons",
+          "total"
+        ],
+        "title": "LessonsResponse",
+        "type": "object"
+      },
       "LinkedInResponse": {
         "properties": {
           "merged": {
@@ -2419,6 +2484,14 @@
             "default": {},
             "title": "Github Temporal",
             "type": "object"
+          },
+          "lessons": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LessonOut"
+            },
+            "title": "Lessons",
+            "type": "array"
           },
           "linkedin_subsections": {
             "additionalProperties": {
@@ -4586,6 +4659,94 @@
           }
         },
         "summary": "Get Job",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/lessons": {
+      "get": {
+        "description": "Slice 9 (#516) \u2014 every \"flag for next time\" lesson across the caller's\napplications, newest first (spec R1 door 1). Read-only; a lesson is\nwritten through ``record_event`` (type ``lesson``) like any other event.\n``get_profile`` carries the last PROFILE_LESSONS_MAX of the same list.",
+        "operationId": "list_lessons_api_applications_lessons_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Lessons",
         "tags": [
           "applications"
         ]

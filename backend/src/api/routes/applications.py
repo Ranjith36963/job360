@@ -29,12 +29,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_request_db
-from src.api.models import JobResponse
+from src.api.models import JobResponse, LessonsResponse
 from src.api.routes.bring import job_row_to_response
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
+from src.services.applications import lessons as lessons_service
 from src.services.applications import spine
 from src.services.applications import stats as stats_service
 from src.services.applications.authorship import actor_for
@@ -573,6 +574,24 @@ async def export_history(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover — _raise always raises
+
+
+@router.get("/applications/lessons", response_model=LessonsResponse)
+async def list_lessons(
+    limit: int = Query(50, ge=1),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Slice 9 (#516) — every "flag for next time" lesson across the caller's
+    applications, newest first (spec R1 door 1). Read-only; a lesson is
+    written through ``record_event`` (type ``lesson``) like any other event.
+    ``get_profile`` carries the last PROFILE_LESSONS_MAX of the same list."""
+    if limit > settings.LESSONS_PAGE_MAX:
+        raise HTTPException(
+            status_code=422, detail=f"limit must be at most LESSONS_PAGE_MAX ({settings.LESSONS_PAGE_MAX})"
+        )
+    rows, total = lessons_service.list_lessons(user.id, limit=limit, offset=offset)
+    return {"lessons": rows, "total": total}
 
 
 @router.get("/applications/stats", response_model=StatsResponse)
