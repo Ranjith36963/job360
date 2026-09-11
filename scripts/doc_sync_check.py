@@ -80,6 +80,23 @@ LIVING_DOCS = [
     # more, and `pillars_fully_watched()` went with it.
 ]
 
+# MACHINE-WRITTEN docs. Not LIVING prose: `scripts/gen_doc_blocks.py --write`
+# rewrites every line of these from the code, and `gen_doc_blocks.py` (no args)
+# fails CI if the file on disk disagrees. So they carry no `last-verified`
+# stamp and no doc-type of their own — there is no human whose freshness is in
+# question.
+#
+# They ARE read by the countable-fact loop below, and that is the load-bearing
+# part. Slice 8 (2026-09-12) moved both generated blocks out of ARCHITECTURE.md
+# and deleted the hand-written copies of the route/endpoint, test-file and
+# workflow counts along with them. The generated row is now the ONLY claim for
+# those facts, so leaving this list out of the loop would make four guards
+# report "claim not found in any doc" — the guard-watches-nothing alarm — and
+# the honest fix is to read the doc that now holds the claim.
+GENERATED_DOCS = [
+    "docs/GENERATED.md",
+]
+
 # Prose lies that numbers can't catch. Each = (forbidden phrase, why).
 FORBIDDEN_PHRASES = [
     ("async SQLite", "the DB is Postgres via psycopg3 since 2026-07-02 (pg.py shim)"),
@@ -219,7 +236,7 @@ def landing_page_source_claims() -> list[tuple[int, int]]:
     return out
 
 
-DOC_KINDS = ("LIVING", "PLAN", "LOG", "REFERENCE", "FROZEN")
+DOC_KINDS = ("LIVING", "PLAN", "LOG", "REFERENCE", "FROZEN", "GENERATED")
 _LIVING_STAMPED_CACHE: list[str] | None = None
 
 
@@ -1177,7 +1194,7 @@ def main() -> int:
     matches_per_fact: dict[str, int] = {}
     today = _dt.date.today()
 
-    for rel in LIVING_DOCS:
+    for rel in LIVING_DOCS + GENERATED_DOCS:
         path = ROOT / rel
         if not path.exists():
             # A vanished LIVING doc is exactly the stale-merge disaster case.
@@ -1203,6 +1220,13 @@ def main() -> int:
                     matches_per_fact[fact] = matches_per_fact.get(fact, 0) + 1
                     if m.group(1) != actual_text:
                         drift.append((rel, str(i), fact, m.group(1), actual_text))
+
+        # Everything below this line judges a HUMAN: is the prose stale, is the
+        # file stamped, when did someone last verify it. None of those questions
+        # mean anything for a file the build rewrites from code every run, and
+        # asking them would demand a 45-day freshness ritual on machine text.
+        if rel in GENERATED_DOCS:
+            continue
 
         for phrase, why in FORBIDDEN_PHRASES:
             for i, line in enumerate(lines, start=1):

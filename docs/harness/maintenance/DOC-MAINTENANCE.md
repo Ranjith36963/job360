@@ -24,7 +24,7 @@
 | Type | Examples | Rule |
 |------|----------|------|
 | **LIVING** | `CLAUDE.md`, `ARCHITECTURE.md`, `README.md`, `STATUS.md`, `backend/CLAUDE.md`, `frontend/README.md` | Must always match the code. Any drift is a bug, same severity as a failing test. |
-| **PLAN** | `docs/plans/*`, `docs/step_*_plan.md`, design docs for unbuilt features | Has a lifecycle (below). Never silently edited after execution starts — plans are promises, and history must stay honest. |
+| **PLAN** | design docs for unbuilt features | Has a lifecycle (below). Never silently edited after execution starts — plans are promises, and history must stay honest. **A plan does NOT survive its own shipping:** once the slice merges, the code is the description and the plan is a second one, so it is deleted (2026-09-12, slice 8 — the whole `docs/plans/` folder went at once). Git log is the record. |
 | **LOG** | `docs/harness/IMPLEMENTATION_LOG.md`, `docs/harness/maintenance/JOURNAL.md` | Append-only. Never rewritten, so never stale by definition. |
 | **REFERENCE** | decision records (`docs/product/plans/batch-2-decisions.md`), research notes | Updated only when the decision itself changes; superseded ones get a banner pointing to the successor, content stays. |
 

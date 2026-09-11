@@ -67,13 +67,23 @@ def code_facts() -> str:
     true. What is left is generic repo shape, none of it sourcing-specific.
     """
     c = _checker()
+    # The VALUE cells are phrased so `doc_sync_check.build_checks()` can match
+    # them verbatim. That is not decoration: those guards fire "claim not found
+    # in any doc" when a fact has zero claims anywhere, and 2026-09-12 (slice 8)
+    # deleted the last hand-written copies of the route/endpoint, test-file and
+    # workflow counts. The generated row IS the claim now, so it has to be
+    # written in the shape the guard reads — otherwise deleting the prose would
+    # quietly blind four guards instead of retiring four copies.
     rows = [
         "| Fact | Value | Where the code says it |",
         "| --- | --- | --- |",
         f"| Migration head | **{c.migration_head():04d}** | `backend/migrations/` |",
         f"| Migration files | **{c.migration_file_count()}** | `backend/migrations/*.up.sql` |",
-        f"| `test_*.py` files | **{c.test_file_count()}** | `backend/tests/` |",
-        f"| GitHub Actions workflows | **{c.workflow_count()}** | `.github/workflows/` |",
+        f"| FastAPI surface | {c.route_module_count()} route modules "
+        f"({c.endpoint_count()} endpoints) | `backend/src/api/routes/` |",
+        f"| Test files | across {c.test_file_count()} `test_*.py` files | `backend/tests/` |",
+        f"| GitHub Actions | {c.workflow_count()} workflows in `.github/workflows/` "
+        f"| `.github/workflows/` |",
         f"| Hard rules | **{c.hard_rule_count()}** | `.claude/skills/hard-rules/SKILL.md` |",
     ]
     return "\n".join(rows)
@@ -133,8 +143,16 @@ def api_routes() -> str:
 
 
 # doc -> {block name: producer}
+#
+# Both blocks moved out of ARCHITECTURE.md into their own file 2026-09-12
+# (slice 8) for a merge reason, not a tidiness one: regenerating a block
+# rewrites the file it sits in, so every open PR that also touched
+# ARCHITECTURE.md's PROSE re-conflicted on every merge that moved a count
+# (#519 needed four fold-ins in one afternoon, 2026-09-11). Prose and machine
+# text in separate files cannot collide. ARCHITECTURE.md keeps a one-line
+# pointer to each.
 BLOCKS: dict[str, dict[str, callable]] = {
-    "ARCHITECTURE.md": {"code-facts": code_facts, "api-routes": api_routes},
+    "docs/GENERATED.md": {"code-facts": code_facts, "api-routes": api_routes},
 }
 
 OPEN = "<!-- generated: {name} -->"
