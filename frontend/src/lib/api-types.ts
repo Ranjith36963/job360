@@ -1675,7 +1675,7 @@ export interface components {
         /** ApplicationReceiptExportOut */
         ApplicationReceiptExportOut: {
             /** Answers */
-            answers?: components["schemas"]["ReceiptAnswer"][];
+            answers?: components["schemas"]["ReceiptAnswerOut"][];
             /** Channel */
             channel: string;
             /** Confirmation */
@@ -1707,7 +1707,7 @@ export interface components {
          */
         ApplicationReceiptOut: {
             /** Answers */
-            answers?: components["schemas"]["ReceiptAnswer"][];
+            answers?: components["schemas"]["ReceiptAnswerOut"][];
             /** Channel */
             channel: string;
             /** Confirmation */
@@ -2692,6 +2692,18 @@ export interface components {
         };
         /** ReceiptAnswer */
         ReceiptAnswer: {
+            /** Answer */
+            answer: string;
+            /** Question */
+            question: string;
+        };
+        /**
+         * ReceiptAnswerOut
+         * @description The READ shape of an answer — deliberately without the request caps.
+         *     A receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS
+         *     is ever lowered, older rows must still read back, not 500 the page.
+         */
+        ReceiptAnswerOut: {
             /** Answer */
             answer: string;
             /** Question */

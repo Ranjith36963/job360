@@ -557,7 +557,7 @@
         "properties": {
           "answers": {
             "items": {
-              "$ref": "#/components/schemas/ReceiptAnswer"
+              "$ref": "#/components/schemas/ReceiptAnswerOut"
             },
             "title": "Answers",
             "type": "array"
@@ -649,7 +649,7 @@
         "properties": {
           "answers": {
             "items": {
-              "$ref": "#/components/schemas/ReceiptAnswer"
+              "$ref": "#/components/schemas/ReceiptAnswerOut"
             },
             "title": "Answers",
             "type": "array"
@@ -2807,6 +2807,25 @@
           "answer"
         ],
         "title": "ReceiptAnswer",
+        "type": "object"
+      },
+      "ReceiptAnswerOut": {
+        "description": "The READ shape of an answer \u2014 deliberately without the request caps.\nA receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS\nis ever lowered, older rows must still read back, not 500 the page.",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer"
+        ],
+        "title": "ReceiptAnswerOut",
         "type": "object"
       },
       "ReceiptListResponse": {

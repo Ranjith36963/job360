@@ -82,6 +82,32 @@ async def test_a_receipt_with_nothing_extra_reads_as_empty_not_null(authenticate
 
 
 @pytest.mark.asyncio
+async def test_an_answer_over_todays_cap_still_reads_back(authenticated_async_context):
+    """History is append-only: a row written under a looser cap (or before a
+    cap was tightened) must read back, not 500 — the READ shape has no caps.
+    Simulated by writing an over-cap answer straight into the row."""
+    import json
+
+    from src.core import settings
+    from src.repositories import pgsync
+
+    long_answer = "x" * (settings.APPLICATION_RECEIPT_ANSWER_MAX_CHARS + 1000)
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _receipt_with_everything(client, app_id)
+        conn = pgsync.connect(str(settings.DB_PATH))
+        conn.execute(
+            "UPDATE application_receipts SET answers = ? WHERE application_id = ?",
+            (json.dumps([{"question": "q", "answer": long_answer}]), app_id),
+        )
+        conn.commit()
+        conn.close()
+        detail = await client.get(f"/api/applications/{app_id}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["receipts"][0]["answers"][0]["answer"] == long_answer
+
+
+@pytest.mark.asyncio
 async def test_a_legacy_row_with_bad_json_reads_as_empty(authenticated_async_context):
     """A pre-0037 row backfilled with junk must not 500 the whole page."""
     from src.core import settings
