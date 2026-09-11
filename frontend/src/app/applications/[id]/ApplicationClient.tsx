@@ -13,6 +13,7 @@ import { TailorSection } from "@/components/tailor/TailorSection";
 import { Contacts } from "@/components/applications/Contacts";
 import { Receipts } from "@/components/applications/Receipts";
 import { NoteForm } from "@/components/applications/NoteForm";
+import { LessonForm } from "@/components/applications/LessonForm";
 import { STATUS_LABEL } from "@/lib/event-labels";
 
 /** The application record: status, the durable job snapshot (spec R2 —
@@ -113,6 +114,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         </h2>
         <Timeline events={detail.events} />
         <NoteForm applicationId={detail.id} onRecorded={load} />
+        <LessonForm applicationId={detail.id} onRecorded={load} />
       </section>
 
       <section data-testid="section-fit">
