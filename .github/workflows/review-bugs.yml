@@ -47,14 +47,18 @@ name: Review bugs (correctness reviewer check)
 # and `timeout-minutes: 15` on the job — a bounded, cheap lens, not a second
 # full audit.
 #
-# WHY 30 TURNS, NOT 15
-# ---------------------
+# WHY 40 TURNS, NOT 15 (NOR 30)
+# ------------------------------
 # Measured on PR #546's own first live run (34581083162): 15 turns was not
 # enough to read the changed files, decide, AND post via `gh` — the run ended
 # `error_max_turns` at turn 16 having posted nothing, so the check failed for
 # the right reason (the agent step itself did not finish) but not the
-# intended one (a real P0/P1 verdict). 30 gives it room to actually finish;
-# the wall-clock cap stays `timeout-minutes: 15` regardless.
+# intended one (a real P0/P1 verdict). 30 then proved one turn short on a
+# 37-file PR (#519, run 34614427330: verdict posted, cap hit at 31 while
+# re-reading). 40 gives it room, the prompt tells it to post LAST and stop,
+# and a non-success exit stays a hard fail (see the gate step for why a
+# "stored verdict counts as completion" fallback was refused). The
+# wall-clock cap stays `timeout-minutes: 15` regardless.
 #
 # WHY NOTHING RECURSES
 # ---------------------
@@ -344,23 +348,22 @@ jobs:
           nobugs=$(gh api --paginate "repos/$GH_REPO/issues/$PR_NUMBER/comments" \
               --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"[reviewer-bugs] no correctness bugs found\")) and (.body | contains(\"(head $HEAD_SHA)\")))] | length" \
               | awk '{s+=$1} END {print s+0}')
-          # THE VERDICT IS THE COMMENT, NOT THE PROCESS EXIT. On PR #519 (37
-          # files) the agent posted "no correctness bugs found" and then hit
-          # the turn cap re-reading, so the step reported failure and the
-          # first version of this gate failed a reviewed PR. A verdict GitHub
-          # stored for this head IS completion. What is NOT completion: an
-          # agent that died with no verdict at all, or one that died with
-          # findings posted but no way to know whether it had finished
-          # looking — an incomplete review must not pass on the strength of
-          # the P2s it managed to post.
+          # AN AGENT THAT DID NOT EXIT CLEANLY DID NOT FINISH — FULL STOP. On
+          # PR #519 (37 files) the agent posted "no correctness bugs found"
+          # and then hit the turn cap re-reading, so this gate failed a
+          # reviewed PR. The tempting fix — "a stored verdict for this head
+          # counts as completion" — was tried in PR #553 and reviewer-bugs
+          # itself refused it (P1): the gate cannot tell "finished, then hit
+          # the cap" from "posted no-bugs EARLY, under a manipulated diff,
+          # then got cut off before looking at the rest". So the cap is made
+          # unlikely to bite instead (40 turns; the prompt posts the verdict
+          # LAST and stops), and a non-success outcome stays a hard FAIL.
+          # `nobugs` is still counted so the summary shows the verdict that
+          # WAS posted, which is what a human needs to decide about a rerun.
           if [ "$AGENT_OUTCOME" != "success" ]; then
-            if [ "$nobugs" -gt 0 ] && [ "$((p0 + p1 + p2))" -eq 0 ]; then
-              echo "agent step outcome '$AGENT_OUTCOME', but a no-bugs verdict for head $HEAD_SHA exists — treating the verdict as completion." >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "::error::reviewer-bugs did not finish (agent step outcome: '${AGENT_OUTCOME:-missing}', verdicts on this head: nobugs=$nobugs findings=$((p0 + p1 + p2))). That is a FAIL, never a silent pass."
-              echo "### reviewer-bugs: FAILED — agent step outcome was '$AGENT_OUTCOME' and no complete verdict exists for head $HEAD_SHA" >> "$GITHUB_STEP_SUMMARY"
-              exit 1
-            fi
+            echo "::error::reviewer-bugs did not finish (agent step outcome: '${AGENT_OUTCOME:-missing}'; verdicts on head $HEAD_SHA: nobugs=$nobugs findings=$((p0 + p1 + p2))). That is a FAIL, never a silent pass — rerun the check."
+            echo "### reviewer-bugs: FAILED — agent step outcome was '$AGENT_OUTCOME', not 'success' (nobugs=$nobugs findings=$((p0 + p1 + p2)) on head $HEAD_SHA)" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
           {
             echo "### reviewer-bugs: P0=$p0 P1=$p1 P2=$p2 (counted from GitHub's own review comments on head $HEAD_SHA — not a self-reported file)"
