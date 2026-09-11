@@ -414,10 +414,17 @@ REGISTRY: dict[str, Guard] = {
         since="2026-08-16",
     ),
     "scripts/watchdog_check.py": Guard(
-        status="owed",
-        reason="watches the other loops via the live GitHub API; a drill needs a "
-        "recorded `gh run list` fixture, which does not exist yet",
-        since="2026-08-16",
+        status="drilled",
+        # WAS `owed` since 2026-08-16 ("needs a recorded gh run list fixture").
+        # Slice 4 (2026-09-11) split the file into a gh fetch and a PURE
+        # classifier (`assess`), and the drill feeds the classifier hand-made
+        # run lists: stopped vs fresh, the two-in-a-row RED streak, a single
+        # failure as a flake, in-progress/cancelled runs not breaking the
+        # streak, a success breaking it, and the RED_ONLY (ci.yml on main)
+        # shape. Negative controls first: it must be able to say "fine".
+        # The gh half stays undrilled on purpose — it is the same `gh run
+        # list` every sibling uses, and a recorded fixture would rot.
+        drill=[sys.executable, "scripts/watchdog_check.py", "--drill"],
     ),
     "backend/scripts/mypy_ratchet.py": Guard(
         status="owed",

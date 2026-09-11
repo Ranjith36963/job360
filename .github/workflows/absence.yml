@@ -50,12 +50,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set +e
-          python scripts/watchdog_check.py > watchdog.md 2>&1
+          python scripts/watchdog_check.py --json watchdog.json > watchdog.md 2>&1
           code=$?
           set -e
           cat watchdog.md
           cat watchdog.md >> "$GITHUB_STEP_SUMMARY"
           echo "stopped=$code" >> "$GITHUB_OUTPUT"
+          # THE SECOND QUESTION (slice 4, 2026-09-11): which watchers are
+          # running but RED? Two of the three production watchers were
+          # silent-red for a month with every dashboard green — each opened
+          # its own issue, which went to triage, which emailed, and nothing
+          # reached the channel the owner reads. This roll-up is the one
+          # wire that turns "N watchers are red" into ONE Slack message.
+          # Absent JSON means the checker crashed before writing it, and an
+          # unknown count must never read as zero.
+          if [ -f watchdog.json ]; then
+            echo "red_count=$(jq -r .red_count watchdog.json)" >> "$GITHUB_OUTPUT"
+            echo "red_list=$(jq -r '.red_list | join(", ")' watchdog.json)" >> "$GITHUB_OUTPUT"
+          fi
           [ "$code" -le 1 ] || exit "$code"
 
       - name: Open, update or close the tracking issue
@@ -118,3 +130,93 @@ jobs:
             Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           resend_api_key: ${{ secrets.RESEND_API_KEY }}
           to_email: ${{ secrets.OWNER_ALERT_EMAIL }}
+
+      # ── RED WATCHERS REACH SLACK — ANNOUNCE THE TRANSITION, NOT THE STATE ──
+      # scripts/slack_transition.py reads the marker issue `Loop RED:
+      # watchdog-red` and decides: green->red SEND (kind `opened`), red->red
+      # SILENT, red->green SEND (kind `recovered`), green->green SILENT. The
+      # marker is opened and closed HERE, in the same step, so Slack and the
+      # tracker cannot disagree. Measured 2026-08-17: synthetic-live alone was
+      # 29 msg/week of pure repetition under "post every failure"; under
+      # transitions it is one message when it breaks and one when it is fixed.
+      - name: Announce the transition, not the state
+        id: transition
+        if: always() && steps.watch.outputs.red_count != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RED_COUNT: ${{ steps.watch.outputs.red_count }}
+          RED_LIST: ${{ steps.watch.outputs.red_list }}
+        run: |
+          set -euo pipefail
+          state=ok
+          [ "$RED_COUNT" != "0" ] && state=failing
+          python scripts/slack_transition.py --key watchdog-red --state "$state" \
+            --channel needs-your-decision --severity warn > transition.json
+          send=$(jq -r .send transition.json)
+          kind=$(jq -r .kind transition.json)
+          echo "send=$send" >> "$GITHUB_OUTPUT"
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          title="Loop RED: watchdog-red"
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+          if [ "$kind" = "opened" ] && [ -z "$num" ]; then
+            {
+              echo "$RED_COUNT watcher(s) are running but RED: $RED_LIST"
+              echo
+              echo "This is the marker issue for the Slack transition rule — it closes itself when all watchers are green again."
+              echo "Details: the watchdog run summary. Each red watcher also has its own \`Loop RED:\` issue."
+              echo
+              echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            } > marker.md
+            gh issue create --title "$title" --body-file marker.md --label harness
+          elif [ "$kind" = "recovered" ] && [ -n "$num" ]; then
+            gh issue close "$num" --comment "All watchers green again as of run ${{ github.run_id }}. (auto-close)"
+          fi
+
+      - name: Slack — watchers are RED
+        if: always() && steps.transition.outputs.send == 'true' && steps.transition.outputs.kind == 'opened'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "watchdog: ${{ steps.watch.outputs.red_count }} watcher(s) are red — ${{ steps.watch.outputs.red_list }}"
+          body: |
+            Each has failed at least twice in a row. The run summary shows the streak and the last green day per watcher.
+            A watcher that is red for a missing secret stays red until the secret exists — that is yours to set, not code.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # Recovery is NOT an incident — it is news. It goes to the muted log
+      # channel so needs-your-decision only ever contains things still open.
+      - name: Slack — watchers back to green
+        if: always() && steps.transition.outputs.send == 'true' && steps.transition.outputs.kind == 'recovered'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "watchdog: every watcher is green again"
+          body: |
+            The red watchers reported in `Loop RED: watchdog-red` are passing again and the marker was auto-closed.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE (scripts/check_alert_paths.py rule B). Every branch
+      # above keys off outputs the transition step only writes if it SUCCEEDS —
+      # a gh 403 or an unreadable marker would skip them all and the red
+      # watchers would go unannounced. If the alarm path itself broke, say THAT.
+      - name: Slack — the watchdog's alarm path itself broke
+        if: always() && (steps.transition.outcome == 'failure' || steps.watch.outcome == 'failure')
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "watchdog: the alarm path itself broke — red watchers may be unannounced"
+          body: |
+            The watchdog ran but could not decide whether to announce (the checker crashed, or the
+            transition marker could not be read). Open the run and look; no message here means
+            the messenger broke, not that every watcher is fine.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

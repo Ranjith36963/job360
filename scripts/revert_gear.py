@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -91,27 +92,53 @@ def git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
                           text=True, encoding="utf-8", errors="replace", timeout=180)
 
 
-def is_merge_commit(sha: str, cwd: Path) -> tuple[bool, str]:
-    """Exactly two-or-more parents, and the SHA must exist.
+# GitHub's squash-merge subject convention: `<title> (#123)`. A commit on main's
+# first-parent line with this marker IS one pull request, landed as one commit.
+_SQUASH_PR_SUBJECT = re.compile(r"\(#\d+\)\s*$")
 
-    Kept separate from the revert so the drill can feed it real SHAs from a real
-    repository rather than assert on a mock. `rev-list --parents -n 1` prints the
-    commit and then its parents, so the field count IS the parent count + 1.
+
+def is_merge_commit(sha: str, cwd: Path) -> tuple[bool, str]:
+    """(ok, why) — is `sha` something this gear may revert? Two shapes are:
+
+      * a MERGE commit (two-or-more parents): reverted with `-m 1`;
+      * a SQUASH-MERGED PR commit (one parent, subject ends in `(#N)`): reverted
+        plainly. THIS REPO SQUASH-MERGES, so this is the shape every landing on
+        main has had since August 2026. The first version of this gear accepted
+        only real merge commits, and the monthly drill therefore rehearsed the
+        newest MERGE commit — a month-old one — which no longer applied. It
+        failed 2026-09-01 and would have failed every month after (slice 4,
+        2026-09-11).
+
+    Anything else — an ordinary commit with no PR marker, a SHA that does not
+    exist — is refused loudly: `git revert` would do something plausible and
+    wrong. Kept separate from the revert so the drill can feed it real SHAs
+    from a real repository rather than assert on a mock. `rev-list --parents
+    -n 1` prints the commit and then its parents, so the field count IS the
+    parent count + 1.
     """
     proc = git(["rev-list", "--parents", "-n", "1", sha], cwd)
     if proc.returncode != 0:
         return False, (f"`{sha}` is not a commit in this repository "
-                       f"({proc.stderr.strip()[:160]}). FIX: pass a full merge SHA from "
-                       f"`git log --merges --first-parent main`.")
+                       f"({proc.stderr.strip()[:160]}). FIX: pass a full SHA from "
+                       f"`git log --first-parent main`.")
     fields = proc.stdout.split()
     parents = len(fields) - 1
-    if parents < 2:
-        return False, (
-            f"`{sha[:12]}` has {parents} parent(s), so it is NOT a merge commit. "
-            f"`git revert -m 1` on it would succeed and revert the WRONG THING — quietly, "
-            f"and plausibly. Refusing. "
-            f"FIX: pick a SHA from `git log --merges --first-parent main`.")
-    return True, ""
+    if parents >= 2:
+        return True, ""
+    subject = git(["log", "-1", "--pretty=%s", sha], cwd).stdout.strip()
+    if parents == 1 and _SQUASH_PR_SUBJECT.search(subject):
+        return True, ""
+    return False, (
+        f"`{sha[:12]}` has {parents} parent(s) and its subject carries no `(#N)` PR marker, "
+        f"so it is NOT a merge commit and not a squash-merged pull request either. "
+        f"`git revert` on it would succeed and revert the WRONG THING — quietly, "
+        f"and plausibly. Refusing. "
+        f"FIX: pick a SHA from `git log --first-parent main` whose subject ends in `(#N)`, "
+        f"or a real merge commit from `git log --merges --first-parent main`.")
+
+
+def _parent_count(sha: str, cwd: Path) -> int:
+    return len(git(["rev-list", "--parents", "-n", "1", sha], cwd).stdout.split()) - 1
 
 
 def build_revert(sha: str, cwd: Path, branch: str) -> Result:
@@ -125,7 +152,9 @@ def build_revert(sha: str, cwd: Path, branch: str) -> Result:
         return Result(False, f"could not create the scratch branch `{branch}`: "
                              f"{made.stderr.strip()[:200]}")
 
-    rev = git(["revert", "-m", "1", "--no-edit", sha], cwd)
+    # `-m 1` is only meaningful (and only accepted by git) for a real merge.
+    mainline = ["-m", "1"] if _parent_count(sha, cwd) >= 2 else []
+    rev = git(["revert", *mainline, "--no-edit", sha], cwd)
     if rev.returncode != 0:
         # THE FAILURE THAT ACTUALLY BITES. Say it plainly: you do not have this
         # revert, and you found out now instead of during an outage.
@@ -159,8 +188,9 @@ def run(sha: str, cwd: Path, branch: str) -> int:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _mk_repo(tmp: Path) -> tuple[Path, str, str]:
-    """A repo with one merge commit and one ordinary commit. Returns both SHAs."""
+def _mk_repo(tmp: Path) -> tuple[Path, str, str, str]:
+    """A repo with one merge commit, one ordinary commit and one squash-merged PR
+    commit. Returns (repo, merge_sha, ordinary_sha, squash_sha)."""
     repo = tmp / "repo"
     repo.mkdir()
     env = {**os.environ, "GIT_AUTHOR_NAME": "drill", "GIT_AUTHOR_EMAIL": "d@x",
@@ -188,7 +218,13 @@ def _mk_repo(tmp: Path) -> tuple[Path, str, str]:
     ordinary = g("rev-parse", "HEAD").stdout.strip()
     g("merge", "--no-ff", "feature", "-m", "Merge pull request #999")
     merge = g("rev-parse", "HEAD").stdout.strip()
-    return repo, merge, ordinary
+    # The shape every landing on main has had since August 2026: one parent,
+    # GitHub's `(#N)` marker in the subject.
+    (repo / "d.txt").write_text("squashed pr\n", encoding="utf-8")
+    g("add", "-A")
+    g("commit", "-m", "feat(x): something useful (#1000)")
+    squash = g("rev-parse", "HEAD").stdout.strip()
+    return repo, merge, ordinary, squash
 
 
 def self_drill() -> int:
@@ -201,11 +237,20 @@ def self_drill() -> int:
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        repo, merge_sha, ordinary_sha = _mk_repo(tmp)
+        repo, merge_sha, ordinary_sha, squash_sha = _mk_repo(tmp)
         main_before = git(["rev-parse", "main"], repo).stdout.strip()
 
         # NEGATIVE CONTROL first, because it is the case that must WORK. A gear
         # that only ever refuses is a gear nobody will reach for at 2 a.m.
+        # The SQUASH case leads: it is what main actually looks like, and it is
+        # the case the gear got wrong for a month.
+        res = build_revert(squash_sha, repo, "revert/drill-0")
+        ok("NEGATIVE CONTROL (a squash-merged PR commit produces a revert that applies)",
+           res.ok, f"the gear refused a squash-merged PR commit: {res.reason}")
+        ok("the file the squashed PR brought in is gone again after the revert",
+           not (repo / "d.txt").exists(), "d.txt survived the revert")
+        git(["checkout", "main"], repo)
+
         res = build_revert(merge_sha, repo, "revert/drill-1")
         ok("NEGATIVE CONTROL (a real merge commit produces a revert that applies)",
            res.ok, f"the gear refused a perfectly good merge SHA: {res.reason}")
