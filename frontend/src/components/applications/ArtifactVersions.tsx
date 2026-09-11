@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { getApplicationArtifact, getArtifactDiff } from "@/lib/api";
 import type { ApplicationArtifact, ApplicationReceiptEntry, ArtifactDiff as ArtifactDiffData } from "@/lib/api";
 import { ArtifactDiff } from "@/components/applications/ArtifactDiff";
@@ -63,18 +63,27 @@ export function ArtifactVersions({
     [applicationId, openId, texts]
   );
 
+  // Every diff fetch is numbered; a response that is not the newest request
+  // is dropped. Without this, Compare v2 → Compare v1 (or two quick base
+  // changes on one version) let the LAST response to land win, painting a
+  // diff for the wrong version or the wrong base.
+  const requestSeq = useRef(0);
+
   const loadDiff = useCallback(
     async (artifactId: number, base: string) => {
+      const seq = ++requestSeq.current;
       setDiffLoading(true);
       setDiffError(null);
+      setDiff(null);
       try {
         const res = await getArtifactDiff(applicationId, artifactId, base || undefined);
+        if (seq !== requestSeq.current) return;
         setDiff(res);
       } catch (err) {
-        setDiff(null);
+        if (seq !== requestSeq.current) return;
         setDiffError(err instanceof Error ? err.message : "Could not load the comparison.");
       } finally {
-        setDiffLoading(false);
+        if (seq === requestSeq.current) setDiffLoading(false);
       }
     },
     [applicationId]
@@ -83,8 +92,10 @@ export function ArtifactVersions({
   const compare = useCallback(
     async (artifact: ApplicationArtifact) => {
       if (compareId === artifact.id) {
+        requestSeq.current += 1; // an in-flight response must not repopulate a closed panel
         setCompareId(null);
         setDiff(null);
+        setDiffLoading(false);
         return;
       }
       setCompareId(artifact.id);

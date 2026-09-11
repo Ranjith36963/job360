@@ -145,10 +145,15 @@ async def test_foreign_or_mismatched_ids_are_404_and_bad_against_is_422(authenti
         unknown_artifact = await _diff(client, app_id, cv + 9999)
         other_kind = await _diff(client, app_id, cv, against=str(letter))
         junk = await _diff(client, app_id, cv, against="latest")
+        # "²" passes str.isdigit() but not int() — must be a 422, never a 500
+        unicode_digit = await _diff(client, app_id, cv, against="²")
+        too_long = await _diff(client, app_id, cv, against="9" * 40)
     assert unknown_app.status_code == 404
     assert unknown_artifact.status_code == 404
     assert other_kind.status_code == 404
     assert junk.status_code == 422
+    assert unicode_digit.status_code == 422
+    assert too_long.status_code == 422
 
 
 @pytest.mark.asyncio

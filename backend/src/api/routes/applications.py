@@ -1,7 +1,10 @@
 """The application spine's REST surface (docs/plans/2026-09-04-application-
 spine/spec.md, §Tool contracts). Every route here is also an MCP tool
 (``src/api/mcp_server.py``) calling the SAME function — one API for every
-surface.
+surface — with one deliberate exception: the read-only artifact diff
+(slice 8, ``GET …/artifacts/{artifact_id}/diff``) is web-only by rule M2
+(the agent already holds both texts), pinned by
+``tests/test_artifact_diff.py::test_no_mcp_tool_diffs_an_artifact``.
 
 Auth: every route ``Depends(require_user)`` (session cookie, personal
 ``j360_…`` token, or OAuth ``j360a_…`` bearer — S1). None of these routes
@@ -680,7 +683,10 @@ async def diff_application_artifact(
             }
             base_text = prev["text"] or ""
     else:
-        if not against.isdigit():
+        # `isascii()` too: `str.isdigit()` accepts Unicode digits such as "²"
+        # that `int()` rejects — without it that request is a 500, not a 422.
+        # The length bound keeps a 100-digit "id" away from psycopg.
+        if not against.isascii() or not against.isdigit() or len(against) > 18:
             raise HTTPException(status_code=422, detail="against must be 'profile' or an artifact id")
         other = await spine.get_artifact(db, user.id, application_id, int(against))
         if other is None or other["kind"] != target["kind"] or other["id"] == target["id"]:
