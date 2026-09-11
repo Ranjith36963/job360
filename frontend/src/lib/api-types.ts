@@ -188,6 +188,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/artifacts/{artifact_id}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Diff Application Artifact
+         * @description Slice 8 (#515) — original vs tailored, read-only (spec R1). No Keep:
+         *     the version the receipt names is the applied one (decision 26).
+         */
+        get: operations["diff_application_artifact_api_applications__application_id__artifacts__artifact_id__diff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/contacts": {
         parameters: {
             query?: never;
@@ -1716,6 +1737,63 @@ export interface components {
             receipts: number;
             /** Status */
             status: string;
+        };
+        /**
+         * ArtifactDiffBaseOut
+         * @description Slice 8 — what the target version is compared against: the profile's
+         *     stored CV (``profile``), another version of the same kind (``artifact``),
+         *     or nothing (``none`` — a first version of a non-cv kind).
+         */
+        ArtifactDiffBaseOut: {
+            /** Artifact Id */
+            artifact_id?: number | null;
+            /** Label */
+            label: string;
+            /** Source */
+            source: string;
+            /** Version No */
+            version_no?: number | null;
+        };
+        /** ArtifactDiffLineOut */
+        ArtifactDiffLineOut: {
+            /** Op */
+            op: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * ArtifactDiffOut
+         * @description ``GET …/artifacts/{artifact_id}/diff`` — read-only; the web paints it.
+         *     ``applied`` is the receipt's word, not a button's (VISION decision 26).
+         */
+        ArtifactDiffOut: {
+            /** Added */
+            added: number;
+            base: components["schemas"]["ArtifactDiffBaseOut"];
+            /** Kind */
+            kind: string;
+            /** Lines */
+            lines: components["schemas"]["ArtifactDiffLineOut"][];
+            /** Removed */
+            removed: number;
+            target: components["schemas"]["ArtifactDiffTargetOut"];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** ArtifactDiffTargetOut */
+        ArtifactDiffTargetOut: {
+            /** Applied */
+            applied: boolean;
+            /** Artifact Id */
+            artifact_id: number;
+            /** Created At */
+            created_at: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model: string | null;
+            /** Version No */
+            version_no: number;
         };
         /** Body_clear_profile_section_api_profile_clear_post */
         Body_clear_profile_section_api_profile_clear_post: {
@@ -3390,6 +3468,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationArtifactRowOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    diff_application_artifact_api_applications__application_id__artifacts__artifact_id__diff_get: {
+        parameters: {
+            query?: {
+                /** @description `profile` (the stored CV text) or another artifact id of the same kind. Default: `profile` for a cv, the previous version otherwise. */
+                against?: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+                artifact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactDiffOut"];
                 };
             };
             /** @description Validation Error */

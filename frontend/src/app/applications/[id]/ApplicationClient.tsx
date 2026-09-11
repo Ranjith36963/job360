@@ -135,7 +135,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Artifacts
         </h2>
-        <ArtifactVersions applicationId={detail.id} artifacts={detail.artifacts} />
+        <ArtifactVersions applicationId={detail.id} artifacts={detail.artifacts} receipts={detail.receipts} />
       </section>
 
       {detail.receipts.length > 0 && (

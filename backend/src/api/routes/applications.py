@@ -31,6 +31,7 @@ from src.api.routes.bring import job_row_to_response
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications import contacts as contacts_service
+from src.services.applications import diff as diff_service
 from src.services.applications import spine
 from src.services.applications import stats as stats_service
 from src.services.applications.authorship import actor_for
@@ -243,6 +244,44 @@ class ApplicationArtifactRowOut(BaseModel):
     label: str
     chars: int
     created_at: str
+
+
+class ArtifactDiffBaseOut(BaseModel):
+    """Slice 8 — what the target version is compared against: the profile's
+    stored CV (``profile``), another version of the same kind (``artifact``),
+    or nothing (``none`` — a first version of a non-cv kind)."""
+
+    source: str
+    artifact_id: Optional[int] = None
+    version_no: Optional[int] = None
+    label: str
+
+
+class ArtifactDiffTargetOut(BaseModel):
+    artifact_id: int
+    version_no: int
+    made_by: str
+    model: Optional[str]
+    created_at: str
+    applied: bool
+
+
+class ArtifactDiffLineOut(BaseModel):
+    op: str
+    text: str
+
+
+class ArtifactDiffOut(BaseModel):
+    """``GET …/artifacts/{artifact_id}/diff`` — read-only; the web paints it.
+    ``applied`` is the receipt's word, not a button's (VISION decision 26)."""
+
+    kind: str
+    base: ArtifactDiffBaseOut
+    target: ArtifactDiffTargetOut
+    lines: list[ArtifactDiffLineOut]
+    added: int
+    removed: int
+    truncated: bool
 
 
 class ApplicationReceiptOut(BaseModel):
@@ -603,6 +642,66 @@ async def get_application_artifact(
     if row is None:
         raise HTTPException(status_code=404, detail="artifact not found")
     return row
+
+
+@router.get(
+    "/applications/{application_id}/artifacts/{artifact_id}/diff", response_model=ArtifactDiffOut
+)
+async def diff_application_artifact(
+    application_id: int,
+    artifact_id: int,
+    against: str = Query(
+        "",
+        description="`profile` (the stored CV text) or another artifact id of the same kind. "
+        "Default: `profile` for a cv, the previous version otherwise.",
+    ),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Slice 8 (#515) — original vs tailored, read-only (spec R1). No Keep:
+    the version the receipt names is the applied one (decision 26)."""
+    target = await spine.get_artifact(db, user.id, application_id, artifact_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    base: dict[str, Any]
+    base_text: str
+    if against == "profile" or (against == "" and target["kind"] == "cv"):
+        base = {"source": "profile", "label": "Original CV"}
+        base_text = diff_service.load_profile_cv_text(user.id)
+    elif against == "":
+        prev = await diff_service.previous_version(db, application_id, target["kind"], target["version_no"])
+        if prev is None:
+            base, base_text = {"source": "none", "label": "Nothing before this"}, ""
+        else:
+            base = {
+                "source": "artifact", "artifact_id": prev["id"], "version_no": prev["version_no"],
+                "label": f"v{prev['version_no']}",
+            }
+            base_text = prev["text"] or ""
+    else:
+        if not against.isdigit():
+            raise HTTPException(status_code=422, detail="against must be 'profile' or an artifact id")
+        other = await spine.get_artifact(db, user.id, application_id, int(against))
+        if other is None or other["kind"] != target["kind"] or other["id"] == target["id"]:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        base = {
+            "source": "artifact", "artifact_id": other["id"], "version_no": other["version_no"],
+            "label": f"v{other['version_no']}",
+        }
+        base_text = other["text"] or ""
+
+    result = diff_service.diff_lines(base_text, target["text"] or "")
+    return {
+        "kind": target["kind"],
+        "base": base,
+        "target": {
+            "artifact_id": target["id"], "version_no": target["version_no"], "made_by": target["made_by"],
+            "model": target.get("model"), "created_at": target["created_at"],
+            "applied": await diff_service.is_applied(db, application_id, target["id"]),
+        },
+        **result,
+    }
 
 
 @router.post(

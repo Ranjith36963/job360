@@ -320,6 +320,9 @@ APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS = int(
 APPLICATION_ARTIFACT_KINDS = ("cv", "cover_letter", "answers", "outreach")
 APPLICATION_ARTIFACT_MAX_CHARS = int(os.getenv("APPLICATION_ARTIFACT_MAX_CHARS", "60000"))
 APPLICATION_ARTIFACT_MAX_VERSIONS = int(os.getenv("APPLICATION_ARTIFACT_MAX_VERSIONS", "200"))
+# Slice 8 (#515) — the read-only artifact diff caps each side in LINES before
+# difflib runs (quadratic worst case); the response says `truncated`.
+APPLICATION_DIFF_MAX_LINES = int(os.getenv("APPLICATION_DIFF_MAX_LINES", "4000"))
 
 # R8 — record_application (the rich receipt).
 APPLICATION_RECEIPT_ANSWERS_MAX = int(os.getenv("APPLICATION_RECEIPT_ANSWERS_MAX", "50"))

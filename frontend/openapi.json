@@ -753,6 +753,155 @@
         "title": "ApplicationSummaryOut",
         "type": "object"
       },
+      "ArtifactDiffBaseOut": {
+        "description": "Slice 8 \u2014 what the target version is compared against: the profile's\nstored CV (``profile``), another version of the same kind (``artifact``),\nor nothing (``none`` \u2014 a first version of a non-cv kind).",
+        "properties": {
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Id"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version No"
+          }
+        },
+        "required": [
+          "source",
+          "label"
+        ],
+        "title": "ArtifactDiffBaseOut",
+        "type": "object"
+      },
+      "ArtifactDiffLineOut": {
+        "properties": {
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "text"
+        ],
+        "title": "ArtifactDiffLineOut",
+        "type": "object"
+      },
+      "ArtifactDiffOut": {
+        "description": "``GET \u2026/artifacts/{artifact_id}/diff`` \u2014 read-only; the web paints it.\n``applied`` is the receipt's word, not a button's (VISION decision 26).",
+        "properties": {
+          "added": {
+            "title": "Added",
+            "type": "integer"
+          },
+          "base": {
+            "$ref": "#/components/schemas/ArtifactDiffBaseOut"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDiffLineOut"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "integer"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ArtifactDiffTargetOut"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "base",
+          "target",
+          "lines",
+          "added",
+          "removed",
+          "truncated"
+        ],
+        "title": "ArtifactDiffOut",
+        "type": "object"
+      },
+      "ArtifactDiffTargetOut": {
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "made_by": {
+            "title": "Made By",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "version_no",
+          "made_by",
+          "model",
+          "created_at",
+          "applied"
+        ],
+        "title": "ArtifactDiffTargetOut",
+        "type": "object"
+      },
       "Body_clear_profile_section_api_profile_clear_post": {
         "properties": {
           "section": {
@@ -4726,6 +4875,102 @@
           }
         },
         "summary": "Get Application Artifact",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/artifacts/{artifact_id}/diff": {
+      "get": {
+        "description": "Slice 8 (#515) \u2014 original vs tailored, read-only (spec R1). No Keep:\nthe version the receipt names is the applied one (decision 26).",
+        "operationId": "diff_application_artifact_api_applications__application_id__artifacts__artifact_id__diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`profile` (the stored CV text) or another artifact id of the same kind. Default: `profile` for a cv, the previous version otherwise.",
+            "in": "query",
+            "name": "against",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "`profile` (the stored CV text) or another artifact id of the same kind. Default: `profile` for a cv, the previous version otherwise.",
+              "title": "Against",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDiffOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diff Application Artifact",
         "tags": [
           "applications"
         ]
