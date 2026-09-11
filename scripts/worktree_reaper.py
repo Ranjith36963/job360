@@ -333,13 +333,21 @@ def stale_remote_branches(
     live_refs: set[str],
     now: float,
     older_than_days: float,
+    open_heads: frozenset[str] | set[str] = frozenset(),
 ) -> list[str]:
     """Which remote branches may be deleted. Pure — the drill needs no network.
 
     A branch qualifies only if a pull request for it MERGED, that merge is older
-    than the grace period, and the ref still exists. `gh pr list --state merged`
-    is the oracle because `git branch --merged` reports 1 here where GitHub
-    reports 343: the repo squash-merges, so a shipped tip is never an ancestor.
+    than the grace period, the ref still exists, AND no OPEN pull request uses
+    it. `gh pr list --state merged` is the oracle because `git branch --merged`
+    reports 1 here where GitHub reports 343: the repo squash-merges, so a
+    shipped tip is never an ancestor.
+
+    The open-PR exclusion exists because this runs on EVERY merge with no grace
+    period (2026-09-10): a branch that shipped once and was then re-used for a
+    follow-up PR has a merged PR in its history and an open one in its present.
+    Without the exclusion the reaper would delete unshipped work — the one thing
+    it must never do.
     """
     cutoff = now - older_than_days * 86400
     out: set[str] = set()
@@ -347,6 +355,8 @@ def stale_remote_branches(
         br = pr.get("headRefName") or ""
         if not br or br in PROTECTED_BRANCHES or br not in live_refs:
             continue
+        if br in open_heads:
+            continue  # shipped once, but unshipped work sits on it NOW
         try:
             ts = time.mktime(time.strptime(pr.get("mergedAt") or "", "%Y-%m-%dT%H:%M:%SZ"))
         except ValueError:
@@ -377,10 +387,26 @@ def reap_remote(repo_root: Path, apply: bool, older_than_days: float, cap: int) 
         print("gh returned zero merged PRs — refusing to trust that.")
         return 1
 
+    # The OPEN set is a refusal input: if it cannot be read, nothing is deleted.
+    # A failed query must never read as "no open PRs" — that would turn every
+    # re-used branch into a target.
+    open_out, rc = run(
+        ["gh", "pr", "list", "--state", "open", "--limit", "500", "--json", "headRefName"],
+        cwd=str(repo_root), timeout=60,
+    )
+    if rc != 0:
+        print("gh pr list --state open failed — doing nothing.")
+        return 1
+    try:
+        open_heads = {p.get("headRefName") or "" for p in json.loads(open_out or "[]")}
+    except ValueError:
+        print("could not parse open-PR output — doing nothing.")
+        return 1
+
     refs, _ = run(["git", "ls-remote", "--heads", "origin"], cwd=str(repo_root), timeout=60)
     live = {ln.split("refs/heads/", 1)[1] for ln in refs.splitlines() if "refs/heads/" in ln}
 
-    targets = stale_remote_branches(prs, live, time.time(), older_than_days)[:cap]
+    targets = stale_remote_branches(prs, live, time.time(), older_than_days, open_heads)[:cap]
     if not targets:
         print("No stale merged remote branches.")
         return 0
@@ -570,15 +596,24 @@ def _drill_remote() -> list[tuple[str, bool, str]]:
     now = time.time()
     old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 30 * 86400))
     fresh = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 3600))
-    live = {"shipped-old", "shipped-fresh", "main", "still-open"}
+    live = {"shipped-old", "shipped-fresh", "main", "still-open", "shipped-then-reused"}
     prs = [
         {"headRefName": "shipped-old", "mergedAt": old},
         {"headRefName": "shipped-fresh", "mergedAt": fresh},
         {"headRefName": "main", "mergedAt": old},
         {"headRefName": "already-gone", "mergedAt": old},
         {"headRefName": "no-date", "mergedAt": None},
+        {"headRefName": "shipped-then-reused", "mergedAt": old},
     ]
-    got = stale_remote_branches(prs, live, now, older_than_days=14)
+    got = stale_remote_branches(prs, live, now, older_than_days=14,
+                                open_heads={"shipped-then-reused"})
+    # Zero grace is what the on-every-merge workflow runs with. It must still
+    # spare the re-used branch — that refusal is the open-PR set, not the clock.
+    got_now = stale_remote_branches(prs, live, now, older_than_days=0,
+                                    open_heads={"shipped-then-reused"})
+    # NEGATIVE CONTROL for the exclusion: drop the open set and the same branch
+    # MUST become a target, or the exclusion is a no-op that happens to pass.
+    got_unguarded = stale_remote_branches(prs, live, now, older_than_days=0)
     return [
         # NEGATIVE CONTROL first: a remote reaper that deletes nothing passes
         # every refusal below and is exactly as useless as no reaper at all.
@@ -587,6 +622,11 @@ def _drill_remote() -> list[tuple[str, bool, str]]:
         ("remote_never_touches_main", "main" not in got, f"got {got}"),
         ("remote_skips_already_deleted", "already-gone" not in got, f"got {got}"),
         ("remote_refuses_unparseable_date", "no-date" not in got, f"got {got}"),
+        ("remote_spares_branch_with_open_pr", "shipped-then-reused" not in got, f"got {got}"),
+        ("remote_zero_grace_still_spares_open_pr",
+         "shipped-then-reused" not in got_now and "shipped-fresh" in got_now, f"got {got_now}"),
+        ("remote_open_pr_guard_is_not_a_noop",
+         "shipped-then-reused" in got_unguarded, f"got {got_unguarded}"),
     ]
 
 

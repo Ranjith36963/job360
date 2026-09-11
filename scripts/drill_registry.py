@@ -289,6 +289,21 @@ REGISTRY: dict[str, Guard] = {
         # step goes red and the claim is withdrawn.
         drill=[sys.executable, "scripts/check_workflow_slack_wiring.py", "--drill"],
     ),
+    "scripts/ci_scope.py": Guard(
+        status="drilled",
+        # Decides `docs` / `frontend` / `full` for a PR so ci.yml and
+        # ci-offline.yml can skip the seven minutes of backend tests a
+        # one-component frontend change cannot affect (slice 3, 2026-09-10).
+        # Its danger is one-directional: a wrong `full` costs minutes, a wrong
+        # `docs` skips the gate. So the drill's negative controls come first
+        # (it must be ABLE to say docs/frontend), then precedence (one backend
+        # file beats forty docs), the #503 deploy-shaped set (Dockerfile,
+        # lockfile, next.config, .env -> never fast), and unknown-is-full.
+        # The drill also runs inside the `scope` job itself, before the
+        # verdict: a classifier that cannot pass it fails every job that
+        # needs it, so a broken classifier is a red PR, never a fast one.
+        drill=[sys.executable, "scripts/ci_scope.py", "--drill"],
+    ),
     "scripts/slack_transition.py": Guard(
         status="drilled",
         # The volume rule: announce the TRANSITION, not the state. Its drill
@@ -354,11 +369,6 @@ REGISTRY: dict[str, Guard] = {
         "plant a duplicate-looking file and demand it is named",
         since="2026-08-16",
     ),
-    "scripts/doc_clutter_check.py": Guard(
-        status="owed",
-        reason="offline; a drill can plant a cluttered doc tree in a temp copy",
-        since="2026-08-16",
-    ),
     "scripts/doc_sync_check.py": Guard(
         status="drilled",
         # Owed since 2026-08-16 for exactly the reasons below; PAID 2026-08-25.
@@ -403,11 +413,29 @@ REGISTRY: dict[str, Guard] = {
         reason="reads the live Sentry API; needs a recorded issue payload",
         since="2026-08-16",
     ),
+    # ── THE GUARD THIS PR WIRES UP (harness simplification slice 5, W1) ─────
+    # A guard and its declaration land together, always -- same rule as the
+    # lane.py/repairable.py/ssrf_drill.py pairs above. The WIP limit's pure
+    # decide() function: counts other open, non-draft, non-dependabot,
+    # non-revert PRs against the owner's limit, and exempts THIS PR from ever
+    # being parked if it is dependabot or a revert. Offline -- no gh, no
+    # network, and a negative control (0 open PRs -> never park) comes first.
+    "scripts/wip_gate.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "scripts/wip_gate.py", "--drill"],
+    ),
     "scripts/watchdog_check.py": Guard(
-        status="owed",
-        reason="watches the other loops via the live GitHub API; a drill needs a "
-        "recorded `gh run list` fixture, which does not exist yet",
-        since="2026-08-16",
+        status="drilled",
+        # WAS `owed` since 2026-08-16 ("needs a recorded gh run list fixture").
+        # Slice 4 (2026-09-11) split the file into a gh fetch and a PURE
+        # classifier (`assess`), and the drill feeds the classifier hand-made
+        # run lists: stopped vs fresh, the two-in-a-row RED streak, a single
+        # failure as a flake, in-progress/cancelled runs not breaking the
+        # streak, a success breaking it, and the RED_ONLY (ci.yml on main)
+        # shape. Negative controls first: it must be able to say "fine".
+        # The gh half stays undrilled on purpose — it is the same `gh run
+        # list` every sibling uses, and a recorded fixture would rot.
+        drill=[sys.executable, "scripts/watchdog_check.py", "--drill"],
     ),
     "backend/scripts/mypy_ratchet.py": Guard(
         status="owed",

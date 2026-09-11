@@ -37,17 +37,17 @@ const jetbrainsMono = JetBrains_Mono({
 const TAGLINE = "Your career memory. Your agent's context.";
 
 export const metadata: Metadata = {
-  title: "Job360 — Your Career Command Center",
+  title: "Job360 — Your agent's memory",
   description: `${TAGLINE} Job360 remembers every application, every version, every outcome for the AI agent doing your job search.`,
   openGraph: {
-    title: "Job360 — Your Career Command Center",
+    title: "Job360 — Your agent's memory",
     description: TAGLINE,
     type: "website",
     siteName: "Job360",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Job360 — Your Career Command Center",
+    title: "Job360 — Your agent's memory",
     description: TAGLINE,
   },
 };

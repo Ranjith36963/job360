@@ -124,7 +124,7 @@ export default function RegisterPage() {
         <CardHeader>
           <CardTitle>Create your Job360 account</CardTitle>
           <CardDescription>
-            Upload your CV next — matches start flowing within minutes.
+            Upload your CV next — it becomes the memory your agent works from.
           </CardDescription>
         </CardHeader>
         <CardContent>

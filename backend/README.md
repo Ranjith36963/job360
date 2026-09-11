@@ -84,7 +84,7 @@ Must pass from `backend/`:
 python -m pytest -q -p no:randomly
 ```
 
-Invariant: full suite passes, 0 failing, across **133** `test_*.py` files (2 `live`
+Invariant: full suite passes, 0 failing, across **136** `test_*.py` files (2 `live`
 deselected offline). The collected count is deliberately not written down — run
 `python -m pytest --collect-only -q -p no:randomly | tail -1` for it. Any total
 committed to a doc is unguarded (`scripts/doc_sync_check.py` declines to check it

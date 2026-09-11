@@ -120,6 +120,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/lessons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Lessons
+         * @description Slice 9 (#516) — every "flag for next time" lesson across the caller's
+         *     applications, newest first (spec R1 door 1). Read-only; a lesson is
+         *     written through ``record_event`` (type ``lesson``) like any other event.
+         *     ``get_profile`` carries the last PROFILE_LESSONS_MAX of the same list.
+         */
+        get: operations["list_lessons_api_applications_lessons_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/stats": {
         parameters: {
             query?: never;
@@ -180,6 +203,27 @@ export interface paths {
         };
         /** Get Application Artifact */
         get: operations["get_application_artifact_api_applications__application_id__artifacts__artifact_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/artifacts/{artifact_id}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Diff Application Artifact
+         * @description Slice 8 (#515) — original vs tailored, read-only (spec R1). No Keep:
+         *     the version the receipt names is the applied one (decision 26).
+         */
+        get: operations["diff_application_artifact_api_applications__application_id__artifacts__artifact_id__diff_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1572,6 +1616,8 @@ export interface components {
             fit: components["schemas"]["ApplicationFitOut"] | null;
             /** Id */
             id: number;
+            /** Interview At */
+            interview_at: string | null;
             job: components["schemas"]["ApplicationJobOut"];
             /** Job Id */
             job_id: number;
@@ -1609,6 +1655,9 @@ export interface components {
             recorded_at: string;
             /** Recorded By */
             recorded_by: string;
+            /** Scheduled At */
+            scheduled_at: string | null;
+            source: components["schemas"]["EventSourceOut"] | null;
             /** Superseded */
             superseded: boolean;
         };
@@ -1648,6 +1697,8 @@ export interface components {
         };
         /** ApplicationReceiptExportOut */
         ApplicationReceiptExportOut: {
+            /** Answers */
+            answers?: components["schemas"]["ReceiptAnswerOut"][];
             /** Channel */
             channel: string;
             /** Confirmation */
@@ -1660,6 +1711,10 @@ export interface components {
             cv_artifact_id: number | null;
             /** Cv Text */
             cv_text?: string | null;
+            /** Fields Filled */
+            fields_filled?: {
+                [key: string]: unknown;
+            };
             /** Id */
             id: number;
             /** Note */
@@ -1674,6 +1729,8 @@ export interface components {
          *     ``ApplicationReceiptExportOut`` for the ``export_history`` shape).
          */
         ApplicationReceiptOut: {
+            /** Answers */
+            answers?: components["schemas"]["ReceiptAnswerOut"][];
             /** Channel */
             channel: string;
             /** Confirmation */
@@ -1682,6 +1739,10 @@ export interface components {
             cover_letter_artifact_id: number | null;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
+            /** Fields Filled */
+            fields_filled?: {
+                [key: string]: unknown;
+            };
             /** Id */
             id: number;
             /** Note */
@@ -1711,6 +1772,63 @@ export interface components {
             receipts: number;
             /** Status */
             status: string;
+        };
+        /**
+         * ArtifactDiffBaseOut
+         * @description Slice 8 — what the target version is compared against: the profile's
+         *     stored CV (``profile``), another version of the same kind (``artifact``),
+         *     or nothing (``none`` — a first version of a non-cv kind).
+         */
+        ArtifactDiffBaseOut: {
+            /** Artifact Id */
+            artifact_id?: number | null;
+            /** Label */
+            label: string;
+            /** Source */
+            source: string;
+            /** Version No */
+            version_no?: number | null;
+        };
+        /** ArtifactDiffLineOut */
+        ArtifactDiffLineOut: {
+            /** Op */
+            op: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * ArtifactDiffOut
+         * @description ``GET …/artifacts/{artifact_id}/diff`` — read-only; the web paints it.
+         *     ``applied`` is the receipt's word, not a button's (VISION decision 26).
+         */
+        ArtifactDiffOut: {
+            /** Added */
+            added: number;
+            base: components["schemas"]["ArtifactDiffBaseOut"];
+            /** Kind */
+            kind: string;
+            /** Lines */
+            lines: components["schemas"]["ArtifactDiffLineOut"][];
+            /** Removed */
+            removed: number;
+            target: components["schemas"]["ArtifactDiffTargetOut"];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** ArtifactDiffTargetOut */
+        ArtifactDiffTargetOut: {
+            /** Applied */
+            applied: boolean;
+            /** Artifact Id */
+            artifact_id: number;
+            /** Created At */
+            created_at: string;
+            /** Made By */
+            made_by: string;
+            /** Model */
+            model: string | null;
+            /** Version No */
+            version_no: number;
         };
         /** Body_clear_profile_section_api_profile_clear_post */
         Body_clear_profile_section_api_profile_clear_post: {
@@ -1993,6 +2111,51 @@ export interface components {
             /** Token */
             token: string;
         };
+        /**
+         * EventSource
+         * @description Slice 6 (docs/plans/2026-09-07-email-evidence/spec.md §Tool contracts)
+         *     — the email an event came from. No length caps declared here: every cap
+         *     is a live ``settings`` value ``spine.validate_source`` checks at call
+         *     time, the same reasoning ``AddContactRequest``'s docstring gives.
+         */
+        EventSource: {
+            /**
+             * Kind
+             * @default email
+             */
+            kind: string;
+            /** Message Id */
+            message_id: string;
+            /** Received At */
+            received_at?: string | null;
+            /**
+             * Sender
+             * @default
+             */
+            sender: string;
+            /**
+             * Subject
+             * @default
+             */
+            subject: string;
+        };
+        /**
+         * EventSourceOut
+         * @description Slice 6 — the ``source`` shape every reader emits (or ``null``, when
+         *     the event carries none).
+         */
+        EventSourceOut: {
+            /** Kind */
+            kind: string;
+            /** Message Id */
+            message_id: string;
+            /** Received At */
+            received_at: string | null;
+            /** Sender */
+            sender: string;
+            /** Subject */
+            subject: string;
+        };
         /** ExportApplicationOut */
         ExportApplicationOut: {
             /** Artifacts */
@@ -2216,6 +2379,33 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * LessonOut
+         * @description One `lesson` event, read back across applications (slice 9, #516).
+         */
+        LessonOut: {
+            /** Application Id */
+            application_id: number;
+            /** Detail */
+            detail: string;
+            /** Event Id */
+            event_id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            /** Occurred At */
+            occurred_at: string;
+            /** Recorded By */
+            recorded_by: string;
+        };
+        /** LessonsResponse */
+        LessonsResponse: {
+            /** Lessons */
+            lessons: components["schemas"]["LessonOut"][];
+            /** Total */
+            total: number;
+        };
         /** LinkedInResponse */
         LinkedInResponse: {
             /** Merged */
@@ -2376,6 +2566,11 @@ export interface components {
                     [key: string]: unknown;
                 };
             };
+            /**
+             * Lessons
+             * @default []
+             */
+            lessons: components["schemas"]["LessonOut"][];
             /**
              * Linkedin Subsections
              * @default {}
@@ -2557,6 +2752,18 @@ export interface components {
             /** Question */
             question: string;
         };
+        /**
+         * ReceiptAnswerOut
+         * @description The READ shape of an answer — deliberately without the request caps.
+         *     A receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS
+         *     is ever lowered, older rows must still read back, not 500 the page.
+         */
+        ReceiptAnswerOut: {
+            /** Answer */
+            answer: string;
+            /** Question */
+            question: string;
+        };
         /** ReceiptListResponse */
         ReceiptListResponse: {
             /** Receipts */
@@ -2660,9 +2867,14 @@ export interface components {
             payload?: {
                 [key: string]: unknown;
             };
+            /** Scheduled At */
+            scheduled_at?: string | null;
+            source?: components["schemas"]["EventSource"] | null;
         };
         /** RecordEventResponse */
         RecordEventResponse: {
+            /** Already Existed */
+            already_existed: boolean;
             /** Event Id */
             event_id: number;
             /** Event Type */
@@ -2673,6 +2885,8 @@ export interface components {
             recorded_at: string;
             /** Recorded By */
             recorded_by: string;
+            /** Scheduled At */
+            scheduled_at: string | null;
             /** Status */
             status: string;
         };
@@ -3000,6 +3214,9 @@ export interface components {
             recorded_at: string;
             /** Recorded By */
             recorded_by: string;
+            /** Scheduled At */
+            scheduled_at: string | null;
+            source: components["schemas"]["EventSourceOut"] | null;
         };
         /** WhatsNewResponse */
         WhatsNewResponse: {
@@ -3196,6 +3413,42 @@ export interface operations {
             };
         };
     };
+    list_lessons_api_applications_lessons_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     stats_api_applications_stats_get: {
         parameters: {
             query?: {
@@ -3330,6 +3583,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationArtifactRowOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    diff_application_artifact_api_applications__application_id__artifacts__artifact_id__diff_get: {
+        parameters: {
+            query?: {
+                /** @description `profile` (the stored CV text) or another artifact id of the same kind. Default: `profile` for a cv, the previous version otherwise. */
+                against?: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+                artifact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactDiffOut"];
                 };
             };
             /** @description Validation Error */

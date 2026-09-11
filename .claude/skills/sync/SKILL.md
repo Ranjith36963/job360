@@ -60,9 +60,10 @@ the top of each file. **Do not type the list from memory — read it from the
 `LIVING_DOCS` constant in `scripts/doc_sync_check.py`**, which is the only
 authority and has grown from 6 files to 15 (it now covers CONTRIBUTING.md,
 frontend/CLAUDE.md, backend/README.md and every file in
-`docs/product/pillars/`). The daily Loop-3 tripwire (`scripts/doc_sync_check.py`)
-reads both the type tag and the date, and flags any doc not verified within
-45 days — so stamping a hardcoded subset leaves the rest to go red on freshness.
+`docs/product/pillars/`). The Loop-3 PR-time gate (`scripts/doc_sync_check.py`,
+run by `.github/workflows/doc-sync.yml` on every pull request) reads both the
+type tag and the date, and flags any doc not verified within 45 days — so
+stamping a hardcoded subset leaves the rest to go red on freshness at the next PR.
 
 **If a doc claims something the code does NOT do** (code is behind the doc —
 an "AHEAD" doc): **leave that doc completely untouched** (user's rule —

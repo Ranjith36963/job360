@@ -19,10 +19,17 @@
 name: branch-reaper
 
 on:
-  schedule:
-    # Weekly. Branch sprawl accrues over weeks, not hours, and a daily job here
-    # would spend its life printing "nothing to do".
-    - cron: "0 4 * * 1"
+  push:
+    # After EVERY merge to main, not weekly (owner decision, harness
+    # simplification slice 2, 2026-09-10): "a branch dies when it merges".
+    # The repo has delete_branch_on_merge on, so GitHub removes the PR's own
+    # branch at merge time; this run is the backstop for the ones that slip
+    # (merged before the setting existed, or re-pushed after the merge). A
+    # merge is the only moment a new merged branch can appear, so this is
+    # the only moment worth looking. Zero grace: a shipped branch has nothing
+    # left to protect, and unshipped work is protected by the open-PR
+    # exclusion in scripts/worktree_reaper.py, not by a waiting period.
+    branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -31,7 +38,7 @@ on:
         default: true
       older_than_days:
         description: "Grace period after the merge before a branch may be deleted"
-        default: "14"
+        default: "0"
 
 permissions:
   contents: write        # needed to delete a ref
@@ -62,8 +69,8 @@ jobs:
       - name: Reap merged remote branches
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLY: ${{ (github.event_name == 'schedule' || inputs.dry_run == false) && '--apply' || '' }}
-          DAYS: ${{ inputs.older_than_days || '14' }}
+          APPLY: ${{ (github.event_name == 'push' || inputs.dry_run == false) && '--apply' || '' }}
+          DAYS: ${{ inputs.older_than_days || '0' }}
         run: |
           python scripts/worktree_reaper.py --remote $APPLY \
             --older-than-days "$DAYS" --max 25
@@ -79,9 +86,10 @@ jobs:
       # pull request. GitHub keeps a merged PR and its head commits indefinitely,
       # reachable from the PR page, so `gh pr checkout <n>` restores the work.
       #
-      # Pushing the log anyway would mean a commit to `main` every week, and
-      # `main` auto-deploys to production. A weekly release to write down
-      # something GitHub already stores is a bad trade.
+      # Pushing the log anyway would mean a commit to `main` after every merge,
+      # and `main` auto-deploys to production. A release per merge to write
+      # down something GitHub already stores is a bad trade — and a push to
+      # main from here would re-trigger this very workflow.
       - name: Record what was reaped
         if: always()
         run: |

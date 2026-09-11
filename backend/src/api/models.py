@@ -157,6 +157,18 @@ class ProfileEditOut(BaseModel):
     set_at: str
 
 
+class LessonOut(BaseModel):
+    """One `lesson` event, read back across applications (slice 9, #516)."""
+
+    event_id: int
+    application_id: int
+    job_title: str
+    job_company: str
+    detail: str
+    occurred_at: str
+    recorded_by: str
+
+
 class ProfileResponse(BaseModel):
     summary: ProfileSummary
     preferences: dict[Any, Any]
@@ -211,6 +223,16 @@ class ProfileResponse(BaseModel):
     # field in place with an "Edited by <set_by> on <date>" mark instead of
     # keeping a second list to reconcile. Empty when no edit is active.
     agent_edits: list[ProfileEditOut] = []
+    # Slice 9 (#516) — the last PROFILE_LESSONS_MAX "flag for next time"
+    # lessons across every application, newest first, so the agent reading
+    # the profile sees them BEFORE it tailors the next CV. The full list is
+    # `GET /applications/lessons`.
+    lessons: list[LessonOut] = []
+
+
+class LessonsResponse(BaseModel):
+    lessons: list[LessonOut]
+    total: int
 
 
 # ── Step-1.5 S3-G — six new Pydantic models for Cohort Z endpoints. ──

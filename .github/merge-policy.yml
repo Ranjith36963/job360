@@ -412,6 +412,21 @@ data_exemptions:
       guard gets registered, which is the workflow this repo wants to be fast.
       Everything else in that file is the enforcement law and stays owner-lane.
 
+# ── WIP limit ──────────────────────────────────────────────────────────────
+# OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)". `limit: 2` means
+# a 3rd open, non-draft, non-dependabot, non-revert PR is PARKED, not refused
+# outright: `scripts/wip_gate.py` (wired into `.github/workflows/pr-advisor.yml`,
+# job `wip`, on `opened`/`ready_for_review` only -- never `synchronize`, so an
+# already-accepted PR is never parked later by a push) converts it to a DRAFT,
+# comments why, and Slacks the owner once to `needs-your-decision`. Drafts are
+# already invisible to `auto-merge.yml`'s filter, so parking IS the refusal --
+# there is no second "block merge" switch. Nothing is lost: `gh pr ready N`
+# un-parks it the moment a slot frees. Dependabot (its own loop) and
+# `revert/*` branches (emergency undos) never count toward the limit and are
+# never themselves parked -- see scripts/wip_gate.py's module docstring.
+wip:
+  limit: 2
+
 # ── Size ceiling ───────────────────────────────────────────────────────────
 # Not a quality judgement — a REVIEWABILITY one. Past this, no reviewer (human
 # or machine) is actually reading it, they are skimming. Big changes are fine;

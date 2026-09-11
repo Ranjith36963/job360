@@ -763,3 +763,248 @@ async def test_audit_log_never_carries_a_body(authenticated_async_context, audit
         blob = " ".join(f"{k}={v!r}" for k, v in record.items())
         for marker in markers:
             assert marker not in blob, f"audit log leaked a body field: {marker} in {blob[:300]}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ── Slice 6 (#513): email evidence + interview datetime ─────────────────────
+#
+# docs/plans/2026-09-07-email-evidence/spec.md — written RED first against
+# that doc's §Frozen tests list (every case 422'd on "extra_forbidden" until
+# `source` / `scheduled_at` existed), green since R1-R6 landed. Dates in the
+# fixtures are deliberately in the PAST: `received_at` shares `occurred_at`'s
+# tight future bound (S8), so a fixed future date would rot.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_event_with_email_source_is_stored_and_shown(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        source = {
+            "kind": "email",
+            "message_id": "msg-001@mail.example",
+            "sender": "recruiter@northwind.example",
+            "subject": "Re: Data Engineer application",
+            "received_at": "2026-09-01T08:30:00+01:00",
+        }
+        resp = await _record_event(client, app_id, "replied", source=source)
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["already_existed"] is False
+
+        detail = await _get_application(client, app_id)
+        whats_new = await client.get("/api/whats-new")
+
+    expected_source = {**source, "received_at": "2026-09-01T07:30:00+00:00"}
+    replied = next(e for e in detail.json()["events"] if e["event_type"] == "replied")
+    assert replied["source"] == expected_source, replied
+
+    wn_replied = next(e for e in whats_new.json()["events"] if e["event_type"] == "replied")
+    assert wn_replied["source"] == expected_source
+
+
+@pytest.mark.asyncio
+async def test_same_message_id_twice_adds_zero_rows(authenticated_async_context):
+    from src.api import dependencies as api_deps
+
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        first = await _record_event(client, app_id, "replied", source={"message_id": "dup-1"})
+        assert first.status_code == 201, first.text
+        first_body = first.json()
+
+        db = await api_deps.get_db()
+        cur = await db._conn.execute(
+            "SELECT COUNT(*) FROM application_events WHERE application_id = ?", (app_id,)
+        )
+        count_before = (await cur.fetchone())[0]
+
+        second = await _record_event(
+            client, app_id, "interview_requested", source={"message_id": "dup-1"}
+        )
+        assert second.status_code == 201, second.text
+        second_body = second.json()
+
+    assert second_body["already_existed"] is True
+    assert second_body["event_id"] == first_body["event_id"]
+    assert second_body["event_type"] == first_body["event_type"] == "replied"
+    assert second_body["status"] == first_body["status"], "a duplicate must not replay status"
+
+    cur = await db._conn.execute(
+        "SELECT COUNT(*) FROM application_events WHERE application_id = ?", (app_id,)
+    )
+    count_after = (await cur.fetchone())[0]
+    assert count_after == count_before, "the second call must add zero rows"
+
+
+@pytest.mark.asyncio
+async def test_same_message_id_on_another_application_is_a_new_row(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_1 = (await _bring(client))["application_id"]
+        app_2 = (await _bring(client, _AD_2))["application_id"]
+
+        r1 = await _record_event(client, app_1, "replied", source={"message_id": "shared-msg-1"})
+        r2 = await _record_event(client, app_2, "replied", source={"message_id": "shared-msg-1"})
+
+    assert r1.status_code == 201, r1.text
+    assert r2.status_code == 201, r2.text
+    assert r1.json()["event_id"] != r2.json()["event_id"]
+    assert r1.json()["already_existed"] is False
+    assert r2.json()["already_existed"] is False
+
+
+@pytest.mark.asyncio
+async def test_event_without_source_has_null_source(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        resp = await _record_event(client, app_id, "note", detail="plain note")
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["already_existed"] is False
+
+        detail = await _get_application(client, app_id)
+
+    note_evt = next(e for e in detail.json()["events"] if e["event_type"] == "note")
+    assert note_evt["source"] is None
+    assert note_evt["scheduled_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_scheduled_at_is_normalised_and_becomes_interview_at(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+
+        first = await _record_event(
+            client, app_id, "interview_scheduled", scheduled_at="2026-09-15T10:00:00+01:00"
+        )
+        assert first.status_code == 201, first.text
+        assert first.json()["scheduled_at"] == "2026-09-15T09:00:00+00:00"
+        first_id = first.json()["event_id"]
+
+        detail_1 = await _get_application(client, app_id)
+        assert detail_1.json()["interview_at"] == "2026-09-15T09:00:00+00:00"
+
+        # The interview got rescheduled: a correcting event supersedes the
+        # first and carries its OWN, newer scheduled_at.
+        second = await _record_event(
+            client, app_id, "interview_scheduled",
+            scheduled_at="2026-09-20T14:00:00+00:00", corrects_event_id=first_id,
+        )
+        assert second.status_code == 201, second.text
+
+        detail_2 = await _get_application(client, app_id)
+
+    assert detail_2.json()["interview_at"] == "2026-09-20T14:00:00+00:00", (
+        "interview_at must move to the CORRECTING event's scheduled_at, not stay on the superseded one"
+    )
+
+
+@pytest.mark.asyncio
+async def test_scheduled_at_on_a_non_interview_event_is_422(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        resp = await _record_event(
+            client, app_id, "note", scheduled_at="2026-09-15T10:00:00+00:00"
+        )
+        assert resp.status_code == 422, resp.text
+        assert "APPLICATION_SCHEDULABLE_EVENT_TYPES" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_scheduled_at_without_timezone_is_422(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        resp = await _record_event(
+            client, app_id, "interview_requested", scheduled_at="2026-09-15T10:00:00"
+        )
+        assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_source_caps_and_control_chars_are_422(authenticated_async_context):
+    from src.core import settings
+
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+
+        too_long_subject = "x" * (settings.APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS + 1)
+        over_cap = await _record_event(
+            client, app_id, "note", source={"message_id": "cap-1", "subject": too_long_subject}
+        )
+        assert over_cap.status_code == 422, over_cap.text
+        assert "APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS" in over_cap.text
+
+        bad_kind = await _record_event(
+            client, app_id, "note", source={"kind": "sms", "message_id": "cap-2"}
+        )
+        assert bad_kind.status_code == 422, bad_kind.text
+
+        control_char = await _record_event(
+            client, app_id, "note", source={"message_id": "cap-3", "subject": "line1\nline2"}
+        )
+        assert control_char.status_code == 422, control_char.text
+
+        # S3 widened after review: U+2028 is a line terminator in JSON/JS
+        # exports and U+202E flips how the rest of the timeline line renders;
+        # both slip past a bare `< 0x20` check. An emoji ZWJ sequence is a
+        # legal subject and must NOT be refused.
+        for bad in ("line1\u2028line2", "\u202eevil", "c1\x85ctrl"):
+            resp = await _record_event(client, app_id, "note", source={"message_id": "cap-3b", "subject": bad})
+            assert resp.status_code == 422, (bad, resp.text)
+        zwj_ok = await _record_event(
+            client, app_id, "note", source={"message_id": "cap-3c", "subject": "\U0001F468\u200d\U0001F4BB hi"}
+        )
+        assert zwj_ok.status_code == 201, zwj_ok.text
+
+        blank_message_id = await _record_event(
+            client, app_id, "note", source={"message_id": "   "}
+        )
+        assert blank_message_id.status_code == 422, blank_message_id.text
+
+        unknown_key = await _record_event(
+            client, app_id, "note", source={"message_id": "cap-4", "bogus": "x"}
+        )
+        assert unknown_key.status_code == 422, unknown_key.text
+
+
+@pytest.mark.asyncio
+async def test_source_never_reaches_the_audit_log(authenticated_async_context, audit_capture):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        source = {
+            "message_id": "audit-msg-1",
+            "sender": "SECRET_SENDER_MARKER@example.com",
+            "subject": "SECRET_SUBJECT_MARKER",
+        }
+        await _record_event(client, app_id, "replied", source=source)
+        # Same message id again -> exercises the duplicate/audit path too.
+        await _record_event(client, app_id, "note", source=source)
+
+    markers = ("SECRET_SENDER_MARKER", "SECRET_SUBJECT_MARKER", "audit-msg-1")
+    for record in audit_capture.records:
+        blob = " ".join(f"{k}={v!r}" for k, v in record.items())
+        for marker in markers:
+            assert marker not in blob, f"audit log leaked a source field: {marker} in {blob[:300]}"
+
+
+@pytest.mark.asyncio
+async def test_a_foreign_application_id_is_404_before_the_duplicate_lookup(authenticated_async_context):
+    from src.api import dependencies as api_deps
+
+    async with authenticated_async_context() as owner:
+        app_id = (await _bring(owner))["application_id"]
+
+    db = await api_deps.get_db()
+    cur = await db._conn.execute(
+        "SELECT COUNT(*) FROM application_events WHERE application_id = ?", (app_id,)
+    )
+    count_before = (await cur.fetchone())[0]
+
+    cookie = await _second_user_session_cookie("intruder-email-evidence@example.com")
+    async with _session_client(cookie) as intruder:
+        resp = await _record_event(intruder, app_id, "replied", source={"message_id": "steal-1"})
+        assert resp.status_code == 404, resp.text
+
+    cur = await db._conn.execute(
+        "SELECT COUNT(*) FROM application_events WHERE application_id = ?", (app_id,)
+    )
+    count_after = (await cur.fetchone())[0]
+    assert count_after == count_before, "a foreign application_id must 404 before any duplicate lookup runs"

@@ -33,9 +33,48 @@ permissions:
   contents: read
 
 jobs:
+
+  # ─── Scope: which steps does THIS diff need? ───────────────────────────────
+  # Harness simplification slice 3 (owner decision 2026-09-08). Measured on the
+  # last green run of main: the backend job spends 347s of 414s in pytest, and
+  # ci-offline.yml runs the same suite again. A one-component frontend PR waited
+  # seven minutes for tests it cannot affect.
+  #
+  # scripts/ci_scope.py answers `docs` / `frontend` / `full` from the changed
+  # files, most restrictive wins, unknown is full, empty is full, and anything
+  # that is not a pull_request (push to main, schedule, dispatch) is full
+  # without looking -- main is production.
+  #
+  # JOBS BELOW ARE NEVER SKIPPED, ONLY THEIR STEPS. The ruleset on main and
+  # scripts/merge_cage.py require checks BY NAME; a skipped job never reports
+  # and blocks the merge, a job whose steps were skipped reports success.
+  scope:
+    name: Scope (which checks this diff needs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      scope: ${{ steps.decide.outputs.scope }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # the diff needs the base commit
+      # The classifier proves it can still go red BEFORE it is allowed to
+      # decide anything. A broken classifier fails this job, which fails every
+      # job that needs it, which is a red PR -- never a silently fast one.
+      - name: The scope classifier can still fail
+        run: python scripts/ci_scope.py --drill
+      - name: Decide
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          scope=$(python scripts/ci_scope.py --event "$EVENT" --base "$BASE_SHA" --head HEAD --print-scope --summary)
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
   offline-suite:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [scope]
     # The backend is Postgres-backed now (pg shim); tests need a DB + Redis.
     # Mirrors ci.yml's service setup — without it, tests hit the dev-default
     # :5433 and fail with "connection refused".
@@ -65,15 +104,19 @@ jobs:
       CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
     steps:
       - uses: actions/checkout@v7
+        if: needs.scope.outputs.scope == 'full'
       - uses: actions/setup-python@v7
+        if: needs.scope.outputs.scope == 'full'
         with:
           python-version: "3.12"
       - name: Install backend (with dev extras)
+        if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       - name: Run offline suite (full backend + automated Loop 2 E2E)
+        if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: python -m pytest -q -p no:randomly
 
@@ -84,25 +127,31 @@ jobs:
     # is needed — Playwright's webServer starts `npm run dev` itself.
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [scope]
     steps:
       - uses: actions/checkout@v7
+        if: needs.scope.outputs.scope != 'docs'
       - uses: actions/setup-node@v7
+        if: needs.scope.outputs.scope != 'docs'
         with:
           node-version: "22"
       - name: Install frontend deps
+        if: needs.scope.outputs.scope != 'docs'
         working-directory: frontend
         run: npm ci
       - name: Install Playwright browser
+        if: needs.scope.outputs.scope != 'docs'
         working-directory: frontend
         run: npx playwright install --with-deps chromium
       - name: Run Playwright UI specs
+        if: needs.scope.outputs.scope != 'docs'
         working-directory: frontend
         # GATING (no continue-on-error): a real regression in any of the 14 specs
         # in tests/e2e/ now fails CI — none are quarantined with `test.fixme` any
         # more. Real browser coverage of prod lives in synthetic-live.yml.
         run: npx playwright test
       - name: Upload Playwright report (on failure)
-        if: failure()
+        if: failure() && needs.scope.outputs.scope != 'docs'
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
@@ -115,6 +164,7 @@ jobs:
     # scanning the whole suite.
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: [scope]
     # Postgres-backed backend needs a DB + Redis (see offline-suite note above).
     services:
       postgres:
@@ -142,15 +192,19 @@ jobs:
       CHANNEL_ENCRYPTION_KEY: ci-test-channel-key-not-used-in-prod
     steps:
       - uses: actions/checkout@v7
+        if: needs.scope.outputs.scope == 'full'
       - uses: actions/setup-python@v7
+        if: needs.scope.outputs.scope == 'full'
         with:
           python-version: "3.12"
       - name: Install backend (with dev extras)
+        if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       - name: Automated Loop 2 (E2E lifecycle + log-fill assertions)
+        if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: python -m pytest tests/test_e2e_lifecycle.py -v -p no:randomly
 

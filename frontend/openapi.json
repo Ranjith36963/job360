@@ -288,6 +288,17 @@
             "title": "Id",
             "type": "integer"
           },
+          "interview_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview At"
+          },
           "job": {
             "$ref": "#/components/schemas/ApplicationJobOut"
           },
@@ -333,6 +344,7 @@
           "fit",
           "artifacts",
           "events",
+          "interview_at",
           "receipts",
           "contacts"
         ],
@@ -382,6 +394,27 @@
             "title": "Recorded By",
             "type": "string"
           },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSourceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "superseded": {
             "title": "Superseded",
             "type": "boolean"
@@ -396,7 +429,9 @@
           "recorded_at",
           "recorded_by",
           "corrects_event_id",
-          "superseded"
+          "superseded",
+          "source",
+          "scheduled_at"
         ],
         "title": "ApplicationEventOut",
         "type": "object"
@@ -520,6 +555,13 @@
       },
       "ApplicationReceiptExportOut": {
         "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAnswerOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
@@ -572,6 +614,11 @@
             ],
             "title": "Cv Text"
           },
+          "fields_filled": {
+            "additionalProperties": true,
+            "title": "Fields Filled",
+            "type": "object"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -600,6 +647,13 @@
       "ApplicationReceiptOut": {
         "description": "``get_application``'s receipts list \u2014 never carries the receipt text\n(that call site never passes ``include_text``; see\n``ApplicationReceiptExportOut`` for the ``export_history`` shape).",
         "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAnswerOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
@@ -629,6 +683,11 @@
               }
             ],
             "title": "Cv Artifact Id"
+          },
+          "fields_filled": {
+            "additionalProperties": true,
+            "title": "Fields Filled",
+            "type": "object"
           },
           "id": {
             "title": "Id",
@@ -716,6 +775,155 @@
           "receipts"
         ],
         "title": "ApplicationSummaryOut",
+        "type": "object"
+      },
+      "ArtifactDiffBaseOut": {
+        "description": "Slice 8 \u2014 what the target version is compared against: the profile's\nstored CV (``profile``), another version of the same kind (``artifact``),\nor nothing (``none`` \u2014 a first version of a non-cv kind).",
+        "properties": {
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Id"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version No"
+          }
+        },
+        "required": [
+          "source",
+          "label"
+        ],
+        "title": "ArtifactDiffBaseOut",
+        "type": "object"
+      },
+      "ArtifactDiffLineOut": {
+        "properties": {
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op",
+          "text"
+        ],
+        "title": "ArtifactDiffLineOut",
+        "type": "object"
+      },
+      "ArtifactDiffOut": {
+        "description": "``GET \u2026/artifacts/{artifact_id}/diff`` \u2014 read-only; the web paints it.\n``applied`` is the receipt's word, not a button's (VISION decision 26).",
+        "properties": {
+          "added": {
+            "title": "Added",
+            "type": "integer"
+          },
+          "base": {
+            "$ref": "#/components/schemas/ArtifactDiffBaseOut"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDiffLineOut"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "removed": {
+            "title": "Removed",
+            "type": "integer"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ArtifactDiffTargetOut"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "base",
+          "target",
+          "lines",
+          "added",
+          "removed",
+          "truncated"
+        ],
+        "title": "ArtifactDiffOut",
+        "type": "object"
+      },
+      "ArtifactDiffTargetOut": {
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "made_by": {
+            "title": "Made By",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "version_no": {
+            "title": "Version No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "version_no",
+          "made_by",
+          "model",
+          "created_at",
+          "applied"
+        ],
+        "title": "ArtifactDiffTargetOut",
         "type": "object"
       },
       "Body_clear_profile_section_api_profile_clear_post": {
@@ -1250,6 +1458,88 @@
           "token"
         ],
         "title": "EmailVerificationConfirmRequest",
+        "type": "object"
+      },
+      "EventSource": {
+        "additionalProperties": false,
+        "description": "Slice 6 (docs/plans/2026-09-07-email-evidence/spec.md \u00a7Tool contracts)\n\u2014 the email an event came from. No length caps declared here: every cap\nis a live ``settings`` value ``spine.validate_source`` checks at call\ntime, the same reasoning ``AddContactRequest``'s docstring gives.",
+        "properties": {
+          "kind": {
+            "default": "email",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "received_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received At"
+          },
+          "sender": {
+            "default": "",
+            "title": "Sender",
+            "type": "string"
+          },
+          "subject": {
+            "default": "",
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id"
+        ],
+        "title": "EventSource",
+        "type": "object"
+      },
+      "EventSourceOut": {
+        "description": "Slice 6 \u2014 the ``source`` shape every reader emits (or ``null``, when\nthe event carries none).",
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "received_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received At"
+          },
+          "sender": {
+            "title": "Sender",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message_id",
+          "sender",
+          "subject",
+          "received_at"
+        ],
+        "title": "EventSourceOut",
         "type": "object"
       },
       "ExportApplicationOut": {
@@ -1791,6 +2081,71 @@
         "title": "JsonResumeResponse",
         "type": "object"
       },
+      "LessonOut": {
+        "description": "One `lesson` event, read back across applications (slice 9, #516).",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "application_id",
+          "job_title",
+          "job_company",
+          "detail",
+          "occurred_at",
+          "recorded_by"
+        ],
+        "title": "LessonOut",
+        "type": "object"
+      },
+      "LessonsResponse": {
+        "properties": {
+          "lessons": {
+            "items": {
+              "$ref": "#/components/schemas/LessonOut"
+            },
+            "title": "Lessons",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lessons",
+          "total"
+        ],
+        "title": "LessonsResponse",
+        "type": "object"
+      },
       "LinkedInResponse": {
         "properties": {
           "merged": {
@@ -2129,6 +2484,14 @@
             "default": {},
             "title": "Github Temporal",
             "type": "object"
+          },
+          "lessons": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LessonOut"
+            },
+            "title": "Lessons",
+            "type": "array"
           },
           "linkedin_subsections": {
             "additionalProperties": {
@@ -2519,6 +2882,25 @@
         "title": "ReceiptAnswer",
         "type": "object"
       },
+      "ReceiptAnswerOut": {
+        "description": "The READ shape of an answer \u2014 deliberately without the request caps.\nA receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS\nis ever lowered, older rows must still read back, not 500 the page.",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer"
+        ],
+        "title": "ReceiptAnswerOut",
+        "type": "object"
+      },
       "ReceiptListResponse": {
         "properties": {
           "receipts": {
@@ -2787,6 +3169,27 @@
             "additionalProperties": true,
             "title": "Payload",
             "type": "object"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2797,6 +3200,10 @@
       },
       "RecordEventResponse": {
         "properties": {
+          "already_existed": {
+            "title": "Already Existed",
+            "type": "boolean"
+          },
           "event_id": {
             "title": "Event Id",
             "type": "integer"
@@ -2817,6 +3224,17 @@
             "title": "Recorded By",
             "type": "string"
           },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -2828,7 +3246,9 @@
           "occurred_at",
           "recorded_at",
           "recorded_by",
-          "status"
+          "status",
+          "already_existed",
+          "scheduled_at"
         ],
         "title": "RecordEventResponse",
         "type": "object"
@@ -3798,6 +4218,27 @@
           "recorded_by": {
             "title": "Recorded By",
             "type": "string"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSourceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3809,7 +4250,9 @@
           "occurred_at",
           "recorded_at",
           "recorded_by",
-          "corrects_event_id"
+          "corrects_event_id",
+          "source",
+          "scheduled_at"
         ],
         "title": "WhatsNewEventOut",
         "type": "object"
@@ -4221,6 +4664,94 @@
         ]
       }
     },
+    "/api/applications/lessons": {
+      "get": {
+        "description": "Slice 9 (#516) \u2014 every \"flag for next time\" lesson across the caller's\napplications, newest first (spec R1 door 1). Read-only; a lesson is\nwritten through ``record_event`` (type ``lesson``) like any other event.\n``get_profile`` carries the last PROFILE_LESSONS_MAX of the same list.",
+        "operationId": "list_lessons_api_applications_lessons_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Lessons",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/applications/stats": {
       "get": {
         "operationId": "stats_api_applications_stats_get",
@@ -4548,6 +5079,102 @@
           }
         },
         "summary": "Get Application Artifact",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/artifacts/{artifact_id}/diff": {
+      "get": {
+        "description": "Slice 8 (#515) \u2014 original vs tailored, read-only (spec R1). No Keep:\nthe version the receipt names is the applied one (decision 26).",
+        "operationId": "diff_application_artifact_api_applications__application_id__artifacts__artifact_id__diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`profile` (the stored CV text) or another artifact id of the same kind. Default: `profile` for a cv, the previous version otherwise.",
+            "in": "query",
+            "name": "against",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "`profile` (the stored CV text) or another artifact id of the same kind. Default: `profile` for a cv, the previous version otherwise.",
+              "title": "Against",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDiffOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diff Application Artifact",
         "tags": [
           "applications"
         ]

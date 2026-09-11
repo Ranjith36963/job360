@@ -635,6 +635,18 @@ export async function listApplications(
   return request(`/api/applications${qs(query as Record<string, unknown>)}`);
 }
 
+// ---- Lessons (slice 9, docs/plans/2026-09-11-lessons/spec.md) ----
+// "Flag for next time": written through recordApplicationEvent(event_type
+// "lesson"); read back here for the profile's Lessons list. The agent gets
+// the same rows (last PROFILE_LESSONS_MAX) on `get_profile`.
+export type Lesson = _Schemas["LessonOut"];
+
+export async function listLessons(
+  params: { limit?: number; offset?: number } = {}
+): Promise<_Schemas["LessonsResponse"]> {
+  return request(`/api/applications/lessons${qs(params as Record<string, unknown>)}`);
+}
+
 export async function getApplication(id: number, withArtifactText = false): Promise<ApplicationDetail> {
   // Query string omitted entirely in the (default) false case — not just an
   // empty value — so the URL is a bare `/api/applications/{id}` when no
@@ -649,6 +661,20 @@ export async function getApplicationArtifact(
   artifactId: number
 ): Promise<ApplicationArtifactRow> {
   return request(`/api/applications/${applicationId}/artifacts/${artifactId}`);
+}
+
+export type ArtifactDiff = _Schemas["ArtifactDiffOut"];
+
+/** Slice 8 (#515) — original vs tailored, read-only. `against` is `"profile"`
+ * or another artifact id of the same kind; omitted = the backend's default
+ * (profile for a cv, the previous version otherwise). */
+export async function getArtifactDiff(
+  applicationId: number,
+  artifactId: number,
+  against?: string
+): Promise<ArtifactDiff> {
+  const query = against ? qs({ against }) : "";
+  return request(`/api/applications/${applicationId}/artifacts/${artifactId}/diff${query}`);
 }
 
 export async function saveApplicationArtifact(
@@ -705,9 +731,13 @@ export async function recordApplicationReceipt(
   });
 }
 
+export type WhatsNewResponse = _Schemas["WhatsNewResponse"];
+export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
+export type WhatsNewApplication = _Schemas["WhatsNewApplicationOut"];
+
 export async function getWhatsNew(
   params: { since?: string; after_id?: number; limit?: number } = {}
-): Promise<_Schemas["WhatsNewResponse"]> {
+): Promise<WhatsNewResponse> {
   return request(`/api/whats-new${qs(params as Record<string, unknown>)}`);
 }
 

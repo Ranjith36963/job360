@@ -1,7 +1,10 @@
 """The application spine's REST surface (docs/plans/2026-09-04-application-
 spine/spec.md, §Tool contracts). Every route here is also an MCP tool
 (``src/api/mcp_server.py``) calling the SAME function — one API for every
-surface.
+surface — with one deliberate exception: the read-only artifact diff
+(slice 8, ``GET …/artifacts/{artifact_id}/diff``) is web-only by rule M2
+(the agent already holds both texts), pinned by
+``tests/test_artifact_diff.py::test_no_mcp_tool_diffs_an_artifact``.
 
 Auth: every route ``Depends(require_user)`` (session cookie, personal
 ``j360_…`` token, or OAuth ``j360a_…`` bearer — S1). None of these routes
@@ -26,11 +29,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_request_db
-from src.api.models import JobResponse
+from src.api.models import JobResponse, LessonsResponse
 from src.api.routes.bring import job_row_to_response
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications import contacts as contacts_service
+from src.services.applications import diff as diff_service
+from src.services.applications import lessons as lessons_service
 from src.services.applications import spine
 from src.services.applications import stats as stats_service
 from src.services.applications.authorship import actor_for
@@ -72,6 +77,21 @@ class SaveFitRequest(BaseModel):
         return self.reasoning
 
 
+class EventSource(BaseModel):
+    """Slice 6 (docs/plans/2026-09-07-email-evidence/spec.md §Tool contracts)
+    — the email an event came from. No length caps declared here: every cap
+    is a live ``settings`` value ``spine.validate_source`` checks at call
+    time, the same reasoning ``AddContactRequest``'s docstring gives."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = "email"
+    message_id: str
+    sender: str = ""
+    subject: str = ""
+    received_at: Optional[str] = None
+
+
 class RecordEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -80,6 +100,8 @@ class RecordEventRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     occurred_at: Optional[str] = None
     corrects_event_id: Optional[int] = None
+    source: Optional[EventSource] = None
+    scheduled_at: Optional[str] = None
 
     def clamp_detail(self) -> str:
         cap = settings.APPLICATION_EVENT_DETAIL_MAX_CHARS
@@ -93,6 +115,15 @@ class ReceiptAnswer(BaseModel):
 
     question: str = Field(..., max_length=500)
     answer: str = Field(..., max_length=settings.APPLICATION_RECEIPT_ANSWER_MAX_CHARS)
+
+
+class ReceiptAnswerOut(BaseModel):
+    """The READ shape of an answer — deliberately without the request caps.
+    A receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS
+    is ever lowered, older rows must still read back, not 500 the page."""
+
+    question: str
+    answer: str
 
 
 class RecordApplicationReceiptRequest(BaseModel):
@@ -166,6 +197,17 @@ class ApplicationFitOut(BaseModel):
     recorded_at: str
 
 
+class EventSourceOut(BaseModel):
+    """Slice 6 — the ``source`` shape every reader emits (or ``null``, when
+    the event carries none)."""
+
+    kind: str
+    message_id: str
+    sender: str
+    subject: str
+    received_at: Optional[str]
+
+
 class ApplicationEventOut(BaseModel):
     """The timeline shape (``list_events_for_display``) — used by
     ``get_application`` and ``export_history``. Carries ``superseded``;
@@ -180,6 +222,8 @@ class ApplicationEventOut(BaseModel):
     recorded_by: str
     corrects_event_id: Optional[int]
     superseded: bool
+    source: Optional[EventSourceOut]
+    scheduled_at: Optional[str]
 
 
 class ApplicationArtifactOut(BaseModel):
@@ -215,6 +259,44 @@ class ApplicationArtifactRowOut(BaseModel):
     created_at: str
 
 
+class ArtifactDiffBaseOut(BaseModel):
+    """Slice 8 — what the target version is compared against: the profile's
+    stored CV (``profile``), another version of the same kind (``artifact``),
+    or nothing (``none`` — a first version of a non-cv kind)."""
+
+    source: str
+    artifact_id: Optional[int] = None
+    version_no: Optional[int] = None
+    label: str
+
+
+class ArtifactDiffTargetOut(BaseModel):
+    artifact_id: int
+    version_no: int
+    made_by: str
+    model: Optional[str]
+    created_at: str
+    applied: bool
+
+
+class ArtifactDiffLineOut(BaseModel):
+    op: str
+    text: str
+
+
+class ArtifactDiffOut(BaseModel):
+    """``GET …/artifacts/{artifact_id}/diff`` — read-only; the web paints it.
+    ``applied`` is the receipt's word, not a button's (VISION decision 26)."""
+
+    kind: str
+    base: ArtifactDiffBaseOut
+    target: ArtifactDiffTargetOut
+    lines: list[ArtifactDiffLineOut]
+    added: int
+    removed: int
+    truncated: bool
+
+
 class ApplicationReceiptOut(BaseModel):
     """``get_application``'s receipts list — never carries the receipt text
     (that call site never passes ``include_text``; see
@@ -227,6 +309,9 @@ class ApplicationReceiptOut(BaseModel):
     cv_artifact_id: Optional[int]
     cover_letter_artifact_id: Optional[int]
     note: str
+    # What was actually sent (R8) — stored since 0037, readable since 2026-09-11.
+    answers: list[ReceiptAnswerOut] = Field(default_factory=list)
+    fields_filled: dict[str, Any] = Field(default_factory=dict)
 
 
 class ApplicationReceiptExportOut(ApplicationReceiptOut):
@@ -260,6 +345,7 @@ class ApplicationDetailOut(BaseModel):
     fit: Optional[ApplicationFitOut]
     artifacts: list[ApplicationArtifactOut]
     events: list[ApplicationEventOut]
+    interview_at: Optional[str]
     receipts: list[ApplicationReceiptOut]
     contacts: list[ContactOut]
 
@@ -306,6 +392,8 @@ class RecordEventResponse(BaseModel):
     recorded_at: str
     recorded_by: str
     status: str
+    already_existed: bool
+    scheduled_at: Optional[str]
 
 
 class RecordApplicationReceiptResponse(BaseModel):
@@ -333,6 +421,8 @@ class WhatsNewEventOut(BaseModel):
     recorded_at: str
     recorded_by: str
     corrects_event_id: Optional[int]
+    source: Optional[EventSourceOut]
+    scheduled_at: Optional[str]
 
 
 class WhatsNewApplicationOut(BaseModel):
@@ -486,6 +576,24 @@ async def export_history(
         raise AssertionError("unreachable")  # pragma: no cover — _raise always raises
 
 
+@router.get("/applications/lessons", response_model=LessonsResponse)
+async def list_lessons(
+    limit: int = Query(50, ge=1),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Slice 9 (#516) — every "flag for next time" lesson across the caller's
+    applications, newest first (spec R1 door 1). Read-only; a lesson is
+    written through ``record_event`` (type ``lesson``) like any other event.
+    ``get_profile`` carries the last PROFILE_LESSONS_MAX of the same list."""
+    if limit > settings.LESSONS_PAGE_MAX:
+        raise HTTPException(
+            status_code=422, detail=f"limit must be at most LESSONS_PAGE_MAX ({settings.LESSONS_PAGE_MAX})"
+        )
+    rows, total = lessons_service.list_lessons(user.id, limit=limit, offset=offset)
+    return {"lessons": rows, "total": total}
+
+
 @router.get("/applications/stats", response_model=StatsResponse)
 async def stats(
     since: Optional[str] = Query(None),
@@ -568,6 +676,69 @@ async def get_application_artifact(
     if row is None:
         raise HTTPException(status_code=404, detail="artifact not found")
     return row
+
+
+@router.get(
+    "/applications/{application_id}/artifacts/{artifact_id}/diff", response_model=ArtifactDiffOut
+)
+async def diff_application_artifact(
+    application_id: int,
+    artifact_id: int,
+    against: str = Query(
+        "",
+        description="`profile` (the stored CV text) or another artifact id of the same kind. "
+        "Default: `profile` for a cv, the previous version otherwise.",
+    ),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Slice 8 (#515) — original vs tailored, read-only (spec R1). No Keep:
+    the version the receipt names is the applied one (decision 26)."""
+    target = await spine.get_artifact(db, user.id, application_id, artifact_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    base: dict[str, Any]
+    base_text: str
+    if against == "profile" or (against == "" and target["kind"] == "cv"):
+        base = {"source": "profile", "label": "Original CV"}
+        base_text = diff_service.load_profile_cv_text(user.id)
+    elif against == "":
+        prev = await diff_service.previous_version(db, application_id, target["kind"], target["version_no"])
+        if prev is None:
+            base, base_text = {"source": "none", "label": "Nothing before this"}, ""
+        else:
+            base = {
+                "source": "artifact", "artifact_id": prev["id"], "version_no": prev["version_no"],
+                "label": f"v{prev['version_no']}",
+            }
+            base_text = prev["text"] or ""
+    else:
+        # `isascii()` too: `str.isdigit()` accepts Unicode digits such as "²"
+        # that `int()` rejects — without it that request is a 500, not a 422.
+        # The length bound keeps a 100-digit "id" away from psycopg.
+        if not against.isascii() or not against.isdigit() or len(against) > 18:
+            raise HTTPException(status_code=422, detail="against must be 'profile' or an artifact id")
+        other = await spine.get_artifact(db, user.id, application_id, int(against))
+        if other is None or other["kind"] != target["kind"] or other["id"] == target["id"]:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        base = {
+            "source": "artifact", "artifact_id": other["id"], "version_no": other["version_no"],
+            "label": f"v{other['version_no']}",
+        }
+        base_text = other["text"] or ""
+
+    result = diff_service.diff_lines(base_text, target["text"] or "")
+    return {
+        "kind": target["kind"],
+        "base": base,
+        "target": {
+            "artifact_id": target["id"], "version_no": target["version_no"], "made_by": target["made_by"],
+            "model": target.get("model"), "created_at": target["created_at"],
+            "applied": await diff_service.is_applied(db, application_id, target["id"]),
+        },
+        **result,
+    }
 
 
 @router.post(
@@ -654,13 +825,15 @@ async def record_event(
         detail = body.clamp_detail()
         payload = spine.validate_payload(body.payload)
         occurred_at = spine.parse_occurred_at(body.occurred_at)
+        source = spine.validate_source(body.source.model_dump() if body.source else None)
+        scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
         app_row = await spine.get_owned_application(db, user.id, application_id)
         if app_row is None:
             raise SpineError(404, "application not found")
         return await spine.append_event(
             db, user_id=user.id, application_id=application_id, event_type=body.event_type,
             detail=detail, payload=payload, occurred_at=occurred_at, recorded_by=actor_for(user),
-            corrects_event_id=body.corrects_event_id,
+            corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
         )
     except SpineError as exc:
         _raise(exc)

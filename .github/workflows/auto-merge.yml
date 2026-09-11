@@ -87,6 +87,31 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+
+      # THE DEPENDENCY THE CAPABILITY QUESTION NEEDS TO BE ANSWERABLE AT ALL.
+      # `merge_cage.py` is described as having no dependencies, and its JUDGEMENT
+      # does not — but `_load_lists()` (merge_cage.py:389) does `import yaml` at
+      # IMPORT time, deliberately, so a broken policy fails as a sentence instead
+      # of a traceback. That import runs before argparse, so even `--help` needs
+      # PyYAML. The `arm` job below installs it; this job did not, so on a fresh
+      # `setup-python` the probe below died with ModuleNotFoundError, printed no
+      # `--queue`, and `ready` was false.
+      #
+      # MEASURED, not reasoned: every auto-merge run from the arm landing on the
+      # default branch through 2026-09-08 stood down. Run 34215804514 emitted
+      # "auto-merge stood down — the default branch's cage cannot queue yet, so
+      # NO PR was judged" while main's cage did have `--queue`. Reproduced in a
+      # venv with CI's dependency set: `--help` exits on `import yaml`.
+      #
+      # This is the failure the step below was built to prevent, arriving through
+      # the door it left open: it correctly stopped asking "is the file here?"
+      # and started asking "can it do the thing?" — but a probe that cannot START
+      # answers "no" for both a missing capability and a missing import, and the
+      # stand-down text only names the first. Hence the dependency here, and the
+      # split message below.
+      - name: The probe's one dependency
+        run: python -m pip install --quiet pyyaml
+
       - id: look
         run: |
           set -euo pipefail
@@ -104,29 +129,74 @@ jobs:
           # it — a capability you have not confirmed you possess is not one you
           # can build a lane on, which is the same rule the policy applies to
           # `canRollback` before it lets the product lane merge at all.
+          #
+          # AND A PROBE THAT CANNOT START IS NOT A PROBE THAT SAID NO. The two
+          # were folded into one `if`, so `ModuleNotFoundError` and "this cage
+          # genuinely has no --queue" produced the same stand-down sentence —
+          # which is why the real cause survived unread for every run. The probe
+          # output is captured and its exit code kept, so the message below can
+          # name which of the two actually happened.
+          # THE FILE TESTS KEEP THEIR ORIGINAL SHAPE ON PURPOSE.
+          # `gate_wiring_check.py` scans this file as text for places the cage is
+          # invoked, and exempts exactly two harmless shapes: a `[ -f ... ]` test
+          # and an `echo`. A first attempt here tracked WHICH file was missing by
+          # putting the paths into a message variable — neither shape — and G1
+          # failed the build: "job `precheck` judges a PR ... but never passes
+          # --baseline". Measured, exit 1.
+          #
+          # The tempting fix is to spell the paths differently so the guard stops
+          # recognising them. That is the one thing `_CAGE_EXISTENCE_TEST`'s own
+          # comment forbids ("making the test unrecognisable to its own guard
+          # would be gaming it"), and the next REAL invocation written that way
+          # would slip past too. So the per-file detail is dropped instead: it was
+          # the least useful half. Which file is missing is one `ls` away; whether
+          # the cage COULD NOT START versus HAS NO `--queue` is the distinction
+          # that hid this bug for every run, and that one is kept below.
+          set +e
+          probe=$(python scripts/merge_cage.py --help 2>&1)
+          probe_rc=$?
+          set -e
+
           if [ -f scripts/merge_cage.py ] && [ -f scripts/lane.py ] && [ -f .github/merge-policy.yml ] \
-             && python scripts/merge_cage.py --help 2>&1 | grep -q -- "--queue"; then
+             && [ "$probe_rc" -eq 0 ] && printf '%s' "$probe" | grep -q -- "--queue"; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
+            # ORDER MATTERS: ask "could it run?" before "what did it say?".
+            # A non-zero exit means the probe never reached argparse, so its
+            # output is silent about `--queue` — reporting "no --queue" there
+            # would be inventing a finding out of a crash, which is precisely
+            # the confusion that kept this lane asleep.
+            if [ "$probe_rc" -ne 0 ]; then
+              why="the cage would not start (exit $probe_rc) — it is present but cannot run here, so this says nothing about \`--queue\`"
+            else
+              why="the cage ran but offers no \`--queue\`"
+            fi
+            echo "stand_down_reason=$why"
+            printf '%s\n' "--- probe output (last 20 lines) ---" >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' '```' >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' "$probe" | tail -20 >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' '```' >> "$GITHUB_STEP_SUMMARY"
             # A GREEN RUN THAT QUEUED NOTHING AND A GREEN RUN THAT HAD NOTHING
             # TO QUEUE MUST NOT LOOK THE SAME IN THE RUN LIST. The stand-down is
             # correct behaviour, so this is not a failure — but a step summary
             # inside a green run is invisible to anyone not already reading it,
             # and a silent skip in an alerting path IS the bug. The annotation
             # puts it on the run's own face. (CodeRabbit, PR #380.)
-            echo "::warning::auto-merge stood down — the default branch's cage cannot queue yet, so NO PR was judged"
+            echo "::warning::auto-merge stood down — $why — so NO PR was judged"
             {
               echo "### Auto-merge stood down — nothing was queued"
               echo
-              echo "The default branch either lacks the cage, the lane map and the policy, or"
-              echo "has a copy of \`merge_cage.py\` with no \`--queue\`. Either way the rules a PR"
-              echo "cannot edit cannot do the job, and falling back to the PR's own copy is"
-              echo "exactly what rule G5 forbids — so this lane declines to act."
+              echo "**Why:** $why"
               echo
-              echo "**Expected until the arm lands on the default branch.** Reported as a"
-              echo "stand-down and not a failure: the PR is not at fault, and a red X here made"
-              echo "six PRs look broken when none were."
+              echo "The rules a PR cannot edit could not do the job, and falling back to the"
+              echo "PR's own copy is exactly what rule G5 forbids — so this lane declines to act."
+              echo
+              echo "Reported as a stand-down and not a failure: the PR is not at fault, and a"
+              echo "red X here made six PRs look broken when none were. But note that a"
+              echo "stand-down every run is NOT the expected steady state once the arm is on"
+              echo "the default branch — if you are reading this repeatedly, the reason above"
+              echo "is the bug, not the weather."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -321,6 +391,22 @@ jobs:
           fi
           echo "json=$(python scripts/merge_cage.py --measure --tree _base)" >> "$GITHUB_OUTPUT"
 
+      # WHY `--slack` IS SAFE TO PASS HERE NOW, AND WAS NOT BEFORE.
+      # This job runs on every `check_suite: completed`, every review, and a
+      # 20-minute sweep — so a flag that posted the VERDICT would repeat the same
+      # red sentence about the same PR dozens of times a day, and a channel that
+      # repeats itself is a channel people mute. Since 2026-09-11 `--slack`
+      # announces only a TRANSITION: a PR newly handed to GitHub's queue
+      # (log-github-ci, info) or one pulled back out after the verdict flipped
+      # (needs-your-decision, warn). A refusal of a PR that was never queued
+      # says nothing at all — the advisory PR comment already carries every
+      # reason. See merge_cage.judge_transition() and blocker B27.
+      #
+      # The post is a urllib call INSIDE the cage, not a workflow step, so
+      # `scripts/check_alert_paths.py` (which only knows `./.github/actions/slack`
+      # steps) sees this step, not a Slack step. The only step after it is "Say
+      # what happened", which is already `if: always()` — rule A's requirement
+      # that the messenger never decides the verdict.
       - name: Judge — and queue it only if the lane allows a machine to
         id: judge
         env:
@@ -328,6 +414,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR: ${{ matrix.pr }}
           BASE_JSON: ${{ steps.baseline.outputs.json }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           set -euo pipefail
           set +e
@@ -336,6 +423,7 @@ jobs:
             --tree _pr \
             --lane lane.json \
             --queue \
+            --slack \
             --verdict-json verdict.json | tee cage-output.txt
           rc=${PIPESTATUS[0]}
           set -e

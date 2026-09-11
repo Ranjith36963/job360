@@ -529,6 +529,51 @@ BLOCKERS: list[Blocker] = [
         drill="an abbreviated flag is rejected, not silently expanded into a different mode",
         severity="too-permissive",
     ),
+    Blocker(
+        id="B26",
+        met="2026-09-11",
+        what="THE REVIEW CAGE PASSED VACUOUSLY. It blocked on UNRESOLVED review threads and on "
+        "nothing else, so a PR nobody had reviewed looked exactly like a PR whose every "
+        "finding was answered: both have zero open threads. Measured live on PRs #538, #543 "
+        "and #544 — CodeRabbit reports `success` with the description \"Review skipped: "
+        "manual review required for this OSS repository\" and posts NO threads at all, so "
+        "the cage's REVIEW claim (\"no reviewer is still waiting on an answer\") was true and "
+        "meaningless on every open PR in the repo. The same pattern as B07: answering a "
+        "different question from the one printed. A second trap sat under it — the reviewer "
+        "is a legacy COMMIT STATUS, not a check run, so the listing PROOF already fetches "
+        "(`/commits/<sha>/check-runs`) does not contain it on any PR here.",
+        repro="gh api repos/Ranjith36963/job360/commits/<head-sha>/status --jq "
+        "'.statuses[] | [.context, .state, .description] | @tsv'   # CodeRabbit | success | "
+        "Review skipped: ...   — while the check-runs listing for the same sha has no "
+        "CodeRabbit entry at all",
+        rule="ABSENCE OF FINDINGS IS NOT A REVIEW. The REVIEW cage now needs EVIDENCE that a "
+        "reviewer looked: a `CodeRabbit` result must exist on the head commit, be completed, "
+        "and must not say \"Review skipped\". Read from check runs AND commit statuses, "
+        "because the two endpoints are separate and GitHub only merges them in the UI.",
+        drill="THE VACUOUS PASS: a SKIPPED review is refused, not read as 'nothing found'",
+        severity="too-permissive",
+    ),
+    Blocker(
+        id="B27",
+        met="2026-09-11",
+        what="THE ARM COULD ONLY SPEAK BY SPAMMING. `--slack` posted the verdict on EVERY "
+        "judgement, to `ready-to-merge` or `needs-your-decision`. The arm re-judges every "
+        "open PR on every `check_suite: completed`, every review event and a 20-minute "
+        "sweep, so wiring that flag as it stood would have repeated the same red sentence "
+        "about the same PR dozens of times a day. That is why the flag was never wired: the "
+        "only way to turn the arm's voice on was to make the channel worth muting, and a "
+        "muted channel is an alert path switched off without anyone deciding to switch it "
+        "off (the measured numbers are in scripts/slack_transition.py).",
+        repro="python scripts/merge_cage.py <PR> --slack --queue --lane lane.json   # before "
+        "this change: one Slack post per run, whatever the previous state was",
+        rule="SAY THE TRANSITION, NEVER THE STATE. A message is sent only when the queue "
+        "CHANGED: newly queued -> log-github-ci (info), pulled back out -> "
+        "needs-your-decision (warn). A refusal of a PR that was never queued says nothing. "
+        "The previous state is GitHub's own auto-merge flag — never a marker issue, never a "
+        "repo variable — so there is no second place for it to drift.",
+        drill="NEGATIVE CONTROL (a plain refusal of a PR that was never queued says NOTHING)",
+        severity="too-vague",
+    ),
 ]
 
 
