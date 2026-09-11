@@ -1002,6 +1002,11 @@ TAG_CHECKS: dict[str, tuple[str, ...]] = {
                  "pip-audit (backend deps)", "npm audit (frontend deps)", "CodeQL"),
     "verify": ("verify / backend", "verify / frontend"),
     "drill": ("Chain wires (harness)",),
+    # The `reviewer-bugs` check (.github/workflows/review-bugs.yml) — the R3
+    # bug-hunting reviewer, wired to CI 2026-09-11. Fails on any P0/P1 finding;
+    # every finding (P0-P2) is also posted as a PR review thread, which the
+    # separate REVIEW cage already blocks on regardless of this tag.
+    "bugs": ("reviewer-bugs",),
 }
 
 # Tags this file proves with its own cages rather than with a check run. Named

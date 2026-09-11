@@ -18,8 +18,8 @@
 | --- | --- | --- |
 | Migration head | **0042** | `backend/migrations/` |
 | Migration files | **43** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **139** | `backend/tests/` |
-| GitHub Actions workflows | **23** | `.github/workflows/` |
+| `test_*.py` files | **140** | `backend/tests/` |
+| GitHub Actions workflows | **24** | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
 
@@ -58,7 +58,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
-│   └── tests/                        # across 139 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 140 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,applications,tailor,profile,layout}/
