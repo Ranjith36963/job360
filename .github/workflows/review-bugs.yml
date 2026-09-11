@@ -121,7 +121,15 @@ jobs:
     # names this job's `name:` field by exact string equality — renaming this
     # line silently un-wires the gate.
     name: reviewer-bugs
-    if: github.event.pull_request.draft == false
+    # NOT FOR DEPENDABOT. A Dependabot-triggered run gets no repository
+    # secrets from GitHub, so CLAUDE_CODE_OAUTH_TOKEN is empty and the token
+    # gate fails loud in seconds (measured on #531/#532/#533, 2026-09-11).
+    # That is the right outcome for a missing token and the wrong outcome for
+    # a dependency bump: its diff is a lockfile no reviewer can read, and it
+    # has its own merge loop (dependabot-auto.yml, >= 10 green checks) that
+    # never consults the cage's `bugs` tag. Skipping is honest here; failing
+    # would only teach people to ignore this check.
+    if: github.event.pull_request.draft == false && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
