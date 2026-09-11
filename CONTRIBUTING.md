@@ -150,3 +150,5 @@ MCP/route gate parity, timezone-aware quiet-hours dispatch, account-mgmt session
 invalidation, etc.) plus the product path and data-flow.
 
 For docs and plans, start at [`docs/README.md`](docs/README.md).
+
+A docs-only pull request is the live proof of the `docs` lane above (drilled 2026-09-11).
