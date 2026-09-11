@@ -123,8 +123,23 @@ def decide(open_prs: list[dict[str, Any]], this_pr: int, limit: int) -> dict[str
     this_author = (this or {}).get("author")
     this_head = (this or {}).get("headRefName") or ""
 
-    # THIS PR'S OWN EXEMPTIONS -- checked first. An emergency revert or a
-    # dependabot PR is never parked, no matter how many other PRs are open.
+    # THIS PR'S OWN EXEMPTIONS -- checked first, BEFORE any counting.
+    #
+    # A PR opened AS A DRAFT (`opened` fires with isDraft: true too) is
+    # already parked in every sense that matters -- `gh pr ready --undo`
+    # would run against a PR that is not ready, which errors, fails the gate
+    # step, and fires the "gate broke" Slack fallback for something that was
+    # never a real incident. Checked before the dependabot/revert exemptions
+    # and before the counting loop: whatever else is true about this PR,
+    # there is nothing left to park.
+    if bool((this or {}).get("isDraft")):
+        return {
+            "park": False,
+            "count": 0,
+            "why": f"PR #{this_pr} is already a draft -- nothing to park.",
+        }
+    # An emergency revert or a dependabot PR is never parked, no matter how
+    # many other PRs are open.
     if _is_exempt_author(this_author):
         return {
             "park": False,
@@ -262,7 +277,19 @@ def _drill() -> int:
     check("two draft PRs don't count toward the limit", v["park"], False)
     check("...count is zero", v["count"], 0)
 
-    # 8. THIS PR being dependabot -> never parked, however many others are open.
+    # 8. THIS PR ITSELF is already a draft -- an `opened` event can fire with
+    #    isDraft: true (someone opened it as a draft from the start). Even at
+    #    the limit, there is nothing to park: `gh pr ready --undo` on a PR
+    #    that is not ready would error and fail the gate step for a PR that
+    #    was never a real WIP-limit incident.
+    v = decide([pr(1, draft=True), pr(2), pr(3)], this_pr=1, limit=2)
+    check("this PR is already a draft, even AT the limit -> never parked",
+          v["park"], False)
+    check("...the reason names the already-a-draft exemption",
+          "already a draft" in v["why"], True)
+    check("...and counts zero (checked before counting)", v["count"], 0)
+
+    # 9. THIS PR being dependabot -> never parked, however many others are open.
     v = decide(
         [pr(1, author="dependabot[bot]"), pr(2), pr(3), pr(4), pr(5), pr(6)],
         this_pr=1, limit=2,
@@ -271,7 +298,7 @@ def _drill() -> int:
           v["park"], False)
     check("...the reason names the dependabot exemption", "dependabot" in v["why"], True)
 
-    # 9. THIS PR being a revert/ branch -> never parked.
+    # 10. THIS PR being a revert/ branch -> never parked.
     v = decide(
         [pr(1, head="revert/hotfix"), pr(2), pr(3), pr(4)],
         this_pr=1, limit=2,
@@ -280,14 +307,14 @@ def _drill() -> int:
           v["park"], False)
     check("...the reason names the revert exemption", "revert" in v["why"], True)
 
-    # 10. The verdict NAMES the blocking PRs -- a park you cannot trace to a
+    # 11. The verdict NAMES the blocking PRs -- a park you cannot trace to a
     #     PR number is a park nobody can argue with, which sounds good and is
     #     not (same principle as lane.py's classify()).
     v = decide([pr(1), pr(2), pr(3)], this_pr=1, limit=2)
     check("the verdict names PR #2", "#2" in v["why"], True)
     check("the verdict names PR #3", "#3" in v["why"], True)
 
-    # 11. Mixed exemptions stack: a pile of exempt PRs plus exactly `limit`
+    # 12. Mixed exemptions stack: a pile of exempt PRs plus exactly `limit`
     #     real ones still parks on the real ones alone.
     v = decide(
         [pr(1), pr(2), pr(3), pr(4, author="dependabot[bot]"),
@@ -297,7 +324,7 @@ def _drill() -> int:
     check("mixed exemptions: only the 2 real PRs count -> parks", v["park"], True)
     check("...count ignores the 3 exempt PRs", v["count"], 2)
 
-    # 12. A missing/malformed `wip:` block raises, never silently returns a
+    # 13. A missing/malformed `wip:` block raises, never silently returns a
     #     limit -- the "safe direction" documented at the top of this file.
     import tempfile
     broken = Path(tempfile.mkdtemp(prefix="wip-gate-drill-")) / "merge-policy.yml"
@@ -329,7 +356,7 @@ def _drill() -> int:
     check("wip.limit of 0 (or less) raises rather than being treated as 'no limit'",
           raised_bad, True)
 
-    # 13. The real policy file (this repo's) must load and produce the
+    # 14. The real policy file (this repo's) must load and produce the
     #     documented owner limit -- proves the file this PR edits actually
     #     parses, not just that the pure function is correct in the abstract.
     try:
