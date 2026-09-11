@@ -299,6 +299,9 @@ class ApplicationReceiptOut(BaseModel):
     cv_artifact_id: Optional[int]
     cover_letter_artifact_id: Optional[int]
     note: str
+    # What was actually sent (R8) — stored since 0037, readable since 2026-09-11.
+    answers: list[ReceiptAnswer] = Field(default_factory=list)
+    fields_filled: dict[str, Any] = Field(default_factory=dict)
 
 
 class ApplicationReceiptExportOut(ApplicationReceiptOut):

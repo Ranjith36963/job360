@@ -1674,6 +1674,8 @@ export interface components {
         };
         /** ApplicationReceiptExportOut */
         ApplicationReceiptExportOut: {
+            /** Answers */
+            answers?: components["schemas"]["ReceiptAnswer"][];
             /** Channel */
             channel: string;
             /** Confirmation */
@@ -1686,6 +1688,10 @@ export interface components {
             cv_artifact_id: number | null;
             /** Cv Text */
             cv_text?: string | null;
+            /** Fields Filled */
+            fields_filled?: {
+                [key: string]: unknown;
+            };
             /** Id */
             id: number;
             /** Note */
@@ -1700,6 +1706,8 @@ export interface components {
          *     ``ApplicationReceiptExportOut`` for the ``export_history`` shape).
          */
         ApplicationReceiptOut: {
+            /** Answers */
+            answers?: components["schemas"]["ReceiptAnswer"][];
             /** Channel */
             channel: string;
             /** Confirmation */
@@ -1708,6 +1716,10 @@ export interface components {
             cover_letter_artifact_id: number | null;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
+            /** Fields Filled */
+            fields_filled?: {
+                [key: string]: unknown;
+            };
             /** Id */
             id: number;
             /** Note */

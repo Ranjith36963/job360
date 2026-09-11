@@ -555,6 +555,13 @@
       },
       "ApplicationReceiptExportOut": {
         "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAnswer"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
@@ -607,6 +614,11 @@
             ],
             "title": "Cv Text"
           },
+          "fields_filled": {
+            "additionalProperties": true,
+            "title": "Fields Filled",
+            "type": "object"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -635,6 +647,13 @@
       "ApplicationReceiptOut": {
         "description": "``get_application``'s receipts list \u2014 never carries the receipt text\n(that call site never passes ``include_text``; see\n``ApplicationReceiptExportOut`` for the ``export_history`` shape).",
         "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAnswer"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
@@ -664,6 +683,11 @@
               }
             ],
             "title": "Cv Artifact Id"
+          },
+          "fields_filled": {
+            "additionalProperties": true,
+            "title": "Fields Filled",
+            "type": "object"
           },
           "id": {
             "title": "Id",
