@@ -37,6 +37,10 @@ version: 1
 #   drill     every guard in the harness was proven able to fail
 #             (scripts/drill_registry.py — a guard that cannot go red is decoration)
 #   ratchets  no quality number went backwards (see RATCHETS below)
+#   bugs      the reviewer-bugs check found no P0/P1 correctness bug
+#             (review-bugs.yml — added 2026-09-11. Every finding it posts,
+#             P0 through P2, is ALSO a PR review thread, so `review` above
+#             blocks on an unresolved P2 even when this tag itself is green.)
 #
 # HOW TO COUNT A CHECK, AND THE TRAP UNDERNEATH IT
 # A check run has more states than pass/fail, and the two that matter are easy
@@ -171,7 +175,7 @@ lanes:
       - ".coderabbit.yaml"
       - "pyrightconfig.json"
       - ".vscode/**"
-    requires: [ci, review, drill]
+    requires: [ci, review, drill, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
     auto_merge: true
     watch: false            # nothing live to watch
     rollback: git-revert    # a normal revert commit is enough
@@ -199,7 +203,7 @@ lanes:
       # a change to what a user is shown, even though no code moved -- which is
       # exactly the kind of edit a "only code is risky" instinct waves through.
       - "backend/data/**"
-    requires: [ci, review, security, verify, ratchets]
+    requires: [ci, review, security, verify, ratchets, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
     auto_merge: true
     watch_minutes: 15       # how long the post-merge watcher stares at prod
     rollback: railway       # `deploymentRollback` — seconds, no rebuild
@@ -268,7 +272,7 @@ lanes:
       - "backend/src/api/routes/account*.py"
       - "backend/src/services/notifications/**"
       - "backend/src/api/routes/profile.py"
-    requires: [ci, review, security, verify, ratchets]
+    requires: [ci, review, security, verify, ratchets, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
     auto_merge: false          # your hand, always
     watch_minutes: 15          # ...but the watcher still runs after you merge
     rollback: railway
@@ -379,7 +383,7 @@ lanes:
       - ".github/workflows/security-watch.yml"
       # the owner's own words
       - "**/CLAUDE.md"
-    requires: [ci, review, drill]
+    requires: [ci, review, drill, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
     auto_merge: false          # your hand, always
     watch: false               # nothing live is downstream
     rollback: git-revert
