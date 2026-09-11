@@ -116,6 +116,15 @@ class ReceiptAnswer(BaseModel):
     answer: str = Field(..., max_length=settings.APPLICATION_RECEIPT_ANSWER_MAX_CHARS)
 
 
+class ReceiptAnswerOut(BaseModel):
+    """The READ shape of an answer — deliberately without the request caps.
+    A receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS
+    is ever lowered, older rows must still read back, not 500 the page."""
+
+    question: str
+    answer: str
+
+
 class RecordApplicationReceiptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -299,6 +308,9 @@ class ApplicationReceiptOut(BaseModel):
     cv_artifact_id: Optional[int]
     cover_letter_artifact_id: Optional[int]
     note: str
+    # What was actually sent (R8) — stored since 0037, readable since 2026-09-11.
+    answers: list[ReceiptAnswerOut] = Field(default_factory=list)
+    fields_filled: dict[str, Any] = Field(default_factory=dict)
 
 
 class ApplicationReceiptExportOut(ApplicationReceiptOut):

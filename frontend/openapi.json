@@ -555,6 +555,13 @@
       },
       "ApplicationReceiptExportOut": {
         "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAnswerOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
@@ -607,6 +614,11 @@
             ],
             "title": "Cv Text"
           },
+          "fields_filled": {
+            "additionalProperties": true,
+            "title": "Fields Filled",
+            "type": "object"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -635,6 +647,13 @@
       "ApplicationReceiptOut": {
         "description": "``get_application``'s receipts list \u2014 never carries the receipt text\n(that call site never passes ``include_text``; see\n``ApplicationReceiptExportOut`` for the ``export_history`` shape).",
         "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAnswerOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
@@ -664,6 +683,11 @@
               }
             ],
             "title": "Cv Artifact Id"
+          },
+          "fields_filled": {
+            "additionalProperties": true,
+            "title": "Fields Filled",
+            "type": "object"
           },
           "id": {
             "title": "Id",
@@ -2783,6 +2807,25 @@
           "answer"
         ],
         "title": "ReceiptAnswer",
+        "type": "object"
+      },
+      "ReceiptAnswerOut": {
+        "description": "The READ shape of an answer \u2014 deliberately without the request caps.\nA receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS\nis ever lowered, older rows must still read back, not 500 the page.",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer"
+        ],
+        "title": "ReceiptAnswerOut",
         "type": "object"
       },
       "ReceiptListResponse": {
