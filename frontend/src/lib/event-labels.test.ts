@@ -93,3 +93,5 @@ describe("whoLabel", () => {
     expect(whoLabel("something-weird")).toEqual({ who: "agent", name: "something-weird" });
   });
 });
+
+// ci_scope drill 2026-09-11: a frontend-only change must take the frontend lane.
