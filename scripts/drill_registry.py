@@ -413,6 +413,17 @@ REGISTRY: dict[str, Guard] = {
         reason="reads the live Sentry API; needs a recorded issue payload",
         since="2026-08-16",
     ),
+    # ── THE GUARD THIS PR WIRES UP (harness simplification slice 5, W1) ─────
+    # A guard and its declaration land together, always -- same rule as the
+    # lane.py/repairable.py/ssrf_drill.py pairs above. The WIP limit's pure
+    # decide() function: counts other open, non-draft, non-dependabot,
+    # non-revert PRs against the owner's limit, and exempts THIS PR from ever
+    # being parked if it is dependabot or a revert. Offline -- no gh, no
+    # network, and a negative control (0 open PRs -> never park) comes first.
+    "scripts/wip_gate.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "scripts/wip_gate.py", "--drill"],
+    ),
     "scripts/watchdog_check.py": Guard(
         status="drilled",
         # WAS `owed` since 2026-08-16 ("needs a recorded gh run list fixture").
