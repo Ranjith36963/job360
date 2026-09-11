@@ -231,7 +231,18 @@ jobs:
               # a bare `dependabot` for some shapes. All three are named because
               # picking one is how chain_check's W12 rule describes a dead wire.
               # (CodeRabbit, PR #380.)
-              Ranjith36963|dependabot|"dependabot[bot]"|app/dependabot) : ;;
+              # DEPENDABOT IS NEVER DISPATCHED (slice 7, 2026-09-11). It was on
+              # this allowlist, so a Dependabot PR going red dispatched the
+              # fixer like any other — and the fixer died at the path cage
+              # every time, because a lockfile is owner-lane and the repair
+              # agent may not touch it (eight Opus runs on #531/#532/#533 in
+              # one afternoon, all refused). A dependency bump has its own
+              # loop: dependabot-auto.yml merges it when fully green and asks
+              # Dependabot itself to rebase on conflict. Nothing here can help
+              # it, so nothing here should spend the owner's subscription on it.
+              dependabot|"dependabot[bot]"|app/dependabot)
+                note "$pr" "is a Dependabot PR — dependabot-auto.yml owns it; the fixer is never dispatched"; exit 0 ;;
+              Ranjith36963) : ;;
               # `exit 0`, NOT `continue` — see the note above the loop. This one
               # survived the sweep that converted the others because it sits in a
               # `case` arm and did not match the shapes I searched for, and it is
