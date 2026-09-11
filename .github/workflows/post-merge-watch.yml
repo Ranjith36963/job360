@@ -480,6 +480,47 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ── MERGED -> TOLD ────────────────────────────────────────────────────
+      # The owner asked to hear when something actually shipped. The honest
+      # moment for that is not the merge (main auto-deploys, so a merge is a
+      # promise) and not the deploy (Railway can roll out a broken image) — it
+      # is HERE, after the watch window closed with nothing tripped. So the
+      # message says "merged and live", and it can only be written by a run that
+      # watched and saw nothing wrong.
+      #
+      # Two non-blank lines on purpose: `check_alert_paths.py` rule B demands a
+      # fallback alert for any SUBSTANTIAL step an alert step quotes, and
+      # "substantial" is a `uses:` step or a `run:` longer than three lines. A
+      # one-line subject read is neither, so it needs no second alarm of its own
+      # — and if it somehow failed, the Slack step below simply says the subject
+      # is blank rather than going silent. `always()` is rule A: nothing after
+      # the job's first alert step may key off the job's own status.
+      - name: The subject line of the commit that just merged
+        id: subject
+        if: always()
+        run: |
+          subject=$(git log -1 --pretty=%s)
+          echo "text=$subject" >> "$GITHUB_OUTPUT"
+
+      # Only on a LIVE run (a rehearsal announcing a merge would be a lie), only
+      # when `decide` really reached a verdict, and only when that verdict was
+      # clean. A trip has its own critical message to production-incidents above;
+      # this one is the quiet "it landed and it is fine" line, which belongs in
+      # log-github-ci and nowhere louder.
+      - name: "Slack — merged, watched, and still standing"
+        if: always() && steps.decide.outcome == 'success' && steps.decide.outputs.tripped != 'true' && steps.mode.outputs.dry_run != 'true'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "merged and live: ${{ steps.subject.outputs.text }}"
+          body: |
+            Commit `${{ github.sha }}` is on main, deployed, and survived the post-merge watch
+            window with nothing crossing a trip threshold.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
       # Show red in the Actions tab too, not just inside the summary text —
       # a green checkmark next to a rolled-back prod is exactly the kind of
       # thing that gets missed. Placed LAST so it never blocks the alarm

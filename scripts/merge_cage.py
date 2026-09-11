@@ -1141,11 +1141,110 @@ def judge_threads(nodes: list[dict], has_next: bool) -> list[str]:
     return reasons
 
 
-def check_review(pr: int) -> Verdict:
-    """Unresolved review THREADS, never the status tick.
+# ── THE REVIEW CAGE'S SECOND HALF: DID ANYONE ACTUALLY LOOK? ────────────────
+#
+# THE VACUOUS PASS, MEASURED 2026-09-11. `judge_threads` above blocks on
+# unresolved threads and on nothing else. CodeRabbit in this repository reports:
+#
+#     context "CodeRabbit" · state success ·
+#     "Review skipped: manual review required for this OSS repository"
+#
+# — and posts NO threads at all. So "zero unresolved threads" was being read as
+# "every finding is answered" when it actually meant "NOBODY LOOKED". That is the
+# exact pattern cage_blockers.py names at the top of its file: a check reporting
+# confidently about a different question than the one that matters. The owner's
+# gate is "CI + CodeRabbit (no open findings) + reviewers green"; absence of
+# findings from a reviewer that never ran is not the middle term.
+#
+# WHERE THE EVIDENCE ACTUALLY LIVES — and why this is not the check-run listing
+# PROOF already reads. Measured on PRs #538, #544 and #543 (2026-09-11):
+# `GET /commits/<sha>/check-runs` contains NO CodeRabbit entry on any of them;
+# `GET /commits/<sha>/status` does, as a legacy COMMIT STATUS. The two listings
+# are different endpoints and GitHub only merges them in the UI, so a cage that
+# reads check runs alone can never see this reviewer. Both are read here and
+# normalised into one shape, so the judge below is one pure function over one
+# list whatever the source was.
+REVIEWER_CHECK = "CodeRabbit"
+REVIEW_SKIPPED_RE = re.compile(r"review\s+skipped", re.IGNORECASE)
 
-    CodeRabbit runs with `fail_commit_status: false`, so its tick is structurally
-    incapable of saying no.
+
+def judge_review_evidence(check_runs: list[dict]) -> list[str]:
+    """Pure half: did a reviewer really look at this PR?
+
+    Takes the check-run shape (`name`, `status`, `conclusion`, `output.title`);
+    commit statuses are normalised into it by `review_evidence()` below, so this
+    function needs no network and the drill can feed it the real shapes.
+
+    EVERY entry named `{REVIEWER_CHECK}` must be completed and must NOT say
+    "Review skipped". Judging all of them rather than "the newest" is the
+    fail-CLOSED direction: `?filter=latest` already collapses re-runs, so a
+    second entry is an oddity, and an oddity must not be the thing that decides
+    a merge. Exact-name matching, never a substring — B21 is the case where
+    `Frontend` matched `frontend-e2e` and an absent check looked present.
+    """
+    seen = [r for r in check_runs if (r.get("name") or "") == REVIEWER_CHECK]
+    if not seen:
+        return [
+            f"no reviewer has looked at this PR: there is no `{REVIEWER_CHECK}` result on its "
+            f"head commit at all, so 'no unresolved review threads' means 'nobody looked', not "
+            f"'nothing was found'. An empty finding list from a reviewer that never ran is not "
+            f"a review. "
+            f"FIX: enable CodeRabbit reviews for this repository (app settings), or wait for it "
+            f"to run, then re-judge."]
+
+    reasons: list[str] = []
+    for r in seen:
+        title = str((r.get("output") or {}).get("title") or "")
+        if r.get("status") != "completed":
+            reasons.append(
+                f"no reviewer has looked at this PR yet: `{REVIEWER_CHECK}` has not finished "
+                f"({r.get('status')}). A review in progress has proved nothing. "
+                f"FIX: wait for it to finish, then re-judge.")
+        elif REVIEW_SKIPPED_RE.search(title):
+            reasons.append(
+                f"no reviewer has looked at this PR: {REVIEWER_CHECK} reported \"{title}\" — a "
+                f"SKIPPED review produces no findings, and no findings is exactly what an "
+                f"answered review looks like from the outside. This cage will not tell the two "
+                f"apart by guessing the permissive one. "
+                f"FIX: enable CodeRabbit reviews for this repository (app settings), or wait for "
+                f"it to run, then re-judge.")
+    return reasons
+
+
+def review_evidence(pr: int) -> list[dict]:
+    """Every reviewer verdict on the PR's head commit, in check-run shape.
+
+    Check runs AND commit statuses, because CodeRabbit is the second kind here
+    (measured 2026-09-11) and a cage that reads one endpoint cannot see the
+    other. A status has no `status`/`conclusion`/`output` fields, so it is
+    mapped: `pending` -> not completed, everything else -> completed with the
+    state as the conclusion and the DESCRIPTION as the title, which is where
+    "Review skipped: ..." is actually written.
+    """
+    sha = gh(["api", f"repos/{REPO}/pulls/{pr}", "-q", ".head.sha"])
+    runs = list(json.loads(
+        gh(["api", f"repos/{REPO}/commits/{sha}/check-runs?per_page={PER_PAGE}"])
+    ).get("check_runs") or [])
+    combined = json.loads(gh(["api", f"repos/{REPO}/commits/{sha}/status"]))
+    for st in (combined.get("statuses") or []):
+        state = st.get("state") or ""
+        runs.append({
+            "name": st.get("context") or "",
+            "status": "in_progress" if state == "pending" else "completed",
+            "conclusion": state,
+            "output": {"title": st.get("description") or ""},
+        })
+    return runs
+
+
+def check_review(pr: int) -> Verdict:
+    """Unresolved review THREADS, and proof a reviewer actually looked.
+
+    Never the status tick as a PASS: CodeRabbit runs with
+    `fail_commit_status: false`, so its tick is structurally incapable of saying
+    no. What IS read from it is the sentence it prints — a tick that cannot fail
+    can still confess "Review skipped", and that confession is evidence of
+    absence, which is a different claim from a green tick.
     """
     owner, _, name = REPO.partition("/")
     raw = gh(["api", "graphql", "-f", f"query={_THREADS_QUERY}",
@@ -1153,8 +1252,9 @@ def check_review(pr: int) -> Verdict:
     threads = (json.loads(raw)["data"]["repository"]["pullRequest"]["reviewThreads"])
     reasons = judge_threads(threads.get("nodes") or [],
                             bool((threads.get("pageInfo") or {}).get("hasNextPage")))
+    reasons += judge_review_evidence(review_evidence(pr))
     return Verdict("REVIEW", "fail" if reasons else "pass", reasons,
-                   claim="no reviewer is still waiting on an answer")
+                   claim="a reviewer really looked, and nobody is still waiting on an answer")
 
 
 def is_worse(direction: str, was: int, now: int) -> bool:
@@ -1565,6 +1665,79 @@ def plain_english(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict],
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# THE ARM SPEAKS — ONLY WHEN SOMETHING CHANGED.
+#
+# The arm re-judges EVERY open PR on every `check_suite: completed`, every
+# review event and every 20 minutes. A Slack post per judgement would therefore
+# repeat the same red sentence about the same PR ~72 times a day, and
+# `scripts/slack_transition.py` already carries the measurement of what that
+# does to a channel: a channel that repeats itself is a channel people mute, and
+# a muted channel is an alert path that is switched off without anyone deciding
+# to switch it off. So the rule is: SAY THE TRANSITION, NEVER THE STATE.
+#
+# THE PREVIOUS STATE IS GITHUB'S OWN AUTO-MERGE FLAG — not a marker issue, not a
+# repo variable, not a file. Whether a PR is in the queue is a fact GitHub
+# already stores and already answers (`.auto_merge` on the PR, and
+# `gh pr merge --disable-auto` saying "auto-merge is not enabled"). Inventing a
+# second place to remember it would be inventing a second thing that can drift.
+#
+#   absent  + allow   -> "queued for merge"      to log-github-ci   (info)
+#   queued  + allow   -> nothing. The arm agreeing with itself is not news.
+#   queued  + refuse  -> "taken back out"        to needs-your-decision (warn)
+#   absent  + refuse  -> NOTHING. The advisor's PR comment already carries every
+#                        reason, and red -> red is the noise that mutes channels.
+#   unknown           -> treated as a transition and SPOKEN. It only happens when
+#                        GitHub would not answer, and a merge nobody was told
+#                        about is the failure this harness exists to end.
+# ─────────────────────────────────────────────────────────────────────────────
+
+QUEUE_ABSENT = "absent"
+QUEUE_QUEUED = "queued"
+QUEUE_UNKNOWN = "unknown"
+
+CHANNEL_LOG = "log-github-ci"          # severity info — every workflow conclusion
+CHANNEL_DECIDE = "needs-your-decision"  # severity warn — a human has to choose
+
+
+def judge_transition(previous_state: str, verdict: str) -> tuple[str, str] | None:
+    """Pure: what, if anything, Slack should be told. -> (kind, channel) or None.
+
+    `previous_state` is GitHub's own auto-merge state BEFORE this run
+    (`absent` | `queued` | `unknown`); `verdict` is this run's (`allow` |
+    `refuse`). Pure so the drill can walk the whole matrix without a network,
+    including the case that matters most — the one that must send NOTHING.
+    """
+    if verdict not in ("allow", "refuse"):
+        raise ValueError(f"judge_transition: unknown verdict {verdict!r}")
+    if previous_state not in (QUEUE_ABSENT, QUEUE_QUEUED, QUEUE_UNKNOWN):
+        raise ValueError(f"judge_transition: unknown previous state {previous_state!r}")
+    if verdict == "allow":
+        # Already queued and still allowed: nothing changed, so nothing is said.
+        return None if previous_state == QUEUE_QUEUED else ("queued", CHANNEL_LOG)
+    # A refusal only speaks if it TOOK SOMETHING BACK.
+    return None if previous_state == QUEUE_ABSENT else ("withdrawn", CHANNEL_DECIDE)
+
+
+def transition_message(kind: str, pr: int, meta: dict, verdicts: list[Verdict],
+                       lane: str) -> str:
+    """The one line that says what changed, followed by the evidence behind it.
+
+    The evidence half is `plain_english`, unchanged — the same sentence-building
+    rule applies (a claim may only be printed by the cage that produced it), and
+    reusing it keeps the announce path one path instead of two that can drift.
+    """
+    link = f"https://github.com/{REPO}/pull/{pr}"
+    if kind == "queued":
+        head = (f":inbox_tray: queued for merge: #{pr} {meta.get('title', '')} (lane `{lane}`) "
+                f"— merges when GitHub's queue agrees · {link}")
+        return f"{head}\n{plain_english(pr, meta, True, verdicts, merged=True)}"
+    first = (blocks_of(verdicts) or ["no reason was recorded"])[0]
+    head = (f":warning: taken back OUT of the merge queue: #{pr} {meta.get('title', '')} "
+            f"(lane `{lane}`) — {first} · {link}")
+    return f"{head}\n{plain_english(pr, meta, False, verdicts)}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # THE ADVISOR. The cage's most valuable output is not the verdict — it is the
 # sentence naming WHICH of the seven files in front of the owner is the one he
 # should actually look at. Measured: median PR here is open 12.9 minutes, and in
@@ -1641,6 +1814,12 @@ def advice_markdown(pr: int, meta: dict, allowed: bool, verdicts: list[Verdict])
 DECISION_PATH = [
     "check_size", "check_paths", "judge_check_runs", "check_proof", "judge_threads",
     "check_review", "measure_ratchets", "check_ratchets", "is_worse", "ground_problem",
+    # DID ANYONE ACTUALLY LOOK. On the decision path because "no unresolved
+    # threads" passed vacuously for as long as CodeRabbit has been skipping.
+    "judge_review_evidence",
+    # THE ANNOUNCE DECISION. On the decision path because an alert path that
+    # spams is an alert path that gets muted, and a muted path protects nothing.
+    "judge_transition", "transition_message",
     "as_reading", "measured_tree", "capability_gap",
     "page_was_full", "path_matches", "check_lists", "blocks_of", "plain_english", "decide",
     "slack",  # the announce path: a verdict nobody hears is a verdict that did not happen
@@ -1873,6 +2052,39 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     red("more review threads than I can see is refused",
         judge_threads([], True), "more than 100 review threads", ["judge_threads"])
 
+    # ── CAGE: REVIEW — DID ANYONE ACTUALLY LOOK? ─────────────────────────────
+    # B26. The shapes are the REAL ones, read from the live API on 2026-09-11:
+    # every open and recently-merged PR carries the commit status
+    # `CodeRabbit | success | "Review skipped: manual review required for this
+    # OSS repository"` and NO review threads at all. So `judge_threads` returned
+    # [] and the cage called it "no reviewer is still waiting on an answer".
+    _rev_looked = {"name": REVIEWER_CHECK, "status": "completed", "conclusion": "success",
+                   "output": {"title": "3 files reviewed, 1 comment posted"}}
+    _rev_skipped = {"name": REVIEWER_CHECK, "status": "completed", "conclusion": "success",
+                    "output": {"title": "Review skipped: manual review required for this "
+                                        "OSS repository"}}
+    _rev_running = {"name": REVIEWER_CHECK, "status": "in_progress", "conclusion": None,
+                    "output": {"title": ""}}
+    RE = ["judge_review_evidence"]
+    # THE CASE THAT MATTERS: this is the negative control that pins the vacuous
+    # pass. Delete the skipped-title branch and THIS goes red while every
+    # thread-based case above stays green — which is exactly how the hole lived.
+    red("THE VACUOUS PASS: a SKIPPED review is refused, not read as 'nothing found'",
+        judge_review_evidence(done + [_rev_skipped]), "no reviewer has looked", RE)
+    red("a PR no reviewer result exists for at all is refused",
+        judge_review_evidence(done), "no reviewer has looked", RE)
+    red("a review still running is not evidence that anyone looked",
+        judge_review_evidence(done + [_rev_running]), "has not finished", RE)
+    ok("NEGATIVE CONTROL (a real review that found things and finished passes)",
+       not judge_review_evidence(done + [_rev_looked]),
+       f"a genuinely reviewed PR was refused: {judge_review_evidence(done + [_rev_looked])}", RE)
+    # A reviewer is matched by EXACT name — B21's lesson, applied before it bites
+    # here: a substring match would let `CodeRabbit (experimental)` or
+    # `pre-CodeRabbit` stand in for the reviewer the owner's gate names.
+    ok("a similarly-named check cannot stand in for the reviewer",
+       bool(judge_review_evidence(done + [{**_rev_looked, "name": "CodeRabbit-lite"}])),
+       "a check whose name merely CONTAINS the reviewer's satisfied the evidence test", RE)
+
     # ── CAGE: RATCHET ────────────────────────────────────────────────────────
     cases = [("down", 0, 5, True), ("down", 5, 0, False), ("down", 3, 3, False),
              ("up", 10, 3, True), ("up", 3, 10, False)]
@@ -2007,6 +2219,14 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # their internals.
     saved_gh = globals()["gh"]
     try:
+        # The reviewer lives in the COMMIT STATUS listing, not in check-runs
+        # (measured on PRs #538/#543/#544, 2026-09-11), so the fake GitHub has to
+        # answer both endpoints or `check_review` is being drilled against a
+        # shape GitHub never sends.
+        def _statuses(description: str) -> str:
+            return json.dumps({"state": "success", "statuses": [
+                {"context": REVIEWER_CHECK, "state": "success", "description": description}]})
+
         def fake_gh(a: list[str]) -> str:
             joined = " ".join(a)
             if "graphql" in joined:
@@ -2016,6 +2236,8 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
                 return "d" * 40
             if "check-runs" in joined:
                 return json.dumps({"total_count": len(done), "check_runs": done})
+            if joined.endswith("/status"):
+                return _statuses("3 files reviewed, 1 comment posted")
             raise RuntimeError(f"the drill did not expect: {joined}")
         globals()["gh"] = fake_gh
         v_proof = check_proof(1)
@@ -2024,6 +2246,24 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         v_rev = check_review(1)
         ok("check_review passes when every thread is resolved end to end",
            v_rev.status == "pass", f"{v_rev.status}: {v_rev.reasons}", ["check_review"])
+
+        # B26 END TO END, THROUGH THE REAL WRAPPER AND THE REAL ENDPOINTS.
+        # Same PR, same zero unresolved threads, one field different: the
+        # reviewer says it skipped. Before 2026-09-11 this was a PASS — the exact
+        # state every live PR in this repo is in today.
+        def skipped_gh(a: list[str]) -> str:
+            if " ".join(a).endswith("/status"):
+                return _statuses("Review skipped: manual review required for this OSS repository")
+            return fake_gh(a)
+
+        globals()["gh"] = skipped_gh
+        v_vacuous = check_review(1)
+        ok("THE VACUOUS PASS, END TO END: no threads + a SKIPPED review is a REFUSAL",
+           v_vacuous.status == "fail"
+           and any("no reviewer has looked" in r for r in v_vacuous.reasons),
+           f"{v_vacuous.status}: {v_vacuous.reasons} — 'nobody looked' was read as "
+           f"'nothing found', which is the whole hole", ["check_review"])
+        globals()["gh"] = fake_gh
         # `done` is the REQUIRED_CHECKS list, which is not the same set as the
         # tag checks — so a harness lane whose `ci` tag names jobs this fake
         # GitHub never reports must REFUSE. That is the honest end-to-end
@@ -2390,6 +2630,8 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     sample_reasons += judge_check_runs([], 0)
     sample_reasons += judge_check_runs(done[1:], len(done) - 1)
     sample_reasons += judge_threads([thread_open], True)
+    sample_reasons += judge_review_evidence([])
+    sample_reasons += judge_review_evidence([_rev_skipped, _rev_running])
     vague = [r for r in sample_reasons if "FIX:" not in r]
     ok("every refusal reason says what would make it mergeable",
        not vague, f"{len(vague)} reason(s) with no FIX clause, e.g. {vague[:1]}",
@@ -2418,6 +2660,13 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
                 return "d" * 40
             if "check-runs" in j:
                 return json.dumps({"total_count": len(done), "check_runs": done})
+            if j.endswith("/status"):
+                # A PR that was REALLY reviewed. Without this the "ALLOW IS
+                # REACHABLE" case below could only ever be reached by a PR nobody
+                # had looked at, which is no longer a PR this cage allows.
+                return json.dumps({"state": "success", "statuses": [
+                    {"context": REVIEWER_CHECK, "state": "success",
+                     "description": "3 files reviewed, 1 comment posted"}]})
             if "/files" in j:
                 return json.dumps([{"filename": "docs/README.md", "status": "modified",
                                     "additions": 3, "deletions": 1}])
@@ -2561,7 +2810,13 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         request_auto_merge(1)
     finally:
         subprocess.run = _saved_run  # type: ignore[assignment]
-    _argv = _seen_argv[0] if _seen_argv else []
+    # THE MERGE COMMAND, not simply the first command. `request_auto_merge` now
+    # asks GitHub for the PREVIOUS auto-merge state before it acts (that is the
+    # before-picture the announcer needs), so the queue request is no longer the
+    # first subprocess this spy sees. Selecting it by name keeps the assertion
+    # exactly as strong — drop `--auto` from the merge command and this still
+    # goes red — without pinning it to a call ORDER, which proves nothing.
+    _argv = next((c for c in _seen_argv if "merge" in c), [])
     ok("the queue request really passes `--auto`, so GitHub still holds the gate",
        "--auto" in _argv,
        f"the command was {_argv} — without `--auto` this is an immediate merge on this "
@@ -2608,11 +2863,58 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     _saved3 = subprocess.run
     try:
         subprocess.run = lambda *_a, **_k: _NotQueued()  # type: ignore[assignment]
-        _ok_nq, _detail_nq = withdraw_auto_merge(1)
+        _ok_nq, _detail_nq, _was_nq = withdraw_auto_merge(1)
     finally:
         subprocess.run = _saved3  # type: ignore[assignment]
+    # The third value is the PREVIOUS STATE, and GitHub's own sentence is where
+    # it comes from: "auto-merge is not enabled" means this refusal took nothing
+    # back, so it must announce nothing. Asserted here, at the source, because a
+    # wrong answer here is what would turn every red re-judgement into a Slack
+    # message every 20 minutes.
     ok("...and withdrawing a PR that was never queued is a no-op, not an error",
-       _ok_nq, f"it reported failure with: {_detail_nq}", ["withdraw_auto_merge"])
+       _ok_nq and _was_nq == QUEUE_ABSENT,
+       f"it reported ok={_ok_nq} previous={_was_nq!r} with: {_detail_nq}",
+       ["withdraw_auto_merge"])
+
+    # ── THE ARM SPEAKS, AND ONLY ON A TRANSITION ─────────────────────────────
+    # B27. The whole matrix, pure, no network. Wired the obvious way — post the
+    # verdict every time — the arm would have said the same red sentence about
+    # the same PR on every check_suite, every review and every 20-minute sweep.
+    X = ["judge_transition"]
+    _matrix = {
+        (QUEUE_ABSENT, "allow"): ("queued", CHANNEL_LOG),
+        (QUEUE_QUEUED, "allow"): None,          # agreeing with itself is not news
+        (QUEUE_QUEUED, "refuse"): ("withdrawn", CHANNEL_DECIDE),
+        (QUEUE_ABSENT, "refuse"): None,         # THE NEGATIVE CONTROL, see below
+        (QUEUE_UNKNOWN, "allow"): ("queued", CHANNEL_LOG),
+        (QUEUE_UNKNOWN, "refuse"): ("withdrawn", CHANNEL_DECIDE),
+    }
+    _wrong = {k: judge_transition(*k) for k, want in _matrix.items()
+              if judge_transition(*k) != want}
+    ok("the arm speaks on a queue TRANSITION and stays silent otherwise",
+       not _wrong, f"wrong routing for {_wrong}", X)
+    # NEGATIVE CONTROL, named on its own because it is the case that decides
+    # whether the channel survives: a PR the cage refuses and never queued is
+    # refused again on every sweep. If this ever returns a message, the arm
+    # becomes a bot that repeats itself ~72 times a day per PR, and a channel
+    # that repeats itself is a channel that gets muted — an alert path switched
+    # off without anyone deciding to switch it off.
+    ok("NEGATIVE CONTROL (a plain refusal of a PR that was never queued says NOTHING)",
+       judge_transition(QUEUE_ABSENT, "refuse") is None,
+       "red -> red would be announced, which is exactly how a Slack channel dies", X)
+    _msg_q = transition_message("queued", 7, {"title": "docs: tidy", "files": 1, "lines": 2},
+                                [Verdict("PATH", "pass", [], claim="only allowed paths")],
+                                "harness")
+    _msg_w = transition_message("withdrawn", 7, {"title": "docs: tidy", "files": 1, "lines": 2},
+                                [Verdict("REVIEW", "fail", ["no reviewer has looked at this "
+                                                            "PR. FIX: enable it."])],
+                                "harness")
+    ok("...and each message names the PR, the lane, and (on a withdrawal) the first reason",
+       "#7" in _msg_q and "harness" in _msg_q and "queued for merge" in _msg_q
+       and "#7" in _msg_w and "no reviewer has looked" in _msg_w
+       and f"https://github.com/{REPO}/pull/7" in _msg_w,
+       f"queued={_msg_q[:120]!r} withdrawn={_msg_w[:120]!r}",
+       ["transition_message", "plain_english", "blocks_of"])
 
     # ── COVERAGE + THE BLOCKER LOG ───────────────────────────────────────────
     missing = [f for f in DECISION_PATH if f not in touched]
@@ -2762,16 +3064,43 @@ def replay(limit: int) -> int:
     """
     print("merge_cage --replay no longer answers, because the answer it used to give was "
           "0/N by construction.", file=sys.stderr)
-    print(f"  It called decide(pr) with no --baseline, so RATCHET returned `not_checked` and "
-          f"`not_checked` blocks. Every PR refused, whatever the PR was.\n"
-          f"  FIX: there is no per-PR replay runner anymore — read the cage's own "
-          f"`python scripts/merge_cage.py --measure` output for the current ratchet values "
-          f"instead.", file=sys.stderr)
+    print("  It called decide(pr) with no --baseline, so RATCHET returned `not_checked` and "
+          "`not_checked` blocks. Every PR refused, whatever the PR was.\n"
+          "  FIX: there is no per-PR replay runner anymore — read the cage's own "
+          "`python scripts/merge_cage.py --measure` output for the current ratchet values "
+          "instead.", file=sys.stderr)
     return EXIT_USAGE
 
 
-def request_auto_merge(pr: int) -> tuple[bool, str]:
-    """Hand the PR to GITHUB'S OWN auto-merge queue. Returns (ok, detail).
+def auto_merge_state(pr: int) -> str:
+    """Is this PR ALREADY in GitHub's auto-merge queue? -> the previous state.
+
+    GitHub is the only honest source for this: it is the system that holds the
+    queue, and `.auto_merge` on the PR is the flag it holds it with. Asked BEFORE
+    the request below, because `gh pr merge --auto` is idempotent — it reports
+    success whether it changed anything or not, so afterwards there is no way to
+    tell a new queue entry from a repeat. That distinction is the whole
+    difference between announcing once and announcing every 20 minutes.
+
+    Never raises: an unreadable state is `unknown`, and `judge_transition` treats
+    unknown as worth speaking. Failing to ANSWER must not become failing to ACT.
+    """
+    try:
+        raw = gh(["api", f"repos/{REPO}/pulls/{pr}", "-q", ".auto_merge"]).strip()
+    except Exception as exc:
+        print(f"QUEUE STATE: could not read GitHub's auto-merge flag for PR #{pr} "
+              f"({type(exc).__name__}: {exc}) — treating it as unknown.", file=sys.stderr)
+        return QUEUE_UNKNOWN
+    return QUEUE_ABSENT if raw in ("", "null") else QUEUE_QUEUED
+
+
+def request_auto_merge(pr: int) -> tuple[bool, str, str]:
+    """Hand the PR to GITHUB'S OWN auto-merge queue. Returns (ok, detail, was).
+
+    `was` is GitHub's auto-merge state BEFORE this call (`absent` | `queued` |
+    `unknown`) — the previous half of the transition the announcer needs. It is
+    read here rather than in the caller so that the fact and the act cannot drift
+    apart: anything that queues a PR gets the before-picture with it.
 
     WHY `--auto` AND NOT A STRAIGHT MERGE. `gh pr merge --squash` would merge
     right now, on this file's judgement alone. `--auto` asks GitHub to merge the
@@ -2795,17 +3124,24 @@ def request_auto_merge(pr: int) -> tuple[bool, str]:
     request was accepted, so the sentence the owner reads is chosen by what
     happened rather than by what was intended.
     """
+    was = auto_merge_state(pr)
     proc = subprocess.run(
         ["gh", "pr", "merge", str(pr), "--auto", "--squash", "--delete-branch"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
     )
     if proc.returncode == 0:
-        return True, (proc.stdout or "queued").strip()[:300]
-    return False, (proc.stderr or proc.stdout or "no output").strip()[:300]
+        return True, (proc.stdout or "queued").strip()[:300], was
+    return False, (proc.stderr or proc.stdout or "no output").strip()[:300], was
 
 
-def withdraw_auto_merge(pr: int) -> tuple[bool, str]:
-    """Take a PR OUT of GitHub's auto-merge queue. Returns (ok, detail).
+def withdraw_auto_merge(pr: int) -> tuple[bool, str, str]:
+    """Take a PR OUT of GitHub's auto-merge queue. Returns (ok, detail, was).
+
+    `was` is the previous state, and it comes from GITHUB'S OWN ANSWER rather
+    than from a second API call: "auto-merge is not enabled" IS the statement
+    that the PR was never queued, so a refusal that changed nothing can be told
+    apart from one that pulled a PR back out. No extra request, no second place
+    for the fact to live.
 
     THE GAP THIS CLOSES, AND WHY IT WAS THE LAST FAIL-OPEN IN THE CHAIN.
 
@@ -2835,12 +3171,15 @@ def withdraw_auto_merge(pr: int) -> tuple[bool, str]:
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
     )
     if proc.returncode == 0:
-        return True, (proc.stdout or "auto-merge disabled").strip()[:300]
+        return True, (proc.stdout or "auto-merge disabled").strip()[:300], QUEUE_QUEUED
     said = (proc.stderr or proc.stdout or "no output").strip()
     low = said.lower()
     if "auto-merge is not enabled" in low or "does not have auto-merge" in low:
-        return True, "was not queued — nothing to withdraw"
-    return False, said[:300]
+        return True, "was not queued — nothing to withdraw", QUEUE_ABSENT
+    # A withdrawal that FAILED is the dangerous direction: GitHub may still be
+    # holding this PR to merge. `unknown` makes the announcer speak, which is the
+    # right way round for a fact nobody can currently check.
+    return False, said[:300], QUEUE_UNKNOWN
 
 
 class _Parser(argparse.ArgumentParser):
@@ -2862,7 +3201,13 @@ def main(argv: list[str] | None = None) -> int:
     ap = _Parser(description=__doc__.splitlines()[0], allow_abbrev=False)
     ap.add_argument("pr", nargs="?", type=int, help="PR number to judge")
     ap.add_argument("--drill", action="store_true", help="break the cage on purpose")
-    ap.add_argument("--slack", action="store_true", help="announce the verdict in Slack")
+    ap.add_argument("--slack", action="store_true",
+                    help="announce a queue TRANSITION in Slack: a PR newly queued "
+                         "(log-github-ci) or pulled back out of the queue "
+                         "(needs-your-decision). Never the state — a refusal of a PR that was "
+                         "never queued says nothing, because the arm re-judges every PR every "
+                         "20 minutes and a channel that repeats itself gets muted. Needs "
+                         "--queue: without it nothing changed, so there is nothing to announce.")
     ap.add_argument("--advise", metavar="FILE",
                     help="write a markdown verdict for a PR comment; NEVER merges")
     ap.add_argument("--verdict-json", metavar="FILE",
@@ -3008,8 +3353,12 @@ def main(argv: list[str] | None = None) -> int:
         # window between "the cage changed its mind" and "the PR is out of the
         # queue" is one sweep at most, and a review event usually makes it
         # seconds. Withdrawing something not queued is a no-op that says so.
+        # GitHub's own auto-merge state BEFORE this run. Only the queue branches
+        # can know it, so it stays `unknown` for a run that did not touch the
+        # queue at all — and a run that changed nothing announces nothing.
+        queue_state = QUEUE_UNKNOWN
         if args.queue and not allowed:
-            ok_out, detail_out = withdraw_auto_merge(args.pr)
+            ok_out, detail_out, queue_state = withdraw_auto_merge(args.pr)
             if ok_out:
                 print(f"WITHDRAWN: PR #{args.pr} is not allowed, so it is out of GitHub's "
                       f"auto-merge queue — {detail_out}")
@@ -3022,7 +3371,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"::error::could not withdraw PR #{args.pr} from the auto-merge queue "
                       f"after the cage refused it")
         if args.queue and allowed:
-            ok_queue, detail = request_auto_merge(args.pr)
+            ok_queue, detail, queue_state = request_auto_merge(args.pr)
             if ok_queue:
                 queued = True
                 print(f"QUEUED: PR #{args.pr} handed to GitHub's auto-merge queue — it will "
@@ -3046,13 +3395,40 @@ def main(argv: list[str] | None = None) -> int:
                 # (CodeRabbit, PR #380.)
                 queue_failed = True
 
+        # THE ARM SPEAKS ONLY WHEN THE QUEUE CHANGED. This used to post on EVERY
+        # judgement, to `ready-to-merge` or `needs-your-decision`. Wired as-is
+        # into the arm — which re-judges every open PR on every check_suite,
+        # every review and every 20 minutes — that is the same red sentence about
+        # the same PR dozens of times a day, and a channel that repeats itself is
+        # a channel people mute. See judge_transition() for the full matrix and
+        # scripts/slack_transition.py for the measured numbers behind it.
         if args.slack:
-            chan = "ready-to-merge" if allowed else "needs-your-decision"
-            if not slack(chan, plain_english(args.pr, meta, allowed, verdicts, queued)):
-                # Announcing is part of the job. A merge nobody was told about is
-                # indistinguishable from a merge that never happened.
-                print("REFUSING TO PROCEED: the owner could not be told.", file=sys.stderr)
-                return EXIT_CANNOT_TELL_OWNER
+            move: tuple[str, str] | None = None
+            if not args.queue:
+                # Nothing was queued or withdrawn, so there is no transition to
+                # report. Said out loud: a flag that silently does nothing is
+                # indistinguishable from a flag that failed.
+                print("SLACK: --slack announces queue TRANSITIONS, and this run did not touch "
+                      "the queue (no --queue), so there was nothing to announce.")
+            elif allowed and queued:
+                move = judge_transition(queue_state, "allow")
+            elif not allowed:
+                move = judge_transition(queue_state, "refuse")
+            if move is not None:
+                kind, chan = move
+                lane_name = str((lane_verdict or {}).get("lane") or "unclassified")
+                text = transition_message(kind, args.pr, meta, verdicts, lane_name)
+                if not slack(chan, text):
+                    # Announcing is part of the job. A queue change nobody was
+                    # told about is indistinguishable from one that never
+                    # happened — and this is now the ONLY thing Slack is asked to
+                    # carry, so losing it loses everything.
+                    print("REFUSING TO PROCEED: the owner could not be told.", file=sys.stderr)
+                    return EXIT_CANNOT_TELL_OWNER
+                print(f"SLACK: told #{chan} that PR #{args.pr} was {kind}.")
+            elif args.queue:
+                print(f"SLACK: nothing changed (previous queue state: {queue_state}), so "
+                      f"nothing was said — red -> red is the noise that mutes a channel.")
 
         if args.advise:
             Path(args.advise).write_text(advice_markdown(args.pr, meta, allowed, verdicts),

@@ -555,6 +555,13 @@
       },
       "ApplicationReceiptExportOut": {
         "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAnswerOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
@@ -607,6 +614,11 @@
             ],
             "title": "Cv Text"
           },
+          "fields_filled": {
+            "additionalProperties": true,
+            "title": "Fields Filled",
+            "type": "object"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -635,6 +647,13 @@
       "ApplicationReceiptOut": {
         "description": "``get_application``'s receipts list \u2014 never carries the receipt text\n(that call site never passes ``include_text``; see\n``ApplicationReceiptExportOut`` for the ``export_history`` shape).",
         "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAnswerOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
@@ -664,6 +683,11 @@
               }
             ],
             "title": "Cv Artifact Id"
+          },
+          "fields_filled": {
+            "additionalProperties": true,
+            "title": "Fields Filled",
+            "type": "object"
           },
           "id": {
             "title": "Id",
@@ -2057,6 +2081,71 @@
         "title": "JsonResumeResponse",
         "type": "object"
       },
+      "LessonOut": {
+        "description": "One `lesson` event, read back across applications (slice 9, #516).",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "application_id",
+          "job_title",
+          "job_company",
+          "detail",
+          "occurred_at",
+          "recorded_by"
+        ],
+        "title": "LessonOut",
+        "type": "object"
+      },
+      "LessonsResponse": {
+        "properties": {
+          "lessons": {
+            "items": {
+              "$ref": "#/components/schemas/LessonOut"
+            },
+            "title": "Lessons",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lessons",
+          "total"
+        ],
+        "title": "LessonsResponse",
+        "type": "object"
+      },
       "LinkedInResponse": {
         "properties": {
           "merged": {
@@ -2395,6 +2484,14 @@
             "default": {},
             "title": "Github Temporal",
             "type": "object"
+          },
+          "lessons": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LessonOut"
+            },
+            "title": "Lessons",
+            "type": "array"
           },
           "linkedin_subsections": {
             "additionalProperties": {
@@ -2783,6 +2880,25 @@
           "answer"
         ],
         "title": "ReceiptAnswer",
+        "type": "object"
+      },
+      "ReceiptAnswerOut": {
+        "description": "The READ shape of an answer \u2014 deliberately without the request caps.\nA receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS\nis ever lowered, older rows must still read back, not 500 the page.",
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer"
+        ],
+        "title": "ReceiptAnswerOut",
         "type": "object"
       },
       "ReceiptListResponse": {
@@ -4543,6 +4659,94 @@
           }
         },
         "summary": "Get Job",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/lessons": {
+      "get": {
+        "description": "Slice 9 (#516) \u2014 every \"flag for next time\" lesson across the caller's\napplications, newest first (spec R1 door 1). Read-only; a lesson is\nwritten through ``record_event`` (type ``lesson``) like any other event.\n``get_profile`` carries the last PROFILE_LESSONS_MAX of the same list.",
+        "operationId": "list_lessons_api_applications_lessons_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Lessons",
         "tags": [
           "applications"
         ]

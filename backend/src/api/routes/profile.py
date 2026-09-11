@@ -22,6 +22,7 @@ from src.api.models import (
     CVDetail,
     GitHubResponse,
     JsonResumeResponse,
+    LessonOut,
     LinkedInResponse,
     ProfileEditOut,
     ProfileResponse,
@@ -73,7 +74,10 @@ logger = logging.getLogger("job360.api.profile")
 
 
 def _build_profile_response(
-    profile: UserProfile, user_id: str, agent_edits: list[ProfileEditOut]
+    profile: UserProfile,
+    user_id: str,
+    agent_edits: list[ProfileEditOut],
+    lessons: list[LessonOut] | None = None,
 ) -> ProfileResponse:
     """Render ``profile`` as the API's ``ProfileResponse``.
 
@@ -277,7 +281,20 @@ def _build_profile_response(
         # profile page and every other caller of _build_profile_response see
         # provenance without a second call.
         agent_edits=agent_edits,
+        # Slice 9 (#516) — the agent's "flag for next time" memory, handed
+        # back with the profile so it is read BEFORE the next CV is written.
+        # Passed IN like `agent_edits` (slice-4 review N4): this builder is
+        # pure, the caller does the read.
+        lessons=lessons or [],
     )
+
+
+def _recent_lessons(user_id: str) -> list[LessonOut]:
+    """The last ``PROFILE_LESSONS_MAX`` lessons — one bounded read."""
+    from src.services.applications.lessons import list_lessons  # noqa: PLC0415
+
+    rows, _total = list_lessons(user_id, limit=settings.PROFILE_LESSONS_MAX)
+    return [LessonOut(**row) for row in rows]
 
 
 def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
@@ -296,7 +313,7 @@ def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
     if profile is None:
         raise HTTPException(status_code=404, detail="No profile found")
     rows = [ProfileEditOut(**row) for row in overlay]
-    return profile, _build_profile_response(profile, user_id, rows)
+    return profile, _build_profile_response(profile, user_id, rows, lessons=_recent_lessons(user_id))
 
 
 # ``_user_id_for(profile)`` used to live here. It did

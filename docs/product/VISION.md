@@ -112,7 +112,8 @@ as a fallback for CLI clients.
 7. Visa / sponsorship signal supplied by the agent, shown on the card.
 8. CV diff (original vs tailored), web only, read-only — the receipt names
    the applied version; no Keep button (decision 26, 2026-09-11).
-9. "Flag for next time" on the web + lessons back through `get_profile`.
+9. "Flag for next time" on the web + lessons back through `get_profile`
+   (shipped 2026-09-11, `docs/plans/2026-09-11-lessons/spec.md`).
 10. Later, on evidence only: WhatsApp ("text your agent" + pushes, needs worker
    + Redis back), multiple named profiles, recruiters.
 

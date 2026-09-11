@@ -24,6 +24,7 @@ from httpx import ASGITransport, AsyncClient
 from src.core import settings
 from src.services.auth import magic_link as auth_magic_link
 from src.services.auth import oauth_clients, oauth_flow
+from src.services.auth import oauth_clock as auth_oauth_clock
 
 pytest.importorskip("mcp")
 
@@ -179,7 +180,7 @@ async def _full_code_exchange(
 
 
 class _Clock:
-    """Injectable clock for `oauth_flow._now` — advance instead of sleeping."""
+    """Injectable clock for `oauth_clock.now` — advance instead of sleeping."""
 
     def __init__(self, start: datetime):
         self._now = start
@@ -193,8 +194,16 @@ class _Clock:
 
 @pytest.fixture
 def oauth_clock(monkeypatch):
+    """Move the WHOLE OAuth subsystem through time, never half of it.
+
+    `oauth_clock.now` is the single clock `oauth_flow` (which writes the
+    timestamps) and `oauth_clients.prune` (which deletes rows by comparing
+    them) both read — issue #530 was the prune running on real time while
+    the rows had been written in the fake past, so it deleted a refresh
+    token that had just been issued.
+    """
     clock = _Clock(datetime(2026, 1, 1, tzinfo=timezone.utc))
-    monkeypatch.setattr(oauth_flow, "_now", clock)
+    monkeypatch.setattr(auth_oauth_clock, "now", clock)
     return clock
 
 
@@ -733,6 +742,34 @@ async def test_rotated_refresh_reuse_after_grace_revokes_grant(authenticated_asy
 
     async with _bearer_client(new_access) as agent:
         assert (await agent.get("/api/auth/me")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_housekeeping_prune_never_deletes_a_just_issued_token(
+    authenticated_async_context, oauth_clock, monkeypatch
+):
+    """#530: `/api/oauth/token` samples `oauth_clients.prune` into a background
+    task on every SUCCESS (1-in-`OAUTH_PRUNE_SAMPLE`). Prune deletes rows that
+    are dead (`expires_at` in the past) and older than a day — so it has to
+    read the very clock that wrote those rows. Forced to fire on every call
+    here; before the shared `oauth_clock` this failed 100% of the time,
+    because prune ran on real time against rows stamped 2026-01-01.
+    """
+    monkeypatch.setattr(settings, "OAUTH_PRUNE_SAMPLE", 1)
+    result = await _full_code_exchange(authenticated_async_context)
+
+    async with _bearer_client(result["access_token"]) as agent:
+        assert (await agent.get("/api/auth/me")).status_code == 200
+
+    async with _unauth_client() as client:
+        refreshed = await client.post(
+            "/api/oauth/token",
+            data={
+                "grant_type": "refresh_token", "refresh_token": result["refresh_token"],
+                "client_id": result["registered"]["client_id"],
+            },
+        )
+        assert refreshed.status_code == 200, refreshed.text
 
 
 @pytest.mark.asyncio

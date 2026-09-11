@@ -323,6 +323,11 @@ APPLICATION_ARTIFACT_MAX_VERSIONS = int(os.getenv("APPLICATION_ARTIFACT_MAX_VERS
 # Slice 8 (#515) — the read-only artifact diff caps each side in LINES before
 # difflib runs (quadratic worst case); the response says `truncated`.
 APPLICATION_DIFF_MAX_LINES = int(os.getenv("APPLICATION_DIFF_MAX_LINES", "4000"))
+# Slice 9 (#516) — "flag for next time". `get_profile` hands the agent the
+# last PROFILE_LESSONS_MAX lessons; the web's full list pages up to
+# LESSONS_PAGE_MAX per call.
+PROFILE_LESSONS_MAX = int(os.getenv("PROFILE_LESSONS_MAX", "20"))
+LESSONS_PAGE_MAX = int(os.getenv("LESSONS_PAGE_MAX", "100"))
 
 # R8 — record_application (the rich receipt).
 APPLICATION_RECEIPT_ANSWERS_MAX = int(os.getenv("APPLICATION_RECEIPT_ANSWERS_MAX", "50"))

@@ -855,10 +855,31 @@ async def write_through_legacy_receipt(
 # ── R11 — get_application / list_applications ────────────────────────────────
 
 
+def _receipt_json(raw: Any, expect: type) -> Any:
+    """``answers`` / ``fields_filled`` come back as JSON text (``'[]'`` /
+    ``'{}'`` defaults from 0037). Junk or the wrong shape reads as the
+    empty value — one bad legacy row must never 500 the whole page."""
+    if isinstance(raw, expect):
+        return raw
+    if not isinstance(raw, str) or not raw:
+        return expect()
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return expect()
+    return parsed if isinstance(parsed, expect) else expect()
+
+
 async def _list_receipts_for_application(
     db: JobDatabase, user_id: str, application_id: int, *, include_text: bool = False
 ) -> list[dict[str, Any]]:
-    cols = "id, sent_at, channel, confirmation, cv_artifact_id, cover_letter_artifact_id, note"
+    """Every receipt on the application, newest first. ``answers`` and
+    ``fields_filled`` are decoded here — they were stored since 0037 but
+    never read back until 2026-09-11 (``tests/test_receipt_answers_readable.py``)."""
+    cols = (
+        "id, sent_at, channel, confirmation, cv_artifact_id, cover_letter_artifact_id, note, "
+        "answers, fields_filled"
+    )
     if include_text:
         cols += ", cv_text, cover_letter_text"
     cur = await db._db.execute(
@@ -866,7 +887,18 @@ async def _list_receipts_for_application(
         f"ORDER BY sent_at DESC, id DESC",
         (user_id, application_id),
     )
-    return [dict(r) for r in await cur.fetchall()]
+    rows = [dict(r) for r in await cur.fetchall()]
+    for row in rows:
+        # Only well-formed {question, answer} pairs survive — the response
+        # model is strict (extra="forbid"), so a malformed legacy entry would
+        # otherwise turn a read into a 500.
+        row["answers"] = [
+            {"question": str(a["question"]), "answer": str(a["answer"])}
+            for a in _receipt_json(row.get("answers"), list)
+            if isinstance(a, dict) and "question" in a and "answer" in a
+        ]
+        row["fields_filled"] = _receipt_json(row.get("fields_filled"), dict)
+    return rows
 
 
 async def get_application_detail(

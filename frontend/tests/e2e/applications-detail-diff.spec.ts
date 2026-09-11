@@ -87,6 +87,9 @@ function applicationDetail() {
         cv_artifact_id: CV_V2,
         cover_letter_artifact_id: null,
         note: "",
+        // What was actually sent (R8) — stored since 0037, shown since 2026-09-11.
+        answers: [{ question: "Why Northwind?", answer: "Because the platform team ships weekly." }],
+        fields_filled: { salary_expectation: 65000, remote_ok: true },
       },
     ],
   };
@@ -167,5 +170,13 @@ test.describe("Application detail — original vs tailored (slice 8)", () => {
 
     // 3. no Keep — the receipt already said which version counts
     await expect(page.getByRole("button", { name: /keep/i })).toHaveCount(0);
+
+    // 4. the receipt shows what was actually sent — answers and filled fields
+    const receipt = page.getByTestId("receipt-row").first();
+    await expect(receipt.getByTestId("receipt-answer")).toHaveCount(1);
+    await expect(receipt.getByText("Why Northwind?")).toBeVisible();
+    await expect(receipt.getByText("Because the platform team ships weekly.")).toBeVisible();
+    await expect(receipt.getByTestId("receipt-field")).toHaveCount(2);
+    await expect(receipt.getByText("65000")).toBeVisible();
   });
 });

@@ -120,6 +120,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/lessons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Lessons
+         * @description Slice 9 (#516) — every "flag for next time" lesson across the caller's
+         *     applications, newest first (spec R1 door 1). Read-only; a lesson is
+         *     written through ``record_event`` (type ``lesson``) like any other event.
+         *     ``get_profile`` carries the last PROFILE_LESSONS_MAX of the same list.
+         */
+        get: operations["list_lessons_api_applications_lessons_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/stats": {
         parameters: {
             query?: never;
@@ -1674,6 +1697,8 @@ export interface components {
         };
         /** ApplicationReceiptExportOut */
         ApplicationReceiptExportOut: {
+            /** Answers */
+            answers?: components["schemas"]["ReceiptAnswerOut"][];
             /** Channel */
             channel: string;
             /** Confirmation */
@@ -1686,6 +1711,10 @@ export interface components {
             cv_artifact_id: number | null;
             /** Cv Text */
             cv_text?: string | null;
+            /** Fields Filled */
+            fields_filled?: {
+                [key: string]: unknown;
+            };
             /** Id */
             id: number;
             /** Note */
@@ -1700,6 +1729,8 @@ export interface components {
          *     ``ApplicationReceiptExportOut`` for the ``export_history`` shape).
          */
         ApplicationReceiptOut: {
+            /** Answers */
+            answers?: components["schemas"]["ReceiptAnswerOut"][];
             /** Channel */
             channel: string;
             /** Confirmation */
@@ -1708,6 +1739,10 @@ export interface components {
             cover_letter_artifact_id: number | null;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
+            /** Fields Filled */
+            fields_filled?: {
+                [key: string]: unknown;
+            };
             /** Id */
             id: number;
             /** Note */
@@ -2344,6 +2379,33 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * LessonOut
+         * @description One `lesson` event, read back across applications (slice 9, #516).
+         */
+        LessonOut: {
+            /** Application Id */
+            application_id: number;
+            /** Detail */
+            detail: string;
+            /** Event Id */
+            event_id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+            /** Occurred At */
+            occurred_at: string;
+            /** Recorded By */
+            recorded_by: string;
+        };
+        /** LessonsResponse */
+        LessonsResponse: {
+            /** Lessons */
+            lessons: components["schemas"]["LessonOut"][];
+            /** Total */
+            total: number;
+        };
         /** LinkedInResponse */
         LinkedInResponse: {
             /** Merged */
@@ -2504,6 +2566,11 @@ export interface components {
                     [key: string]: unknown;
                 };
             };
+            /**
+             * Lessons
+             * @default []
+             */
+            lessons: components["schemas"]["LessonOut"][];
             /**
              * Linkedin Subsections
              * @default {}
@@ -2680,6 +2747,18 @@ export interface components {
         };
         /** ReceiptAnswer */
         ReceiptAnswer: {
+            /** Answer */
+            answer: string;
+            /** Question */
+            question: string;
+        };
+        /**
+         * ReceiptAnswerOut
+         * @description The READ shape of an answer — deliberately without the request caps.
+         *     A receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS
+         *     is ever lowered, older rows must still read back, not 500 the page.
+         */
+        ReceiptAnswerOut: {
             /** Answer */
             answer: string;
             /** Question */
@@ -3321,6 +3400,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_lessons_api_applications_lessons_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LessonsResponse"];
                 };
             };
             /** @description Validation Error */

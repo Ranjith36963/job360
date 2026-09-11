@@ -391,6 +391,22 @@ jobs:
           fi
           echo "json=$(python scripts/merge_cage.py --measure --tree _base)" >> "$GITHUB_OUTPUT"
 
+      # WHY `--slack` IS SAFE TO PASS HERE NOW, AND WAS NOT BEFORE.
+      # This job runs on every `check_suite: completed`, every review, and a
+      # 20-minute sweep — so a flag that posted the VERDICT would repeat the same
+      # red sentence about the same PR dozens of times a day, and a channel that
+      # repeats itself is a channel people mute. Since 2026-09-11 `--slack`
+      # announces only a TRANSITION: a PR newly handed to GitHub's queue
+      # (log-github-ci, info) or one pulled back out after the verdict flipped
+      # (needs-your-decision, warn). A refusal of a PR that was never queued
+      # says nothing at all — the advisory PR comment already carries every
+      # reason. See merge_cage.judge_transition() and blocker B27.
+      #
+      # The post is a urllib call INSIDE the cage, not a workflow step, so
+      # `scripts/check_alert_paths.py` (which only knows `./.github/actions/slack`
+      # steps) sees this step, not a Slack step. The only step after it is "Say
+      # what happened", which is already `if: always()` — rule A's requirement
+      # that the messenger never decides the verdict.
       - name: Judge — and queue it only if the lane allows a machine to
         id: judge
         env:
@@ -398,6 +414,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR: ${{ matrix.pr }}
           BASE_JSON: ${{ steps.baseline.outputs.json }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
           set -euo pipefail
           set +e
@@ -406,6 +423,7 @@ jobs:
             --tree _pr \
             --lane lane.json \
             --queue \
+            --slack \
             --verdict-json verdict.json | tee cage-output.txt
           rc=${PIPESTATUS[0]}
           set -e
