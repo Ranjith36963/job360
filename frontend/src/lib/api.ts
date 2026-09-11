@@ -651,6 +651,20 @@ export async function getApplicationArtifact(
   return request(`/api/applications/${applicationId}/artifacts/${artifactId}`);
 }
 
+export type ArtifactDiff = _Schemas["ArtifactDiffOut"];
+
+/** Slice 8 (#515) — original vs tailored, read-only. `against` is `"profile"`
+ * or another artifact id of the same kind; omitted = the backend's default
+ * (profile for a cv, the previous version otherwise). */
+export async function getArtifactDiff(
+  applicationId: number,
+  artifactId: number,
+  against?: string
+): Promise<ArtifactDiff> {
+  const query = against ? qs({ against }) : "";
+  return request(`/api/applications/${applicationId}/artifacts/${artifactId}/diff${query}`);
+}
+
 export async function saveApplicationArtifact(
   applicationId: number,
   body: { kind: string; text: string; label?: string; model?: string }
