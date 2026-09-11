@@ -305,6 +305,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/visa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Visa */
+        put: operations["set_visa_api_applications__application_id__visa_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -1629,6 +1646,7 @@ export interface components {
             status: string;
             /** Updated At */
             updated_at: string;
+            visa: components["schemas"]["ApplicationVisaOut"];
         };
         /**
          * ApplicationEventOut
@@ -1768,10 +1786,42 @@ export interface components {
             job_title: string;
             /** Last Event At */
             last_event_at: string | null;
+            /** Needs Sponsorship */
+            needs_sponsorship?: boolean | null;
             /** Receipts */
             receipts: number;
             /** Status */
             status: string;
+            /**
+             * Visa Country
+             * @default
+             */
+            visa_country: string;
+            /**
+             * Visa Signal
+             * @default unknown
+             */
+            visa_signal: string;
+        };
+        /**
+         * ApplicationVisaOut
+         * @description Slice 7 — fact 1 (the agent's reading of the ad) plus the ONE
+         *     comparison against fact 2 (the candidate's countries). ``needs_sponsorship``
+         *     is ``null`` whenever either side is silent (rule #29).
+         */
+        ApplicationVisaOut: {
+            /** Country */
+            country: string;
+            /** Detail */
+            detail: string;
+            /** Needs Sponsorship */
+            needs_sponsorship: boolean | null;
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+            /** Signal */
+            signal: string;
         };
         /**
          * ArtifactDiffBaseOut
@@ -1889,6 +1939,12 @@ export interface components {
             location: string;
             /** Title */
             title: string;
+            /** Visa Country */
+            visa_country?: string | null;
+            /** Visa Detail */
+            visa_detail?: string | null;
+            /** Visa Signal */
+            visa_signal?: string | null;
         };
         /** BringJobResponse */
         BringJobResponse: {
@@ -2958,6 +3014,12 @@ export interface components {
             score?: number | null;
             /** Verdict */
             verdict?: string | null;
+            /** Visa Country */
+            visa_country?: string | null;
+            /** Visa Detail */
+            visa_detail?: string | null;
+            /** Visa Signal */
+            visa_signal?: string | null;
         };
         /** SaveFitResponse */
         SaveFitResponse: {
@@ -2966,6 +3028,27 @@ export interface components {
             /** Event Id */
             event_id: number;
             fit: components["schemas"]["ApplicationFitOut"];
+            visa?: components["schemas"]["ApplicationVisaOut"] | null;
+        };
+        /**
+         * SetVisaRequest
+         * @description Slice 7 — the human door (a person at the browser has no agent to
+         *     read the ad for them). Same three fields, same rules as bring_job /
+         *     save_fit; no MCP tool calls this (an agent uses save_fit).
+         */
+        SetVisaRequest: {
+            /** Visa Country */
+            visa_country?: string | null;
+            /** Visa Detail */
+            visa_detail?: string | null;
+            /** Visa Signal */
+            visa_signal: string;
+        };
+        /** SetVisaResponse */
+        SetVisaResponse: {
+            /** Application Id */
+            application_id: number;
+            visa: components["schemas"]["ApplicationVisaOut"];
         };
         /** StatsCvVersionGroupOut */
         StatsCvVersionGroupOut: {
@@ -3787,6 +3870,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecordApplicationReceiptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_visa_api_applications__application_id__visa_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetVisaRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetVisaResponse"];
                 };
             };
             /** @description Validation Error */

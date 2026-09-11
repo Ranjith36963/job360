@@ -692,12 +692,20 @@ async def save_fit(
     verdict: Optional[str],
     gaps: Optional[list[str]],
     reasoning: Optional[str],
+    visa_signal: Optional[str] = None,
+    visa_detail: Optional[str] = None,
+    visa_country: Optional[str] = None,
 ) -> dict[str, Any]:
     """R6 — overwrite the fit-verdict SLOT on ``applications`` (the current
     answer) and append a ``fit_judged`` event carrying the whole verdict (the
     version history) — S7's "update of the slot is not history" case. Never
     calls a scorer, matcher or judge; the verdict is always the caller's own
-    (VISION rule 4)."""
+    (VISION rule 4). Slice 7: an optional visa reading rides along — the
+    slot is set through ``visa.set_visa_signal`` (same rules as every door)
+    and the event payload carries it, so the judgement is history too."""
+    # Lazy: visa.py imports SpineError / get_owned_application from here.
+    from src.services.applications import visa as visa_service  # noqa: PLC0415
+
     app_row = await get_owned_application(db, user_id, application_id)
     if app_row is None:
         raise SpineError(404, "application not found")
@@ -710,10 +718,19 @@ async def save_fit(
         "fit_recorded_by = ?, fit_recorded_at = ?, updated_at = ? WHERE id = ?",
         (score, verdict, gaps_json, reasoning, recorded_by, now, now, application_id),
     )
+    payload: dict[str, Any] = {"score": score, "verdict": verdict, "gaps": gaps_list, "reasoning": reasoning}
+    visa: Optional[dict[str, Any]] = None
+    if visa_signal is not None or visa_detail or visa_country:
+        visa = (
+            await visa_service.set_visa_signal(
+                db, user_id=user_id, application_id=application_id, recorded_by=recorded_by,
+                signal=visa_signal, detail=visa_detail, country=visa_country,
+            )
+        )["visa"]
+        payload["visa"] = {"signal": visa["signal"], "detail": visa["detail"], "country": visa["country"]}
     event = await append_event(
         db, user_id=user_id, application_id=application_id, event_type="fit_judged",
-        payload={"score": score, "verdict": verdict, "gaps": gaps_list, "reasoning": reasoning},
-        occurred_at=now, recorded_by=recorded_by,
+        payload=payload, occurred_at=now, recorded_by=recorded_by,
     )
     get_audit_logger().info("fit_saved", extra={"event": "fit_saved", "application_id": application_id})
     return {
@@ -722,6 +739,7 @@ async def save_fit(
             "score": score, "verdict": verdict, "gaps": gaps_list, "reasoning": reasoning,
             "recorded_by": recorded_by, "recorded_at": now,
         },
+        "visa": visa,
         "event_id": event["event_id"],
     }
 
@@ -901,6 +919,19 @@ async def _list_receipts_for_application(
     return rows
 
 
+def _visa_for(app_row: dict[str, Any], countries: list[str]) -> dict[str, Any]:
+    """Slice 7 — lazy so visa.py (which imports from here) never cycles."""
+    from src.services.applications.visa import visa_view  # noqa: PLC0415
+
+    return visa_view(app_row, countries)
+
+
+async def _work_countries(db: JobDatabase, user_id: str) -> list[str]:
+    from src.services.applications.visa import user_work_countries  # noqa: PLC0415
+
+    return await user_work_countries(db, user_id)
+
+
 async def get_application_detail(
     db: JobDatabase, user_id: str, application_id: int, *, with_artifact_text: bool = False
 ) -> Optional[dict[str, Any]]:
@@ -961,6 +992,7 @@ async def get_application_detail(
             "catalog_present": catalog_present,
         },
         "fit": fit,
+        "visa": _visa_for(app_row, await _work_countries(db, user_id)),
         "artifacts": await _list_artifacts(db, application_id, with_text=with_artifact_text),
         "events": events,
         "interview_at": interview_at,
@@ -1014,20 +1046,30 @@ async def list_applications(
     total = int((await cur.fetchone())[0])
 
     cur = await db._db.execute(
-        f"SELECT id, job_id, job_title, job_company, status, last_event_at FROM applications "  # noqa: S608
+        f"SELECT id, job_id, job_title, job_company, status, last_event_at, "  # noqa: S608
+        f"visa_signal, visa_country FROM applications "
         f"WHERE {where_sql} ORDER BY last_event_at DESC NULLS LAST, id DESC LIMIT ? OFFSET ?",
         [*params, limit, offset],
     )
     rows = [dict(r) for r in await cur.fetchall()]
 
+    # Slice 7 — fact 2 once per request, so every card can carry its badge.
+    from src.services.applications import visa as visa_service  # noqa: PLC0415
+
+    countries = await visa_service.user_work_countries(db, user_id)
+
     out = []
     for r in rows:
         app_id = r["id"]
+        signal = r.get("visa_signal") or "unknown"
+        country = r.get("visa_country") or ""
         out.append(
             {
                 "id": app_id, "job_id": r["job_id"], "job_title": r["job_title"] or "",
                 "job_company": r["job_company"] or "", "status": r["status"],
                 "last_event_at": r.get("last_event_at"),
+                "visa_signal": signal, "visa_country": country,
+                "needs_sponsorship": visa_service.needs_sponsorship(signal, country, countries),
                 "events": await _count(db, "application_events", "application_id", app_id),
                 "artifacts": await _artifact_counts_by_kind(db, app_id),
                 "receipts": await _count(db, "application_receipts", "application_id", app_id),

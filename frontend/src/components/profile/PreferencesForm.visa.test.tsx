@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import { PreferencesForm } from "./PreferencesForm";
 
 const VISA_LABEL = /i need visa sponsorship/i;
@@ -67,6 +67,41 @@ describe("PreferencesForm — visa sponsorship", () => {
     });
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ needs_visa: true })
+    );
+  });
+});
+
+// docs/plans/2026-09-11-visa-signal/spec.md — Fact 2, the candidate's
+// work-authorization countries (compared against a job's visa_country
+// server-side; Job360 never knows country rules itself, rule #29).
+describe("PreferencesForm — work authorization countries", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("uppercases a typed 2-letter code, ignores a non-ISO tag, and saves the list", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<PreferencesForm preferences={{}} onSave={onSave} loading={false} />);
+
+    const field = screen.getByTestId("work-authorization-countries");
+    const input = within(field).getByPlaceholderText(/e\.g\. gb, in, de/i);
+
+    fireEvent.change(input, { target: { value: "gb" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    fireEvent.change(input, { target: { value: "United Kingdom" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(within(field).getByText("GB")).toBeTruthy();
+    expect(within(field).queryByText("United Kingdom")).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(900);
+    });
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ work_authorization_countries: ["GB"] })
     );
   });
 });
