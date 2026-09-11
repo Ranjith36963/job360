@@ -30,6 +30,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from src.core import settings
 from src.repositories import pg
 from src.repositories.db_retry import open_db
+from src.services.auth import oauth_clock
 from src.utils.logger import get_audit_logger
 
 ACCESS_TOKEN_PREFIX = "j360a_"  # noqa: S105 — a public display prefix, not a secret
@@ -41,11 +42,6 @@ LAST_USED_WRITE_INTERVAL = timedelta(minutes=5)
 # `\Z`, not `$` — `$` also matches before a trailing newline.
 _CODE_VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}\Z")
 _CODE_CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_-]{43}\Z")
-
-
-def _now() -> datetime:
-    """Module-level clock so tests can monkeypatch a single function."""
-    return datetime.now(timezone.utc)
 
 
 def _hash(secret: str) -> str:
@@ -167,7 +163,7 @@ async def create_authorization_request(
 ) -> str:
     """Store a pending consent request; returns its `rid` (R3, valid path)."""
     rid = secrets.token_urlsafe(32)
-    now = _now()
+    now = oauth_clock.now()
     expires_at = (now + timedelta(seconds=settings.OAUTH_AUTHORIZE_TTL_SECONDS)).isoformat()
     async with open_db(db_path) as db:
         await db.execute(
@@ -185,7 +181,7 @@ async def create_authorization_request(
 
 async def get_pending_authorization_request(db_path: str, rid: str) -> Optional[AuthorizationRequest]:
     """R4 GET: None when the rid is unknown, consumed, or expired (route -> 404)."""
-    now_iso = _now().isoformat()
+    now_iso = oauth_clock.now().isoformat()
     async with open_db(db_path) as db:
         db.row_factory = pg.Row
         cur = await db.execute(
@@ -221,7 +217,7 @@ async def decide_authorization_request(
         consume_cur = await db.execute(
             "UPDATE oauth_authorization_requests SET consumed_at = ? "
             "WHERE id = ? AND consumed_at IS NULL",
-            (_now().isoformat(), rid),
+            (oauth_clock.now().isoformat(), rid),
         )
         if not consume_cur.rowcount:
             raise AuthorizationRequestGoneError(rid)
@@ -241,7 +237,7 @@ async def decide_authorization_request(
         else:
             ins_cur = await db.execute(
                 "INSERT INTO oauth_grants(user_id, client_id, scope, created_at) VALUES (?, ?, ?, ?)",
-                (user_id, req.client_id, req.scope, _now().isoformat()),
+                (user_id, req.client_id, req.scope, oauth_clock.now().isoformat()),
             )
             grant_id = int(ins_cur.lastrowid)
             get_audit_logger().info(
@@ -253,7 +249,7 @@ async def decide_authorization_request(
             )
 
         code = secrets.token_urlsafe(32)
-        now = _now()
+        now = oauth_clock.now()
         expires_at = (now + timedelta(seconds=settings.OAUTH_CODE_TTL_SECONDS)).isoformat()
         await db.execute(
             "INSERT INTO oauth_authorization_codes(code_hash, grant_id, client_id, redirect_uri, "
@@ -276,12 +272,12 @@ async def _grant_created_at(db: Any, grant_id: int) -> datetime:
     cur = await db.execute("SELECT created_at FROM oauth_grants WHERE id = ?", (grant_id,))
     row = await cur.fetchone()
     ts = _parse_ts(row["created_at"]) if row else None
-    return ts or _now()
+    return ts or oauth_clock.now()
 
 
 async def _issue_token_pair(db: Any, *, grant_id: int, audience: str) -> tuple[str, str, int, int, int]:
     """Insert a fresh access+refresh pair. Returns (access, refresh, expires_in, access_id, refresh_id)."""
-    now = _now()
+    now = oauth_clock.now()
     access = ACCESS_TOKEN_PREFIX + secrets.token_urlsafe(32)
     refresh = REFRESH_TOKEN_PREFIX + secrets.token_urlsafe(32)
     access_expires = (now + timedelta(seconds=settings.OAUTH_ACCESS_TOKEN_TTL_SECONDS)).isoformat()
@@ -307,7 +303,7 @@ async def _issue_token_pair(db: Any, *, grant_id: int, audience: str) -> tuple[s
 async def _revoke_grant(db: Any, grant_id: int, *, reason: str) -> None:
     await db.execute(
         "UPDATE oauth_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
-        (_now().isoformat(), grant_id),
+        (oauth_clock.now().isoformat(), grant_id),
     )
     await db.commit()
     get_audit_logger().info(
@@ -361,7 +357,7 @@ async def exchange_authorization_code(
         raise TokenError(400, "invalid_request", "missing required parameter")
 
     code_hash = _hash(code)
-    now = _now()
+    now = oauth_clock.now()
     now_iso = now.isoformat()
     async with open_db(db_path) as db:
         db.row_factory = pg.Row
@@ -451,7 +447,7 @@ async def refresh_access_token(db_path: str, *, refresh_token: str, client_id: s
         raise TokenError(400, "invalid_grant", "not a refresh token")
 
     token_hash = _hash(refresh_token)
-    now = _now()
+    now = oauth_clock.now()
     now_iso = now.isoformat()
     async with open_db(db_path) as db:
         db.row_factory = pg.Row
@@ -553,7 +549,7 @@ async def resolve_access_token(db_path: str, token: str) -> AccessTokenResolutio
     if not token or not token.startswith(ACCESS_TOKEN_PREFIX):
         return AccessTokenResolution(owner=None, hash_known=False)
 
-    now = _now()
+    now = oauth_clock.now()
     now_iso = now.isoformat()
     token_hash = _hash(token)
     async with open_db(db_path) as db:
@@ -638,7 +634,7 @@ async def revoke_token(db_path: str, *, token: str, client_id: Optional[str]) ->
             return
         await db.execute(
             "UPDATE oauth_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
-            (_now().isoformat(), grant_id),
+            (oauth_clock.now().isoformat(), grant_id),
         )
         await db.commit()
 
@@ -683,7 +679,7 @@ async def revoke_grant_for_user(db_path: str, *, user_id: str, grant_id: int) ->
     async with open_db(db_path) as db:
         cur = await db.execute(
             "UPDATE oauth_grants SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
-            (_now().isoformat(), grant_id, user_id),
+            (oauth_clock.now().isoformat(), grant_id, user_id),
         )
         changed = cur.rowcount
         await db.commit()
