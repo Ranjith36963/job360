@@ -35,8 +35,8 @@ that landed, a log line that proves the code path ran. "It should work now" is n
 Choose based on what you touched. When unsure, do the broader one.
 
 - **Frontend / UX** — you changed a page, component, API call, or auth flow → drive a real browser, screenshot.
-- **Backend** — you changed a route, scorer, source, DB, scheduler, worker → run the service, hit the route, query the DB, read the logs.
-- **End-to-end** — you changed something that spans both, or the user wants the whole journey proven → walk register → CV → search → jobs.
+- **Backend** — you changed a route, the application spine, the tailor, an MCP tool or the DB → run the service, hit the route, query the DB, read the logs.
+- **End-to-end** — you changed something that spans both, or the user wants the whole journey proven → walk register → CV → bring → tailor → receipt → MCP.
 
 `$ARGUMENTS` may name a flavor (`backend`, `frontend`, `e2e`) or a specific feature to focus on. If given, scope to that.
 
@@ -94,11 +94,12 @@ For per-user routes you need a session cookie — register via `POST /api/auth/r
   storage layer is psycopg3; `src/repositories/pg.py` only *shapes* itself like
   aiosqlite):
   ```
-  cd backend && python -c "import os,psycopg; dsn=os.getenv('DATABASE_URL','postgresql://job360:job360dev@localhost:5433/job360'); c=psycopg.connect(dsn); print(c.execute('SELECT COUNT(*) FROM jobs').fetchone()); [print(r) for r in c.execute('SELECT match_score,title FROM jobs ORDER BY match_score DESC LIMIT 5')]"
+  cd backend && python -c "import os,psycopg; dsn=os.getenv('DATABASE_URL','postgresql://job360:job360dev@localhost:5433/job360'); c=psycopg.connect(dsn); print(c.execute('SELECT COUNT(*) FROM jobs').fetchone()); [print(r) for r in c.execute('SELECT id,title,company FROM jobs ORDER BY id DESC LIMIT 5')]"
   ```
   Against PROD instead of local dev: `railway run -s Postgres python <script>`
   (never print the DSN).
-  Useful tables: `jobs` (shared catalog), `user_feed`, `user_profiles`, `users`, `sessions`, `applications`, `run_log`.
+  Don't guess table names — the sourcing and notification tables were dropped by
+  migrations `0039`/`0040`. List them: `SELECT tablename FROM pg_tables WHERE schemaname='public'`.
 - **Did the path run?** Read the server's stdout/log. When you launched it as a background
   Bash task, its output goes to a task file — `tail` that file and grep for your route,
   for `ERROR`/`WARNING`, and for the run UUID. If a code path's execution is ambiguous,
@@ -124,8 +125,7 @@ For per-user routes you need a session cookie — register via `POST /api/auth/r
 > buttons + the LinkedIn/GitHub gates). Report its PASS/FAIL/GATED table.
 
 Run **both** servers, then walk the real journey with the browser and watch the DB/logs in parallel.
-**The journey is the product path (`docs/product/VISION.md`): bring → tailor → receipt → MCP. The old
-search journey is legacy — verify it only when the change touched `src/sources/` or the scorer.**
+**The journey is the product path (`docs/product/VISION.md`): bring → tailor → receipt → MCP.**
 
 1. **Register** a fresh account (UI: `/register`, or `POST /api/auth/register`).
 2. **Upload a CV** on `/profile` — use `test-artifacts/sample_cv.pdf` (a realistic ML-engineer CV).
@@ -139,9 +139,8 @@ search journey is legacy — verify it only when the change touched `src/sources
 5. **MCP** — call the `/api/mcp` mount (streamable HTTP, not a `@router` route) with a personal `j360_…` token: `tools/list`, then `get_profile` and the
    receipt-listing tool return the same data the web showed.
 
-A good E2E run produces a short report: what works, what's broken (with the exact file:line
-and the DB/log evidence), severity, and the fix. See `E2E_TEST_REPORT.md` at the repo root
-for the format and the two real bugs this methodology already caught.
+A good E2E run produces a short report: what works, what's broken (with the DB/log
+evidence), severity, and the fix.
 
 ---
 

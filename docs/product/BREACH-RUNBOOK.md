@@ -59,10 +59,13 @@ Variables → edit → redeploy happens automatically.
 | `user_profiles`, `user_profile_versions` | CV text, LinkedIn text, GitHub data, preferences | **HIGH — this is the crown jewels** |
 | `tailored_documents` | AI-generated CVs / cover letters | **HIGH** |
 | `users` | email addresses, argon2id password hashes, timezone | Medium (hashes are argon2id — not reversible in practice, but report as exposed) |
-| `applications`, `user_actions`, `user_feed` | job-hunt activity (who applied where) | Medium — sensitive in context (current employer must not learn) |
-| `user_channels` | Fernet-encrypted webhooks/bot tokens | Medium (encrypted at rest; HIGH if `CHANNEL_ENCRYPTION_KEY` also leaked) |
-| `sessions`, `oauth_states` | session + OAuth artifacts | Low once rotated/deleted |
-| `jobs`, `job_enrichment`, `job_embeddings` | public job listings | Not personal data |
+| `applications`, `application_events`, `application_artifacts`, `application_receipts`, `user_actions` | job-hunt activity (who applied where, and the exact CV sent) | Medium — sensitive in context (current employer must not learn) |
+| `sessions`, `api_tokens`, `oauth_tokens`, `oauth_grants` | session + OAuth artifacts | Low once rotated/deleted |
+| `jobs` | public job listings | Not personal data |
+
+Do not work this table from memory during an incident — enumerate the live schema
+first (`SELECT tablename FROM pg_tables WHERE schemaname='public'`). Tables listed
+here have been dropped before (migrations `0031`, `0039`, `0040`).
 
 **Answer these four questions in writing** (the ICO form asks exactly this):
 1. What happened, and how? 2. Whose data and how many people?
