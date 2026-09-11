@@ -69,6 +69,9 @@ interface TagInputProps {
   suggestionsHint?: string;
   /** Extra content after the label — e.g. an `EditedMark` (spec R11). */
   trailing?: React.ReactNode;
+  /** `data-testid` on the field's outer wrapper, for tests/e2e to target a
+   *  specific TagInput among several on this form. */
+  testId?: string;
 }
 
 function TagInput({
@@ -83,6 +86,7 @@ function TagInput({
   suggestionsLabel,
   suggestionsHint,
   trailing,
+  testId,
 }: TagInputProps) {
   const [inputValue, setInputValue] = useState("");
 
@@ -124,7 +128,7 @@ function TagInput({
       : "skill-matched";
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-testid={testId}>
       <Label className="text-sm font-medium">
         {icon}
         {label}
@@ -261,6 +265,7 @@ function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
     negative_keywords: asArr(raw.negative_keywords),
     about_me: typeof raw.about_me === "string" ? raw.about_me : "",
     needs_visa: raw.needs_visa === true,
+    work_authorization_countries: asArr(raw.work_authorization_countries),
   };
 }
 
@@ -280,6 +285,7 @@ function serializePrefs(p: PreferencesRequest): string {
     p.negative_keywords,
     p.about_me,
     p.needs_visa,
+    p.work_authorization_countries,
   ]);
 }
 
@@ -310,6 +316,7 @@ export function PreferencesForm({
   const [negativeKeywords, setNegativeKeywords] = useState<string[]>([]);
   const [aboutMe, setAboutMe] = useState("");
   const [needsVisa, setNeedsVisa] = useState(false);
+  const [workAuthorizationCountries, setWorkAuthorizationCountries] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   // Distinct from `saving`: a failed auto-save used to fall back to the same
   // green "Changes save automatically" line as a successful one, so once the
@@ -347,6 +354,7 @@ export function PreferencesForm({
     // loaded, untouched form.
     setExperienceLevel(p.experience_level || EXPERIENCE_UNSET);
     setNeedsVisa(p.needs_visa === true);
+    setWorkAuthorizationCountries(p.work_authorization_countries ?? []);
     setNegativeKeywords(p.negative_keywords ?? []);
     setAboutMe(p.about_me ?? "");
     baselineRef.current = serializePrefs(p);
@@ -373,6 +381,7 @@ export function PreferencesForm({
       negative_keywords: negativeKeywords,
       about_me: aboutMe,
       needs_visa: needsVisa,
+      work_authorization_countries: workAuthorizationCountries,
     }),
     [
       targetTitles,
@@ -387,6 +396,7 @@ export function PreferencesForm({
       negativeKeywords,
       aboutMe,
       needsVisa,
+      workAuthorizationCountries,
     ]
   );
 
@@ -610,6 +620,35 @@ export function PreferencesForm({
           I need visa sponsorship to work in the UK
           <EditedMark edit={editOf("needs_visa")} />
         </label>
+
+        {/* ── Work authorization countries (slice 7, #514) ──────────
+            Fact 2 of the visa-signal comparison — compared against each
+            job's visa_country, never a per-country rule Job360 knows
+            itself (see docs/plans/2026-09-11-visa-signal/spec.md). Empty
+            list = "don't care" (rule #29), never a penalty. */}
+        <TagInput
+          testId="work-authorization-countries"
+          label="Countries where I need no visa sponsorship"
+          tags={workAuthorizationCountries}
+          onChange={(tags) => {
+            if (tags.length > workAuthorizationCountries.length) {
+              // TagInput appends the newly typed value (or a tapped
+              // suggestion) as the last entry — validate/normalize it here
+              // rather than duplicating TagInput's own add-logic.
+              const added = tags[tags.length - 1].trim();
+              if (!/^[A-Za-z]{2}$/.test(added)) return; // not an ISO alpha-2 code — ignore
+              setWorkAuthorizationCountries([
+                ...tags.slice(0, -1),
+                added.toUpperCase(),
+              ]);
+              return;
+            }
+            setWorkAuthorizationCountries(tags);
+          }}
+          placeholder="e.g. GB, IN, DE"
+          description="ISO codes, e.g. GB, IN, DE. Leave empty if you'd rather not compare."
+          trailing={<EditedMark edit={editOf("work_authorization_countries")} />}
+        />
 
         <Separator />
 

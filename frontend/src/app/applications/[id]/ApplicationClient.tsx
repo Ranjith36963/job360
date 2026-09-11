@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { getApplication, recordApplicationReceipt } from "@/lib/api";
-import type { ApplicationDetail } from "@/lib/api";
+import type { ApplicationDetail, VisaShape } from "@/lib/api";
 import { Timeline } from "@/components/applications/Timeline";
 import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
 import { FitPanel } from "@/components/applications/FitPanel";
@@ -14,6 +14,8 @@ import { Contacts } from "@/components/applications/Contacts";
 import { Receipts } from "@/components/applications/Receipts";
 import { NoteForm } from "@/components/applications/NoteForm";
 import { LessonForm } from "@/components/applications/LessonForm";
+import { VisaBadge } from "@/components/applications/VisaBadge";
+import { VisaSelect } from "@/components/applications/VisaSelect";
 import { STATUS_LABEL } from "@/lib/event-labels";
 
 /** The application record: status, the durable job snapshot (spec R2 —
@@ -60,6 +62,17 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
 
+  // Slice 7 (#514) — the backend always sends `visa`; the fallback only
+  // guards a cached pre-slice-7 payload without the key.
+  const visa: VisaShape = detail.visa ?? {
+    signal: "unknown",
+    detail: "",
+    country: "",
+    recorded_by: "",
+    recorded_at: "",
+    needs_sponsorship: null,
+  };
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8">
       <Link href="/applications" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
@@ -80,6 +93,11 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary">
             {STATUS_LABEL[detail.status] ?? detail.status}
           </span>
+          <VisaBadge
+            signal={visa.signal}
+            needsSponsorship={visa.needs_sponsorship}
+            detail={visa.detail}
+          />
           {detail.interview_at && (
             <span className="rounded-full bg-accent/20 px-3 py-1 text-sm font-medium text-accent-foreground">
               Interview {new Date(detail.interview_at).toLocaleString()}
@@ -120,6 +138,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
       <section data-testid="section-fit">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fit</h2>
         <FitPanel fit={detail.fit} />
+        <VisaSelect applicationId={detail.id} visa={visa} onSaved={load} />
       </section>
 
       <section>

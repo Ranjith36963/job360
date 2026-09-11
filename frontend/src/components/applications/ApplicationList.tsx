@@ -7,6 +7,8 @@ import { listApplications, recordApplicationReceipt } from "@/lib/api";
 import type { ApplicationSummary } from "@/lib/api";
 import { STATUS_LABEL } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
+import { VisaBadge } from "@/components/applications/VisaBadge";
+
 
 // The status vocabulary is closed in the backend (src/core/settings.py
 // APPLICATION_STATUS_EVENT_TYPES) — STATUS_LABEL (src/lib/event-labels.ts)
@@ -109,6 +111,10 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
             <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
               {STATUS_LABEL[app.status] ?? app.status}
             </span>
+            <VisaBadge
+              signal={app.visa_signal ?? "unknown"}
+              needsSponsorship={app.needs_sponsorship}
+            />
             {app.status === "considering" && (
               <button
                 type="button"

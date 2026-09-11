@@ -72,6 +72,12 @@ export interface PreferencesRequest {
   // until 2026-08-08, so the field was always the default False because no
   // screen could set it.
   needs_visa?: boolean;
+  // ISO 3166-1 alpha-2 codes (upper-case) where the candidate can work
+  // without sponsorship. Compared against a job's `visa_country` to derive
+  // `needs_sponsorship` server-side (slice 7, #514) — Job360 never knows
+  // country rules itself. Empty list = "don't care", never a penalty
+  // (rule #29).
+  work_authorization_countries?: string[];
 }
 
 // ---- Skill tier / provenance — frontend structuring of profile fields ----

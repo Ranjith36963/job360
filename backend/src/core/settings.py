@@ -328,6 +328,13 @@ APPLICATION_DIFF_MAX_LINES = int(os.getenv("APPLICATION_DIFF_MAX_LINES", "4000")
 # LESSONS_PAGE_MAX per call.
 PROFILE_LESSONS_MAX = int(os.getenv("PROFILE_LESSONS_MAX", "20"))
 LESSONS_PAGE_MAX = int(os.getenv("LESSONS_PAGE_MAX", "100"))
+# Slice 7 (#514) — the visa / sponsorship signal. A CLOSED set the agent (or
+# a human at the browser) picks from after reading the ad; `unknown` = the
+# ad said nothing and the web shows nothing (rule #29). Job360 holds no
+# country rule anywhere — the only comparison is "is the job's country in
+# the candidate's own list" (docs/plans/2026-09-11-visa-signal/spec.md).
+APPLICATION_VISA_SIGNALS = ("sponsors", "no_sponsorship", "unknown")
+APPLICATION_VISA_DETAIL_MAX_CHARS = int(os.getenv("APPLICATION_VISA_DETAIL_MAX_CHARS", "500"))
 
 # R8 — record_application (the rich receipt).
 APPLICATION_RECEIPT_ANSWERS_MAX = int(os.getenv("APPLICATION_RECEIPT_ANSWERS_MAX", "50"))
@@ -422,6 +429,8 @@ PROFILE_EDITABLE_PATHS = (
     "preferences.additional_skills", "preferences.excluded_skills", "preferences.negative_keywords",
     "preferences.salary_min", "preferences.salary_max", "preferences.work_arrangement",
     "preferences.experience_level", "preferences.about_me", "preferences.needs_visa",
+    # Slice 7 — ISO alpha-2 codes where the candidate needs no sponsorship.
+    "preferences.work_authorization_countries",
 )
 # Env-added paths must ALSO be declared dataclass fields — an unknown one is a
 # startup error, not an accepted path.

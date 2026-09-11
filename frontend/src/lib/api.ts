@@ -697,6 +697,21 @@ export async function saveApplicationFit(
   });
 }
 
+// ---- Visa / sponsorship signal (slice 7, #514) ----
+// docs/plans/2026-09-11-visa-signal/spec.md — the human door at the browser
+// (PUT /applications/{id}/visa); an agent uses save_fit / bring_job instead.
+export type VisaShape = _Schemas["ApplicationVisaOut"];
+
+export async function setApplicationVisa(
+  applicationId: number,
+  body: { visa_signal: string; visa_detail?: string; visa_country?: string }
+): Promise<_Schemas["SetVisaResponse"]> {
+  return request(`/api/applications/${applicationId}/visa`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
 export async function recordApplicationEvent(
   applicationId: number,
   body: {

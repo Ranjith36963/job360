@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -106,6 +106,13 @@ class BringJobRequest(BaseModel):
     description: str = Field(..., min_length=1, max_length=_MAX_TEXT)
     location: str = Field("", max_length=_MAX_FIELD)
     apply_url: str = Field("", max_length=2_000)
+    # Slice 7 (#514) — the agent's reading of the ad, stored not judged
+    # (docs/plans/2026-09-11-visa-signal/spec.md). Omitted = 'unknown' = the
+    # ad said nothing; the closed set / alpha-2 / length rules are checked in
+    # services/applications/visa.py so every door validates the same way.
+    visa_signal: Optional[str] = Field(None, max_length=32)
+    visa_detail: Optional[str] = Field(None, max_length=4_000)
+    visa_country: Optional[str] = Field(None, max_length=8)
 
     @field_validator("title", "company", "location", "apply_url")
     @classmethod
@@ -199,6 +206,20 @@ async def bring_job(
     birth = await applications_spine.birth_application(
         db, user_id=user.id, job_id=job_id, job_row=dict(row), recorded_by=actor_for(user),
     )
+    # Slice 7 — the agent's visa reading, when it gave one. Omitted means the
+    # ad said nothing: the slot stays 'unknown' and a re-bring never clears a
+    # judgement recorded earlier through save_fit or the web.
+    if body.visa_signal is not None or body.visa_detail or body.visa_country:
+        from src.services.applications import visa as visa_service  # noqa: PLC0415
+        from src.services.applications.spine import SpineError  # noqa: PLC0415
+
+        try:
+            await visa_service.set_visa_signal(
+                db, user_id=user.id, application_id=birth["application_id"], recorded_by=actor_for(user),
+                signal=body.visa_signal, detail=body.visa_detail, country=body.visa_country,
+            )
+        except SpineError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
     get_audit_logger().info(
         "job_brought",
