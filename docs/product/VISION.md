@@ -110,8 +110,10 @@ as a fallback for CLI clients.
    `source` (message id, from, subject) idempotently, plus a real interview
    datetime. Added 2026-09-07 from the competitor read.
 7. Visa / sponsorship signal supplied by the agent, shown on the card.
-8. CV diff (original vs tailored) with one Keep button, web only.
-9. "Flag for next time" on the web + lessons back through `get_profile`.
+8. CV diff (original vs tailored), web only, read-only — the receipt names
+   the applied version; no Keep button (decision 26, 2026-09-11).
+9. "Flag for next time" on the web + lessons back through `get_profile`
+   (shipped 2026-09-11, `docs/plans/2026-09-11-lessons/spec.md`).
 10. Later, on evidence only: WhatsApp ("text your agent" + pushes, needs worker
    + Redis back), multiple named profiles, recruiters.
 
@@ -159,6 +161,12 @@ consent-first; everything free; no auto-submit at volume; global from day one.
 | 23 | WhatsApp | **Wait for a paying signal.** If ever: inbound-only Twilio webhook first, no worker. |
 | 24 | ChatGPT / Grok connectors | **Proved live in prod by a session in a real browser**, findings in `docs/operations/`. Never assumed from the OAuth code. |
 | 25 | The eight pre-pivot `wiring/*` draft PRs | **Closed** (#447–#454). They targeted the deleted notification stack. |
+
+### Addition, 2026-09-11 (the owner's question on slice 8)
+
+| # | Question | Decision |
+|---|---|---|
+| 26 | "Do we really need the Keep button? Do we always go back and forth between the web and the chat?" | **No Keep button.** The version that counts is the one the receipt names (`record_application`'s `cv_artifact_id` / `cover_letter_artifact_id`) — that fact already exists, and a Keep on the web would be a "do" door (rule 5) forcing a chat ↔ web round trip. The web stays the record: it shows original vs any version and marks the applied one. Version numbers stay internal; the human sees "Original", "Applied". Decision 21's Keep is withdrawn. |
 
 ## Older docs this supersedes
 

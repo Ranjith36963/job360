@@ -407,21 +407,45 @@ jobs:
             echo "issue #$num already open for this trip — commented instead of duplicating" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: "Step 6 — notify Slack, if configured"
+      # THE SAME VOICE AS EVERY OTHER WATCHER. Until 2026-09-11 this step
+      # posted to an incoming webhook (SLACK_WEBHOOK_URL) and swallowed every
+      # failure with a ::warning:: — the exact RESEND_API_KEY shape: a secret
+      # that may never have been set, and a step that goes green either way.
+      # A production rollback is the one message that must not be lost, so it
+      # now uses the bot-token action that slack-drill.yml proved live on
+      # 2026-09-11, which fails LOUD when it cannot speak.
+      - name: "Step 6 — Slack: production was rolled back"
         if: always() && steps.decide.outputs.tripped == 'true'
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          if [ -z "$SLACK_WEBHOOK_URL" ]; then
-            echo "::warning::SLACK_WEBHOOK_URL is not set — no Slack ping for this trip. The GitHub issue above is the only alarm."
-            exit 0
-          fi
-          prefix=""
-          if [ "${{ steps.mode.outputs.dry_run }}" = "true" ]; then prefix="[DRILL] "; fi
-          text="${prefix}Post-merge watch tripped on ${{ github.sha }}: ${{ steps.decide.outputs.trip_reason }} (services: ${{ steps.decide.outputs.services }})"
-          body=$(python -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}))' "$text")
-          curl -sf -X POST -H 'Content-type: application/json' --data "$body" "$SLACK_WEBHOOK_URL" \
-            || echo "::warning::Slack notification failed to send"
+        uses: ./.github/actions/slack
+        with:
+          channel: production-incidents
+          severity: critical
+          title: "${{ steps.mode.outputs.dry_run == 'true' && '[DRILL] ' || '' }}post-merge watch tripped on ${{ github.sha }} — rolled back"
+          body: |
+            ${{ steps.decide.outputs.trip_reason }} (services: ${{ steps.decide.outputs.services }})
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE (scripts/check_alert_paths.py rule B). Step 6 keys
+      # off outputs that `mode` and `decide` only write if they REACH that
+      # line. If either dies half way — an unbound variable, a gh 403 — the
+      # trip is never announced and a rolled-back (or NOT rolled-back)
+      # production goes unmentioned. If the alarm path itself broke, say THAT.
+      - name: "Slack — the post-merge watch's alarm path itself broke"
+        if: always() && (steps.mode.outcome == 'failure' || steps.decide.outcome == 'failure')
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "post-merge watch on ${{ github.sha }} could not reach a verdict"
+          body: |
+            The watch ran after a merge to main but the step that decides LIVE vs rehearsal, or the
+            step that decides whether to roll back, failed before writing its verdict. Production may
+            or may not be fine — nobody checked. Open the run and look.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
       # ── THE HONESTY RULE — always, win or lose ────────────────────────────
       - name: "HONESTY — what this run watched, what it could NOT, and the verdict"
@@ -456,12 +480,57 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ── MERGED -> TOLD ────────────────────────────────────────────────────
+      # The owner asked to hear when something actually shipped. The honest
+      # moment for that is not the merge (main auto-deploys, so a merge is a
+      # promise) and not the deploy (Railway can roll out a broken image) — it
+      # is HERE, after the watch window closed with nothing tripped. So the
+      # message says "merged and live", and it can only be written by a run that
+      # watched and saw nothing wrong.
+      #
+      # Two non-blank lines on purpose: `check_alert_paths.py` rule B demands a
+      # fallback alert for any SUBSTANTIAL step an alert step quotes, and
+      # "substantial" is a `uses:` step or a `run:` longer than three lines. A
+      # one-line subject read is neither, so it needs no second alarm of its own
+      # — and if it somehow failed, the Slack step below simply says the subject
+      # is blank rather than going silent. `always()` is rule A: nothing after
+      # the job's first alert step may key off the job's own status.
+      - name: The subject line of the commit that just merged
+        id: subject
+        if: always()
+        run: |
+          subject=$(git log -1 --pretty=%s)
+          echo "text=$subject" >> "$GITHUB_OUTPUT"
+
+      # Only on a LIVE run (a rehearsal announcing a merge would be a lie), only
+      # when `decide` really reached a verdict, and only when that verdict was
+      # clean. A trip has its own critical message to production-incidents above;
+      # this one is the quiet "it landed and it is fine" line, which belongs in
+      # log-github-ci and nowhere louder.
+      - name: "Slack — merged, watched, and still standing"
+        if: always() && steps.decide.outcome == 'success' && steps.decide.outputs.tripped != 'true' && steps.mode.outputs.dry_run != 'true'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: info
+          title: "merged and live: ${{ steps.subject.outputs.text }}"
+          body: |
+            Commit `${{ github.sha }}` is on main, deployed, and survived the post-merge watch
+            window with nothing crossing a trip threshold.
+
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
       # Show red in the Actions tab too, not just inside the summary text —
       # a green checkmark next to a rolled-back prod is exactly the kind of
       # thing that gets missed. Placed LAST so it never blocks the alarm
       # steps above (all of which are `if: always()` or unconditional).
+      # `always()` is load-bearing (scripts/check_alert_paths.py rule A): the
+      # Slack step above fails LOUD when it cannot speak, and without this the
+      # implicit `success()` here would let a Slack outage decide whether the
+      # run reports the trip. The verdict is `decide`'s, never the messenger's.
       - name: Fail the run if the watch tripped
-        if: steps.decide.outputs.tripped == 'true'
+        if: always() && steps.decide.outputs.tripped == 'true'
         run: |
           echo "::error::post-merge-watch TRIPPED — ${{ steps.decide.outputs.trip_reason }}"
           exit 1

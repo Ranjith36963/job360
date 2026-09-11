@@ -266,6 +266,11 @@ def build_server() -> MCPServer:
             # carries it, so this is not a third query.
             "agent_edits": [row.model_dump() for row in resp.agent_edits],
             "fields": profile_edits.field_values(profile, editable_paths),
+            # Slice 9 (#516) — "flag for next time": the last PROFILE_LESSONS_MAX
+            # lessons across every application, newest first. Read them before
+            # tailoring the next CV; write a new one with
+            # record_event(event_type="lesson").
+            "lessons": [row.model_dump() for row in resp.lessons],
         }
 
     @mcp.tool()

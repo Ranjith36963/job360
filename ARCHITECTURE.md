@@ -3,7 +3,7 @@
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
-> This file describes the one path the app has: `api/routes/bring.py` (`POST /jobs/bring`, link or text) → `api/routes/receipts.py` (append-only `application_receipts`) → `api/routes/tailor.py` (CV tailor, web fallback only) → `api/mcp_server.py` (the MCP tools at `/api/mcp` — count them with `grep -c "@mcp.tool()"`; bearer `j360_…`, OAuth 2.1). The FastAPI app behind it is 11 route modules (69 endpoints). Profile extraction (`services/profile/`) feeds it, and the application spine (`applications`, `application_events`, `application_artifacts`, `application_receipts`) records everything that happens to a brought job.
+> This file describes the one path the app has: `api/routes/bring.py` (`POST /jobs/bring`, link or text) → `api/routes/receipts.py` (append-only `application_receipts`) → `api/routes/tailor.py` (CV tailor, web fallback only) → `api/mcp_server.py` (the MCP tools at `/api/mcp` — count them with `grep -c "@mcp.tool()"`; bearer `j360_…`, OAuth 2.1). The FastAPI app behind it is 11 route modules (71 endpoints). Profile extraction (`services/profile/`) feeds it, and the application spine (`applications`, `application_events`, `application_artifacts`, `application_receipts`) records everything that happens to a brought job.
 >
 > **The sourcing-era pipeline was deleted 2026-09-05** (slice 5, #483): job search, keyword-driven scoring, four-layer dedup, LLM enrichment, embeddings, the search dashboard, and the 40 job-source classes that fed them. **The per-user notification-channel system (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) was deleted the same day.** None of that code exists in this repo any more, and nothing archives its history in-tree — git history is the record.
 >
@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | Migration head | **0041** | `backend/migrations/` |
 | Migration files | **42** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **136** | `backend/tests/` |
+| `test_*.py` files | **139** | `backend/tests/` |
 | GitHub Actions workflows | **23** | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -48,7 +48,7 @@ job360/
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
 │   │   ├── services/                 # (post-Phase-4 merge of filters/ + notifications/ + profile/)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies), magic-link + system email (Resend/SMTP)
-│   │   │   ├── applications/         # application-spine services (events, artifacts, authorship, contacts, stats)
+│   │   │   ├── applications/         # application-spine services (events, artifacts, authorship, contacts, stats, diff, lessons)
 │   │   │   ├── fetch/                # the URL-fetch web fallback (extract, fetcher, ssrf guard.py, outcomes)
 │   │   │   ├── tailoring/            # generator, prompts, provenance, integrity, docx, pdf — the tailor web fallback
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, seniority, skill_normalizer
@@ -58,7 +58,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
-│   └── tests/                        # across 136 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 139 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,applications,tailor,profile,layout}/
@@ -96,8 +96,10 @@ def normalized_key(self) -> tuple[str, str]:
     return (normalized_company, normalized_title)
 ```
 
-The key backs the `UNIQUE(normalized_company, normalized_title)` constraint, so two
-users pasting the same ad share one `jobs` row.
+This key is used for:
+- **Database uniqueness** — `UNIQUE(normalized_company, normalized_title)` constraint
+- **Seen-check** — `is_job_seen()` queries by these columns, so two users pasting
+  the same ad share one `jobs` row
 
 ---
 
@@ -227,7 +229,7 @@ with the sourcing era — do not rebuild them.
 
 > **The SQL below is SQLite-flavoured, and is never executed as written.** It is the legacy baseline `init_db()` hands to `executescript()`, which pushes every statement through `pg.translate()` first (`repositories/pg.py:670-674`) — `INTEGER PRIMARY KEY AUTOINCREMENT` becomes a Postgres identity column (`pg.py:193-195`), and `?` placeholders, `datetime('now')`, `INSERT OR IGNORE` and FK clauses are rewritten or stripped the same way. Read it as the *shape* of the baseline, not as DDL you could run against Postgres by hand.
 >
-> This section shows the baseline schema. The full schema is built by the forward migrations in `backend/migrations/` — see the repo-facts table above for the current count and head. Later migrations drop tables as well as add them (`0039_drop_sourcing_tables`, `0040_drop_notification_tables`), so do not read the baseline below as the live table list: ask the database (`SELECT tablename FROM pg_tables WHERE schemaname='public'`).
+> This section shows the baseline schema. The full schema is built by the forward migrations in `backend/migrations/` — see the repo-facts table above for the current count and head. Migration `0039_drop_sourcing_tables` (slice 5, #483) drops `run_log`, `job_enrichment` and `job_embeddings` — the three tables nothing left in the codebase reads. `jobs`, `user_feed`, `applications`, `application_events`, `user_actions` and every profile/auth/receipt table are untouched; the down migration recreates the three dropped tables empty.
 
 ```sql
 CREATE TABLE IF NOT EXISTS jobs (
@@ -291,10 +293,12 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/api/applications` | `applications.py` |
 | `GET` | `/api/applications/export` | `applications.py` |
 | `GET` | `/api/applications/job/{job_id}` | `applications.py` |
+| `GET` | `/api/applications/lessons` | `applications.py` |
 | `GET` | `/api/applications/stats` | `applications.py` |
 | `GET` | `/api/applications/{application_id}` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/artifacts` | `applications.py` |
 | `GET` | `/api/applications/{application_id}/artifacts/{artifact_id}` | `applications.py` |
+| `GET` | `/api/applications/{application_id}/artifacts/{artifact_id}/diff` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/contacts` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/events` | `applications.py` |
 | `PUT` | `/api/applications/{application_id}/fit` | `applications.py` |
@@ -358,7 +362,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**69 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**71 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->
 
 ## Configuration
@@ -408,6 +412,9 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `APPLICATION_EXTRA_EVENT_TYPES` | No (default empty) | Comma-separated list extending the application-spine's event vocabulary (R7) with NON-status note-type events only — a status event also needs an R4 status mapping, which an env var cannot add. Unknown types still 422 naming the allowed list |
 | `APPLICATION_ARTIFACT_MAX_CHARS` | No (default `60000`) | Per-artifact-version character cap (`POST /applications/{id}/artifacts`, S5) — over the cap is a 422 naming this variable |
 | `APPLICATION_ARTIFACT_MAX_VERSIONS` | No (default `200`) | Per-`(application_id, kind)` version-count cap — over the cap is a 429 naming this variable, never a silent drop |
+| `APPLICATION_DIFF_MAX_LINES` | No (default `4000`) | Slice 8 — each side of `GET /applications/{id}/artifacts/{artifact_id}/diff` is cut to this many lines before `difflib` runs; the response says `truncated` |
+| `PROFILE_LESSONS_MAX` | No (default `20`) | Slice 9 — how many "flag for next time" lessons `GET /profile` and MCP `get_profile` carry (newest first) |
+| `LESSONS_PAGE_MAX` | No (default `100`) | Slice 9 — the largest `limit` `GET /applications/lessons` accepts; over it is a 422 naming this variable |
 | `APPLICATION_EVENT_DETAIL_MAX_CHARS` | No (default `2000`) | S5 — `detail` char cap on `POST /applications/{id}/events`; over the cap is a 422 naming this variable |
 | `APPLICATION_EVENT_PAYLOAD_MAX_BYTES` | No (default `8192`) | S5 — event `payload` cap, checked on the SERIALISED (`json.dumps`) size, because that is what the column costs; the payload must also be a JSON object, never a list/scalar |
 | `APPLICATION_EVENT_MAX_FUTURE_SECONDS` | No (default `300`) | S6 — how far into the future `occurred_at` may claim to be before it is refused as implausible. No lower bound: backdating is the normal case. Slice 6 reuses it for an email source's `received_at` |
@@ -442,7 +449,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 
 ### Constants (`settings.py`)
 
-Read `core/settings.py` — nothing in it is worth a second copy here.
+The scorer's `MIN_STORE_SCORE` catalog floor and the engine thresholds went with the scorer (slice 5). What is left in `core/settings.py` is rate limits (`RATE_LIMITS`, the per-user profile-extraction and export caps) and the `ESCO_SKILL_NORMALISATION_ENABLED` flag — read the file; nothing there is worth a second copy here.
 
 ---
 

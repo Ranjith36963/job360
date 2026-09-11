@@ -24,11 +24,50 @@ permissions:
 
 jobs:
 
+  # ─── Scope: which steps does THIS diff need? ───────────────────────────────
+  # Harness simplification slice 3 (owner decision 2026-09-08). Measured on the
+  # last green run of main: the backend job spends 347s of 414s in pytest, and
+  # ci-offline.yml runs the same suite again. A one-component frontend PR waited
+  # seven minutes for tests it cannot affect.
+  #
+  # scripts/ci_scope.py answers `docs` / `frontend` / `full` from the changed
+  # files, most restrictive wins, unknown is full, empty is full, and anything
+  # that is not a pull_request (push to main, schedule, dispatch) is full
+  # without looking -- main is production.
+  #
+  # JOBS BELOW ARE NEVER SKIPPED, ONLY THEIR STEPS. The ruleset on main and
+  # scripts/merge_cage.py require checks BY NAME; a skipped job never reports
+  # and blocks the merge, a job whose steps were skipped reports success.
+  scope:
+    name: Scope (which checks this diff needs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      scope: ${{ steps.decide.outputs.scope }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # the diff needs the base commit
+      # The classifier proves it can still go red BEFORE it is allowed to
+      # decide anything. A broken classifier fails this job, which fails every
+      # job that needs it, which is a red PR -- never a silently fast one.
+      - name: The scope classifier can still fail
+        run: python scripts/ci_scope.py --drill
+      - name: Decide
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          scope=$(python scripts/ci_scope.py --event "$EVENT" --base "$BASE_SHA" --head HEAD --print-scope --summary)
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+
   # ─── Backend ───────────────────────────────────────────────────────────────
   backend:
     name: Backend (Python 3.12)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [scope]
 
     services:
       postgres:
@@ -68,20 +107,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        if: needs.scope.outputs.scope == 'full'
 
       - uses: actions/setup-python@v7
+        if: needs.scope.outputs.scope == 'full'
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
 
       - name: Install backend (with dev extras)
+        if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
       - name: Lint (ruff)
+        if: needs.scope.outputs.scope == 'full'
         # Backlog drained 2026-07-10: 329 findings → 0. The bulk auto-fixed
         # (`ruff check --fix`, ~141 import-sort/style); the rest were real
         # code fixes (dead-var deletes, ambiguous-name renames, a closure
@@ -92,10 +135,12 @@ jobs:
         run: python -m ruff check .
 
       - name: Tests (offline suite)
+        if: needs.scope.outputs.scope == 'full'
         working-directory: backend
         run: python -m pytest -q -p no:randomly
 
       - name: Type-check (mypy ratchet)
+        if: needs.scope.outputs.scope == 'full'
         # BLOCKING (H7). Was `continue-on-error: true` with a comment claiming
         # "existing errors are grandfathered" — but nothing implemented that, so
         # the result was discarded entirely and new code could add type errors
@@ -114,9 +159,12 @@ jobs:
     # Must exceed DRILL_TIMEOUT_S (240s) in scripts/drill_registry.py, or a hung
     # drill is cancelled by the job before it can report DRILL TIMEOUT.
     timeout-minutes: 10
+    needs: [scope]
     steps:
       - uses: actions/checkout@v7
+        if: needs.scope.outputs.scope == 'full'
       - uses: actions/setup-python@v7
+        if: needs.scope.outputs.scope == 'full'
         with:
           python-version: "3.12"
       # aiohttp + aioresponses: scripts/ssrf_drill.py's fetcher-level cases
@@ -126,6 +174,7 @@ jobs:
       # src.core.settings, whose import chain is dotenv -> src.repositories.pg
       # -> psycopg (first PR #496 run: 9/10 cases "No module named 'dotenv'").
       - run: pip install pyyaml aiohttp aioresponses python-dotenv "psycopg[binary]"
+        if: needs.scope.outputs.scope == 'full'
 
       # Every NODE in detect -> triage -> repair -> verify -> PR has always been
       # healthy. The WIRES between them kept breaking silently: two spellings of
@@ -134,6 +183,7 @@ jobs:
       # left the outage unannounced. Nothing watched the wires, because every
       # individual workflow was green. This job watches the wires.
       - name: Every wire connects
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/chain_check.py --no-map
 
       # And this is the part that matters: a checker nobody has watched fail is
@@ -142,6 +192,7 @@ jobs:
       # name each one — plus a negative control (a comment-only edit) that must
       # stay quiet. If chain_check.py ever silently stops detecting, this fails.
       - name: The checker can still fail
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/chain_check.py --drill
 
       # The registry is the most dangerous file in the harness: if it stops
@@ -153,6 +204,7 @@ jobs:
       # whether the registry can still detect at all — which is the one answer
       # you need when it is red.
       - name: The registry can still fail
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/drill_registry.py --drill
 
       # Every guard CI runs must declare how to make itself fail. Ten guards here
@@ -168,9 +220,11 @@ jobs:
       # of the seven log-injection alerts sitting open right now: fixing the
       # instances without adding the guard is how a class grows.
       - name: No text decoded with the machine's locale
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/encoding_guard.py
 
       - name: That guard can still fail
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/encoding_guard.py --drill
 
       # The broom that sorts worktrees and local branches into SAFE / KEEP / ASK.
@@ -183,6 +237,7 @@ jobs:
       # checkout would census one clean worktree, report all-green, and become
       # another guard that cannot fire.
       - name: The broom still refuses to sweep up unsaved work
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/worktree_census.py --drill
 
       # The broom's ENTRANCE. Same reason this step sits next to the one above and
@@ -190,11 +245,14 @@ jobs:
       # main, so a break would surface only AFTER a merge — too late for the one
       # component whose whole job is deleting things. Here it fires on every PR.
       - name: The reaper still refuses, and still delegates
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/worktree_reaper.py --drill
 
       - name: The ruleset checker can still fail
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/ruleset_gate.py --drill
       - name: Would the ruleset wedge the repo?
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/ruleset_gate.py --check --scope ruleset
       # WIRED FOR REAL, NOT IN A COMMENT. Both of these were referenced only
       # from commented-out example lines, so `drill_registry.discover()` counted
@@ -202,21 +260,26 @@ jobs:
       # discover() to ignore comments, which turned them into STALE ENTRY --
       # correctly. The fix is to invoke them, not to un-declare them.
       - name: Every alert path still reaches a human
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/check_alert_paths.py
 
       - name: Every slack step passes a token, a title and a real channel
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/check_workflow_slack_wiring.py
 
       - name: The review-debt reader can still fail (and still refuses to gate)
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/review_debt.py --drill
 
       # The guard on the one route that makes outbound requests to a URL a
       # stranger chose (docs/plans/2026-09-04-url-fetch/spec.md). Ten
       # mutations, each a real SSRF bypass, plus a negative control.
       - name: The SSRF guard can still fail
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/ssrf_drill.py --drill
 
       - name: Every guard declares its drill
+        if: needs.scope.outputs.scope == 'full'
         run: python scripts/drill_registry.py --run-drills
 
   # ─── Frontend ──────────────────────────────────────────────────────────────
@@ -224,11 +287,14 @@ jobs:
     name: Frontend (Node 20)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: [scope]
 
     steps:
       - uses: actions/checkout@v7
+        if: needs.scope.outputs.scope != 'docs'
 
       - uses: actions/setup-node@v7
+        if: needs.scope.outputs.scope != 'docs'
         with:
           node-version: "22"
           cache: npm
@@ -239,21 +305,31 @@ jobs:
       # It exists mainly for the local commit gate (scripts/agent-gate.sh), which
       # runs against installed node_modules and cannot see a pruned lock (#503).
       - name: Lockfile sync (scripts/check_lock_sync.py)
+        if: needs.scope.outputs.scope != 'docs'
         run: python scripts/check_lock_sync.py frontend
 
       - name: Install frontend deps
+        if: needs.scope.outputs.scope != 'docs'
         working-directory: frontend
         run: npm ci
 
       - name: Type-check (tsc)
+        if: needs.scope.outputs.scope != 'docs'
         working-directory: frontend
         run: npm run type-check
 
       - name: Lint (ESLint)
+        if: needs.scope.outputs.scope != 'docs'
         working-directory: frontend
         run: npm run lint
 
+      - name: Unit tests (vitest)
+        if: needs.scope.outputs.scope != 'docs'
+        working-directory: frontend
+        run: npx vitest run
+
       - name: Build (next build)
+        if: needs.scope.outputs.scope != 'docs'
         working-directory: frontend
         run: npm run build
 
@@ -262,6 +338,7 @@ jobs:
       # its COPY died, two prod deploys failed) never showed here. No push, no
       # registry: an image that builds is the whole assertion.
       - name: Docker image builds (frontend/Dockerfile)
+        if: needs.scope.outputs.scope == 'full'
         run: docker build --quiet -t job360-frontend-ci frontend
 
   # ── Make this loop LOUD ───────────────────────────────────────────────────

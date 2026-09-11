@@ -563,3 +563,121 @@ jobs:
             echo "posted a new lane comment"
           fi
           cat lane-advice.md >> "$GITHUB_STEP_SUMMARY"
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # WIP LIMIT — refuse a 3rd open PR by PARKING it, never by losing it.
+  #
+  # OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)". Refuse does
+  # NOT mean discard. A PR opened while `wip.limit` other real PRs are
+  # already open gets converted to a DRAFT, a comment says why and how to
+  # undo it, and the owner is told in Slack once. Drafts are already
+  # invisible to `auto-merge.yml`'s filter, so parking IS the refusal — there
+  # is no second "block merge" switch to wire. `scripts/wip_gate.py` carries
+  # the exemptions and the full reasoning; this job is only its caller.
+  #
+  # WHY `opened` / `ready_for_review` ONLY, NEVER `synchronize`
+  # A PR already accepted (past this gate once) must never be parked LATER by
+  # an ordinary push — that would yank a PR mid-review just because someone
+  # else opened two more in the meantime. `on.pull_request.types` above is
+  # workflow-wide (shared with precheck/advise/lane), so this is narrowed
+  # with a job-level `if:` on `github.event.action` instead. It also excludes
+  # `workflow_dispatch` runs entirely — parking is only ever a reaction to a
+  # PR's own lifecycle event, never something dispatched by hand for a PR
+  # picked out of a hat.
+  # ═════════════════════════════════════════════════════════════════════════
+  wip:
+    name: WIP limit (park the 3rd open PR)
+    if: >-
+      github.event_name == 'pull_request' &&
+      contains(fromJSON('["opened","ready_for_review"]'), github.event.action)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Least privilege, explicit: this job converts a PR to draft and comments
+    # on it, and needs nothing else. Same discipline as `precheck` above.
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: The gate's one dependency
+        run: python -m pip install --quiet pyyaml
+
+      # Proving the gate still parks a 3rd real PR, still exempts dependabot
+      # and reverts (both as a counted PR and as the PR under judgement), and
+      # still refuses to guess a limit from a broken policy — costs seconds
+      # and is the only thing standing between "there is a WIP gate" and "the
+      # WIP gate works".
+      - name: The WIP gate still parks on purpose — and still exempts the right PRs
+        run: python scripts/wip_gate.py --drill
+
+      # THE DECISION. Its outputs are written by THIS STEP'S OWN `run:` block
+      # with a visible `echo ... >> "$GITHUB_OUTPUT"` — never read out of
+      # Python — per scripts/chain_check.py rule W1: a `steps.X.outputs.Y`
+      # consumer must be able to see, in this file, exactly where X writes Y.
+      - name: Decide — park, or let it stand
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          python scripts/wip_gate.py --pr "$PR" --json wip.json
+          echo "park=$(jq -r .park wip.json)" >> "$GITHUB_OUTPUT"
+          echo "why=$(jq -r .why wip.json)" >> "$GITHUB_OUTPUT"
+
+      # Parking is not a red check — this can only ever run and succeed; the
+      # job never fails because a PR was parked, only if `decide` itself
+      # crashed (caught by the fallback alert below).
+      - name: Park it — convert to draft
+        if: steps.decide.outputs.park == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr ready "$PR" --undo
+
+      - name: Say why, on the PR
+        if: steps.decide.outputs.park == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          WHY: ${{ steps.decide.outputs.why }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR" --body "$(printf '**Parked as a draft — the WIP limit was reached.**\n\n%s\n\nThis is not a rejection. Nothing about your PR was touched, and no work is lost — it is simply not counted against the limit while it sits as a draft. Run `gh pr ready %s` the moment a slot frees (a PR ahead of you merges or closes) to put it straight back in the queue.' "$WHY" "$PR")"
+
+      - name: Tell the owner in Slack — a PR was parked
+        if: steps.decide.outputs.park == 'true'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "WIP 2: PR #${{ github.event.pull_request.number }} parked as draft — WIP limit reached"
+          body: |
+            ${{ steps.decide.outputs.why }}
+
+            ${{ github.event.pull_request.html_url }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # RULE B FALLBACK. If `decide` itself crashed (a missing/broken `wip:`
+      # policy block, a `gh pr list` failure, malformed JSON) its outputs
+      # never exist and every step above silently skips — the exact "alarm
+      # rang into an empty room" bug this repo has hit four separate times.
+      # `always()` is load-bearing: without it, the earlier Slack step failing
+      # would silently skip this one too.
+      - name: Say so if the WIP gate itself broke
+        if: always() && steps.decide.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "WIP gate broke on PR #${{ github.event.pull_request.number }} — no park decision was made"
+          body: >-
+            scripts/wip_gate.py crashed or the policy could not be read. No
+            verdict was reached — this PR was neither parked nor cleared.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
