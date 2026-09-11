@@ -19,7 +19,6 @@ const eslintConfig = defineConfig([
             "Textarea",
             "Select",
             "SelectTrigger",
-            "Slider",
             "Switch",
             "Checkbox",
             "RadioGroup",

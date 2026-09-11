@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | Migration head | **0042** | `backend/migrations/` |
 | Migration files | **43** | `backend/migrations/*.up.sql` |
-| `test_*.py` files | **140** | `backend/tests/` |
+| `test_*.py` files | **138** | `backend/tests/` |
 | GitHub Actions workflows | **24** | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -44,7 +44,6 @@ job360/
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, rate limits, the ESCO flag
 │   │   │   ├── observability.py      # Sentry init
-│   │   │   ├── skill_synonyms.py     # alias dict (k8s↔kubernetes, ...), profile-side skill normalisation — a vocabulary table, reads no CV input
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
 │   │   ├── services/                 # (post-Phase-4 merge of filters/ + notifications/ + profile/)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies), magic-link + system email (Resend/SMTP)
@@ -58,7 +57,7 @@ job360/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
-│   └── tests/                        # across 140 `test_*.py` files (collected-test count: measure it, never quote it)
+│   └── tests/                        # across 138 `test_*.py` files (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
 │   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 │   ├── src/components/{ui,applications,tailor,profile,layout}/

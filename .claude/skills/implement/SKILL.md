@@ -52,5 +52,5 @@ Confirm everything works and nothing is broken.
 - If you added new functionality, add tests for it
 - Run the full test suite: `python -m pytest tests/ -v`
 - If any test fails, fix the implementation (not the test)
-- Update affected MD files if facts changed (source count, test count, features, architecture)
+- Update affected MD files if facts changed (test count, features, architecture)
 - **Output**: Test results and summary of what was implemented

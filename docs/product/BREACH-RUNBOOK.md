@@ -1,3 +1,4 @@
+<!-- doc: LIVING | last-verified: 2026-09-11 by /sync -->
 # Breach Runbook — the 72-hour plan
 
 <!-- doc: LIVING | Fable compliance finding 05:39 — "have a one-page runbook ready before you need it" -->

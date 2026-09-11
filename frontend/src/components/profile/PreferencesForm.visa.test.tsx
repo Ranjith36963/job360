@@ -1,12 +1,13 @@
 /**
  * PreferencesForm — visa sponsorship control.
  *
- * needs_visa gates the backend VISA scoring dimension (weight 6). It had NO UI
- * control anywhere until 2026-08-08, so the field the scorer reads was always
- * the default False and sponsors could never be ranked up for the people who
- * need them. These tests pin the round-trip: the checkbox must hydrate from a
- * saved value AND send its new value on change — and, per the serialize/hydrate
- * symmetry the component depends on, hydration alone must NOT fire a save.
+ * needs_visa is stored on the profile so the user's own agent knows whether
+ * sponsorship is required when it judges a job's fit. It had NO UI control
+ * anywhere until 2026-08-08, so the field was always the default False and
+ * the agent had no way to know a user needed one. These tests pin the
+ * round-trip: the checkbox must hydrate from a saved value AND send its new
+ * value on change — and, per the serialize/hydrate symmetry the component
+ * depends on, hydration alone must NOT fire a save.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";

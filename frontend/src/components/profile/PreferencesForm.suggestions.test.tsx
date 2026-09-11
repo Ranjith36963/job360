@@ -235,17 +235,17 @@ describe("PreferencesForm — words to avoid in job titles", () => {
     );
   });
 
-  it("describes what the penalty actually does", () => {
+  it("describes what the field actually does", () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(
       <PreferencesForm preferences={initial} onSave={onSave} loading={false} />
     );
-    // The mechanism, verified in skill_matcher.py, is a 30-point deduction on a
-    // whole-word TITLE match — not a filter. The old name "Negative Keywords"
-    // read like one, which is a promise the code does not keep: the job still
-    // appears. If the copy ever drifts back to implying removal, this fails.
-    const help = screen.getByText(/drops 30 points/i);
-    expect(help.textContent).toMatch(/title/i);
-    expect(help.textContent).toMatch(/doesn't hide it/i);
+    // Since the 2026-09-03 pivot, Job360 does not score or filter jobs
+    // itself — the user's own agent does. This list is just stored on the
+    // profile so the agent can read it when judging fit. The old name
+    // "Negative Keywords" implied a filter, which was never true even when
+    // there was a scorer: the job still appeared, just ranked lower.
+    const help = screen.getByText(/titles or roles you don't want/i);
+    expect(help.textContent).toMatch(/agent/i);
   });
 });

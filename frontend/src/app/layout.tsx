@@ -33,7 +33,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 // C2 (application-spine review, VISION rule 4) — Job360 never sources or
 // ranks jobs; the meta/OpenGraph/Twitter copy used to advertise a source
-// count and scoring dimensions on every page. Mission copy instead.
+// count and a multi-factor score on every page. Mission copy instead.
 const TAGLINE = "Your career memory. Your agent's context.";
 
 export const metadata: Metadata = {

@@ -67,10 +67,10 @@ export interface PreferencesRequest {
   negative_keywords?: string[];
   about_me?: string;
   excluded_companies?: string[];
-  // Whether the user needs visa sponsorship. Gates the VISA scoring dimension
-  // (weight 6) on the backend. Had no UI control until 2026-08-08, so the
-  // dimension could never fire for anyone — the field the scorer reads was
-  // always the default False because no screen could set it.
+  // Whether the user needs visa sponsorship. Stored on the profile so the
+  // user's agent knows whether sponsorship is required. Had no UI control
+  // until 2026-08-08, so the field was always the default False because no
+  // screen could set it.
   needs_visa?: boolean;
   // ISO 3166-1 alpha-2 codes (upper-case) where the candidate can work
   // without sponsorship. Compared against a job's `visa_country` to derive

@@ -24,6 +24,7 @@ REPO = BACKEND.parent
 # ── R1: modules that must not exist ─────────────────────────────────────────
 _GONE_MODULES = (
     "src.sources",
+    "src.core.skill_synonyms",  # scorer vocabulary; only consumer was the deleted JobScorer (pruned 2026-09-07)
     "src.main",
     "src.cli_view",
     "src.workers",

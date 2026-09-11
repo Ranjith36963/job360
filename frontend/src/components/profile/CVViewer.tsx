@@ -574,10 +574,11 @@ export function CVViewer({
           </div>
         )}
 
-        {/* Seniority and right-to-work, as the CV states them. Both are read by
-            the LLM judge, so they were being SCORED ON while invisible to the
-            person they describe - the same gap that hid linkedin_summary, made
-            again one commit later on the shelves that replaced it. */}
+        {/* Seniority and right-to-work, as the CV states them. Both are part of
+            the stored profile, so they were being read by the agent while
+            invisible to the person they describe - the same gap that hid
+            linkedin_summary, made again one commit later on the shelves that
+            replaced it. */}
         {(cv.cv_experience_level || cv.cv_right_to_work) && (
           <div className="mb-5">
             <SectionLabel icon={Briefcase} text="Stated on your CV" />
@@ -1140,9 +1141,9 @@ export function CVViewer({
               30 LLM-read skills sat in the database while only languages and
               topics reached the screen. It is the input where invisibility
               costs most — a CV CLAIMS "FastAPI", a requirements.txt in shipped
-              code PROVES it, which is why skill tiering already weights this
-              evidence above a CV mention. It was scoring their matches
-              already; they just could not see it. */}
+              code PROVES it, which is stronger evidence than a CV mention
+              alone. It was part of the stored profile already; they just
+              could not see it. */}
 
           {ghRepos.length > 0 && (
             <div className="mb-5">

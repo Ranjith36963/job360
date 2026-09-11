@@ -11,7 +11,7 @@ Usage:
 
 Prints:
     * Tables present + row counts
-    * Top 10 recently-seen jobs by match_score
+    * Top 10 recently-seen jobs
 """
 
 from __future__ import annotations
@@ -75,8 +75,8 @@ def _table_counts(conn: pgsync.Connection) -> list[tuple[str, int]]:
 
 def _top_jobs(conn: pgsync.Connection, limit: int = 10) -> list[tuple]:
     q = (
-        "SELECT id, match_score, title, company, location, first_seen"
-        " FROM jobs ORDER BY first_seen DESC, match_score DESC LIMIT ?"
+        "SELECT id, title, company, location, first_seen"
+        " FROM jobs ORDER BY first_seen DESC, id DESC LIMIT ?"
     )
     return conn.execute(q, (limit,)).fetchall()
 
@@ -98,8 +98,8 @@ def main() -> int:
 
         jobs = _top_jobs(conn)
         _print_rows(
-            "Top 10 recent jobs (first_seen DESC, match_score DESC)",
-            ["id", "match_score", "title", "company", "location", "first_seen"],
+            "Top 10 recent jobs (first_seen DESC)",
+            ["id", "title", "company", "location", "first_seen"],
             jobs,
         )
     finally:

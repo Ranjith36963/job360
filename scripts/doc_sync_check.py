@@ -65,6 +65,13 @@ LIVING_DOCS = [
     # was archived 2026-09-05 with the code it described (slice 5, #483).
     "CONTRIBUTING.md",
     "backend/README.md",
+    # Added 2026-09-07 with the post-pivot prune. All three carry hard rules
+    # or claims that used to guard the sourcing pipeline (uk_gate, visa_signal,
+    # notification tables) and rotted the moment slice 5 deleted that code
+    # without this checker watching them.
+    "docs/product/product_design_rules.md",
+    "docs/product/BREACH-RUNBOOK.md",
+    "docs/product/troubleshooting.md",
     # docs/product/pillars/ (01-user-pillar.md, 02-search-and-match-engine.md,
     # 03-job-providers.md, glossary.md, runbook.md, CATALOG_STATE.md,
     # SHELF_FILL_MEASURED.md, UNIVERSAL_SHELF.md and its own README.md) was
@@ -1142,7 +1149,12 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
         # was drift the LLM found by reading; they are countable, so they belong
         # here where they cost nothing and are caught on every push.
         ("workflows", workflow_count(), r"(\d+) workflows in"),
-        ("test-files", test_file_count(), r"across (\d+) `?test_\*\.py`? files"),
+        # `\*{0,2}` around the digits tolerates markdown bold ("across **133**
+        # `test_*.py` files", backend/README.md) as well as plain prose
+        # ("across 135 `test_*.py` files", ARCHITECTURE.md) — added
+        # 2026-09-07 after the checker couldn't see backend/README.md's own
+        # claim because its bold asterisks broke the naive `(\d+)` match.
+        ("test-files", test_file_count(), r"across \*{0,2}(\d+)\*{0,2} `?test_\*\.py`? files"),
     ]
 
     # String-valued facts. Kept separate because the numeric loop below does

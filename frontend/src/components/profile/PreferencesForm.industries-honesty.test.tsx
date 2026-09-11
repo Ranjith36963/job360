@@ -1,18 +1,12 @@
 /**
  * PreferencesForm — Industries help text honesty (Pillar 1 audit, Finding 9).
  *
- * The old copy said "Target industries for relevance scoring bonus". That is
- * false: a full read of backend/src/services/profile/{keyword_generator,
- * skill_matcher,scoring_dimensions,prefilter,embeddings,llm_matcher}.py shows
- * `preferences.industries` reaches exactly ONE consumer — the semantic
- * embedding text built in embeddings.py (`_add_all(getattr(prefs,
- * "industries", []))`). No keyword generator, no scoring dimension, no
- * prefilter, and no LLM judge ever reads it (llm_matcher.py only reads the
- * CV-extracted `cv_industries` fact, a different field). Semantic matching is
- * gated behind SEMANTIC_ENABLED/ENGINE3_ENABLED and only actively scores a
- * minority of jobs in production, so for most jobs typing an industry here
- * changes nothing. This test pins the honest replacement copy and guards
- * against the old overclaim coming back.
+ * The old copy said "Target industries for relevance scoring bonus". That was
+ * always an overclaim. Since the 2026-09-03 pivot, Job360 does not score,
+ * rank, or match jobs at all — the user's own AI agent does that. This field
+ * is just stored on the profile as context for the agent to read; it has no
+ * scoring effect of any kind, for any job. This test pins the honest
+ * replacement copy and guards against the old overclaim coming back.
  */
 
 import { describe, it, expect, vi } from "vitest";

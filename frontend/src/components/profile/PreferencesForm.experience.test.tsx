@@ -8,15 +8,14 @@
  * chosen it. The backend stores it verbatim -- `_apply_preferences` reads
  * experience_level with a bare `.get(..., "")` and normalises nothing.
  *
- * "mid" is not inert. resolve_experience_level treats a typed value as
- * authoritative ("typed always wins"), so seniority_score skips its neutral
- * midpoint and runs the real curve at SENIORITY_WEIGHT=8 -- up to 8 points
- * given or taken on every job. The same fake value is then stated to the LLM
- * judge and appended to the semantic vector.
+ * "mid" is not inert. It would be stored on the profile as though the user
+ * had stated it, and the user's own agent -- which reads this profile to
+ * judge job fit -- has no way to tell a guess from a real answer.
  *
- * Rule #29: an unstated preference is silence. This is the identical defect
- * already fixed one field over for `work_arrangement`, whose "any" sentinel was
- * reaching the judge as a real constraint. That fix was never copied here.
+ * Rule #29: an unstated preference is silence, never a guess. This is the
+ * identical defect already fixed one field over for `work_arrangement`,
+ * whose "any" sentinel was reaching the profile as a real constraint. That
+ * fix was never copied here.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";

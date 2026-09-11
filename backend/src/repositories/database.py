@@ -412,10 +412,11 @@ class JobDatabase:
         """Mark a job as seen NOW, clearing the stale marks a long-dead ghost
         sweep may have left on it.
 
-        Its old caller (the scrape cycle) is gone. `POST /jobs/bring` is the
-        only one left: re-bringing an ad that matches a legacy scraped row must
-        make that row usable again, because `POST /pipeline/{job_id}` still
-        refuses a `confirmed_expired` one — the last read of that column.
+        Its old caller (the scrape cycle) is gone, and so is the Kanban route
+        that used to refuse `confirmed_expired` rows. `POST /jobs/bring` is the
+        only caller left: re-bringing an ad that matches a legacy scraped row
+        resets the stale marks so the row reads as active again. Nothing writes
+        any value other than 'active' / 0 to these columns any more.
         """
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
@@ -584,24 +585,13 @@ class JobDatabase:
                 pass
         return out
 
-    async def get_tailored_summary_for_jobs(
-        self, user_id: str, job_ids: list[int]
-    ) -> dict[int, dict[str, Any]]:
-        """For the Kanban attach: {job_id: {doc_kind: status}} for the given jobs."""
-        if not job_ids:
-            return {}
-        placeholders = ",".join("?" for _ in job_ids)
-        cursor = await self._db.execute(
-            f"""SELECT job_id, doc_kind, status FROM tailored_documents
-                WHERE user_id = ? AND job_id IN ({placeholders})""",
-            (user_id, *job_ids),
-        )
-        result: dict[int, dict[str, Any]] = {}
-        for jid, kind, status in await cursor.fetchall():
-            result.setdefault(jid, {})[kind] = status
-        return result
+    async def create_application(self, job_id: int, user_id: str) -> None:
+        """Upsert the legacy `applications` row for (user, job) as 'applied'.
 
-    async def create_application(self, job_id: int, user_id: str) -> dict[str, Any]:
+        INSERT OR IGNORE — calling it twice is safe. Returns nothing: both
+        callers (`POST /receipts`, the MCP `record_application` tool) read the
+        spine's Application object straight after, never this row.
+        """
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             """INSERT OR IGNORE INTO applications
@@ -610,70 +600,6 @@ class JobDatabase:
             (user_id, job_id, now, now),
         )
         await self._db.commit()
-        return await self._get_application(job_id, user_id)
-
-    async def advance_application(self, job_id: int, stage: str, user_id: str) -> dict[str, Any]:
-        now = datetime.now(timezone.utc).isoformat()
-        # Fetch current stage before updating, to record it in history.
-        cursor = await self._db.execute(
-            "SELECT stage FROM applications WHERE user_id = ? AND job_id = ?",
-            (user_id, job_id),
-        )
-        row = await cursor.fetchone()
-        from_stage = row[0] if row else None
-        # Stage move + its history row commit together or not at all (docs/
-        # fable/02 D11): previously each statement auto-committed, so a crash
-        # between them moved the card but silently dropped the history entry.
-        # The history INSERT sits behind a SAVEPOINT so the long-standing
-        # tolerance for a missing application_stage_history table (init_db-only
-        # test flows, pre-0014) skips JUST the history — without the savepoint
-        # that error would abort the whole transaction and undo the UPDATE.
-        await self._db.execute("BEGIN")
-        try:
-            await self._db.execute(
-                """UPDATE applications SET stage = ?, updated_at = ?, last_advanced_at = ?
-                   WHERE user_id = ? AND job_id = ?""",
-                (stage, now, now, user_id, job_id),
-            )
-            await self._db.execute("SAVEPOINT _adv_hist")
-            try:
-                await self._db.execute(
-                    """INSERT INTO application_stage_history
-                       (job_id, user_id, from_stage, to_stage, transitioned_at)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    (job_id, user_id, from_stage, stage, now),
-                )
-                await self._db.execute("RELEASE SAVEPOINT _adv_hist")
-            except Exception:  # noqa: BLE001
-                # Table not yet created (migration 0014 not run) — keep the
-                # stage move, skip only the history row.
-                await self._db.execute("ROLLBACK TO SAVEPOINT _adv_hist")
-            await self._db.execute("COMMIT")
-        except Exception:
-            await self._db.execute("ROLLBACK")
-            raise
-        return await self._get_application(job_id, user_id)
-
-    async def _get_application(self, job_id: int, user_id: str) -> dict[str, Any]:
-        cursor = await self._db.execute(
-            """SELECT a.job_id, a.stage, a.created_at, a.updated_at, a.notes,
-                      j.title, j.company
-               FROM applications a LEFT JOIN jobs j ON a.job_id = j.id
-               WHERE a.user_id = ? AND a.job_id = ?""",
-            (user_id, job_id),
-        )
-        row = await cursor.fetchone()
-        if not row:
-            return {}
-        return {
-            "job_id": row[0],
-            "stage": row[1],
-            "created_at": row[2],
-            "updated_at": row[3],
-            "notes": row[4] or "",
-            "title": row[5] or "",
-            "company": row[6] or "",
-        }
 
     async def get_job_id_by_key(self, normalized_key: tuple[str, str]) -> int | None:
         """Resolve a (normalized_company, normalized_title) key to the catalog id.
