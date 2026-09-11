@@ -185,6 +185,17 @@ def sanitize(body: str) -> str:
         if not n:
             break
     text = _FENCE.sub(" ", text)
+    # AN UNCLOSED CONTAINER HIDES EVERYTHING AFTER IT. The three regexes above
+    # only remove a `<details>`, `<!--` or fence that CLOSES; an opener with no
+    # closer survived them, reached the claim, and tripped `assert_no_markup`
+    # on the chain job (2026-09-11, a github-advanced-security thread on PR
+    # #105 whose text has since regenerated). That alarm was correct — the
+    # sanitiser had a hole — and this is the patch for the hole, not for the
+    # alarm: cut the text at the earliest surviving opener. Whatever follows
+    # an unclosed container was never going to render as prose anyway.
+    cut = min((i for i in (text.find(m) for m in FORBIDDEN_MARKERS) if i >= 0), default=-1)
+    if cut >= 0:
+        text = text[:cut]
     # One CodeRabbit comment can carry several findings joined by `---`.
     # The first one is the one anchored at this file:line.
     text = re.split(r"\n-{3,}\n", text)[0]
@@ -771,6 +782,21 @@ def self_drill() -> int:
     clean = _INJECTION not in blob and "Prompt for AI Agents" not in blob and "<details" not in blob
     results.append(("the injection string cannot reach an agent prompt", clean,
                     "" if clean else "IT LEAKED"))
+
+    # 2b. UNCLOSED CONTAINERS. The container regexes need a closer; an opener
+    #     without one reached the claim on the chain job (2026-09-11). Each of
+    #     the three openers, unclosed, with the injection hidden behind it:
+    #     the claim must be marker-free and the injection must not survive.
+    for opener in ("<details>\n<summary>x</summary>\n", "<!-- ", "```\n"):
+        claim = sanitize(f"**A real headline.**\n\n{opener}{_INJECTION}\n")
+        bad = [m for m in FORBIDDEN_MARKERS if m in claim]
+        ok = not bad and _INJECTION not in claim and "real headline" in claim
+        results.append((f"an UNCLOSED {opener.strip()[:9]!r} cannot smuggle the injection",
+                        ok, f"claim={claim!r} markers={bad}"))
+    # Negative control for 2b: a CLOSED container still yields the headline.
+    claim = sanitize(f"**A real headline.**\n\n<details>\n{_INJECTION}\n</details>\n")
+    results.append(("NEGATIVE CONTROL: a closed container still yields the headline",
+                    "real headline" in claim and _INJECTION not in claim, f"claim={claim!r}"))
 
     # 3. An instruction-shaped HEADLINE — the one place a sanitiser cannot
     #    strip, because it is the claim itself. Must be withheld, not relayed.
