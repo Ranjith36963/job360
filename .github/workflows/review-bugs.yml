@@ -334,9 +334,16 @@ jobs:
           # body starts with the literal tag, counts. `--paginate` may run the
           # `--jq` filter once per page, so each severity's count is summed
           # across however many lines it prints, never just read as one line.
+          # `original_commit_id`, NOT `commit_id`. GitHub re-anchors a review
+          # comment's `commit_id` to the newest commit for as long as its line
+          # still applies, so on PR #553 a P1 posted on the PREVIOUS head — and
+          # already acted on and resolved — was counted against the new head
+          # and failed the check (run 34616893136). Only a finding CREATED on
+          # this head is this run's verdict; an older one that is still open is
+          # the merge cage's REVIEW gate's business (unresolved threads block).
           count_tag() {
             gh api --paginate "repos/$GH_REPO/pulls/$PR_NUMBER/comments" \
-              --jq "[.[] | select(.commit_id == \"$HEAD_SHA\" and .user.login == \"github-actions[bot]\" and (.body | startswith(\"$1\")))] | length" \
+              --jq "[.[] | select(.original_commit_id == \"$HEAD_SHA\" and .user.login == \"github-actions[bot]\" and (.body | startswith(\"$1\")))] | length" \
               | awk '{s+=$1} END {print s+0}'
           }
           p0=$(count_tag "[reviewer-bugs][P0]")
@@ -366,7 +373,7 @@ jobs:
             exit 1
           fi
           {
-            echo "### reviewer-bugs: P0=$p0 P1=$p1 P2=$p2 (counted from GitHub's own review comments on head $HEAD_SHA — not a self-reported file)"
+            echo "### reviewer-bugs: P0=$p0 P1=$p1 P2=$p2 (counted from review comments CREATED on head $HEAD_SHA — not a self-reported file)"
             echo "P0/P1 fail this check. P2 alone passes here but is still posted as an open"
             echo "review thread — the merge cage's REVIEW gate requires it resolved regardless."
           } >> "$GITHUB_STEP_SUMMARY"
