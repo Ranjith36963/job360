@@ -12,7 +12,7 @@ You are checking that the codebase and documentation reflect the same informatio
 Read the actual code and extract current facts. **The mission is `docs/product/VISION.md` — a doc that still tells a session to build search, ranking or a feed is a mismatch even if its numbers are right.** Check ALL of these:
 
 - **Product path**: which routes exist in `backend/src/api/routes/bring.py`, `receipts.py`, `tailor.py`; which tools `backend/src/api/mcp_server.py` registers (count them); which Railway services exist (three: backend, frontend, Postgres — worker + Redis deleted 2026-09-02)
-- **Roadmap state**: which slices in `docs/plans/2026-09-03-mission-roadmap.md` have merged (check the issue #479–#483 state with `gh issue view`)
+- **Roadmap state**: which slices have merged — `STATUS.md` names what is live and what is next; confirm each slice's issue state with `gh issue view` (the per-slice plan files were deleted 2026-09-12, so git log is the record)
 - **Test count**: Run (from `backend/`) `python -m pytest tests/ --collect-only -q 2>&1 | tail -3` to get exact test count
 - **DB schema**: Read `backend/src/repositories/database.py` + `backend/migrations/` for table definitions (jobs, applications, application_receipts, tailored_documents, user_actions), column names, UNIQUE constraints, indexes
 - **Features**: Check what modules exist under `backend/src/services/` and `backend/src/api/` — what's actually implemented

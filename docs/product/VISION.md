@@ -113,11 +113,11 @@ as a fallback for CLI clients.
    country-agnostic: we store the agent's reading of the ad and the
    candidate's own list of countries where they need no sponsorship, and
    compare the two; no country rule of ours anywhere (shipped 2026-09-11,
-   `docs/plans/2026-09-11-visa-signal/spec.md`).
+   pinned by `backend/tests/test_visa_signal.py`).
 8. CV diff (original vs tailored), web only, read-only — the receipt names
    the applied version; no Keep button (decision 26, 2026-09-11).
 9. "Flag for next time" on the web + lessons back through `get_profile`
-   (shipped 2026-09-11, `docs/plans/2026-09-11-lessons/spec.md`).
+   (shipped 2026-09-11, pinned by `backend/tests/test_lessons.py`).
 10. Later, on evidence only: WhatsApp ("text your agent" + pushes, needs worker
    + Redis back), multiple named profiles, recruiters.
 
@@ -154,7 +154,7 @@ applications and events in the database, not a doc.
 Taken from the 2026-09-02 pivot without re-asking: recruiters later and
 consent-first; everything free; no auto-submit at volume; global from day one.
 
-### Additions, 2026-09-07 (the Tsenta read — [`competitor-tsenta.md`](competitor-tsenta.md))
+### Additions, 2026-09-07 (the Tsenta competitor read — decisions kept, the read itself deleted 2026-09-12)
 
 | # | Question | Decision |
 |---|---|---|
@@ -179,6 +179,7 @@ The sourcing-era product docs this superseded (`docs/product/PRD.md`, the
 `docs/product/pillars/` manuals, every `docs/product/plans/PRICING_*` file)
 described a product this codebase no longer builds. They were deleted whole
 2026-09-05 (harness+docs cleanup) rather than archived — git history is the
-record, not a guide for what to build next.
-[`docs/plans/2026-09-02-bring-a-job/spec.md`](../plans/2026-09-02-bring-a-job/spec.md)
-is slice one of this vision and still holds.
+record, not a guide for what to build next. The per-slice plan and spec files
+(`docs/plans/`) and the ADR folder (`docs/decisions/`) went the same way
+2026-09-12 — the shipped code, the hard rules and this file are what bind; git
+log holds the reasoning that produced them.

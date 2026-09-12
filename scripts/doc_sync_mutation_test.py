@@ -43,8 +43,22 @@ if hasattr(sys.stdout, "reconfigure"):
 # — see `landing_source_count_drill()` below — because there is no live
 # registry value left to plant a wrong NUMBER against.
 CASES: list[tuple[str, str, str, str]] = [
-    ("CLAUDE.md", r"(\d+) workflows in", "999 workflows in", "workflows"),
-    ("ARCHITECTURE.md", r"across (\d+) `?test_\*\.py`? files", "across 999 test_*.py files", "test-files"),
+    # Retargeted 2026-09-12 (slice 8). Both claims used to be hand-written
+    # prose — the workflow count in CLAUDE.md, the test-file count in
+    # ARCHITECTURE.md's source tree — beside a generated block that already
+    # stated the same number. Slice 8 deleted the prose copies and moved the
+    # generated blocks into docs/GENERATED.md, so the generated row IS the
+    # claim now and that is what a mutation must break. Fifth time a drill has
+    # followed its target rather than quietly passing on a claim that moved.
+    ("docs/GENERATED.md", r"(\d+) workflows in", "999 workflows in", "workflows"),
+    ("docs/GENERATED.md", r"across (\d+) `?test_\*\.py`? files", "across 999 test_*.py files", "test-files"),
+    # route-modules and endpoints had NO drill before slice 8: their only claim
+    # was one hand-written sentence in ARCHITECTURE.md and nothing ever broke
+    # it. Moving the claim into the generated block is the moment to pay that
+    # debt — the pair is mutated in one line because the doc states them in one
+    # ("11 route modules (72 endpoints)"), and each guard reports separately.
+    ("docs/GENERATED.md", r"(\d+) route modules", "999 route modules", "route-modules"),
+    ("docs/GENERATED.md", r"\((\d+) endpoints", "(999 endpoints", "endpoints"),
     ("frontend/CLAUDE.md", r"Next\.js (\d+\.\d+\.\d+)", "Next.js 1.2.3", "nextjs-version"),
     ("frontend/CLAUDE.md", r"React (\d+\.\d+\.\d+)", "React 4.5.6", "react-version"),
     # Eighth batch, 2026-08-25. The disagreement guard: does one doc contradict
@@ -365,6 +379,71 @@ def landing_source_count_drill() -> list[str]:
         target.write_bytes(before)
 
 
+def generated_block_drill() -> list[str]:
+    """Prove `gen_doc_blocks.py` (check mode) goes RED on a hand-edited block.
+
+    New in slice 8 (2026-09-12) and it is the guard the slice created. The
+    countable facts used to exist TWICE — once generated, once as prose — so a
+    hand-edit of the block was survivable: the prose copy still had to agree
+    with the code, and the doc-sync guards read the prose. Slice 8 deleted the
+    prose, which is the right move (a deleted line is a lie that can never be
+    told again) and also removes that second pair of eyes. From here,
+    `gen_doc_blocks.py --check` is the ONLY thing standing between a hand-typed
+    number and a doc that states it as generated fact.
+
+    A text CASE cannot express this: the CASES above re-run doc_sync_check.py,
+    which knows nothing about markers. So this drills the generator itself, and
+    drills BOTH of its failure paths — a wrong VALUE inside the block, and a
+    DELETED marker, which is the sneakier one (a block quietly reverting to
+    hand-written prose, reported as "MISSING MARKERS" rather than "STALE").
+
+    Byte-level read/write, like the CASES: a text round-trip rewrites line
+    endings on Windows and would leave the tree dirty after a passing run.
+    """
+    target = ROOT / "docs" / "GENERATED.md"
+    if not target.exists():
+        return ["generated-blocks: docs/GENERATED.md does not exist — cannot drill"]
+
+    def check() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "gen_doc_blocks.py")],
+            capture_output=True, encoding="utf-8", errors="replace", cwd=str(ROOT),
+        )
+
+    before = target.read_bytes()
+    failures: list[str] = []
+    try:
+        if check().returncode != 0:
+            return ["generated-blocks: the checker is ALREADY red before the drill "
+                    "— run `python scripts/gen_doc_blocks.py --write` first"]
+
+        # 1. A hand-typed value inside the block.
+        target.write_bytes(before.replace(b"| Migration head | **", b"| Migration head | **9", 1))
+        proc = check()
+        if proc.returncode == 0:
+            failures.append(
+                "generated-blocks: a hand-edited value inside the block stayed GREEN "
+                "— the only copy of these facts can now be edited to say anything"
+            )
+        target.write_bytes(before)
+
+        # 2. The marker itself deleted. The block stops being generated and
+        #    nothing regenerates it; the text below it freezes and rots.
+        target.write_bytes(before.replace(b"<!-- generated: code-facts -->", b"", 1))
+        proc = check()
+        if proc.returncode == 0 or "MISSING MARKERS" not in (proc.stdout or ""):
+            failures.append(
+                "generated-blocks: a DELETED marker stayed GREEN — a generated block "
+                "can silently go back to being hand-written prose"
+            )
+    finally:
+        target.write_bytes(before)
+
+    if not failures:
+        print("PASS  generated-blocks went RED on both a hand-edited value and a deleted marker")
+    return failures
+
+
 def unwatched_claims() -> list[str]:
     """Find docs that state a guarded fact but are NOT in LIVING_DOCS.
 
@@ -380,7 +459,11 @@ def unwatched_claims() -> list[str]:
     sys.path.insert(0, str(ROOT / "scripts"))
     import doc_sync_check as dsc  # noqa: PLC0415
 
-    watched = {w.replace("\\", "/") for w in dsc.LIVING_DOCS}
+    # GENERATED_DOCS counts as watched: the fact loop in doc_sync_check.main()
+    # reads it exactly as it reads a LIVING doc. It is only excluded from the
+    # stamp/freshness half, and "is anyone checking this claim?" — the question
+    # this drill asks — is answered yes.
+    watched = {w.replace("\\", "/") for w in dsc.LIVING_DOCS + dsc.GENERATED_DOCS}
     patterns = [p for _, _, p in dsc.build_checks()[0]]
 
     # graphify-out/ holds dated, machine-generated graph snapshots. They are
@@ -459,6 +542,10 @@ def main() -> int:
     # landing-source-count is now a PRESENCE guard (see docstring) — an
     # insertion drill, not a CASE substitution.
     failures.extend(landing_source_count_drill())
+
+    # The generator is now the ONLY copy of the countable facts (slice 8), so
+    # its own check mode has to be watched going red like any other guard.
+    failures.extend(generated_block_drill())
 
     # Second half of the drill: docs that make a guarded claim while sitting
     # outside LIVING_DOCS. Planting a lie proves the LISTED docs are scanned;

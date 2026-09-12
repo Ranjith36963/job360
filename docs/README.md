@@ -2,8 +2,14 @@
 <!-- doc: LIVING -->
 
 A complete map of every doc under `docs/` (plus the load-bearing docs at the
-repo root). Rewritten 2026-09-05 after the harness + sourcing-era cleanup —
-every link below resolves; nothing is left out.
+repo root). Every link below resolves; nothing is left out.
+
+Pruned 2026-09-12 (slice 8) to the minimum set. The shipped per-slice plans
+(`docs/plans/`) and the ADR folder (`docs/decisions/`) were deleted, not
+archived: a shipped plan describes a decision the code has already made, and a
+second description of a decision is the thing that drifts. The reasoning lives
+in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
+`product/product_design_rules.md`.
 
 ---
 
@@ -14,12 +20,14 @@ every link below resolves; nothing is left out.
 | **Know what we are building (and not)** | [`product/VISION.md`](product/VISION.md) — the 2026-09-03 decisions; wins over every older product doc |
 | **Understand the project fast** | [`../CLAUDE.md`](../CLAUDE.md) → [`../STATUS.md`](../STATUS.md) |
 | **Understand the architecture deeply** | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) — the one architecture reference |
+| **Look up a count, a route, an endpoint** | [`GENERATED.md`](GENERATED.md) — machine-written from the code, never by hand |
 | **Run it locally** | [`../backend/README.md`](../backend/README.md) · [`../frontend/README.md`](../frontend/README.md) |
 | **Contribute / open a PR** | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
+| **Know the rules I must not break** | [`../.claude/skills/hard-rules/SKILL.md`](../.claude/skills/hard-rules/SKILL.md) |
 | **Debug a runtime problem** | [`product/troubleshooting.md`](product/troubleshooting.md) |
-| **Know what to build next** | [`plans/2026-09-03-mission-roadmap.md`](plans/2026-09-03-mission-roadmap.md) — slices 0–10, one issue each |
+| **Know what to build next** | [`../STATUS.md`](../STATUS.md) — what is live, what is next, known issues |
 | **Deploy / run a backup / restore** | [`product/DEPLOY.md`](product/DEPLOY.md) · [`product/RUNBOOK-backups.md`](product/RUNBOOK-backups.md) |
-| **Respond to a security incident** | [`product/BREACH-RUNBOOK.md`](product/BREACH-RUNBOOK.md) |
+| **Respond to a security incident** | [`product/BREACH-RUNBOOK.md`](product/BREACH-RUNBOOK.md) · [`../SECURITY.md`](../SECURITY.md) |
 
 ---
 
@@ -27,39 +35,16 @@ every link below resolves; nothing is left out.
 
 | Doc | What it is |
 |---|---|
-| [`product/VISION.md`](product/VISION.md) | **The mission.** Agent thinks, Job360 remembers; never source/rank; build order; the 18-decision interview log + the 2026-09-07 additions. |
+| [`product/VISION.md`](product/VISION.md) | **The mission.** Agent thinks, Job360 remembers; never source/rank; build order; the decision log through 2026-09-11. |
 | [`product/product_design_rules.md`](product/product_design_rules.md) | The owner's product rules in full — rules 4–6 (never source, agent thinks, free/pull) are the mission. |
-| [`product/competitor-tsenta.md`](product/competitor-tsenta.md) | Tsenta feature by feature — copy / refuse / later, with what exists on main; the reasoning behind slices 6–9. |
-| [`product/peruser_cv_coverletter.md`](product/peruser_cv_coverletter.md) | Design: per-job AI-tailored CV + cover letter that learns from your edits — the tailor web-fallback feature. |
-| [`plans/2026-09-03-mission-roadmap.md`](plans/2026-09-03-mission-roadmap.md) | The work list that follows from VISION.md — one issue per slice (#479–#483 shipped, #513–#516 next). |
 
-### Slice specs (design records — shipped code + `VISION.md` win over these)
+---
 
-| Slice | Spec | Shipped |
-|---|---|---|
-| 1 — OAuth 2.1 for MCP clients | [`plans/2026-09-03-oauth-mcp/spec.md`](plans/2026-09-03-oauth-mcp/spec.md) | PR #488 |
-| 2 — Application spine | [`plans/2026-09-04-application-spine/spec.md`](plans/2026-09-04-application-spine/spec.md) | PR #480 |
-| 3 — URL fetch on the web | [`plans/2026-09-04-url-fetch/spec.md`](plans/2026-09-04-url-fetch/spec.md) | PR #496 |
-| 4 — Contacts, stats, `update_profile` | [`plans/2026-09-05-contacts-stats/spec.md`](plans/2026-09-05-contacts-stats/spec.md) | PR #498 |
-| 5 — Delete the sourcing era | [`plans/2026-09-05-delete-sourcing-era/spec.md`](plans/2026-09-05-delete-sourcing-era/spec.md) | #483 |
-| 6 — Email evidence on events + interview datetime | [`plans/2026-09-07-email-evidence/spec.md`](plans/2026-09-07-email-evidence/spec.md) | #513 |
-| 8 — CV diff, read-only (no Keep — decision 26) | [`plans/2026-09-11-cv-diff/spec.md`](plans/2026-09-11-cv-diff/spec.md) | #515 |
-| 9 — Flag for next time: lessons written, listed, handed to the agent | [`plans/2026-09-11-lessons/spec.md`](plans/2026-09-11-lessons/spec.md) | #516 |
-| 7 — Visa / sponsorship signal, country-agnostic | [`plans/2026-09-11-visa-signal/spec.md`](plans/2026-09-11-visa-signal/spec.md) | #514 |
-| — Bring a job, keep the receipt | [`plans/2026-09-02-bring-a-job/spec.md`](plans/2026-09-02-bring-a-job/spec.md) | PR #469 |
-| — Personal tokens + MCP server | [`plans/2026-09-03-mcp-server/spec.md`](plans/2026-09-03-mcp-server/spec.md) | PR #473 |
+## Generated
 
-### Decisions (`decisions/`)
-
-[`decisions/README.md`](decisions/README.md) explains why this folder exists — the reasoning
-behind a choice, which code alone never shows.
-
-| Record | Decided |
+| Doc | What it is |
 |---|---|
-| [`0003-empty-preferences-stay-silent.md`](decisions/0003-empty-preferences-stay-silent.md) | An empty preference is "don't care", never a penalty or a guessed default. |
-| [`0004-jobs-is-a-shared-catalog.md`](decisions/0004-jobs-is-a-shared-catalog.md) | `jobs` holds no `user_id`/`tenant_id` — a brought ad is a catalog row too. |
-| [`0005-no-hardcoded-skill-lists.md`](decisions/0005-no-hardcoded-skill-lists.md) | Zero hand-typed skill/keyword dicts in profile extraction — LLM + structural passes only. |
-| [`0006-docs-are-generated-or-deleted-not-reworded.md`](decisions/0006-docs-are-generated-or-deleted-not-reworded.md) | A countable doc claim is generated from code or deleted — never hand-edited back into sync. |
+| [`GENERATED.md`](GENERATED.md) | Machine-written by `scripts/gen_doc_blocks.py --write`: migration head, route and endpoint counts, test-file count, workflow count, hard-rule count, and the full route table. Never edit it — CI fails if it disagrees with the code. |
 
 ---
 
@@ -84,8 +69,9 @@ behind a choice, which code alone never shows.
 
 ---
 
-> **Conventions.** `../ARCHITECTURE.md` is the authoritative architecture reference — its
-> generated blocks (`scripts/gen_doc_blocks.py --write`) are the source of truth for counts.
-> Code is the proof, not docs — verify counts/claims against source before trusting any doc.
-> A doc's own type header (`<!-- doc: LIVING|PLAN|LOG|REFERENCE -->`) says how it should be
-> read; see `harness/maintenance/DOC-MAINTENANCE.md` §1.
+> **Conventions.** `../ARCHITECTURE.md` is the authoritative architecture reference for how
+> the system fits together; [`GENERATED.md`](GENERATED.md) is the authority for every count
+> and route, because the code writes it. Code is the proof, not docs — verify any claim
+> against source before trusting it. A doc's own type header
+> (`<!-- doc: LIVING|PLAN|LOG|REFERENCE|FROZEN|GENERATED -->`) says how it should be read;
+> see `harness/maintenance/DOC-MAINTENANCE.md` §1.

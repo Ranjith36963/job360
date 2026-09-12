@@ -3,7 +3,7 @@
 
 **Job360 is the memory and context layer for the seeker's own AI agent.** Job boards find jobs. Agents (Claude Code, ChatGPT, Grok, Gemini, a browser agent) think and act — judge fit, write the CV, find the recruiter, read the inbox, fill the form. Job360 remembers: the structured profile, every artifact version, every typed event with its author, and the receipt of what was sent.
 
-**We never source, rank or recommend jobs** (product rule 4). The user, or their agent, brings the job — a link or pasted text — and Job360 keeps everything that happens after the click. Read [`docs/product/VISION.md`](./docs/product/VISION.md) first; the work list with an issue per slice is [`docs/plans/2026-09-03-mission-roadmap.md`](./docs/plans/2026-09-03-mission-roadmap.md).
+**We never source, rank or recommend jobs** (product rule 4). The user, or their agent, brings the job — a link or pasted text — and Job360 keeps everything that happens after the click. Read [`docs/product/VISION.md`](./docs/product/VISION.md) first; what is live and what is next is [`STATUS.md`](./STATUS.md).
 
 > **What is live on `main` today:** magic-link login, profile extraction (CV / LinkedIn / GitHub / preferences), `POST /api/jobs/bring`, the application spine (one Application object, typed events, versioned artifacts, append-only receipts), a CV tailor kept as the web fallback, and an MCP server at `/api/mcp`. Three Railway services: `backend`, `frontend`, `Postgres` (worker + Redis were deleted 2026-09-02, so nothing runs in the background — no notifications, no crons).
 >

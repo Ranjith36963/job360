@@ -151,4 +151,13 @@ on `jobs`, no lazy-breaking heavy imports, append-only application history,
 MCP/route gate parity, timezone-aware quiet-hours dispatch, account-mgmt session
 invalidation, etc.) plus the product path and data-flow.
 
-For docs and plans, start at [`docs/README.md`](docs/README.md).
+For docs, start at [`docs/README.md`](docs/README.md).
+
+**Doc drift is fixed by deleting or generating, never by rewording.** A doc
+sentence that contradicts the code gets deleted, replaced by a pointer to a
+symbol name, or pinned by a named test; a countable fact is generated from the
+code into [`docs/GENERATED.md`](docs/GENERATED.md) by
+`scripts/gen_doc_blocks.py` and CI fails if the file disagrees. Rewording a
+claim to be accurate only resets its expiry date, which is why fifteen
+consecutive nightly doc-drift runs never reached zero. (Was ADR-0006; the ADR
+folder was deleted 2026-09-12 and this paragraph is the rule's home.)
