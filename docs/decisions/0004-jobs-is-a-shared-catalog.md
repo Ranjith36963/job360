@@ -8,8 +8,8 @@
 
 The `jobs` table never gets a `user_id` or `tenant_id` column.
 
-Per-user state lives in its own tables — today `applications` and its append-only
-event/artifact/receipt children, plus `user_actions`.
+Per-user state lives in its own tables — `applications` and its append-only
+event/artifact/receipt children (`backend/tests/test_dropped_tables_stay_dropped.py`).
 
 ## The problem it solved
 
@@ -46,6 +46,5 @@ Yes.
 ## Enforced by
 
 Convention plus review; **no schema-level guard exists** for the absence of
-these columns. That is an honest gap: the rule is stated in `CLAUDE.md` as
-rules #10 and #17 and has held so far because it is written down, not because
-anything stops it.
+these columns. That is an honest gap: the rule is `.claude/skills/hard-rules/SKILL.md`
+#10, and has held so far because it is written down, not because anything stops it.

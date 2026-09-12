@@ -9,7 +9,8 @@
 > structured profile, every artifact version, every event and the receipt.**
 > We never source, rank or recommend jobs (product rule 4).
 >
-> **Live on `main` (89cd1dd, 2026-09-03):** bring-a-job (paste) + append-only
+> **Shipped** (what is deployed: `railway deployment list --service backend --json`):
+> bring-a-job (paste) + append-only
 > receipts (#469); personal API tokens + MCP server at `/api/mcp` (#473; tool count grows per slice — measure it, never quote it);
 > token-cap race fix (#476); mypy at 0 (#477). Railway runs backend + frontend +
 > Postgres only — **worker and Redis were deleted 2026-09-02**, so nothing runs in
@@ -24,10 +25,9 @@
 > drilled ten ways (`scripts/ssrf_drill.py`); paste stays the fallback, no MCP tool → 4
 > contacts/outreach, stats, `update_profile` — **shipped (PR #498)** (`add_contact` /
 > `stats` / `update_profile` MCP tools, `profile_edits` overlay the web shows and
-> clears, People section on the application page) → 5 **delete the sourcing era
-> (#483) — this branch**, the flag and the code it hid go together (migration
-> `0039_drop_sourcing_tables`, after slice 4's `0038`). Measure: the owner uses it
-> daily for his own hunt.
+> clears, People section on the application page) → 5 **delete the sourcing era —
+> shipped (#483)**, the flag and the code it hid together. Measure: the owner uses
+> it daily for his own hunt.
 
 ## Sourcing era — deleted 2026-09-05 (slice 5, #483)
 
