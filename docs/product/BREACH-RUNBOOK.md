@@ -1,8 +1,6 @@
 <!-- doc: LIVING | last-verified: 2026-09-11 by /sync -->
 # Breach Runbook — the 72-hour plan
 
-<!-- doc: LIVING | Fable compliance finding 05:39 — "have a one-page runbook ready before you need it" -->
-
 **Read this top-to-bottom the moment you suspect a breach.** Do the steps in
 order. The legal clock (72 hours to report to the ICO) starts when you
 *become aware*, not when the breach happened — so the time you spend
@@ -27,19 +25,13 @@ Variables → edit → redeploy happens automatically.
      and must log in again via email.
 2. **Rotate the database password** (`DATABASE_URL` / Railway Postgres
    credentials) — if the attacker had the DSN, this locks them out.
-3. **Rotate the rest of the keys** (names only, values live in Railway):
-   `RESEND_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`,
-   `CEREBRAS_API_KEY`, `GITHUB_TOKEN`, R2 backup keys
-   (`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` in GitHub Actions secrets),
-   job-source API keys. Each provider's dashboard → revoke old, issue new.
-4. **`CHANNEL_ENCRYPTION_KEY` — read this before rotating.** Rotating it
-   makes every stored notification-channel credential (email and webhook
-   credentials) permanently unreadable — users will have to
-   reconnect their channels. In a real breach that trade is CORRECT: rotate
-   it, accept the reconnects. Just don't be surprised.
-5. **If the app itself is compromised** (malicious deploy, defaced page):
+3. **Rotate every other secret the services carry** — plus the R2 backup keys,
+   which live in GitHub Actions secrets, not Railway. Read the live names off
+   Railway → service → Variables rather than a list here; **never print the
+   values** (root `CLAUDE.md`). Each provider's dashboard → revoke old, issue new.
+4. **If the app itself is compromised** (malicious deploy, defaced page):
    Railway → Deployments → roll back to the last known-good deploy.
-6. **Do NOT delete or truncate any logs.** They are your evidence and your
+5. **Do NOT delete or truncate any logs.** They are your evidence and your
    timeline. Containment never includes cleanup.
 
 ## Hour 1–24 — Assess (what actually got touched?)
@@ -60,13 +52,14 @@ Variables → edit → redeploy happens automatically.
 | `user_profiles`, `user_profile_versions` | CV text, LinkedIn text, GitHub data, preferences | **HIGH — this is the crown jewels** |
 | `tailored_documents` | AI-generated CVs / cover letters | **HIGH** |
 | `users` | email addresses, argon2id password hashes, timezone | Medium (hashes are argon2id — not reversible in practice, but report as exposed) |
-| `applications`, `application_events`, `application_artifacts`, `application_receipts`, `user_actions` | job-hunt activity (who applied where, and the exact CV sent) | Medium — sensitive in context (current employer must not learn) |
+| `applications`, `application_events`, `application_artifacts`, `application_receipts` | job-hunt activity (who applied where, and the exact CV sent) | Medium — sensitive in context (current employer must not learn) |
 | `sessions`, `api_tokens`, `oauth_tokens`, `oauth_grants` | session + OAuth artifacts | Low once rotated/deleted |
 | `jobs` | public job listings | Not personal data |
 
 Do not work this table from memory during an incident — enumerate the live schema
 first (`SELECT tablename FROM pg_tables WHERE schemaname='public'`). Tables listed
-here have been dropped before (migrations `0031`, `0039`, `0040`).
+here have been dropped before; `backend/tests/test_dropped_tables_stay_dropped.py`
+is the standing check that the dropped ones stay dropped.
 
 **Answer these four questions in writing** (the ICO form asks exactly this):
 1. What happened, and how? 2. Whose data and how many people?
