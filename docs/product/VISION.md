@@ -163,7 +163,7 @@ consent-first; everything free; no auto-submit at volume; global from day one.
 | 21 | "Review before submit" | **Side-by-side diff + one Keep button**, web only. Agents already hold both texts. |
 | 22 | What first | **Email evidence (#513)**, then visa (#514), CV diff (#515), flag-for-next-time (#516). |
 | 23 | WhatsApp | **Wait for a paying signal.** If ever: inbound-only Twilio webhook first, no worker. |
-| 24 | ChatGPT / Grok connectors | **Proved live in prod by a session in a real browser**, findings in `docs/operations/`. Never assumed from the OAuth code. |
+| 24 | Claude.ai / ChatGPT / Grok / Cursor connectors | **Proved live in prod by a session in a real browser**, findings in `docs/operations/`. Never assumed from the OAuth code. *Not yet done (measured 2026-09-11): 0 OAuth grants and 0 personal tokens ever minted in prod — no MCP client of any kind has connected; the MCP surface is exercised only by `backend/tests/test_mcp_server.py`. Needs each client's callback URL in `OAUTH_REDIRECT_ALLOWLIST` on Railway and one logged-in browser session per client.* |
 | 25 | The eight pre-pivot `wiring/*` draft PRs | **Closed** (#447–#454). They targeted the deleted notification stack. |
 
 ### Addition, 2026-09-11 (the owner's question on slice 8)
