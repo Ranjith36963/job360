@@ -218,6 +218,12 @@ jobs:
 
             [ "$state" = "OPEN" ]        || { note "$pr" "is $state — left alone"; exit 0; }
             [ "$draft" = "false" ]       || { note "$pr" "is a draft — drafts are left alone"; exit 0; }
+            # A PR labeled `wip:parked` (scripts/wip_gate.py) opted itself out
+            # of the queue on purpose, same as a draft — waking the fixer for
+            # it would repair a PR the owner has not even let compete for a
+            # merge slot yet.
+            echo "$meta" | jq -e '[.labels[].name]|any(.=="wip:parked")' >/dev/null \
+              && { note "$pr" "is parked by the WIP limit — left alone"; exit 0; }
             # A fork PR is a stranger's code. pr-repair refuses it anyway (G1);
             # not dispatching means the refusal never has to be the safety net.
             [ "$headowner" = "$owner" ]  || { note "$pr" "comes from a fork ($headowner) — never dispatched"; exit 0; }
