@@ -3,18 +3,45 @@
 
 OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)". Refuse does NOT
 mean discard. A pull request opened while `wip.limit` (2) other real PRs are
-already open gets converted to a DRAFT, a comment says why and how to undo it,
-and the owner is told in Slack once. Drafts are invisible to `auto-merge.yml`
-(it already filters them out), so parking a PR AS a draft is the whole
-refusal mechanism -- there is no second "block merge" switch to wire.
+already open gets PARKED, a comment says why and how to undo it, and the
+owner is told in Slack once.
+
+PARKING IS A LABEL (`wip:parked`), NOT DRAFT STATUS -- CHANGED 2026-09-12.
+---------------------------------------------------------------------------
+The original version of this file converted a PR to a draft (`gh pr ready
+--undo`). Measured on PR #560, pr-advisor run 34664353220, job 103473145164:
+the gate decided correctly ("2 other open ... PRs ahead: #558, #559") and
+then the "Park it — convert to draft" step failed with
+
+    GraphQL: Resource not accessible by integration (convertPullRequestToDraft)
+
+The workflow's `GITHUB_TOKEN` cannot convert a PR to draft -- that mutation
+needs a permission GitHub does not grant the default token. The step exited
+1, which put a RED check on the PR, which woke `finding-watch.yml` (it reads
+failed checks as findings), which dispatched `pr-repair.yml` three times --
+each of which refused at its own gate (nothing to repair; the "finding" was
+this workflow's own parking step failing). Three wasted repair runs from one
+parking decision.
+
+So parking is now a LABEL, `wip:parked`, applied with `gh pr edit --add-
+label` -- a mutation the default `GITHUB_TOKEN` genuinely has. A labeled PR
+is exempted from the WIP count and filtered out of `auto-merge.yml`'s
+candidate list exactly like a draft, so the refusal mechanism (invisible to
+the merge queue) is unchanged; only the marker changed. And because a
+parking decision must never again produce a red check that wakes the fixer,
+the calling workflow step never fails the job for a parking outcome -- see
+`.github/workflows/pr-advisor.yml`'s `wip` job for how that is now enforced.
 
 WHAT COUNTS TOWARD THE LIMIT, AND WHAT DOES NOT
 ------------------------------------------------
-Only OTHER open, non-draft PRs whose author is not dependabot and whose
-branch is not an emergency revert count against the limit:
+Only OTHER open, non-draft, non-parked PRs whose author is not dependabot
+and whose branch is not an emergency revert count against the limit:
 
   * a draft already opted itself out of the merge queue -- counting it would
     park a PR because of one that was never competing for a slot
+  * a PR labeled `wip:parked` is, for exactly the same reason, already
+    parked -- it is not competing for a slot either, so it must not count
+    against one
   * dependabot has its OWN loop (dependabot-auto.yml) and its own cadence;
     folding it into the human WIP count would park a human's PR because a
     bot opened three dependency bumps overnight
@@ -23,9 +50,10 @@ branch is not an emergency revert count against the limit:
 
 THIS PR'S OWN EXEMPTIONS
 -------------------------
-The PR being judged is *itself* never parked if it is a dependabot PR or a
-revert -- same reasoning as above, stated the other way round: the PR that
-would be exempt from the COUNT would also be senseless to PARK.
+The PR being judged is *itself* never parked if it is a dependabot PR, a
+revert, or ALREADY carries `wip:parked` -- same reasoning as above, stated
+the other way round: the PR that would be exempt from the COUNT would also
+be senseless to PARK (again), and a PR already parked has nothing left to do.
 
 THE POLICY, AND WHY A MISSING BLOCK REFUSES RATHER THAN DEFAULTS
 ------------------------------------------------------------------
@@ -72,6 +100,7 @@ POLICY_PATH = REPO_ROOT / ".github" / "merge-policy.yml"
 # W12/W13 exist to catch for a different bot). Treat either as dependabot.
 DEPENDABOT_AUTHORS = {"dependabot[bot]", "app/dependabot"}
 REVERT_PREFIX = "revert/"
+PARKED_LABEL = "wip:parked"
 
 
 class PolicyError(RuntimeError):
@@ -112,31 +141,47 @@ def _is_revert(head_ref: str | None) -> bool:
     return bool(head_ref) and head_ref.startswith(REVERT_PREFIX)
 
 
+def _is_parked(labels: Any) -> bool:
+    """`labels` is the normalised list of label name strings `fetch_open_prs`
+    produces (see there for why it is flattened out of gh's `{name: ...}`
+    objects). Missing/None reads as "not parked", never an error -- a PR with
+    no labels field at all is exactly a PR with no `wip:parked` label."""
+    return bool(labels) and PARKED_LABEL in labels
+
+
 def decide(open_prs: list[dict[str, Any]], this_pr: int, limit: int) -> dict[str, Any]:
     """PURE decision function -- the thing the drill breaks.
 
     `open_prs` items carry: number (int), isDraft (bool), author (the login
-    string), headRefName (str). Returns a dict with at least `park` (bool),
-    `count` (int, OTHER PRs counted against the limit) and `why` (str).
+    string), headRefName (str), labels (list[str], optional). Returns a dict
+    with at least `park` (bool), `count` (int, OTHER PRs counted against the
+    limit) and `why` (str).
     """
     this = next((p for p in open_prs if p.get("number") == this_pr), None)
     this_author = (this or {}).get("author")
     this_head = (this or {}).get("headRefName") or ""
+    this_labels = (this or {}).get("labels") or []
 
     # THIS PR'S OWN EXEMPTIONS -- checked first, BEFORE any counting.
     #
     # A PR opened AS A DRAFT (`opened` fires with isDraft: true too) is
-    # already parked in every sense that matters -- `gh pr ready --undo`
-    # would run against a PR that is not ready, which errors, fails the gate
-    # step, and fires the "gate broke" Slack fallback for something that was
-    # never a real incident. Checked before the dependabot/revert exemptions
-    # and before the counting loop: whatever else is true about this PR,
-    # there is nothing left to park.
+    # already parked in every sense that matters -- there is nothing left to
+    # park. Checked before the dependabot/revert/label exemptions and before
+    # the counting loop: whatever else is true about this PR, there is
+    # nothing left to do.
     if bool((this or {}).get("isDraft")):
         return {
             "park": False,
             "count": 0,
             "why": f"PR #{this_pr} is already a draft -- nothing to park.",
+        }
+    # A PR already carrying `wip:parked` is, for the same reason, already
+    # parked -- re-labelling it would be a no-op dressed up as a decision.
+    if _is_parked(this_labels):
+        return {
+            "park": False,
+            "count": 0,
+            "why": f"PR #{this_pr} is already parked ({PARKED_LABEL}).",
         }
     # An emergency revert or a dependabot PR is never parked, no matter how
     # many other PRs are open.
@@ -161,6 +206,8 @@ def decide(open_prs: list[dict[str, Any]], this_pr: int, limit: int) -> dict[str
             continue
         if p.get("isDraft"):
             continue
+        if _is_parked(p.get("labels")):
+            continue
         if _is_exempt_author(p.get("author")):
             continue
         if _is_revert(p.get("headRefName")):
@@ -175,16 +222,16 @@ def decide(open_prs: list[dict[str, Any]], this_pr: int, limit: int) -> dict[str
             "park": True,
             "count": count,
             "why": (
-                f"WIP limit is {limit}; {count} other open, non-draft, non-dependabot, "
-                f"non-revert PR(s) are already ahead of PR #{this_pr}: {names}."
+                f"WIP limit is {limit}; {count} other open, non-draft, non-parked, "
+                f"non-dependabot, non-revert PR(s) are already ahead of PR #{this_pr}: {names}."
             ),
         }
     return {
         "park": False,
         "count": count,
         "why": (
-            f"{count} other open, non-draft, non-dependabot, non-revert PR(s) "
-            f"counted{f' ({names})' if names else ''}; under the WIP limit of {limit}."
+            f"{count} other open, non-draft, non-parked, non-dependabot, non-revert "
+            f"PR(s) counted{f' ({names})' if names else ''}; under the WIP limit of {limit}."
         ),
     }
 
@@ -197,7 +244,7 @@ def fetch_open_prs() -> list[dict[str, Any]]:
     """
     out = subprocess.run(
         ["gh", "pr", "list", "--state", "open", "--json",
-         "number,isDraft,author,headRefName", "--limit", "100"],
+         "number,isDraft,author,headRefName,labels", "--limit", "100"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=60,
     )
@@ -211,11 +258,16 @@ def fetch_open_prs() -> list[dict[str, Any]]:
             login = author_field.get("login")
         else:
             login = author_field
+        # `gh`'s `labels` field is a list of {name, ...} objects; flatten to
+        # bare names so `decide()` (and its drill fixtures) deal in plain
+        # strings, not gh's object shape.
+        labels = [lbl.get("name") for lbl in (p.get("labels") or []) if isinstance(lbl, dict) and lbl.get("name")]
         normalized.append({
             "number": p.get("number"),
             "isDraft": bool(p.get("isDraft")),
             "author": login,
             "headRefName": p.get("headRefName") or "",
+            "labels": labels,
         })
     return normalized
 
@@ -231,8 +283,11 @@ def _drill() -> int:
         print(f"  {mark} {name}" + ("" if ok else f"   got={got!r} want={want!r}"))
 
     def pr(number: int, author: str = "alice", draft: bool = False,
-           head: str = "feature/x") -> dict[str, Any]:
-        return {"number": number, "isDraft": draft, "author": author, "headRefName": head}
+           head: str = "feature/x", labels: list[str] | None = None) -> dict[str, Any]:
+        return {
+            "number": number, "isDraft": draft, "author": author,
+            "headRefName": head, "labels": labels or [],
+        }
 
     print("wip_gate.py --drill")
 
@@ -307,24 +362,43 @@ def _drill() -> int:
           v["park"], False)
     check("...the reason names the revert exemption", "revert" in v["why"], True)
 
-    # 11. The verdict NAMES the blocking PRs -- a park you cannot trace to a
+    # 11. A PR labeled `wip:parked` does not count toward the limit -- same
+    #     reasoning as a draft: it is already sitting out of the queue, so
+    #     counting it would park a PR on the strength of one that was never
+    #     competing for a slot.
+    v = decide([pr(1), pr(2, labels=["wip:parked"]), pr(3, labels=["wip:parked"])],
+                this_pr=1, limit=2)
+    check("two labeled-parked PRs don't count toward the limit", v["park"], False)
+    check("...count is zero", v["count"], 0)
+
+    # 12. THIS PR already carries `wip:parked` -- nothing to do. Re-labelling
+    #     an already-parked PR is a no-op dressed up as a decision, and it
+    #     must never happen even AT the limit.
+    v = decide([pr(1, labels=["wip:parked"]), pr(2), pr(3)], this_pr=1, limit=2)
+    check("this PR is already labeled wip:parked, even AT the limit -> not parked again",
+          v["park"], False)
+    check("...the reason names the already-parked exemption",
+          "already parked" in v["why"], True)
+    check("...and counts zero (checked before counting)", v["count"], 0)
+
+    # 13. The verdict NAMES the blocking PRs -- a park you cannot trace to a
     #     PR number is a park nobody can argue with, which sounds good and is
     #     not (same principle as lane.py's classify()).
     v = decide([pr(1), pr(2), pr(3)], this_pr=1, limit=2)
     check("the verdict names PR #2", "#2" in v["why"], True)
     check("the verdict names PR #3", "#3" in v["why"], True)
 
-    # 12. Mixed exemptions stack: a pile of exempt PRs plus exactly `limit`
+    # 14. Mixed exemptions stack: a pile of exempt PRs plus exactly `limit`
     #     real ones still parks on the real ones alone.
     v = decide(
         [pr(1), pr(2), pr(3), pr(4, author="dependabot[bot]"),
-         pr(5, draft=True), pr(6, head="revert/x")],
+         pr(5, draft=True), pr(6, head="revert/x"), pr(7, labels=["wip:parked"])],
         this_pr=1, limit=2,
     )
     check("mixed exemptions: only the 2 real PRs count -> parks", v["park"], True)
-    check("...count ignores the 3 exempt PRs", v["count"], 2)
+    check("...count ignores the 4 exempt PRs", v["count"], 2)
 
-    # 13. A missing/malformed `wip:` block raises, never silently returns a
+    # 15. A missing/malformed `wip:` block raises, never silently returns a
     #     limit -- the "safe direction" documented at the top of this file.
     import tempfile
     broken = Path(tempfile.mkdtemp(prefix="wip-gate-drill-")) / "merge-policy.yml"
@@ -356,7 +430,7 @@ def _drill() -> int:
     check("wip.limit of 0 (or less) raises rather than being treated as 'no limit'",
           raised_bad, True)
 
-    # 14. The real policy file (this repo's) must load and produce the
+    # 16. The real policy file (this repo's) must load and produce the
     #     documented owner limit -- proves the file this PR edits actually
     #     parses, not just that the pure function is correct in the abstract.
     try:
