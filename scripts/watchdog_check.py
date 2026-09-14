@@ -59,11 +59,16 @@ EXPECTED: dict[str, tuple[float, str]] = {
     "uptime.yml": (3, "every 10 min"),
     # Gained its cron in #525 (2026-09-08) and drifted out of this roster until
     # slice 4 (2026-09-11) ran the roster check — the exact blind spot below.
-    "auto-merge.yml": (2, "every 20 min"),
+    # 6h, NOT 2h. Both this and finding-watch also fire on events, and GitHub's
+    # cron is best-effort: on 2026-09-12 the arm went 2.7h and finding-watch
+    # 4.1h between runs on a quiet repo and the watchdog raised #561 for two
+    # loops that were fine. A limit tighter than the scheduler's own slack is
+    # a permanent false alarm, and a permanent alarm is how a loop dies.
+    "auto-merge.yml": (6, "every 20 min + events"),
     "synthetic-live.yml": (14, "every 6h"),
     "db-backup.yml": (36, "daily 02:17"),
     "ci-offline.yml": (36, "daily 06:00"),
-    "finding-watch.yml": (2, "every 30 min"),
+    "finding-watch.yml": (6, "every 30 min + events"),  # see auto-merge.yml above
     "absence.yml": (36, "daily 08:00"),
     "security-watch.yml": (36, "daily 08:20"),
     "external-health.yml": (36, "daily 07:10"),
