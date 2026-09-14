@@ -106,6 +106,4 @@ they should do.
 ---
 
 *Owner: Ranjith. Review this page every 6 months or after any incident,
-whichever comes first. Last verified against the real stack: 2026-07-24
-(sessions table + SESSION_SECRET dual kill-switch, Fernet channel-cred
-rotation trade-off, R2 ciphertext-only backups, Resend sender domain).*
+whichever comes first.*
