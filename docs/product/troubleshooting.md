@@ -45,14 +45,11 @@ one test writes to schema A while another reads schema B.
 **Fix:**
 
 ```bash
-# From the repo root. `make redis-up` starts the redis service ONLY
-# (Makefile:238 → `docker compose ... up -d redis`), so it does NOT fix this
-# symptom — postgres is a separate service in docker-compose.dev.yml:37.
-# `--wait` is load-bearing: plain `up -d` returns as soon as the container is
-# RUNNING, so pytest can start before postgres accepts connections and you get
-# this exact symptom back. `--wait` blocks on the pg_isready healthcheck at
-# docker-compose.dev.yml:50-54.
-docker compose -f docker-compose.dev.yml up -d --wait   # both: postgres + redis
+# From the repo root. `--wait` is load-bearing: plain `up -d` returns as soon as
+# the container is RUNNING, so pytest can start before postgres accepts
+# connections and you get this exact symptom back. `--wait` blocks on the
+# postgres service's own pg_isready healthcheck in docker-compose.dev.yml.
+docker compose -f docker-compose.dev.yml up -d --wait
 cd backend && python -m pytest -q -p no:randomly
 ```
 

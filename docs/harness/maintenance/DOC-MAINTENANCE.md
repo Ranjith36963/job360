@@ -25,8 +25,8 @@
 |------|----------|------|
 | **LIVING** | `CLAUDE.md`, `ARCHITECTURE.md`, `README.md`, `STATUS.md`, `backend/CLAUDE.md`, `frontend/README.md` | Must always match the code. Any drift is a bug, same severity as a failing test. |
 | **PLAN** | design docs for unbuilt features | Has a lifecycle (below). Never silently edited after execution starts — plans are promises, and history must stay honest. **A plan does NOT survive its own shipping:** once the slice merges, the code is the description and the plan is a second one, so it is deleted (2026-09-12, slice 8 — the whole `docs/plans/` folder went at once). Git log is the record. |
-| **LOG** | `docs/harness/IMPLEMENTATION_LOG.md`, `docs/harness/maintenance/JOURNAL.md` | Append-only. Never rewritten, so never stale by definition. |
-| **REFERENCE** | decision records (`docs/product/plans/batch-2-decisions.md`), research notes | Updated only when the decision itself changes; superseded ones get a banner pointing to the successor, content stays. |
+| **LOG** | `docs/harness/maintenance/PARKED.md` | Append-only. Never rewritten, so never stale by definition. |
+| **REFERENCE** | decision records, research notes | Updated only when the decision itself changes; superseded ones get a banner pointing to the successor, content stays. |
 
 ### Every doc carries its type on line 2 (machine + human readable)
 
@@ -65,15 +65,11 @@ DRAFT ──► ACTIVE ──► IMPLEMENTED ──► ARCHIVED
 
   "Never deleted" was amended by the owner on 2026-08-25. Scaffolding whose
   output has merged — step plans, prompt batches — may be deleted, because git
-  history holds the content and `IMPLEMENTATION_LOG.md` holds the narrative.
-  Five scaffolding docs went that day, alongside four superseded audit
-  records — nine files, 3,123 lines in total.
+  history holds the content.
 
-  What may NOT be deleted is anything still cited: `CurrentStatus.md` is
-  hardcoded in `merge_cage.py`, and the two `*_progress.md` logs are cited from
-  backend test docstrings. Before deleting any doc, grep the repo for its
-  filename and repoint every hit to a `git show <sha>:<path>` reference first —
-  a deletion that leaves dangling citations costs more than it saves.
+  Before deleting any doc, grep the repo for its filename and repoint every hit
+  to a `git show <sha>:<path>` reference first — a deletion that leaves dangling
+  citations costs more than it saves.
 - A plan that was abandoned or replaced gets a `> **SUPERSEDED by <doc>**` banner.
 - A plan not yet built stays where it is — it is the backlog.
 
@@ -135,7 +131,7 @@ report, but never edits them — memory hygiene is the session's own job.
 | Docs-as-code: in repo, PR-reviewed, versioned | Already true — keep it |
 | Dedicated technical writers | Loop 3 tooling is the writer; you are the editor who merges |
 | Freshness SLAs + staleness dashboards | Tier-1 PR gate + `DOC-HEALTH.md` scorecard |
-| ADRs (architecture decision records) | `docs/product/plans/batch-2-decisions.md` pattern — keep appending |
+| ADRs (architecture decision records) | The decision log in `docs/product/VISION.md` — keep appending |
 | Archive-over-delete retention | An archive location under `docs/` + stamps (none exists today — see §2). Nothing deleted EXCEPT merged scaffolding, per the 2026-08-25 amendment in §2 |
 | Doc impact required in code review | Rule 5 above |
 
@@ -143,7 +139,7 @@ report, but never edits them — memory hygiene is the session's own job.
 
 - `docs/harness/maintenance/DOC-HEALTH.md` — **written by the first Tier-3 audit; absent
   until one runs**, so an unresolved link here is expected, not rot. This is the
-  destination `.claude/skills/doc-audit/SKILL.md:89` writes to. Scorecard from each audit:
+  destination `/doc-audit` Step 5 writes to. Scorecard from each audit:
   docs checked, drifts fixed, plans archived, gaps parked, modules undocumented.
 - `docs/harness/maintenance/PARKED.md` — the "code is behind the doc" list: intentions
   found in docs that are not yet implemented, each with source doc + date.

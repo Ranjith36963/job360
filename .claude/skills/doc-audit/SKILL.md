@@ -73,9 +73,8 @@ history (not the doc's own claims):
   to an archive directory under `docs/` (see DOC-MAINTENANCE.md §2 — none
   exists today). Do not edit its content. **After EVERY move, grep the
   whole repo for the old path** (`grep -rn "<old path>" --include="*.md"`) and
-  update each referrer — `docs/README.md` (the plan index) and CLAUDE.md's
-  "Related documentation" section link to plan files; a move without a link
-  fix leaves dead links the tripwire cannot see.
+  update each referrer; a move without a link fix leaves dead links the
+  tripwire cannot see.
 - **SUPERSEDED** (replaced by a newer plan/design) → banner + pointer, leave in
   place or archive, content frozen.
 - **ACTIVE / not yet built** → leave untouched. If a LIVING doc contradicts it

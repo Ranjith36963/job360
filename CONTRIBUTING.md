@@ -10,14 +10,12 @@ Branch off `main`. Use one of these prefixes:
 
 | Prefix       | Use for                                             |
 |--------------|-----------------------------------------------------|
-| `feature/*`  | New user-facing behaviour or new source / channel   |
+| `feature/*`  | New user-facing behaviour                           |
 | `fix/*`      | Bug fix with a reproducer test                      |
 | `docs/*`     | README / CLAUDE.md / docs-only changes              |
 | `refactor/*` | Internal restructure, no behaviour change           |
 | `test/*`     | Test-only changes (new coverage, flake fixes)       |
 | `chore/*`    | Tooling, deps, CI, config                           |
-
-Example: `feat/application-export`, `fix/receipt-null-channel`.
 
 ## Commit messages
 
@@ -124,8 +122,7 @@ instructions.
 Two `scripts/` directories exist by design:
 
 - **`scripts/`** at repo root — repo-wide tooling that must not import from
-  `backend/src/`: **30 Python files + 4 shell files** today, not two shell
-  scripts. Most of it is the CI/harness guard estate (`doc_sync_check.py`,
+  `backend/src/`. Most of it is the CI/harness guard estate (`doc_sync_check.py`,
   `doc_sync_mutation_test.py`, `merge_cage.py`, `ruleset_gate.py`, …), which
   `.github/workflows/` runs directly; the Makefile shells out to
   `migration_roundtrip.sh`, and `agent-gate.sh` is the commit gate. Add new
@@ -146,10 +143,8 @@ repo once had were both removed 2026-09-05.
 ## Architecture + rules
 
 Read [`CLAUDE.md`](CLAUDE.md) at repo root before your first non-trivial change.
-It points at the hard rules (`.claude/skills/hard-rules/SKILL.md`: no `user_id`
-on `jobs`, no lazy-breaking heavy imports, append-only application history,
-MCP/route gate parity, timezone-aware quiet-hours dispatch, account-mgmt session
-invalidation, etc.) plus the product path and data-flow.
+It points at the hard rules (`.claude/skills/hard-rules/SKILL.md`) plus the
+product path and data-flow.
 
 For docs, start at [`docs/README.md`](docs/README.md).
 
