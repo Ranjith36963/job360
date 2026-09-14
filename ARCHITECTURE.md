@@ -86,9 +86,8 @@ def normalized_key(self) -> tuple[str, str]:
 ```
 
 This key is used for:
-- **Database uniqueness** — `UNIQUE(normalized_company, normalized_title)` constraint
-- **Seen-check** — `is_job_seen()` queries by these columns, so two users pasting
-  the same ad share one `jobs` row
+- **Database uniqueness** — `UNIQUE(normalized_company, normalized_title)` constraint, so
+  two users pasting the same ad share one `jobs` row (`database.get_job_id_by_key`)
 
 ---
 
@@ -198,9 +197,8 @@ deleted with the sourcing era).
 
 ### Seniority helpers (`services/profile/seniority.py`)
 
-`detect_seniority` / `strip_seniority` and the experience-rank table moved here
-from the deleted scoring modules — profile extraction still infers a
-candidate's seniority band from job titles, independent of any job search.
+Profile extraction infers a candidate's seniority band from job titles
+(`seniority.detect_seniority`), independent of any job search.
 
 ---
 
@@ -261,9 +259,9 @@ CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
 CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
 ```
 
-**Pragmas:** none. This was a SQLite-era line (`journal_mode=WAL`, `busy_timeout=5000`); the store has been Postgres since 2026-07-02 and sets neither — `database.py:94` says so in as many words, `db_retry.open_db()` accepts `busy_timeout_ms` only for signature compatibility and ignores it (`db_retry.py:30-31`), and the `pg.py` shim turns any remaining `PRAGMA` into a no-op (`pg.py:316-317`).
+**Pragmas:** none — a SQLite-era concept. `db_retry.open_db` keeps `busy_timeout_ms` only for signature compatibility, and `pg.translate` turns any remaining `PRAGMA` into a no-op (`tests/test_pg_translate.py`).
 
-**Auto-purge:** `purge_old_jobs(days=30)` deletes jobs by **liveness, not ingestion** — `DELETE FROM jobs WHERE COALESCE(last_seen_at, first_seen) < cutoff` (`repositories/database.py:688,723`), skipping any row whose `source` is the user-brought marker (hard rule 3) — a brought job (and its application snapshot) survives the purge. It also deletes the catalog-derived child rows itself because the shim strips every FK clause, including `ON DELETE CASCADE`.
+**Nothing expires a `jobs` row.** There is no purge function, and nothing that could run one (no worker, no cron).
 
 **first_seen:** Set in Python via `datetime.now(timezone.utc).isoformat()` at insert time (not a database DEFAULT).
 
