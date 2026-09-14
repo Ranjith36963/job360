@@ -11,8 +11,7 @@
 > fold in here: (1) never auto-delete what has no durable copy elsewhere —
 > git history is the copy for merged work, a pushed tag/branch is the copy for
 > unmerged work; (2) ground truth (`CLAUDE.md`, `ARCHITECTURE.md`, `README`,
-> `STATUS.md`, `CONTRIBUTING`, `SECURITY`) and permanent records
-> (`IMPLEMENTATION_LOG.md`, decision records, reviews) are never auto-touched;
+> `STATUS.md`, `CONTRIBUTING`, `SECURITY`) is never auto-touched;
 > (3) an unshipped plan is never silently deleted — park it, don't ticket-and-
 > forget; (4) any loop may read freely, but a loop that **writes** lands only
 > through a PR a human merges — never a direct push to `main` — the Loop-1

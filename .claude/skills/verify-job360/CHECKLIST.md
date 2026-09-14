@@ -15,7 +15,8 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 **Standing gates (note in every report until resolved):**
 - **LinkedIn enrich (#12)** needs a sample LinkedIn PDF in `test-artifacts/`.
 - **GitHub enrich (#13)** hits **live GitHub** (rate-limited; needs a real handle).
-- **LLM CV parse (#11)** uses the Gemini→Groq→Cerebras fallback; free-tier daily quotas can
+- **LLM CV parse (#11)** walks `llm_provider.llm_extract`'s chain (order pinned by
+  `tests/test_llm_provider.py::test_llm_extract_prefers_openai`); free-tier daily quotas can
   exhaust → extraction may degrade to titles-only or fall back slowly. Not a bug.
 
 ---
@@ -77,4 +78,4 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 Produce a table: `# | item | LIVE/CODE/GATED/FAIL | evidence`. End with:
 - counts (e.g. "30 LIVE, 3 CODE, 1 GATED, 1 FAIL")
 - the FIRST real FAIL with exact file:line + error (if any)
-- what's needed to close the gates (install Redis; add LinkedIn sample; set OAuth creds)
+- what's needed to close the gates (add a LinkedIn sample; a real GitHub handle)
