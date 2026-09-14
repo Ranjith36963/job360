@@ -131,7 +131,7 @@ Run **both** servers, then walk the real journey with the browser and watch the 
 2. **Upload a CV** on `/profile` — use `test-artifacts/sample_cv.pdf` (a realistic ML-engineer CV).
    Confirm the profile populates (skills/titles chips, Skill Tiers) and the log shows
    `Profile saved for user …`.
-3. **Bring a job** on `/bring` (paste an ad; a link too once slice 3 lands) or `POST /api/jobs/bring`.
+3. **Bring a job** on `/bring` (paste an ad, or a link) or `POST /api/jobs/bring`.
    The job page must open from the response.
 4. **Tailor + "I applied"** — tailor the CV on the job page, click "I applied", then open `/receipts`:
    the receipt shows the ad as it read, the exact CV/cover letter, the date. Re-tailor and confirm
@@ -158,10 +158,10 @@ These cost real time the first time. Reading them here saves the next run.
   aiosqlite thread holding the file lock — are obsolete: SQLite is gone.)
 - **Auth needs secrets in the root `.env`.** Registration creates the user row, then fails
   to mint the session cookie if `SESSION_SECRET` is missing → "Failed to fetch" + a
-  half-created account that then 409s "already registered". Both `SESSION_SECRET` and
-  `CHANNEL_ENCRYPTION_KEY` (a Fernet key) must be set. Generate: `SESSION_SECRET` =
-  `python -c "import secrets;print(secrets.token_urlsafe(64))"`; `CHANNEL_ENCRYPTION_KEY` =
-  `python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"`.
+  half-created account that then 409s "already registered". Generate one with
+  `python -c "import secrets;print(secrets.token_urlsafe(64))"`. The full set prod
+  refuses to boot without is `core.settings._REQUIRED_PROD_VARS`, checked by
+  `core.settings.validate_required_env`.
 - **Editable install (`pip install -e`) may resolve `import src` to a git worktree** under
   `.claude/worktrees/…`, not the main checkout. If a standalone script imports the wrong
   copy, force it: `sys.path.insert(0, r'D:\dev\job360\backend')` and `os.chdir` to backend.
