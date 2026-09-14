@@ -37,7 +37,7 @@ An index of the 14 hard rules, one line each. Where a test guards a rule, the te
 
 ### Schema + data integrity
 1. **`normalized_key()` in `models.py`** — never change without re-verifying the DB UNIQUE constraint. Wrong normalization = duplicate rows. Still bites `bring_job`: two users pasting the same ad share one row.
-10. **Never INSERT into `jobs` with `user_id`/`tenant_id`** — `jobs` is the shared catalog (a brought job is a catalog row too). Per-user state lives in its own tables — `applications`, `application_events`, `application_artifacts`, `application_receipts`, `user_actions`.
+10. **Never INSERT into `jobs` with `user_id`/`tenant_id`** — `jobs` is the shared catalog (a brought job is a catalog row too). Per-user state lives in its own tables; `tests/test_dropped_tables_stay_dropped.py` names the ones that reach migration head.
 
 ### Auth + multi-tenant routes
 12. **Every per-user FastAPI route MUST `Depends(require_user)`** and scope queries by `user.id`. Never accept `user_id` from URL/body — trivial IDOR.

@@ -50,7 +50,8 @@ Confirm everything works and nothing is broken.
 
 - Run the relevant test file(s) first: `python -m pytest tests/<relevant_test>.py -v`
 - If you added new functionality, add tests for it
-- Run the full test suite: `python -m pytest tests/ -v`
+- Run the full suite with the canonical command in root `CLAUDE.md` — the flags on it
+  are load-bearing, not decoration
 - If any test fails, fix the implementation (not the test)
 - Update affected MD files if facts changed (test count, features, architecture)
 - **Output**: Test results and summary of what was implemented

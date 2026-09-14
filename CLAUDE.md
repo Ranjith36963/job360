@@ -4,7 +4,7 @@
      rules moved to a skill -- a budget left above the real size is slack, not
      headroom). This file is auto-loaded before every session,
      so it is POINTERS + CRITICAL GOTCHAS ONLY. Long-form history belongs in
-     docs/harness/IMPLEMENTATION_LOG.md, reference tables in ARCHITECTURE.md, recipes in
+     git log, reference tables in ARCHITECTURE.md, recipes in
      .claude/skills/. If you are about to add a paragraph here, add it there and
      leave a one-line pointer. CI enforces this (doc_sync_check.py). -->
 
