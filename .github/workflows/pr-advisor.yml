@@ -385,10 +385,23 @@ jobs:
           PR: ${{ steps.pick.outputs.pr }}
         run: |
           set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --paginate \
-            --jq '.[].path' > changed.txt
-          echo "--- changed files ---"
+          # `gh pr view --json files`, NOT `gh api .../files --paginate --jq`.
+          # The api form printed NOTHING here for PR #566 (11 files; run
+          # 34795382607) and for #546/#553 before it, exited 0, and the
+          # classifier then did the only honest thing with an empty list:
+          # "no files in the changeset -- refusing to guess" -> product_owner.
+          # So every PR was reaching the owner lane by a bug, not by policy,
+          # while the same call returned all 11 paths from a laptop. The
+          # pr-view form is the one every other reader in this repo uses.
+          gh pr view "$PR" --json files --jq '.files[].path' > changed.txt
+          n=$(gh pr view "$PR" --json changedFiles --jq '.changedFiles')
+          echo "--- changed files ($n per GitHub) ---"
           cat changed.txt
+          # AN EMPTY LIST ON A NON-EMPTY PR IS A BROKEN INSTRUMENT, NOT A VERDICT.
+          if [ "$n" -gt 0 ] && [ ! -s changed.txt ]; then
+            echo "::error::GitHub reports $n changed file(s) but the file list came back empty — refusing to classify on a blind read."
+            exit 1
+          fi
 
       # ADVISORY ON PURPOSE, AND ONLY FOR NOW. A brand-new guard that hard-fails
       # every PR on day one is how guards get switched off permanently, so the
