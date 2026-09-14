@@ -120,7 +120,7 @@ npm run test:e2e    # playwright
 
 ## Infrastructure
 
-Live on Railway at job360.uk since 2026-07-02. Three services: `backend`, `frontend`, `Postgres`. The `worker` and `Redis` services were deleted 2026-09-02 — nothing runs in the background, so there are no scheduled jobs and no async notification delivery; anything that sends mail does it synchronously from the API process. Login is passwordless, by magic link, delivered through Resend on the verified `job360.uk` domain.
+Live on Railway at job360.uk since 2026-07-02. Three services: `backend`, `frontend`, `Postgres`. The `worker` and `Redis` services were deleted 2026-09-02 — nothing runs in the background, so there are no scheduled jobs and no async notification delivery; anything that sends mail does it synchronously from the API process, through Resend on the verified `job360.uk` domain.
 
 ## Notifications
 
