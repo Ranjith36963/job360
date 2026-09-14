@@ -86,9 +86,8 @@ def normalized_key(self) -> tuple[str, str]:
 ```
 
 This key is used for:
-- **Database uniqueness** — `UNIQUE(normalized_company, normalized_title)` constraint
-- **Seen-check** — `is_job_seen()` queries by these columns, so two users pasting
-  the same ad share one `jobs` row
+- **Database uniqueness** — `UNIQUE(normalized_company, normalized_title)` constraint, so
+  two users pasting the same ad share one `jobs` row (`database.get_job_id_by_key`)
 
 ---
 
@@ -198,9 +197,8 @@ deleted with the sourcing era).
 
 ### Seniority helpers (`services/profile/seniority.py`)
 
-`detect_seniority` / `strip_seniority` and the experience-rank table moved here
-from the deleted scoring modules — profile extraction still infers a
-candidate's seniority band from job titles, independent of any job search.
+Profile extraction infers a candidate's seniority band from job titles
+(`seniority.detect_seniority`), independent of any job search.
 
 ---
 
