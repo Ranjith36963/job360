@@ -3,12 +3,13 @@ name: verify-job360
 description: >-
   Verify Job360 changes by actually running the app and watching the behavior — not by
   assuming tests or a clean compile prove it works. Use this AGGRESSIVELY: any time you
-  touch backend (FastAPI, scoring, sources, DB, scheduler) or frontend (Next.js pages,
-  API calls, auth) code, before saying something is "done" or "fixed", before opening a
-  PR, and whenever the user asks to verify / test / confirm / "does it actually work" /
-  "prove it". Drives a real browser with Playwright for UX, hits routes with curl and
-  queries the Postgres DB for backend, and walks the full register→CV→search→jobs journey
-  for end-to-end. If you changed Job360 code and haven't run it, this skill applies.
+  touch backend (FastAPI, the application spine, the tailor, MCP, DB) or frontend
+  (Next.js pages, API calls, auth) code, before saying something is "done" or "fixed",
+  before opening a PR, and whenever the user asks to verify / test / confirm / "does it
+  actually work" / "prove it". Drives a real browser with Playwright for UX, hits routes
+  with curl and queries the Postgres DB for backend, and walks the product path
+  (`docs/product/VISION.md`) end-to-end. If you changed Job360 code and haven't run it,
+  this skill applies.
 ---
 <!-- doc: LIVING -->
 
@@ -18,8 +19,8 @@ description: >-
 
 Code compiling, or unit tests passing, does **not** mean the feature works. Things break
 at the seams the tests mock away — a route the frontend calls with the wrong shape, a
-profile saved in the DB but read from a file, a job that scores 10 and silently gets
-filtered out. The only way to know is to **run the real app and watch the behavior**.
+profile saved in the DB but read from a file. The only way to know is to **run the real
+app and watch the behavior**.
 
 So verification is a loop, not a one-shot (see `references/methodology.md` + the slide PNGs):
 
@@ -131,7 +132,7 @@ Run **both** servers, then walk the real journey with the browser and watch the 
 2. **Upload a CV** on `/profile` — use `test-artifacts/sample_cv.pdf` (a realistic ML-engineer CV).
    Confirm the profile populates (skills/titles chips, Skill Tiers) and the log shows
    `Profile saved for user …`.
-3. **Bring a job** on `/bring` (paste an ad, or a link) or `POST /api/jobs/bring`.
+3. **Bring a job** on `/bring` (paste an ad, or give a URL) or `POST /api/jobs/bring`.
    The job page must open from the response.
 4. **Tailor + "I applied"** — tailor the CV on the job page, click "I applied", then open `/receipts`:
    the receipt shows the ad as it read, the exact CV/cover letter, the date. Re-tailor and confirm
@@ -151,11 +152,17 @@ These cost real time the first time. Reading them here saves the next run.
 - **Postgres must be up before anything boots.** The dev DB is a container on
   host port 5433 (`docker-compose.dev.yml`); if it is down the API and the whole
   test suite fail at startup/collection with
-  `connection to server at "127.0.0.1", port 5433 failed`. Start the container first.
+  `connection to server at "127.0.0.1", port 5433 failed`. That exact error also
+  killed the nightly `live-e2e` workflow for 25 consecutive nights because CI had
+  no Postgres service. Start the container first.
+  (The two SQLite gotchas that used to live here — a stale `data/jobs.db` and an
+  aiosqlite thread holding the file lock — are obsolete: SQLite is gone.)
 - **Auth needs secrets in the root `.env`.** Registration creates the user row, then fails
   to mint the session cookie if `SESSION_SECRET` is missing → "Failed to fetch" + a
-  half-created account that then 409s "already registered". `core.settings._REQUIRED_PROD_VARS`
-  is the list. Generate one: `python -c "import secrets;print(secrets.token_urlsafe(64))"`.
+  half-created account that then 409s "already registered". Generate one with
+  `python -c "import secrets;print(secrets.token_urlsafe(64))"`. The full set prod
+  refuses to boot without is `core.settings._REQUIRED_PROD_VARS`, checked by
+  `core.settings.validate_required_env`.
 - **Editable install (`pip install -e`) may resolve `import src` to a git worktree** under
   `.claude/worktrees/…`, not the main checkout. If a standalone script imports the wrong
   copy, force it: `sys.path.insert(0, r'D:\dev\job360\backend')` and `os.chdir` to backend.
@@ -171,18 +178,12 @@ These cost real time the first time. Reading them here saves the next run.
   "the neon lime theme IS dark"). The navbar "Toggle theme" button flips the class but
   there's no light palette, so light mode looks identical to dark — don't chase it as a
   styling bug; it's a product decision (remove the toggle, or build a real light theme).
-- **A `target="_blank"` link (e.g. "View ad" on an application) opens a NEW TAB.** The new
-  tab can swallow the *next* Playwright click — close it or re-navigate before asserting the
-  following interaction, or you'll get a false negative.
-
-- **Per-input profile routes need the EXACT multipart/form field names.** `POST /api/profile/cv` wants `cv=@file.pdf` (NOT `file=`); `POST /api/profile/preferences` wants a `preferences` form field; `/profile/linkedin` + `/profile/github` likewise; the combined `POST /api/profile` takes `cv` + `preferences`. Wrong field → **422**, which looks like a route bug but is a *driver* bug. (Caught a false 422 this way 2026-06-22.)
-- **CV extraction is ASYNC (~60–90 s).** The upload returns **200 immediately**, then the two-pass LLM extraction runs in the background and saves the profile ~1 min later. Reading `/api/profile` right after the 200 shows **empty skills/titles** — that's timing, NOT a bug. Poll the profile (or the DB `user_profiles.cv_data` blob) until skills appear before asserting populated.
+- **A wrong multipart field name is a 422 that looks like a route bug and is a *driver* bug.** The profile routes do not share one field name — read them off `/openapi.json` or the signatures of `routes/profile.upload_cv` / `upsert_preferences` / `upload_linkedin` / `upload_github` / `upsert_profile`.
+- **CV extraction blocks the upload.** `routes/profile.upload_cv` awaits the two-pass extraction and returns the populated profile in the 200 (`tests/test_profile_upload.py::test_dedicated_cv_route_accepts_pdf`) — give the request a long client timeout, and don't poll for skills that already landed.
 - **`user_profiles` stores the CV under the `cv_data` JSON column** (siblings: `preferences`, `linkedin_data`, `github_data`) — there is NO `profile_json` column. Use `cv_data` for direct DB skill/title checks.
 - **Login is now brute-force-locked.** 5 failed logins for one email → **HTTP 429** (Retry-After) for ~15 min, even with the correct password. When sweeping: use a **throwaway email** for the lockout test, and never reuse an email you've intentionally failed — the lock turns a later legit login into a false 429.
-- **Minting an agent token is gated on a verified email.** A fresh registered user is unverified, so `POST /api/tokens` returns **403 `email_not_verified`** (`require_verified_user`). To exercise the MCP surface, first verify: walk the verify-email token, or `UPDATE users SET email_verified_at = now() WHERE email = ?`.
-- **A provider 429 is not a failure.** `llm_provider.llm_extract` walks the chain
-  (order pinned by `tests/test_llm_provider.py::test_llm_extract_prefers_openai`); the
-  profile saving ("Profile saved for user …") is the success signal, whoever served it.
+- **Minting an agent token needs a browser session, not a verified email.** An unverified user mints fine (`tests/test_token_mint_gate.py::test_an_unverified_session_can_still_mint_a_token`); the 403 you can actually hit is `session_required`, from a token trying to mint a token. Verification gates the routes that SPEND an LLM call (`tests/test_email_enforcement.py`), so verify the user before tailoring.
+- **Gemini free tier returns 429 (quota 0); the Groq/Cerebras fallback handles it.** Don't flag the Gemini 429 as a failure — the fallback chain saving the profile ("Profile saved for user …") is the success signal.
 
 ## Tools this skill uses
 

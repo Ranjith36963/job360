@@ -129,17 +129,19 @@ jobs:
         run: |
           set -euo pipefail
           num="${{ inputs.pr }}"
-          meta=$(gh pr view "$num" --json author,isDraft,headRefName,headRepositoryOwner,state)
+          meta=$(gh pr view "$num" --json author,isDraft,headRefName,headRepositoryOwner,state,labels)
           state=$(echo "$meta"  | jq -r .state)
           author=$(echo "$meta" | jq -r .author.login)
           draft=$(echo "$meta"  | jq -r .isDraft)
           branch=$(echo "$meta" | jq -r .headRefName)
           headowner=$(echo "$meta" | jq -r .headRepositoryOwner.login)
+          parked=$(echo "$meta" | jq -r '[.labels[].name]|any(.=="wip:parked")')
           repoowner="${GH_REPO%%/*}"
 
           fail() { echo "::error::$1"; gh pr comment "$num" --body "**PR repair refused:** $1"; exit 1; }
           [ "$state" = "OPEN" ]        || fail "PR #$num is $state, not open"
           [ "$draft" = "false" ]       || fail "PR #$num is a draft — drafts are left alone"
+          [ "$parked" = "false" ]      || fail "PR #$num is parked by the WIP limit (wip:parked) — remove the label first"
           [ "$headowner" = "$repoowner" ] || fail "PR #$num comes from a FORK ($headowner) — a stranger's code never gets an agent pushed onto it (G1)"
           case "$author" in
             # EXACT LOGINS, NOT A PREFIX GLOB. `dependabot*` matches

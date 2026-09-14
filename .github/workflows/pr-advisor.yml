@@ -569,11 +569,43 @@ jobs:
   #
   # OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)". Refuse does
   # NOT mean discard. A PR opened while `wip.limit` other real PRs are
-  # already open gets converted to a DRAFT, a comment says why and how to
-  # undo it, and the owner is told in Slack once. Drafts are already
-  # invisible to `auto-merge.yml`'s filter, so parking IS the refusal — there
-  # is no second "block merge" switch to wire. `scripts/wip_gate.py` carries
-  # the exemptions and the full reasoning; this job is only its caller.
+  # already open gets PARKED, a comment says why and how to undo it, and the
+  # owner is told in Slack once. `scripts/wip_gate.py` carries the exemptions
+  # and the full reasoning; this job is only its caller.
+  #
+  # PARKING IS A LABEL, NOT DRAFT STATUS — CHANGED 2026-09-12, AND HERE IS
+  # WHY IN ONE SENTENCE: `GITHUB_TOKEN` CANNOT CONVERT A PR TO DRAFT.
+  #
+  # Measured on PR #560, run 34664353220, job 103473145164. The gate decided
+  # correctly ("2 other open ... PRs ahead: #558, #559") and then the "Park
+  # it — convert to draft" step ran `gh pr ready "$PR" --undo`, and GitHub
+  # refused:
+  #
+  #     GraphQL: Resource not accessible by integration (convertPullRequestToDraft)
+  #
+  # That mutation needs a permission the default workflow token does not
+  # carry — no `permissions:` grant in this file can add it. The step exited
+  # 1, which put a RED check on the PR. `finding-watch.yml` reads a failed
+  # check as a finding and dispatched `pr-repair.yml` at it — THREE TIMES —
+  # and each run refused at its own gate, because there was nothing to
+  # repair: the "finding" was this workflow's own parking step failing on a
+  # decision it made correctly. Three wasted repair runs, from one PR being
+  # parked.
+  #
+  # So parking is now `gh pr edit --add-label wip:parked` — a mutation the
+  # default token genuinely has. A labeled PR is exempted from the WIP count
+  # and filtered out of `auto-merge.yml`'s candidate list exactly like a
+  # draft (see that file's `pick` job), so the refusal mechanism is
+  # unchanged; only the marker changed.
+  #
+  # THE RED-CHECK CASCADE IS WHY A PARKING DECISION MAY NEVER FAIL THIS JOB.
+  # The root defect was not "the wrong API call" — it was that a routine,
+  # correct WIP decision was allowed to produce a red check at all. A red
+  # check on this job wakes `finding-watch.yml` regardless of WHY it is red,
+  # so every step below that acts on a parking decision must itself never
+  # fail the job; only `decide` crashing (a broken policy, a `gh` outage)
+  # may, and that failure is reported through Slack (rule B fallback below),
+  # never as this job's own exit code.
   #
   # WHY `opened` / `ready_for_review` ONLY, NEVER `synchronize`
   # A PR already accepted (past this gate once) must never be parked LATER by
@@ -630,33 +662,46 @@ jobs:
           echo "park=$(jq -r .park wip.json)" >> "$GITHUB_OUTPUT"
           echo "why=$(jq -r .why wip.json)" >> "$GITHUB_OUTPUT"
 
-      # Parking is not a red check — this can only ever run and succeed; the
-      # job never fails because a PR was parked, only if `decide` itself
-      # crashed (caught by the fallback alert below).
-      - name: Park it — convert to draft
+      # Parking is not allowed to become a red check — that is the exact
+      # cascade measured on PR #560 (see the job header). `continue-on-error`
+      # is load-bearing here: a real failure in this step (the label cannot
+      # be created or applied) still records `steps.park.outcome == 'failure'`
+      # for the fallback below to react to, but it does NOT fail the JOB —
+      # unlike the old `gh pr ready --undo` step, whose failure was the whole
+      # incident. `gh label create --force` is idempotent (create-if-missing,
+      # no-op if it already exists with these exact fields), so this never
+      # races another PR's advisor run creating the same label.
+      - name: Park it — label it wip:parked
+        id: park
         if: steps.decide.outputs.park == 'true'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-        run: gh pr ready "$PR" --undo
+        run: |
+          set -euo pipefail
+          gh label create wip:parked --color B60205 \
+            --description "Parked by the WIP limit; remove the label when a slot frees" \
+            --force
+          gh pr edit "$PR" --add-label wip:parked
 
       - name: Say why, on the PR
-        if: steps.decide.outputs.park == 'true'
+        if: steps.decide.outputs.park == 'true' && steps.park.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           WHY: ${{ steps.decide.outputs.why }}
         run: |
           set -euo pipefail
-          gh pr comment "$PR" --body "$(printf '**Parked as a draft — the WIP limit was reached.**\n\n%s\n\nThis is not a rejection. Nothing about your PR was touched, and no work is lost — it is simply not counted against the limit while it sits as a draft. Run `gh pr ready %s` the moment a slot frees (a PR ahead of you merges or closes) to put it straight back in the queue.' "$WHY" "$PR")"
+          gh pr comment "$PR" --body "$(printf '**Parked by the WIP limit (label `wip:parked`).**\n\n%s\n\nThis is not a rejection. Nothing about your PR was touched, and no work is lost — it is simply not counted against the limit while it carries the label. Remove the label with `gh pr edit %s --remove-label wip:parked` when a slot frees (a PR ahead of you merges or closes) to put it straight back in the queue.' "$WHY" "$PR")"
 
       - name: Tell the owner in Slack — a PR was parked
-        if: steps.decide.outputs.park == 'true'
+        if: steps.decide.outputs.park == 'true' && steps.park.outcome == 'success'
         uses: ./.github/actions/slack
         with:
           channel: needs-your-decision
           severity: warn
-          title: "WIP 2: PR #${{ github.event.pull_request.number }} parked as draft — WIP limit reached"
+          title: "WIP 2: PR #${{ github.event.pull_request.number }} parked (label wip:parked) — WIP limit reached"
           body: |
             ${{ steps.decide.outputs.why }}
 
@@ -667,17 +712,22 @@ jobs:
       # policy block, a `gh pr list` failure, malformed JSON) its outputs
       # never exist and every step above silently skips — the exact "alarm
       # rang into an empty room" bug this repo has hit four separate times.
-      # `always()` is load-bearing: without it, the earlier Slack step failing
+      # Widened 2026-09-12 to ALSO cover `park` failing outright (the label
+      # call erroring): that step deliberately never fails the JOB (see its
+      # own comment — a parking decision must never produce a red check), so
+      # nothing else would ever surface a broken label call. `always()` is
+      # load-bearing both ways: without it, the earlier Slack step failing
       # would silently skip this one too.
       - name: Say so if the WIP gate itself broke
-        if: always() && steps.decide.outcome == 'failure'
+        if: always() && (steps.decide.outcome == 'failure' || steps.park.outcome == 'failure')
         uses: ./.github/actions/slack
         with:
           channel: needs-your-decision
           severity: warn
           title: "WIP gate broke on PR #${{ github.event.pull_request.number }} — no park decision was made"
           body: >-
-            scripts/wip_gate.py crashed or the policy could not be read. No
-            verdict was reached — this PR was neither parked nor cleared.
+            scripts/wip_gate.py crashed, the policy could not be read, or the
+            wip:parked label could not be applied. No verdict took effect —
+            this PR was neither parked nor cleared.
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}

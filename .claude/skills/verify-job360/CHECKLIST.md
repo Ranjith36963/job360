@@ -27,7 +27,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 
 ## B. Auth (full lifecycle)
 - [ ] 3. Register → `POST /api/auth/register` 201, `users` row lands, cookie issued
-- [ ] 4. Email verify — `POST /verify-email/request`, `/verify-email/confirm`, `GET /me/email-verified` (confirm whether enforcement is on/off — currently `email_verified_at` stays NULL = not enforced)
+- [ ] 4. Email verify — `POST /verify-email/request`, `/verify-email/confirm`, `GET /me/email-verified`; enforcement is ON by default and blocks the routes that spend an LLM call — the tailor (`tests/test_email_enforcement.py`) — so verify this user before exercising those
 - [ ] 5. Login + session — `GET /api/auth/me` resolves the exact user from the cookie
 - [ ] 6. Password reset **request** → 204 (send is SMTP-conditional)
 - [ ] 7. Password reset **confirm** → `/password-reset/confirm` with a token

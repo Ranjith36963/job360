@@ -231,15 +231,19 @@ jobs:
               if [ -n "${INPUT_PR:-}" ]; then prs="$INPUT_PR"
               else prs=$(gh pr list --state open --limit 30 --json number --jq '.[].number'); fi ;;
           esac
-          # Only OPEN, non-draft, same-repo PRs are ever candidates. A fork PR is
-          # a stranger's code and never reaches the arm — the cage would refuse
-          # it, but a refusal should be the second line of defence, not the first.
+          # Only OPEN, non-draft, non-parked, same-repo PRs are ever candidates.
+          # A fork PR is a stranger's code and never reaches the arm — the cage
+          # would refuse it, but a refusal should be the second line of
+          # defence, not the first. A PR labeled `wip:parked` (scripts/wip_gate.py)
+          # is filtered out for the same reason as a draft: it opted itself out
+          # of the queue, on purpose, and must not be picked up here.
           keep=""
           for pr in $prs; do
-            meta=$(gh pr view "$pr" --json state,isDraft,headRepositoryOwner 2>/dev/null || echo '')
+            meta=$(gh pr view "$pr" --json state,isDraft,headRepositoryOwner,labels 2>/dev/null || echo '')
             [ -n "$meta" ] || continue
             [ "$(echo "$meta" | jq -r .state)" = "OPEN" ] || continue
             [ "$(echo "$meta" | jq -r .isDraft)" = "false" ] || continue
+            [ "$(echo "$meta" | jq -r '[.labels[].name]|any(.=="wip:parked")')" = "false" ] || continue
             [ "$(echo "$meta" | jq -r .headRepositoryOwner.login)" = "${GH_REPO%%/*}" ] || continue
             keep="$keep $pr"
           done

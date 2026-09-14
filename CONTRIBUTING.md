@@ -17,8 +17,6 @@ Branch off `main`. Use one of these prefixes:
 | `test/*`     | Test-only changes (new coverage, flake fixes)       |
 | `chore/*`    | Tooling, deps, CI, config                           |
 
-Example: `feat/application-export`, `fix/receipt-null-channel`.
-
 ## Commit messages
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/) with an
@@ -124,10 +122,12 @@ instructions.
 Two `scripts/` directories exist by design:
 
 - **`scripts/`** at repo root — repo-wide tooling that must not import from
-  `backend/src/`, mostly the CI/harness guard estate that `.github/workflows/`
-  runs directly. Python and shell both live here; add new cross-service tooling
-  here in either language. (Measure it, never quote it: `ls scripts/*.py | wc -l`
-  / `ls scripts/*.sh | wc -l`.)
+  `backend/src/`. Most of it is the CI/harness guard estate (`doc_sync_check.py`,
+  `doc_sync_mutation_test.py`, `merge_cage.py`, `ruleset_gate.py`, …), which
+  `.github/workflows/` runs directly; the Makefile shells out to
+  `migration_roundtrip.sh`, and `agent-gate.sh` is the commit gate. Add new
+  cross-service tooling here, in **either** language. (Measure it, never quote
+  it: `ls scripts/*.py | wc -l` / `ls scripts/*.sh | wc -l`.)
 - **`backend/scripts/`** — backend-only Python helpers, run via
   `cd backend && python scripts/X.py`. Add ESCO-index builders, dev
   bootstrappers, verification scripts, dump/inspection tools, and any
@@ -146,4 +146,13 @@ Read [`CLAUDE.md`](CLAUDE.md) at repo root before your first non-trivial change.
 It points at the hard rules (`.claude/skills/hard-rules/SKILL.md`) plus the
 product path and data-flow.
 
-For docs and plans, start at [`docs/README.md`](docs/README.md).
+For docs, start at [`docs/README.md`](docs/README.md).
+
+**Doc drift is fixed by deleting or generating, never by rewording.** A doc
+sentence that contradicts the code gets deleted, replaced by a pointer to a
+symbol name, or pinned by a named test; a countable fact is generated from the
+code into [`docs/GENERATED.md`](docs/GENERATED.md) by
+`scripts/gen_doc_blocks.py` and CI fails if the file disagrees. Rewording a
+claim to be accurate only resets its expiry date, which is why fifteen
+consecutive nightly doc-drift runs never reached zero. (Was ADR-0006; the ADR
+folder was deleted 2026-09-12 and this paragraph is the rule's home.)

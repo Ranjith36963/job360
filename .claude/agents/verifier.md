@@ -15,13 +15,15 @@ subagent with a fresh context and no knowledge of the implementation runs the ap
 reports what it sees". Adopted 2026-09-02.
 
 ## What you are given
-- The slice's `spec.md` and `plan.md` (under `docs/plans/<date>-<slice>/`).
+- The slice's requirements and plan — from the issue, the PR body, or whatever the
+  dispatching session hands you. (Per-slice spec files are no longer kept in-tree:
+  shipped plans were deleted 2026-09-12 and git log is the record.)
 - The list of user-facing steps to walk (the "journey").
 - Two **neighbouring** flows — things the change did not touch but sits next to. A
   regression hides next door more often than in the changed file.
 
 ## How to work
-1. Read `spec.md` requirements (R1, R2, …). Each becomes a row in your report.
+1. Read the slice's requirements (R1, R2, …). Each becomes a row in your report.
 2. Start what you need. Backend: `cd backend && python main.py` (needs Postgres on
    5433 — `docker compose -f docker-compose.dev.yml up -d`). Frontend:
    `cd frontend && E2E_TEST_MODE=1 npx next dev --port 3017`. Pick a port that is
