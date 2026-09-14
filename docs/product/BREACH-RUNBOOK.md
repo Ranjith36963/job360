@@ -30,16 +30,13 @@ Variables → edit → redeploy happens automatically.
 3. **Rotate the rest of the keys** (names only, values live in Railway):
    `RESEND_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`,
    `CEREBRAS_API_KEY`, `GITHUB_TOKEN`, R2 backup keys
-   (`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` in GitHub Actions secrets),
-   job-source API keys. Each provider's dashboard → revoke old, issue new.
-4. **`CHANNEL_ENCRYPTION_KEY` — read this before rotating.** Rotating it
-   makes every stored notification-channel credential (email and webhook
-   credentials) permanently unreadable — users will have to
-   reconnect their channels. In a real breach that trade is CORRECT: rotate
-   it, accept the reconnects. Just don't be surprised.
-5. **If the app itself is compromised** (malicious deploy, defaced page):
+   (`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` in GitHub Actions secrets).
+   Each provider's dashboard → revoke old, issue new. Don't rotate from this
+   list alone — check it against `core.settings` and the live Railway
+   variable NAMES first.
+4. **If the app itself is compromised** (malicious deploy, defaced page):
    Railway → Deployments → roll back to the last known-good deploy.
-6. **Do NOT delete or truncate any logs.** They are your evidence and your
+5. **Do NOT delete or truncate any logs.** They are your evidence and your
    timeline. Containment never includes cleanup.
 
 ## Hour 1–24 — Assess (what actually got touched?)
@@ -113,6 +110,4 @@ they should do.
 ---
 
 *Owner: Ranjith. Review this page every 6 months or after any incident,
-whichever comes first. Last verified against the real stack: 2026-07-24
-(sessions table + SESSION_SECRET dual kill-switch, Fernet channel-cred
-rotation trade-off, R2 ciphertext-only backups, Resend sender domain).*
+whichever comes first.*
