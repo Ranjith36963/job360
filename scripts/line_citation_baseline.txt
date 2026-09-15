@@ -25,8 +25,14 @@
 # deleted whole, so they left this list. README.md's dead source-tree
 # citations were rewritten to 0. ARCHITECTURE.md fell 11 -> 10 rewriting the
 # ESCO citation as a symbol name. Re-measured, not estimated.
-
-ARCHITECTURE.md 10
-backend/CLAUDE.md 2
-docs/product/product_design_rules.md 5
-docs/product/troubleshooting.md 7
+#
+# Re-baselined 2026-09-15 (nightly truth check) — and the list is now EMPTY.
+# Measured, not estimated: `doc_sync_check.line_number_citations()` returns {}.
+# ARCHITECTURE.md's 10 all lived in the env-var table, deleted that day as a
+# duplicate of core/settings.py; product_design_rules.md's 5 were already gone
+# (slack the ratchet could not see); backend/CLAUDE.md's 2 and
+# troubleshooting.md's 7 were rewritten as symbol names the same day.
+#
+# An empty list means the ratchet is now a BAN: any `file.py:NN` added to any
+# LIVING doc reads as 0 -> N and fails. That is the intended end state — 24
+# unused slots were 24 line numbers a future session could add with CI green.

@@ -3,8 +3,7 @@ name: hard-rules
 description: >-
   Job360's numbered hard rules — the load-bearing invariants that break
   production or corrupt data when violated. Consult BEFORE editing schema,
-  the application spine, MCP tools, auth routes, notifications, or profile
-  extraction.
+  the application spine, MCP tools, auth routes, or profile extraction.
 ---
 <!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
 

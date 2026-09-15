@@ -28,11 +28,16 @@ python -m venv .venv
 pip install -e .
 ```
 
-For dev tooling (pytest, ruff, pre-commit), install the dev extra:
+For dev tooling, install the dev extra — read
+`[project.optional-dependencies].dev` in `pyproject.toml` for what it gives you:
 
 ```bash
 pip install -e ".[dev]"
 ```
+
+`pre-commit` is **not** in that extra even though `CONTRIBUTING.md` makes
+`pre-commit run --all-files` a merge gate. Install it yourself
+(`pip install pre-commit`, or pipx) before the first commit.
 
 ## Environment
 
@@ -43,8 +48,9 @@ cp ../.env.example ../.env     # Unix
 copy ..\.env.example ..\.env   # Windows
 ```
 
-Edit `../.env` to set your API keys, webhook URLs, and `FRONTEND_ORIGIN`.
-See [`ARCHITECTURE.md`](../ARCHITECTURE.md) for the full env-var table.
+Edit `../.env` to set your API keys and `FRONTEND_ORIGIN`. Every variable the
+app reads is an `os.getenv` call in `src/core/settings.py`, commented in place;
+`core.settings._REQUIRED_PROD_VARS` is the set prod refuses to boot without.
 
 ## Run the API
 
@@ -109,5 +115,5 @@ The frontend reaches the API via `NEXT_PUBLIC_API_URL` (frontend env, default
 
 - [`docs/README.md`](../docs/README.md) — full docs index
 - [`CLAUDE.md`](../CLAUDE.md) — mission, hard rules
-- [`ARCHITECTURE.md`](../ARCHITECTURE.md) — directory tree, DB schema, env vars
+- [`ARCHITECTURE.md`](../ARCHITECTURE.md) — directory tree, DB schema
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md) — branch / commit / PR conventions

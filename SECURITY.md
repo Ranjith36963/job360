@@ -16,8 +16,8 @@ Please include, where possible:
 
 - what the vulnerability is and the impact,
 - steps to reproduce (a minimal proof-of-concept helps),
-- affected area (backend API, frontend, auth, notifications, …) and any
-  relevant version / commit.
+- affected area (backend API, frontend, auth, …) and any relevant
+  version / commit.
 
 ## Supported versions
 

@@ -1,9 +1,9 @@
 # Job360 Frontend
 <!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
 
-Next.js 16 + React 19 web app for Job360. Talks to the FastAPI backend for
-profile, bringing a job, applications, and the pipeline. Job360 never sources
-or ranks jobs — the seeker's own agent finds the job; Job360 remembers it.
+Next.js 16 + React 19 web app for Job360. A thin screen over the FastAPI
+backend's routes. Job360 never sources or ranks jobs — the seeker's own agent
+finds the job; Job360 remembers it.
 
 ## Prerequisites
 
@@ -19,8 +19,8 @@ npm install
 
 ## Environment
 
-This repo ships a committed `.env.local` with the dev default. If yours is
-missing, create it manually:
+`.env*` is gitignored (`frontend/.gitignore`), so a fresh clone has no
+`.env.local`. Create it:
 
 ```bash
 # frontend/.env.local
@@ -51,7 +51,7 @@ npm run type-check             # tsc --noEmit (no emit, type-only)
 
 Unit tests live alongside their subject files (`*.test.tsx` next to
 `*.tsx`). E2E specs live in `tests/e2e/` and run against a started dev
-server. Step-3 close-out invariant: ≥44 unit tests, ≥5 E2E specs.
+server. Counts are not written down here — measure them.
 
 ## Cross-wiring with the backend
 
@@ -64,5 +64,5 @@ server. Step-3 close-out invariant: ≥44 unit tests, ≥5 E2E specs.
 
 ## Further reading
 
-- [`../backend/README.md`](../backend/README.md) — API, CLI, worker, migrations
+- [`../backend/README.md`](../backend/README.md) — API, CLI, migrations
 - [`../docs/README.md`](../docs/README.md) — full docs index
