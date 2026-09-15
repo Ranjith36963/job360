@@ -22,7 +22,7 @@ at the seams the tests mock away — a route the frontend calls with the wrong s
 profile saved in the DB but read from a file. The only way to know is to **run the real
 app and watch the behavior**.
 
-So verification is a loop, not a one-shot (see `references/methodology.md` + the slide PNGs):
+So verification is a loop, not a one-shot (see `references/methodology.md`):
 
 ```
 Run it → Drive it → See what happens → Read the logs → Fix → loop → Prove it with evidence

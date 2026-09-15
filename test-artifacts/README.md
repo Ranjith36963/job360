@@ -5,7 +5,7 @@ Test fixtures and E2E verification artifacts.
 
 | File | Purpose |
 |------|---------|
-| `sample_cv.pdf` | Minimal PDF fixture used by CV-parser tests (`test_profile.py`, `test_api.py` file-upload scenarios) |
+| `sample_cv.pdf` | The CV uploaded by the manual sweep — `.claude/skills/verify-job360/SKILL.md` step 2. No pytest reads it; the tests that need a PDF build their own with fpdf2 |
 
 Transient outputs (screenshots, HTML reports) are gitignored by an
 **allow-list**, not a glob: `.gitignore` ignores `test-artifacts/*` and then

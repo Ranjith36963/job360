@@ -67,14 +67,13 @@ isolation, and the symptom looks like unrelated tests failing.
 ## 3. CV parse fails / LLM provider unreachable
 
 **Symptom:** `setup-profile --cv ...` errors with `LLMKeyMissing`, `LLMRateLimited` or
-`LLMAllProvidersFailed` — all subclasses of `LLMError`
-(`backend/src/services/profile/llm_provider.py:48,53,62,71`;
-there is no `LLMProviderError`) — or hangs with no output.
+`LLMAllProvidersFailed` — all subclasses of `services.profile.llm_provider.LLMError`;
+there is no `LLMProviderError` — or hangs with no output.
 
 **Cause:** No LLM API key set, or the first provider in the fallback chain is rate-limited.
 
-**Fix:** At least ONE of these four must be set in `.env` — the same four
-`LLM_KEY_VARS` names the key probe reads (`backend/src/services/profile/llm_provider.py:231-236`):
+**Fix:** At least ONE of the names in
+`services.profile.llm_provider.LLM_KEY_VARS` must be set in `.env`:
 
 ```
 OPENAI_API_KEY=...      # PRIMARY — heads the chain; set this one if you have it
@@ -83,7 +82,7 @@ GROQ_API_KEY=...        # free tier
 CEREBRAS_API_KEY=...    # free tier
 ```
 
-Fallback chain (`backend/src/services/profile/llm_provider.py:329-334`): **OpenAI (PRIMARY)** → Gemini → Groq → Cerebras. If every configured provider fails, `llm_extract` raises `LLMRateLimited` (retry later) or `LLMAllProvidersFailed`; with no key at all it raises `LLMKeyMissing`. Callers must NOT persist an empty result on `LLMRateLimited`.
+The chain is the provider tuple inside `services.profile.llm_provider.llm_extract`; its order is pinned by `backend/tests/test_llm_provider.py::test_llm_extract_prefers_openai`. Callers must NOT persist an empty result on `LLMRateLimited` — it means "retry later", not "the user has no data".
 
 Debug with:
 
@@ -142,8 +141,6 @@ pdf = FPDF()
 pdf.set_font("Helvetica", size=12)
 pdf.cell(0, 10, safe_latin1("café naïve — résumé"))
 ```
-
-Our `tests/conftest.py` helpers use Option B.
 
 ---
 

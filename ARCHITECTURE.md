@@ -233,90 +233,20 @@ The full table — every method, path and router file, generated from the router
 
 ## Configuration
 
-### Environment Variables (.env)
+### Environment Variables
 
-> These are read from the environment. Tuning constants that are NOT env-readable — retry, timeout, page-size and age limits — live in `core/settings.py` and changing them in `.env` does nothing.
-
-> **This table is the canonical env-var reference.** It was moved here verbatim from
-> the root `CLAUDE.md` (2026-08-11) — the root file is auto-loaded by every session
-> and must stay pointers-only. Runtime source of truth is always `backend/src/core/settings.py`.
+`backend/src/core/settings.py` is the only list. Every knob is an `os.getenv`
+call there with the comment that says why it exists and what it costs to move —
+a table here is a second copy that falls behind silently (it had drifted 22
+variables behind by 2026-09-15, including `SITE_BASE_URL`, which `README.md`
+tells you to set).
 
 - `.env` lives in the repo root (see `.env.example`).
+- Required in production: `core.settings._REQUIRED_PROD_VARS`, enforced at boot
+  by `core.settings.validate_required_env`. Everything else is optional.
+- Tuning constants that are NOT env-readable live in the same file; changing
+  them in `.env` does nothing.
 - Data outputs go to `backend/data/` (gitignored): `exports/`, `reports/`, `logs/`, `chroma/`.
-
-| Variable | Required | Used by |
-|----------|----------|---------|
-| `GITHUB_TOKEN` | No | Higher GitHub API rate limit (5000/hr vs 60/hr) |
-| `SMTP_EMAIL` + `SMTP_PASSWORD` (+ `SMTP_HOST` / `SMTP_PORT`) | No | The PLATFORM's SMTP credentials — system email only (magic links, password reset: `services/auth/email_sender.py`). Prefer `RESEND_API_KEY` (row below): Railway blocks SMTP 25/465/587. The per-user notification-channel system this once also fed was deleted 2026-09-05 |
-| `DATABASE_URL` | **Yes in prod** | Postgres DSN (psycopg3). Dev default is the docker-compose.dev.yml Postgres (`core.settings.DATABASE_URL`). Required in prod by `core.settings._REQUIRED_PROD_VARS`, enforced by `validate_required_env()` |
-| `OPENAI_API_KEY` / `OPENAI_MODEL` | No (but PRIMARY LLM) | OpenAI is the **primary** CV-parsing provider (default model `gpt-4o-mini`); Gemini/Groq/Cerebras are fallbacks. The chain itself is the provider tuple in `services.profile.llm_provider.llm_extract`; the key names are `llm_provider.LLM_KEY_VARS` |
-| `SESSION_SECRET` | Yes in prod | `itsdangerous` HMAC for session cookies |
-| `APP_ENV` / `RAILWAY_ENVIRONMENT` | No | Prod detection for HSTS + required-env validation (`APP_ENV=production` OR any `RAILWAY_ENVIRONMENT`) |
-| `SENTRY_DSN` | No | Sentry error tracking; empty = disabled |
-| `ESCO_SKILL_NORMALISATION_ENABLED` | No (default `false`) | Slice 5 renamed `SEMANTIC_ENABLED`; the old name is deliberately not read. Even `true` turns nothing on until an ESCO index is actually built (hard rule #28) |
-| `TAILOR_FREE_PER_MONTH` | No (default `10`) | Free-tier cap on AI CV/cover-letter generations per user/month |
-| `PROFILE_EXTRACT_MAX_PER_HOUR` | No (default `12`) | Cost cap on profile re-extraction. EVERY profile change re-runs the full two-pass extraction (4+ paid LLM calls); five routes reach `_extract_save_trigger` and nothing bounded it. Over the limit returns HTTP 429. `0` disables. Uses the shared limiter, so `RATE_LIMIT_REDIS=true` makes the cap hold across replicas |
-| `LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS` | No (default `5` / `900`) | Brute-force login lockout (in-memory) |
-| `API_TOKENS_PER_USER` | No (default `10`) | Active personal API tokens one user may hold (one per agent/machine). Minting past the cap returns HTTP 409 |
-| `API_TOKEN_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `Authorization: Bearer j360_…` attempts per client IP per minute before 429 — a brute-force brake on the token door (`api/auth_deps.py`) |
-| `MCP_ALLOWED_HOSTS` | No (default empty = off) | Comma-separated `Host` values the MCP transport at `/api/mcp` accepts (DNS-rebinding guard). Off in prod because the backend sits behind the Next rewrite and sees Railway's internal host; the bearer token is the real guard |
-| `OAUTH_REDIRECT_ALLOWLIST` | No (default: Claude.ai + ChatGPT callbacks) | Comma-separated redirect URIs a registering OAuth client may use — exact scheme/host/port, path equal or (entry ending in `/`) prefix. Anything else → 400 `invalid_redirect_uri`. Add a new MCP client here, never in code (`services/auth/oauth_clients.py`) |
-| `OAUTH_ALLOW_LOOPBACK_REDIRECTS` | No (default `0`) | `1` also allows RFC 8252 loopback redirects (`http://127.0.0.1`, `::1`, `localhost`, any port) for desktop clients. Off in prod |
-| `OAUTH_ACCESS_TOKEN_TTL_SECONDS` / `OAUTH_REFRESH_TOKEN_TTL_SECONDS` | No (default `3600` / `2592000`) | Access-token life and the **absolute** refresh life of a grant (counted from the grant, not the last refresh). After the second, the user consents again |
-| `OAUTH_CODE_TTL_SECONDS` / `OAUTH_AUTHORIZE_TTL_SECONDS` | No (default `60` / `1800`) | Authorization-code life, and how long a pending consent request (`/oauth/consent/[rid]`) survives — long enough for the magic-link email round-trip |
-| `OAUTH_REUSE_GRACE_SECONDS` | No (default `10`) | A code or refresh token presented twice inside this window is a client retry → `invalid_grant`; after it → the whole grant is revoked (OAuth 2.1 §4.1.2) |
-| `OAUTH_REGISTER_MAX_PER_HOUR` / `OAUTH_REGISTER_MAX_PER_HOUR_GLOBAL` | No (default `60` / `600`) | Dynamic-registration caps per IP and across all IPs (429 over cap) |
-| `OAUTH_AUTHORIZE_MAX_PER_MIN` | No (default `60`) | Per-IP cap on `GET /api/oauth/authorize` |
-| `OAUTH_TOKEN_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `/api/oauth/token` exchanges per IP (and per IP+client) per minute before 429 |
-| `OAUTH_BEARER_FAIL_MAX_PER_MIN` | No (default `30`) | Failed `Authorization: Bearer j360a_…` attempts per IP per minute — its own bucket, only a hash matching **no** row counts (an expired token is normal, not an attack) |
-| `OAUTH_CLIENT_PRUNE_DAYS` / `OAUTH_MAX_CLIENTS` / `OAUTH_PRUNE_SAMPLE` | No (default `7` / `10000` / `20`) | Housekeeping: a registered client with no grant ever is dropped after N days; the client table is capped (prune-at-ceiling, then 503); the prune runs after 1-in-N `/token` calls, in its own transaction, never delaying the exchange |
-| `FRONTEND_ORIGIN` | No (default `http://localhost:3000`) | CORS allow-list (comma-sep) |
-| `REDIS_URL` | No | Optional Redis backend for `RATE_LIMIT_REDIS` (auth rate limiting holds across replicas). The ARQ worker this used to also serve was deleted with `src/workers/` (slice 5) |
-| `RUN_MIGRATIONS_ON_BOOT` | No (default `true`) | H6 — set `false` ONLY once a deploy release-phase step owns `python -m migrations.runner up`. Default keeps today's behaviour (migrations apply inside the FastAPI lifespan, `api/dependencies.py`). Existing mitigations: `runner.up()` takes a Postgres advisory lock so concurrent replicas serialise, and `backend/railway.json`'s healthcheck + `ON_FAILURE` restart keeps the old container serving if a migration fails |
-| `RESEND_API_KEY` | Recommended in prod | Resend HTTPS API key. Used for system email only (magic links, password reset: `auth/email_sender.py`). **Railway blocks outbound SMTP ports 25/465/587**, so `resend://` over 443 is the path that actually delivers there. A key placed in `SMTP_PASSWORD` (recognised by its `re_` prefix) is honoured too |
-| `SMTP_FROM` | No (falls back to `SMTP_EMAIL`, then `onboarding@resend.dev`) | From-address for system email |
-| `APPLICATION_EXTRA_EVENT_TYPES` | No (default empty) | Comma-separated list extending the application-spine's event vocabulary (R7) with NON-status note-type events only — a status event also needs an R4 status mapping, which an env var cannot add. Unknown types still 422 naming the allowed list |
-| `APPLICATION_ARTIFACT_MAX_CHARS` | No (default `60000`) | Per-artifact-version character cap (`POST /applications/{id}/artifacts`, S5) — over the cap is a 422 naming this variable |
-| `APPLICATION_ARTIFACT_MAX_VERSIONS` | No (default `200`) | Per-`(application_id, kind)` version-count cap — over the cap is a 429 naming this variable, never a silent drop |
-| `APPLICATION_DIFF_MAX_LINES` | No (default `4000`) | Slice 8 — each side of `GET /applications/{id}/artifacts/{artifact_id}/diff` is cut to this many lines before `difflib` runs; the response says `truncated` |
-| `PROFILE_LESSONS_MAX` | No (default `20`) | Slice 9 — how many "flag for next time" lessons `GET /profile` and MCP `get_profile` carry (newest first) |
-| `LESSONS_PAGE_MAX` | No (default `100`) | Slice 9 — the largest `limit` `GET /applications/lessons` accepts; over it is a 422 naming this variable |
-| `APPLICATION_VISA_DETAIL_MAX_CHARS` | No (default `500`) | Slice 7 — cap on `visa_detail` (the ad sentence a visa judgement rests on) on `bring_job` / `save_fit` / `PUT /applications/{id}/visa`; over it is a 422 naming this variable |
-| `APPLICATION_EVENT_DETAIL_MAX_CHARS` | No (default `2000`) | S5 — `detail` char cap on `POST /applications/{id}/events`; over the cap is a 422 naming this variable |
-| `APPLICATION_EVENT_PAYLOAD_MAX_BYTES` | No (default `8192`) | S5 — event `payload` cap, checked on the SERIALISED (`json.dumps`) size, because that is what the column costs; the payload must also be a JSON object, never a list/scalar |
-| `APPLICATION_EVENT_MAX_FUTURE_SECONDS` | No (default `300`) | S6 — how far into the future `occurred_at` may claim to be before it is refused as implausible. No lower bound: backdating is the normal case. Slice 6 reuses it for an email source's `received_at` |
-| `APPLICATION_EVENT_SOURCE_KINDS` | No (default `email`) | Slice 6 — the closed set of `source.kind` values an event may cite; anything else is a 422 naming this variable |
-| `APPLICATION_EVENT_SOURCE_MESSAGE_ID_MAX_CHARS` | No (default `256`) | Slice 6 (S2) — char cap on `source.message_id`, the identity the same-message dedupe keys on |
-| `APPLICATION_EVENT_SOURCE_SENDER_MAX_CHARS` | No (default `320`) | Slice 6 (S2) — char cap on `source.sender` |
-| `APPLICATION_EVENT_SOURCE_SUBJECT_MAX_CHARS` | No (default `500`) | Slice 6 (S2) — char cap on `source.subject` |
-| `APPLICATION_SCHEDULED_AT_MAX_FUTURE_SECONDS` | No (default `31622400` = 366 days) | Slice 6 (S8) — how far ahead `scheduled_at` (an interview datetime) may be; past values are allowed |
-| `APPLICATION_RECEIPT_ANSWERS_MAX` | No (default `50`) | S5 — max `answers` items on `POST /applications/{id}/receipt` |
-| `APPLICATION_RECEIPT_ANSWER_MAX_CHARS` | No (default `2000`) | S5 — max chars per receipt answer |
-| `APPLICATION_RECEIPT_FIELDS_MAX_BYTES` | No (default `8192`) | S5 — `fields_filled` cap on the receipt, checked on the serialised size |
-| `APPLICATION_FIT_REASONING_MAX_CHARS` | No (default `4000`) | S5 — `reasoning` char cap on `PUT /applications/{id}/fit` |
-| `APPLICATION_ACTOR_NAME_MAX_CHARS` | No (default `60`) | S3 — how much of an OAuth client's attacker-supplied name `actor_for` keeps as `agent:<name>` authorship (`src/services/applications/authorship.py`) |
-| `WHATS_NEW_DEFAULT_WINDOW_DAYS` | No (default `7`) | R9 — how far back `GET /whats-new` looks when `since` is omitted |
-| `WHATS_NEW_MAX_EVENTS` | No (default `200`) | R9 — `whats_new`'s page-size ceiling; `limit` above it is clamped, `truncated: true` when the cap bites |
-| `EXPORT_HISTORY_MAX_APPLICATIONS` | No (default `500`) | R10/S8 — `export_history` stops at this many applications and reports `truncated: true` with `next_since` |
-| `EXPORT_HISTORY_MAX_BYTES` | No (default `8388608` = 8 MiB) | R10/S8 — `export_history`'s response-size ceiling; also bounds how much artifact text `get_application(with_artifact_text=true)` will inline (`EXPORT_HISTORY_MAX_BYTES / 4`) |
-| `EXPORT_HISTORY_MAX_PER_HOUR` | No (default `12`) | R10/S8 — `export_history` rate limit, keyed on `user.id` (never per IP — every agent shares the proxy IP behind the Next rewrite unless `JOB360_TRUST_PROXY=1`) |
-| `URL_FETCH_ENABLED` | No (default `true`) | Slice 3 (URL fetch), requirement R11 — the kill switch. Off → `POST /jobs/fetch-url` answers 404 on the next restart, no deploy needed; this is the control that actually stops the surface (the frontend flag below only hides the button and needs a rebuild) |
-| `URL_FETCH_MAX_BYTES` / `URL_FETCH_TIMEOUT_S` / `URL_FETCH_TOTAL_BUDGET_S` / `URL_FETCH_EXTRACT_BUDGET_S` | No (default `2097152` / `10` / `20` / `3`) | R7 — decoded-body size cap (2 MiB) and three independent time budgets (per-request, whole-journey across redirects, parse-only) — bytes, per-request time and total time are different attacks and need different ceilings |
-| `URL_FETCH_MAX_REDIRECTS` | No (default `5`) | R6 — hop cap on the manual redirect loop; every hop re-screens the URL and re-resolves the host from scratch |
-| `URL_FETCH_MAX_HTML_DEPTH` | No (default `200`) | A7 — nesting-depth ceiling on the heuristic extractor's own container-frame stack, so a pathologically nested document can't blow up OUR algorithm even though `html.parser` itself would keep streaming |
-| `URL_FETCH_MAX_PER_MINUTE` / `URL_FETCH_MAX_PER_HOUR` | No (default `6` / `60`) | R9 — per-**user** fetch rate limits (never per IP — every browser/agent shares the proxy address behind the Next rewrite unless `JOB360_TRUST_PROXY=1`) |
-| `URL_FETCH_MAX_PER_HOUR_GLOBAL` | No (default `2000`) | R9/A9 — the GLOBAL bucket across every user; what stops a handful of accounts turning Job360 into an open relay/scanner for the whole internet — not redundant with the per-address deny list |
-| `URL_FETCH_ALLOWED_CONTENT_TYPES` | No (default `text/html,application/xhtml+xml`) | R7 — we never sniff content; a server's stated `Content-Type` outside this list is `unsupported_content` and the body is never read |
-| `URL_FETCH_USER_AGENT` | No (default `Job360/1.0 (+https://job360.uk/bot; user-initiated)`) | Constraint 8 — never pretend to be a browser; names Job360 and that the fetch is user-initiated |
-| `URL_FETCH_EXTRA_DENY_NETS` | No (default empty) | S9 — comma-separated CIDRs added to the SSRF deny list without a code change |
-| `URL_FETCH_ALLOW_NETS` | No (default empty) | S9 — the LOUD escape hatch for a self-hosted deployment that genuinely needs to reach an internal careers page. Empty changes nothing; every address it lets through logs a WARNING naming the net — a documented hole with an alarm on it, not a convenience |
-| `NEXT_PUBLIC_URL_FETCH_ENABLED` (frontend) | No (default `true`) | R11/C5 — frontend counterpart to `URL_FETCH_ENABLED`: hides the link/Fetch box on `/bring` when explicitly `false`. Inlined at Next.js **build** time — the backend's 404 is the control that actually stops the surface on a restart |
-| `URL_FETCH_MAX_JSONLD_BYTES` | No (default `262144` = 256 KiB) | Adversarial review B3 — a single `<script type="application/ld+json">` block over this many bytes is skipped before `json.loads` ever sees it, bounding the CPU a hostile nested-array bomb can spend even after the `RecursionError` it raises is caught |
-| `BRING_MAX_TEXT` / `BRING_MAX_FIELD` | No (default `40000` / `300`) | `POST /jobs/bring`'s field caps (a real ad is 500-8,000 chars). Moved here from `api/routes/bring.py` (review C4) so `src/services/fetch/extract.py` — a service, no FastAPI — can read the same caps without importing a route module |
-
-### Constants (`settings.py`)
-
-The scorer's `MIN_STORE_SCORE` catalog floor and the engine thresholds went with the scorer (slice 5). What is left in `core/settings.py` is rate limits (`RATE_LIMITS`, the per-user profile-extraction and export caps) and the `ESCO_SKILL_NORMALISATION_ENABLED` flag — read the file; nothing there is worth a second copy here.
 
 ---
 
@@ -360,10 +290,9 @@ The scorer's `MIN_STORE_SCORE` catalog floor and the engine thresholds went with
 
 ### Dev (`pip install -e ".[dev]"` from `backend/`)
 
-| Package | Purpose |
-|---------|---------|
-| pytest / pytest-asyncio | Test framework + async test support |
-| aioresponses | Mock aiohttp responses (rule #4 — the suite must run offline) |
-| fpdf2 | Generate test PDF files for CV parser tests |
-| pytest-randomly | Random test ordering (disable with `-p no:randomly` for the canonical run) |
-| ruff / pre-commit | Lint + commit hooks |
+Read `[project.optional-dependencies].dev` in `backend/pyproject.toml` — each
+entry carries the comment explaining why it is pinned or opt-in.
+
+One thing the manifest does NOT tell you: **`pre-commit` is not in the extra**,
+even though `CONTRIBUTING.md` makes `pre-commit run --all-files` a merge gate.
+Install it separately.

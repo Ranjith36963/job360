@@ -59,7 +59,7 @@ railway add --database postgres      # managed Postgres → DATABASE_URL
 railway add --service backend
 railway variables --service backend --set "DATABASE_URL=${{Postgres.DATABASE_URL}}" \
   --set "SESSION_SECRET=..." --set "GEMINI_API_KEY=..." --set "APP_ENV=production" ...
-# For the full list of variables and which are required, see ARCHITECTURE.md's env table.
+# Which variables prod refuses to boot without: core.settings._REQUIRED_PROD_VARS.
 cd backend && railway up --service backend --detach && cd ..
 railway domain --service backend     # → public API URL
 

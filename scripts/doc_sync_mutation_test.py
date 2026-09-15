@@ -157,8 +157,14 @@ CASES: list[tuple[str, str, str, str]] = [
     # Retargeted 2026-09-05 from docs/product/pillars/glossary.md (archived
     # with the sourcing era, slice 5, #483) to a route that survives the
     # slice: OAuth is part of the kept product path.
-    ("ARCHITECTURE.md",
-     r"`GET (/api/oauth/authorize)`", "`GET /api/oauth/definitely-not-a-route`",
+    # Retargeted again 2026-09-15: that anchor was `GET /api/oauth/authorize`
+    # inside ARCHITECTURE.md's env-var table, and the table was deleted as a
+    # duplicate of core/settings.py -- leaving ARCHITECTURE.md with no
+    # fully-qualified route claim and this drill watching nothing. The new
+    # anchor is the verify sweep's checklist, which an agent EXECUTES nightly:
+    # a wrong route there is run, not merely read.
+    (".claude/skills/verify-job360/CHECKLIST.md",
+     r"`GET (/api/auth/me)`", "`GET /api/auth/definitely-not-a-route`",
      "route-not-found"),
     # The stamp guard. A KIND outside the five is as unreadable as no stamp at
     # all -- both leave the routine unable to tell a dated record from a live

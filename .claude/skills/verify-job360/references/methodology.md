@@ -2,7 +2,7 @@
 <!-- doc: LIVING -->
 
 This skill is built on a short talk about how an agent should verify its own work.
-The four slides are saved alongside this file as PNGs. Their content, in text:
+Its four slides, in text:
 
 ## Slide 1 — "Loops make the world go around"
 
