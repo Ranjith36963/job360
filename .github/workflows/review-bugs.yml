@@ -203,7 +203,7 @@ jobs:
       - name: reviewer-bugs reviews the changed files
         id: agent
         if: steps.token.outputs.have == 'true' && steps.docsonly.outputs.docsonly != 'true'
-        uses: anthropics/claude-code-action@dcb57747bfceeaa1fa72638cae52295d1d853d4a # v1
+        uses: anthropics/claude-code-action@56cf60fde42f7b19c3abfd5c9c48b69a1288461f # v1
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
