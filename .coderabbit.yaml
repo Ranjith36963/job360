@@ -140,21 +140,27 @@ reviews:
     unit_tests:
       enabled: false      # tests must be watched failing first; generated ones never are
 
-tools:
-  ruff:
-    enabled: true
-  shellcheck:
-    enabled: true         # the SIGPIPE and orphaned-`fi` class lives in shell
-  actionlint:
-    enabled: true         # workflows are the highest-risk files here
-  markdownlint:
-    enabled: false        # style noise on docs that are read for facts, not formatting
-  gitleaks:
-    enabled: true
-  semgrep:
-    enabled: true
-  eslint:
-    enabled: true
+  # MOVED from a top-level `tools:` block (measured 2026-09-16: CodeRabbit
+  # reported "Validation error: Unrecognized key: 'tools'" on every PR).
+  # Verified against CodeRabbit's own schema (docs.coderabbit.ai/reference/
+  # configuration and its published schema.v2.json): `tools` is defined only
+  # under `reviews.tools`, never at the top level. Same keys, same values —
+  # only the nesting changed.
+  tools:
+    ruff:
+      enabled: true
+    shellcheck:
+      enabled: true         # the SIGPIPE and orphaned-`fi` class lives in shell
+    actionlint:
+      enabled: true         # workflows are the highest-risk files here
+    markdownlint:
+      enabled: false        # style noise on docs that are read for facts, not formatting
+    gitleaks:
+      enabled: true
+    semgrep:
+      enabled: true
+    eslint:
+      enabled: true
 
 chat:
   auto_reply: true

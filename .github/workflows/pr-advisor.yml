@@ -578,6 +578,86 @@ jobs:
           cat lane-advice.md >> "$GITHUB_STEP_SUMMARY"
 
   # ═════════════════════════════════════════════════════════════════════════
+  # CODERABBIT TRIGGER — this PUBLIC repo gets no automatic review.
+  #
+  # WHY (measured 2026-09-15/16): CodeRabbit posts, on every PR here, "This
+  # repository does not receive automatic reviews because it has fewer than
+  # 10 stars." `.coderabbit.yaml`'s `reviews.auto_review.enabled: true` is
+  # NOT the problem — the stars threshold overrides it regardless of config.
+  # A comment `@coderabbitai review`, posted from the OWNER's own GitHub
+  # account (not a bot), starts a real review: on PR #507 CodeRabbit replied
+  # "Review triggered" and its commit status moved from "Review skipped..."
+  # to "pending | Review in progress". `merge_cage.py`'s
+  # `judge_review_evidence` refuses any PR whose CodeRabbit status still says
+  # "Review skipped", so this job is what makes that gate satisfiable on this
+  # repo at all — it is a courtesy, not a gate itself.
+  #
+  # WHY THE OWNER'S TOKEN, NOT THE BUILT-IN `github.token`
+  # A comment posted by a bot identity (`github-actions[bot]` or similar) is
+  # ASSUMED not to be honoured by CodeRabbit as a command — not independently
+  # proven here; the one working trigger observed (PR #507) came from the
+  # owner's own account, and that is the only case tested.
+  # `CODERABBIT_TRIGGER_TOKEN` is meant to be a fine-grained PAT scoped to
+  # this repo only (job360), with Pull requests: read/write and nothing else.
+  #
+  # WHY `synchronize` IS IN THE TRIGGER LIST
+  # CodeRabbit's review is incremental — it only re-reads commits pushed
+  # since its last pass. Firing this only on `opened` would review a PR once
+  # and go stale on every push after, which is exactly the shape of a guard
+  # that looks armed and is not. The trade-off, said out loud: every push
+  # after this lands costs one `@coderabbitai review` comment from this job
+  # and one reply from CodeRabbit. The owner accepted that noise on purpose
+  # to keep the review current with what would actually ship.
+  #
+  # `dependabot[bot]` is excluded because its PRs are lockfile bumps merged
+  # by `dependabot-auto.yml` without going through the cage at all — a
+  # review trigger there is pure noise with nothing downstream to read it.
+  #
+  # NOT A GATE, ON PURPOSE. If the token is missing, this job says so in one
+  # summary line and exits 0. It must never turn a PR red for a secret only
+  # the owner can create — the real gate is the cage's review-evidence judge
+  # (`merge_cage.py`, untouched here); this job only tries to make that judge
+  # satisfiable.
+  coderabbit:
+    name: Trigger CodeRabbit review (owner's token)
+    if: >-
+      github.event_name == 'pull_request' &&
+      contains(fromJSON('["opened","reopened","ready_for_review","synchronize"]'), github.event.action) &&
+      github.event.pull_request.draft == false &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Least privilege, explicit, same discipline as `precheck` and `wip`
+    # above: the built-in token is never used to post here (the owner's PAT
+    # is), so this grant is unused in the happy path and kept only so the
+    # job is never accidentally broader than it needs to be.
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Check trigger token present
+        id: token
+        run: |
+          set -euo pipefail
+          echo "have=${{ secrets.CODERABBIT_TRIGGER_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: No token yet — say so, never fail the PR for it
+        if: steps.token.outputs.have != 'true'
+        run: |
+          set -euo pipefail
+          echo "CODERABBIT_TRIGGER_TOKEN is not set — reviews must be triggered by hand (\`@coderabbitai review\`) until the owner sets it." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Ask CodeRabbit to review, as the owner
+        if: steps.token.outputs.have == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CODERABBIT_TRIGGER_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR" --body "@coderabbitai review"
+          echo "Posted \`@coderabbitai review\` on PR #$PR (synchronize/open/reopen/ready_for_review only, never dependabot)." >> "$GITHUB_STEP_SUMMARY"
+
+  # ═════════════════════════════════════════════════════════════════════════
   # WIP LIMIT — refuse a 3rd open PR by PARKING it, never by losing it.
   #
   # OWNER DECISION (2026-09-08): "refuse a 3rd open PR (WIP 2)". Refuse does
