@@ -62,7 +62,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 ## F. Account management
 - [ ] 29. Password change guard — wrong current password → 401 (rule #26), tested non-destructively
 - [ ] 30. Email change → `PATCH /users/me/email` (verify current password first)
-- [ ] 31. Account delete → `DELETE /users/me` soft-delete (sets `deleted_at`; restore after to keep the demo account)
+- [ ] 31. Account delete → `DELETE /users/me` **irreversibly ERASES** the account — there is no restore (`backend/tests/test_account_delete_is_erasure.py`). Use a throwaway account, never the demo one.
 
 ## G. Agent surface (MCP)
 - [ ] 32. Token → `POST /api/tokens` 201 returns a `j360_…` token once; `GET /api/tokens` lists names only; `DELETE /api/tokens/{id}` revokes

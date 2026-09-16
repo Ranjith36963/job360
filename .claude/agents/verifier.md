@@ -43,7 +43,6 @@ A table, one row per requirement and per neighbour flow:
 
 | Req | What I did | What I saw | Evidence | Verdict |
 |---|---|---|---|---|
-| R1 | filled title/company, left ad blank, clicked Score | button disabled | `01-blank.png` | PASS |
 
 Then:
 - **Console errors** (verbatim, with the step they appeared on) — or "none".

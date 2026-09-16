@@ -91,9 +91,8 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 | `stats` | cheap counts: reply / interview rate per CV version, per role |
 | `tailor_documents` | **web fallback only** — our own tailoring for users with no agent |
 
-Auth: personal tokens (`j360_…`) today; **OAuth 2.1 with short-lived tokens
-is the next slice** so ChatGPT and Grok connectors can be added. Tokens stay
-as a fallback for CLI clients.
+Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
+`api/routes/well_known.py`), with personal `j360_…` tokens as the CLI fallback.
 
 ## Build order (decided 2026-09-03)
 
