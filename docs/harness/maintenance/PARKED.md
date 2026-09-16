@@ -11,3 +11,5 @@ implementation or an explicit decision to drop it. Written by `/sync` and
 
 | Date | Source doc | Claim | Evidence the code lacks it | Status |
 |------|-----------|-------|----------------------------|--------|
+
+Proof drill 2026-09-16: a docs-only PR to watch the CodeRabbit trigger fire as the owner.
