@@ -24,7 +24,7 @@ job360/
 ├── backend/
 │   ├── main.py                       # FastAPI uvicorn entry (thin; imports src/api/main.py)
 │   ├── pyproject.toml                # Deps + dev extras, ruff/mypy/pytest config
-│   ├── data/                         # Runtime (gitignored): exports/, reports/, logs/, chroma/, legacy user_profile.json. NO jobs.db — the store is Postgres; `core.settings.DB_PATH` is a connection selector `repositories.pg.connect` maps to a schema, not a file
+│   ├── data/                         # Runtime (gitignored). NO jobs.db — the store is Postgres; `core.settings.DB_PATH` is a connection selector `repositories.pg.connect` maps to a schema, not a file
 │   ├── migrations/                   # forward/reverse SQL migration pairs + runner.py (counts: repo facts above)
 │   ├── src/
 │   │   ├── cli.py                    # Click CLI: api, setup-profile
@@ -37,7 +37,7 @@ job360/
 │   │   │   └── tenancy.py            # DEFAULT_TENANT_ID UUID for CLI/legacy rows
 │   │   ├── services/                 # (post-Phase-4 merge of filters/ + notifications/ + profile/)
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies), magic-link + system email (Resend/SMTP)
-│   │   │   ├── applications/         # application-spine services (events, artifacts, authorship, contacts, stats, diff, lessons, visa)
+│   │   │   ├── applications/         # application-spine services — `ls` the folder for the module list
 │   │   │   ├── fetch/                # the URL-fetch web fallback (extract, fetcher, ssrf guard.py, outcomes)
 │   │   │   ├── tailoring/            # generator, prompts, provenance, integrity, docx, pdf — the tailor web fallback
 │   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, seniority, skill_normalizer
@@ -95,82 +95,17 @@ This key is used for:
 
 ### Data Model
 
-```
-UserProfile
-  +-- cv_data: CVData
-  |     +-- raw_text: str
-  |     +-- skills: list[str]
-  |     +-- job_titles: list[str]
-  |     +-- education: list[str]
-  |     +-- certifications: list[str]
-  |     +-- summary: str
-  |     +-- linkedin_positions: list[dict]      # From LinkedIn profile PDF
-  |     +-- linkedin_skills: list[str]           # From LinkedIn profile PDF
-  |     +-- linkedin_industry: str               # From LinkedIn profile PDF
-  |     +-- github_languages: dict[str, int]     # From GitHub API
-  |     +-- github_topics: list[str]             # From GitHub API
-  |     +-- github_skills_inferred: list[str]    # From GitHub API
-  |     +-- linkedin_raw_text: str               # Two-pass: stored for offline LLM re-run
-  |     +-- github_repos_brief: list[dict]       # Two-pass: name/description/topics for LLM re-run
-  |     +-- github_llm_skills: list[str]         # Two-pass: LLM read repo prose
-  |     +-- about_me_inferred_skills: list[str]  # Two-pass: LLM mined preferences.about_me
-  +-- preferences: UserPreferences
-        +-- target_job_titles: list[str]
-        +-- additional_skills: list[str]
-        +-- excluded_skills: list[str]
-        +-- preferred_locations: list[str]
-        +-- industries: list[str]
-        +-- salary_min/max: float | None
-        +-- work_arrangement: str    # "remote", "hybrid", "onsite", or ""
-        +-- experience_level: str
-        +-- negative_keywords: list[str]
-        +-- about_me: str
-        +-- github_username: str
-```
+The fields are the dataclasses `services/profile/models.CVData` and
+`services/profile/models.UserPreferences`. Read them there.
 
-### LinkedIn Parser Pipeline
+### Extraction pipelines
 
-```
-LinkedIn profile PDF -> parse_linkedin_pdf() -> dict
-  |
-  +-> pdfplumber text extraction (all pages)
-  +-> is_linkedin_pdf() 2-of-3 heuristic (URL / headings / footer)
-  +-> _split_sections() by known heading vocabulary
-  +-> Deterministic: summary, skills (one per line), headline, industry
-  +-> LLM (Gemini -> Groq -> Cerebras) in parallel for:
-  |     - Experience -> [{title, company, start, end, description}, ...]
-  |     - Education  -> [{school, degree, start, end, notes}, ...]
-  |     - Certifications -> [{name, authority, start, end}, ...]
-  |
-  enrich_cv_from_linkedin(cv_data, linkedin_data) -> CVData
-  # Merges LinkedIn data into existing CVData fields (same as old ZIP path)
-```
-
-### GitHub Enricher Pipeline
-
-```
-GitHub username -> fetch_github_profile(username) -> dict  [async]
-  |
-  +-> GET /users/{username}/repos -> repo list (up to 30)
-  +-> For each repo: languages, topics from API
-  +-> LANGUAGE_TO_SKILL mapping -> inferred skills
-  |
-  enrich_cv_from_github(cv_data, github_data) -> CVData
-  # Adds github_languages, github_topics, github_skills_inferred to CVData
-```
-
-Uses optional `GITHUB_TOKEN` env var for higher API rate limits (60 req/hr unauthenticated, 5000 req/hr authenticated).
-
-### CV Parser Pipeline
-
-```
-PDF/DOCX -> extract_text() -> raw text
-  |
-  +-> _find_sections() -> {skills, experience, education, certifications, summary}
-  |
-  +-> LLM extraction via llm_provider.py (OpenAI PRIMARY, then Gemini/Groq/Cerebras free-tier fallback)
-  |     Returns: skills[], job_titles[], education[], certifications[], summary
-```
+One entry point each — read the function and what it calls:
+`services/profile/linkedin_parser.parse_linkedin_pdf`,
+`services/profile/github_enricher.fetch_github_profile`,
+`services/profile/cv_parser.extract_text`. All three reach the LLM through the
+single chain in `services/profile/llm_provider.llm_extract`, whose provider order is
+pinned by `backend/tests/test_llm_provider.py::test_llm_extract_prefers_openai`.
 
 ### Two-Pass Extraction (`services/profile/two_pass.py`)
 
@@ -246,7 +181,7 @@ tells you to set).
   by `core.settings.validate_required_env`. Everything else is optional.
 - Tuning constants that are NOT env-readable live in the same file; changing
   them in `.env` does nothing.
-- Data outputs go to `backend/data/` (gitignored): `exports/`, `reports/`, `logs/`, `chroma/`.
+- Data outputs go to `backend/data/` (gitignored).
 
 ---
 
@@ -260,33 +195,15 @@ tells you to set).
 
 ### Production (backend/pyproject.toml)
 
-> **Source of truth is `backend/pyproject.toml` — read it, don't trust this table.**
+`[project].dependencies` in `backend/pyproject.toml` is the list; every entry
+carries the comment saying why it is there. A table here is a second copy that
+goes stale without failing anything — this one still declared `scikit-learn`
+long after #503 removed it.
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| aiohttp | >=3.14.1 | Async HTTP client (profile-side: GitHub API, LLM providers) |
-| defusedxml | >=0.7.1 | XXE-safe XML parsing |
-| psycopg[binary,pool] | >=3.2 | Async PostgreSQL driver — ALL storage. SQLite is fully removed; `pg.py` shims an aiosqlite-shaped API over it, but **aiosqlite is NOT a dependency** |
-| python-dotenv | >=1.0.0 | .env file loading |
-| jinja2 | >=3.1.0 | HTML report templates |
-| click | >=8.1.0 | CLI framework |
-| pdfplumber | >=0.10.0 | PDF text extraction (CV parsing) |
-| python-docx | >=1.1.0 | DOCX text extraction (CV parsing) |
-| rich | >=13.0.0 | Terminal table rendering |
-| humanize | >=4.9.0 | Relative time formatting |
-| fastapi | >=0.115.0 | API server for the Next.js frontend (`backend/src/api/`) |
-| uvicorn[standard] | >=0.30.0 | ASGI server for FastAPI |
-| python-multipart | >=0.0.9 | File upload support |
-| httpx | >=0.27.0 | Async HTTP client (used by API + LLM providers) |
-| openai | >=1.0.0 | **PRIMARY** CV-parsing LLM provider |
-| google-generativeai / groq / cerebras-cloud-sdk | >=0.8.0 / >=0.11.0 / >=1.0.0 | Fallback LLM providers for CV parsing |
-| argon2-cffi / itsdangerous / email-validator | >=23.1.0 / >=2.2.0 / >=2.1.0 | Password hashing (argon2id) + signed session cookies + pydantic `EmailStr`. `cryptography` (Fernet channel-credential encryption) was dropped with the notification-channel system, 2026-09-05 |
-| rapidfuzz | >=3.0 | Tailor integrity check + two-pass profile merge (**lazy-imported**, rule #16) |
-| scikit-learn | >=1.4 | **No importer left** — it was the dedup TF-IDF layer (deleted, slice 5). Still declared because the `[semantic]` stack expects it; dropping it is a follow-up |
-| sentry-sdk | >=1.40.0 | Error tracking + performance monitoring |
-| sentence-transformers / numpy | `[semantic]` extra (~300 MB) | One importer left: `services/profile/skill_normalizer.py` (**lazy-imported**, opt-in). `chromadb` left the extra with the sourcing-era embeddings stack (slice 5) |
-
-`arq` and `python-jobspy` are gone — no worker process, no Indeed/Glassdoor scraper. The `indeed` extra no longer exists.
+The only fact worth repeating, because the manifest cannot say it:
+**aiosqlite is NOT a dependency** — `repositories/pg.py` shims an
+aiosqlite-shaped API over psycopg3, and heavy packages must stay lazy-imported
+(rule #16, guarded by `backend/tests/test_heavy_imports_stay_lazy.py`).
 
 ### Dev (`pip install -e ".[dev]"` from `backend/`)
 
