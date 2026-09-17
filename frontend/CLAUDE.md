@@ -72,15 +72,10 @@ backend route/response change: run `npm run gen:types`, commit the regenerated
 
 ## Where things are
 
-- `src/app/` — App Router pages: `(auth)/`, `bring/`, `applications/[id]/`, `receipts/`,
-  `profile/`, `settings/{account,connect}/` (+ `layout.tsx`, `page.tsx`, `_tabs.tsx`),
-  `oauth/` (consent screen for MCP clients), `privacy/`, `terms/`, `contact/`.
-  `/settings` redirects to `/settings/account`.
-- `src/components/` — `ui/` (shadcn primitives), `applications/`, `tailor/`,
-  `profile/`, `layout/`, `providers/`, `consent/`.
-- `src/lib/` — `api.ts` (fetch wrapper), `api-types.ts` (generated), `api-error.ts`,
-  `types.ts`, `utils.ts`, `consent.ts`, `agent-edits.ts`.
-- `src/middleware.ts` — session-cookie auth guard (redirects unauthed → login).
+- `src/app/`, `src/components/`, `src/lib/` — `ls` them; the one thing `ls` cannot
+  tell you is that `/settings` redirects to `/settings/account`.
+- `src/middleware.ts` — session-cookie auth guard; `PROTECTED_PATHS` there is the
+  gated list, and an unauthed hit bounces to `/login?next=…`.
 
 ## Verify, don't assume (root rule + verify-job360 skill)
 
