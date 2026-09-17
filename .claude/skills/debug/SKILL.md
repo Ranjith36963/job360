@@ -104,10 +104,6 @@ WHERE lower(company) LIKE '%<norm_company>%' AND lower(title) LIKE '%<norm_title
 ORDER BY id;
 ```
 
-The EARLIEST row is the one `bring` returns; if two rows exist for one key, the
-bug is in `normalized_key()` or in the insert path — read both before touching
-the data.
-
 Replace `<TITLE_ARG>` and `<COMPANY_ARG>` with the user's arguments.
 
 ## Tools Used

@@ -39,8 +39,8 @@ job360/
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies), magic-link + system email (Resend/SMTP)
 │   │   │   ├── applications/         # application-spine services — `ls` the folder for the module list
 │   │   │   ├── fetch/                # the URL-fetch web fallback (extract, fetcher, ssrf guard.py, outcomes)
-│   │   │   ├── tailoring/            # generator, prompts, provenance, integrity, docx, pdf — the tailor web fallback
-│   │   │   └── profile/              # cv_parser, llm_provider, linkedin_parser, github_enricher, models, preferences, storage, seniority, skill_normalizer
+│   │   │   ├── tailoring/            # the tailor web fallback — `ls` the folder for the module list
+│   │   │   └── profile/              # extraction + the LLM chain — `ls` the folder for the module list
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
 │   │   │   └── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + forward-compat migration schema
 │   │   └── utils/
@@ -49,9 +49,7 @@ job360/
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
 │   └── tests/                        # file count: `docs/GENERATED.md` (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
-│   ├── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
-│   ├── src/components/{ui,applications,tailor,profile,layout}/
-│   └── src/lib/{api.ts,types.ts,utils.ts}
+│   └── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 ├── docs/
 │   └── product/                      # VISION.md (the mission), product_design_rules.md
 ├── .env.example
