@@ -69,7 +69,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 - [ ] 33. MCP → a POST to `/api/mcp` (a mounted ASGI app, not a router) with no bearer = 401 + `WWW-Authenticate: Bearer`; with the token, `tools/list` names every tool (count it with `grep -c "@mcp.tool()" backend/src/api/mcp_server.py`)
 
 ## H. Cross-cutting
-- [ ] 34. Every page renders with no console errors: `/`, `/login`, `/register`, `/forgot-password`, `/reset-password`, `/bring`, `/applications`, `/applications/[id]`, `/receipts`, `/profile`, `/settings/account`
+- [ ] 34. Every page renders with no console errors. Enumerate the pages from the code — every `page.tsx` under `frontend/src/app/` — never from a list written here.
 - [ ] 35. Theme toggle works; spot-click every primary button on every page (no dead buttons)
 
 ---
