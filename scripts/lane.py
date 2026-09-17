@@ -671,27 +671,42 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
 
     # 12. THE `.claude` CARVE-OUT (owner, 2026-09-17: "merge all daily docs").
     #
-    #     The daily truth-check PR edits `.claude/skills/**/*.md` and
-    #     `.claude/agents/*.md`. The blanket `.claude/**` in `harness_owner` made
-    #     every one of them a hand-merge, for prose an agent reads.
+    #     The daily truth-check PR edits `.claude/skills/**/*.md`. The blanket
+    #     `.claude/**` in `harness_owner` made every one of them a hand-merge,
+    #     for prose an agent reads.
     #
     #     Both directions are pinned, because this carve-out is only safe as a
-    #     PAIR: the reading matter merges, the executing and configuring half
-    #     does not. Widen `.claude/skills/**` to `.claude/**` and the second
-    #     group goes red instantly.
+    #     PAIR: the reading matter merges, the executing, configuring and
+    #     JUDGING parts do not. Widen `.claude/skills/**` to `.claude/**` and the
+    #     second group goes red instantly.
     for readable in (".claude/skills/hard-rules/SKILL.md",
                      ".claude/skills/verify-job360/references/methodology.md",
-                     ".claude/agents/reviewer-bugs.md"):
+                     ".claude/skills/debug/SKILL.md"):
         v_read = classify([readable], policy)
         check(f"the words an agent reads take the fast lane: {readable}",
               (v_read["lane"], v_read["auto_merge"]), ("harness", True))
+    #     `.claude/agents/**` WAS IN THE LIST ABOVE FOR ONE COMMIT. reviewer-bugs
+    #     raised it as a P0 on PR #582: that directory defines the reviewers this
+    #     gate relies on (`bugs` IS the reviewer-bugs check), so machine-
+    #     mergeable it lets a PR soften its own reviewer and then be merged by
+    #     the softened reviewer. All three files are named, not just the one the
+    #     P0 cited — the rule is about the directory, and `verifier.md` is the
+    #     one nobody would think to check.
     for guarded in (".claude/hooks/commit-gate.sh",
                     ".claude/hooks/worktree-reaper.sh",
                     ".claude/settings.json",
-                    ".claude/settings.local.json"):
+                    ".claude/settings.local.json",
+                    ".claude/agents/reviewer-bugs.md",
+                    ".claude/agents/reviewer-conventions.md",
+                    ".claude/agents/verifier.md"):
         v_guard = classify([guarded], policy)
-        check(f"the half that RUNS or CONFIGURES is still yours: {guarded}",
+        check(f"the half that RUNS, CONFIGURES or JUDGES is still yours: {guarded}",
               (v_guard["lane"], v_guard["auto_merge"]), ("harness_owner", False))
+    #     ...and a skill beside an agent definition is the owner's, because
+    #     precedence is a door. Without this the skills carve-out is a way in.
+    check("a skill doc beside a reviewer definition is still harness_owner",
+          classify([".claude/skills/hard-rules/SKILL.md",
+                    ".claude/agents/verifier.md"], policy)["lane"], "harness_owner")
     # ...and a skill beside a hook is a harness_owner PR, because precedence is a
     # door. Without this, the carve-out could be used as a way in.
     check("a skill doc beside a hook is still harness_owner",

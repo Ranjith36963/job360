@@ -149,8 +149,15 @@ def drill() -> int:
         # the same question. The owner decided the first. The second stays no.
         (".claude/skills/hard-rules/SKILL.md",
          "a skill doc — fast lane now, but still SELF", True),
+        # Blocked TWICE over: `harness_owner` fails condition 1 and the
+        # `.claude/` prefix fails condition 2. Both are stated because they
+        # protect against different mistakes — the lane could be widened again,
+        # and SELF could be "tidied". reviewer-bugs raised the lane half as a P0
+        # on PR #582; this file was already right, and now says so out loud.
         (".claude/agents/reviewer-bugs.md",
-         "an agent definition — fast lane now, but still SELF", True),
+         "a reviewer definition — owner lane AND SELF", True),
+        (".claude/agents/verifier.md",
+         "the verifier's definition — owner lane AND SELF", True),
         ("CLAUDE.md", "the owner's own words — owner lane", True),
         ("backend/CLAUDE.md", "...at depth too", True),
         (".coderabbit.yaml", "the reviewer's own config", True),

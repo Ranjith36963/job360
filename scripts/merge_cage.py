@@ -370,7 +370,17 @@ DENY_REASONS: dict[str, str] = {
         f"only holds while a file is absent is not a rule. {_OWNER_MERGES}",
     ".claude/*.json":
         "configuration at the root of `.claude/`, including files nobody has invented "
-        f"yet — prose lives in `skills/` and `agents/`, not here. {_OWNER_MERGES}",
+        f"yet — prose lives in `skills/`, not here. {_OWNER_MERGES}",
+    # ── THE JUDGE (P0 raised by reviewer-bugs on PR #582) ────────────────────
+    # `reviewer-bugs.md`, `reviewer-conventions.md`, `verifier.md`. The `bugs`
+    # tag in the policy IS the reviewer-bugs check, so this directory defines a
+    # gate that judges this very PR. Machine-mergeable, a diff could soften the
+    # reviewer and then be merged by the softened reviewer. Same sentence as
+    # `.github/**` and `scripts/**` on purpose — it is the same rule, and the
+    # drill matches on "cage is escaped" so the three cannot drift apart.
+    ".claude/agents/**":
+        "the definition of a reviewer this gate relies on — a machine editing its own "
+        f"judge is how a cage is escaped. {_OWNER_MERGES}",
     "**/CLAUDE.md": "the rules agents read; changing them unsupervised is circular. "
                     + _OWNER_MERGES,
 }
@@ -2015,18 +2025,36 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     red("the owner's own words are refused",
         check_paths(["backend/CLAUDE.md"]), "circular", P)
 
-    # THE `.claude` SPLIT, BOTH HALVES. The owner carved `.claude/skills/**` and
-    # `.claude/agents/**` into the fast lane on 2026-09-17 so the daily
-    # truth-check PR stops needing a hand. The carve-out is only safe as a PAIR,
-    # so each half gets a case: widen the allow side to `.claude/**` and the two
-    # reds below go green, which is the drill doing its job.
+    # THE `.claude` SPLIT, BOTH HALVES. The owner carved `.claude/skills/**`
+    # into the fast lane on 2026-09-17 so the daily truth-check PR stops needing
+    # a hand. The carve-out is only safe as a PAIR, so each half gets a case:
+    # widen the allow side to `.claude/**` and the reds below go green, which is
+    # the drill doing its job.
     red("a git hook is refused — an agent may not edit its own exam",
         check_paths([".claude/hooks/worktree-reaper.sh"]), "cage is escaped", P)
     red("the agent's own permissions file is refused",
         check_paths([".claude/settings.json"]), "authorisation", P)
+
+    # ── A MACHINE MAY NOT EDIT ITS OWN JUDGE (P0, reviewer-bugs on PR #582) ──
+    # `.claude/agents/**` was in the fast-lane carve-out for exactly one commit.
+    # It holds `reviewer-bugs.md`, `reviewer-conventions.md` and `verifier.md` —
+    # the definitions of the reviewers this very gate relies on (`bugs` is the
+    # `reviewer-bugs` check). Machine-mergeable, a PR could soften the reviewer
+    # in the same diff the reviewer is judging and then be merged by the
+    # softened reviewer.
+    #
+    # ALL THREE ARE NAMED, not just the one the P0 cited. A drill that pins one
+    # file pins one file; the rule is about the directory, and `verifier.md` is
+    # the one nobody would think to check.
+    for judge in (".claude/agents/reviewer-bugs.md",
+                  ".claude/agents/reviewer-conventions.md",
+                  ".claude/agents/verifier.md"):
+        red(f"a machine may not edit its own judge: {judge}",
+            check_paths([judge]), "cage is escaped", P)
+
     claude_stuck = [f for f in (".claude/skills/hard-rules/SKILL.md",
-                                ".claude/agents/reviewer-bugs.md",
-                                ".claude/skills/verify-job360/references/methodology.md")
+                                ".claude/skills/verify-job360/references/methodology.md",
+                                ".claude/skills/debug/SKILL.md")
                     if check_paths([f]).status != "pass"]
     ok("the words an agent READS take the fast lane (owner's call, 2026-09-17)",
        not claude_stuck, f"a daily-truth-check file is still refused: {claude_stuck}", P)

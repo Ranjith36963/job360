@@ -39,18 +39,44 @@
 #      watched for fifteen minutes, and taken back automatically if prod moves.
 #
 #   2. The daily truth-check PRs merge themselves.
-#      They edit `.claude/skills/**/*.md` and `.claude/agents/*.md`. The blanket
-#      `.claude/**` in `harness_owner` (and the DENY the cage derives from it)
-#      made every one of them owner-only, which is a hand-merge per day for
-#      prose an agent reads. Those two directories are now `harness`.
+#      They edit `.claude/skills/**/*.md`. The blanket `.claude/**` in
+#      `harness_owner` (and the DENY the cage derives from it) made every one of
+#      them owner-only, which is a hand-merge per day for prose an agent reads.
+#      That directory is now `harness`.
+#
+#      `.claude/agents/**` WAS IN THAT CARVE-OUT FOR ONE COMMIT AND IS NOT NOW.
+#      reviewer-bugs raised it as a P0 on PR #582: that directory holds the
+#      definitions of the reviewers the gates rely on, so a machine-mergeable
+#      edit lets a PR weaken its own reviewer and then be merged by it. It is
+#      back in `harness_owner`, named explicitly. See the entry there.
 #
 # WHAT DID NOT CHANGE, AND MUST NOT
 #   `harness_owner` is still human-only, and it is now the ONLY human-only lane:
 #   the robot's own rulebook -- `.github/**`, `scripts/**`, `.claude/hooks/**`,
-#   `.claude/settings*.json`, every `**/CLAUDE.md`, and the cage files named
-#   below -- is never merged by a machine. An agent editing its own guards is
-#   how a cage is escaped, and no amount of post-merge watching detects it,
-#   because the watcher is one of the things it could have edited.
+#   `.claude/settings*.json`, `.claude/agents/**`, every `**/CLAUDE.md`, and the
+#   cage files named below -- is never merged by a machine. An agent editing its
+#   own guards is how a cage is escaped, and no amount of post-merge watching
+#   detects it, because the watcher is one of the things it could have edited.
+#
+# THE FOUR LANES AND WHAT EACH DEMANDS (kept in step with `requires:` below)
+#
+#   harness        ci, review, security, drill, bugs             auto_merge true
+#   product        ci, review, security, verify, ratchets, bugs  auto_merge true
+#   product_owner  ci, review, security, verify, ratchets, bugs  auto_merge true
+#   harness_owner  ci, review, drill, bugs                       auto_merge FALSE
+#
+#   `security` joined `harness` on 2026-09-17 (reviewer-bugs, #582). Its checks
+#   -- gitleaks, bandit, pip-audit, npm audit, CodeQL -- already run
+#   unconditionally on every PR here, so requiring them adds no job and no
+#   latency; what it adds is the refusal to merge while one is red or absent.
+#   `harness` was the only MACHINE-MERGEABLE lane that did not ask, and it now
+#   carries `.claude/skills/**`, which is not "only docs".
+#
+#   `harness_owner` is deliberately left alone. Its tag list never gates
+#   anything: the LANE cage refuses an `auto_merge: false` lane before the TAGS
+#   cage is ever consulted, so adding a tag there would change no verdict and
+#   would only make this table look symmetrical. The owner still sees every
+#   check on the PR before merging it by hand.
 #
 # THE TWO CONSEQUENCES THIS DECISION FORCES ELSEWHERE
 #   (a) PRECEDENCE REORDERED. `merge_cage.LANES` -- the single definition of
@@ -232,14 +258,31 @@ lanes:
       - ".vscode/**"
       # ── THE .claude CARVE-OUT (2026-09-17, owner: "merge all daily docs") ──
       # The daily truth-check routine opens a PR a day that edits the skills an
-      # agent loads and the agent definitions themselves. Under the blanket
-      # `.claude/**` in `harness_owner` every one of those was a hand-merge, for
-      # prose. These two directories are the READING MATTER; the EXECUTION and
-      # the CONFIGURATION stay owner-only (`.claude/hooks/**`,
-      # `.claude/settings*.json`, `.claude/*.json` -- see harness_owner).
+      # agent loads. Under the blanket `.claude/**` in `harness_owner` every one
+      # of those was a hand-merge, for prose. SKILLS are the reading matter; the
+      # EXECUTION, the CONFIGURATION and — see the P0 below — the REVIEWERS stay
+      # owner-only (`.claude/hooks/**`, `.claude/settings*.json`,
+      # `.claude/*.json`, `.claude/agents/**` -- all in harness_owner).
+      #
+      # `.claude/agents/**` WAS HERE FOR ONE COMMIT AND IT WAS WRONG.
+      # reviewer-bugs raised it as a P0 on PR #582 and it was right: that
+      # directory holds `reviewer-bugs.md`, `reviewer-conventions.md` and
+      # `verifier.md` — the definitions of the reviewers the gates rely on. A
+      # machine-mergeable edit to them lets a PR weaken its own reviewer and
+      # then be merged by it. That is the "cage may not edit the cage" rule with
+      # the judge in the role of the cage, and it does not stop being true
+      # because the judge is written in markdown. Moved to `harness_owner`.
+      #
+      # WHY SKILLS ARE NOT THE SAME CASE, stated so this line is not "tidied"
+      # into the agents one later: a skill produces NO CI gate. Nothing in
+      # `.github/workflows/` reads `.claude/skills/**` at run time (grepped),
+      # so no check's verdict can be changed by editing one. They are
+      # instructions for a local session, they are what the daily truth-check
+      # actually edits, and every such diff is read by CodeRabbit and by
+      # reviewer-bugs — whose own prompt calls prompt-injection a P0.
       #
       # CARVED OUT BY DIRECTORY, NOT BY EXTENSION, ON PURPOSE. `git ls-files
-      # .claude` says both trees are markdown-only today, so `**/*.md` would
+      # .claude` says the skills tree is markdown-only today, so `**/*.md` would
       # classify exactly the same files and would look tighter. It is not: if a
       # `.py` or a `.sh` ever appears under `.claude/skills/`, an extension rule
       # sends it to `unknown` -> `harness_owner`, which is the safe direction but
@@ -249,10 +292,15 @@ lanes:
       # whatever it is written in. The lane is a fact about WHERE it lives.
       # (Anything executable that turns up there is caught upstream of the lane:
       # `scripts/repairable.py` blocks the whole `.claude/` prefix outright, so
-      # the auto-fixer still may not touch either directory unsupervised.)
+      # the auto-fixer still may not touch this directory unsupervised.)
       - ".claude/skills/**"
-      - ".claude/agents/**"
-    requires: [ci, review, drill, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
+    # `security` ADDED 2026-09-17, also from reviewer-bugs on #582: this lane
+    # carries `.claude/skills/**` now, and a fast lane with no secret scan and no
+    # dependency audit was a hole the moment it stopped being only docs. It costs
+    # NOTHING to close — gitleaks, bandit, pip-audit, npm audit and CodeQL
+    # already run on every PR in this repo, so requiring them here adds no job,
+    # only the refusal to merge when one of them is red or missing.
+    requires: [ci, review, security, drill, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
     auto_merge: true
     watch: false            # nothing live to watch
     rollback: git-revert    # a normal revert commit is enough
@@ -445,13 +493,39 @@ lanes:
       #                          purpose — `*` stops at `/`, so this cannot
       #                          reach a JSON fixture inside a skill directory.
       #
-      # The reading matter — `.claude/skills/**` and `.claude/agents/**` — is in
-      # the `harness` lane, carved out by DIRECTORY rather than by extension.
-      # The reason is written at that entry.
+      # The reading matter — `.claude/skills/**` — is in the `harness` lane,
+      # carved out by DIRECTORY rather than by extension. The reason is written
+      # at that entry.
       - ".claude/hooks/**"
       - ".claude/settings.json"
       - ".claude/settings.local.json"
       - ".claude/*.json"
+      # ── THE REVIEWERS THEMSELVES (P0 from reviewer-bugs on PR #582) ────────
+      # THE DEFINITIONS OF THE REVIEWERS THE GATES RELY ON — A MACHINE MAY NOT
+      # EDIT ITS OWN JUDGE.
+      #
+      # `.claude/agents/` holds `reviewer-bugs.md`, `reviewer-conventions.md`
+      # and `verifier.md`. The `bugs` tag in THIS file is the `reviewer-bugs`
+      # check; the R1/R3 lenses and the verifier are what "reviewed" means here.
+      # Ship `.claude/agents/**` in a fast lane and a PR can soften the reviewer
+      # in the same diff the reviewer is judging, then be merged by the softened
+      # reviewer. It is the "cage may not edit the cage" rule with the judge in
+      # the cage's place, and markdown does not exempt it — a prompt IS the
+      # judgement.
+      #
+      # THE HONEST STATE TODAY, so nobody later reads this as narrower than it
+      # is: no workflow READS these files at run time. `review-bugs.yml` inlines
+      # the prompt verbatim and says in its own comment "do not rewrite the
+      # judgement here if the agent file changes — update this prompt to match
+      # it instead". So the file is the SOURCE OF TRUTH the CI prompt is kept in
+      # sync with, and it is loaded directly by every local session that runs
+      # the lens. A weakening merged here is a weakening that arrives in CI on
+      # the next sync, quietly and with a clean diff. That is worse than a live
+      # read, not better.
+      #
+      # This costs the owner a hand-merge whenever a reviewer's judgement
+      # changes, which is the correct price and a rare event.
+      - ".claude/agents/**"
       # the cage may not edit the cage
       - ".github/merge-policy.yml"       # this file
       - "scripts/merge_cage.py"

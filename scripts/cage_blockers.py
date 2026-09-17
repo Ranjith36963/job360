@@ -657,6 +657,47 @@ BLOCKERS: list[Blocker] = [
         "lane. Third instance in this file of the same shape: a drill that agrees with the "
         "code for a reason neither of them is about.",
     ),
+    Blocker(
+        id="B29",
+        met="2026-09-17",
+        what="A MACHINE WAS GIVEN ITS OWN JUDGE TO EDIT. The first cut of B28's change "
+        "carved BOTH `.claude/skills/**` and `.claude/agents/**` into the fast `harness` "
+        "lane, on the reasoning that both are 'the words an agent reads'. That reasoning is "
+        "true of skills and false of agents: `.claude/agents/` holds `reviewer-bugs.md`, "
+        "`reviewer-conventions.md` and `verifier.md` — the definitions of the reviewers the "
+        "gate itself relies on. The `bugs` tag in merge-policy.yml IS the reviewer-bugs "
+        "check. Machine-mergeable, a PR could soften the reviewer in the same diff that "
+        "reviewer is judging, and then be merged by the softened reviewer. Nine drill cases "
+        "were rewritten in that commit and not one of them could see this, because every one "
+        "asked 'is this path in the lane the policy says' — never 'does this path DEFINE a "
+        "gate that judges this PR'. Caught by reviewer-bugs itself, as a P0 on PR #582.",
+        repro="# before the fix, on the PR that introduced the carve-out\n"
+        "python scripts/lane.py .claude/agents/reviewer-bugs.md\n"
+        '  -> {"lane": "harness", "auto_merge": true}   # the judge, machine-mergeable',
+        rule="THE CAGE MAY NOT EDIT THE CAGE APPLIES TO THE JUDGE, AND A PROMPT IS A "
+        "JUDGEMENT. Whether a gate is enforced by Python or by markdown read into a model "
+        "changes nothing about who may edit it: `.claude/agents/**` is `harness_owner`, "
+        "named explicitly, with the same refusal sentence as `.github/**` and `scripts/**` "
+        "so the three cannot drift apart. The test for a fast lane is not 'is this prose' "
+        "but 'can editing this change a verdict about the PR it arrives in'. Skills pass "
+        "that test — nothing in .github/workflows/ reads them at run time, so no check's "
+        "result can move — and stay fast. NOTE THE TRAP UNDER THE HONEST DEFENCE: "
+        "review-bugs.yml INLINES its prompt rather than reading the agent file, so 'CI does "
+        "not read it' is true and is NOT a reason to relax. The workflow's own comment makes "
+        "the agent file the source of truth the prompt is kept in sync with, so a weakening "
+        "merged here reaches CI on the next sync, quietly, with a clean diff — and it is "
+        "loaded directly by every local session in the meantime.",
+        drill="a machine may not edit its own judge: .claude/agents/reviewer-bugs.md",
+        severity="too-permissive",
+        note="The same review added `security` to the `harness` lane's `requires`. That lane "
+        "asked for ci, review, drill and bugs and no secret scan or dependency audit, which "
+        "was defensible while it was documents and is not now that it carries "
+        "`.claude/skills/**`. It cost nothing: gitleaks, bandit, pip-audit, npm audit and "
+        "CodeQL already run unconditionally on every PR here, so requiring them adds no job "
+        "— only the refusal to merge while one is red or absent. `harness_owner` was "
+        "deliberately left alone: the LANE cage refuses an `auto_merge: false` lane before "
+        "the TAGS cage is consulted, so a tag there would change no verdict.",
+    ),
 ]
 
 
