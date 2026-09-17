@@ -132,6 +132,27 @@ def drill() -> int:
         ("scripts/merge_cage.py", "the cage itself — SELF", True),
         ("scripts/repairable.py", "THIS FILE — SELF", True),
         (".claude/hooks/commit-gate.sh", "a git hook — SELF", True),
+        # ── ADDED 2026-09-17, WHEN THE LANE MAP MOVED UNDER THIS FILE ────────
+        # The owner carved `.claude/skills/**` and `.claude/agents/**` into the
+        # `harness` lane so the daily truth-check PRs stop needing a hand. That
+        # is condition 1 (`lane in REPAIRABLE_LANES`) flipping to TRUE for two
+        # directories — which is exactly the situation the module docstring
+        # calls "a cage that is only safe while another file stays correct".
+        # Condition 2, the hardcoded `.claude/` prefix in SELF, is what still
+        # blocks them, and until now nothing proved it: the only `.claude` case
+        # here was a hook, which condition 1 blocked anyway.
+        #
+        # THIS IS A SEPARATE DECISION FROM THE MERGE LANE, and it is deliberately
+        # NOT taken here. "A machine may merge a skill doc that a human wrote and
+        # CodeRabbit reviewed" and "the auto-fixer may rewrite the instructions
+        # it is about to read, unsupervised, with no review in the loop" are not
+        # the same question. The owner decided the first. The second stays no.
+        (".claude/skills/hard-rules/SKILL.md",
+         "a skill doc — fast lane now, but still SELF", True),
+        (".claude/agents/reviewer-bugs.md",
+         "an agent definition — fast lane now, but still SELF", True),
+        ("CLAUDE.md", "the owner's own words — owner lane", True),
+        ("backend/CLAUDE.md", "...at depth too", True),
         (".coderabbit.yaml", "the reviewer's own config", True),
         ("pyrightconfig.json", "what the type checker may ignore", True),
         ("backend/scripts/health-daily.sh", "a script CI shells out to", True),

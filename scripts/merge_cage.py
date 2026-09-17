@@ -191,7 +191,10 @@ def repo_root() -> Path:
 #
 # The new failure direction is the safe one: a bare name now matches the root
 # only, so a pattern someone forgets to prefix under-matches, the file matches no
-# lane, and it escalates to `product_owner`. Forgetting costs one refusal.
+# lane, and it escalates to `harness_owner` — the only lane a machine may not
+# merge (it was `product_owner` until that lane was flipped on 2026-09-17;
+# escalating to a lane that auto-merges would turn "nobody has decided this is
+# safe" into "ship it"). Forgetting costs one refusal.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -236,9 +239,14 @@ def path_matches(path: str, pattern: str) -> bool:
 #
 # DENY always beats ALLOW. If a file matches both, the owner decides.
 #
-# The deny list is not "dangerous code". It is the owner's own sentence:
-# product decisions, user-facing decisions, infrastructure decisions. Plus two
-# things a machine must never do unsupervised — delete, and edit its own guards.
+# The deny list is not "dangerous code". It is the owner's own sentence about
+# what a machine may not decide. NARROWED 2026-09-17: it used to carry the
+# product's sharp end too (schema, auth, manifests, infrastructure). The owner
+# moved that half to the watcher — `product_owner` is `auto_merge: true` now, so
+# those paths derive onto ALLOW, and what holds them safe is `verify` plus 15
+# minutes of post-merge watching plus a confirmed Railway rollback rather than a
+# filename. What is left on DENY is the two things a machine must never do
+# unsupervised: delete, and edit its own guards.
 #
 # Every entry carries a FIX clause, because a refusal a human cannot act on is
 # how a gate gets switched off at 7am. Most of these say plainly that nothing an
@@ -279,6 +287,14 @@ _OWNER_MERGES = "FIX: nothing an agent can do — this is the owner's call, so h
 # `check_lists()` now fails the build on BOTH new failure modes: a reason that
 # names a pattern the policy no longer has (dead configuration), and a fast-lane
 # path that a deny pattern swallows whole (the contradiction described above).
+# A fourth rule joined them 2026-09-17 for `WATCHED_RISKS` — see check_lists().
+#
+# THE COROLLARY OF DERIVING, learned on 2026-09-17: flipping ONE lane's
+# `auto_merge` in the policy silently moves every one of its paths across the
+# ALLOW/DENY line. That is the design working — one dial, one edit — and it is
+# also why a flip is never a one-line change in practice: the drill cases that
+# pinned those paths as DENY must be rewritten to pin them as ALLOW, or they go
+# red, which is exactly what they are for.
 # ─────────────────────────────────────────────────────────────────────────────
 
 POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy.yml"
@@ -294,84 +310,164 @@ POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy
 # same file `unknown`, and escalate. One reader permits, the other refuses, and
 # whichever runs decides. Adding a lane is therefore a deliberate edit to BOTH
 # readers, made here, once.
-LANES: tuple[str, ...] = ("product_owner", "harness_owner", "product", "harness")
+#
+# ── REORDERED 2026-09-17, AND IT IS A SECURITY CHANGE, NOT A TIDY-UP ─────────
+# The order was `product_owner, harness_owner, product, harness`, and
+# product_owner came first because it was the strictest lane: a human had to
+# merge it AND a user was downstream.
+#
+# The owner flipped `product_owner` to `auto_merge: true` on 2026-09-17. It is
+# no longer the strictest — it is no longer strict at all in the only sense
+# precedence cares about, which is "does a machine get to decide this". With the
+# old order, a PR holding ONE harness_owner file and ONE product_owner file
+# classified `product_owner`, reported `auto_merge: true`, and the arm would have
+# queued it: the human-only file loses to the machine-mergeable one standing next
+# to it. Precedence is a DOOR, not a score, and the door has to be the one that
+# stays shut.
+#
+# `harness_owner` is now first because it is now the only `auto_merge: false`
+# lane. Drilled in `scripts/lane.py`: "a migration AND a workflow file is
+# harness_owner, never machine-merged" — put this tuple back the old way and that
+# case goes red.
+LANES: tuple[str, ...] = ("harness_owner", "product_owner", "product", "harness")
 
-# pattern -> the sentence printed when it refuses. Keys MUST exist in the policy.
+# pattern -> the sentence printed when it refuses. Keys MUST exist in the policy
+# as the path of an `auto_merge: false` lane, and `check_lists()` refuses a key
+# that does not — a reason nobody will ever print reads like a rule and is only
+# a sentence.
+#
+# ── THIS DICT SHRANK ON 2026-09-17, AND NOT ONE RULE WAS DELETED ─────────────
+# The owner flipped `product_owner` to `auto_merge: true`, so `_load_lists()`
+# now derives that lane's twenty-odd paths onto ALLOW instead of DENY. Their
+# refusal sentences therefore stopped being refusals. They did NOT stop being
+# true — a migration is still irreversible, `profile.py` is still the file three
+# real IDORs were found in — so they moved down to `WATCHED_RISKS` rather than
+# being thrown away, and `check_lists()` keeps THAT dict honest the same way it
+# keeps this one honest.
+#
+# What is left here is exactly `harness_owner`: the robot's own rulebook.
 DENY_REASONS: dict[str, str] = {
-    # ── product: anything that changes what a user is shown or how it ranks ──
-    "backend/src/services/skill_matcher.py":
-        f"changes how jobs are scored — a product decision. {_OWNER_MERGES}",
-    "backend/src/services/deduplicator.py":
-        f"changes which jobs are shown at all. {_OWNER_MERGES}",
-    "backend/src/services/scoring/**":
-        f"changes how jobs are scored — a product decision. {_OWNER_MERGES}",
-    "backend/src/services/uk_gate.py":
-        f"decides which jobs enter the catalogue. {_OWNER_MERGES}",
-    "backend/src/services/visa_signal.py":
-        f"changes what the visa spotlight shows. {_OWNER_MERGES}",
-    "backend/src/services/profile/**":
-        f"changes what is extracted from a user's CV. {_OWNER_MERGES}",
-    "backend/src/models.py":
-        f"normalized_key lives here; wrong dedup = duplicate or lost rows. {_OWNER_MERGES}",
-    # ── users: identity, sessions, anything that can lock someone out ────────
-    "backend/src/api/routes/auth.py": f"authentication — a user decision. {_OWNER_MERGES}",
-    "backend/src/services/auth/**": f"authentication — a user decision. {_OWNER_MERGES}",
-    "backend/src/api/routes/account*.py":
-        f"account management — a user decision. {_OWNER_MERGES}",
-    "backend/src/services/notifications/**":
-        f"sends real messages to real people. {_OWNER_MERGES}",
-    # A per-user API route is denied on its PATH because a path cage cannot tell a
-    # logging fix from a deleted `Depends(require_user)`. PR #315 was +45 lines in
-    # exactly this file and would have merged on its filename alone; rules #12/#25
-    # exist because a review found three real IDORs in these routes.
-    "backend/src/api/routes/profile.py":
-        "a per-user API route — rules #12/#25. A filename cannot tell a logging fix "
-        f"from a removed `Depends(require_user)`. {_OWNER_MERGES}",
-    # ── infrastructure ───────────────────────────────────────────────────────
-    "backend/migrations/**":
-        f"schema change — irreversible against live data. {_OWNER_MERGES}",
-    "**/*docker-compose*": f"infrastructure decision. {_OWNER_MERGES}",
-    "**/*Dockerfile*": f"infrastructure decision. {_OWNER_MERGES}",
-    "**/railway.json": f"infrastructure decision. {_OWNER_MERGES}",
-    "**/*.env*": f"secrets and configuration. {_OWNER_MERGES}",
-    "backend/src/core/settings.py":
-        f"flags here change production behaviour globally. {_OWNER_MERGES}",
-    # ── dependency manifests ─────────────────────────────────────────────────
-    # THE CAGE MAY NEVER BE MORE PERMISSIVE THAN A GATE ALREADY ON MAIN. These
-    # were on the ALLOW list, and the cage has no semver awareness, so it would
-    # have waved through PR #291 (motion 12.42.2 -> 13.0.0) which
-    # dependabot-auto.yml already routes to a human. Manifests also carry
-    # postinstall scripts: allowing one is allowing arbitrary code on the build host.
-    "**/package.json":
-        "a dependency change — `.github/workflows/dependabot-auto.yml` already "
-        "owns this decision and sends MAJOR bumps to a human; a manifest also "
-        "runs postinstall scripts on the build host. "
-        "FIX: let dependabot-auto decide it, or the owner merges it by hand.",
-    "**/package-lock.json": "a dependency change — see package.json. "
-        "FIX: let dependabot-auto decide it, or the owner merges it by hand.",
-    "**/pyproject.toml": "a dependency change — see package.json. "
-        "FIX: let dependabot-auto decide it, or the owner merges it by hand.",
-    "**/requirements*.txt": "a dependency change — see package.json. "
-        "FIX: let dependabot-auto decide it, or the owner merges it by hand.",
-    # ── documents that ARE decisions ─────────────────────────────────────────
-    # The rest of `docs/product/` moved to the fast lane on 2026-08-26 (owner's
-    # call: a doc is prose). These two did not, because they are not prose: if a
-    # denied file delegates its authority to another file, that file inherits
-    # the denial.
-    "docs/product/product_design_rules.md":
-        "the canonical text of owner rules #29/#30/#31 — changing it changes the "
-        f"product. {_OWNER_MERGES}",
-    "docs/product/plans/batch-2-decisions.md":
-        f"a record of irreversible choices. {_OWNER_MERGES}",
     # ── the harness must not quietly edit its own cage ───────────────────────
     ".github/**": "part of the harness that judges this very PR — an agent editing its "
                   f"own guards is how a cage is escaped. {_OWNER_MERGES}",
     "scripts/**": "part of the harness that judges this very PR — an agent editing its "
                   f"own guards is how a cage is escaped. {_OWNER_MERGES}",
-    ".claude/**": "the instructions agents read — editing them unsupervised is circular. "
-                  + _OWNER_MERGES,
+    # ── `.claude/`: the half that RUNS, not the half that is READ ────────────
+    # `.claude/**` used to sit here whole. The daily truth-check routine edits
+    # `.claude/skills/**/*.md` and `.claude/agents/*.md` every day, and the
+    # blanket made each of those a hand-merge for prose, so the owner carved the
+    # two reading-matter directories into the `harness` lane on 2026-09-17.
+    # These four are what stayed, and the line between them is "does it execute,
+    # or does it decide what an agent may do without asking".
+    ".claude/hooks/**":
+        "a git hook the harness actually executes — the commit gate itself. An agent "
+        f"editing its own exam is how a cage is escaped. {_OWNER_MERGES}",
+    ".claude/settings.json":
+        "the agent's own permissions, denied commands and hook wiring — widening it is "
+        f"a machine widening its own authorisation. {_OWNER_MERGES}",
+    ".claude/settings.local.json":
+        "the same switches, per-machine. Untracked today and named anyway: a rule that "
+        f"only holds while a file is absent is not a rule. {_OWNER_MERGES}",
+    ".claude/*.json":
+        "configuration at the root of `.claude/`, including files nobody has invented "
+        f"yet — prose lives in `skills/` and `agents/`, not here. {_OWNER_MERGES}",
     "**/CLAUDE.md": "the rules agents read; changing them unsupervised is circular. "
                     + _OWNER_MERGES,
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHAT THE `product_owner` PATHS ARE DANGEROUS FOR — kept after the flip.
+#
+# Every sentence below was a REFUSAL until 2026-09-17. The owner's decision did
+# not claim these paths became safe; it named a different mechanism for holding
+# them safe. A filename cage answers "is this file scary?", which is a question
+# it can only guess at. The six-tag gate answers "did the app actually run" —
+# `verify` starts it and drives a browser — and `watch_minutes: 15` plus
+# `rollback: railway` answer "and is production still fine fifteen minutes
+# later, and can we take it straight back if not".
+#
+# SO WHY KEEP THE TEXT AT ALL? Because deleting it would leave nothing in this
+# repo that remembers WHY these paths were ever separated from ordinary product
+# code, and the next person reading `product_owner` would see a lane with the
+# same `auto_merge` as `product` and conclude the split is decoration. It is
+# not: this lane is what gets the `lane:owner` eye, and moving any one of these
+# lines back to `harness_owner` is how the owner takes a path back by hand.
+#
+# AND IT IS ENFORCED, NOT FILED. `check_lists()` refuses any key here that is
+# not a live `auto_merge: true` path in the policy — the mirror of the rule that
+# governs `DENY_REASONS`. A note about a path the policy dropped is the same
+# dead configuration in a different dict, and this repo has shipped that bug
+# enough times to stop trusting a comment to survive.
+# ─────────────────────────────────────────────────────────────────────────────
+_WATCHED = ("Machine-mergeable since 2026-09-17 under the full gate "
+            "(ci, review, security, verify, ratchets, bugs), 15 minutes of post-merge "
+            "watching and a confirmed Railway rollback.")
+
+WATCHED_RISKS: dict[str, str] = {
+    # ── product: anything that changes what a user is shown or how it ranks ──
+    "backend/src/services/skill_matcher.py":
+        f"changes how jobs are scored — a product decision. {_WATCHED}",
+    "backend/src/services/deduplicator.py":
+        f"changes which jobs are shown at all. {_WATCHED}",
+    "backend/src/services/scoring/**":
+        f"changes how jobs are scored — a product decision. {_WATCHED}",
+    "backend/src/services/uk_gate.py":
+        f"decides which jobs enter the catalogue. {_WATCHED}",
+    "backend/src/services/visa_signal.py":
+        f"changes what the visa spotlight shows. {_WATCHED}",
+    "backend/src/services/profile/**":
+        f"changes what is extracted from a user's CV. {_WATCHED}",
+    "backend/src/models.py":
+        f"normalized_key lives here; wrong dedup = duplicate or lost rows. {_WATCHED}",
+    # ── users: identity, sessions, anything that can lock someone out ────────
+    "backend/src/api/routes/auth.py": f"authentication — a user decision. {_WATCHED}",
+    "backend/src/services/auth/**": f"authentication — a user decision. {_WATCHED}",
+    "backend/src/api/routes/account*.py":
+        f"account management — a user decision. {_WATCHED}",
+    "backend/src/services/notifications/**":
+        f"sends real messages to real people. {_WATCHED}",
+    # This one was denied on its PATH precisely because a path cage cannot tell a
+    # logging fix from a deleted `Depends(require_user)`. PR #315 was +45 lines in
+    # exactly this file and would have merged on its filename alone; rules #12/#25
+    # exist because a review found three real IDORs in these routes. The answer to
+    # "a filename cannot tell" is not a better filename rule — it is `verify`,
+    # which calls the real route as a real user.
+    "backend/src/api/routes/profile.py":
+        f"a per-user API route — rules #12/#25. {_WATCHED}",
+    # ── infrastructure ───────────────────────────────────────────────────────
+    "backend/migrations/**":
+        f"schema change — irreversible against live data. {_WATCHED} "
+        "NOTE: a Railway rollback restores the previous IMAGE, not the previous "
+        "SCHEMA. The watcher can undo the deploy; only a down-migration undoes the "
+        "table. Hard rule: every migration ships with its `.down.sql`.",
+    "**/*docker-compose*": f"infrastructure decision. {_WATCHED}",
+    "**/*Dockerfile*": f"infrastructure decision. {_WATCHED}",
+    "**/railway.json": f"infrastructure decision. {_WATCHED}",
+    "**/*.env*": f"secrets and configuration. {_WATCHED}",
+    "backend/src/core/settings.py":
+        f"flags here change production behaviour globally. {_WATCHED}",
+    # ── dependency manifests ─────────────────────────────────────────────────
+    # The cage has no semver awareness, and a manifest runs postinstall scripts
+    # on the build host. `dependabot-auto.yml` still owns the bump decision and
+    # still sends MAJOR bumps to a human — that gate is upstream of this lane and
+    # is unaffected by the flip.
+    "**/package.json":
+        "a dependency change — `.github/workflows/dependabot-auto.yml` still owns this "
+        f"decision and still sends MAJOR bumps to a human. {_WATCHED}",
+    "**/package-lock.json": f"a dependency change — see package.json. {_WATCHED}",
+    "**/pyproject.toml": f"a dependency change — see package.json. {_WATCHED}",
+    "**/requirements*.txt": f"a dependency change — see package.json. {_WATCHED}",
+    # ── documents that ARE decisions ─────────────────────────────────────────
+    # The rest of `docs/product/` moved to the fast lane on 2026-08-26 (owner's
+    # call: a doc is prose). These two did not, and they still have not: they
+    # stay in `product_owner`, which keeps them labelled and separated from
+    # ordinary prose — but since the flip that lane no longer stops for a hand.
+    "docs/product/product_design_rules.md":
+        "the canonical text of owner rules #29/#30/#31 — changing it changes the "
+        f"product. {_WATCHED} If that is the wrong call, move this line to "
+        "`harness_owner` in .github/merge-policy.yml.",
+    "docs/product/plans/batch-2-decisions.md":
+        f"a record of irreversible choices. {_WATCHED}",
 }
 
 
@@ -720,6 +816,16 @@ def check_lists() -> list[str]:
     3. A REASON FOR A PATH THE POLICY NO LONGER HAS. `DENY_REASONS` annotates
        patterns; a key that matches nothing is a sentence nobody will ever read,
        and — worse — it looks like a rule while being none.
+
+    4. THE SAME RULE FOR `WATCHED_RISKS`, ADDED 2026-09-17. When the owner
+       flipped `product_owner` to `auto_merge: true`, twenty-odd refusal
+       sentences stopped being refusals and became the record of what those
+       paths are dangerous for. A record is worth exactly as much as its
+       accuracy: a note keyed on a path the policy has dropped describes a rule
+       that is not there, which is failure mode 3 in a different dict. So every
+       key must still be a live `auto_merge: true` path — and if one moves BACK
+       to an owner lane, this fires too, which is the reminder to move its
+       sentence back into `DENY_REASONS` where it will actually be printed.
     """
     bad: list[str] = []
 
@@ -749,6 +855,23 @@ def check_lists() -> list[str]:
                 f"DENY_REASONS carries `{key}`, which no lane in {POLICY_PATH.name} lists any "
                 f"more. It reads as a rule and is only a sentence. Remove it, or put the path "
                 f"back in an `auto_merge: false` lane."
+            )
+
+    allow_patterns = set(ALLOW)
+    for key in WATCHED_RISKS:
+        if key in deny_patterns:
+            bad.append(
+                f"WATCHED_RISKS carries `{key}`, but {POLICY_PATH.name} now puts that path in "
+                f"an `auto_merge: false` lane. It is a REFUSAL again, and a refusal's sentence "
+                f"has to be somewhere the cage will print it. FIX: move this entry into "
+                f"DENY_REASONS."
+            )
+        elif key not in allow_patterns:
+            bad.append(
+                f"WATCHED_RISKS carries `{key}`, which no lane in {POLICY_PATH.name} lists any "
+                f"more. It describes a risk the policy has stopped naming, which is dead "
+                f"configuration wearing a note's clothes. FIX: remove it, or put the path back "
+                f"in a lane."
             )
 
     return bad
@@ -1863,14 +1986,69 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     P = ["check_paths", "path_matches"]
 
     # ── CAGE 1: PATHS ────────────────────────────────────────────────────────
-    red("scoring change is refused",
-        check_paths(["backend/src/services/skill_matcher.py"]), "product decision", P)
-    red("auth change is refused",
-        check_paths(["backend/src/api/routes/auth.py"]), "user decision", P)
-    red("infra change is refused",
-        check_paths(["docker-compose.prod.yml"]), "infrastructure", P)
+    #
+    # ── WHAT THIS CAGE STOPPED BEING, ON 2026-09-17 ──────────────────────────
+    # Six cases here used to refuse the product's sharp end on its FILENAME:
+    # skill_matcher.py, auth.py, docker-compose, profile.py, package.json,
+    # product_design_rules.md. The owner flipped `product_owner` to
+    # `auto_merge: true`, so `_load_lists()` now derives every one of those onto
+    # ALLOW and the PATH cage passes them. Those cases are rewritten below to
+    # assert the NEW verdict rather than deleted, because "this used to be
+    # refused here and is now allowed here" is the single most important fact
+    # about this commit, and a deleted test records nothing.
+    #
+    # THE REFUSAL DID NOT DISAPPEAR, IT MOVED. What holds those paths safe now
+    # is the lane's six-tag gate (`verify` starts the app and drives a browser),
+    # `watch_minutes: 15` and a confirmed Railway rollback — none of which are
+    # this function's job. A filename cage was never able to tell a logging fix
+    # from a deleted `Depends(require_user)`; that was written down in this file
+    # as the reason to refuse, and it is equally the reason a filename is the
+    # wrong instrument.
+    #
+    # WHAT THIS CAGE STILL DOES, AND MUST: `harness_owner`. An agent may not
+    # edit the machinery that judges it, and no amount of post-merge watching
+    # detects that, because the watcher is one of the things it could edit.
     red("the agent editing its own guards is refused",
         check_paths([".github/workflows/ci.yml"]), "cage is escaped", P)
+    red("the cage itself is refused",
+        check_paths(["scripts/merge_cage.py"]), "cage is escaped", P)
+    red("the owner's own words are refused",
+        check_paths(["backend/CLAUDE.md"]), "circular", P)
+
+    # THE `.claude` SPLIT, BOTH HALVES. The owner carved `.claude/skills/**` and
+    # `.claude/agents/**` into the fast lane on 2026-09-17 so the daily
+    # truth-check PR stops needing a hand. The carve-out is only safe as a PAIR,
+    # so each half gets a case: widen the allow side to `.claude/**` and the two
+    # reds below go green, which is the drill doing its job.
+    red("a git hook is refused — an agent may not edit its own exam",
+        check_paths([".claude/hooks/worktree-reaper.sh"]), "cage is escaped", P)
+    red("the agent's own permissions file is refused",
+        check_paths([".claude/settings.json"]), "authorisation", P)
+    claude_stuck = [f for f in (".claude/skills/hard-rules/SKILL.md",
+                                ".claude/agents/reviewer-bugs.md",
+                                ".claude/skills/verify-job360/references/methodology.md")
+                    if check_paths([f]).status != "pass"]
+    ok("the words an agent READS take the fast lane (owner's call, 2026-09-17)",
+       not claude_stuck, f"a daily-truth-check file is still refused: {claude_stuck}", P)
+
+    # ── THE FLIP, ASSERTED AS THE NEW VERDICT ────────────────────────────────
+    # Every path here was a DENY entry until 2026-09-17. If a future edit puts
+    # `product_owner` back to `auto_merge: false` without rewriting these, they
+    # go red — which is correct: the policy and its drill have to say the same
+    # thing, and that is the whole reason both lists come from one file.
+    flipped = ["backend/src/services/skill_matcher.py",
+               "backend/src/api/routes/auth.py",
+               "backend/src/api/routes/profile.py",
+               "docker-compose.prod.yml",
+               "frontend/package.json",
+               "backend/migrations/0042_x.up.sql",
+               "docs/product/product_design_rules.md",
+               "backend/src/core/settings.py"]
+    still_denied = [f for f in flipped if check_paths([f]).status != "pass"]
+    ok("the product's sharp end is machine-mergeable now, under the watcher",
+       not still_denied,
+       f"`product_owner` is flipped in the policy but the cage still refuses: {still_denied}",
+       P)
     # The witness moved on 2026-08-26 and the invariant did not. It used to be
     # `backend/src/some_new_module.py`, which was only "unrecognised" because
     # the cage's hand-typed ALLOW list had never heard of `backend/src/**` —
@@ -1879,35 +2057,123 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     red("an unrecognised path is refused",
         check_paths(["some_new_top_level/thing.py"]), "nobody has decided", P)
 
-    # B16 — a per-user API route may not merge on the strength of its filename.
-    red("a per-user API route is refused on its path",
-        check_paths(["backend/src/api/routes/profile.py"]), "#12/#25", P)
-    # B11 — the cage may never be more permissive than a gate already on main.
-    red("a dependency manifest is refused and points at dependabot-auto",
-        check_paths(["frontend/package.json"]), "dependabot-auto", P)
-    # B12 — a document that IS a decision inherits the denial it delegates from.
-    red("a document that is itself a product decision is refused",
-        check_paths(["docs/product/product_design_rules.md"]), "product", P)
+    # ── B16 / B11 / B12 — THE THREE THAT THE FLIP RE-HOMED ───────────────────
+    #
+    # These three cases pinned `backend/src/api/routes/profile.py`,
+    # `frontend/package.json` and `docs/product/product_design_rules.md` as
+    # PATH-cage refusals. All three are `product_owner` paths, so the
+    # 2026-09-17 flip moved them onto ALLOW and the PATH cage no longer has an
+    # opinion about any of them.
+    #
+    # THE RULES THEY BOUGHT ARE NOT GONE, AND THAT IS WHY THIS IS NOT A
+    # DELETION. Each is now enforced one level up, and each is asserted there:
+    #
+    #   B16  a filename cannot tell a logging fix from a removed
+    #        `Depends(require_user)` — which was always the argument, and is now
+    #        the argument for `verify` doing the telling. The lane that carries
+    #        profile.py REQUIRES `verify`, and that is asserted below.
+    #   B11  the cage may never be more permissive than a gate already on main.
+    #        `dependabot-auto.yml` is that gate for manifests; it is upstream of
+    #        this lane, unchanged by the flip, and it still routes MAJOR bumps
+    #        to a human. What this case can still prove is that the manifest did
+    #        not fall into a FAST lane — it is `product_owner`, which is watched.
+    #   B12  a document that IS a decision is not ordinary prose. It still is
+    #        not: both files stay in `product_owner` rather than joining
+    #        `docs/product/**` in the fast lane.
+    #
+    # Asserted by asking WHICH LANE rather than "is this refused", because the
+    # question has genuinely moved. Resolved from the policy with this module's
+    # own `LANES` and `path_matches` — NOT by importing `scripts/lane.py`, which
+    # imports this module and would load a second copy of it mid-drill.
+    import yaml  # noqa: PLC0415
 
-    # B12b — THE TWO DOCUMENTS THAT ARE DECISIONS SURVIVE THEIR OWN DIRECTORY.
+    _pol = yaml.safe_load(POLICY_PATH.read_text(encoding="utf-8"))
+
+    def _lane_of(f: str) -> str:
+        for name in LANES:
+            for pat in _pol["lanes"][name].get("paths") or []:
+                if path_matches(f, pat):
+                    return name
+        return "unknown"
+
+    rehomed = {
+        "backend/src/api/routes/profile.py": "product_owner",   # B16
+        "frontend/package.json": "product_owner",               # B11
+        "docs/product/product_design_rules.md": "product_owner",  # B12
+        "docs/product/plans/batch-2-decisions.md": "product_owner",
+    }
+    wrong = {f: _lane_of(f) for f, want in rehomed.items() if _lane_of(f) != want}
+    ok("the sharp end did not fall into a FAST lane — it is watched, not waved through",
+       not wrong,
+       f"these landed in the wrong lane after the flip: {wrong}", P)
+
+    # ...and the watched lane really demands the tag that replaced the filename
+    # rule. `verify` is the whole substitute for refusing profile.py on its name:
+    # it starts the app, drives a real browser and calls the real routes. Drop it
+    # from `requires` and B16's protection is gone with nothing in its place.
+    _po = _pol["lanes"]["product_owner"]
+    missing_tags = [t for t in ("ci", "review", "security", "verify", "ratchets", "bugs")
+                    if t not in (_po.get("requires") or [])]
+    ok("the watched lane demands `verify` — the instrument that replaced the filename rule",
+       not missing_tags,
+       f"product_owner auto-merges but no longer requires: {missing_tags}", P)
+    ok("...and it is still watched and still rollback-able, or the flip has no argument",
+       _po.get("watch_minutes") == 15 and _po.get("rollback") == "railway",
+       f"product_owner auto_merge={_po.get('auto_merge')} but watch="
+       f"{_po.get('watch_minutes')} rollback={_po.get('rollback')} — speed with no undo", P)
+
+    # ── B28: PRECEDENCE, DRILLED WHERE THE TUPLE ACTUALLY LIVES ──────────────
     #
-    #        This case used to assert that NOTHING under `docs/product/` could be
-    #        machine-merged. The owner reversed that on 2026-08-26: prose is
-    #        prose, and `verify` — fifteen minutes of watching production —
-    #        cannot say anything true about a markdown file.
+    # `LANES` is defined in THIS file and `scripts/lane.py` imports it, so this
+    # is where a reorder has to be caught. lane.py drills the same defect
+    # behaviourally ("a migration AND a workflow file is harness_owner"); this
+    # asks the structural question underneath it, which is the one that stays
+    # true if a fifth lane ever appears.
     #
-    #        The half that was always the real invariant is kept, and it is now
-    #        HARDER to satisfy than before, not easier. Previously these two
-    #        files sat inside a directory that was denied wholesale, so their own
-    #        DENY lines were belt-and-braces. Now the directory around them is
-    #        the FAST lane and those two lines are the only thing standing up. A
-    #        specific deny beating a broad allow is the precedence rule; this is
-    #        the case that proves it still holds.
-    escaped = [f for f in ("docs/product/product_design_rules.md",
-                           "docs/product/plans/batch-2-decisions.md")
-               if check_paths([f]).status == "pass"]
-    ok("a document that IS a decision is refused inside a fast-lane directory",
-       not escaped, f"a decision document became machine-mergeable: {escaped}", P)
+    # THE INVARIANT IS NOT "harness_owner IS FIRST". That is a fact about today's
+    # table, and stating it that way is exactly the mistake B28 records: the old
+    # order was justified as "most restrictive first", which stopped being true
+    # the moment `product_owner` began auto-merging and nothing noticed. The
+    # invariant is that EVERY human-only lane outranks EVERY machine lane —
+    # because precedence is a door, and the door has to be the one that stays
+    # shut.
+    _auto = {n: bool(_pol["lanes"][n].get("auto_merge")) for n in LANES}
+    _first_machine = next((i for i, n in enumerate(LANES) if _auto[n]), len(LANES))
+    _late_human = [n for n in LANES[_first_machine:] if not _auto[n]]
+    ok("precedence: a machine-mergeable lane never outranks a human-only one",
+       not _late_human,
+       f"LANES={LANES} puts human-only lane(s) {_late_human} BEHIND the machine lane "
+       f"`{LANES[_first_machine] if _first_machine < len(LANES) else '?'}` — a PR holding one "
+       f"file from each would classify to the machine lane and be merged unattended",
+       ["path_matches"])
+
+    # ...and the behavioural witness for the same thing, on the real policy: one
+    # migration (machine-mergeable) beside one workflow (never).
+    def _lane_of_set(paths: list[str]) -> str:
+        hit = {_lane_of(p) for p in paths}
+        if "unknown" in hit:
+            return "unknown"
+        return next((n for n in LANES if n in hit), "unknown")
+
+    _mixed = _lane_of_set(["backend/migrations/0042_x.up.sql", ".github/workflows/ci.yml"])
+    ok("precedence: one workflow file makes the whole PR the owner's, whatever it rides with",
+       _mixed == "harness_owner" and not _auto["harness_owner"],
+       f"a migration + a workflow classified `{_mixed}` (auto_merge="
+       f"{_auto.get(_mixed)}) — the human-only file rode in on the migration's ticket",
+       ["path_matches"])
+
+    # ── B28: THE ESCALATION TARGET ───────────────────────────────────────────
+    # An unknown path and an empty changeset go to a lane by NAME in lane.py.
+    # The property that has to hold is about this policy: that lane must not
+    # auto-merge. Asserted here as well as there because the two files are the
+    # pair that can drift — lane.py names the lane, the policy decides what the
+    # name means, and "nobody has decided this is safe" turning into "ship it"
+    # needs only one of them to move.
+    ok("the escalation target is a lane a machine may not merge",
+       _auto.get("harness_owner") is False,
+       "`harness_owner` is what lane.py escalates unknown paths and empty changesets to, "
+       "and the policy now lets a machine merge it — every unclassified path in the repo "
+       "just became shippable", ["path_matches"])
 
     # B12b-ii — and the reversal really happened: ordinary product prose merges.
     #           A cage that refuses everything is an off switch, which is the
@@ -1951,11 +2217,19 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     #        wrong answer — the same file, refused for a reason that no longer
     #        knows what it is protecting. (Measured: a mutation narrowing
     #        `scripts/**` back to `scripts/*` left a count-based drill green.)
+    #        THE WITNESS LIST SHRANK ON 2026-09-17 and the property did not.
+    #        Three of the five nested witnesses were `product_owner` paths
+    #        (`profile/**`, `migrations/**`, `auth/**`), and the flip moved them
+    #        onto ALLOW, so they can no longer witness a DENY of any width. The
+    #        two that remain are `harness_owner` and they exercise exactly the
+    #        same mechanism; `.claude/hooks/**` is added because it is a NEW
+    #        recursive deny this commit introduced, and a new deny with no nested
+    #        witness is how the 2026-08-20 rewrite nearly lost every slash-free
+    #        rule it was fixing.
     nested = [("scripts/deep/nested/tool.py", "cage is escaped"),
-              ("backend/src/services/profile/deep/inner.py", "extracted from a user's CV"),
               (".github/workflows/sub/x.yml", "cage is escaped"),
-              ("backend/migrations/versions/0001_x.py", "schema change"),
-              ("backend/src/services/auth/session/store.py", "authentication")]
+              (".claude/hooks/lib/deep/helper.sh", "cage is escaped"),
+              ("backend/deep/nested/CLAUDE.md", "circular")]
     missed = [f for f, needle in nested
               if not any(needle in r for r in check_paths([f]).reasons)]
     ok("a nested file under a recursive deny is still refused, and for the right reason",
@@ -2686,21 +2960,68 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         # ── THE OWNER LANE STOPS THE MACHINE, ON THE SAME PERFECT PR ─────────
         # Same fake GitHub, same flawless PR, same baseline — the ONLY thing
         # that changes is the lane. If this ever goes green, `auto_merge: false`
-        # has stopped meaning anything, and the four owner-lane path lists in
+        # has stopped meaning anything, and the owner-lane path list in
         # merge-policy.yml became decoration without a single test going red.
+        #
+        # THE FIXTURE MOVED 2026-09-17, and it had to. It used to be a
+        # `product_owner` lane carrying a migration, which was the right witness
+        # while that lane was human-only. The owner flipped it, so the fixture
+        # now describes a lane that DOES auto-merge — and a hand-written
+        # `"auto_merge": False` beside a lane name that means the opposite is a
+        # test passing on a fiction. `harness_owner` is the lane that still stops
+        # the machine, so it is the lane this case is about, and the witness is a
+        # workflow file rather than a migration.
         allowed_owner, v_owner, _ = decide(
             1, {"drill": 3},
-            {"lane": "product_owner", "auto_merge": False,
-             "requires": ["ci", "review", "security", "verify", "ratchets"],
-             "why": ["`backend/migrations/0007.sql` is irreversible against live data."]})
+            {"lane": "harness_owner", "auto_merge": False,
+             "requires": ["ci", "review", "drill", "bugs"],
+             "why": ["`.github/workflows/ci.yml` is part of the harness that judges this "
+                     "very PR."]})
         ok("an owner lane refuses the machine even when NOTHING ELSE is wrong",
            not allowed_owner and any("may not decide it" in b for b in blocks_of(v_owner)),
            f"allowed={allowed_owner}: {blocks_of(v_owner)}", ["decide"])
         ok("...and the refusal NAMES the file that made it the owner's call",
-           any("migrations" in b for b in blocks_of(v_owner)),
+           any("workflows/ci.yml" in b for b in blocks_of(v_owner)),
            "the owner was told to decide something without being told what — a "
            "refusal he cannot act on is how a gate gets switched off at 7am",
            ["decide"])
+
+        # NEGATIVE CONTROL FOR THE FLIP ITSELF. Without this, the case above is
+        # satisfied by a cage that refuses every lane verdict it is handed, and
+        # the owner's decision would have been silently undone by a LANE verdict
+        # rather than by the policy. Same perfect PR, same baseline; the lane is
+        # `product_owner` with the flag the policy now really carries.
+        #
+        # This one needs a richer fake than `perfect_gh`: the lane REQUIRES six
+        # tags, and `TAG_CHECKS` maps those onto real check names that are not in
+        # `REQUIRED_CHECKS` (`offline-suite`, `verify / backend`, `reviewer-bugs`
+        # ...). Feeding the thin list would make this case fail for a reason that
+        # has nothing to do with the lane — which is the whole defect class this
+        # file exists to refuse, committed inside its own negative control.
+        po_requires = ["ci", "review", "security", "verify", "ratchets", "bugs"]
+        tag_runs = [
+            {"name": n, "status": "completed", "conclusion": "success", "output": {}}
+            for n in sorted(
+                set(REQUIRED_CHECKS).union(
+                    *(TAG_CHECKS[t] for t in po_requires if t in TAG_CHECKS))
+            )
+        ]
+
+        def watched_gh(a: list[str]) -> str:
+            if "check-runs" in " ".join(a):
+                return json.dumps({"total_count": len(tag_runs), "check_runs": tag_runs})
+            return perfect_gh(a)
+
+        globals()["gh"] = watched_gh
+        allowed_watched, v_watched, _ = decide(
+            1, {"drill": 3},
+            {"lane": "product_owner", "auto_merge": True, "requires": po_requires,
+             "why": ["`backend/migrations/0007.sql` — watched for 15 minutes after merge."]})
+        globals()["gh"] = perfect_gh
+        ok("NEGATIVE CONTROL (a product_owner verdict with every cage green is ALLOWED)",
+           allowed_watched,
+           f"the flip is in the policy but the LANE cage still stops it: "
+           f"{blocks_of(v_watched)}", ["decide", "judge_tags", "check_tags"])
 
         md_yes = advice_markdown(1, meta_y, allowed_y, v_y)
         ok("the advice for an allowed PR is labelled agent-safe and merges nothing",
@@ -2953,10 +3274,21 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
 
 
 def _shadow_probe() -> list[str]:
-    """Inject a deliberately shadowed ALLOW entry and see whether check_lists sees it."""
+    """Inject a deliberately shadowed ALLOW entry and see whether check_lists sees it.
+
+    THE WITNESS MOVED 2026-09-17. It was `backend/src/services/profile/storage.py`
+    under the DENY `backend/src/services/profile/**` — the real historic pair.
+    The owner's flip put `product_owner` on ALLOW, so that pattern is no longer a
+    DENY and the probe stopped shadowing anything: `check_lists()` came back
+    empty and this drill went red, correctly, because a probe that cannot
+    reproduce the fault proves nothing about the guard.
+
+    The replacement is the same shape against a deny that still exists: a single
+    hook file under the recursive `.claude/hooks/**`.
+    """
     saved = list(ALLOW)
     try:
-        ALLOW.append("backend/src/services/profile/storage.py")  # the real historic pair
+        ALLOW.append(".claude/hooks/commit-gate.sh")
         return check_lists()
     finally:
         ALLOW[:] = saved

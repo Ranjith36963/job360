@@ -20,6 +20,61 @@
 #   is fast because `deploymentRollback` puts users back in seconds. The harness
 #   lane is fast because nothing live is at stake. The owner lane has neither,
 #   so it has a human.
+#
+# ═══════════════════════════════════════════════════════════════════════════
+# OWNER DECISION, 2026-09-17: "Flip product and merge all daily docs."
+#
+# Two things changed, and they are the same argument applied twice.
+#
+#   1. `product_owner` now has `auto_merge: true`.
+#      It was the only lane whose refusal was not backed by an argument about
+#      UNDO. A migration, a Dockerfile, a settings flag all reach live users --
+#      and so does everything in the ordinary `product` lane, which has merged
+#      unattended since this file was written. What makes that safe is not that
+#      the change looked small; it is `watch_minutes: 15` plus
+#      `rollback: railway`. product_owner keeps BOTH, and it keeps the full
+#      six-tag gate (ci, review, security, verify, ratchets, bugs) -- `verify`
+#      being the one that actually starts the app and drives a browser. So a
+#      migration now merges on the same terms as a route change: proven alive,
+#      watched for fifteen minutes, and taken back automatically if prod moves.
+#
+#   2. The daily truth-check PRs merge themselves.
+#      They edit `.claude/skills/**/*.md` and `.claude/agents/*.md`. The blanket
+#      `.claude/**` in `harness_owner` (and the DENY the cage derives from it)
+#      made every one of them owner-only, which is a hand-merge per day for
+#      prose an agent reads. Those two directories are now `harness`.
+#
+# WHAT DID NOT CHANGE, AND MUST NOT
+#   `harness_owner` is still human-only, and it is now the ONLY human-only lane:
+#   the robot's own rulebook -- `.github/**`, `scripts/**`, `.claude/hooks/**`,
+#   `.claude/settings*.json`, every `**/CLAUDE.md`, and the cage files named
+#   below -- is never merged by a machine. An agent editing its own guards is
+#   how a cage is escaped, and no amount of post-merge watching detects it,
+#   because the watcher is one of the things it could have edited.
+#
+# THE TWO CONSEQUENCES THIS DECISION FORCES ELSEWHERE
+#   (a) PRECEDENCE REORDERED. `merge_cage.LANES` -- the single definition of
+#       lane order, which `scripts/lane.py` imports -- was
+#       `product_owner, harness_owner, product, harness`, most restrictive
+#       first. With product_owner auto-merging it is no longer the most
+#       restrictive, so a PR holding ONE harness_owner file and ONE
+#       product_owner file would have classified `product_owner` and been
+#       machine-merged: the human-only file loses to the one beside it. The
+#       order is now `harness_owner, product_owner, product, harness`.
+#       Drilled in lane.py: "a migration AND a workflow file is harness_owner".
+#   (b) ESCALATION TARGET MOVED. An unknown path and an empty changeset used to
+#       escalate to `product_owner` BECAUSE it was the strictest lane. It is
+#       not any more, and escalating to a lane that auto-merges would turn
+#       "nobody has decided this is safe" into "ship it". Both now escalate to
+#       `harness_owner`. Drilled: "unknown path never auto-merges".
+#
+# WHAT ELSE MOVED WITH product_owner, NAMED SO IT IS NOT A SURPRISE
+#   Everything in that lane's `paths:` is now machine-mergeable under the full
+#   gate -- including `docs/product/product_design_rules.md` and
+#   `docs/product/plans/batch-2-decisions.md`, which stay in this lane (so they
+#   are still WATCHED and still separated from ordinary prose) but no longer
+#   stop for a hand. If that one is unwanted, move those two lines to
+#   `harness_owner` -- a two-line edit, and the drills will tell you.
 # ═══════════════════════════════════════════════════════════════════════════
 
 version: 1
@@ -175,6 +230,28 @@ lanes:
       - ".coderabbit.yaml"
       - "pyrightconfig.json"
       - ".vscode/**"
+      # ── THE .claude CARVE-OUT (2026-09-17, owner: "merge all daily docs") ──
+      # The daily truth-check routine opens a PR a day that edits the skills an
+      # agent loads and the agent definitions themselves. Under the blanket
+      # `.claude/**` in `harness_owner` every one of those was a hand-merge, for
+      # prose. These two directories are the READING MATTER; the EXECUTION and
+      # the CONFIGURATION stay owner-only (`.claude/hooks/**`,
+      # `.claude/settings*.json`, `.claude/*.json` -- see harness_owner).
+      #
+      # CARVED OUT BY DIRECTORY, NOT BY EXTENSION, ON PURPOSE. `git ls-files
+      # .claude` says both trees are markdown-only today, so `**/*.md` would
+      # classify exactly the same files and would look tighter. It is not: if a
+      # `.py` or a `.sh` ever appears under `.claude/skills/`, an extension rule
+      # sends it to `unknown` -> `harness_owner`, which is the safe direction but
+      # says the wrong thing; and the moment someone "fixes" that by widening the
+      # extension list, the rule has quietly become about file types again --
+      # the `*.md` bug this file spent a commit deleting. A skill is instructions
+      # whatever it is written in. The lane is a fact about WHERE it lives.
+      # (Anything executable that turns up there is caught upstream of the lane:
+      # `scripts/repairable.py` blocks the whole `.claude/` prefix outright, so
+      # the auto-fixer still may not touch either directory unsupervised.)
+      - ".claude/skills/**"
+      - ".claude/agents/**"
     requires: [ci, review, drill, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
     auto_merge: true
     watch: false            # nothing live to watch
@@ -212,7 +289,8 @@ lanes:
   # matter what else is in it. Not a risk score — a door. A score can be diluted
   # by adding safe files; a door cannot.
   # ─────────────────────────────────────────────────────────────────────────
-  # PRODUCT_OWNER — you decide, AND a user is exposed.
+  # PRODUCT_OWNER — the sharp end of the product. A machine may merge it
+  #                 (since 2026-09-17), and the WATCHER is why.
   #
   # There is not one owner lane, there are two. "Who decides" and "who gets
   # hurt" are separate questions, and a single `owner` bucket collapsed them:
@@ -220,11 +298,37 @@ lanes:
   # decisions and 5 that were both.
   #
   # The difference is not cosmetic — it is what happens AFTER the merge. A
-  # hand-merged migration still reaches live users, so it still needs the
-  # watcher and a confirmed rollback. Under one bucket it got neither.
+  # migration reaches live users, so it needs the watcher and a confirmed
+  # rollback. Under one bucket it got neither.
+  #
+  # ── FLIPPED 2026-09-17: `auto_merge: false` -> `true` ─────────────────────
+  # The name stays, and it still means something: this lane is the product's
+  # sharp end (schema, secrets, auth, dependency manifests, the two documents
+  # that ARE decisions), separated from ordinary product code so it can be
+  # seen, labelled and reasoned about on its own. What changed is who presses
+  # the button.
+  #
+  # THE SAFETY NET IS THE SAME ONE THE `product` LANE ALREADY RUNS ON, and it
+  # is not "the change looked fine":
+  #   * the full six-tag gate — ci, review, security, verify, ratchets, bugs.
+  #     `verify` is the one that matters here: it starts the app, drives a real
+  #     browser and calls the real routes. A filename cannot tell a logging fix
+  #     from a deleted `Depends(require_user)`; `verify` does not guess.
+  #   * `watch_minutes: 15` — post-merge-watch.yml stares at readyz, the
+  #     frontend and Sentry for a quarter of an hour after it lands.
+  #   * `rollback: railway` — `deploymentRollback` restores the previous image
+  #     AND its variables in seconds, and the watcher CONFIRMS `canRollback`
+  #     before anything in this lane is allowed to merge at all.
+  # Speed still comes from being able to UNDO. Nothing here merges on the
+  # strength of looking safe.
+  #
+  # WHAT THIS LANE IS NOT: a hiding place for the harness. `.github/**`,
+  # `scripts/**`, `.claude/hooks/**` and `**/CLAUDE.md` are in `harness_owner`,
+  # which is now the only human-only lane — and it OUTRANKS this one, so a PR
+  # carrying one file from each is a harness_owner PR and stops.
   # ─────────────────────────────────────────────────────────────────────────
   product_owner:
-    description: "You decide — and it reaches a user. Watched anyway."
+    description: "The product's sharp end — merged by a machine only under the watcher."
     paths:
       # irreversible against live data
       - "backend/migrations/**"
@@ -273,34 +377,81 @@ lanes:
       - "backend/src/services/notifications/**"
       - "backend/src/api/routes/profile.py"
     requires: [ci, review, security, verify, ratchets, bugs]   # bugs: reviewer-bugs check, added 2026-09-11
-    auto_merge: false          # your hand, always
-    watch_minutes: 15          # ...but the watcher still runs after you merge
+    auto_merge: true           # FLIPPED 2026-09-17 — the watcher below is the argument
+    watch_minutes: 15          # ...and it is not optional; this is what buys the speed
     rollback: railway
 
   # ─────────────────────────────────────────────────────────────────────────
   # HARNESS_OWNER — you decide, and only you are exposed.
   #
   # The cage, and the words agents read. No user is downstream of these, so no
-  # watcher and no rollback rehearsal: merge it and walk away. What they share
-  # with product_owner is only that a machine may not decide them.
+  # watcher and no rollback rehearsal: merge it and walk away.
+  #
+  # SINCE 2026-09-17 THIS IS THE ONLY HUMAN-ONLY LANE, and it OUTRANKS every
+  # other — it is first in `merge_cage.LANES`, so one file here makes the whole
+  # PR stop, however much product_owner or product sits beside it. That is the
+  # precedence reorder the product_owner flip forced: see the decision block at
+  # the top of this file.
+  #
+  # WHY THIS ONE DOES NOT GET THE SAME DEAL AS product_owner. The argument that
+  # let product_owner auto-merge is the post-merge watcher plus a confirmed
+  # Railway rollback. Neither exists here, and worse, neither COULD: the watcher
+  # and the rollback are `.github/workflows/post-merge-watch.yml`,
+  # `scripts/rollback_gear.py` and `scripts/revert_gear.py` — files in this very
+  # lane. A change here can be a change to the instrument that would have caught
+  # it. There is no undo to borrow speed against, so it has a human.
   # ─────────────────────────────────────────────────────────────────────────
   harness_owner:
     description: "You decide — and only your own tooling is exposed."
     paths:
-      # ── THE THREE BLANKET PATHS (written down 2026-08-26) ─────────────────
-      # `merge_cage.py` has denied all three since it was written, while the
+      # ── THE BLANKET PATHS (written down 2026-08-26) ───────────────────────
+      # `merge_cage.py` has denied these since it was written, while the
       # `harness` lane listed them as auto-mergeable. The cage won every time,
       # so recording them here changes NO verdict — it stops the two files
       # disagreeing about the same question.
       #
-      # NOTE THE INTENT GAP, because closing it is yours: the named entries
-      # below say "the cage may not edit the cage", which is a handful of files.
-      # These three say "no agent may touch the harness at all", which is a much
-      # larger rule. If you meant the narrower one, delete these three lines and
-      # the named entries below take over.
+      # `.github/**` and `scripts/**` are UNCHANGED and deliberately blanket:
+      # the named entries below say "the cage may not edit the cage", which is a
+      # handful of files, and a hand-list is wrong the moment someone adds the
+      # next one. These two say "no machine widens its own authorisation".
       - ".github/**"
       - "scripts/**"
-      - ".claude/**"
+      # ── `.claude/**` WAS HERE. NARROWED 2026-09-17, owner's call. ──────────
+      # The blanket line made the daily truth-check PR — which edits
+      # `.claude/skills/**/*.md` and `.claude/agents/*.md` — a hand-merge every
+      # single day, for prose an agent reads.
+      #
+      # What stays owner-only is the half that RUNS or CONFIGURES, and the split
+      # is between "words an agent reads" and "code the harness executes / the
+      # switches that decide what an agent may do without asking":
+      #
+      #   .claude/hooks/**       shell that runs on real git events —
+      #                          commit-gate.sh, branch-owner-guard.sh,
+      #                          worktree-reaper.sh. This is the commit gate
+      #                          itself; an agent editing it is editing its own
+      #                          exam, and `scripts/repairable.py` already
+      #                          refuses to let the auto-fixer near it.
+      #   .claude/settings.json  permissions, denied commands, hook wiring. The
+      #                          agentic loop was disabled here in 2026-06-21
+      #                          after ralph-loop wiped worktrees and committed
+      #                          to main; that refusal lives in this file.
+      #   .claude/settings.local.json  the same switches, per-machine. Untracked
+      #                          today (gitignored) and named anyway: a rule
+      #                          that only holds while a file is absent is not a
+      #                          rule.
+      #   .claude/*.json         everything else at the root of `.claude/` that
+      #                          is configuration rather than prose, including
+      #                          files nobody has invented yet. Root-only on
+      #                          purpose — `*` stops at `/`, so this cannot
+      #                          reach a JSON fixture inside a skill directory.
+      #
+      # The reading matter — `.claude/skills/**` and `.claude/agents/**` — is in
+      # the `harness` lane, carved out by DIRECTORY rather than by extension.
+      # The reason is written at that entry.
+      - ".claude/hooks/**"
+      - ".claude/settings.json"
+      - ".claude/settings.local.json"
+      - ".claude/*.json"
       # the cage may not edit the cage
       - ".github/merge-policy.yml"       # this file
       - "scripts/merge_cage.py"

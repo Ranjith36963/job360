@@ -71,6 +71,17 @@ class Blocker:
     rule: str  # the rule the blocker produced
     drill: str  # name of the drill case in merge_cage.self_drill() that goes red
     severity: str  # "crash" | "wrong-verdict" | "too-permissive" | "too-strict" | "too-vague"
+    # WHAT HAPPENED TO THIS BLOCKER LATER. Added 2026-09-17, when the owner
+    # flipped `product_owner` to `auto_merge: true` and three entries here
+    # stopped being enforced the way they were written.
+    #
+    # THE ALTERNATIVE WAS TO EDIT `what` AND `rule` IN PLACE, and that is the
+    # trap this file's own header warns about: "never delete an entry — a
+    # blocker that stops being true is history, and history is the only thing
+    # that stops round five." Rewriting the past tense is a quieter kind of
+    # deleting. So the original sentences stand untouched and the amendment sits
+    # beside them, named and dated, saying which drill carries the rule now.
+    note: str = ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -258,8 +269,16 @@ BLOCKERS: list[Blocker] = [
         rule="THE CAGE MAY NEVER BE MORE PERMISSIVE THAN A GATE ALREADY ON MAIN. "
         "Dependency manifests are denied and the refusal names the gate that owns that "
         "decision, so the two cannot disagree.",
-        drill="a dependency manifest is refused and points at dependabot-auto",
+        drill="the sharp end did not fall into a FAST lane — it is watched, not waved through",
         severity="too-permissive",
+        note="2026-09-17: the owner flipped `product_owner` to `auto_merge: true`, so a "
+        "manifest is no longer a PATH-cage refusal. The RULE is untouched, and so is the "
+        "gate it defers to: dependabot-auto.yml sits UPSTREAM of the merge lane and still "
+        "routes MAJOR bumps to a human, so the cage is still not more permissive than it. "
+        "What the drill can still prove is that a manifest did not land in a FAST lane — it "
+        "is `product_owner`, i.e. the full six-tag gate, 15 minutes of watching and a "
+        "confirmed Railway rollback. The old drill name pinned a verdict the owner changed; "
+        "this one pins the property that survived the change.",
     ),
     Blocker(
         id="B12",
@@ -272,8 +291,14 @@ BLOCKERS: list[Blocker] = [
         repro="check_paths(['docs/product/product_design_rules.md'])   -> [] (allowed)",
         rule="IF A DENIED FILE DELEGATES ITS AUTHORITY TO ANOTHER FILE, THAT FILE "
         "INHERITS THE DENIAL. The documents that ARE decisions are denied by name.",
-        drill="a document that is itself a product decision is refused",
+        drill="the sharp end did not fall into a FAST lane — it is watched, not waved through",
         severity="too-permissive",
+        note="2026-09-17: same flip. `product_design_rules.md` and `batch-2-decisions.md` "
+        "are no longer refused — but the delegation this entry exists to protect survives in "
+        "the form that matters: they did NOT follow `docs/product/**` into the fast lane. "
+        "They stay in `product_owner`, separated from ordinary prose, watched, and two lines "
+        "away from `harness_owner` if the owner wants the hand back. CLAUDE.md — the file "
+        "that delegates its authority to them — is still DENY.",
     ),
     Blocker(
         id="B13",
@@ -333,8 +358,16 @@ BLOCKERS: list[Blocker] = [
         "assertion over the merged content was proposed and REJECTED: it false-positives "
         "on client_log.py, which is deliberately public, and cannot see router-level "
         "dependencies. An auth invariant belongs in a test that walks app.routes.)",
-        drill="a per-user API route is refused on its path",
+        drill="the watched lane demands `verify` — the instrument that replaced the filename rule",
         severity="too-permissive",
+        note="2026-09-17: this entry's own rule is what made the owner's flip coherent. It "
+        "says a path allow-list CANNOT distinguish a logging fix from an auth removal, so it "
+        "must not try — and the answer reached for in 2026-08 was `deny the path`, which is "
+        "the same blunt instrument pointed the other way. The answer now is an instrument "
+        "that CAN tell: `verify` starts the app, drives a real browser and calls the real "
+        "routes as a real user. So the drill moved from `is profile.py refused` to `does the "
+        "lane carrying profile.py still REQUIRE verify`. Delete that tag and this protection "
+        "is gone with nothing in its place, which is exactly the failure recorded here.",
     ),
     Blocker(
         id="B17",
@@ -574,6 +607,56 @@ BLOCKERS: list[Blocker] = [
         drill="NEGATIVE CONTROL (a plain refusal of a PR that was never queued says NOTHING)",
         severity="too-vague",
     ),
+    Blocker(
+        id="B28",
+        met="2026-09-17",
+        what="ONE POLICY FLIP MOVED TWO SAFETY PROPERTIES THAT NOTHING WAS WATCHING. The "
+        "owner decided `product_owner` should auto-merge (it is watched for 15 minutes and "
+        "rolled back on Railway, which is the same argument the `product` lane has always "
+        "run on) and that the daily truth-check PRs — `.claude/skills/**/*.md` and "
+        "`.claude/agents/*.md` — should stop needing a hand. Flipping one `auto_merge:` "
+        "field would have done both. It would ALSO have done two things nobody asked for, "
+        "silently, because both were written as facts about which lane happened to be "
+        "strictest rather than as facts about what had to stay true:\n"
+        "  (a) PRECEDENCE. `LANES` was ordered most-restrictive-first with `product_owner` "
+        "at the head. Flip it and the head of the order is a lane a machine may merge, so a "
+        "PR holding ONE `.github/workflows/*.yml` file and ONE migration classifies "
+        "`product_owner`, reports auto_merge TRUE, and the human-only file rides in on the "
+        "migration's ticket.\n"
+        "  (b) ESCALATION. `lane.py classify()` sent unknown paths and empty changesets to "
+        "`product_owner` with the comment 'the strictest of the four'. Flip it and that same "
+        "line turns 'nobody has decided this is safe' into 'ship it' — and pr-advisor.yml "
+        "was reading an EMPTY file list off a broken `gh api` call on real 11-file PRs as "
+        "recently as #566, so that arm is live, not hypothetical.",
+        repro="# with LANES = (product_owner, harness_owner, product, harness) and "
+        "product_owner auto_merge: true\n"
+        "python scripts/lane.py backend/migrations/0042_x.up.sql .github/workflows/ci.yml\n"
+        '  -> {"lane": "product_owner", "auto_merge": true}   # the workflow file rides in\n'
+        "python scripts/lane.py            # no files\n"
+        '  -> {"lane": "product_owner", "auto_merge": true}   # an empty PR is shippable',
+        rule="A RULE WRITTEN AS A SUPERLATIVE BREAKS WHEN THE RANKING MOVES. 'The strictest "
+        "lane' and 'most restrictive first' are both descriptions of a table, not of an "
+        "invariant, and neither survives an edit to the table. State the property instead: "
+        "PRECEDENCE MUST BE HEADED BY THE LANE A MACHINE MAY NOT MERGE, and ESCALATION MUST "
+        "TARGET A LANE WITH `auto_merge: false`. Both are now pinned by drills that assert "
+        "the lane NAME and the FLAG together — the name alone survives a later flip of "
+        "harness_owner, and the flag alone survives an escalation that lands somewhere "
+        "unintended. Corollary for any future lane flip: because merge_cage derives ALLOW "
+        "and DENY from the policy, changing one `auto_merge:` moves every path in that lane "
+        "across the line, so the drill cases pinning those paths must be REWRITTEN in the "
+        "same commit, never deleted — nine of them went red here and every one was a real "
+        "verdict change that deserved to be looked at.",
+        drill="precedence: a machine-mergeable lane never outranks a human-only one",
+        severity="too-permissive",
+        note="Found while implementing the owner's decision, not after it shipped — the "
+        "nine red drill cases are what surfaced (a) and (b). One of them, 'precedence: 40 "
+        "docs + 1 migration is an OWNER pr', turned out to have been VACUOUS since it was "
+        "written: its 40 witnesses were `docs/note{i}.md`, paths in no lane at all, so it "
+        "had been passing on escalation rather than on precedence and would have stayed "
+        "green with the precedence rule deleted. It now uses `docs/harness/**`, a real fast "
+        "lane. Third instance in this file of the same shape: a drill that agrees with the "
+        "code for a reason neither of them is about.",
+    ),
 ]
 
 
@@ -597,6 +680,10 @@ def render() -> str:
             f"  RULE   {b.rule}",
             f"  DRILL  {b.drill or '*** NONE — this rule can die unnoticed ***'}",
         ]
+        # An amendment nobody prints is an amendment nobody reads, which is the
+        # markdown-changelog failure this whole module exists to avoid.
+        if b.note:
+            out.append(f"  SINCE  {b.note}")
     return "\n".join(out)
 
 

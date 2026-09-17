@@ -389,7 +389,11 @@ jobs:
           # The api form printed NOTHING here for PR #566 (11 files; run
           # 34795382607) and for #546/#553 before it, exited 0, and the
           # classifier then did the only honest thing with an empty list:
-          # "no files in the changeset -- refusing to guess" -> product_owner.
+          # "no files in the changeset -- refusing to guess" -> harness_owner
+          # (that escalation went to product_owner until 2026-09-17, when the
+          # owner flipped product_owner to auto_merge: true and the target had to
+          # move to the one lane a machine still may not merge -- otherwise this
+          # exact bug would have turned a blind read into an auto-merge).
           # So every PR was reaching the owner lane by a bug, not by policy,
           # while the same call returned all 11 paths from a laptop. The
           # pr-view form is the one every other reader in this repo uses.
@@ -439,6 +443,15 @@ jobs:
         run: |
           set -euo pipefail
           lane=$(python -c "import json;print(json.load(open('verdict.json')).get('lane',''))")
+          # KNOWN AMBIGUITY SINCE 2026-09-17, LEFT FOR THE OWNER ON PURPOSE.
+          # `product_owner` is `auto_merge: true` now, so `lane:owner` on one of
+          # those PRs no longer means "you must merge this" -- it means "this is
+          # the product's sharp end, watched for 15 minutes". The mapping is
+          # UNCHANGED here because the label is what the owner scans the PR list
+          # by, and silently re-pointing it at `lane:product` would throw away
+          # the distinction he uses it for. If the label should say something
+          # else, that is a one-line change and it is his: either add a fourth
+          # label (`lane:watched`) or fold product_owner into `lane:product`.
           case "$lane" in
             product)                    want="lane:product" ;;
             harness)                    want="lane:harness" ;;
