@@ -74,9 +74,9 @@ is derived — every step of it, each one load-bearing and commented with the
 incident that added it — is `models.Job.normalized_key`. Read them there; a
 paraphrase here that drops a step is how the dedup bug comes back.
 
-The key has one consumer: the `UNIQUE(normalized_company, normalized_title)`
-constraint, so two users pasting the same ad share one `jobs` row
-(`database.get_job_id_by_key`).
+Dedup is the database's alone: the `UNIQUE(normalized_company, normalized_title)`
+constraint, no dedup service, so two users pasting the same ad share one `jobs`
+row. `grep -rn "normalized_key()" backend/src` for its call sites.
 
 ---
 
@@ -105,9 +105,10 @@ function runs for which input is the body of
 
 Re-runs use only **stored** inputs (`raw_text`, `linkedin_raw_text`,
 `github_repos_brief`, `about_me`) — no re-upload, no GitHub re-fetch. Each pass
-no-ops when its input or LLM key is missing. Skill provenance is preserved: the
-two-pass sources feed `services/profile/skill_tiering` alongside the existing
-ones, at the weights declared there.
+no-ops when its input or LLM key is missing. Which of those outputs become skill
+evidence, and under which source label, is
+`services/profile/skill_tiering.collect_evidence_from_profile` — not every field
+two-pass writes is read by it.
 
 A profile save saves the profile — nothing else happens. There is no re-score
 to trigger any more (the code that queued one, and the queue itself, were
