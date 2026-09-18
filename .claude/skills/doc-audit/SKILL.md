@@ -52,8 +52,8 @@ either phase, unless the user explicitly orders that specific doc changed.
 ## Step 1: Inventory + classify
 
 List every `*.md` in the repo root, `docs/`, `backend/`, `frontend/`
-(excluding `node_modules`, `.claude/worktrees`). Assign each exactly one type:
-**LIVING / PLAN / LOG / REFERENCE** (definitions in DOC-MAINTENANCE.md §1).
+(excluding `node_modules`, `.claude/worktrees`). Assign each exactly one kind
+from `scripts/doc_sync_check.DOC_KINDS` (what each one obliges: DOC-MAINTENANCE.md §1).
 Flag any doc you cannot classify — that is itself a finding.
 
 ## Step 2: Sync the LIVING docs (delegate to /sync)
