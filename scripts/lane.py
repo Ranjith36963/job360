@@ -28,16 +28,30 @@ THE PRECEDENCE RULE, AND WHY IT IS NOT A SCORE
 A PR is classified by its MOST RESTRICTIVE file, never by a majority or an
 average:
 
-    product_owner  >  harness_owner  >  product  >  harness
+    harness_owner  >  product_owner  >  product  >  harness
 
 One migration file in a 40-file docs PR makes the whole thing a product_owner PR. This
 is deliberate and it is the opposite of a risk score. A score can be diluted --
 add enough safe files and the dangerous one stops mattering. A door cannot.
 
+REORDERED 2026-09-17. `product_owner` used to be first, because it was the
+strictest lane: a human merged it AND a user was downstream. The owner flipped it
+to `auto_merge: true` that day, which means it is no longer strict in the sense
+precedence exists to serve -- "does a machine get to decide this". Under the old
+order a PR holding one `.github/workflows/*.yml` file and one migration
+classified `product_owner`, reported `auto_merge: true`, and the human-only file
+would have ridden along. `harness_owner` is first now because it is the only
+`auto_merge: false` lane left. The tuple itself lives in `merge_cage.LANES`.
+
 THE OTHER RULE: AN UNKNOWN PATH IS NOT A SAFE PATH
 --------------------------------------------------
 A file matching no lane does not fall through to the fast lane. It escalates to
-`product_owner` -- the strictest of the four -- and the reason names the file. This repo has shipped ten guards that
+`harness_owner` -- the only lane a machine may not merge -- and the reason names
+the file. (It escalated to `product_owner` until 2026-09-17 for exactly the same
+stated reason, "the strictest of the four"; when that lane started auto-merging,
+an unchanged escalation target would have quietly turned "nobody has decided this
+is safe" into "ship it". The TARGET was never the point -- "a machine does not
+decide this" was.) This repo has shipped ten guards that
 could not fire, every one of them a check that reported success about a question
 it was not actually asking. `else: allow` is that bug in one word.
 """
@@ -65,8 +79,16 @@ POLICY_PATH = Path(__file__).resolve().parent.parent / ".github" / "merge-policy
 #
 # TWO owner lanes, not one. "Who decides" and "who gets hurt" are separate
 # questions; a single `owner` bucket collapsed them and quietly left hand-merged
-# migrations with no post-merge watcher at all. product_owner outranks
-# harness_owner because a user is downstream of it.
+# migrations with no post-merge watcher at all.
+#
+# `harness_owner` outranks `product_owner` since 2026-09-17, which is the
+# opposite of what it said here before. The old ranking was "a user is
+# downstream, so it is more serious", and that was a statement about BLAST
+# RADIUS. Precedence is not about blast radius; it is about WHO DECIDES. Once
+# `product_owner` began auto-merging, ranking it above the one human-only lane
+# meant a single harness_owner file could be out-voted by a product_owner file
+# beside it and machine-merged. The harness lane is also the one whose blast
+# radius includes the watcher that would have caught the other one.
 # IMPORTED, NOT RETYPED. `merge_cage.LANES` is the one definition; this file
 # used to keep its own copy, and a lane in one list but not the other is the
 # same "two readers, two answers" bug the ALLOW/DENY merge was written to end.
@@ -164,11 +186,39 @@ def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
     specific files that caused the answer. A verdict you cannot trace to a file
     is a verdict nobody can argue with, which sounds good and is not.
     """
+    # THE ESCALATION TARGET, NAMED ONCE. Both fall-throughs below send a
+    # changeset nobody has classified to this lane, and the property that has to
+    # hold is `auto_merge: false`, not the lane's name. It was `product_owner`
+    # until 2026-09-17, when that lane started auto-merging and the same line of
+    # code silently became "ship whatever we do not recognise". Pinned by two
+    # drill cases that assert the name AND the flag.
+    escalate = "harness_owner"
+    # ...AND THE FLAG IS READ FROM THE POLICY, NOT TYPED HERE.
+    #
+    # Both escalation arms used to return a literal `"auto_merge": False`. That
+    # is a sentence about a lane, written somewhere the lane cannot contradict
+    # it, and on 2026-09-17 it was caught doing exactly what this repo's dead
+    # guards all do: pointing `escalate` at a lane that auto-merges left the
+    # verdict still saying False, so the drill case "unknown path never
+    # auto-merges" stayed GREEN over the mutation it exists to catch. It could
+    # not go red, because it was reading a constant.
+    #
+    # Downstream it would have been an internally inconsistent verdict too —
+    # `lane: product_owner, auto_merge: false` handed to a reader that also
+    # knows product_owner auto-merges is two answers to one question, and this
+    # whole file exists because that is how a cage stops meaning anything.
+    #
+    # Reading the real flag makes the mutation visible. What keeps it SAFE is
+    # not this line but merge_cage's drill case "the escalation target is a lane
+    # a machine may not merge", which asserts against the live policy that
+    # `harness_owner` is still `auto_merge: false`.
+    escalate_auto = bool(policy["lanes"][escalate].get("auto_merge", False))
+
     if not files:
         return {
-            "lane": "product_owner",
-            "requires": policy["lanes"]["product_owner"].get("requires") or [],
-            "auto_merge": False,
+            "lane": escalate,
+            "requires": policy["lanes"][escalate].get("requires") or [],
+            "auto_merge": escalate_auto,
             "why": ["no files in the changeset -- refusing to guess"],
             "by_lane": {},
         }
@@ -177,13 +227,14 @@ def classify(files: list[str], policy: dict[str, Any]) -> dict[str, Any]:
     for f in files:
         by_lane.setdefault(lane_of_file(f, policy), []).append(f)
 
-    # An unknown path takes the STRICTEST lane, and says which file made it so.
+    # An unknown path takes the lane no machine may merge, and says which file
+    # made it so.
     if by_lane.get("unknown"):
         unknown = sorted(by_lane["unknown"])
         return {
-            "lane": "product_owner",
-            "requires": policy["lanes"]["product_owner"].get("requires") or [],
-            "auto_merge": False,
+            "lane": escalate,
+            "requires": policy["lanes"][escalate].get("requires") or [],
+            "auto_merge": escalate_auto,
             "why": [
                 f"{len(unknown)} file(s) match no lane in .github/merge-policy.yml, "
                 f"so they escalate to the owner lane: {', '.join(unknown[:5])}"
@@ -253,11 +304,48 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
 
     # 3. PRECEDENCE -- one dangerous file beats any number of safe ones. This is
     #    the case a risk SCORE gets wrong and a DOOR gets right.
-    many_docs = [f"docs/note{i}.md" for i in range(40)]
-    check("precedence: 40 docs + 1 migration is an OWNER pr",
+    # THE WITNESSES HAD TO BE REAL DOCS, AND THEY WERE NOT. This list was
+    # `docs/note{i}.md` — paths in NO lane, which escalate. So the case passed
+    # because 40 files were unclassified, not because one migration outranked 40
+    # harmless ones, and it would have stayed green with the precedence rule
+    # deleted. It only showed up on 2026-09-17 when the escalation target moved
+    # to `harness_owner` and the answer changed without the premise changing.
+    # `docs/harness/**` is a real fast lane, so the safe files are now genuinely
+    # safe and the migration is genuinely the thing doing the work.
+    many_docs = [f"docs/harness/note{i}.md" for i in range(40)]
+    check("precedence: 40 docs + 1 migration is a PRODUCT_OWNER pr",
           classify([*many_docs, "backend/migrations/007_x.sql"], policy)["lane"], "product_owner")
     check("precedence: product + harness is PRODUCT",
           classify(["docs/harness/a.md", "backend/src/main.py"], policy)["lane"], "product")
+
+    # 3b. THE CASE THE 2026-09-17 REORDER EXISTS FOR.
+    #
+    #     `product_owner` auto-merges now. `harness_owner` does not. Under the
+    #     OLD order (`product_owner` first, because it used to be the strictest)
+    #     this changeset classified `product_owner` and reported auto_merge TRUE
+    #     -- so the workflow file, which a machine may never merge, would have
+    #     ridden into main on the migration's ticket. Put the old tuple back in
+    #     `merge_cage.LANES` and this goes red; that is the whole point of it.
+    #
+    #     Asserted on BOTH the lane name and the flag on purpose. The name alone
+    #     would stay green if someone later gave harness_owner `auto_merge: true`;
+    #     the flag alone would stay green if the changeset escalated for some
+    #     unrelated reason. The defect this guards is "the machine merged a file
+    #     it may not merge", and it takes both halves to say that.
+    mixed = classify(["backend/migrations/0042_x.up.sql", ".github/workflows/ci.yml"], policy)
+    check("precedence: a migration AND a workflow file is harness_owner",
+          mixed["lane"], "harness_owner")
+    check("precedence: ...and is therefore never machine-merged",
+          mixed["auto_merge"], False)
+    check("precedence: the workflow file is what pinned it, by the RULE",
+          ".github/workflows/ci.yml" in (mixed.get("by_lane") or {}).get("harness_owner", []),
+          True)
+    # ...and the negative control, or the case above is bought by refusing
+    # everything: the migration ALONE is the watched lane and a machine may merge
+    # it (owner decision 2026-09-17).
+    mig_only = classify(["backend/migrations/0042_x.up.sql"], policy)
+    check("NEGATIVE CONTROL: a migration alone is product_owner and machine-mergeable",
+          (mig_only["lane"], mig_only["auto_merge"]), ("product_owner", True))
 
     # 4. The cage may not edit the cage.
     check("recursion: editing the policy file is owner-only",
@@ -267,16 +355,30 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     check("recursion: editing the verifier is owner-only",
           classify([".github/workflows/verify-live.yml"], policy)["lane"], "harness_owner")
 
-    # 5. An UNKNOWN path must escalate, never fall through to fast.
+    # 5. An UNKNOWN path must escalate, never fall through to fast — and since
+    #    2026-09-17 "escalate" means `harness_owner`, the only lane a machine may
+    #    not merge. Both halves are asserted: the NAME, because a lane that
+    #    auto-merges is not an escalation whatever it is called, and the FLAG,
+    #    because the flag is the property that actually stops the arm.
     unknown = classify(["some/brand/new/place.py"], policy)
-    check("unknown path escalates to the strictest lane", unknown["lane"], "product_owner")
+    check("unknown path escalates to the only human-only lane",
+          unknown["lane"], "harness_owner")
     check("unknown path never auto-merges", unknown["auto_merge"], False)
     check("unknown path names the file",
           "some/brand/new/place.py" in " ".join(unknown["why"]), True)
 
-    # 6. An empty changeset is refused, not waved through.
-    check("empty changeset is product_owner", classify([], policy)["lane"], "product_owner")
+    # 6. An empty changeset is refused, not waved through. This is not a
+    #    hypothetical: pr-advisor.yml was reading an empty file list off a
+    #    broken `gh api` call on real 11-file PRs, and this arm is what kept
+    #    those out of the machine's hands.
+    check("empty changeset is harness_owner", classify([], policy)["lane"], "harness_owner")
     check("empty changeset never auto-merges", classify([], policy)["auto_merge"], False)
+    # ...and the flag really comes from the policy, not from a literal. Proven by
+    # asking the policy the same question directly: if these two ever disagree,
+    # the verdict is describing a lane that does not exist.
+    check("the escalation verdict's flag is the escalation lane's real flag",
+          classify([], policy)["auto_merge"],
+          bool(policy["lanes"][classify([], policy)["lane"]].get("auto_merge", False)))
 
     # 7. Every lane demands at least one tag. A lane with `requires: []` would
     #    merge on nothing at all, which is the failure this whole file prevents.
@@ -368,8 +470,24 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     check("harness_owner is NOT watched -- nothing live is downstream",
           bool(cage.get("watch_minutes")), False)
     check("product_owner can be rolled back on Railway", mig.get("rollback"), "railway")
-    check("neither owner lane ever auto-merges",
-          (mig["auto_merge"], cage["auto_merge"]), (False, False))
+
+    # REWRITTEN 2026-09-17. This line used to read "neither owner lane ever
+    # auto-merges" and it was the single sentence the owner's decision
+    # contradicted, so it is stated as the new asymmetry rather than deleted:
+    #
+    #   product_owner  auto-merges, BECAUSE it is watched and can be rolled back.
+    #   harness_owner  does not, because the watcher and the rollback are FILES
+    #                  IN IT -- there is no undo to borrow speed against.
+    #
+    # The second half is the load-bearing one and it is asserted on its own
+    # below so that flipping harness_owner can never be a side effect of
+    # anything.
+    check("product_owner auto-merges — the 15-minute watcher is the argument",
+          mig["auto_merge"], True)
+    check("harness_owner NEVER auto-merges — it owns the watcher, so it has no undo",
+          cage["auto_merge"], False)
+    check("...and the watched lane really is watched, or the flip has no argument",
+          (mig.get("watch_minutes"), mig.get("rollback")), (15, "railway"))
 
     # 11. THE LEAKY-GLOB TRAP -- and why this section was rewritten 2026-08-20.
     #
@@ -423,10 +541,18 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #      the lane name, because `product_owner` reached by ESCALATION and
     #      `product_owner` reached by the RULE are different facts that
     #      `auto_merge` renders identically.
+    #
+    #      2026-09-17: the CLAIM these cases make is narrower now. They used to
+    #      say "still needs you"; since the product_owner flip they say "still
+    #      separated from ordinary prose" -- the two decision documents sit in
+    #      the watched lane, wear the `lane:owner` label, and do not ride the
+    #      fast lane with a README. They no longer stop for a hand. Moving these
+    #      two lines to `harness_owner` in the policy is how the owner takes
+    #      that back, and it is two lines.
     for decision in ("docs/product/product_design_rules.md",
                      "docs/product/plans/batch-2-decisions.md"):
         verdict = classify([decision], policy)
-        check(f"a document that IS a decision still needs you: {decision}",
+        check(f"a document that IS a decision is not ordinary prose: {decision}",
               verdict["lane"], "product_owner")
         check(f"...by the RULE, not by escalation: {decision}",
               decision in (verdict.get("by_lane") or {}).get("product_owner", []), True)
@@ -531,10 +657,61 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
         check(f"the undo is not machine-mergeable: {gear}",
               classify([gear], policy)["auto_merge"], False)
 
+    # ASSERT THE LANE TOO, from 2026-09-17. `auto_merge == False` alone was a
+    # true sentence about a moving target: it stayed green through the
+    # product_owner flip while the lane it named quietly became machine-
+    # mergeable. The name is the fact that cannot be faked by escalation.
+    nested_doc = classify(["docs/somewhere/new.md"], policy)
+    check("an unclassified nested doc escalates to harness_owner",
+          nested_doc["lane"], "harness_owner")
     check("an unclassified nested doc escalates, never auto-merges",
-          classify(["docs/somewhere/new.md"], policy)["auto_merge"], False)
+          nested_doc["auto_merge"], False)
     check("a root doc that IS classified still takes the fast lane",
           classify(["README.md"], policy)["lane"], "harness")
+
+    # 12. THE `.claude` CARVE-OUT (owner, 2026-09-17: "merge all daily docs").
+    #
+    #     The daily truth-check PR edits `.claude/skills/**/*.md`. The blanket
+    #     `.claude/**` in `harness_owner` made every one of them a hand-merge,
+    #     for prose an agent reads.
+    #
+    #     Both directions are pinned, because this carve-out is only safe as a
+    #     PAIR: the reading matter merges, the executing, configuring and
+    #     JUDGING parts do not. Widen `.claude/skills/**` to `.claude/**` and the
+    #     second group goes red instantly.
+    for readable in (".claude/skills/hard-rules/SKILL.md",
+                     ".claude/skills/verify-job360/references/methodology.md",
+                     ".claude/skills/debug/SKILL.md"):
+        v_read = classify([readable], policy)
+        check(f"the words an agent reads take the fast lane: {readable}",
+              (v_read["lane"], v_read["auto_merge"]), ("harness", True))
+    #     `.claude/agents/**` WAS IN THE LIST ABOVE FOR ONE COMMIT. reviewer-bugs
+    #     raised it as a P0 on PR #582: that directory defines the reviewers this
+    #     gate relies on (`bugs` IS the reviewer-bugs check), so machine-
+    #     mergeable it lets a PR soften its own reviewer and then be merged by
+    #     the softened reviewer. All three files are named, not just the one the
+    #     P0 cited — the rule is about the directory, and `verifier.md` is the
+    #     one nobody would think to check.
+    for guarded in (".claude/hooks/commit-gate.sh",
+                    ".claude/hooks/worktree-reaper.sh",
+                    ".claude/settings.json",
+                    ".claude/settings.local.json",
+                    ".claude/agents/reviewer-bugs.md",
+                    ".claude/agents/reviewer-conventions.md",
+                    ".claude/agents/verifier.md"):
+        v_guard = classify([guarded], policy)
+        check(f"the half that RUNS, CONFIGURES or JUDGES is still yours: {guarded}",
+              (v_guard["lane"], v_guard["auto_merge"]), ("harness_owner", False))
+    #     ...and a skill beside an agent definition is the owner's, because
+    #     precedence is a door. Without this the skills carve-out is a way in.
+    check("a skill doc beside a reviewer definition is still harness_owner",
+          classify([".claude/skills/hard-rules/SKILL.md",
+                    ".claude/agents/verifier.md"], policy)["lane"], "harness_owner")
+    # ...and a skill beside a hook is a harness_owner PR, because precedence is a
+    # door. Without this, the carve-out could be used as a way in.
+    check("a skill doc beside a hook is still harness_owner",
+          classify([".claude/skills/debug/SKILL.md",
+                    ".claude/hooks/commit-gate.sh"], policy)["lane"], "harness_owner")
 
 
     passed = sum(1 for _, ok in cases if ok)
