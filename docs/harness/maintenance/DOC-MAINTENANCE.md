@@ -20,12 +20,17 @@
 
 ## 1. Doc taxonomy — every doc gets exactly ONE type
 
-| Type | Examples | Rule |
-|------|----------|------|
-| **LIVING** | `CLAUDE.md`, `ARCHITECTURE.md`, `README.md`, `STATUS.md`, `backend/CLAUDE.md`, `frontend/README.md` | Must always match the code. Any drift is a bug, same severity as a failing test. |
-| **PLAN** | design docs for unbuilt features | Has a lifecycle (below). Never silently edited after execution starts — plans are promises, and history must stay honest. **A plan does NOT survive its own shipping:** once the slice merges, the code is the description and the plan is a second one, so it is deleted (2026-09-12, slice 8 — the whole `docs/plans/` folder went at once). Git log is the record. |
-| **LOG** | `docs/harness/maintenance/PARKED.md` | Append-only. Never rewritten, so never stale by definition. |
-| **REFERENCE** | decision records, research notes | Updated only when the decision itself changes; superseded ones get a banner pointing to the successor, content stays. |
+The valid kinds are `scripts/doc_sync_check.DOC_KINDS`; which docs carry LIVING
+today is `doc_sync_check.living_stamped_docs()`. Do not retype either list here —
+this table says only what each kind OBLIGES.
+
+| Type | Rule |
+|------|------|
+| **LIVING** | Must always match the code. Any drift is a bug, same severity as a failing test. |
+| **PLAN** | Has a lifecycle (below). Never silently edited after execution starts — plans are promises, and history must stay honest. **A plan does NOT survive its own shipping:** once the slice merges, the code is the description and the plan is a second one, so it is deleted (2026-09-12, slice 8 — the whole `docs/plans/` folder went at once). Git log is the record. |
+| **LOG** | Append-only. Never rewritten, so never stale by definition. |
+| **REFERENCE** | Updated only when the decision itself changes; superseded ones get a banner pointing to the successor, content stays. |
+| **FROZEN**, **GENERATED** | Never hand-edited, so never drift. `GENERATED` is rewritten by `scripts/gen_doc_blocks.py --write` and CI fails if it disagrees with the code. |
 
 ### Every doc carries its type on line 2 (machine + human readable)
 

@@ -26,14 +26,15 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 - [ ] 2. Every nav + footer link and the Get-started / Login buttons navigate correctly
 
 ## B. Auth (full lifecycle)
-- [ ] 3. Register → `POST /api/auth/register` 201, `users` row lands, cookie issued
-- [ ] 4. Email verify — `POST /verify-email/request`, `/verify-email/confirm`, `GET /me/email-verified`; enforcement is ON by default and blocks the routes that spend an LLM call — the tailor (`tests/test_email_enforcement.py`) — so verify this user before exercising those
+> Every route in this section lives under `/api/auth/` — the router is `backend/src/api/routes/auth.py`. Read each path off it; do not infer one from the item text.
+- [ ] 3. Register → 201, `users` row lands, cookie issued
+- [ ] 4. Email verify — the request, confirm and email-verified routes; enforcement is ON by default and blocks the routes that spend an LLM call — the tailor (`tests/test_email_enforcement.py`) — so verify this user before exercising those
 - [ ] 5. Login + session — `GET /api/auth/me` resolves the exact user from the cookie
 - [ ] 6. Password reset **request** → 204 (send is SMTP-conditional)
-- [ ] 7. Password reset **confirm** → `/password-reset/confirm` with a token
-- [ ] 8. Logout → `POST /logout` 204, cookie cleared, old cookie → `/me` 401
+- [ ] 7. Password reset **confirm** → 204 with a token
+- [ ] 8. Logout → 204, cookie cleared, old cookie on `me` → 401
 - [ ] 9. Route guard — gated route with no cookie → 401
-- [ ] 10. Session persists — 30-day cookie max-age (`auth.py`)
+- [ ] 10. Session persists — 30-day cookie max-age (`auth._set_session_cookie`)
 
 ## C. Profile
 - [ ] 11. CV upload + LLM parse → `POST /api/profile` 200, skills+titles returned, `user_profiles` row lands
@@ -61,8 +62,8 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 
 ## F. Account management
 - [ ] 29. Password change guard — wrong current password → 401 (rule #26), tested non-destructively
-- [ ] 30. Email change → `PATCH /users/me/email` (verify current password first)
-- [ ] 31. Account delete → `DELETE /users/me` **irreversibly ERASES** the account — there is no restore (`backend/tests/test_account_delete_is_erasure.py`). Use a throwaway account, never the demo one.
+- [ ] 30. Email change (verify current password first) — path off `auth.py`, per section B
+- [ ] 31. Account delete **irreversibly ERASES** the account — there is no restore (`backend/tests/test_account_delete_is_erasure.py`). Use a throwaway account, never the demo one.
 
 ## G. Agent surface (MCP)
 - [ ] 32. Token → `POST /api/tokens` 201 returns a `j360_…` token once; `GET /api/tokens` lists names only; `DELETE /api/tokens/{id}` revokes

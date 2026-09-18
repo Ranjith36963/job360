@@ -69,23 +69,14 @@ dedup against, because the uniqueness constraint on the table still needs it
 any more; those fields are trimmed from the model wherever nothing remaining
 writes them.
 
-**Post-init processing kept:**
-- HTML entity decoding on title and company (`html.unescape`)
-- Company name cleaning: empty/nan/none/null → "Unknown"
+What the constructor still normalises is `models.Job.__post_init__`; how the key
+is derived — every step of it, each one load-bearing and commented with the
+incident that added it — is `models.Job.normalized_key`. Read them there; a
+paraphrase here that drops a step is how the dedup bug comes back.
 
-### normalized_key()
-
-```python
-def normalized_key(self) -> tuple[str, str]:
-    # 1. Strip company suffixes: Ltd, Limited, Inc, PLC, Corp, GmbH, etc.
-    # 2. Strip region suffixes: UK, US, EU, EMEA, APAC, Global, International
-    # 3. Lowercase both company and title
-    return (normalized_company, normalized_title)
-```
-
-This key is used for:
-- **Database uniqueness** — `UNIQUE(normalized_company, normalized_title)` constraint, so
-  two users pasting the same ad share one `jobs` row (`database.get_job_id_by_key`)
+Dedup is the database's alone: the `UNIQUE(normalized_company, normalized_title)`
+constraint, no dedup service, so two users pasting the same ad share one `jobs`
+row. `grep -rn "normalized_key()" backend/src` for its call sites.
 
 ---
 
@@ -107,22 +98,17 @@ pinned by `backend/tests/test_llm_provider.py::test_llm_extract_prefers_openai`.
 
 ### Two-Pass Extraction (`services/profile/two_pass.py`)
 
-Every input gets a **deterministic pass** (plain code) AND an **LLM enhance pass**,
-both merged into one `CVData`:
-
-```
-run_two_pass_extraction(profile)        # in place, never raises, no network
-  CV         : deterministic_cv_fields(raw_text)      + llm_cv_fields_from_text(raw_text)
-  LinkedIn   : header/skills split (deterministic)    + parse_linkedin_from_text(linkedin_raw_text)
-  GitHub     : LANGUAGE/TOPIC lookup (deterministic)  + llm_infer_github_skills(github_repos_brief)
-  Preferences: form parse (deterministic)             + llm_infer_from_about_me(about_me)
-```
+Every input (CV, LinkedIn, GitHub, preferences) gets a **deterministic pass**
+(plain code) AND an **LLM enhance pass**, both merged into one `CVData`. Which
+function runs for which input is the body of
+`services/profile/two_pass.run_two_pass_extraction` — read it there.
 
 Re-runs use only **stored** inputs (`raw_text`, `linkedin_raw_text`,
 `github_repos_brief`, `about_me`) — no re-upload, no GitHub re-fetch. Each pass
-no-ops when its input or LLM key is missing. Skill provenance is preserved: the
-new sources `about_me_llm` (weight 2.0) and `github_llm` (1.5) feed
-`skill_tiering` alongside the existing ones.
+no-ops when its input or LLM key is missing. Which of those outputs become skill
+evidence, and under which source label, is
+`services/profile/skill_tiering.collect_evidence_from_profile` — not every field
+two-pass writes is read by it.
 
 A profile save saves the profile — nothing else happens. There is no re-score
 to trigger any more (the code that queued one, and the queue itself, were
