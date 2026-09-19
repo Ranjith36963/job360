@@ -59,8 +59,9 @@ CASES: list[tuple[str, str, str, str]] = [
     # ("11 route modules (72 endpoints)"), and each guard reports separately.
     ("docs/GENERATED.md", r"(\d+) route modules", "999 route modules", "route-modules"),
     ("docs/GENERATED.md", r"\((\d+) endpoints", "(999 endpoints", "endpoints"),
-    ("frontend/CLAUDE.md", r"Next\.js (\d+\.\d+\.\d+)", "Next.js 1.2.3", "nextjs-version"),
-    ("frontend/CLAUDE.md", r"React (\d+\.\d+\.\d+)", "React 4.5.6", "react-version"),
+    # Majors only since 2026-09-19 (exact pins drifted on every Dependabot bump).
+    ("frontend/CLAUDE.md", r"Next\.js (\d+) \(App Router\)", "Next.js 99 (App Router)", "nextjs-version"),
+    ("frontend/CLAUDE.md", r"React (\d+) \+ Tailwind", "React 99 + Tailwind", "react-version"),
     # Eighth batch, 2026-08-25. The disagreement guard: does one doc contradict
     # ANOTHER doc about a named constant? Six of ten findings in the cycle that
     # prompted it were exactly this, twice within a single file.
