@@ -150,9 +150,14 @@ async def test_b3_a_jsonld_recursion_bomb_does_not_500_the_route(authenticated_a
     assert resp.json()["outcome"] == "ok"
 
 
-def test_b3_the_recursion_bomb_is_caught_directly_by_extract_job_fields():
+def test_b3_the_recursion_bomb_is_caught_directly_by_extract_job_fields(monkeypatch):
+    from src.core import settings
     from src.services.fetch.extract import extract_job_fields
 
+    # This test is about the bomb, not ad quality: the body is a two-word
+    # stand-in, which the 2026-09-19 junk guard (a heuristic description
+    # under URL_FETCH_MIN_DESCRIPTION_CHARS is not an ad) would rightly drop.
+    monkeypatch.setattr(settings, "URL_FETCH_MIN_DESCRIPTION_CHARS", 0)
     bomb = "[" * 60_000
     html = f'<html><head><script type="application/ld+json">{bomb}</script></head><body>hi there</body></html>'
     result = extract_job_fields(html, max_depth=200, budget_s=3.0)  # must not raise
