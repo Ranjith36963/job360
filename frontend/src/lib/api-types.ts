@@ -2420,8 +2420,6 @@ export interface components {
             source: string;
             /** Title */
             title: string;
-            /** Visa Flag */
-            visa_flag: boolean;
         };
         /**
          * JsonResumeResponse

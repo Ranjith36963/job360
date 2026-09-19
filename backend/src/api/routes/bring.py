@@ -78,7 +78,6 @@ def job_row_to_response(row: dict[str, Any]) -> JobResponse:
         source=row.get("source", ""),
         date_found=row.get("date_found", "") or "",
         apply_url=row.get("apply_url", "") or "",
-        visa_flag=bool(row.get("visa_flag", 0)),
         experience_level=row.get("experience_level", "") or "",
         description=row.get("description") or None,
         posted_at=row.get("posted_at"),

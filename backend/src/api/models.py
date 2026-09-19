@@ -48,7 +48,6 @@ class JobResponse(BaseModel):
     source: str
     date_found: str
     apply_url: str
-    visa_flag: bool
     job_type: str = ""
     experience_level: str = ""
     # The stored ad text. A user-brought job has no source website to read the

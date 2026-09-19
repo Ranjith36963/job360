@@ -46,7 +46,6 @@ function job(over) {
     source: "reed",
     date_found: iso(3),
     apply_url: "https://example.test/1",
-    visa_flag: false,
     experience_level: "mid",
     action: null,
     bucket: "24h",
@@ -113,7 +112,6 @@ export const MOCK_JOBS = [
     company: "InternationalConsolidatedFinancialServicesGroup",
     location: "Manchester, United Kingdom (Hybrid — 2 days on site)",
     salary: null, // rule #29: an absent salary must read as absent, not as £0
-    visa_flag: true,
     bucket: "48h",
   }),
   job({ id: 3, match_score: 67, title: "Analytics Engineer", company: "Deliveroo", salary: null }),
