@@ -84,6 +84,8 @@ concurrency:
   # posts. One open PR has one head SHA at a time, and every event this file
   # listens to carries it, so every arm for that head now waits its turn.
   # A hand dispatch keys by the PR it was given; the schedule keys by run.
+  # This group is the COARSE lock (it can only use what the event carries);
+  # the per-PR lock that actually holds is on the `arm` job below.
   group: auto-merge-${{ github.event.check_suite.head_sha || github.event.pull_request.head.sha || github.event.sha || inputs.pr || github.run_id }}
   cancel-in-progress: false
 
@@ -313,6 +315,17 @@ jobs:
       max-parallel: 1 # they all touch the same queue; judge them in order
       matrix:
         pr: ${{ fromJSON(needs.pick.outputs.prs) }}
+    # ONE LOCK PER PR, HERE, WHATEVER WOKE THE RUN (2026-09-19, reviewer-bugs
+    # on #592). The workflow-level group above can only key by what the EVENT
+    # carries -- a SHA for status/check_suite/review events, a number for a
+    # hand dispatch, nothing for the schedule -- so two runs woken differently
+    # for the same PR could still judge it side by side. By the time this job
+    # exists the PR number is known, so this is where "never two arms on one
+    # PR" is actually enforced: a dispatch, a status and the sweep all wait
+    # their turn on `auto-merge-pr-<N>`.
+    concurrency:
+      group: auto-merge-pr-${{ matrix.pr }}
+      cancel-in-progress: false
     steps:
       # THE RULES. From the default branch, which the PR cannot edit.
       - uses: actions/checkout@v7
