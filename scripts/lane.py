@@ -545,7 +545,7 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #      2026-09-17: the CLAIM these cases make is narrower now. They used to
     #      say "still needs you"; since the product_owner flip they say "still
     #      separated from ordinary prose" -- the two decision documents sit in
-    #      the watched lane, wear the `lane:owner` label, and do not ride the
+    #      the watched lane, wear the `lane:product-owner` label, and do not ride the
     #      fast lane with a README. They no longer stop for a hand. Moving these
     #      two lines to `harness_owner` in the policy is how the owner takes
     #      that back, and it is two lines.
