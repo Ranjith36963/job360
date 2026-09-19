@@ -1,9 +1,12 @@
 """Right to work — the UK fact a CV states and we never read.
 
-Job360 is a UK-market product. Rule #30 refuses jobs the user cannot take
-because of WHERE they are; rule #31 treats sponsorship as a spotlight rather
-than a wall, because ``jobs.visa_flag`` conflates "says no" with "never
-mentioned". Both are about the JOB side.
+Job360 is a UK-market product. Rule #30 refused jobs the user could not take
+because of WHERE they are; rule #31 treated sponsorship as a spotlight rather
+than a wall, because the sourcing era's ``jobs.visa_flag`` boolean conflated
+"says no" with "never mentioned". Both were about the JOB side — and both are
+history: that column was dropped in migration 0043 (#571), and the job-side
+signal now lives on ``applications.visa_signal`` (slice 7, migration 0042),
+where the seeker's own agent records it.
 
 The USER side had nothing at all. ``needs_visa`` is a single boolean the user
 ticks, and 13 of 15 preferences on the owner's live profile are untouched — so

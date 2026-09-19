@@ -28,7 +28,6 @@ class Job:
     salary_min: Optional[float] = None
     salary_max: Optional[float] = None
     description: str = ""
-    visa_flag: bool = False
     experience_level: str = ""
     # Pillar 3 Batch 1 — 5-column date model.
     # posted_at: claimed posting date (None when no trustworthy field).

@@ -2153,10 +2153,6 @@
           "title": {
             "title": "Title",
             "type": "string"
-          },
-          "visa_flag": {
-            "title": "Visa Flag",
-            "type": "boolean"
           }
         },
         "required": [
@@ -2167,8 +2163,7 @@
           "salary",
           "source",
           "date_found",
-          "apply_url",
-          "visa_flag"
+          "apply_url"
         ],
         "title": "JobResponse",
         "type": "object"

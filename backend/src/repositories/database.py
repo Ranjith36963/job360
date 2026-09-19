@@ -91,7 +91,6 @@ class JobDatabase:
                 source TEXT NOT NULL,
                 date_found TEXT NOT NULL,
                 match_score INTEGER DEFAULT 0,
-                visa_flag INTEGER DEFAULT 0,
                 experience_level TEXT DEFAULT '',
                 normalized_company TEXT NOT NULL,
                 normalized_title TEXT NOT NULL,
@@ -338,11 +337,11 @@ class JobDatabase:
         cursor = await self._db.execute(
             """INSERT OR IGNORE INTO jobs
             (title, company, location, salary_min, salary_max, description,
-             apply_url, source, date_found, visa_flag,
+             apply_url, source, date_found,
              experience_level, normalized_company, normalized_title, first_seen,
              posted_at, first_seen_at, last_seen_at, date_confidence,
              date_posted_raw, deadline, deadline_source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 job.title,
                 job.company,
@@ -353,7 +352,6 @@ class JobDatabase:
                 job.apply_url,
                 job.source,
                 job.date_found,
-                int(job.visa_flag),
                 job.experience_level,
                 company,
                 title,
