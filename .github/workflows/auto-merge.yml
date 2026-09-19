@@ -38,6 +38,15 @@ name: Auto-merge (the cage's arm, and only inside its lane)
 # the evidence has arrived; the schedule is the sweep that catches every PR the
 # events missed, because a queue whose only input is webhooks forgets things.
 #
+# TWO MORE SIGNALS, ADDED 2026-09-19 AFTER #591 SAT GREEN FOR AN HOUR. The
+# review gate reads CodeRabbit, and CodeRabbit reports as a COMMIT STATUS, not
+# a check suite -- so its completion never fired `check_suite`. The other
+# thing the cage waits on is "no unresolved review thread", and resolving one
+# fires `pull_request_review_thread`, not `pull_request_review`. Both were left
+# to the sweep, and GitHub runs a `*/20` cron on this repo every 3-4 HOURS in
+# practice (measured: 09:35, 13:21, 16:45, 19:05). A `status` event carries a
+# SHA and no PR number, so the pick job asks GitHub which PRs the commit heads.
+#
 # AND WHY IT IS SAFE TO RUN THIS OFTEN: every decision is idempotent. Asking
 # GitHub to auto-merge a PR that is already queued changes nothing, and a PR the
 # cage refuses is simply refused again, in writing.
@@ -47,6 +56,9 @@ on:
     types: [completed]
   pull_request_review:
     types: [submitted]
+  pull_request_review_thread:
+    types: [resolved] # the cage waits on "no unresolved thread"; this is the moment it changes
+  status: {} # CodeRabbit / semgrep post a commit STATUS, which `check_suite` never sees
   schedule:
     - cron: "*/20 * * * *" # the sweep — a webhook can be missed, this cannot
   workflow_dispatch:
@@ -221,12 +233,24 @@ jobs:
           EVENT: ${{ github.event_name }}
           SUITE_PR: ${{ github.event.check_suite.pull_requests[0].number }}
           REVIEW_PR: ${{ github.event.pull_request.number }}
+          STATUS_SHA: ${{ github.event.sha }}
+          STATUS_STATE: ${{ github.event.state }}
           INPUT_PR: ${{ inputs.pr }}
         run: |
           set -euo pipefail
           case "$EVENT" in
-            check_suite)         prs="${SUITE_PR:-}" ;;
-            pull_request_review) prs="${REVIEW_PR:-}" ;;
+            check_suite)                prs="${SUITE_PR:-}" ;;
+            pull_request_review)        prs="${REVIEW_PR:-}" ;;
+            pull_request_review_thread) prs="${REVIEW_PR:-}" ;;
+            status)
+              # A status that is still `pending` says nothing has arrived yet.
+              # A finished one names only a SHA, so ask which open PRs it heads
+              # (a SHA on main after a merge heads a CLOSED PR, filtered below).
+              if [ "${STATUS_STATE:-}" = "pending" ]; then
+                prs=""
+              else
+                prs=$(gh api "repos/$GH_REPO/commits/$STATUS_SHA/pulls" --jq '.[].number' 2>/dev/null || true)
+              fi ;;
             *)
               if [ -n "${INPUT_PR:-}" ]; then prs="$INPUT_PR"
               else prs=$(gh pr list --state open --limit 30 --json number --jq '.[].number'); fi ;;
