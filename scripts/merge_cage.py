@@ -2371,9 +2371,17 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
             del os.environ["GITHUB_RUN_ID"]
         else:
             os.environ["GITHUB_RUN_ID"] = _saved_run_id
-    ok("outside Actions nothing is dropped",
-       len(without_own_run([_own_job])) == 1 or bool(os.environ.get("GITHUB_RUN_ID")),
-       "no GITHUB_RUN_ID = no filter", ["without_own_run"])
+    # Asserted with the variable GENUINELY absent (reviewer-bugs on #592: the
+    # first version `or`-ed in "or we are inside Actions", which is always true
+    # on the one path that runs this drill, so it could never fail).
+    _saved_run_id = os.environ.pop("GITHUB_RUN_ID", None)
+    try:
+        ok("outside Actions nothing is dropped",
+           len(without_own_run([_own_job])) == 1,
+           "no GITHUB_RUN_ID = no filter", ["without_own_run"])
+    finally:
+        if _saved_run_id is not None:
+            os.environ["GITHUB_RUN_ID"] = _saved_run_id
     # The measured live hole: green conclusion, new alert in the title.
     red("a GREEN check reporting a NEW security alert is still refused",
         judge_check_runs(done[:-1] + [{"name": "CodeQL", "status": "completed",

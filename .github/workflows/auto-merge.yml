@@ -76,7 +76,15 @@ permissions:
 concurrency:
   # Never two arms on one PR. `cancel-in-progress: false` because a half-run
   # judgement is worse than a slightly late one.
-  group: auto-merge-${{ github.event.check_suite.pull_requests[0].number || github.event.pull_request.number || inputs.pr || github.run_id }}
+  #
+  # KEYED BY HEAD SHA, NOT PR NUMBER (2026-09-19, reviewer-bugs on #592). A
+  # `status` event names only a SHA, so a PR-number key fell through to
+  # `run_id` and two statuses posted seconds apart (CodeRabbit, semgrep) ran
+  # two arms on the same PR in true parallel -- two queue requests, two Slack
+  # posts. One open PR has one head SHA at a time, and every event this file
+  # listens to carries it, so every arm for that head now waits its turn.
+  # A hand dispatch keys by the PR it was given; the schedule keys by run.
+  group: auto-merge-${{ github.event.check_suite.head_sha || github.event.pull_request.head.sha || github.event.sha || inputs.pr || github.run_id }}
   cancel-in-progress: false
 
 jobs:
