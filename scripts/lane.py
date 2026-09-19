@@ -560,6 +560,19 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
               classify(["docs/product/pillars/README.md", decision], policy)["lane"],
               "product_owner")
 
+    # 11a. THE GENERATED DOC RIDES WITH WHATEVER TOUCHES IT (2026-09-19).
+    #      docs/GENERATED.md matched no lane, so a product PR that added a
+    #      route regenerated it and escalated to harness_owner (#588). Alone it
+    #      is harness; beside product code it must NOT pull the PR up.
+    check("docs/GENERATED.md alone is the harness's own record",
+          classify(["docs/GENERATED.md"], policy)["lane"], "harness")
+    check("docs/GENERATED.md does not escalate a product PR",
+          classify(["backend/src/api/routes/bring.py", "docs/GENERATED.md"], policy)["lane"],
+          "product")
+    check("docs/GENERATED.md is matched by a rule, not escalation",
+          "docs/GENERATED.md" in (classify(["docs/GENERATED.md"], policy).get("by_lane") or {}).get("harness", []),
+          True)
+
     # 11b. EVERY FAST-LANE PATTERN, WITH A REAL NESTED WITNESS.
     #
     #      THE FIRST VERSION OF THIS WAS VACUOUS AND I SHIPPED IT AS THE FIX FOR
