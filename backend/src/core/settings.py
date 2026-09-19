@@ -495,6 +495,13 @@ URL_FETCH_MAX_REDIRECTS = int(os.getenv("URL_FETCH_MAX_REDIRECTS", "5"))
 # so a pathologically nested document can't make our OWN algorithm blow up
 # even though html.parser itself would happily keep streaming.
 URL_FETCH_MAX_HTML_DEPTH = int(os.getenv("URL_FETCH_MAX_HTML_DEPTH", "200"))
+# 2026-09-19 real-world run: a JS-rendered board (job-boards.greenhouse.io)
+# ships only page chrome in its HTML, so the heuristic rung "found" a
+# description of "Skip to Content Jump to the top…". A heuristic description
+# shorter than this is dropped, which lands the user in the paste box with a
+# clear sentence instead of a junk pre-fill. JSON-LD / meta descriptions are
+# not subject to it — they are the site's own structured answer.
+URL_FETCH_MIN_DESCRIPTION_CHARS = int(os.getenv("URL_FETCH_MIN_DESCRIPTION_CHARS", "400"))
 
 # R9 — rate limits: two per-user buckets plus one GLOBAL bucket. Per USER,
 # never per IP (every browser/agent shares the proxy address behind the Next

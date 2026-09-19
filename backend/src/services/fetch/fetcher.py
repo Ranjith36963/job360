@@ -121,6 +121,27 @@ def _make_decompressor(content_encoding: str) -> Optional[Any]:
     return None
 
 
+def peer_verdict(peer_ip: Optional[str], approved: frozenset[str]) -> Optional[str]:
+    """R5's belt, with the case the first real-world run found (2026-09-19).
+
+    ``None`` = accepted. When the socket's peer IS readable it must be one the
+    resolver approved for this hop (``verify_peername``, unchanged — the SSRF
+    drill's PEERNAME_RECHECK anchor sits there). When it is NOT readable
+    (``peer_ip is None``) that is not a violation: aiohttp releases a
+    response's connection to the pool the moment a small page is fully
+    received, and ``resp.connection`` is then ``None`` before we ever get to
+    look. Measured on a live public Ashby ad: 7 of 15 fetches were wrongly
+    ``ssrf_denied`` this way. A connection aiohttp made can only have gone to
+    an address the GuardedResolver returned — it hands the connector nothing
+    else — so an unknown peer is safe exactly when this hop approved at least
+    one address. With NOTHING approved there was no screened path to connect
+    over, and the unknown peer stays denied.
+    """
+    if peer_ip is None:
+        return None if approved else "peer unknown and no address was approved for this hop"
+    return verify_peername(approved, peer_ip)
+
+
 def _peer_ip(resp: Any) -> Optional[str]:
     """Best-effort read of the real socket peer (R5's belt). ``None`` under
     any mocked/absent transport — the caller decides what "unknown" means.
@@ -251,7 +272,7 @@ async def fetch_url(url: str) -> FetchResult:
                     # to ITS approved set whenever the resolver-level one is
                     # empty — the two are the same host, screened twice.
                     approved = guarded_resolver.approved_for(url_verdict.host) or host_verdict.approved
-                    if peer_ip is None or verify_peername(approved, peer_ip) is not None:
+                    if peer_verdict(peer_ip, approved) is not None:
                         return _result("ssrf_denied", redirects=redirects, final_url="")
 
                 content_type = _media_type(resp.headers.get("Content-Type", ""))

@@ -22,11 +22,15 @@ hostile page spends its whole body trying to reintroduce one.
 """
 from __future__ import annotations
 
+import html as html_module
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Any, Optional
+
+from src.core import settings as _settings  # live read: URL_FETCH_MIN_DESCRIPTION_CHARS (tests monkeypatch it)
 
 # Same caps BringJobRequest already enforces — settings-backed (C4: this used
 # to import api.routes.bring directly, dragging FastAPI into a service module,
@@ -60,6 +64,14 @@ _CONTAINER_TAGS = frozenset(
 # A container whose text is more than this fraction link text is treated as
 # navigation, not content, and is never chosen as the "best" block.
 _LINK_RATIO_CEILING = 0.6
+
+# Tags whose start/end is a word boundary when a fragment is flattened to
+# text. Inline tags (strong, em, a, span) are deliberately absent — "&lt;b&gt;A&lt;/b&gt;I"
+# is one word.
+_BLOCK_TAGS = frozenset({
+    "p", "br", "div", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6",
+    "tr", "td", "th", "section", "article", "header", "footer", "blockquote", "pre", "hr",
+})
 
 
 @dataclass
@@ -101,13 +113,20 @@ class _TextOnlyParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
         if tag in _EXCLUDED_TAGS:
             self._exclude_depth += 1
+        elif tag in _BLOCK_TAGS:
+            # A block boundary is a word boundary: "…Science)</p><p>This…" must
+            # read "Science) This", not "Science)This" (2026-09-19 real-world run).
+            self._parts.append(" ")
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
-        return None
+        if tag in _BLOCK_TAGS:
+            self._parts.append(" ")
 
     def handle_endtag(self, tag: str) -> None:
         if tag in _EXCLUDED_TAGS and self._exclude_depth > 0:
             self._exclude_depth -= 1
+        elif tag in _BLOCK_TAGS:
+            self._parts.append(" ")
 
     def handle_data(self, data: str) -> None:
         if self._exclude_depth == 0:
@@ -221,17 +240,39 @@ def _job_posting_location(obj: dict[str, Any]) -> str:
     return ", ".join(p for p in parts if p)
 
 
+def _undouble_html(fragment: str) -> str:
+    """A JSON-LD ``description`` is sometimes HTML that was entity-escaped
+    a second time (LinkedIn ships ``&lt;p&gt;&lt;strong&gt;…``). Fed to the
+    tag-stripper as-is, the parser unescapes it into text — ``<p><strong>``
+    as DATA, not tags — and ``_clean_text``'s bracket scrub then leaves the
+    tag names glued to the words ("pstrongAI Engineer"). Measured on the
+    2026-09-19 real-world run. Unescape ONCE, only when the fragment carries
+    escaped tags and no real ones, so a plain-text description that merely
+    mentions ``&lt;`` is untouched.
+    """
+    if "<" not in fragment and _ESCAPED_TAG.search(fragment):
+        return html_module.unescape(fragment)
+    return fragment
+
+
+# An escaped TAG, not a stray escaped bracket: "&lt;p&gt;", "&lt;/strong&gt;",
+# "&lt;br/&gt;" match; "x &lt; y" in prose does not.
+_ESCAPED_TAG = re.compile(r"&lt;/?[a-zA-Z][a-zA-Z0-9]*(?:\s|/|&gt;)")
+
+
 def _extract_json_ld(html: str) -> ExtractResult:
     result = ExtractResult()
     posting = next((o for o in _iter_json_ld_objects(html) if _is_job_posting(o)), None)
     if posting is None:
         return result
 
-    title = str(posting.get("title") or "").strip()
+    # Short JSON-LD strings can carry entities too ("Change Digital &amp; Tech");
+    # one unescape, then _clean_text's bracket scrub keeps the no-raw-HTML rule.
+    title = html_module.unescape(str(posting.get("title") or "").strip())
     org = posting.get("hiringOrganization")
-    company = str(org.get("name") or "").strip() if isinstance(org, dict) else ""
-    location = _job_posting_location(posting)
-    description = strip_html_to_text(str(posting.get("description") or ""))
+    company = html_module.unescape(str(org.get("name") or "").strip()) if isinstance(org, dict) else ""
+    location = html_module.unescape(_job_posting_location(posting))
+    description = strip_html_to_text(_undouble_html(str(posting.get("description") or "")))
 
     if title:
         result.title = _clean_text(title, max_len=_MAX_FIELD)
@@ -490,6 +531,14 @@ def extract_job_fields(html: str, *, max_depth: int, budget_s: float) -> Extract
         if rung.source_hint and not any_source:
             any_source = rung.source_hint
 
+    # 2026-09-19 real-world run: a JS-rendered board hands the heuristic rung
+    # only page chrome ("Skip to Content Jump to the top…", 331 chars on
+    # job-boards.greenhouse.io). A heuristic description that short is not a
+    # job ad — drop it so the form shows the paste sentence, not junk. The
+    # site's own structured answers (JSON-LD / meta) are never second-guessed.
+    if description_source == "heuristic" and len(merged.description) < _settings.URL_FETCH_MIN_DESCRIPTION_CHARS:
+        merged.description = ""
+        description_source = ""
     merged.source_hint = description_source or any_source
     for field_name in ("title", "company", "location", "description"):
         if getattr(merged, field_name):
