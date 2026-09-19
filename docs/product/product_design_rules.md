@@ -1,5 +1,5 @@
 # Product Design Rules
-<!-- doc: LIVING | last-verified: 2026-09-07 by chore/post-pivot-prune -->
+<!-- doc: LIVING | last-verified: 2026-09-19 by the daily truth check -->
 
 Owner-set rules that shape every feature. Each rule records WHY it exists so
 a future session applies it rather than rediscovering it. When code
@@ -31,18 +31,11 @@ the LLM judge went with the sourcing pipeline — see below.
 
 Job360 never sources, ranks or judges jobs any more (VISION.md rule 4) — a
 job enters only because the user or their agent brought it. There is no
-catalog left for these two rules to act on, so they no longer apply to
-anything in this codebase:
+catalog left for **UK-only is a door, not a penalty** to act on: it was
+enforced at ingestion by `services/uk_gate.py`, and that file, its gazetteer
+data and every caller are deleted. Its reasoning — never hand-enumerate an
+unbounded set — is worth reapplying if catalog-shaped features ever return.
 
-- **UK-only is a door, not a penalty.** Used to be enforced at ingestion by
-  `services/uk_gate.py`, one chokepoint before a scraped job reached storage.
-  That file, its gazetteer data, and every caller are deleted.
-- **Visa is a spotlight, not a wall.** Used to rank sponsors up in a feed via
-  `services/visa_signal.py`. That file and the feed it spotlighted in are
-  both deleted.
-
-Verify before citing either as live: `git ls-tree -r origin/main --name-only
-backend/src` lists neither file. If catalog-shaped features ever come back,
-the reasoning behind both rules (never hand-enumerate an unbounded set;
-a toggle must never shrink what the user sees) is worth reapplying — but
-nothing in the current code implements them today.
+**Visa is a spotlight, not a wall** did NOT retire with it. The rule came
+back country-agnostic in slice 7: `VISION.md` decision 27, pinned by
+`backend/tests/test_visa_signal.py`.

@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
+<!-- doc: LIVING | last-verified: 2026-09-19 by the daily truth check -->
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
@@ -65,9 +65,7 @@ job360/
 `jobs` is now "the ad the user brought", nothing more — a shared catalog row keyed
 by the same `(normalized_company, normalized_title)` pair a scraper used to
 dedup against, because the uniqueness constraint on the table still needs it
-(hard rule 1). No code sets a score, a visa flag or an experience level on it
-any more; those fields are trimmed from the model wherever nothing remaining
-writes them.
+(hard rule 1).
 
 What the constructor still normalises is `models.Job.__post_init__`; how the key
 is derived — every step of it, each one load-bearing and commented with the
