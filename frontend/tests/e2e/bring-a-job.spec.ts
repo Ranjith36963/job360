@@ -35,7 +35,6 @@ const BROUGHT_JOB = {
   source: "user_brought",
   date_found: new Date().toISOString(),
   apply_url: "https://careers.example.com/jobs/123",
-  visa_flag: false,
   visa_status: "unknown",
   job_type: "",
   experience_level: "",

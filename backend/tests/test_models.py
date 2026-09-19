@@ -28,7 +28,6 @@ def test_job_defaults():
     assert job.salary_min is None
     assert job.salary_max is None
     assert job.description == ""
-    assert job.visa_flag is False
     # Pillar 3 Batch 1 — 5-column date model default fields
     assert job.posted_at is None
     assert job.date_confidence == "low"
