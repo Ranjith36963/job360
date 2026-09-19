@@ -52,9 +52,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # Same rule as auto-merge.yml (2026-09-19): `gh pr merge` with
+      # GITHUB_TOKEN lands a commit on main that starts no workflow -- #531,
+      # #532 and #589 got no CI, no CodeQL and no post-merge watch. With the
+      # owner's MERGE_TOKEN the merge is the owner's push and main wakes up.
+      - name: Is there a merge token, or will main sleep through these merges
+        env:
+          HAVE: ${{ secrets.MERGE_TOKEN != '' }}
+        run: |
+          if [ "$HAVE" != "true" ]; then
+            echo "::warning::MERGE_TOKEN is not set — a Dependabot merge made with GITHUB_TOKEN starts NO workflow on main (no post-merge watch, no CI, no CodeQL). Owner: gh secret set MERGE_TOKEN"
+          fi
+
       - name: Sweep dependabot PRs
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.MERGE_TOKEN || github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail

@@ -411,10 +411,33 @@ jobs:
       # steps) sees this step, not a Slack step. The only step after it is "Say
       # what happened", which is already `if: always()` — rule A's requirement
       # that the messenger never decides the verdict.
+      # WHOSE TOKEN QUEUES THE MERGE DECIDES WHETHER MAIN EVER HEARS OF IT.
+      # Measured 2026-09-19: the four machine merges of the day (#531, #532,
+      # #589, #591) started ZERO workflows on main -- no CI, no CodeQL, no
+      # branch-reaper and no post-merge watch -- while the owner's three hand
+      # merges started all five. GitHub's rule: an event caused by GITHUB_TOKEN
+      # creates no workflow run, and a merge queued by GITHUB_TOKEN is such an
+      # event. So the product_owner lane's "watched 15 minutes, rollback ready"
+      # had never once run for the merges it exists for. `MERGE_TOKEN` is a
+      # fine-grained PAT of the owner (this repo only: Contents R/W, Pull
+      # requests R/W); a merge it queues is the owner's push and main wakes up.
+      # Absent, the arm still works but says so loudly, every run.
+      - name: Is there a merge token, or will main sleep through this merge
+        id: token
+        env:
+          HAVE: ${{ secrets.MERGE_TOKEN != '' }}
+        run: |
+          if [ "$HAVE" = "true" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::MERGE_TOKEN is not set — a merge queued with GITHUB_TOKEN starts NO workflow on main (no post-merge watch, no CI, no CodeQL). Owner: gh secret set MERGE_TOKEN"
+            echo "have=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Judge — and queue it only if the lane allows a machine to
         id: judge
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.MERGE_TOKEN || github.token }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ matrix.pr }}
           BASE_JSON: ${{ steps.baseline.outputs.json }}
