@@ -74,7 +74,7 @@ jobs:
             fi
 
             red=$(gh pr view "$num" --json statusCheckRollup --jq '[.statusCheckRollup[]?|select(.conclusion=="FAILURE")]|length')
-            pending=$(gh pr view "$num" --json statusCheckRollup --jq '[.statusCheckRollup[]?|select(.status!="COMPLETED")]|length')
+            pending=$(gh pr view "$num" --json statusCheckRollup --jq '[.statusCheckRollup[]?|select((.status? // "COMPLETED")!="COMPLETED" or (.state? // "")=="PENDING" or (.state? // "")=="EXPECTED")]|length')
 
             # ---- conflicts first: a conflicted PR's CI state is stale anyway ----
             if [ "$mergeable" = "CONFLICTING" ]; then

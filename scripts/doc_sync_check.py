@@ -966,18 +966,22 @@ def migration_file_count() -> int:
 
 
 def frontend_versions() -> tuple[str, str]:
-    """(next, react) exact versions from frontend/package.json.
+    """(next, react) MAJOR versions from frontend/package.json.
 
-    Also promoted 2026-08-24: docs said Next.js 16.2.2 / React 19.2.4 while
-    package.json pinned 16.3.0 / 19.2.8. Only FULL x.y.z claims are matched,
-    so prose like "Next.js 16" stays legal.
+    Promoted 2026-08-24 as exact x.y.z: docs said Next.js 16.2.2 / React 19.2.4
+    while package.json pinned 16.3.0 / 19.2.8. Loosened to the major on
+    2026-09-19: an exact pin in prose went red on every Dependabot patch bump
+    (#570 sat for five days over 19.2.8 -> 19.3.0) and Dependabot cannot edit
+    prose, so the pin only ever blocked the machine. The major is the claim a
+    reader acts on (App Router, React 19 semantics); the exact version is
+    package.json's to state.
     """
     import json
 
     pkg = json.loads((ROOT / "frontend/package.json").read_text(encoding="utf-8"))
     deps = pkg.get("dependencies", {})
-    clean = lambda v: str(v).lstrip("^~>=< ")  # noqa: E731
-    return clean(deps.get("next", "")), clean(deps.get("react", ""))
+    major = lambda v: str(v).lstrip("^~>=< ").split(".")[0]  # noqa: E731
+    return major(deps.get("next", "")), major(deps.get("react", ""))
 
 
 def dead_links() -> list[tuple[str, str]]:
@@ -1179,9 +1183,12 @@ def build_checks() -> tuple[list[tuple[str, int, str]], list[tuple[str, str, str
     # compared as text.
     next_ver, react_ver = frontend_versions()
     text_checks = [
-        # Only FULL x.y.z claims match, so prose like "Next.js 16" stays legal.
-        ("nextjs-version", next_ver, r"Next\.js (\d+\.\d+\.\d+)"),
-        ("react-version", react_ver, r"React (\d+\.\d+\.\d+)"),
+        # Majors only (2026-09-19), anchored to frontend/CLAUDE.md's identity
+        # line ("Next.js 16 (App Router) + React 19 + Tailwind 4"). A bare
+        # `Next\.js (\d+)` would also read history ("Next.js 15 made params a
+        # Promise") as a claim about today.
+        ("nextjs-version", next_ver, r"Next\.js (\d+) \(App Router\)"),
+        ("react-version", react_ver, r"React (\d+) \+ Tailwind"),
     ]
     return checks, text_checks
 

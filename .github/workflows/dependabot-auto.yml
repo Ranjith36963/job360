@@ -99,7 +99,10 @@ jobs:
             # ---- checks: all done, none red, and ENOUGH of them ----
             green=$(gh pr view "$num" --json statusCheckRollup --jq '[.statusCheckRollup[]?|select(.conclusion=="SUCCESS")]|length')
             red=$(gh pr view "$num"   --json statusCheckRollup --jq '[.statusCheckRollup[]?|select(.conclusion=="FAILURE")]|length')
-            pending=$(gh pr view "$num" --json statusCheckRollup --jq '[.statusCheckRollup[]?|select(.status!="COMPLETED")]|length')
+            # Commit STATUSES (CodeRabbit, semgrep) have `.state`, not `.status`;
+            # `.status!="COMPLETED"` counted them as pending forever, so this sweep
+            # said WAIT on every green Dependabot PR every day (2026-09-19).
+            pending=$(gh pr view "$num" --json statusCheckRollup --jq '[.statusCheckRollup[]?|select((.status? // "COMPLETED")!="COMPLETED" or (.state? // "")=="PENDING" or (.state? // "")=="EXPECTED")]|length')
 
             if [ "$red" -gt 0 ]; then
               # Arrive diagnosed, like every failure in this harness. A PR
