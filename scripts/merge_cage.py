@@ -400,7 +400,7 @@ DENY_REASONS: dict[str, str] = {
 # repo that remembers WHY these paths were ever separated from ordinary product
 # code, and the next person reading `product_owner` would see a lane with the
 # same `auto_merge` as `product` and conclude the split is decoration. It is
-# not: this lane is what gets the `lane:owner` eye, and moving any one of these
+# not: this lane is what wears the `lane:product-owner` label, and moving any one of these
 # lines back to `harness_owner` is how the owner takes a path back by hand.
 #
 # AND IT IS ENFORCED, NOT FILED. `check_lists()` refuses any key here that is

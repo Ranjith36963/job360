@@ -443,24 +443,23 @@ jobs:
         run: |
           set -euo pipefail
           lane=$(python -c "import json;print(json.load(open('verdict.json')).get('lane',''))")
-          # KNOWN AMBIGUITY SINCE 2026-09-17, LEFT FOR THE OWNER ON PURPOSE.
-          # `product_owner` is `auto_merge: true` now, so `lane:owner` on one of
-          # those PRs no longer means "you must merge this" -- it means "this is
-          # the product's sharp end, watched for 15 minutes". The mapping is
-          # UNCHANGED here because the label is what the owner scans the PR list
-          # by, and silently re-pointing it at `lane:product` would throw away
-          # the distinction he uses it for. If the label should say something
-          # else, that is a one-line change and it is his: either add a fourth
-          # label (`lane:watched`) or fold product_owner into `lane:product`.
+          # ONE LABEL PER LANE (2026-09-19). `lane:owner` used to cover both
+          # owner lanes, and that stopped being one fact on 2026-09-17 when
+          # `product_owner` became `auto_merge: true`: the same label then said
+          # "the machine merges this and watches prod for 15 minutes" on one PR
+          # and "only the owner merges this" on the next. The owner asked for
+          # the split. The old label stays in the sweep below so a PR stamped
+          # before this change loses it on its next run.
           case "$lane" in
-            product)                    want="lane:product" ;;
-            harness)                    want="lane:harness" ;;
-            product_owner|harness_owner) want="lane:owner"  ;;
+            product)       want="lane:product" ;;
+            harness)       want="lane:harness" ;;
+            product_owner) want="lane:product-owner" ;;
+            harness_owner) want="lane:harness-owner" ;;
             *)
               echo "::warning::lane.py returned '$lane' — no label stamped"
               exit 0 ;;
           esac
-          for l in lane:product lane:harness lane:owner; do
+          for l in lane:product lane:harness lane:product-owner lane:harness-owner lane:owner; do
             [ "$l" = "$want" ] && continue
             gh pr edit "$PR" --remove-label "$l" 2>/dev/null || true
           done
