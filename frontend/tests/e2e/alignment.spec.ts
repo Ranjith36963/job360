@@ -50,6 +50,7 @@ function applicationDetail() {
       recorded_by: "agent:Claude",
       recorded_at: "2026-09-20T09:04:11Z",
     },
+    next_step: { code: "apply", label: "CV ready — apply, then mark it applied" },
     artifacts: [],
     contacts: [],
     events: [
@@ -122,6 +123,10 @@ test.describe("Alignment — the fit picture on the application page", () => {
 
     await page.goto(`/applications/${APPLICATION_ID}`);
     await expect(page.getByText("NLP Engineer")).toBeVisible({ timeout: 20_000 });
+
+    await expect(page.getByTestId("next-step")).toHaveText(
+      "Next: CV ready — apply, then mark it applied"
+    );
 
     const bar = page.getByTestId("fit-score-bar").locator("> div");
     await expect(bar).toHaveCSS("width", /.+/);

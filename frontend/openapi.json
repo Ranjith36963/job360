@@ -363,6 +363,9 @@
             ],
             "title": "Last Event At"
           },
+          "next_step": {
+            "$ref": "#/components/schemas/NextStepOut"
+          },
           "receipts": {
             "items": {
               "$ref": "#/components/schemas/ApplicationReceiptOut"
@@ -396,7 +399,8 @@
           "events",
           "interview_at",
           "receipts",
-          "contacts"
+          "contacts",
+          "next_step"
         ],
         "title": "ApplicationDetailOut",
         "type": "object"
@@ -2404,6 +2408,25 @@
           "email"
         ],
         "title": "MagicLinkRequest",
+        "type": "object"
+      },
+      "NextStepOut": {
+        "description": "What to do next on this application \u2014 a state machine over the stored\nrecord (status, fit, CV versions, receipt, interview date, lesson), never\na judgement of the job. ``code`` is the closed vocabulary an agent\nbranches on; ``label`` is the sentence the web shows.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ],
+        "title": "NextStepOut",
         "type": "object"
       },
       "OAuthGrantOut": {

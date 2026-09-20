@@ -452,7 +452,13 @@ def build_server() -> MCPServer:
     async def get_application(application_id: int, with_artifact_text: bool = False) -> dict[str, Any]:
         """One application in full: status, the job snapshot, the fit verdict,
         every artifact version (text omitted unless with_artifact_text=true),
-        the whole event timeline, and receipts."""
+        the whole event timeline, receipts, and `next_step` — what to do next,
+        read off the stored state. Branch on `next_step.code`: judge_fit → call
+        save_fit; write_cv → save_artifact(kind="cv"); apply → the human applies,
+        then record_application; record_receipt → record_application; schedule →
+        record_event(interview_scheduled, scheduled_at=…); lesson → record_event(
+        event_type="lesson"). wait / interview / await_outcome / decide / closed
+        need nothing from you."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.get_application(application_id, with_artifact_text, db, _user())

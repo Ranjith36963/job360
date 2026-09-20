@@ -1679,6 +1679,7 @@ export interface components {
             job_id: number;
             /** Last Event At */
             last_event_at: string | null;
+            next_step: components["schemas"]["NextStepOut"];
             /** Receipts */
             receipts: components["schemas"]["ApplicationReceiptOut"][];
             /** Status */
@@ -2542,6 +2543,19 @@ export interface components {
             email: string;
             /** Next */
             next?: string | null;
+        };
+        /**
+         * NextStepOut
+         * @description What to do next on this application — a state machine over the stored
+         *     record (status, fit, CV versions, receipt, interview date, lesson), never
+         *     a judgement of the job. ``code`` is the closed vocabulary an agent
+         *     branches on; ``label`` is the sentence the web shows.
+         */
+        NextStepOut: {
+            /** Code */
+            code: string;
+            /** Label */
+            label: string;
         };
         /** OAuthGrantOut */
         OAuthGrantOut: {

@@ -367,6 +367,16 @@ class ContactOut(BaseModel):
     created_at: str
 
 
+class NextStepOut(BaseModel):
+    """What to do next on this application — a state machine over the stored
+    record (status, fit, CV versions, receipt, interview date, lesson), never
+    a judgement of the job. ``code`` is the closed vocabulary an agent
+    branches on; ``label`` is the sentence the web shows."""
+
+    code: str
+    label: str
+
+
 class ApplicationDetailOut(BaseModel):
     id: int
     job_id: int
@@ -382,6 +392,10 @@ class ApplicationDetailOut(BaseModel):
     interview_at: Optional[str]
     receipts: list[ApplicationReceiptOut]
     contacts: list[ContactOut]
+    # 2026-09-20 — what to do next, read off the stored state (a state machine
+    # over the record, never a judgement of the job). `code` is the closed
+    # vocabulary an agent branches on; `label` is the sentence the web shows.
+    next_step: NextStepOut
 
 
 class ApplicationSummaryOut(BaseModel):
