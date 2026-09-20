@@ -3,6 +3,8 @@ name: model-delegation
 description: Use at the start of EVERY task (owner rule, 2026-09-20) — decide which model does which part before doing any of it; the big model manages and reviews, cheaper models implement, test and verify in parallel.
 ---
 
+<!-- doc: LIVING | last-verified: 2026-09-20 by the owner rule (split every task by model) -->
+
 # Model delegation (owner rule — every prompt, not just big ones)
 
 The owner said it three times. The lead model (Fable / Opus) is the manager.
