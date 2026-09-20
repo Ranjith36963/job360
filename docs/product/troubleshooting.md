@@ -167,12 +167,6 @@ cd backend && python -m pytest tests\ -v
 
 ## 7. Migrations runner "already applied" confusion
 
-**Symptom:** `python -m migrations.runner up` prints `no pending migrations` but you expected 0010 to run.
-
-**Cause:** The `_schema_migrations` registry already has a row for that stem — likely from a prior partial run.
-
-**Fix:** Inspect state first.
-
 ```bash
 cd backend
 python -m migrations.runner status        # lists applied + pending — read this FIRST
