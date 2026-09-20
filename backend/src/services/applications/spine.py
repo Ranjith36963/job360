@@ -682,6 +682,48 @@ async def _list_artifacts(db: JobDatabase, application_id: int, *, with_text: bo
 # ── R6 — the fit verdict is stored, never computed ───────────────────────────
 
 
+def validate_axes(axes: Optional[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """The fit picture's axes, checked against the live settings (2026-09-20).
+
+    Each axis is ``{"name", "role", "you"}``: the agent's own name for the
+    dimension and two whole numbers 0..100 — how much the role asks on it and
+    how much the seeker brings. Job360 never names an axis or puts a number
+    on one (VISION rule 4); it only refuses shapes it cannot draw. ``None`` or
+    ``[]`` means "no picture" and stays silent (rule #29)."""
+    if not axes:
+        return []
+    from src.core import settings as _settings  # noqa: PLC0415
+
+    lo, hi = _settings.APPLICATION_FIT_AXES_MIN, _settings.APPLICATION_FIT_AXES_MAX
+    name_cap = _settings.APPLICATION_FIT_AXIS_NAME_MAX_CHARS
+    if not (lo <= len(axes) <= hi):
+        raise SpineError(422, f"axes must have between {lo} and {hi} entries")
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for axis in axes:
+        if not isinstance(axis, dict):
+            raise SpineError(422, "each axis must be an object with name, role, you")
+        name = str(axis.get("name") or "").strip()
+        if not name:
+            raise SpineError(422, "each axis needs a name")
+        if len(name) > name_cap:
+            raise SpineError(422, f"axis name exceeds APPLICATION_FIT_AXIS_NAME_MAX_CHARS ({name_cap})")
+        key = name.casefold()
+        if key in seen:
+            raise SpineError(422, f"duplicate axis name: {name}")
+        seen.add(key)
+        values: dict[str, int] = {}
+        for side in ("role", "you"):
+            raw = axis.get(side)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)) or int(raw) != raw:
+                raise SpineError(422, f"axis {name!r}: {side} must be a whole number 0..100")
+            if not 0 <= int(raw) <= 100:
+                raise SpineError(422, f"axis {name!r}: {side} must be 0..100")
+            values[side] = int(raw)
+        out.append({"name": name, "role": values["role"], "you": values["you"]})
+    return out
+
+
 async def save_fit(
     db: JobDatabase,
     *,
@@ -695,6 +737,7 @@ async def save_fit(
     visa_signal: Optional[str] = None,
     visa_detail: Optional[str] = None,
     visa_country: Optional[str] = None,
+    axes: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """R6 — overwrite the fit-verdict SLOT on ``applications`` (the current
     answer) and append a ``fit_judged`` event carrying the whole verdict (the
@@ -702,7 +745,10 @@ async def save_fit(
     calls a scorer, matcher or judge; the verdict is always the caller's own
     (VISION rule 4). Slice 7: an optional visa reading rides along — the
     slot is set through ``visa.set_visa_signal`` (same rules as every door)
-    and the event payload carries it, so the judgement is history too."""
+    and the event payload carries it, so the judgement is history too.
+    ``axes`` (2026-09-20): the fit picture — the agent's own named dimensions
+    with a role/you number on each (``validate_axes``); part of the slot, so
+    a save without axes clears them."""
     # Lazy: visa.py imports SpineError / get_owned_application from here.
     from src.services.applications import visa as visa_service  # noqa: PLC0415
 
@@ -710,15 +756,18 @@ async def save_fit(
     if app_row is None:
         raise SpineError(404, "application not found")
 
+    axes_list = validate_axes(axes)
     now = datetime.now(timezone.utc).isoformat()
     gaps_list = gaps or []
     gaps_json = json.dumps(gaps_list)
     await db._db.execute(
         "UPDATE applications SET fit_score = ?, fit_verdict = ?, fit_gaps = ?, fit_reasoning = ?, "
-        "fit_recorded_by = ?, fit_recorded_at = ?, updated_at = ? WHERE id = ?",
-        (score, verdict, gaps_json, reasoning, recorded_by, now, now, application_id),
+        "fit_axes = ?, fit_recorded_by = ?, fit_recorded_at = ?, updated_at = ? WHERE id = ?",
+        (score, verdict, gaps_json, reasoning, json.dumps(axes_list), recorded_by, now, now, application_id),
     )
-    payload: dict[str, Any] = {"score": score, "verdict": verdict, "gaps": gaps_list, "reasoning": reasoning}
+    payload: dict[str, Any] = {
+        "score": score, "verdict": verdict, "gaps": gaps_list, "reasoning": reasoning, "axes": axes_list,
+    }
     visa: Optional[dict[str, Any]] = None
     if visa_signal is not None or visa_detail or visa_country:
         visa = (
@@ -737,7 +786,7 @@ async def save_fit(
         "application_id": application_id,
         "fit": {
             "score": score, "verdict": verdict, "gaps": gaps_list, "reasoning": reasoning,
-            "recorded_by": recorded_by, "recorded_at": now,
+            "axes": axes_list, "recorded_by": recorded_by, "recorded_at": now,
         },
         "visa": visa,
         "event_id": event["event_id"],
@@ -959,6 +1008,7 @@ async def get_application_detail(
             "verdict": app_row.get("fit_verdict"),
             "gaps": json.loads(app_row.get("fit_gaps") or "[]"),
             "reasoning": app_row.get("fit_reasoning"),
+            "axes": json.loads(app_row.get("fit_axes") or "[]"),
             "recorded_by": app_row.get("fit_recorded_by"),
             "recorded_at": app_row.get("fit_recorded_at"),
         }

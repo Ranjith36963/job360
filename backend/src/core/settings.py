@@ -347,6 +347,13 @@ APPLICATION_RECEIPT_FIELDS_MAX_BYTES = int(os.getenv("APPLICATION_RECEIPT_FIELDS
 
 # R6 — the fit verdict is stored, never computed.
 APPLICATION_FIT_REASONING_MAX_CHARS = int(os.getenv("APPLICATION_FIT_REASONING_MAX_CHARS", "4000"))
+# The fit picture's axes (2026-09-20): the AGENT names 3..MAX dimensions and
+# puts two 0-100 numbers on each (what the role asks / what the seeker brings).
+# Job360 stores and draws them; the bounds keep the chart readable and the
+# row small. Live settings, never a hardcoded list of axis names (rule #28).
+APPLICATION_FIT_AXES_MIN = int(os.getenv("APPLICATION_FIT_AXES_MIN", "3"))
+APPLICATION_FIT_AXES_MAX = int(os.getenv("APPLICATION_FIT_AXES_MAX", "8"))
+APPLICATION_FIT_AXIS_NAME_MAX_CHARS = int(os.getenv("APPLICATION_FIT_AXIS_NAME_MAX_CHARS", "40"))
 
 # S3 — how much of an OAuth client's attacker-supplied name `actor_for` keeps
 # as `agent:<name>` authorship. Env-backed like every other spine cap (C8);

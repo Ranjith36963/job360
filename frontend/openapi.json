@@ -492,6 +492,14 @@
       },
       "ApplicationFitOut": {
         "properties": {
+          "axes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FitAxisOut"
+            },
+            "title": "Axes",
+            "type": "array"
+          },
           "gaps": {
             "items": {
               "type": "string"
@@ -2008,6 +2016,58 @@
           "message"
         ],
         "title": "FetchUrlResponse",
+        "type": "object"
+      },
+      "FitAxisIn": {
+        "additionalProperties": false,
+        "description": "One axis of the fit picture (2026-09-20): the agent's own name for a\ndimension and two 0..100 numbers \u2014 how much the role asks on it and how\nmuch the seeker brings. Bounds on the count and the name length are live\nsettings checked by ``spine.validate_axes``.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Role",
+            "type": "integer"
+          },
+          "you": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "You",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "role",
+          "you"
+        ],
+        "title": "FitAxisIn",
+        "type": "object"
+      },
+      "FitAxisOut": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "integer"
+          },
+          "you": {
+            "title": "You",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "role",
+          "you"
+        ],
+        "title": "FitAxisOut",
         "type": "object"
       },
       "GitHubResponse": {
@@ -3568,6 +3628,21 @@
       "SaveFitRequest": {
         "additionalProperties": false,
         "properties": {
+          "axes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FitAxisIn"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Axes"
+          },
           "gaps": {
             "anyOf": [
               {

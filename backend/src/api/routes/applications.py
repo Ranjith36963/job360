@@ -61,6 +61,19 @@ class SaveArtifactRequest(BaseModel):
     model: Optional[str] = Field(None, max_length=200)
 
 
+class FitAxisIn(BaseModel):
+    """One axis of the fit picture (2026-09-20): the agent's own name for a
+    dimension and two 0..100 numbers — how much the role asks on it and how
+    much the seeker brings. Bounds on the count and the name length are live
+    settings checked by ``spine.validate_axes``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    role: int = Field(..., ge=0, le=100)
+    you: int = Field(..., ge=0, le=100)
+
+
 class SaveFitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -68,6 +81,8 @@ class SaveFitRequest(BaseModel):
     verdict: Optional[str] = Field(None, max_length=200)
     gaps: Optional[list[str]] = Field(None, max_length=50)
     reasoning: Optional[str] = None
+    # The fit picture — `None`/`[]` = no chart (rule #29); part of the slot.
+    axes: Optional[list[FitAxisIn]] = Field(None, max_length=50)
     # Slice 7 (#514) — the agent's visa reading, optional. `None` = not
     # judged this time (the slot is left alone); the closed set / alpha-2 /
     # length rules live in services/applications/visa.py.
@@ -195,11 +210,19 @@ class ApplicationJobOut(BaseModel):
     catalog_present: bool
 
 
+class FitAxisOut(BaseModel):
+    name: str
+    role: int
+    you: int
+
+
 class ApplicationFitOut(BaseModel):
     score: Optional[int]
     verdict: Optional[str]
     gaps: list[str]
     reasoning: Optional[str]
+    # The fit picture's axes — `[]` when the agent gave none (drawn as nothing).
+    axes: list[FitAxisOut] = []
     recorded_by: str
     recorded_at: str
 
@@ -816,6 +839,7 @@ async def application_alignment(
             "verdict": app_row.get("fit_verdict"),
             "gaps": json.loads(app_row.get("fit_gaps") or "[]"),
             "reasoning": app_row.get("fit_reasoning"),
+            "axes": json.loads(app_row.get("fit_axes") or "[]"),
             "recorded_by": app_row.get("fit_recorded_by") or "",
             "recorded_at": app_row.get("fit_recorded_at") or "",
         }
@@ -897,6 +921,7 @@ async def save_fit(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
             score=body.score, verdict=body.verdict, gaps=body.gaps, reasoning=reasoning,
             visa_signal=body.visa_signal, visa_detail=body.visa_detail, visa_country=body.visa_country,
+            axes=[a.model_dump() for a in body.axes] if body.axes is not None else None,
         )
     except SpineError as exc:
         _raise(exc)
