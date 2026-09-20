@@ -47,6 +47,9 @@ producers and consumers, then asserts every hop actually connects:
               `NAME[bot]`; triage.yml auto-authorisation had NEVER fired.
   W12 (warn) the same actor is spelled two ways in two places -- the literal
       detect->triage bug.
+  W14 (error) every `on:` key is a trigger GitHub actually has. A made-up one
+      (`pull_request_review_thread`, 2026-09-20) makes GitHub refuse the WHOLE
+      file: every run fails with zero jobs and the arm is dead on main.
 
 Then it prints a MAP of the dispatch graph, and with --live asks GitHub when
 each target workflow last ran and last SUCCEEDED, so a wire that has been dead
@@ -111,8 +114,24 @@ if hasattr(sys.stdout, "reconfigure"):
 
 LINE_KEY = "__line__"
 
+# EVERY TRIGGER GITHUB ACTIONS ACCEPTS, copied from
+# docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+# on 2026-09-20. `pull_request_review_thread` is a WEBHOOK, not a trigger: #592
+# named it, GitHub refused to parse auto-merge.yml ("Unexpected value"), and
+# every arm run after the merge failed with zero jobs. Nothing local caught it
+# because nothing local knew the list. Now something does.
+KNOWN_TRIGGERS = frozenset({
+    "branch_protection_rule", "check_run", "check_suite", "create", "delete",
+    "deployment", "deployment_status", "discussion", "discussion_comment", "fork",
+    "gollum", "image_version", "issue_comment", "issues", "label", "merge_group",
+    "milestone", "page_build", "public", "pull_request", "pull_request_review",
+    "pull_request_review_comment", "pull_request_target", "push",
+    "registry_package", "release", "repository_dispatch", "schedule", "status",
+    "watch", "workflow_call", "workflow_dispatch", "workflow_run",
+})
+
 # Checks that BREAK the chain if they fire, vs. checks that only smell bad.
-ERROR_CHECKS = {"W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W13"}
+ERROR_CHECKS = {"W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W13", "W14"}
 WARN_CHECKS = {"W11", "W12"}
 ALL_CHECKS = ERROR_CHECKS | WARN_CHECKS
 
@@ -519,6 +538,17 @@ def check_wires(
         findings.append(Finding(check, severity, hop, message, wf.file, line))
 
     for wf in workflows:
+        # ── W14: a trigger name GitHub does not have refuses the whole file.
+        for trigger in (wf.on or {}):
+            if trigger == LINE_KEY or not isinstance(trigger, str):
+                continue
+            if trigger not in KNOWN_TRIGGERS:
+                add("W14", "error", wf, _find_line(wf, f"{trigger}:", 1), f"on.{trigger}",
+                    f"`{trigger}` is not a workflow trigger GitHub has (it may be a webhook "
+                    f"event; the list is KNOWN_TRIGGERS in this file, from the docs). GitHub "
+                    f"refuses to parse a file that names one -- every run of {wf.file} fails "
+                    f"with zero jobs until it is removed.")
+
         for job in wf.jobs.values():
             steps_by_id = {s.id: s for s in job.steps if s.id}
             for kind, text, line, step in _expr_sites(job):
@@ -1106,7 +1136,30 @@ jobs:
 """
 
 
+_W14_BROKEN = """\
+name: drill — W14 trigger GitHub does not have (synthetic)
+on:
+  pull_request_review_thread:
+    types: [resolved]
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo never runs, GitHub refuses the file
+"""
+
+
 DRILLS = [
+    Drill(
+        name="a trigger GitHub does not have",
+        mechanism="W14 -- the whole file is refused by GitHub, every run has zero jobs",
+        target="drill-w14-broken.yml",
+        before="",
+        after="",
+        expect_check="W14",
+        expect_in_message="pull_request_review_thread",
+        create=_W14_BROKEN,
+    ),
     Drill(
         name="renamed output",
         mechanism="W1 — producer/consumer name mismatch",
