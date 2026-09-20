@@ -89,6 +89,52 @@
         "title": "AddContactResponse",
         "type": "object"
       },
+      "AlignmentOut": {
+        "description": "``GET \u2026/alignment`` (2026-09-20) \u2014 the fit picture: the agent's stored\nverdict beside which of the candidate's own skills occur in the stored\nad text. Two stored facts drawn together; nothing computed about the\ncandidate (VISION rule 4).",
+        "properties": {
+          "ad_chars": {
+            "title": "Ad Chars",
+            "type": "integer"
+          },
+          "fit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApplicationFitOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "skills_in_ad": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills In Ad",
+            "type": "array"
+          },
+          "skills_not_in_ad": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills Not In Ad",
+            "type": "array"
+          },
+          "skills_total": {
+            "title": "Skills Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fit",
+          "skills_in_ad",
+          "skills_not_in_ad",
+          "skills_total",
+          "ad_chars"
+        ],
+        "title": "AlignmentOut",
+        "type": "object"
+      },
       "ApplicationArtifactOut": {
         "description": "The ``get_application`` artifacts-list shape: ``text`` is ALWAYS a key\n(null unless ``with_artifact_text=true`` and under the byte cap).",
         "properties": {
@@ -5117,6 +5163,81 @@
           }
         },
         "summary": "Get Application",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/alignment": {
+      "get": {
+        "description": "The fit picture (2026-09-20). Read-only; web only \u2014 an agent already\nholds the profile and the ad (rule M2), so there is no MCP tool.",
+        "operationId": "application_alignment_api_applications__application_id__alignment_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlignmentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Application Alignment",
         "tags": [
           "applications"
         ]
