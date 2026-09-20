@@ -1721,6 +1721,11 @@ export interface components {
         };
         /** ApplicationFitOut */
         ApplicationFitOut: {
+            /**
+             * Axes
+             * @default []
+             */
+            axes: components["schemas"]["FitAxisOut"][];
             /** Gaps */
             gaps: string[];
             /** Reasoning */
@@ -2385,6 +2390,30 @@ export interface components {
              * @default
              */
             title: string;
+        };
+        /**
+         * FitAxisIn
+         * @description One axis of the fit picture (2026-09-20): the agent's own name for a
+         *     dimension and two 0..100 numbers — how much the role asks on it and how
+         *     much the seeker brings. Bounds on the count and the name length are live
+         *     settings checked by ``spine.validate_axes``.
+         */
+        FitAxisIn: {
+            /** Name */
+            name: string;
+            /** Role */
+            role: number;
+            /** You */
+            you: number;
+        };
+        /** FitAxisOut */
+        FitAxisOut: {
+            /** Name */
+            name: string;
+            /** Role */
+            role: number;
+            /** You */
+            you: number;
         };
         /** GitHubResponse */
         GitHubResponse: {
@@ -3057,6 +3086,8 @@ export interface components {
         };
         /** SaveFitRequest */
         SaveFitRequest: {
+            /** Axes */
+            axes?: components["schemas"]["FitAxisIn"][] | null;
             /** Gaps */
             gaps?: string[] | null;
             /** Reasoning */

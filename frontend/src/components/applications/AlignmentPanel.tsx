@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getAlignment, type Alignment } from "@/lib/api";
+import { FitRadar } from "./FitRadar";
 
 // Past this many pills, "Not in the ad" reads as a wall rather than a list —
 // fold the rest behind "Show all N" so a large profile doesn't dominate the
@@ -112,6 +113,14 @@ export function AlignmentPanel({
                 </li>
               ))}
             </ul>
+          )}
+          {fit.axes.length >= 3 && (
+            <>
+              <FitRadar axes={fit.axes} />
+              <p className="mt-1 text-center text-xs text-muted-foreground/70">
+                The lines are your agent&apos;s own choice for this job.
+              </p>
+            </>
           )}
         </>
       )}

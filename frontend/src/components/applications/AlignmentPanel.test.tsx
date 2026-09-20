@@ -15,6 +15,7 @@ function payload(overrides: Partial<Alignment> = {}): Alignment {
       verdict: "Strong match on NLP",
       gaps: ["leading university", "5 years management"],
       reasoning: null,
+      axes: [],
       recorded_by: "agent:Claude",
       recorded_at: "2026-09-20T09:04:11Z",
     },

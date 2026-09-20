@@ -513,6 +513,7 @@ def build_server() -> MCPServer:
         visa_signal: Optional[str] = None,
         visa_detail: str = "",
         visa_country: str = "",
+        axes: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         """Record YOUR OWN fit judgement for this application — never computed
         by Job360 (VISION rule 4). Overwrites the current verdict; the log
@@ -520,11 +521,21 @@ def build_server() -> MCPServer:
         the ad says whether the employer sponsors, pass `visa_signal`
         ("sponsors" / "no_sponsorship"), the ad sentence in `visa_detail`, and
         the job's ISO alpha-2 country in `visa_country`; leave it out when the ad
-        is silent."""
+        is silent.
+
+        `axes` (optional) is the fit PICTURE the web draws as a radar chart:
+        3 to 8 dimensions YOU name from this ad and the profile, each
+        `{"name": "...", "role": 0-100, "you": 0-100}` — `role` is how much
+        the role asks on that dimension, `you` how much the seeker brings.
+        Pick the dimensions that matter for THIS job (for one ad that may be
+        depth in a stack, domain knowledge, leadership, location, pay; for
+        another something else). Job360 never names an axis or scores one;
+        it draws exactly what you send. Omit `axes` and no chart is shown."""
         try:
             body = applications_route.SaveFitRequest(
                 score=score, verdict=verdict, gaps=gaps, reasoning=reasoning,
                 visa_signal=visa_signal, visa_detail=visa_detail, visa_country=visa_country,
+                axes=axes,  # type: ignore[arg-type]
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None

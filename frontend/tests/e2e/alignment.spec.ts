@@ -79,6 +79,12 @@ function alignmentPayload() {
       verdict: "Strong match on NLP",
       gaps: ["leading university"],
       reasoning: null,
+      axes: [
+        { name: "NLP depth", role: 90, you: 80 },
+        { name: "Production ML", role: 70, you: 75 },
+        { name: "Leadership", role: 30, you: 40 },
+        { name: "Remote", role: 100, you: 100 },
+      ],
       recorded_by: "agent:Claude",
       recorded_at: "2026-09-20T09:04:11Z",
     },
@@ -135,6 +141,14 @@ test.describe("Alignment — the fit picture on the application page", () => {
 
     await expect(page.getByText("Strong match on NLP")).toBeVisible();
     await expect(page.getByTestId("fit-gap")).toHaveCount(1);
+
+    // The radar: one shape per side, one label per axis the agent named.
+    const radar = page.getByTestId("fit-radar");
+    await expect(radar).toBeVisible();
+    await expect(radar.getByTestId("fit-radar-axis")).toHaveCount(4);
+    await expect(radar.getByTestId("fit-radar-role")).toHaveAttribute("points", /.+/);
+    await expect(radar.getByTestId("fit-radar-you")).toHaveAttribute("points", /.+/);
+    await expect(radar.locator("figcaption").getByText("The role asks", { exact: true })).toBeVisible();
 
     await expect(
       page.getByText("2 of 3 of your skills appear in this ad")
