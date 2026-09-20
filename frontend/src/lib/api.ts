@@ -656,6 +656,21 @@ export async function getApplication(id: number, withArtifactText = false): Prom
   return request(`/api/applications/${id}${query}`);
 }
 
+/**
+ * The fit picture (slice — alignment view): the stored fit verdict plus
+ * which of the user's own profile skills occur in the ad text. Backend
+ * route not yet in the generated `api-types.ts` (built in parallel), so
+ * hand-typed here — regenerate + replace once `npm run gen:types` picks it
+ * up.
+ */
+/** The fit picture (2026-09-20): the agent's stored verdict beside which of
+ * the user's own profile skills occur in the stored ad text. Read-only. */
+export type Alignment = _Schemas["AlignmentOut"];
+
+export async function getAlignment(applicationId: number): Promise<Alignment> {
+  return request(`/api/applications/${applicationId}/alignment`);
+}
+
 export async function getApplicationArtifact(
   applicationId: number,
   artifactId: number

@@ -177,6 +177,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/alignment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Application Alignment
+         * @description The fit picture (2026-09-20). Read-only; web only — an agent already
+         *     holds the profile and the ad (rule M2), so there is no MCP tool.
+         */
+        get: operations["application_alignment_api_applications__application_id__alignment_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/artifacts": {
         parameters: {
             query?: never;
@@ -1563,6 +1584,24 @@ export interface components {
             contact: components["schemas"]["ContactOut"];
             /** Event Id */
             event_id: number | null;
+        };
+        /**
+         * AlignmentOut
+         * @description ``GET …/alignment`` (2026-09-20) — the fit picture: the agent's stored
+         *     verdict beside which of the candidate's own skills occur in the stored
+         *     ad text. Two stored facts drawn together; nothing computed about the
+         *     candidate (VISION rule 4).
+         */
+        AlignmentOut: {
+            /** Ad Chars */
+            ad_chars: number;
+            fit: components["schemas"]["ApplicationFitOut"] | null;
+            /** Skills In Ad */
+            skills_in_ad: string[];
+            /** Skills Not In Ad */
+            skills_not_in_ad: string[];
+            /** Skills Total */
+            skills_total: number;
         };
         /**
          * ApplicationArtifactOut
@@ -3589,6 +3628,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    application_alignment_api_applications__application_id__alignment_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlignmentOut"];
                 };
             };
             /** @description Validation Error */

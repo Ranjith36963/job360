@@ -8,7 +8,7 @@ import { getApplication, recordApplicationReceipt } from "@/lib/api";
 import type { ApplicationDetail, VisaShape } from "@/lib/api";
 import { Timeline } from "@/components/applications/Timeline";
 import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
-import { FitPanel } from "@/components/applications/FitPanel";
+import { AlignmentPanel } from "@/components/applications/AlignmentPanel";
 import { TailorSection } from "@/components/tailor/TailorSection";
 import { Contacts } from "@/components/applications/Contacts";
 import { Receipts } from "@/components/applications/Receipts";
@@ -137,7 +137,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
 
       <section data-testid="section-fit">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fit</h2>
-        <FitPanel fit={detail.fit} />
+        <AlignmentPanel applicationId={detail.id} refreshKey={detail.updated_at} />
         <VisaSelect applicationId={detail.id} visa={visa} onSaved={load} />
       </section>
 

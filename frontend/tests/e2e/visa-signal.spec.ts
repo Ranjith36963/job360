@@ -106,22 +106,6 @@ test.describe("Visa signal — applications home", () => {
     await context.addCookies([SESSION_COOKIE]);
     await mockAuth(page);
 
-    await page.route("**/api/whats-new**", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          now: "2026-09-11T00:00:00Z",
-          since: "2026-09-04T00:00:00Z",
-          next_since: "2026-09-11T00:00:00Z",
-          next_after_id: 1,
-          truncated: false,
-          applications: [],
-          events: [],
-        }),
-      })
-    );
-
     await page.route("**/api/applications?**", (route) =>
       route.fulfill({
         status: 200,

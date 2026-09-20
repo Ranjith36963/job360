@@ -2,7 +2,6 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import Landing from "./Landing";
 import { ApplicationList } from "@/components/applications/ApplicationList";
-import { WhatsNewStrip } from "@/components/applications/WhatsNewStrip";
 
 // ---------------------------------------------------------------------------
 // R14 (docs/plans/2026-09-04-application-spine/spec.md) — the web home is
@@ -41,7 +40,6 @@ export default async function Home() {
           Bring a job
         </Link>
       </div>
-      <WhatsNewStrip />
       <ApplicationList />
     </div>
   );

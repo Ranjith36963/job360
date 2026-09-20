@@ -204,6 +204,19 @@ class ApplicationFitOut(BaseModel):
     recorded_at: str
 
 
+class AlignmentOut(BaseModel):
+    """``GET …/alignment`` (2026-09-20) — the fit picture: the agent's stored
+    verdict beside which of the candidate's own skills occur in the stored
+    ad text. Two stored facts drawn together; nothing computed about the
+    candidate (VISION rule 4)."""
+
+    fit: Optional[ApplicationFitOut]
+    skills_in_ad: list[str]
+    skills_not_in_ad: list[str]
+    skills_total: int
+    ad_chars: int
+
+
 class ApplicationVisaOut(BaseModel):
     """Slice 7 — fact 1 (the agent's reading of the ad) plus the ONE
     comparison against fact 2 (the candidate's countries). ``needs_sponsorship``
@@ -765,6 +778,43 @@ async def diff_application_artifact(
             "applied": await diff_service.is_applied(db, application_id, target["id"]),
         },
         **result,
+    }
+
+
+@router.get("/applications/{application_id}/alignment", response_model=AlignmentOut)
+async def application_alignment(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The fit picture (2026-09-20). Read-only; web only — an agent already
+    holds the profile and the ad (rule M2), so there is no MCP tool."""
+    from src.services.applications import alignment  # noqa: PLC0415
+    from src.services.profile.storage import load_profile  # noqa: PLC0415 — rule #16, heavy stack
+
+    app_row = await spine.get_owned_application(db, user.id, application_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    fit = None
+    if app_row.get("fit_recorded_at"):
+        fit = {
+            "score": app_row.get("fit_score"),
+            "verdict": app_row.get("fit_verdict"),
+            "gaps": json.loads(app_row.get("fit_gaps") or "[]"),
+            "reasoning": app_row.get("fit_reasoning"),
+            "recorded_by": app_row.get("fit_recorded_by") or "",
+            "recorded_at": app_row.get("fit_recorded_at") or "",
+        }
+    ad_text = app_row.get("job_description_snapshot") or ""
+    profile = load_profile(user.id)
+    skills = alignment.candidate_skills(profile) if profile is not None else []
+    found, missing = alignment.skills_in_text(skills, ad_text)
+    return {
+        "fit": fit,
+        "skills_in_ad": found,
+        "skills_not_in_ad": missing,
+        "skills_total": len(found) + len(missing),
+        "ad_chars": len(ad_text),
     }
 
 

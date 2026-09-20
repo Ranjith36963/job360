@@ -334,6 +334,10 @@ LESSONS_PAGE_MAX = int(os.getenv("LESSONS_PAGE_MAX", "100"))
 # country rule anywhere — the only comparison is "is the job's country in
 # the candidate's own list" (docs/plans/2026-09-11-visa-signal/spec.md).
 APPLICATION_VISA_SIGNALS = ("sponsors", "no_sponsorship", "unknown")
+# 2026-09-20 — the fit picture on the application page: how many of the
+# candidate's own skills are checked against the stored ad text (a regex
+# per skill; the profile page caps skills well below this anyway).
+ALIGNMENT_MAX_SKILLS = int(os.getenv("ALIGNMENT_MAX_SKILLS", "200"))
 APPLICATION_VISA_DETAIL_MAX_CHARS = int(os.getenv("APPLICATION_VISA_DETAIL_MAX_CHARS", "500"))
 
 # R8 — record_application (the rich receipt).
