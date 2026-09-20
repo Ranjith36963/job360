@@ -12,8 +12,16 @@ endings on Windows and would leave the tree dirty after a "successful" run.
 
 Usage (from repo root):
     python scripts/doc_sync_mutation_test.py
+    python scripts/doc_sync_mutation_test.py --blind   # the negative control
 
 Exit 0 = every guard proven able to fail. Exit 1 = at least one guard is blind.
+
+--blind is this harness's own NEGATIVE CONTROL, and it is what scripts/drill_registry.py
+runs to prove THIS drill can go red (#359). It walks every case with the mutation NOT
+applied: each guard then has nothing to find and stays green, which is a result this
+harness must notice and report -- so --blind MUST exit non-zero. If it exits 0, the
+verdict never depended on the mutation landing at all, which is exactly the bug the
+whole file exists to catch, one level up.
 """
 from __future__ import annotations
 
@@ -503,7 +511,9 @@ def unwatched_claims() -> list[str]:
     return findings
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    blind = "--blind" in args  # the negative control; see the module docstring
     failures: list[str] = []
 
     for rel, pattern, replacement, fact in CASES:
@@ -523,7 +533,9 @@ def main() -> int:
             continue
 
         try:
-            path.write_bytes(mutated.encode("utf-8"))
+            # --blind writes the ORIGINAL back: the case runs end to end with
+            # nothing broken, so the guard has nothing to find.
+            path.write_bytes(original if blind else mutated.encode("utf-8"))
             proc = subprocess.run(
                 [sys.executable, str(ROOT / "scripts" / "doc_sync_check.py")],
                 capture_output=True,
@@ -541,6 +553,20 @@ def main() -> int:
                 failures.append(f"{fact}: stayed GREEN on a broken {rel} — the guard is blind")
         finally:
             path.write_bytes(original)
+
+    if blind:
+        # The negative control stops here on purpose: the CASES loop has already
+        # answered the only question it asks, and the structural drills below
+        # mutate real files, which a control run has no business doing.
+        print()
+        if failures:
+            print("NEGATIVE CONTROL HELD — nothing was mutated, every guard stayed green, and "
+                  "this harness said so. Its verdict does depend on the mutation landing.")
+            return 1
+        print("NEGATIVE CONTROL FAILED — every guard reported RED with NOTHING mutated. This "
+              "harness's verdict has nothing to do with the mutation, so a green run proves "
+              "nothing about the docs.")
+        return 0
 
     # Failure paths no text mutation can express: an ABSENT check (deleted
     # source folder) and a structurally broken migration run.

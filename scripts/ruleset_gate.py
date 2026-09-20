@@ -67,7 +67,6 @@ import argparse
 import datetime as dt
 import json
 import subprocess
-import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
