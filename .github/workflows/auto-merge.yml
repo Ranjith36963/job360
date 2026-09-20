@@ -106,11 +106,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
 
@@ -332,13 +332,13 @@ jobs:
       cancel-in-progress: false
     steps:
       # THE RULES. From the default branch, which the PR cannot edit.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.repository.default_branch }}
 
       # THE TREE UNDER JUDGEMENT — the PR merged into its base, i.e. what would
       # actually ship, not the head, which has never been combined with anything.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: refs/pull/${{ matrix.pr }}/merge
           path: _pr
@@ -380,12 +380,12 @@ jobs:
       # ratchet would then be measured against nothing while the run stayed
       # green. A baseline that cannot be fetched must stop the lane, which is
       # the safe direction and costs one retry.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ steps.baseref.outputs.sha }}
           path: _base
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
 

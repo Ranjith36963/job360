@@ -61,7 +61,7 @@ jobs:
     steps:
       # A local composite action is just files in the repo — without a checkout
       # `uses: ./.github/actions/slack` cannot resolve and the step errors.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Open, update or close the tracking issue
         id: raise
