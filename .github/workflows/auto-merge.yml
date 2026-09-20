@@ -42,7 +42,11 @@ name: Auto-merge (the cage's arm, and only inside its lane)
 # review gate reads CodeRabbit, and CodeRabbit reports as a COMMIT STATUS, not
 # a check suite -- so its completion never fired `check_suite`. The other
 # thing the cage waits on is "no unresolved review thread", and resolving one
-# fires `pull_request_review_thread`, not `pull_request_review`. Both were left
+# fires no workflow trigger at all (`pull_request_review_thread` is a webhook
+# only -- GitHub refused this whole file for naming it, 2026-09-20, and the
+# arm was dead for the twelve minutes it took to notice). The nearest signal
+# is the reply people post before they click Resolve: `pull_request_review_comment`.
+# A silent resolve is left to `status` and the sweep. Both were left
 # to the sweep, and GitHub runs a `*/20` cron on this repo every 3-4 HOURS in
 # practice (measured: 09:35, 13:21, 16:45, 19:05). A `status` event carries a
 # SHA and no PR number, so the pick job asks GitHub which PRs the commit heads.
@@ -56,8 +60,8 @@ on:
     types: [completed]
   pull_request_review:
     types: [submitted]
-  pull_request_review_thread:
-    types: [resolved] # the cage waits on "no unresolved thread"; this is the moment it changes
+  pull_request_review_comment:
+    types: [created] # a reply on a thread usually precedes Resolve; the resolve itself fires nothing
   status: {} # CodeRabbit / semgrep post a commit STATUS, which `check_suite` never sees
   schedule:
     - cron: "*/20 * * * *" # the sweep — a webhook can be missed, this cannot
@@ -251,7 +255,7 @@ jobs:
           case "$EVENT" in
             check_suite)                prs="${SUITE_PR:-}" ;;
             pull_request_review)        prs="${REVIEW_PR:-}" ;;
-            pull_request_review_thread) prs="${REVIEW_PR:-}" ;;
+            pull_request_review_comment) prs="${REVIEW_PR:-}" ;;
             status)
               # A status that is still `pending` says nothing has arrived yet.
               # A finished one names only a SHA, so ask which open PRs it heads
