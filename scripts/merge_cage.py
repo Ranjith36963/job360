@@ -978,6 +978,31 @@ def check_size(n_files: int, n_lines: int, deletions: list[str],
                              if exempt_lines else "") + ")"))
 
 
+def without_own_run(runs: list[dict]) -> list[dict]:
+    """Drop the check runs that belong to THIS workflow run.
+
+    Measured 2026-09-19 on PR #591: when auto-merge.yml is woken by a
+    `pull_request_review` event, GitHub attaches its jobs to the PR's HEAD
+    commit, so `GET /commits/<sha>/check-runs` lists "Judge, and queue only
+    inside the lane (591)" -- status `in_progress`, because it is the job asking.
+    The cage then refused with "has not finished", withdrew the PR from the
+    queue and told Slack -- on every event, forever. A schedule or dispatch run
+    attaches to `main` instead, which is why the first machine merges (#578,
+    #580, #579) never hit it.
+
+    A check run made by Actions carries `/actions/runs/<run id>/` in its
+    `details_url` and `html_url`; the run judging now is `GITHUB_RUN_ID`. Outside
+    Actions nothing is dropped.
+    """
+    own = os.environ.get("GITHUB_RUN_ID", "")
+    if not own:
+        return list(runs)
+    marker = f"/actions/runs/{own}/"
+    return [r for r in runs
+            if marker not in (r.get("details_url") or "")
+            and marker not in (r.get("html_url") or "")]
+
+
 def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BRANCH) -> list[str]:
     """Pure half of the PROOF cage, so it can be drilled with real shapes.
 
@@ -989,6 +1014,9 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
     refused them for a reason no author could ever clear, while ci.yml and
     security.yml really did run. Naming the reason is the whole fix.
     """
+    before = len(runs)
+    runs = without_own_run(runs)
+    total_count -= before - len(runs)
     reasons: list[str] = []
     cannot = ", ".join(sorted(MAIN_ONLY_CHECKS))
     if not base_ref:
@@ -1154,6 +1182,7 @@ def judge_tags(requires: list[str], runs: list[dict], base_ref: str = MAIN_BRANC
     required check: a job that skipped proved nothing, and the whole point of a
     lane tag is that the evidence really exists.
     """
+    runs = without_own_run(runs)
     reasons: list[str] = []
     if not requires:
         # A lane with an empty `requires` would auto-merge on nothing at all.
@@ -1315,6 +1344,7 @@ def judge_review_evidence(check_runs: list[dict]) -> list[str]:
     a merge. Exact-name matching, never a substring — B21 is the case where
     `Frontend` matched `frontend-e2e` and an absent check looked present.
     """
+    check_runs = without_own_run(check_runs)
     seen = [r for r in check_runs if (r.get("name") or "") == REVIEWER_CHECK]
     if not seen:
         return [
@@ -2315,6 +2345,43 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         judge_check_runs(done[:-1] + [{"name": "CodeQL", "status": "in_progress",
                                        "conclusion": None, "output": {}}], len(done)),
         "has not finished", ["judge_check_runs"])
+    # THE ARM'S OWN JOB (2026-09-19, PR #591). Woken by a review event, the
+    # arm's judge job sits on the PR's head SHA as `in_progress` while it judges,
+    # and the cage refused itself on every event. Own run = ignored; another
+    # workflow's running job = still a block.
+    _own_job = {"name": "Judge, and queue only inside the lane (591)", "status": "in_progress",
+                "conclusion": None, "output": {},
+                "details_url": f"https://github.com/{REPO}/actions/runs/424242/job/1"}
+    _other_job = dict(_own_job, name="Backend (Python 3.12)",
+                      details_url=f"https://github.com/{REPO}/actions/runs/424243/job/1")
+    _saved_run_id = os.environ.get("GITHUB_RUN_ID")
+    os.environ["GITHUB_RUN_ID"] = "424242"
+    try:
+        ok("the arm's own running job is not a check the cage waits on",
+           judge_check_runs(done + [_own_job], len(done) + 1) == [],
+           "own job in the list, no reason produced", ["judge_check_runs", "without_own_run"])
+        red("another workflow's running job still blocks",
+            judge_check_runs(done[:-1] + [_other_job], len(done)),
+            "has not finished", ["judge_check_runs", "without_own_run"])
+        ok("...and the same for the review judge",
+           judge_review_evidence(done + [_own_job]) == judge_review_evidence(done),
+           "own job changes nothing", ["judge_review_evidence", "without_own_run"])
+    finally:
+        if _saved_run_id is None:
+            del os.environ["GITHUB_RUN_ID"]
+        else:
+            os.environ["GITHUB_RUN_ID"] = _saved_run_id
+    # Asserted with the variable GENUINELY absent (reviewer-bugs on #592: the
+    # first version `or`-ed in "or we are inside Actions", which is always true
+    # on the one path that runs this drill, so it could never fail).
+    _saved_run_id = os.environ.pop("GITHUB_RUN_ID", None)
+    try:
+        ok("outside Actions nothing is dropped",
+           len(without_own_run([_own_job])) == 1,
+           "no GITHUB_RUN_ID = no filter", ["without_own_run"])
+    finally:
+        if _saved_run_id is not None:
+            os.environ["GITHUB_RUN_ID"] = _saved_run_id
     # The measured live hole: green conclusion, new alert in the title.
     red("a GREEN check reporting a NEW security alert is still refused",
         judge_check_runs(done[:-1] + [{"name": "CodeQL", "status": "completed",
