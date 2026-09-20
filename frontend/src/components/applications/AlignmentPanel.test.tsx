@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { AlignmentPanel } from "./AlignmentPanel";
 import type { Alignment } from "@/lib/api";
 
@@ -79,5 +79,28 @@ describe("AlignmentPanel", () => {
     await waitFor(() =>
       expect(screen.getByText("Could not load the fit picture.")).toBeInTheDocument()
     );
+  });
+
+  it("folds 'Not in the ad' past 12 pills, and 'Show all' expands to the full list", async () => {
+    const thirteenSkills = Array.from({ length: 13 }, (_, i) => `Skill${i + 1}`);
+    getAlignment.mockResolvedValue(
+      payload({
+        skills_in_ad: [],
+        skills_not_in_ad: thirteenSkills,
+        skills_total: 13,
+      })
+    );
+    render(<AlignmentPanel applicationId={8383} />);
+
+    const notInAd = await screen.findByTestId("skills-not-in-ad");
+    await waitFor(() => expect(notInAd.querySelectorAll("li")).toHaveLength(12));
+
+    const showAll = screen.getByTestId("skills-show-all");
+    expect(showAll).toHaveTextContent("Show all 13");
+
+    fireEvent.click(showAll);
+
+    expect(notInAd.querySelectorAll("li")).toHaveLength(13);
+    expect(showAll).toHaveTextContent("Show fewer");
   });
 });

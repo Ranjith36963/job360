@@ -25,6 +25,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   const [detail, setDetail] = useState<ApplicationDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [marking, setMarking] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -73,6 +74,17 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
     needs_sponsorship: null,
   };
 
+  // Read off the stored record by the backend (`next_step.py`) — the same
+  // line an agent sees on `get_application`, so human and agent agree.
+  const nextStep = detail.next_step;
+
+  const hasCvArtifact = detail.artifacts.some((a) => a.kind === "cv");
+
+  // Newest first — a fresh "flag for next time" should read at the top.
+  const lessonEvents = detail.events
+    .filter((e) => e.event_type === "lesson" && !e.superseded)
+    .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8">
       <Link href="/applications" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
@@ -83,6 +95,11 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         <div>
           <h1 className="font-heading text-2xl font-bold">{detail.job.job_title || "Untitled role"}</h1>
           <p className="text-muted-foreground">{detail.job.job_company}</p>
+          {nextStep?.label && (
+            <p data-testid="next-step" className="text-sm text-primary">
+              Next: {nextStep.label}
+            </p>
+          )}
           {!detail.job.catalog_present && (
             <p className="mt-1 text-xs text-muted-foreground/70">
               This listing is no longer in the catalog — the snapshot above is what it read when you brought it.
@@ -126,47 +143,78 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         </div>
       </div>
 
-      <section data-testid="section-timeline">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Timeline
-        </h2>
-        <Timeline events={detail.events} />
-        <NoteForm applicationId={detail.id} onRecorded={load} />
-        <LessonForm applicationId={detail.id} onRecorded={load} />
-      </section>
-
       <section data-testid="section-fit">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fit</h2>
         <AlignmentPanel applicationId={detail.id} refreshKey={detail.updated_at} />
         <VisaSelect applicationId={detail.id} visa={visa} onSaved={load} />
       </section>
 
-      <section>
-        <TailorSection jobId={detail.job_id} />
+      <section data-testid="section-documents">
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Documents
+        </h2>
+        <ArtifactVersions applicationId={detail.id} artifacts={detail.artifacts} receipts={detail.receipts} />
+        {!hasCvArtifact && (
+          <div className="mt-4">
+            <p className="mb-2 text-xs text-muted-foreground">
+              No CV for this job yet. Your agent can write one and save it here — or:
+            </p>
+            <TailorSection jobId={detail.job_id} />
+          </div>
+        )}
       </section>
 
-      <section>
+      {detail.receipts.length > 0 && (
+        <section data-testid="section-sent">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Sent
+          </h2>
+          <Receipts receipts={detail.receipts} />
+        </section>
+      )}
+
+      <section data-testid="section-people">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           People
         </h2>
         <Contacts applicationId={detail.id} contacts={detail.contacts} />
       </section>
 
-      <section>
+      <section data-testid="section-lessons">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Artifacts
+          Lessons
         </h2>
-        <ArtifactVersions applicationId={detail.id} artifacts={detail.artifacts} receipts={detail.receipts} />
+        {lessonEvents.length > 0 && (
+          <ul className="mb-3 flex flex-col gap-2">
+            {lessonEvents.map((event) => (
+              <li key={event.id} data-testid="lesson-here" className="glass-card rounded-lg p-3 text-sm">
+                <p>{event.detail}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {new Date(event.occurred_at).toLocaleString()}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+        <LessonForm applicationId={detail.id} onRecorded={load} />
       </section>
 
-      {detail.receipts.length > 0 && (
-        <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Receipts
-          </h2>
-          <Receipts receipts={detail.receipts} />
-        </section>
-      )}
+      <section data-testid="section-timeline">
+        <button
+          type="button"
+          data-testid="history-toggle"
+          onClick={() => setHistoryOpen((open) => !open)}
+          className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+        >
+          {historyOpen ? "Hide history" : `Show history (${detail.events.length} events)`}
+        </button>
+        {historyOpen && (
+          <>
+            <Timeline events={detail.events} />
+            <NoteForm applicationId={detail.id} onRecorded={load} />
+          </>
+        )}
+      </section>
     </div>
   );
 }

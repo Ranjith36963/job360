@@ -114,7 +114,11 @@ export function ArtifactVersions({
   );
 
   if (artifacts.length === 0) {
-    return <p className="text-sm text-muted-foreground">No CV or cover letter versions saved yet.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        No documents yet. Your agent saves every CV and cover letter version here.
+      </p>
+    );
   }
 
   const byKind = new Map<string, ApplicationArtifact[]>();

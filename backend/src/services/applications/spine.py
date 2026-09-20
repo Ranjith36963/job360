@@ -974,7 +974,7 @@ async def get_application_detail(
         if ev["scheduled_at"] and not ev["superseded"]:
             interview_at = ev["scheduled_at"]
 
-    return {
+    detail: dict[str, Any] = {
         "id": app_row["id"],
         "job_id": job_id,
         "status": app_row["status"],
@@ -999,6 +999,13 @@ async def get_application_detail(
         "receipts": await _list_receipts_for_application(db, user_id, application_id),
         "contacts": await list_contacts(db, user_id, application_id),
     }
+    # 2026-09-20 — the one line at the top: what to do next, read off the
+    # stored state above (never a judgement of the job). The same value
+    # reaches the web header and every agent calling get_application.
+    from src.services.applications.next_step import next_step_for_detail  # noqa: PLC0415
+
+    detail["next_step"] = next_step_for_detail(detail)
+    return detail
 
 
 async def _count(db: JobDatabase, table: str, col: str, value: Any) -> int:

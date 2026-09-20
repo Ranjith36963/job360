@@ -210,8 +210,10 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     await v2.click();
     await expect(page.getByText(CV_TEXT[2])).toBeVisible({ timeout: 10_000 });
 
-    // fix 3 (agentic UX audit) — Timeline is now the first section, ahead of
-    // Fit (`data-testid` order), and the one receipt in the mock renders.
+    // Six-question reorder (2026-09-20) — Fit answers "how do I compare",
+    // the first question a seeker has, so it now leads; History (the old
+    // Timeline) is folded at the bottom. The one receipt in the mock renders
+    // in the Sent section.
     const timelineSection = page.getByTestId("section-timeline");
     const fitSection = page.getByTestId("section-fit");
     await expect(timelineSection).toBeVisible();
@@ -220,7 +222,7 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     const fitBox = await fitSection.boundingBox();
     expect(timelineBox).not.toBeNull();
     expect(fitBox).not.toBeNull();
-    expect(timelineBox!.y).toBeLessThan(fitBox!.y);
+    expect(fitBox!.y).toBeLessThan(timelineBox!.y);
 
     await expect(page.getByTestId("receipt-row")).toHaveCount(1);
   });

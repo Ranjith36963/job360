@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { getAlignment, type Alignment } from "@/lib/api";
 
+// Past this many pills, "Not in the ad" reads as a wall rather than a list —
+// fold the rest behind "Show all N" so a large profile doesn't dominate the
+// Fit section.
+const SKILLS_FOLD_LIMIT = 12;
+
 /** Colour for the fit-score bar fill — thresholds match the rest of the app's
  * "verdict" language (nothing here computes a score; it only paints one
  * that's already stored). */
@@ -28,11 +33,13 @@ export function AlignmentPanel({
   const [data, setData] = useState<Alignment | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showAllSkills, setShowAllSkills] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setShowAllSkills(false);
     (async () => {
       try {
         const res = await getAlignment(applicationId);
@@ -142,15 +149,27 @@ export function AlignmentPanel({
                   Not in the ad
                 </p>
                 <ul className="flex flex-wrap gap-1.5">
-                  {skills_not_in_ad.map((skill) => (
-                    <li
-                      key={skill}
-                      className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground"
-                    >
-                      {skill}
-                    </li>
-                  ))}
+                  {(showAllSkills ? skills_not_in_ad : skills_not_in_ad.slice(0, SKILLS_FOLD_LIMIT)).map(
+                    (skill) => (
+                      <li
+                        key={skill}
+                        className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground"
+                      >
+                        {skill}
+                      </li>
+                    )
+                  )}
                 </ul>
+                {skills_not_in_ad.length > SKILLS_FOLD_LIMIT && (
+                  <button
+                    type="button"
+                    data-testid="skills-show-all"
+                    onClick={() => setShowAllSkills((prev) => !prev)}
+                    className="mt-1.5 text-xs font-medium text-primary hover:underline"
+                  >
+                    {showAllSkills ? "Show fewer" : `Show all ${skills_not_in_ad.length}`}
+                  </button>
+                )}
               </div>
             </div>
           </>
