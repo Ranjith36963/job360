@@ -207,6 +207,23 @@ jobs:
         if: needs.scope.outputs.scope == 'full'
         run: python scripts/drill_registry.py --drill
 
+      # ...and that drill can itself go RED (#359). A drill exiting 0 proves the
+      # drill RAN, never that the guard could still fire: `all([])` is True, and
+      # a derivation that resolves to zero files prints zero lines and succeeds.
+      # Both shipped here inside one PR. So one of the registry's own rules is
+      # BLINDED on purpose and the self-drill must fail. `--run-drills` below
+      # runs every other guard's negative control, but it skips this one -- a
+      # drill may not invoke itself -- so the registry's own runs here, explicitly.
+      - name: ...and the registry's own drill can go RED
+        if: needs.scope.outputs.scope == 'full'
+        run: |
+          if python scripts/drill_registry.py --drill --break-checker UNDECLARED; then
+            echo "The registry's drill stayed GREEN with its UNDECLARED rule blinded."
+            echo "So the drill cannot go red, and its green tick proves nothing."
+            exit 1
+          fi
+          echo "Blinded on purpose -> the drill went red, as it must."
+
       # Every guard CI runs must declare how to make itself fail. Ten guards here
       # shipped unable to fire, across four consecutive rounds — each was
       # correct-looking code in the wrong position, reporting success about a

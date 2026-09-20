@@ -40,6 +40,10 @@ This makes it structural:
                 (it has a self-drill, and we run it) or `owed` (we know it cannot be
                 fire-tested yet, and WHY). An undeclared guard fails the build.
   3. RUN        every declared drill, and demand the guard actually goes RED.
+  4. MUTATE     run each guard's NEGATIVE CONTROL too -- argv that BLINDS or
+                BREAKS the guard on purpose, and must therefore exit NON-ZERO.
+                A drill exiting 0 proves the drill RAN. Only a negative proves
+                the drill can still go RED. (#359)
 
 WHAT `owed` IS FOR, AND WHAT IT IS NOT
 --------------------------------------
@@ -51,6 +55,30 @@ So `owed` is honest debt, and it is LOUD — every run prints the count and the 
 What `owed` does NOT do is let a NEW guard in quietly. New guard, no entry, red build.
 That is the whole mechanism: it cannot stop you shipping an undrilled guard, but it
 can stop you doing it by accident.
+
+WHAT A NEGATIVE CONTROL IS, AND WHY EXIT 0 WAS NEVER PROOF (#359)
+-----------------------------------------------------------------
+"the drill exits 0" and "the guard can still go red" are two different claims, and
+this file used to make the second while measuring only the first. A drill whose
+checker has gone blind exits 0 exactly like a drill that passed: `all([])` is True,
+a derivation that resolves to zero files prints zero lines and succeeds, and an
+assertion that holds for the wrong reason still holds. Both of those shipped here,
+inside one PR, and both were found only by breaking the guard on purpose.
+
+So a `drilled` guard declares a SECOND command, `negative`: argv that blinds or
+breaks the guard deliberately --
+
+    scripts/chain_check.py --drill --break-checker W1     switch one check off
+    scripts/doc_sync_mutation_test.py --blind             apply no mutation at all
+
+-- and it MUST exit non-zero. If it exits 0 the drill cannot go red, and the guard
+is reported RED here whatever the registry claims.
+
+A guard that cannot express a cheap negative is NOT red. It is OWED, with a one-line
+reason in `no_negative`: a guard that cannot express a mutation is honestly owed, and
+a bar that reds twenty guards the day it lands gets switched off in a week.
+`--count-owed` keeps its narrower meaning -- DECLARED debt, not proof of liveness --
+so the two numbers are printed side by side and never merged into one.
 """
 
 from __future__ import annotations
@@ -89,7 +117,30 @@ class Guard:
     status: str  # "drilled" | "owed"
     reason: str = ""  # required for owed: why it cannot be drilled YET
     drill: list[str] = field(default_factory=list)  # argv, run from ROOT
+    # THE NEGATIVE CONTROL (#359). argv, run from ROOT, that BLINDS or BREAKS the
+    # guard on purpose -- and therefore MUST exit non-zero. Without one,
+    # `the drill exited 0` says the drill ran, and nothing more.
+    negative: list[str] = field(default_factory=list)
+    # Why this guard has no negative YET. REQUIRED when a `drilled` guard declares
+    # none, for the same reason `owed` requires a reason: silence is
+    # indistinguishable from an oversight. The guard then reports as OWED.
+    no_negative: str = ""
     since: str = ""  # date the debt was taken on, for owed
+
+
+NO_NEGATIVE = "no negative control -- nothing proves this drill can still go red"
+
+
+def effective(guard: Guard) -> tuple[str, str]:
+    """What a guard HONESTLY is, against what its entry says. Returns (status, why).
+
+    `drilled` with no negative control is not proof of anything: the drill exits 0
+    whether the guard works or has gone blind. So it reads OWED here, with its
+    reason, exactly like declared debt -- honest, not red. (#359)
+    """
+    if guard.status == "drilled" and not guard.negative:
+        return "owed", guard.no_negative or NO_NEGATIVE
+    return guard.status, guard.reason
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -108,6 +159,9 @@ REGISTRY: dict[str, Guard] = {
         # includes a negative control that must stay quiet. 4/4 as of the
         # commit that added it.
         drill=[sys.executable, "scripts/chain_check.py", "--drill"],
+        # NEGATIVE CONTROL: blinds check W1, so the drill must FAIL. Verified
+        # exit 1 on the commit that added this line.
+        negative=[sys.executable, "scripts/chain_check.py", "--drill", "--break-checker", "W1"],
     ),
     # ── FOUR GUARDS THAT ARRIVED WITH THE CAGE (#348) ────────────────────────
     # It was six. Two came out again, and finding out why was the whole point.
@@ -135,23 +189,31 @@ REGISTRY: dict[str, Guard] = {
         # scoring change, an auth change, an infra change, an edit to its own
         # guards, an unrecognised path, and a ratchet going backwards.
         drill=[sys.executable, "scripts/merge_cage.py", "--drill"],
+        no_negative="40+ cases hardcoded in a 3,600-line self_drill(); a --break-checker there is its own "
+                      "PR",
     ),
     "scripts/gate_wiring_check.py": Guard(
         status="drilled",
         # Checks the cage is wired somewhere it could actually stop something.
         # Watched red this session on a real judging call with no --baseline.
         drill=[sys.executable, "scripts/gate_wiring_check.py", "--drill"],
+        # NEGATIVE CONTROL: blinds rule G1, so the drill must FAIL. Verified
+        # exit 1 on the commit that added this line.
+        negative=[sys.executable, "scripts/gate_wiring_check.py", "--drill",
+                  "--break-checker", "G1"],
     ),
     "scripts/rollback_gear.py": Guard(
         status="drilled",
         # THE UNDO. The product lane's speed is borrowed against this working:
         # "speed comes from being able to UNDO, not from being sure."
         drill=[sys.executable, "scripts/rollback_gear.py", "--drill"],
+        no_negative="the drill builds its fakes inline; there is nothing a flag can switch off",
     ),
     "scripts/revert_gear.py": Guard(
         status="drilled",
         # The other undo -- what revert-main.yml runs to take main back.
         drill=[sys.executable, "scripts/revert_gear.py", "--drill"],
+        no_negative="the drill builds its fakes inline; there is nothing a flag can switch off",
     ),
     # ── THE TWO GUARDS THIS PR WIRES UP ──────────────────────────────────────
     # A guard and its declaration land together, always. #357 removed both of
@@ -167,6 +229,7 @@ REGISTRY: dict[str, Guard] = {
         # restoring the basename fallback, un-protecting the undo gears, and
         # adding the tempting `**/README.md` one-liner all turn it red.
         drill=[sys.executable, "scripts/lane.py", "--drill"],
+        no_negative="the lane cases are inline assertions over a pure classifier",
     ),
     "scripts/repairable.py": Guard(
         status="drilled",
@@ -181,12 +244,14 @@ REGISTRY: dict[str, Guard] = {
         # code. Delete the SELF list and the CI definition becomes editable by
         # the very agent CI is judging.
         drill=[sys.executable, "scripts/repairable.py", "--drill"],
+        no_negative="the cases are inline assertions over a pure predicate",
     ),
     "scripts/stale_path_check.py": Guard(
         status="drilled",
         # Asks git which paths a change renamed and fails if any tracked file
         # still names an old one. The guard that makes a file MOVE safe.
         drill=[sys.executable, "scripts/stale_path_check.py", "--drill"],
+        no_negative="the drill builds a temp git repo and asserts inline",
     ),
     "scripts/worktree_reaper.py": Guard(
         status="drilled",
@@ -211,6 +276,7 @@ REGISTRY: dict[str, Guard] = {
         # passes every safety case and collects nothing, which is precisely how
         # branch_prune.sh looked correct while 98 worktrees piled up behind it.
         drill=[sys.executable, "scripts/worktree_reaper.py", "--drill"],
+        no_negative="the drill builds a temp git repo and asserts inline",
     ),
     "scripts/worktree_census.py": Guard(
         status="drilled",
@@ -230,6 +296,7 @@ REGISTRY: dict[str, Guard] = {
         # pointing this step at the checkout would census one clean worktree and
         # one branch, report all-green, and be the eleventh dead guard.
         drill=[sys.executable, "scripts/worktree_census.py", "--drill"],
+        no_negative="the drill builds a temp git repo and asserts inline",
     ),
     "scripts/ruleset_gate.py": Guard(
         status="drilled",
@@ -250,6 +317,7 @@ REGISTRY: dict[str, Guard] = {
         # that with a dead context is how this guard would cry wolf until it was
         # switched off. Offline and network-free; it reads a recorded snapshot.
         drill=[sys.executable, "scripts/ruleset_gate.py", "--drill"],
+        no_negative="eight inline breaks over a recorded snapshot, none reachable from the CLI",
     ),
     "scripts/check_alert_paths.py": Guard(
         status="drilled",
@@ -261,6 +329,7 @@ REGISTRY: dict[str, Guard] = {
         # here. Brute-forces the gate expressions rather than pattern-matching a
         # known-bad string, so a NEW way of writing the same bug is still caught.
         drill=[sys.executable, "scripts/check_alert_paths.py", "--drill"],
+        no_negative="the gate expressions are brute-forced inline; nothing a flag can switch off",
     ),
     "scripts/check_lock_sync.py": Guard(
         status="drilled",
@@ -271,6 +340,8 @@ REGISTRY: dict[str, Guard] = {
         # of the real lock and demands that exact edge is reported; the
         # untouched lock is the negative control.
         drill=[sys.executable, "scripts/check_lock_sync.py", "--drill"],
+        no_negative="the drill mutates a copy of the lock inline; blinding it means a flag that skips that "
+                      "edit",
     ),
     "scripts/check_workflow_slack_wiring.py": Guard(
         status="drilled",
@@ -288,6 +359,8 @@ REGISTRY: dict[str, Guard] = {
         # CI's `--run-drills` is the proof: if Linux cannot finish it either, that
         # step goes red and the claim is withdrawn.
         drill=[sys.executable, "scripts/check_workflow_slack_wiring.py", "--drill"],
+        no_negative="its drill already spends ~300 bash -n spawns a pass; a negative doubles the slowest "
+                      "drill here, so it waits for a cheaper one",
     ),
     "scripts/ci_scope.py": Guard(
         status="drilled",
@@ -303,6 +376,7 @@ REGISTRY: dict[str, Guard] = {
         # verdict: a classifier that cannot pass it fails every job that
         # needs it, so a broken classifier is a red PR, never a fast one.
         drill=[sys.executable, "scripts/ci_scope.py", "--drill"],
+        no_negative="the classifier's cases are inline ok() calls with nothing to switch off",
     ),
     "scripts/slack_transition.py": Guard(
         status="drilled",
@@ -314,6 +388,7 @@ REGISTRY: dict[str, Guard] = {
         # reason string) that must stay quiet, because a checker that fires at
         # any change is not a checker. Offline: no token, no network.
         drill=[sys.executable, "scripts/slack_transition.py", "--drill"],
+        no_negative="three inline breaks plus a negative control, none reachable from the CLI",
     ),
     "scripts/review_debt.py": Guard(
         status="drilled",
@@ -334,6 +409,7 @@ REGISTRY: dict[str, Guard] = {
         # negative control) took it to 12. Network-free: runs off a recorded
         # GraphQL payload in scripts/fixtures/review_threads/.
         drill=[sys.executable, "scripts/review_debt.py", "--drill"],
+        no_negative="12 inline cases over a recorded GraphQL payload",
     ),
     "scripts/encoding_guard.py": Guard(
         status="drilled",
@@ -344,12 +420,19 @@ REGISTRY: dict[str, Guard] = {
         # number -- a line-number baseline rots on the next import and gets
         # switched off.
         drill=[sys.executable, "scripts/encoding_guard.py", "--drill"],
+        no_negative="a negative means a flag that skips the planted em-dash -- an edit to the guard, not a "
+                      "declaration about it",
     ),
     "scripts/drill_registry.py": Guard(
         status="drilled",
         # This file drills itself. A registry that cannot fail is the eleventh
         # guard, and it would be the worst one — it would certify the other ten.
         drill=[sys.executable, "scripts/drill_registry.py", "--drill"],
+        # NEGATIVE CONTROL: blinds this file's own UNDECLARED GUARD rule, so its
+        # self-drill must FAIL. `--run-drills` skips this entry (a drill may not
+        # invoke itself), so ci.yml runs BOTH halves as their own steps.
+        negative=[sys.executable, "scripts/drill_registry.py", "--drill",
+                  "--break-checker", "UNDECLARED"],
     ),
     # ── THE GUARD THIS PR WIRES UP (docs/plans/2026-09-04-url-fetch) ────────
     # A guard and its declaration land together, always — same rule as the
@@ -361,6 +444,7 @@ REGISTRY: dict[str, Guard] = {
     "scripts/ssrf_drill.py": Guard(
         status="drilled",
         drill=[sys.executable, "scripts/ssrf_drill.py", "--drill"],
+        no_negative="ten inline mutations against an injected resolver",
     ),
     # ── owed: real guards, no fire-test yet, and here is exactly why ────────
     "scripts/already_built.py": Guard(
@@ -382,13 +466,21 @@ REGISTRY: dict[str, Guard] = {
         # sequence, a control byte inside a guard's own regex, and a pillar doc
         # nobody added to the watched list.
         drill=[sys.executable, "scripts/doc_sync_mutation_test.py"],
+        # NEGATIVE CONTROL: runs the whole mutation harness with NO mutation
+        # applied. Every guard then has nothing to find and stays green, which the
+        # harness must notice and report -- exit 1. If it exits 0, its verdict never
+        # depended on the mutation at all: the same failure one level up.
+        negative=[sys.executable, "scripts/doc_sync_mutation_test.py", "--blind"],
     ),
     "scripts/doc_sync_mutation_test.py": Guard(
         status="owed",
         reason="it IS the drill for doc_sync_check.py, so drilling it means "
-        "breaking a mutation on purpose and proving the runner notices — "
-        "worth doing, but the honest state today is that nothing checks the "
-        "checker's checker. Added to doc-sync.yml 2026-08-25 after Fable 5 "
+        "breaking a mutation on purpose and proving the runner notices. #359 paid "
+        "HALF of that: `--blind` runs the harness with no mutation applied, must "
+        "exit non-zero, and now runs on every sweep as doc_sync_check.py's negative "
+        "control. Still owed is the other direction — a drill of its own that exits "
+        "0 while proving a mutation that DOES land is reported. "
+        "Added to doc-sync.yml 2026-08-25 after Fable 5 "
         "found it ran in NO workflow at all, which let 27 guards degrade to "
         "always-green with no signal",
         since="2026-08-25",
@@ -401,6 +493,8 @@ REGISTRY: dict[str, Guard] = {
         # value inside the block, and DELETING the marker (a block quietly
         # going back to being hand-written, which is the sneakier one).
         drill=[sys.executable, "scripts/gen_doc_blocks.py"],
+        no_negative="its drill IS the generator's check mode; a negative means planting a wrong value and "
+                      "restoring it, i.e. a mutation harness of its own",
     ),
     "scripts/provider_probe.py": Guard(
         status="owed",
@@ -423,6 +517,7 @@ REGISTRY: dict[str, Guard] = {
     "scripts/wip_gate.py": Guard(
         status="drilled",
         drill=[sys.executable, "scripts/wip_gate.py", "--drill"],
+        no_negative="inline check() calls over a pure decide()",
     ),
     "scripts/watchdog_check.py": Guard(
         status="drilled",
@@ -436,6 +531,7 @@ REGISTRY: dict[str, Guard] = {
         # The gh half stays undrilled on purpose — it is the same `gh run
         # list` every sibling uses, and a recorded fixture would rot.
         drill=[sys.executable, "scripts/watchdog_check.py", "--drill"],
+        no_negative="the classifier's run lists are fed inline; nothing a flag can switch off",
     ),
     "backend/scripts/mypy_ratchet.py": Guard(
         status="owed",
@@ -510,7 +606,14 @@ def _resolve(ref: str, root: Path) -> Path | None:
     return None
 
 
-def check(root: Path, registry: dict[str, Guard]) -> list[str]:
+# The rules `check` enforces, by name, so ONE can be switched off to prove this
+# file's own drill can go red (`--break-checker`). Nothing but the drill passes
+# `disabled` -- a blinding switch reachable from normal use is just a bug.
+RULES = ("UNDECLARED", "BROKEN", "STALE", "MALFORMED")
+
+
+def check(root: Path, registry: dict[str, Guard],
+          disabled: frozenset[str] = frozenset()) -> list[str]:
     """Every guard declared, every declaration real. Returns failure lines."""
     fails: list[str] = []
     found = discover(root / ".github")
@@ -521,6 +624,8 @@ def check(root: Path, registry: dict[str, Guard]) -> list[str]:
     for ref, wfs in found.items():
         path = _resolve(ref, root)
         if path is None:
+            if "BROKEN" in disabled:
+                continue
             fails.append(
                 f"BROKEN REFERENCE: {', '.join(sorted(wfs))} invokes `{ref}`, which does "
                 f"not exist at {ref} or backend/{ref}. The step will die on a missing "
@@ -531,7 +636,7 @@ def check(root: Path, registry: dict[str, Guard]) -> list[str]:
         canonical.setdefault(key, set()).update(wfs)
 
     for key, wfs in sorted(canonical.items()):
-        if key not in registry:
+        if key not in registry and "UNDECLARED" not in disabled:
             fails.append(
                 f"UNDECLARED GUARD: {key} runs in {', '.join(sorted(wfs))} but has no "
                 f"entry in REGISTRY. Add one: `drilled` with a drill command you have "
@@ -542,6 +647,8 @@ def check(root: Path, registry: dict[str, Guard]) -> list[str]:
 
     for key, guard in sorted(registry.items()):
         if key not in canonical:
+            if "STALE" in disabled:
+                continue
             fails.append(
                 f"STALE ENTRY: REGISTRY declares {key} but no workflow invokes it. Either "
                 f"the guard was removed and this entry should go, or it was quietly "
@@ -549,17 +656,73 @@ def check(root: Path, registry: dict[str, Guard]) -> list[str]:
                 f"noticing."
             )
             continue
+        malformed: list[str] = []
         if guard.status == "drilled" and not guard.drill:
-            fails.append(f"MALFORMED: {key} is marked `drilled` but declares no drill command.")
+            malformed.append(f"MALFORMED: {key} is marked `drilled` but declares no drill command.")
         if guard.status == "owed" and not guard.reason:
-            fails.append(
+            malformed.append(
                 f"MALFORMED: {key} is marked `owed` with no reason. Debt without a reason "
                 f"is indistinguishable from an oversight."
             )
         if guard.status not in {"drilled", "owed"}:
-            fails.append(f"MALFORMED: {key} has unknown status {guard.status!r}.")
+            malformed.append(f"MALFORMED: {key} has unknown status {guard.status!r}.")
+        # #359. Having NO negative control is not a failure -- the guard is reported
+        # owed for it, honestly. Saying nothing about why IS a failure, for exactly
+        # the reason `owed` needs a reason: an unexplained gap is indistinguishable
+        # from an oversight, and an oversight is how ten guards shipped unable to fire.
+        if guard.status == "drilled" and not guard.negative and not guard.no_negative:
+            malformed.append(
+                f"MALFORMED: {key} is `drilled` with no negative control and no reason for not "
+                f"having one. Declare `negative` (argv that blinds the guard, and must therefore "
+                f"exit non-zero) or `no_negative` (one line: what would have to be built)."
+            )
+        if guard.negative and guard.no_negative:
+            malformed.append(
+                f"MALFORMED: {key} declares BOTH a negative control and a reason for having none."
+            )
+        if guard.status != "drilled" and guard.negative:
+            malformed.append(
+                f"MALFORMED: {key} is `{guard.status}` but declares a negative control. A negative "
+                f"proves a DRILL can go red, and there is no drill here for it to prove anything "
+                f"about."
+            )
+        if "MALFORMED" not in disabled:
+            fails.extend(malformed)
 
     return fails
+
+
+def run_negative(root: Path, key: str, guard: Guard) -> list[str]:
+    """Run the guard's negative control. It BLINDS the guard, so it MUST fail.
+
+    This is the whole of #359. A drill exiting 0 says the drill RAN; it says nothing
+    about whether the drill could still go red. So every guard that can express it is
+    broken on purpose and watched failing on every CI run -- not by a human, once, in
+    a commit message nobody re-reads.
+    """
+    if not guard.negative:
+        # Announced, never silent, and never counted as proven.
+        print(f"  [OWED] {key} — {guard.no_negative or NO_NEGATIVE}")
+        return []
+    try:
+        proc = subprocess.run(
+            guard.negative, cwd=root, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=DRILL_TIMEOUT_S
+        )
+    except subprocess.TimeoutExpired:
+        return [f"NEGATIVE TIMEOUT: {key} — its negative control did not finish in {DRILL_TIMEOUT_S}s."]
+    except OSError as exc:
+        return [f"NEGATIVE UNRUNNABLE: {key} -> {exc}"]
+    if proc.returncode == 0:
+        tail = (proc.stdout + proc.stderr).strip().splitlines()[-6:]
+        joined = " ".join(guard.negative)
+        return [
+            f"THE DRILL CANNOT GO RED: {key} ran `{joined}`, which BLINDS the guard on purpose, "
+            f"and it still exited 0. Its green tick therefore means the drill RAN — not that this "
+            f"guard would fire if something broke.\n      " + "\n      ".join(tail)
+        ]
+    print(f"  [NEGATIVE RED] {key} — blinded on purpose, and the drill went red, as it must")
+    return []
 
 
 def run_drills(root: Path, registry: dict[str, Guard], only: str | None = None) -> list[str]:
@@ -575,8 +738,9 @@ def run_drills(root: Path, registry: dict[str, Guard], only: str | None = None) 
         if Path(key).name == Path(__file__).name and only is None:
             # Announced, never silent. A skip nobody is told about is how a
             # guard stops running while its row still reads as covered.
-            print(f"  [SKIPPED] {key} — a drill cannot invoke itself; it runs as its "
-                  f"own CI step (`--drill`), which must be present in the workflow.")
+            print(f"  [SKIPPED] {key} — a drill cannot invoke itself; it and its negative "
+                  f"control run as their own CI steps (`--drill`, and `--drill "
+                  f"--break-checker`), both of which must be present in the workflow.")
             continue
         try:
             proc = subprocess.run(
@@ -595,8 +759,11 @@ def run_drills(root: Path, registry: dict[str, Guard], only: str | None = None) 
                 f"when deliberately broken, so it cannot be trusted when something breaks "
                 f"for real.\n      " + "\n      ".join(tail)
             )
-        else:
-            print(f"  [DRILL PASS] {key}")
+            continue
+        print(f"  [DRILL PASS] {key}")
+        # The drill ran and stayed green. That is half the claim. Now blind the guard
+        # on purpose and demand the very same drill goes RED. (#359)
+        fails.extend(run_negative(root, key, guard))
     return fails
 
 
@@ -610,11 +777,14 @@ def run_drills(root: Path, registry: dict[str, Guard], only: str | None = None) 
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def self_drill() -> int:
+def self_drill(disabled: frozenset[str] = frozenset()) -> int:
     print("DRILL — breaking the registry on purpose. It must go RED and name the reason.")
+    if disabled:
+        print(f"        ...with {', '.join(sorted(disabled))} BLINDED — this run must FAIL. "
+              f"A self-test that cannot be made to fail is not a self-test.")
     print("=" * 72)
 
-    baseline = check(ROOT, REGISTRY)
+    baseline = check(ROOT, REGISTRY, disabled)
     if baseline:
         print(f"  baseline: {len(baseline)} pre-existing failure(s) — a drill counts only NEW")
         print("            findings, so real problems cannot mask a broken drill.")
@@ -632,7 +802,7 @@ def self_drill() -> int:
             p.write_text("# drill stub\n", encoding="utf-8")
 
         def new_findings(reg: dict[str, Guard]) -> list[str]:
-            return [f for f in check(tmp, reg) if f not in base]
+            return [f for f in check(tmp, reg, disabled) if f not in base]
 
         # 1. THE ENFORCER. A new guard wired into CI with no registry entry.
         wf = tmp / ".github" / "workflows" / "_drill_new_guard.yml"
@@ -674,6 +844,34 @@ def self_drill() -> int:
         f = new_findings(reg)
         hit = next((x for x in f if "MALFORMED" in x and "no reason" in x), "")
         results.append(("owed entry with no reason given", bool(hit), hit))
+
+        # 4b. #359, THE HONEST HALF. A `drilled` guard that declares no negative
+        #     control is OWED — not red. The issue's own words: "a guard that
+        #     cannot express a mutation is honestly owed". Red would be a lie in
+        #     the other direction, and a bar that reds twenty guards on the day it
+        #     lands is a bar someone switches off inside a week.
+        reg = dict(REGISTRY)
+        reg["scripts/chain_check.py"] = Guard(
+            status="drilled",
+            drill=[sys.executable, "scripts/chain_check.py", "--drill"],
+            no_negative="drill fixture: no blinding switch declared")
+        status, why = effective(reg["scripts/chain_check.py"])
+        found = new_findings(reg)
+        downgraded = status == "owed" and not found
+        results.append(("a `drilled` guard with NO negative control is reported OWED, not red",
+                        downgraded,
+                        "" if downgraded else f"status={status} why={why!r} findings={found[:1]}"))
+
+        # 4c. ...but saying NOTHING about why is malformed, for the same reason
+        #     `owed` needs a reason: an unexplained gap is indistinguishable from
+        #     an oversight, and an oversight is how ten guards shipped dead.
+        reg = dict(REGISTRY)
+        reg["scripts/chain_check.py"] = Guard(
+            status="drilled",
+            drill=[sys.executable, "scripts/chain_check.py", "--drill"])
+        f = new_findings(reg)
+        hit = next((x for x in f if "MALFORMED" in x and "no negative control" in x), "")
+        results.append(("`drilled`, no negative, and no reason for that, is MALFORMED", bool(hit), hit))
 
         # 5. NEGATIVE CONTROL. A harmless workflow that runs no script at all must
         #    produce nothing. A checker that fires at any change is not a checker.
@@ -730,6 +928,44 @@ def self_drill() -> int:
                     caught_red and stayed_green,
                     "" if caught_red else "run_drills did not report a failing drill"))
 
+    # 7. #359, THE NEW BAR. A negative control that exits 0 means the guard was
+    #    blinded on purpose and its drill STILL passed — so the drill cannot go
+    #    red, and its green tick has never meant what the registry claimed. That
+    #    must be reported RED here, whatever the entry says about itself. This is
+    #    the case the whole issue is about: `all([])` is True, and a derivation
+    #    that finds zero files prints zero lines and succeeds.
+    blind_neg = {"scripts/chain_check.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "-c", "raise SystemExit(0)"],
+        negative=[sys.executable, "-c", "raise SystemExit(0)"])}
+    out = run_drills(ROOT, blind_neg, only="chain_check")
+    hit = next((x for x in out if "CANNOT GO RED" in x), "")
+    results.append(("a negative control that exits 0 is reported RED (the drill cannot go red)",
+                    bool(hit), hit or "run_drills accepted a negative control that stayed green"))
+
+    # 8. THE HAPPY PATH, and it must be SILENT. A bar nothing can clear is not a
+    #    bar, it is an outage: drill green + negative red is the whole contract,
+    #    and a guard that honours it may not be reported as failing.
+    good = {"scripts/chain_check.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "-c", "raise SystemExit(0)"],
+        negative=[sys.executable, "-c", "raise SystemExit(1)"])}
+    accepted = not run_drills(ROOT, good, only="chain_check")
+    results.append(("NEGATIVE CONTROL (drill exits 0 AND negative exits non-zero -> accepted)",
+                    accepted, "" if accepted else "a correctly drilled guard was reported as failing"))
+
+    # 9. A negative that cannot even be launched is a failure, never a pass. The
+    #    permissive reading — "could not run it, assume fine" — is how an alert
+    #    path whose key was missing stayed GREEN for weeks.
+    unrunnable = {"scripts/chain_check.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "-c", "raise SystemExit(0)"],
+        negative=[str(ROOT / "no_such_binary_for_the_drill"), "--nope"])}
+    out = run_drills(ROOT, unrunnable, only="chain_check")
+    hit = next((x for x in out if "NEGATIVE UNRUNNABLE" in x), "")
+    results.append(("a negative control that cannot be launched is reported, not assumed fine",
+                    bool(hit), hit or "an unrunnable negative control was swallowed"))
+
     print()
     for name, ok, detail in results:
         print(f"  [{'PASS' if ok else 'FAIL'}] {name}")
@@ -755,8 +991,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--run-drills", action="store_true", help="run every declared guard drill")
     ap.add_argument("--only", help="restrict --run-drills to keys containing this substring")
     ap.add_argument("--count-owed", action="store_true",
-                    help="print just the number of guards never watched failing, and exit")
+                    help="print just the number of guards never watched failing, and exit. "
+                         "DECLARED DEBT, NOT PROOF OF LIVENESS: it counts guards that have SAID "
+                         "they cannot be drilled. A guard missing from this count may still have "
+                         "a drill that cannot go red — see `negative` (#359), whose count is "
+                         "printed separately and never folded into this one.")
+    ap.add_argument("--break-checker", metavar="RULE", action="append", default=[],
+                    help=f"blind one rule ({', '.join(RULES)}) — used to prove this file's own "
+                         f"DRILL can still fail")
     args = ap.parse_args(argv)
+
+    bad = [r for r in args.break_checker if r not in RULES]
+    if bad:
+        print(f"unknown rule(s) {bad}; known: {', '.join(RULES)}", file=sys.stderr)
+        return 2
+    disabled = frozenset(args.break_checker)
 
     if args.count_owed:
         # The single place this number comes from. scripts/merge_cage.py used to
@@ -772,7 +1021,7 @@ def main(argv: list[str] | None = None) -> int:
         # number. Exiting non-zero here is the whole contract: the ratchet then
         # reads "could not measure", which blocks, instead of a false low count,
         # which merges. (CodeRabbit, PR #336.)
-        problems = check(ROOT, REGISTRY)
+        problems = check(ROOT, REGISTRY, disabled)
         if problems:
             print("cannot count owed drills -- the registry itself is malformed:",
                   file=sys.stderr)
@@ -783,14 +1032,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.drill:
-        return self_drill()
+        return self_drill(disabled)
 
-    fails = check(ROOT, REGISTRY)
+    fails = check(ROOT, REGISTRY, disabled)
 
-    drilled = sorted(k for k, g in REGISTRY.items() if g.status == "drilled")
-    owed = sorted((k, g) for k, g in REGISTRY.items() if g.status == "owed")
+    # PROVEN, not `drilled`. A guard counts as proven only if its drill goes green
+    # AND its negative control goes red; one that declares no negative reads as
+    # owed here however its entry is spelled, because `the drill exited 0` was
+    # never the claim anyone wanted. (#359)
+    proven = sorted(k for k, g in REGISTRY.items() if effective(g)[0] == "drilled")
+    owed = sorted((k, effective(g)[1]) for k, g in REGISTRY.items() if effective(g)[0] == "owed")
+    declared = sum(1 for g in REGISTRY.values() if g.status == "owed")
 
-    print(f"drill_registry: {len(REGISTRY)} guards - {len(drilled)} drilled, {len(owed)} owed")
+    print(f"drill_registry: {len(REGISTRY)} guards - {len(proven)} proven "
+          f"(drill goes green AND negative goes red), {len(owed)} owed: "
+          f"{declared} declared (`--count-owed`, the ratchet's number) + "
+          f"{len(owed) - declared} drilled with no negative control")
 
     if args.run_drills:
         fails += run_drills(ROOT, REGISTRY, only=args.only)
@@ -800,10 +1057,10 @@ def main(argv: list[str] | None = None) -> int:
         # you will not clear, and a quiet `owed` list would make this file a
         # certificate rather than a check.
         print()
-        print(f"OWED - {len(owed)} guards have never been watched failing:")
-        for key, guard in owed:
+        print(f"OWED - {len(owed)} guards have never been PROVEN able to fail:")
+        for key, why in owed:
             print(f"  * {key}")
-            print(f"      {guard.reason}")
+            print(f"      {why}")
 
     if fails:
         print()
