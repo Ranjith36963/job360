@@ -175,13 +175,13 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # CodeRabbit: this job authenticates `gh` through GH_TOKEN, never
           # through the git credential helper, so the checkout was leaving a
           # token in .git/config that no step uses. zizmor flags it artipacked.
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
 
