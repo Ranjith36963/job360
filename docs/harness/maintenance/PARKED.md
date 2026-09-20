@@ -11,3 +11,4 @@ implementation or an explicit decision to drop it. Written by `/sync` and
 
 | Date | Source doc | Claim | Evidence the code lacks it | Status |
 |------|-----------|-------|----------------------------|--------|
+| 2026-09-20 | drill | merge-token proof: a machine merge queued with MERGE_TOKEN starts CI, CodeQL and the post-merge watch on main | throwaway row, removed by the next PR | drill |
