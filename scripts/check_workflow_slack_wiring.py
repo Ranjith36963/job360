@@ -201,7 +201,10 @@ MUTATIONS = [
     (
         "slack step in a job with no actions/checkout",
         "uptime.yml",
-        lambda t: t.replace("      - uses: actions/checkout@v7\n", "", 1),
+        # Any ref form: `@v7` or `@<sha> # v7` (pinned 2026-09-20, #358). A
+        # literal `@v7` anchor stopped matching the moment the pins landed and
+        # the drill exited 2 -- "mutation did not apply" -- on the pin PR.
+        lambda t: re.sub(r"      - uses: actions/checkout@[^\n]*\n", "", t, count=1),
     ),
     (
         "slack step missing slack_bot_token",
