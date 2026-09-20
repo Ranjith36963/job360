@@ -3541,6 +3541,13 @@ def request_auto_merge(pr: int) -> tuple[bool, str, str]:
     the one that is not written by an agent. If this file is ever wrong in the
     permissive direction, the ruleset is still standing.
 
+    WHOSE TOKEN. `gh` reads GH_TOKEN, and auto-merge.yml binds it to the
+    owner's MERGE_TOKEN when that secret exists (2026-09-19). A queue request
+    made with GITHUB_TOKEN produces a merge that starts NO workflow on main --
+    measured on #531/#532/#589/#591, which got no CI, no CodeQL and no
+    post-merge watch -- so the lane's 15-minute watch only exists when the
+    request is the owner's.
+
     It also fails in the right direction on the way in: `--auto` needs
     `allow_auto_merge` on the repository, which is a setting only the owner can
     turn on. Until he does, this returns an error and the PR sits — a capability
