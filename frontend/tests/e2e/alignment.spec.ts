@@ -80,10 +80,12 @@ function alignmentPayload() {
       gaps: ["leading university"],
       reasoning: null,
       axes: [
-        { name: "NLP depth", role: 90, you: 80 },
-        { name: "Production ML", role: 70, you: 75 },
-        { name: "Leadership", role: 30, you: 40 },
-        { name: "Remote", role: 100, you: 100 },
+        { name: "LLM apps & frontier APIs", role: 90, you: 80 },
+        { name: "RAG & retrieval design", role: 85, you: 80 },
+        { name: "NLP / CV modelling depth", role: 70, you: 65 },
+        { name: "Production Python & deployment", role: 85, you: 65 },
+        { name: "CS fundamentals (distributed, HPC)", role: 75, you: 40 },
+        { name: "Client-facing delivery", role: 55, you: 35 },
       ],
       recorded_by: "agent:Claude",
       recorded_at: "2026-09-20T09:04:11Z",
@@ -145,7 +147,7 @@ test.describe("Alignment — the fit picture on the application page", () => {
     // The radar: one shape per side, one label per axis the agent named.
     const radar = page.getByTestId("fit-radar");
     await expect(radar).toBeVisible();
-    await expect(radar.getByTestId("fit-radar-axis")).toHaveCount(4);
+    await expect(radar.getByTestId("fit-radar-axis")).toHaveCount(6);
     await expect(radar.getByTestId("fit-radar-role")).toHaveAttribute("points", /.+/);
     await expect(radar.getByTestId("fit-radar-you")).toHaveAttribute("points", /.+/);
     await expect(radar.locator("figcaption").getByText("The role asks", { exact: true })).toBeVisible();

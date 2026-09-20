@@ -37,6 +37,49 @@ function anchor(x: number, cx: number): "start" | "middle" | "end" {
   return "middle";
 }
 
+const MAX_LABEL_LINE_CHARS = 18;
+
+/**
+ * Wrap an axis name into at most 2 lines, breaking only at spaces (never
+ * mid-word). A single word longer than the limit stays whole on its own
+ * line. Whatever doesn't fit on line 1 — however long — goes on line 2,
+ * since there is no line 3.
+ */
+function wrapLabel(name: string, maxLineChars = MAX_LABEL_LINE_CHARS): string[] {
+  const words = name.split(" ");
+  let line1 = "";
+  let splitAt = words.length;
+  for (let i = 0; i < words.length; i++) {
+    const candidate = line1 ? `${line1} ${words[i]}` : words[i];
+    if (line1 && candidate.length > maxLineChars) {
+      splitAt = i;
+      break;
+    }
+    line1 = candidate;
+  }
+  const line2 = words.slice(splitAt).join(" ");
+  return line2 ? [line1, line2] : [line1];
+}
+
+/** Tspan text per wrapped line — the first line carries a trailing space so
+ * the concatenated tspan textContent reconstructs the exact original name
+ * (space-joined words, one space between the two lines). */
+function tspanTexts(lines: string[]): string[] {
+  return lines.length === 1 ? lines : [`${lines[0]} `, lines[1]];
+}
+
+/** Per-tspan `dy` (relative vertical offset) for a wrapped label, given
+ * where it sits: top labels grow downward (toward the chart is fine — the
+ * padding is on the outside), bottom labels stack upward so they don't run
+ * into the chart, and side labels are simply centred on the axis point. */
+function lineDy(textAnchor: "start" | "middle" | "end", isTop: boolean, lineCount: number): string[] {
+  if (lineCount === 1) return ["0"];
+  if (textAnchor === "middle") {
+    return isTop ? ["0", "1.2em"] : ["-1.2em", "1.2em"];
+  }
+  return ["-0.6em", "1.2em"];
+}
+
 /**
  * The fit picture as a radar (owner ask, 2026-09-20 — "this kind of view").
  * Two shapes over the agent's OWN axes: how much the role asks on each line
@@ -52,16 +95,22 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
   const cy = size / 2;
   const r = size * 0.32;
   const labelR = r + size * 0.06;
-  // Side labels hang outside the circle; give the viewBox room on both
-  // sides so a long axis name is never clipped.
-  const pad = size * 0.3;
   const n = axes.length;
+  const fontSize = size * 0.036;
+
+  // Labels hang outside the circle and can wrap to 2 lines; size the
+  // viewBox from what's actually going to be drawn so a long axis name is
+  // never clipped, on any side.
+  const wrappedLabels = axes.map((axis) => wrapLabel(axis.name));
+  const longestLineChars = Math.max(...wrappedLabels.flat().map((line) => line.length));
+  const padX = Math.ceil(longestLineChars * fontSize * 0.62) + 8;
+  const padY = fontSize * 1.4;
 
   return (
     <figure data-testid="fit-radar" className="mt-4">
       <svg
-        viewBox={`${-pad} 0 ${size + 2 * pad} ${size}`}
-        className="mx-auto block h-auto w-full max-w-md"
+        viewBox={`${-padX} ${-padY} ${size + 2 * padX} ${size + 2 * padY}`}
+        className="mx-auto block h-auto w-full max-w-lg"
         role="img"
         aria-labelledby="fit-radar-title"
       >
@@ -119,18 +168,27 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
         />
         {axes.map((axis, i) => {
           const p = point(i, n, 100, cx, cy, labelR);
+          const x = p.x.toFixed(1);
+          const textAnchor = anchor(p.x, cx);
+          const lines = wrappedLabels[i];
+          const texts = tspanTexts(lines);
+          const dys = lineDy(textAnchor, p.y < cy, lines.length);
           return (
             <text
               key={axis.name}
               data-testid="fit-radar-axis"
-              x={p.x.toFixed(1)}
+              x={x}
               y={p.y.toFixed(1)}
-              textAnchor={anchor(p.x, cx)}
+              textAnchor={textAnchor}
               dominantBaseline="middle"
-              fontSize={size * 0.036}
+              fontSize={fontSize}
               className="fill-current text-foreground"
             >
-              {axis.name}
+              {texts.map((line, idx) => (
+                <tspan key={idx} x={x} dy={dys[idx]}>
+                  {line}
+                </tspan>
+              ))}
             </text>
           );
         })}
