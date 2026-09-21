@@ -3,56 +3,45 @@
 All three were LIVE, affected every user, produced no error and no log, and
 passed the entire existing suite. They share one shape: a SUCCESS path that
 quietly destroys user data. Nothing crashed; the data simply stopped existing.
+
+DECISION 28 (2026-09-21) rewrite. Two of the three original bugs lived
+inside an LLM cost cache: the cache correctly skipped re-billing an
+unchanged LinkedIn input, but the merge that followed still ran and
+overwrote LinkedIn's LLM-only sections with the empty lists a
+deterministic-only merge produces. That whole mechanism --
+``llm_linkedin_fields``, the ``llm_ran`` flag, ``EXTRACTOR_VERSION``,
+``_input_hash`` -- is gone. Job360 has no LLM pass left to cache the cost
+of, so there is nothing left to skip.
+
+The FEAR those tests protected against is not gone -- it is sharper. The
+LinkedIn prose sections are now written by the USER'S OWN AGENT through
+``update_profile``, and a re-extraction (triggered by ANY other profile
+edit) must never silently wipe what the agent put there. The tests below
+assert that promise directly against the real orchestrator
+(``two_pass.run_two_pass_extraction``), which is deterministic end to end
+now, so there are no LLM edges left to stub out.
 """
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import patch
+import dataclasses
+from typing import Any
 
 import pytest
 
+from src.services.profile import two_pass
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 
+# The six LinkedIn shelves the original 2026-08-08 hunt found being wiped on
+# a cache-hit re-run. Kept as the historical anchor for that specific bug --
+# skills sat one line OUTSIDE the fix the first round shipped, which is why
+# a real profile's 13 LinkedIn skills once collapsed to the 3 in the
+# deterministic sidebar on any unrelated edit.
+# TestEveryLinkedInShelfSurvivesReExtraction below covers every shelf,
+# hand-listed or not, which is the structural fix for THIS list also going
+# stale one day.
 _LI_FIELDS = ("linkedin_positions", "linkedin_languages", "linkedin_projects",
-              "linkedin_volunteer", "linkedin_courses",
-              # Added 2026-08-12. Skills have the same two-pass shape as the
-              # five above and the same cache-hit failure, but the assignment
-              # sat one line OUTSIDE the llm_ran gate the original fix added —
-              # so a real profile's 13 LinkedIn skills collapsed to the 3 in the
-              # deterministic sidebar on any unrelated profile edit. The tuple
-              # not covering it is why the original fix looked complete.
-              "linkedin_skills")
-
-
-async def _noop(*a, **kw):
-    return []
-
-
-async def _passthrough(items, *a, **kw):
-    return items
-
-
-async def _no_cv(*a, **kw):
-    return None
-
-
-async def _drive(profile, li_fn):
-    """Run the REAL orchestrator with only the network/LLM edges stubbed.
-
-    Deliberately not a hand-rolled replica of two_pass's calls: the original
-    proof script WAS such a replica, and once the fix landed inside two_pass
-    the replica kept reporting the old result. A stale replica is the same
-    trap as a fixture describing an API that no longer exists.
-    """
-    from src.services.profile import llm_curate, two_pass
-
-    with patch.object(two_pass, "llm_linkedin_fields", li_fn), \
-         patch.object(two_pass, "llm_cv_fields_from_text", _no_cv), \
-         patch.object(two_pass, "llm_infer_github_skills", _noop), \
-         patch.object(two_pass, "llm_infer_from_about_me", _noop), \
-         patch.object(llm_curate, "llm_suggest_adjacent_skills", _noop), \
-         patch.object(llm_curate, "llm_merge_duplicates", _passthrough):
-        return await two_pass.run_two_pass_extraction(profile)
+              "linkedin_volunteer", "linkedin_courses", "linkedin_skills")
 
 
 class TestPreferencesSurviveTheMerge:
@@ -79,8 +68,6 @@ class TestPreferencesSurviveTheMerge:
         """The structural guarantee, not just the two known casualties: a field
         added to UserPreferences tomorrow must pass through untouched. This is
         what `dataclasses.replace` buys over a hand-listed constructor."""
-        import dataclasses
-
         from src.services.profile.preferences import merge_cv_and_preferences
 
         prefs = UserPreferences(
@@ -99,181 +86,99 @@ class TestPreferencesSurviveTheMerge:
             )
 
 
-class TestLinkedInSectionsSurviveACacheHit:
-    """The five LinkedIn sections are LLM-ONLY output. The cost cache correctly
-    SKIPS the LinkedIn LLM pass when the raw text is unchanged — but the merge
-    still ran and overwrote all five with the empty lists a deterministic-only
-    merge produces. Upload LinkedIn, then touch anything else on the profile,
-    and they were gone permanently: nothing short of uploading a DIFFERENT PDF
-    brought them back.
+class TestLinkedInSectionsSurviveReExtraction:
+    """Historical bug (2026-08-08): the LinkedIn cost cache correctly SKIPPED
+    re-billing the LLM pass when the raw text was unchanged — but the merge
+    that followed still ran and overwrote all six shelves above with the
+    empty lists a deterministic-only pass produces. Upload LinkedIn, then
+    touch anything else on the profile, and they were gone permanently:
+    nothing short of uploading a DIFFERENT PDF brought them back.
+
+    DECISION 28: there is no cache and no LLM pass to skip any more. The
+    promise is now kept by ``enrich_cv_from_linkedin``'s fill-if-present rule
+    (see its docstring in linkedin_parser.py) — it only ever ADDS a value it
+    actually parsed structurally, and never assigns an empty one over
+    something already there. This proves that promise against the real
+    orchestrator: shelves the user's agent already filled must survive
+    however many times extraction re-runs.
     """
 
-    def test_cache_hit_does_not_wipe(self) -> None:
-        payload = {
-            "positions": [{"title": "Engineer", "company": "Acme"}],
-            "languages": [{"language": "English"}],
-            "projects": [{"title": "Thing"}],
-            "volunteer": [{"role": "Mentor"}],
-            "courses": [{"title": "K8s"}],
-            # Skills come from BOTH LinkedIn passes, so they belong in this
-            # cache-hit test exactly like the five sections above. They were
-            # absent from this payload, which is why the assignment sitting
-            # outside the llm_ran gate went unnoticed for four days.
-            "skills": ["LangGraph", "Multi-agent Systems"],
-        }
-
-        async def ran(*a, **kw):
-            return dict(payload)
-
-        async def skipped(*a, **kw):
-            return None
-
-        profile = UserProfile(
-            cv_data=CVData(linkedin_raw_text="Some LinkedIn text"),
-            preferences=UserPreferences(),
-        )
-        after1 = asyncio.run(_drive(profile, ran))
-        assert all(getattr(after1.cv_data, f) for f in _LI_FIELDS), "setup failed"
-
-        after2 = asyncio.run(_drive(after1, skipped))
+    def test_populated_shelves_survive_a_re_extraction(self) -> None:
+        cv = CVData(linkedin_raw_text="Some LinkedIn text")
         for f in _LI_FIELDS:
-            assert getattr(after2.cv_data, f), f"{f} was wiped on the cache-hit re-run"
+            setattr(cv, f, ["ProbeSkill"] if f == "linkedin_skills"
+                    else [{"probe": f}])
+        profile = UserProfile(cv_data=cv, preferences=UserPreferences())
 
-    def test_a_real_reparse_still_replaces(self) -> None:
-        """The original overwrite existed for a reason: LinkedIn is the
-        canonical source, so removing a section there should remove it here.
-        The fix must preserve that — only the SKIPPED case is protected."""
-        async def ran_full(*a, **kw):
-            return {"positions": [{"title": "Engineer", "company": "Acme"}]}
+        after1 = asyncio.run(two_pass.run_two_pass_extraction(profile))
+        for f in _LI_FIELDS:
+            assert getattr(after1.cv_data, f), f"{f} was wiped on the first re-extraction"
 
-        async def ran_empty(*a, **kw):
-            return {"positions": []}
-
-        profile = UserProfile(
-            cv_data=CVData(linkedin_raw_text="text v1"),
-            preferences=UserPreferences(),
-        )
-        p1 = asyncio.run(_drive(profile, ran_full))
-        assert p1.cv_data.linkedin_positions
-
-        p1.cv_data.linkedin_raw_text = "text v2 — section removed"
-        p2 = asyncio.run(_drive(p1, ran_empty))
-        assert p2.cv_data.linkedin_positions == [], (
-            "a genuine re-parse must still be able to clear a removed section"
-        )
+        # A second run (e.g. the user edits an unrelated preference and the
+        # whole profile is re-read again) must not wipe it either — this is
+        # the exact repeat-run shape the original cache-hit bug had.
+        after2 = asyncio.run(two_pass.run_two_pass_extraction(after1))
+        for f in _LI_FIELDS:
+            assert getattr(after2.cv_data, f), f"{f} was wiped on the second re-extraction"
 
 
-class TestEveryLinkedInShelfSurvivesTheMerge:
-    """The same data-loss shape as the class above, one shelf-generation later.
+class TestEveryLinkedInShelfSurvivesReExtraction:
+    """Same data-loss shape as the class above, one shelf-generation later.
 
-    ``merge_linkedin_fields`` hand-lists the keys it forwards. On 2026-08-09
-    eight new LinkedIn shelves shipped — honors, publications, patents,
-    organizations, test_scores, recommendations, interests and contact — with
-    extractors, prompts, storage, an API field and a rendered UI section each.
-    The merger was not updated, so it forwarded twelve keys and dropped those
-    eight. ``enrich_cv_from_linkedin`` then does
-    ``cv.linkedin_honors = linkedin_data.get("honors", [])`` against a dict that
-    never had the key, so the shelves were not merely unfilled — they were
-    ASSIGNED EMPTY on every extraction.
+    ``merge_linkedin_fields`` used to hand-list the keys it forwarded. On
+    2026-08-09 eight new LinkedIn shelves shipped — honors, publications,
+    patents, organizations, test_scores, recommendations, interests and
+    contact. The merger was not updated, so it forwarded twelve keys and
+    dropped those eight. ``enrich_cv_from_linkedin`` then did
+    ``cv.linkedin_honors = linkedin_data.get("honors", [])`` against a dict
+    that never had the key, so the shelves were not merely unfilled — they
+    were ASSIGNED EMPTY on every extraction.
 
-    Every layer was verified in isolation and the feature was reported working;
-    a live profile even showed a populated contact block, because it had been
-    backfilled by a one-off script that bypassed the merge. The pipeline was
-    never once exercised end to end.
-
-    So this test is deliberately NOT another hand-listed tuple — that is the
-    construct that failed. It reads the shelves off the dataclass, so a shelf
-    added tomorrow is covered the moment it is declared.
+    DECISION 28: every one of those assignment lines is now fill-if-present
+    (linkedin_parser.enrich_cv_from_linkedin), and the merge is built from
+    ``_empty_linkedin_data()``, the ONE canonical shape, instead of a literal
+    key list. This test is still deliberately NOT a hand-listed tuple — that
+    is the construct that failed twice already. It reads the shelves off the
+    dataclass, so a shelf added tomorrow is covered the moment it is
+    declared.
     """
 
-    # Shelves whose value does not travel as its own key through this merge.
-    # Each needs a reason; "hard to test" is not one.
-    _NOT_A_MERGE_KEY = {
-        "linkedin_raw_text": "the raw document, carried as raw_text",
-        "linkedin_industry": "deterministic header field, not an LLM section",
-        "linkedin_skills": "unioned from both passes, covered by its own tests",
-        "linkedin_filename": "upload receipt, stamped by the API route",
-        "linkedin_uploaded_at": "upload receipt, stamped by the API route",
-    }
+    def _linkedin_shelves(self) -> list[Any]:
+        return [f for f in dataclasses.fields(CVData) if f.name.startswith("linkedin_")]
 
-    def _section_shelves(self) -> list[str]:
-        import dataclasses
+    @staticmethod
+    def _probe_for(field_name: str, default: Any) -> Any:
+        if isinstance(default, dict):
+            return {"probe": field_name}
+        if isinstance(default, list):
+            # linkedin_skills / linkedin_interests are list[str]; every other
+            # linkedin_ list shelf is list[dict]. This is the shape of the
+            # dataclass, not a keyword vocabulary (rule #28) — just the two
+            # known str-list fields among the LinkedIn shelves.
+            if field_name in ("linkedin_skills", "linkedin_interests"):
+                return [f"probe-{field_name}"]
+            return [{"probe": field_name}]
+        return f"probe-{field_name}"
 
-        return [
-            f.name
-            for f in dataclasses.fields(CVData)
-            if f.name.startswith("linkedin_") and f.name not in self._NOT_A_MERGE_KEY
-        ]
-
-    def test_every_linkedin_section_reaches_the_shelf(self) -> None:
-        shelves = self._section_shelves()
+    def test_every_linkedin_shelf_survives_a_re_extraction(self) -> None:
+        shelves = self._linkedin_shelves()
         assert len(shelves) >= 12, "sanity: the LinkedIn shelves should not vanish"
 
-        # Payload keys are the shelf names minus the prefix — the naming
-        # contract the merger is supposed to honour.
-        payload: dict = {}
-        for shelf in shelves:
-            key = shelf[len("linkedin_"):]
-            payload[key] = (
-                {"email": "probe@example.com"} if key == "contact" else [{"probe": key}]
-            )
+        pristine = CVData()
+        cv = CVData()
+        for f in shelves:
+            setattr(cv, f.name, self._probe_for(f.name, getattr(pristine, f.name)))
 
-        async def ran(*a, **kw):
-            return dict(payload)
+        profile = UserProfile(cv_data=cv, preferences=UserPreferences())
+        after = asyncio.run(two_pass.run_two_pass_extraction(profile))
 
-        profile = UserProfile(
-            cv_data=CVData(linkedin_raw_text="Some LinkedIn text"),
-            preferences=UserPreferences(),
-        )
-        after = asyncio.run(_drive(profile, ran))
-
-        dropped = [s for s in shelves if not getattr(after.cv_data, s)]
+        dropped = [f.name for f in shelves if not getattr(after.cv_data, f.name)]
         assert not dropped, (
-            "These LinkedIn shelves were produced by the pass and then dropped "
-            f"before reaching CVData: {dropped}. merge_linkedin_fields forwards a "
-            "hand-listed set of keys; anything missing from that list is silently "
-            "discarded and then overwritten with an empty value."
-        )
-
-
-class TestTheExtractorVersionTracksThePrompts:
-    """A cost cache keyed on the INPUT hides a change to the EXTRACTOR.
-
-    ``_input_hash`` folds ``EXTRACTOR_VERSION`` into the hash precisely so that
-    improving a prompt re-reads inputs that have not changed. Shipping seven new
-    LinkedIn section prompts WITHOUT bumping it meant every existing user's
-    LinkedIn hash still matched, the LLM pass was skipped as a cache hit, and the
-    new sections could never populate for anyone who had already uploaded —
-    which is every current user.
-    """
-
-    def test_bumping_the_version_invalidates_a_stored_hash(self) -> None:
-        from src.services.profile import two_pass
-
-        raw = "same unchanged LinkedIn text"
-        before = two_pass._input_hash(raw)
-
-        original = two_pass.EXTRACTOR_VERSION
-        try:
-            two_pass.EXTRACTOR_VERSION = f"{original}-next"
-            after = two_pass._input_hash(raw)
-        finally:
-            two_pass.EXTRACTOR_VERSION = original
-
-        assert before != after, (
-            "EXTRACTOR_VERSION is not reaching the hash, so a prompt change can "
-            "never re-read an unchanged input."
-        )
-
-    def test_the_version_is_ahead_of_the_linkedin_section_prompts(self) -> None:
-        """Pins the specific miss: the version at the time the seven section
-        prompts landed was "2". Any later prompt change must move it again."""
-        from src.services.profile.two_pass import EXTRACTOR_VERSION
-
-        assert EXTRACTOR_VERSION != "2", (
-            "EXTRACTOR_VERSION is still '2', the value in force before the "
-            "LinkedIn section prompts shipped — existing users will keep hitting "
-            "the cache and never receive them."
+            "These LinkedIn shelves were pre-populated (as if the user's own "
+            f"agent had written them) and then wiped by a re-extraction: {dropped}. "
+            "enrich_cv_from_linkedin must only ever ADD what it actually parsed "
+            "structurally — never assign an empty value over something already "
+            "there."
         )
 
 
@@ -283,6 +188,10 @@ class TestCertificationsAcceptBothShapes:
     AttributeError and aborted the WHOLE LinkedIn merge, so one loosely-shaped
     section could cost a user every LinkedIn field. Found while verifying the
     fix above, not by the hunt that found the other two.
+
+    Still relevant post decision-28: an agent writing this section back
+    through ``update_profile`` can hand either shape too, and the merge must
+    stay tolerant of both.
     """
 
     @pytest.mark.parametrize("certs", [

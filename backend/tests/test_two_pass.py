@@ -1,116 +1,47 @@
-"""Two-pass profile extraction — deterministic pass + LLM enhance pass.
+"""Profile extraction orchestrator — deterministic-only, since decision 28.
 
-Covers the NEW pieces added for the user-side profile improvement goal:
-  * preferences LLM pass — mine free-text ``about_me`` for skills
-  * CV deterministic pass — no-LLM field grab from CV text
-  * the orchestrator that re-runs both passes for all inputs from stored data
+DECISION 28 (2026-09-21) deleted all six LLM passes that used to sit inside
+this pipeline (CV / LinkedIn / GitHub / preferences model calls, plus the two
+curation passes). ``two_pass.py`` is now ~370 lines of plain, offline,
+deterministic code: it reads whatever raw text/briefs are stored on the
+profile, runs structure-only extraction over them, dedups the free-text
+lists, folds CV skills into preferences, infers seniority from dated
+positions, and scores the result. Nothing here calls a model, so nothing here
+needs mocking.
 
-All LLM calls are mocked (rule #4 — suite runs offline).
+What this file tests:
+  * the two free-text dedup helpers (``dedup_by_containment`` / ``dedup_fuzzy``)
+  * ``merge_cv_and_preferences`` keeping the user's own extras separate from
+    CV-extracted skills
+  * each input's deterministic pass in isolation (CV / LinkedIn / GitHub /
+    about_me)
+  * the skill-tiering evidence collector picking up the surviving LEGACY
+    shelves (``github_llm_skills`` / ``about_me_inferred_skills``) that old
+    profiles still carry, even though nothing writes them any more
+  * the orchestrator (``run_two_pass_extraction``) wiring all four inputs
+    together deterministically
+  * ``reset_cv_owned_fields`` — the CV-replacement bug fix, including the
+    in-place-mutation identity contract
+  * THE LOAD-BEARING INVARIANT OF DECISION 28: re-running the extractor must
+    never clear a field the user's own agent wrote (``cv_positions``,
+    ``linkedin_positions``, ``github_llm_skills``) — those fields are no
+    longer this module's to write OR to take away.
+
+Everything that tested LLM behaviour — the four model passes, the input-hash
+cost cache, the concurrent-gather retry logic, ``_pass_produced_data`` /
+``_cv_pass_is_partial``, the two curation passes, "the LLM pass fills X",
+provider-failure handling — is gone along with the code it tested. The suite
+still runs fully offline (rule #4); there was never anything to mock here to
+begin with once the model calls left.
 """
 
 from __future__ import annotations
-
-from unittest.mock import patch
 
 import pytest
 
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 
-# ── Preferences LLM pass (Pass 2) — mine about_me ───────────────────
-
-
-class TestPreferencesLlmPass:
-    @pytest.mark.asyncio
-    async def test_infers_skills_from_about_me(self):
-        from src.services.profile.preferences import llm_infer_from_about_me
-
-        captured = {}
-
-        async def fake_llm(prompt, system=""):
-            captured["prompt"] = prompt
-            return {"skills": ["Stakeholder Management", "Roadmapping"]}
-
-        text = "I'm a product lead who loves stakeholder management and roadmapping."
-        with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
-            skills = await llm_infer_from_about_me(text)
-
-        assert "stakeholder" in captured["prompt"].lower()
-        assert "Stakeholder Management" in skills
-
-    @pytest.mark.asyncio
-    async def test_blank_about_me_skips_llm(self):
-        from src.services.profile.preferences import llm_infer_from_about_me
-
-        called = False
-
-        async def fake_llm(prompt, system=""):
-            nonlocal called
-            called = True
-            return {"skills": ["nope"]}
-
-        with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
-            skills = await llm_infer_from_about_me("   ")
-
-        assert skills == []
-        assert called is False
-
-    @pytest.mark.asyncio
-    async def test_llm_failure_returns_empty(self):
-        from src.services.profile.preferences import llm_infer_from_about_me
-
-        async def boom(prompt, system=""):
-            raise RuntimeError("no provider")
-
-        with patch("src.services.profile.llm_provider.llm_extract", new=boom):
-            skills = await llm_infer_from_about_me("some real text here")
-
-        assert skills == []
-
-
-# ── LinkedIn LLM skills pass (fixes 2-column "Top Skills" loss) ─────
-
-
-class TestLinkedInLlmSkills:
-    @pytest.mark.asyncio
-    async def test_extracts_skills_from_raw_text(self):
-        from src.services.profile.linkedin_parser import llm_infer_linkedin_skills
-
-        async def fake(prompt, system=""):
-            assert "LangGraph" in prompt
-            return {"skills": ["LangGraph", "Systems Design", "Multi-agent Systems", "RLHF"]}
-
-        with patch("src.services.profile.llm_provider.llm_extract", new=fake):
-            sk = await llm_infer_linkedin_skills("Top Skills\nLangGraph\nSystems Design\nRLHF")
-        assert "LangGraph" in sk and "RLHF" in sk
-
-    @pytest.mark.asyncio
-    async def test_blank_skips_llm(self):
-        from src.services.profile.linkedin_parser import llm_infer_linkedin_skills
-
-        called = False
-
-        async def fake(prompt, system=""):
-            nonlocal called
-            called = True
-            return {"skills": ["x"]}
-
-        with patch("src.services.profile.llm_provider.llm_extract", new=fake):
-            sk = await llm_infer_linkedin_skills("   ")
-        assert sk == [] and called is False
-
-    @pytest.mark.asyncio
-    async def test_failsafe_returns_empty(self):
-        from src.services.profile.linkedin_parser import llm_infer_linkedin_skills
-
-        async def boom(prompt, system=""):
-            raise RuntimeError("no provider")
-
-        with patch("src.services.profile.llm_provider.llm_extract", new=boom):
-            sk = await llm_infer_linkedin_skills("real linkedin text")
-        assert sk == []
-
-
-# ── CV deterministic pass (Pass 1) — no-LLM field grab ──────────────
+# ── Free-text dedup helpers — certifications / education ────────────
 
 
 class TestCertEducationDedup:
@@ -382,7 +313,7 @@ class TestCvDeterministicPass:
         assert "Production Python for data engineering and analytics" not in out["skills"]
 
 
-# ── Preferences deterministic pass (Pass 1) — structure-only, no LLM ─
+# ── Preferences deterministic pass — structure-only, no LLM ─────────
 
 
 class TestAboutMeDeterministicPass:
@@ -401,7 +332,9 @@ class TestAboutMeDeterministicPass:
         assert {"PyTorch", "TensorFlow", "Kubernetes"}.issubset(set(out))
 
     def test_pure_prose_with_no_marker_returns_empty(self):
-        """No skill vocabulary — free prose yields nothing (the LLM pass mines it)."""
+        """No skill vocabulary — free prose yields nothing. Since decision 28
+        nothing reads this prose for meaning any more; it stays untouched for
+        the user's own agent to read off ``get_profile``."""
         from src.services.profile.preferences import deterministic_about_me_fields
 
         out = deterministic_about_me_fields(
@@ -416,7 +349,7 @@ class TestAboutMeDeterministicPass:
         assert deterministic_about_me_fields("   ") == []
 
 
-# ── GitHub deterministic pass (Pass 1) — topics from stored briefs ──
+# ── GitHub deterministic pass — topics + language from stored briefs ─
 
 
 class TestGithubDeterministicPass:
@@ -465,25 +398,18 @@ class TestGithubDeterministicPass:
         assert sum(1 for s in out if s.lower() == "python") == 1
 
 
-# ── LinkedIn deterministic pass (Pass 1) — structure-only, no LLM ───
+# ── LinkedIn deterministic pass — structure-only, no LLM ─────────────
 
 
 class TestLinkedInDeterministicPass:
-    def test_extracts_top_skills_without_calling_llm(self):
+    def test_extracts_top_skills(self):
+        """Since decision 28 this parser has exactly one layer — deterministic —
+        so there is no LLM call left to guard against; it's a plain read."""
         from src.services.profile import linkedin_parser
 
-        text = _linkedin_text()  # defined below
-        called = False
+        text = _linkedin_text()
+        out = linkedin_parser.deterministic_linkedin_fields(text)
 
-        async def boom(prompt, system=""):
-            nonlocal called
-            called = True
-            return {}
-
-        with patch("src.services.profile.llm_provider.llm_extract", new=boom):
-            out = linkedin_parser.deterministic_linkedin_fields(text)
-
-        assert called is False  # deterministic pass must NOT touch the LLM
         assert "Kubernetes" in out["skills"]
         assert out["raw_text"] == text
 
@@ -556,7 +482,12 @@ class TestLinkedInDeterministicPass:
         assert "luton, england, united kingdom" not in sl
 
 
-# ── Skill tiering — new two-pass sources contribute evidence ────────
+# ── Skill tiering — legacy two-pass shelves still contribute evidence ─
+#
+# github_llm_skills / about_me_inferred_skills are LEGACY (decision 28):
+# nothing writes them any more, but an existing profile that already has
+# entries there must keep counting them as evidence — the shelf just never
+# grows for a NEW profile.
 
 
 class TestSkillTieringNewSources:
@@ -581,7 +512,7 @@ class TestSkillTieringNewSources:
         assert _SOURCE_WEIGHTS.get("about_me_llm", 0) > 0
 
 
-# ── Orchestrator — run both passes over all four inputs ─────────────
+# ── Orchestrator — run the deterministic pass over all four inputs ──
 
 
 def _linkedin_text():
@@ -597,77 +528,35 @@ def _linkedin_text():
 
 class TestTwoPassOrchestrator:
     @pytest.mark.asyncio
-    async def test_enhances_all_four_sources(self, monkeypatch):
+    async def test_extracts_all_four_sources_deterministically(self):
+        """Every one of the four stored raw inputs goes through its own
+        deterministic pass and lands on the merged CVData. No mocking needed:
+        since decision 28 there is no model call anywhere in this path."""
         from src.services.profile import two_pass
 
         cv = CVData(
             raw_text="Skills\nPython\nDjango\n\nExperience\nWorked somewhere\n",
             linkedin_raw_text=_linkedin_text(),
-            github_repos_brief=[{"name": "rag", "description": "rag app", "topics": ["llm"]}],
+            github_repos_brief=[
+                {"name": "rag", "description": "rag app", "topics": ["llm"], "language": "Python"}
+            ],
         )
-        prefs = UserPreferences(about_me="I lead product and love stakeholder management")
+        prefs = UserPreferences(about_me="Skills: Stakeholder Management, Roadmapping")
         prof = UserProfile(cv_data=cv, preferences=prefs)
-
-        async def fake_cv(text, section_hint=""):
-            return CVData(raw_text=text, skills=["FastAPI"], job_titles=["Engineer"])
-
-        # LinkedIn now forks into two independent halves: a pure-deterministic
-        # dict and an LLM dict. Both go through enrich_cv_from_linkedin.
-        def fake_li_det(text):
-            return {"skills": ["Kubernetes"], "summary": "", "industry": "",
-                    "headline": "", "raw_text": text}
-
-        async def fake_li_llm(text):
-            return {"positions": [{"title": "SRE"}], "education": [], "certifications": [],
-                    "languages": [], "projects": [], "volunteer": [], "courses": [],
-                    "skills": ["LangGraph", "Systems Design"]}
-
-        async def fake_gh(brief, *a, **kw):  # accepts bio=/profile_readme= kwargs
-            return ["LangChain"]
-
-        async def fake_about(text):
-            return ["Stakeholder Management"]
-
-        monkeypatch.setattr(two_pass, "llm_cv_fields_from_text", fake_cv)
-        monkeypatch.setattr(two_pass, "deterministic_linkedin_fields", fake_li_det)
-        monkeypatch.setattr(two_pass, "llm_linkedin_fields", fake_li_llm)
-        monkeypatch.setattr(two_pass, "llm_infer_github_skills", fake_gh)
-        monkeypatch.setattr(two_pass, "llm_infer_from_about_me", fake_about)
 
         out = await two_pass.run_two_pass_extraction(prof)
         c = out.cv_data
 
-        # Deterministic CV pass landed.
+        # CV deterministic pass landed.
         assert "Python" in c.skills and "Django" in c.skills
-        # LLM CV pass enhanced.
-        assert "FastAPI" in c.skills
-        assert "Engineer" in c.job_titles
-        # LinkedIn lane merged BOTH halves: deterministic (Kubernetes) + LLM
-        # (LangGraph, Systems Design) skills, and the LLM position title.
+        # LinkedIn deterministic pass merged its Skills sidebar.
         assert "Kubernetes" in c.linkedin_skills
-        assert "LangGraph" in c.linkedin_skills and "Systems Design" in c.linkedin_skills
-        assert "SRE" in c.job_titles
-        # GitHub LLM pass merged.
-        assert "LangChain" in c.github_llm_skills
-        # GitHub deterministic pass merged the repo topic ("llm").
+        # GitHub deterministic pass merged the repo's language and topic.
+        assert "Python" in c.github_skills_inferred
         assert "llm" in c.github_skills_inferred
-        # Preferences LLM pass.
+        # Preferences deterministic pass read the explicit "Skills:" marker.
         assert "Stakeholder Management" in c.about_me_inferred_skills
-
-    @pytest.mark.asyncio
-    async def test_cv_llm_failure_keeps_deterministic_skills(self, monkeypatch):
-        from src.services.profile import two_pass
-
-        prof = UserProfile(cv_data=CVData(raw_text="Skills\nPython\nRust\n\nEducation\nBSc\n"))
-
-        async def boom(text, section_hint=""):
-            raise RuntimeError("no LLM key")
-
-        monkeypatch.setattr(two_pass, "llm_cv_fields_from_text", boom)
-        out = await two_pass.run_two_pass_extraction(prof)
-        # Deterministic skills survive even though the LLM pass blew up.
-        assert "Python" in out.cv_data.skills
-        assert "Rust" in out.cv_data.skills
+        assert "Roadmapping" in c.about_me_inferred_skills
 
     @pytest.mark.asyncio
     async def test_empty_profile_is_noop(self):
@@ -680,8 +569,10 @@ class TestTwoPassOrchestrator:
         assert out.cv_data.about_me_inferred_skills == []
 
     @pytest.mark.asyncio
-    async def test_cv_llm_does_not_wipe_github_and_linkedin(self, monkeypatch):
-        """A CV re-parse must preserve LinkedIn/GitHub fields set by other passes."""
+    async def test_cv_pass_does_not_wipe_github_and_linkedin(self):
+        """A CV re-parse (e.g. after an unrelated preferences edit re-triggers
+        the whole extraction) must preserve LinkedIn/GitHub fields the other
+        inputs already set."""
         from src.services.profile import two_pass
 
         cv = CVData(
@@ -691,13 +582,44 @@ class TestTwoPassOrchestrator:
         )
         prof = UserProfile(cv_data=cv)
 
-        async def fake_cv(text, section_hint=""):
-            return CVData(raw_text=text, skills=["NewSkill"])
-
-        monkeypatch.setattr(two_pass, "llm_cv_fields_from_text", fake_cv)
         out = await two_pass.run_two_pass_extraction(prof)
         assert "Existing LI Skill" in out.cv_data.linkedin_skills
         assert "Existing GH Skill" in out.cv_data.github_skills_inferred
+        assert "Python" in out.cv_data.skills
+
+    @pytest.mark.asyncio
+    async def test_extraction_never_clears_fields_the_agent_wrote(self):
+        """THE LOAD-BEARING PROMISE OF DECISION 28.
+
+        ``cv_positions``, ``linkedin_positions`` and ``github_llm_skills`` are
+        not written by any pass in this file any more — they are written by
+        the user's own agent through ``update_profile``. The extractor still
+        re-runs on every save (module docstring), reading the SAME stored raw
+        text again each time. That re-run must never touch structure it did
+        not write: it has no way to tell "the agent wrote this on purpose"
+        from "a stale value nobody needs", so the only safe rule is to leave
+        it alone unconditionally.
+        """
+        from src.services.profile import two_pass
+
+        positions = [
+            {"company": "Acme", "title": "ML Engineer", "dates": "2023 - 2024",
+             "location": "London", "bullets": ["Built pipelines"]},
+        ]
+        cv = CVData(
+            raw_text="Skills\nPython\n\nExperience\nML Engineer at Acme\n",
+            linkedin_raw_text=_linkedin_text(),
+            cv_positions=list(positions),
+            linkedin_positions=list(positions),
+            github_llm_skills=["LangChain"],
+        )
+        profile = UserProfile(cv_data=cv, preferences=UserPreferences())
+
+        out = await two_pass.run_two_pass_extraction(profile)
+
+        assert out.cv_data.cv_positions == positions
+        assert out.cv_data.linkedin_positions == positions
+        assert out.cv_data.github_llm_skills == ["LangChain"]
 
 
 # ── CV REPLACEMENT — a new upload must not inherit the previous CV ──────────
@@ -708,9 +630,8 @@ class TestCvReplacementResetsCvOwnedFields:
 
     Found in production 2026-07-27. The upload route sets only
     ``profile.cv_data.raw_text`` and leaves every other field in place; the
-    enhance merge then fills empty scalars ONLY (`two_pass.py`
-    "never overwrite a value the user already has") and UNIONS the lists. So a
-    second CV produced one profile holding:
+    old (now-deleted) enhance merge then filled empty scalars ONLY and UNIONED
+    the lists. So a second CV produced one profile holding:
 
         * the FIRST person's name / headline / location / summary
         * BOTH people's skills, roles, companies, education
@@ -720,6 +641,12 @@ class TestCvReplacementResetsCvOwnedFields:
 
     That matters beyond tidiness — tailored CVs and cover letters are generated
     from this profile, so the wrong name goes out to an employer.
+
+    ``reset_cv_owned_fields`` itself doesn't care whether decision 28's
+    deterministic pass or the old LLM merge writes the new values afterwards
+    — its only job is clearing every CV-owned field to a pristine ``CVData``'s
+    default, in place. That contract is unchanged and is what this class
+    tests.
     """
 
     def _cv_from_first_upload(self) -> CVData:
@@ -804,182 +731,3 @@ class TestCvReplacementResetsCvOwnedFields:
         skills_obj = cv.skills
         reset_cv_owned_fields(cv)
         assert cv.skills is skills_obj, "must clear the list, not rebind it"
-
-    def test_after_reset_the_merge_can_write_the_new_cvs_identity(self):
-        """End-to-end of the actual defect: reset + merge must yield ONLY person B.
-
-        Without the reset, `_merge_cv_llm_into` refuses to overwrite `name`
-        (fill-if-empty) and unions the skills — producing the two-person blend.
-        """
-        from src.services.profile.two_pass import (
-            _merge_cv_llm_into,
-            reset_cv_owned_fields,
-        )
-
-        cv = self._cv_from_first_upload()
-        cv.raw_text = "NEW CV TEXT"
-        reset_cv_owned_fields(cv)
-
-        newly_extracted = CVData(
-            name="Bob Brown",
-            headline="Frontend Engineer",
-            summary="Six years of React.",
-            skills=["React", "TypeScript"],
-            job_titles=["Frontend Engineer"],
-        )
-        _merge_cv_llm_into(cv, newly_extracted)
-
-        assert cv.name == "Bob Brown", "the new CV must own the identity"
-        assert cv.headline == "Frontend Engineer"
-        assert sorted(cv.skills) == ["React", "TypeScript"]
-        assert "Airflow" not in cv.skills, "person A's skills must be GONE, not unioned"
-        assert cv.job_titles == ["Frontend Engineer"]
-        # Other inputs still intact after the full round-trip.
-        assert cv.github_llm_skills == ["LangChain"]
-
-
-@pytest.mark.asyncio
-async def test_cv_positions_survive_the_two_pass_merge(monkeypatch):
-    """PILLAR-1 AUDIT FINDING (2026-08-07). Every other CV-owned field was
-    merged by `_merge_cv_llm_into`; `cv_positions` was not — so a live
-    extraction produced 3 dated positions and the merge threw them away one
-    layer above the adapter that had just been fixed to emit them."""
-    from src.services.profile import llm_curate, two_pass
-    from src.services.profile.models import CVData, UserPreferences, UserProfile
-
-    positions = [
-        {"company": "Acme", "title": "ML Engineer", "dates": "2023 - 2024",
-         "location": "London", "bullets": ["Built pipelines"]},
-    ]
-
-    async def fake_cv(text, *a, **kw):
-        return CVData(skills=["Python"], job_titles=["ML Engineer"],
-                      cv_positions=positions)
-
-    async def _noop_list(*a, **kw):
-        return []
-
-    async def _pass(items, *a, **kw):
-        return items
-
-    profile = UserProfile(
-        cv_data=CVData(raw_text="Experience\nML Engineer at Acme 2023-2024\n"),
-        preferences=UserPreferences(),
-    )
-    with patch.object(two_pass, "llm_cv_fields_from_text", fake_cv), \
-         patch.object(two_pass, "llm_linkedin_fields", _noop_list), \
-         patch.object(two_pass, "llm_infer_github_skills", _noop_list), \
-         patch.object(two_pass, "llm_infer_from_about_me", _noop_list), \
-         patch.object(llm_curate, "llm_suggest_adjacent_skills", _noop_list), \
-         patch.object(llm_curate, "llm_merge_duplicates", _pass):
-        out = await two_pass.run_two_pass_extraction(profile)
-
-    got = out.cv_data.cv_positions
-    assert len(got) == 1, "dated positions were dropped by the merge"
-    assert got[0]["dates"] == "2023 - 2024"
-
-
-@pytest.mark.asyncio
-async def test_cv_positions_replace_not_duplicate_on_reextraction(monkeypatch):
-    """One CV = one ordered career record. A union would duplicate every role
-    on each re-extraction (profiles re-extract on ANY input change)."""
-    from src.services.profile import llm_curate, two_pass
-    from src.services.profile.models import CVData, UserPreferences, UserProfile
-
-    positions = [{"company": "Acme", "title": "ML Engineer", "dates": "2023",
-                  "location": "", "bullets": []}]
-
-    async def fake_cv(text, *a, **kw):
-        return CVData(skills=["Python"], cv_positions=positions)
-
-    async def _noop_list(*a, **kw):
-        return []
-
-    async def _pass(items, *a, **kw):
-        return items
-
-    cv = CVData(raw_text="cv text", cv_positions=list(positions))
-    profile = UserProfile(cv_data=cv, preferences=UserPreferences())
-    with patch.object(two_pass, "llm_cv_fields_from_text", fake_cv), \
-         patch.object(two_pass, "llm_linkedin_fields", _noop_list), \
-         patch.object(two_pass, "llm_infer_github_skills", _noop_list), \
-         patch.object(two_pass, "llm_infer_from_about_me", _noop_list), \
-         patch.object(llm_curate, "llm_suggest_adjacent_skills", _noop_list), \
-         patch.object(llm_curate, "llm_merge_duplicates", _pass):
-        out = await two_pass.run_two_pass_extraction(profile)
-
-    assert len(out.cv_data.cv_positions) == 1, "re-extraction duplicated the role"
-
-
-# ── career_domain / cv_skills_esco merge — Pillar-1 audit 2026-08-07 ───────
-# Same bug shape as `cv_positions` above, twice more in one day:
-#   * career_domain: the CV prompt never asked for it, and even once it does
-#     (cv_parser._CV_PROMPT), `_merge_cv_llm_into` had no line copying it.
-#   * cv_skills_esco: `cv_schema_to_cvdata` never populated it (fixed in
-#     schemas.py), and even once it does, this merge had no line for it
-#     either — `reset_cv_owned_fields` has always CLEARED this field on a CV
-#     swap, treating it as CV-owned, but nothing ever wrote it back.
-
-
-def test_merge_cv_llm_into_fills_career_domain_when_empty():
-    from src.services.profile.two_pass import _merge_cv_llm_into
-
-    cv = CVData(skills=["Python"])
-    llm_cv = CVData(career_domain="software_engineering")
-    _merge_cv_llm_into(cv, llm_cv)
-    assert cv.career_domain == "software_engineering"
-
-
-def test_merge_cv_llm_into_never_overwrites_existing_career_domain():
-    """Fill-if-empty, like every other scalar in this function — a
-    re-classification on a later re-run must not clobber what the user's
-    profile already carries."""
-    from src.services.profile.two_pass import _merge_cv_llm_into
-
-    cv = CVData(career_domain="healthcare_and_lifesciences")
-    llm_cv = CVData(career_domain="data_and_ai")
-    _merge_cv_llm_into(cv, llm_cv)
-    assert cv.career_domain == "healthcare_and_lifesciences"
-
-
-def test_merge_cv_llm_into_unions_cv_skills_esco():
-    from src.services.profile.two_pass import _merge_cv_llm_into
-
-    cv = CVData(cv_skills_esco={"Python": "http://esco/python"})
-    llm_cv = CVData(cv_skills_esco={"Docker": "http://esco/docker"})
-    _merge_cv_llm_into(cv, llm_cv)
-    assert cv.cv_skills_esco == {
-        "Python": "http://esco/python",
-        "Docker": "http://esco/docker",
-    }
-
-
-@pytest.mark.asyncio
-async def test_career_domain_survives_the_two_pass_merge():
-    """End-to-end: a value the CV LLM pass classifies must reach the merged
-    profile, not just the isolated adapter output."""
-    from src.services.profile import llm_curate, two_pass
-    from src.services.profile.models import CVData, UserPreferences, UserProfile
-
-    async def fake_cv(text, *a, **kw):
-        return CVData(skills=["Python"], career_domain="data_and_ai")
-
-    async def _noop_list(*a, **kw):
-        return []
-
-    async def _pass(items, *a, **kw):
-        return items
-
-    profile = UserProfile(
-        cv_data=CVData(raw_text="Data scientist CV text"),
-        preferences=UserPreferences(),
-    )
-    with patch.object(two_pass, "llm_cv_fields_from_text", fake_cv), \
-         patch.object(two_pass, "llm_linkedin_fields", _noop_list), \
-         patch.object(two_pass, "llm_infer_github_skills", _noop_list), \
-         patch.object(two_pass, "llm_infer_from_about_me", _noop_list), \
-         patch.object(llm_curate, "llm_suggest_adjacent_skills", _noop_list), \
-         patch.object(llm_curate, "llm_merge_duplicates", _pass):
-        out = await two_pass.run_two_pass_extraction(profile)
-
-    assert out.cv_data.career_domain == "data_and_ai"

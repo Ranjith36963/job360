@@ -40,7 +40,7 @@ job360/
 │   │   │   ├── applications/         # application-spine services — `ls` the folder for the module list
 │   │   │   ├── fetch/                # the URL-fetch web fallback (extract, fetcher, ssrf guard.py, outcomes)
 │   │   │   ├── tailoring/            # the tailor web fallback — `ls` the folder for the module list
-│   │   │   └── profile/              # extraction + the LLM chain — `ls` the folder for the module list
+│   │   │   └── profile/              # deterministic extraction + storage — `ls` the folder for the module list
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
 │   │   │   └── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + forward-compat migration schema
 │   │   └── utils/
@@ -90,20 +90,28 @@ The fields are the dataclasses `services/profile/models.CVData` and
 One entry point each — read the function and what it calls:
 `services/profile/linkedin_parser.parse_linkedin_pdf`,
 `services/profile/github_enricher.fetch_github_profile`,
-`services/profile/cv_parser.extract_text`. All three reach the LLM through the
-single chain in `services/profile/llm_provider.llm_extract`, whose provider order is
-pinned by `backend/tests/test_llm_provider.py::test_llm_extract_prefers_openai`.
+`services/profile/cv_parser.extract_text`. All three are **deterministic**:
+they pull TEXT out of a file or the GitHub API and read the structure they can
+prove (a delimited Skills section, the Top-Skills sidebar, repo topics). None of
+them calls a model — Job360 has none (decision 28, 2026-09-21; the provider
+pool in `services/profile/llm_provider.py` and its four SDKs were deleted).
 
-### Two-Pass Extraction (`services/profile/two_pass.py`)
+### Extraction (`services/profile/two_pass.py`)
 
-Every input (CV, LinkedIn, GitHub, preferences) gets a **deterministic pass**
-(plain code) AND an **LLM enhance pass**, both merged into one `CVData`. Which
-function runs for which input is the body of
-`services/profile/two_pass.run_two_pass_extraction` — read it there.
+Every input (CV, LinkedIn, GitHub, preferences) is read ONCE, deterministically,
+into one shared `CVData`. Which function runs for which input is the body of
+`services/profile/two_pass.run_two_pass_extraction` — read it there. The name
+"two_pass" is historical: there was a second, LLM pass per input until decision
+28 removed it.
+
+**What fills the rest of the profile:** the user's own agent. It reads the
+stored raw text through the MCP tool `get_profile` (key `raw`) and writes the
+structured fields back with `update_profile`. Job360 never overwrites or clears
+what the agent wrote — every merge in the extractor is fill-if-present.
 
 Re-runs use only **stored** inputs (`raw_text`, `linkedin_raw_text`,
-`github_repos_brief`, `about_me`) — no re-upload, no GitHub re-fetch. Each pass
-no-ops when its input or LLM key is missing. Which of those outputs become skill
+`github_repos_brief`, `about_me`) — no re-upload, no GitHub re-fetch. Each step
+no-ops when its input is missing. Which of those outputs become skill
 evidence, and under which source label, is
 `services/profile/skill_tiering.collect_evidence_from_profile` — not every field
 two-pass writes is read by it.

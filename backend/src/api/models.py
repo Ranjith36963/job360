@@ -208,7 +208,7 @@ class ProfileResponse(BaseModel):
     github_temporal: dict[str, dict[Any, Any]] = {}
     # Everything else GitHub gave us: repos (name/language/description/topics/
     # README excerpt/stars/pushed_at), dependency-file frameworks, inferred and
-    # LLM-read skills, bio, profile README. Measured 2026-08-09: 92 pieces of
+    # Legacy model-read skills, bio, profile README. Measured 2026-08-09: 92 pieces of
     # this were stored and rendered NOWHERE while only languages+topics showed.
     # Defaults to {} so every existing caller and older profile stays valid.
     github_detail: dict[str, Any] = {}

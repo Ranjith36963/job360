@@ -64,27 +64,32 @@ isolation, and the symptom looks like unrelated tests failing.
 
 ---
 
-## 3. CV parse fails / LLM provider unreachable
+## 3. "My CV uploaded but the profile is nearly empty"
 
-**Symptom:** `setup-profile --cv ...` errors with `LLMKeyMissing`, `LLMRateLimited` or
-`LLMAllProvidersFailed` — all subclasses of `services.profile.llm_provider.LLMError`;
-there is no `LLMProviderError` — or hangs with no output.
+**Symptom:** `setup-profile --cv ...` (or the web upload) succeeds, and the
+profile shows the raw CV text, a handful of skills and a summary — and nothing
+else. No roles, no dates, no companies, no certifications.
 
-**Cause:** No LLM API key set, or the first provider in the fallback chain is rate-limited.
+**Cause: that is the product working correctly (decision 28, 2026-09-21).**
+Job360 has no model of its own. It extracts the TEXT and reads only the
+structure it can PROVE — the delimited Skills section and the Summary. There is
+no LLM key to set, because there is no provider: `services/profile/llm_provider.py`
+and the four SDKs (`openai`, `google-generativeai`, `groq`, `cerebras-cloud-sdk`)
+were deleted, along with `OPENAI_API_KEY`, `OPENAI_MODEL`, `GEMINI_API_KEY`,
+`GEMINI_MODEL`, `GROQ_API_KEY` and `CEREBRAS_API_KEY`.
 
-**Fix:** At least ONE of the names in
-`services.profile.llm_provider.LLM_KEY_VARS` must be set in `.env`:
+**Fix: connect an agent and let it fill the profile.** Point Claude / ChatGPT /
+any MCP client at `/api/mcp` (see `docs/product/VISION.md`), then ask it to:
 
-```
-OPENAI_API_KEY=...      # PRIMARY — heads the chain; set this one if you have it
-GEMINI_API_KEY=...      # free tier
-GROQ_API_KEY=...        # free tier
-CEREBRAS_API_KEY=...    # free tier
-```
+1. call `get_profile` — the `raw` key carries the CV text, the LinkedIn export
+   text, the GitHub bio, the profile README and the repo briefs;
+2. read them, and call `update_profile` with the roles, dates, companies,
+   projects, certifications and the skills that are only stated in prose.
 
-The chain is the provider tuple inside `services.profile.llm_provider.llm_extract`; its order is pinned by `backend/tests/test_llm_provider.py::test_llm_extract_prefers_openai`. Callers must NOT persist an empty result on `LLMRateLimited` — it means "retry later", not "the user has no data".
+What the agent writes survives every later re-upload — nothing in the extractor
+clears a field the agent set.
 
-Debug with:
+Debug the TEXT extraction (the only half Job360 still owns) with:
 
 ```bash
 cd backend
@@ -94,7 +99,9 @@ LOG_LEVEL=DEBUG python -m src.cli setup-profile --cv path/to/cv.pdf
 (`setup_profile` in `src/cli.py` takes only `--cv` / `--linkedin` / `--github`;
 verbosity is the `LOG_LEVEL` env var read by `core.settings`.)
 
-Look for `[llm_provider]` lines — they log which provider was tried and why each failed.
+If `raw_text` itself comes back empty, the PDF has no text layer — it is a scan
+or a screenshot. Re-export it. `cv_parser.text_is_missing_spaces` also warns
+when a PDF's text layer carries no space glyphs, which mangles every skill.
 
 ---
 

@@ -23,8 +23,10 @@ regexes = [
   # Location: src/sources/eightykhours.py:13
   '''d1d7f2c8696e7b36837d5ed337c4a319''',
 
-  # Test fixture placeholder used to assert that providers reject obviously
-  # fake API keys. Not a real credential.
-  # Location: tests/test_llm_providers.py:70
+  # Test fixture placeholder that asserted providers reject obviously fake API
+  # keys. Not a real credential, and no longer present anywhere: the LLM
+  # provider pool and its tests went with decision 28 (2026-09-21). Kept in the
+  # allowlist only so a scan over HISTORY does not alarm on the old commits.
+  # Former location: backend/tests/test_llm_provider.py
   '''TEST_NONEXISTENT_KEY_12345''',
 ]

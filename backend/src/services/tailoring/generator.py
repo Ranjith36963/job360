@@ -13,13 +13,12 @@ from typing import Any, Awaitable, Callable
 
 from pydantic import BaseModel
 
-from src.services.profile.llm_provider import llm_extract
 from src.services.tailoring.integrity import repair_proper_nouns
 from src.services.tailoring.prompts import SYSTEM_BY_KIND, build_user_prompt
 
 DOC_KINDS = ("cv", "cover_letter")
 
-# (prompt, system) -> {"document": "..."} ; matches llm_provider.llm_extract.
+# (prompt, system) -> {"document": "..."} — whatever the caller injects.
 LlmFn = Callable[[str, str], Awaitable[dict[str, Any]]]
 
 
@@ -58,7 +57,15 @@ async def generate_document(
     if not (cv_text or "").strip():
         raise EmptyCVError("no CV text on file — upload a CV before tailoring")
 
-    fn: LlmFn = llm_extract_fn or llm_extract
+    # REQUIRED since decision 28 (2026-09-21): Job360 has no LLM of its own
+    # to fall back on — ``services/profile/llm_provider.py`` and its four SDKs
+    # were deleted with the profile's LLM passes. The caller injects the model.
+    if llm_extract_fn is None:
+        raise RuntimeError(
+            "no llm_extract_fn injected: Job360 has no model of its own "
+            "(decision 28) — the caller must supply one"
+        )
+    fn: LlmFn = llm_extract_fn
     system = SYSTEM_BY_KIND[doc_kind]
     user_prompt = build_user_prompt(
         doc_kind=doc_kind,

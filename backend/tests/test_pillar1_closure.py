@@ -1,115 +1,33 @@
-"""Batch 1.3c / 1.7b / 1.8b — Pillar 1 closure patches.
+"""Batch 1.3c / 1.8b — Pillar 1 closure patches.
 
-Closes the three documented partials in docs/pillar1_progress.md:
+Closes the documented partials in docs/pillar1_progress.md:
   * 1.3c: ESCO normaliser wired into build_skill_entries_from_profile
-  * 1.7b: PDF section segmentation fed into the CV LLM prompt
   * 1.8b: JSON Resume inverse loader (CVData.from_json_resume) — round-trip
+
+DECISION 28 (2026-09-21) removed the third partial this file used to close:
+1.7b fed a PDF's section split into the CV LLM prompt as a
+``PRE-SEGMENTED SECTIONS`` hint (``cv_parser._build_section_hint``, calling
+``llm_provider.llm_extract_validated`` with a ``schemas.CVSchema``). All
+three of those names are deleted — ``cv_parser.parse_cv_async`` is
+deterministic now (``cv_parser.py``'s module docstring), so there is no
+prompt left for a section hint to land in, and the four tests that pinned
+that behaviour went with it. ``cv_parser.extract_sections_from_pdf`` itself
+survives (still covered by ``test_cv_layout.py``) — only its LLM consumer
+is gone.
+
+This file also used to close 1.8 with two rollback tests that stay below
+unchanged: they exercise ``storage.restore_profile_version``, which has
+nothing to do with the deleted LLM passes.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from src.services.profile import cv_parser, skill_normalizer
+from src.services.profile import skill_normalizer
 from src.services.profile.models import CVData, UserPreferences, UserProfile
-
-# ── 1.7b: section hints in the LLM prompt ─────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_17b_pdf_sections_land_in_prompt(tmp_path):
-    """When extract_sections_from_pdf returns a section map, the LLM
-    prompt must include a ``PRE-SEGMENTED SECTIONS`` block."""
-    from src.services.profile import cv_parser, schemas
-
-    captured: list[str] = []
-
-    async def fake_extract(prompt: str, schema_cls, system: str = "", max_retries: int = 2):
-        captured.append(prompt)
-        return schemas.CVSchema.model_validate({})
-
-    with patch.object(cv_parser, "extract_text", return_value="RAW CV TEXT"), \
-         patch.object(cv_parser, "extract_sections_from_pdf",
-                      return_value={
-                          "header": "Ada Lovelace",
-                          "experience": "Senior Engineer at ACME\nBuilt things",
-                          "education": "BSc Maths",
-                      }), \
-         patch("src.services.profile.llm_provider.llm_extract_validated",
-               side_effect=fake_extract):
-        fake_pdf = tmp_path / "cv.pdf"
-        fake_pdf.write_bytes(b"PDF")
-        await cv_parser.parse_cv_async(str(fake_pdf))
-
-    assert len(captured) == 1
-    prompt = captured[0]
-    assert "PRE-SEGMENTED SECTIONS" in prompt
-    assert "[EXPERIENCE]" in prompt
-    assert "Senior Engineer at ACME" in prompt
-    assert "[EDUCATION]" in prompt
-
-
-@pytest.mark.asyncio
-async def test_17b_non_pdf_skips_section_hint(tmp_path):
-    """DOCX / other extensions must NOT trigger extract_sections_from_pdf
-    (would waste a pdfplumber open attempt on a non-PDF)."""
-    from src.services.profile import cv_parser, schemas
-
-    captured: list[str] = []
-
-    async def fake_extract(prompt: str, schema_cls, system: str = "", max_retries: int = 2):
-        captured.append(prompt)
-        return schemas.CVSchema.model_validate({})
-
-    with patch.object(cv_parser, "extract_text", return_value="DOCX TEXT"), \
-         patch.object(cv_parser, "extract_sections_from_pdf",
-                      side_effect=AssertionError("should not be called")), \
-         patch("src.services.profile.llm_provider.llm_extract_validated",
-               side_effect=fake_extract):
-        fake_docx = tmp_path / "cv.docx"
-        fake_docx.write_bytes(b"docx")
-        await cv_parser.parse_cv_async(str(fake_docx))
-
-    assert "PRE-SEGMENTED SECTIONS" not in captured[0]
-
-
-@pytest.mark.asyncio
-async def test_17b_graceful_when_no_sections_detected(tmp_path):
-    """Unreadable PDF → extract_sections returns None → prompt has no hint."""
-    from src.services.profile import cv_parser, schemas
-
-    captured: list[str] = []
-
-    async def fake_extract(prompt: str, schema_cls, system: str = "", max_retries: int = 2):
-        captured.append(prompt)
-        return schemas.CVSchema.model_validate({})
-
-    with patch.object(cv_parser, "extract_text", return_value="RAW"), \
-         patch.object(cv_parser, "extract_sections_from_pdf", return_value=None), \
-         patch("src.services.profile.llm_provider.llm_extract_validated",
-               side_effect=fake_extract):
-        fake_pdf = tmp_path / "cv.pdf"
-        fake_pdf.write_bytes(b"pdf")
-        await cv_parser.parse_cv_async(str(fake_pdf))
-
-    assert "PRE-SEGMENTED SECTIONS" not in captured[0]
-
-
-def test_17b_build_section_hint_truncates_long_bodies(tmp_path):
-    """A ≥1200-char body gets clipped in the hint so prompts stay compact."""
-    long_body = "x" * 2000
-    with patch.object(cv_parser, "extract_sections_from_pdf",
-                      return_value={"experience": long_body}):
-        fake_pdf = tmp_path / "cv.pdf"
-        fake_pdf.write_bytes(b"pdf")
-        hint = cv_parser._build_section_hint(str(fake_pdf))
-    assert "…" in hint
-    # Full 2000-char body would blow past 1200 + header overhead
-    assert len(hint) < 1800
-
 
 # ── 1.8b: JSON Resume inverse loader ──────────────────────────────
 

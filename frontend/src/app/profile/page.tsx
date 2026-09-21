@@ -311,9 +311,14 @@ export default function ProfilePage() {
                   <span className="text-gradient-lime">Profile</span>
                 </h1>
                 <p className="text-sm text-muted-foreground">
+                  {/* Decision 28 — say who does what. Job360 stores the text
+                      it is given; the connected agent reads it and writes the
+                      structured fields back. A new user who is told only
+                      "upload your CV" waits for an extraction that is never
+                      coming. */}
                   {profile?.summary.is_complete
                     ? "Your profile is ready for your agent"
-                    : "Upload your CV and set preferences to get started"}
+                    : "Upload your CV — Job360 stores the text; your connected agent fills in the rest"}
                 </p>
               </div>
             </div>

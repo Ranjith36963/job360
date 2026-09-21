@@ -157,9 +157,15 @@ def test_empty_extraction_is_broken_not_merely_weak():
 
 def test_two_pass_writes_the_score_onto_the_profile():
     """run_two_pass_extraction must leave its verdict on cv_data, so the API
-    and the UI can act on a thin profile instead of shipping it silently."""
+    and the UI can act on a thin profile instead of shipping it silently.
+
+    Decision 28 (2026-09-21) deleted all six LLM passes that this test used to
+    neutralise with mocks (``llm_cv_fields_from_text``, ``llm_infer_github_skills``,
+    ``llm_infer_from_about_me``, and the two ``llm_curate`` curation helpers).
+    ``run_two_pass_extraction`` is deterministic end to end now, so there is
+    nothing left to stub out — this just runs it and reads the score it wrote.
+    """
     import asyncio
-    from unittest.mock import patch
 
     from src.services.profile import two_pass as tp
     from src.services.profile.models import CVData, UserPreferences, UserProfile
@@ -174,27 +180,7 @@ def test_two_pass_writes_the_score_onto_the_profile():
         preferences=UserPreferences(target_job_titles=["Nurse"]),
     )
 
-    # Neutralise every paid/network pass — we are testing the GATE, not the LLM.
-    # llm_cv_fields_from_text returns a CVData (not a dict), and the merge that
-    # follows reads .skills off it, so the stub must keep that shape.
-    async def _noop(*a, **kw):
-        return CVData()
-
-    async def _noop_list(*a, **kw):
-        return []
-
-    # llm_curate is imported INSIDE run_two_pass_extraction, so it must be
-    # patched at its SOURCE module — patching a two_pass attribute misses it.
-    # The LinkedIn/GitHub passes no-op on their own here: this profile carries
-    # no LinkedIn text and no GitHub data, which is the documented behaviour.
-    from src.services.profile import llm_curate
-
-    with patch.object(tp, "llm_cv_fields_from_text", _noop), \
-         patch.object(tp, "llm_infer_github_skills", _noop_list), \
-         patch.object(tp, "llm_infer_from_about_me", _noop_list), \
-         patch.object(llm_curate, "llm_suggest_adjacent_skills", _noop_list), \
-         patch.object(llm_curate, "llm_merge_duplicates", _noop_list):
-        out = asyncio.run(tp.run_two_pass_extraction(profile))
+    out = asyncio.run(tp.run_two_pass_extraction(profile))
 
     score = out.cv_data.extraction_score
     assert score, "the gate did not run — a scorer nobody calls is no scorer"
@@ -204,7 +190,12 @@ def test_two_pass_writes_the_score_onto_the_profile():
 
 def test_scoring_failure_never_costs_the_user_their_upload():
     """If scoring itself breaks, extraction must still return a profile. A
-    quality check that can destroy the thing it measures is worse than none."""
+    quality check that can destroy the thing it measures is worse than none.
+
+    Decision 28 (2026-09-21) removed the LLM passes this test used to neutralise
+    (see the sibling test above for the full list) — the only thing left to
+    stub is the scorer itself, to prove its crash doesn't take the upload with it.
+    """
     import asyncio
     from unittest.mock import patch
 
@@ -216,23 +207,10 @@ def test_scoring_failure_never_costs_the_user_their_upload():
         preferences=UserPreferences(),
     )
 
-    async def _noop(*a, **kw):
-        return CVData()
-
-    async def _noop_list(*a, **kw):
-        return []
-
     def _boom(*a, **kw):
         raise RuntimeError("scorer exploded")
 
-    from src.services.profile import llm_curate
-
-    with patch.object(tp, "llm_cv_fields_from_text", _noop), \
-         patch.object(tp, "llm_infer_github_skills", _noop_list), \
-         patch.object(tp, "llm_infer_from_about_me", _noop_list), \
-         patch.object(llm_curate, "llm_suggest_adjacent_skills", _noop_list), \
-         patch.object(llm_curate, "llm_merge_duplicates", _noop_list), \
-         patch.object(tp, "score_extraction", _boom):
+    with patch.object(tp, "score_extraction", _boom):
         out = asyncio.run(tp.run_two_pass_extraction(profile))
 
     assert out is profile, "a scoring crash must not lose the extraction"

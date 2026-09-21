@@ -61,22 +61,13 @@ def _secret(name: str) -> str:
 # other environment broken until someone noticed, and nobody noticed this one.
 GITHUB_TOKEN = _secret("GITHUB_TOKEN") or _secret("GITHUB_PERSONAL_ACCESS_TOKEN")
 
-# LLM providers for CV analysis.
-# OpenAI (paid) is the PRIMARY — reliable quota, deterministic (temp 0), structured
-# output. The free tiers (Gemini/Groq/Cerebras) remain as fallbacks. Key is read
-# case-insensitively so a lowercase `openai_api_key=` in .env still works.
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "") or os.getenv("openai_api_key", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-# Env-overridable for the same reason OPENAI_MODEL is. It was HARDCODED as
-# "gemini-2.0-flash" in llm_provider.py, and Google retired that model: prod
-# Sentry PYTHON-FASTAPI-J, "404 This model models/gemini-2.0-flash is no longer
-# available", last seen 2026-08-11. A hardcoded model name is a dependency on
-# someone else's release schedule with no way to respond except a deploy —
-# which is why the fallback chain was dead and nobody noticed.
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
+# NOTE (2026-09-21, decision 28) — Job360 has no LLM of its own. Six settings
+# lived here for the provider pool that read CVs, LinkedIn exports and GitHub
+# profiles: OPENAI_API_KEY, OPENAI_MODEL, GEMINI_API_KEY, GEMINI_MODEL,
+# GROQ_API_KEY and CEREBRAS_API_KEY. The user's own agent reads the raw text we
+# store and writes the structured fields back through `update_profile`, so there
+# is no provider chain left to key. Nothing reads these names any more — if one
+# is still set on Railway it is simply ignored, and deleting it is safe.
 
 # NOTE (2026-08-24) — the per-user Slack / Discord / Telegram delivery channels
 # were removed. Nine settings lived here for them: SLACK_WEBHOOK_URL,

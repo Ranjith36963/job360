@@ -6,8 +6,14 @@ quota-gated (guardrail #1). The LLM call is done synchronously here (reliable +
 testable, no Redis dependency) — and now that is the ONLY path: the ARQ task
 that used to mirror it went with `src/workers/` in slice 5 (#483).
 
-Test seam: ``llm_extract`` and ``load_profile`` are imported into this module so
-tests monkeypatch them here (``monkeypatch.setattr(tailor, "llm_extract", fake)``).
+Test seam: ``llm_extract`` and ``load_profile`` live on this module so tests
+monkeypatch them here (``monkeypatch.setattr(tailor, "llm_extract", fake)``).
+
+DECISION 28 (2026-09-21): ``llm_extract`` no longer resolves to a provider —
+Job360 has no model of its own, and ``services/profile/llm_provider.py`` was
+deleted with the profile's LLM passes. The name stays as the injection point;
+calling it raises, so this route answers 503 until the tailor slice replaces
+web generation with the agent writing the document. See issue #491.
 """
 
 from __future__ import annotations
@@ -22,7 +28,6 @@ from src.api.auth_deps import CurrentUser, require_verified_user
 from src.api.dependencies import get_request_db
 from src.core.settings import TAILOR_FREE_PER_MONTH
 from src.repositories.database import JobDatabase
-from src.services.profile.llm_provider import llm_extract
 from src.services.profile.storage import current_profile_version_id, load_profile
 from src.services.tailoring import DOC_KINDS, generate_document
 from src.services.tailoring.docx import render_docx
@@ -31,6 +36,20 @@ from src.services.tailoring.patterns import derive_patterns, summarize_patterns
 from src.services.tailoring.pdf import render_pdf
 from src.services.tailoring.provenance import annotate_provenance
 from src.utils.logger import get_audit_logger, get_logger
+
+
+async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
+    """The tailor's model seam — no model behind it (decision 28).
+
+    Job360 does not own an LLM. Tests inject a fake here; in production this
+    raises, ``generate_document``'s caller below turns it into a 503, and the
+    user's own agent writes the document instead.
+    """
+    raise RuntimeError(
+        "Job360 has no model of its own (decision 28) — ask your connected "
+        "agent to write this document and store it with an MCP tool"
+    )
+
 
 router = APIRouter(tags=["tailor"])
 

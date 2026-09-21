@@ -4,10 +4,11 @@
 WHY THIS EXISTS — two incidents, one shape.
 
 1. GROQ_API_KEY expired. Nothing noticed. The provider chain detected it
-   perfectly (`llm_provider.py` logs "looks PERMANENTLY misconfigured") and then
-   called it again on the very next request, forever. Measured 2026-08-03: one
-   CV upload took **584 seconds** — 8 LLM calls, each paying a doomed round-trip
-   to a key we already knew was dead.
+   perfectly and then called it again on the very next request, forever.
+   Measured 2026-08-03: one CV upload took **584 seconds** — 8 LLM calls, each
+   paying a doomed round-trip to a key we already knew was dead. (That whole
+   provider chain is gone — decision 28, 2026-09-21: Job360 has no model of its
+   own. The lesson it taught is why this file still exists.)
 
 2. RESEND_API_KEY has the same exposure and a worse blast radius. Login is
    passwordless: a magic link, delivered by Resend. If that key dies, NOBODY CAN
@@ -34,6 +35,11 @@ CONTRACT:
     exit 3  a whole CAPABILITY has no credential at all (create one) -> raise.
             Different fix from exit 1, so a different alarm: 1 means a key we
             own stopped working, 3 means we never had one.
+
+SCOPE (2026-09-21). This probed five credentials; four of them keyed the LLM
+provider pool that read CVs, and decision 28 deleted it. Email is what is left,
+and it is the one that always mattered most: login is a magic link, so a dead
+Resend key means NOBODY CAN LOG IN.
 """
 
 from __future__ import annotations
@@ -56,20 +62,13 @@ FORCE_RED = os.getenv("PROBE_FORCE_RED", "") == "1"
 # the capability is DOWN, and it is down silently, which is worse than a dead
 # key: a dead key at least 401s somewhere.
 #
-# Measured shape of the bug this fixes: with all four LLM keys unset but ONE
-# other credential present (Resend is always configured — it is the login path),
-# `results` was non-empty, so this probe printed "Every configured credential
-# authenticated" and exited 0. GREEN. DAILY. FOREVER. Meanwhile the judge could
-# not make a single call, and the weekly eval was filing that as an accuracy
-# regression. The four names were reported in a footnote that reads as
-# reassurance: "absent is not broken".
-#
-# These four names are the same list as `llm_provider.LLM_KEY_VARS`. They are
-# re-typed here ONLY because this script is deliberately stdlib-only — it runs
-# in external-health.yml with no `pip install` of the backend at all — so it
-# cannot import the shared constant. `backend/tests/test_missing_llm_key_is_loud.py`
-# pins the two lists together so they cannot drift apart in silence.
-LLM_KEY_VARS = ("OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY")
+# This used to guard the four LLM keys, because with all four unset and Resend
+# present the probe printed "Every configured credential authenticated" and
+# exited 0 — GREEN, DAILY, FOREVER — while nothing could make a model call. The
+# LLM pool is gone (decision 28), so EMAIL is now the capability with that
+# shape, and it is the worse one: no email credential means no magic link,
+# which means nobody can log in.
+EMAIL_KEY_VARS = ("RESEND_API_KEY", "SMTP_PASSWORD")
 
 
 def _probe(url: str, headers: dict[str, str], payload: dict | None = None) -> tuple[str, str]:
@@ -110,36 +109,6 @@ def main() -> int:
 
     def env(name: str) -> str:
         return os.getenv(name, "").strip()
-
-    # ── LLM providers ────────────────────────────────────────────────────────
-    # A models-list call proves auth without spending a token.
-    if env("OPENAI_API_KEY"):
-        results.append(("openai", *_probe(
-            "https://api.openai.com/v1/models",
-            {"Authorization": f"Bearer {env('OPENAI_API_KEY')}"})))
-    else:
-        absent.append("OPENAI_API_KEY")
-
-    if env("GROQ_API_KEY"):
-        results.append(("groq", *_probe(
-            "https://api.groq.com/openai/v1/models",
-            {"Authorization": f"Bearer {env('GROQ_API_KEY')}"})))
-    else:
-        absent.append("GROQ_API_KEY")
-
-    if env("CEREBRAS_API_KEY"):
-        results.append(("cerebras", *_probe(
-            "https://api.cerebras.ai/v1/models",
-            {"Authorization": f"Bearer {env('CEREBRAS_API_KEY')}"})))
-    else:
-        absent.append("CEREBRAS_API_KEY")
-
-    if env("GEMINI_API_KEY"):
-        results.append(("gemini", *_probe(
-            f"https://generativelanguage.googleapis.com/v1beta/models?key={env('GEMINI_API_KEY')}",
-            {})))
-    else:
-        absent.append("GEMINI_API_KEY")
 
     # ── Resend: the login path ───────────────────────────────────────────────
     # PROBE THE THING WE ACTUALLY USE, WITH A CALL THAT CANNOT SEND MAIL.
@@ -200,18 +169,19 @@ def main() -> int:
         results.append(("DRILL", "DEAD", "forced red to prove the chain — no key is actually broken"))
 
     # ORDER IS LOAD-BEARING. This check used to sit BELOW the `if not results`
-    # guard, which made the whole LLM alarm dead on arrival: an environment with
-    # no provider secrets at all returns 2 from that guard and never reaches
-    # here. Measured on the live scheduled run 31683129750 (2026-08-13T08:40) —
-    # `no provider credentials are configured` + exit 2 — and external-health has
-    # conclusion=failure on 8 of 8 runs since 2026-08-06. It has NEVER been green.
+    # guard, which made the whole no-credential alarm dead on arrival: an
+    # environment with no provider secrets at all returns 2 from that guard and
+    # never reaches here. Measured on the live scheduled run 31683129750
+    # (2026-08-13T08:40) — `no provider credentials are configured` + exit 2 —
+    # and external-health had conclusion=failure on 8 of 8 runs since
+    # 2026-08-06. It had NEVER been green.
     #
-    # So the promised "within 24 hours an issue appears saying no LLM key is
+    # So the promised "within 24 hours an issue appears saying no key is
     # configured" would never have happened: the job would just go red the same
     # way it already does, with no issue and no triage. An environment with zero
-    # secrets trivially has zero LLM keys — that is the SAME alarm, not a
+    # secrets trivially has zero email keys — that is the SAME alarm, not a
     # separate blind-probe case, and it must be reported as such.
-    no_llm_key = all(not env(name) for name in LLM_KEY_VARS)
+    no_email_key = all(not env(name) for name in EMAIL_KEY_VARS)
 
     if not results:
         print("::error::no provider credentials are configured, so nothing could be probed.")
@@ -219,16 +189,16 @@ def main() -> int:
             "This is a BLIND result, not a clean one. Add the provider keys as repo "
             "secrets, or this loop will report success forever while proving nothing."
         )
-        if no_llm_key:
+        if no_email_key:
             print()
-            print("## No LLM provider is configured at all — the judge is DOWN")
+            print("## No email credential is configured at all — LOGIN IS DOWN")
             print()
             print(
-                "None of " + ", ".join("`" + n + "`" for n in LLM_KEY_VARS) + " is set. "
-                "Any ONE of them unblocks the judge; GROQ, GEMINI and CEREBRAS have "
-                "free tiers. Until one is set, every ranking eval reports "
-                "'produced no judgments' — which reads as a QUALITY regression and "
-                "is not one."
+                "Neither " + " nor ".join("`" + n + "`" for n in EMAIL_KEY_VARS)
+                + " is set. Login is passwordless — a magic link delivered by "
+                "Resend — so with no email credential NOBODY CAN LOG IN, and "
+                "nothing else goes red: every live probe injects a pre-made "
+                "session cookie instead of walking the real email path."
             )
             return 3
         return 2
@@ -243,28 +213,23 @@ def main() -> int:
     if absent:
         print(f"\n_Not configured, so not probed (absent is not broken): {', '.join(absent)}._")
 
-    if no_llm_key:
-        print("\n## No LLM provider is configured at all — the judge is DOWN\n")
+    if no_email_key:
+        print("\n## No email credential is configured at all — LOGIN IS DOWN\n")
         print(
-            f"::error::All {len(LLM_KEY_VARS)} LLM keys are empty "
-            f"({', '.join(LLM_KEY_VARS)}) — the judge, CV parsing and job "
-            "enrichment cannot make a single call."
+            f"::error::Both email keys are empty ({', '.join(EMAIL_KEY_VARS)}) — "
+            "the magic link cannot be sent, so nobody can log in."
         )
         print(
-            "\nThis is a CONFIG failure, not a quality problem — and it is the one "
-            "case where absence IS breakage, because there is no fallback left. It "
-            "is also invisible everywhere else: scoring silently falls back to "
-            "keywords, `llm_fit_score` stays NULL, and the weekly accuracy audit "
-            "reports it as a RANKING REGRESSION (that is exactly what happened for a "
-            "week — issue #238).\n"
+            "\nThis is a CONFIG failure, and it is the one case where absence IS "
+            "breakage: there is no password fallback. It is invisible everywhere "
+            "else, because every live probe injects a pre-made session cookie "
+            "instead of walking the real email path.\n"
         )
         print(
-            "**Any ONE of the four fixes it, and three are free:** `GEMINI_API_KEY`, "
-            "`GROQ_API_KEY`, `CEREBRAS_API_KEY` all have a free tier, and all four "
-            "SDKs are already installed (`backend/pyproject.toml`). `OPENAI_API_KEY` "
-            "is the paid primary. Add one as a repo Actions secret AND to the Railway "
-            "backend/worker services — an unset Actions secret renders as an EMPTY "
-            "string, which is how this hid."
+            "**Fix:** set `RESEND_API_KEY` as a repo Actions secret AND on the "
+            "Railway backend service (`email_sender.py` falls back to "
+            "`SMTP_PASSWORD` when it looks like a Resend key). An unset Actions "
+            "secret renders as an EMPTY string, which is how this hides."
         )
 
     if dead:
@@ -272,15 +237,13 @@ def main() -> int:
         for name, _v, detail in dead:
             print(f"- **{name}** — {detail}")
         print(
-            "\nA rejected key fails on EVERY call until a human rotates it. Measured "
-            "cost of leaving one in place: a CV upload took 584 seconds because eight "
-            "LLM calls each paid a doomed round-trip to a key we already knew was "
-            "dead. If `resend` is on this list, nobody can log in at all — the login "
-            "link is the only way in."
+            "\nA rejected key fails on EVERY call until a human rotates it. If "
+            "`resend` is on this list, nobody can log in at all — the login link "
+            "is the only way in."
         )
         return 1
 
-    if no_llm_key:
+    if no_email_key:
         # Its OWN code, deliberately. "Rotate the dead key" and "you never had a
         # key" are different jobs for the human, and an alarm that blurs them
         # sends him to the wrong page — which is the whole failure this file is
