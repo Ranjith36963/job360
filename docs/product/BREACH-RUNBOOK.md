@@ -50,7 +50,7 @@ Variables → edit → redeploy happens automatically.
 | Table | What's in it | Sensitivity |
 |---|---|---|
 | `user_profiles`, `user_profile_versions` | CV text, LinkedIn text, GitHub data, preferences | **HIGH — this is the crown jewels** |
-| `tailored_documents` | AI-generated CVs / cover letters | **HIGH** |
+| `tailored_documents` | tailored CVs / cover letters (legacy — nothing writes it since decision 28, 2026-09-21; the live ones are `application_artifacts`) | **HIGH** |
 | `users` | email addresses, argon2id password hashes, timezone | Medium (hashes are argon2id — not reversible in practice, but report as exposed) |
 | `applications`, `application_events`, `application_artifacts`, `application_receipts` | job-hunt activity (who applied where, and the exact CV sent) | Medium — sensitive in context (current employer must not learn) |
 | `sessions`, `api_tokens`, `oauth_tokens`, `oauth_grants` | session + OAuth artifacts | Low once rotated/deleted |

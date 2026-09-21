@@ -3,7 +3,7 @@
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
-> This file describes the one path the app has: `api/routes/bring.py` (`POST /jobs/bring`, link or text) → `api/routes/receipts.py` (append-only `application_receipts`) → `api/routes/tailor.py` (CV tailor, web fallback only) → `api/mcp_server.py` (the MCP tools at `/api/mcp` — count them with `grep -cF '@mcp.tool()' backend/src/api/mcp_server.py`; bearer `j360_…`, OAuth 2.1). The FastAPI app behind it is the route modules under `backend/src/api/routes/` (counts: [`docs/GENERATED.md`](docs/GENERATED.md)). Profile extraction (`services/profile/`) feeds it, and the application spine (`applications`, `application_events`, `application_artifacts`, `application_receipts`) records everything that happens to a brought job.
+> This file describes the one path the app has: `api/routes/bring.py` (`POST /jobs/bring`, link or text) → `api/routes/receipts.py` (append-only `application_receipts`) → `api/routes/tailor.py` (reads, versions and renders the CV the agent wrote — no LLM of ours, decision 28) → `api/mcp_server.py` (the MCP tools at `/api/mcp` — count them with `grep -cF '@mcp.tool()' backend/src/api/mcp_server.py`; bearer `j360_…`, OAuth 2.1). The FastAPI app behind it is the route modules under `backend/src/api/routes/` (counts: [`docs/GENERATED.md`](docs/GENERATED.md)). Profile extraction (`services/profile/`) feeds it, and the application spine (`applications`, `application_events`, `application_artifacts`, `application_receipts`) records everything that happens to a brought job.
 >
 > **The sourcing-era pipeline was deleted 2026-09-05** (slice 5, #483): job search, keyword-driven scoring, four-layer dedup, LLM enrichment, embeddings, the search dashboard, and the 40 job-source classes that fed them. **The per-user notification-channel system (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) was deleted the same day.** None of that code exists in this repo any more, and nothing archives its history in-tree — git history is the record.
 >
@@ -39,7 +39,7 @@ job360/
 │   │   │   ├── auth/                 # passwords (argon2id), sessions (HMAC cookies), magic-link + system email (Resend/SMTP)
 │   │   │   ├── applications/         # application-spine services — `ls` the folder for the module list
 │   │   │   ├── fetch/                # the URL-fetch web fallback (extract, fetcher, ssrf guard.py, outcomes)
-│   │   │   ├── tailoring/            # the tailor web fallback — `ls` the folder for the module list
+│   │   │   ├── tailoring/            # render + check a saved CV (no LLM since decision 28) — `ls` the folder for the module list
 │   │   │   └── profile/              # extraction + the LLM chain — `ls` the folder for the module list
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/)
 │   │   │   └── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + forward-compat migration schema

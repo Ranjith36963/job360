@@ -27,14 +27,12 @@ export type ReceiptListResponse = Schemas["ReceiptListResponse"];
 export type ReceiptSummary = Schemas["ReceiptSummary"];
 export type ProfileVersionSummary = Schemas["ProfileVersionSummary"];
 
-// `doc_kind`/`status` are narrowed from `string` to literal unions — the
-// backend OpenAPI declares them as string but only these values are valid
-// (docs/product/peruser_cv_coverletter.md).
+// `doc_kind` is narrowed from `string` to a literal union — the backend OpenAPI
+// declares it as string but only these two values render as a document.
 export type TailorDocKind = "cv" | "cover_letter";
 
-export type TailoredDocOut = Omit<Schemas["TailoredDocOut"], "doc_kind" | "status"> & {
+export type TailoredDocOut = Omit<Schemas["TailoredDocOut"], "doc_kind"> & {
   doc_kind: TailorDocKind;
-  status: "draft" | "kept";
 };
 
 export type TailorBundle = Omit<Schemas["TailorBundle"], "documents"> & {
