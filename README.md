@@ -128,7 +128,7 @@ Job360 is **pull, not push** (VISION.md decision 11): the seeker reads `GET /wha
 
 ## Configuration
 
-Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL` / `DATABASE_PUBLIC_URL`, `FRONTEND_ORIGIN`, `SITE_BASE_URL`, and `RESEND_API_KEY` (system email — magic-link login and password reset — needs it). Every other knob is an `os.getenv` call in `backend/src/core/settings.py`, commented in place — read it there, not a list.
+Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL` / `DATABASE_PUBLIC_URL`, `FRONTEND_ORIGIN`, `SITE_BASE_URL`, and `RESEND_API_KEY` (system email — magic-link login and password reset — needs it). Every other knob: `grep -rn "os.getenv\|os.environ.get" backend/src` — most are in `core/settings.py`, not all.
 
 ## Contributing
 

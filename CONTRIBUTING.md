@@ -112,10 +112,8 @@ present; the scope decision and the files that made it are in the run summary.
 - **Unix / macOS:** `bash setup.sh`
 - **Windows:** `setup.bat`
 
-Both create a venv, install backend deps, and validate `.env`. See
-[`backend/README.md`](backend/README.md) and
-[`frontend/README.md`](frontend/README.md) for service-specific run
-instructions.
+Per-service install and run instructions: [`backend/README.md`](backend/README.md),
+[`frontend/README.md`](frontend/README.md).
 
 ## Where scripts live
 

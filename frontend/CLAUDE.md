@@ -16,11 +16,10 @@ of text — say what happened, what I did, what's next.
 
 ## What this is
 
-The Job360 web app: **Next.js 16 (App Router) + React 19 + Tailwind 4 +
-shadcn 4**. Talks to the FastAPI backend on `:8000`. State via **TanStack Query 5**;
-forms via **react-hook-form 7 + zod 4**; toasts via **sonner**. Auth is cookie-session —
-guarded in `src/middleware.ts`. No charts, no drag-and-drop libraries (the Kanban went
-with the pipeline page).
+The Job360 web app: **Next.js 16 (App Router) + React 19 + Tailwind 4**, talking to
+the FastAPI backend on `:8000`. `package.json` is the dependency list — the UI
+primitives are `@base-ui/react`, composed via the `render` prop, never Radix's
+`asChild`. Auth is cookie-session, guarded in `src/middleware.ts`.
 
 ## Owner rule #29 — empty preferences stay SILENT (never default, never require)
 

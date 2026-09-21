@@ -48,8 +48,8 @@ cp ../.env.example ../.env     # Unix
 copy ..\.env.example ..\.env   # Windows
 ```
 
-Edit `../.env` to set your API keys and `FRONTEND_ORIGIN`. Every variable the
-app reads is an `os.getenv` call in `src/core/settings.py`, commented in place;
+Edit `../.env` for your API keys and `FRONTEND_ORIGIN` (read in `api.main`, not
+`core.settings`). Every knob: `grep -rn "os.getenv\|os.environ.get" src`.
 `core.settings._REQUIRED_PROD_VARS` is the set prod refuses to boot without.
 
 ## Run the API
