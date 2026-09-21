@@ -1,4 +1,4 @@
-"""Right to work — the UK fact a CV states and we never read.
+"""Right to work — the UK fact a CV states and Job360 never reads for itself.
 
 Job360 is a UK-market product. Rule #30 refused jobs the user could not take
 because of WHERE they are; rule #31 treated sponsorship as a spotlight rather
@@ -14,67 +14,62 @@ in practice the engine knows nothing about eligibility for almost everyone.
 Meanwhile UK CVs routinely say it outright: "British citizen", "Indefinite Leave
 to Remain", "Graduate Route visa valid until 2027", "requires sponsorship".
 
-So this is a stated FACT being discarded, not a missing preference — the same
-shape as the seniority level the prompt already asked for and the adapter binned.
+So this is a stated FACT the shelf must hold, not a missing preference.
 
-TRI-STATE, deliberately, for exactly the reason rule #31 gives: "" means the CV
-never said, which is NOT the same as "needs sponsorship". Guessing here would
-put a wall in front of the one candidate who most needs the door open.
+Decision 28 (2026-09-21) removed every LLM pass from the profile pipeline —
+Job360 has no brain of its own; the user's agent reads, judges and writes.
+There is no CV prompt left that asks for ``right_to_work`` and nothing to
+extract it from raw text: ``cv_right_to_work`` is now filled the same way any
+other agent-supplied fact is, by the seeker's own agent reading the CV text
+off MCP ``get_profile`` and writing the answer back with ``update_profile``
+(``cv_data.cv_right_to_work`` is a declared path in
+``core.settings.PROFILE_EDITABLE_PATHS``). What survives here is the shelf
+itself and the invariant that guards it — not the prompt that used to fill it.
+
+TRI-STATE, deliberately, for exactly the reason rule #31 gives: "" means
+nobody has said yet, which is NOT the same as "needs sponsorship". Guessing
+here — inferring it from a name, a university, anything — would put a wall in
+front of the one candidate who most needs the door open. Job360 writes this
+field never; only the agent does.
 """
 from __future__ import annotations
 
-from src.services.profile.models import UserPreferences
-from src.services.profile.schemas import CVSchema, cv_schema_to_cvdata
+from src.core.settings import PROFILE_EDITABLE_PATHS
+from src.services.profile.models import CVData, UserPreferences
 
 
-class TestTheCvsStatementSurvives:
+class TestTheShelfHoldsWhatItIsGiven:
     def test_a_stated_status_reaches_the_shelf(self) -> None:
-        cv = cv_schema_to_cvdata(
-            CVSchema(name="Ada", right_to_work="British citizen"), raw_text="x"
-        )
+        cv = CVData(cv_right_to_work="British citizen")
         assert cv.cv_right_to_work == "British citizen"
 
     def test_silence_stays_silent(self) -> None:
         """Rule #31: unknown is a THIRD state. An empty string must never be
-        read as "needs sponsorship" — that is the opposite fact."""
-        cv = cv_schema_to_cvdata(CVSchema(name="Ada"), raw_text="x")
+        read as "needs sponsorship" — that is the opposite fact. Nobody
+        infers this any more; a blank shelf just means nobody has answered
+        yet, agent included."""
+        cv = CVData()
         assert cv.cv_right_to_work == ""
 
     def test_it_is_not_the_needs_visa_preference(self) -> None:
-        cv = cv_schema_to_cvdata(
-            CVSchema(name="Ada", right_to_work="requires sponsorship"), raw_text="x"
-        )
+        cv = CVData(cv_right_to_work="requires sponsorship")
         prefs = UserPreferences()
-        # The extracted fact must not silently flip a preference the user owns.
+        # A fact the agent wrote onto the CV shelf must not silently flip a
+        # preference the user owns on a different shelf.
         assert prefs.needs_visa is False
         assert cv.cv_right_to_work == "requires sponsorship"
 
 
+class TestOnlyTheAgentMayWriteIt:
+    """Decision 28: Job360 stores and versions this fact, it never guesses
+    it. The one door that may change it is the agent's own
+    ``update_profile`` call — the closed, dataclass-validated edit path in
+    ``core.settings.PROFILE_EDITABLE_PATHS`` (enforced at import by
+    ``services.profile.edits``). No CV-parsing code path may set this field;
+    there isn't one left to do it."""
 
-
-class TestThePromptAsksForIt:
-    """An unasked-for field is an empty field. The extraction prompt and the
-    schema have to move together — this is the pairing that failed for
-    experience_level, where the prompt asked and the adapter dropped it."""
-
-    def test_the_cv_prompt_requests_it(self) -> None:
-        from src.services.profile import cv_parser
-
-        blob = " ".join(
-            str(getattr(cv_parser, n, "")) for n in dir(cv_parser)
-            if n.isupper() and isinstance(getattr(cv_parser, n, None), str)
-        )
-        assert "right_to_work" in blob, (
-            "the CV prompt never asks for right_to_work, so the shelf can only "
-            "ever be empty"
-        )
-
-    def test_the_extractor_version_moved(self) -> None:
-        """A new prompt field reaches nobody unless the cost cache is
-        invalidated — the exact miss that kept seven LinkedIn sections empty."""
-        from src.services.profile.two_pass import EXTRACTOR_VERSION
-
-        assert EXTRACTOR_VERSION not in ("1", "2", "3"), (
-            "EXTRACTOR_VERSION still predates the right_to_work prompt; every "
-            "existing user will hit the cache and never be asked"
+    def test_the_edit_path_is_declared(self) -> None:
+        assert "cv_data.cv_right_to_work" in PROFILE_EDITABLE_PATHS, (
+            "the agent has no way to correct or supply this fact if its "
+            "path is missing from the editable set"
         )

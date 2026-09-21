@@ -29,23 +29,14 @@ dependencies = [
     # (MCPServer, streamable_http_app kwargs) differs from 1.x — pin the major.
     # Needs Python >=3.10; the prod image is 3.12.
     "mcp>=2.1,<3",
-    # UNDECLARED UNTIL NOW — a real production bug, caught by the mypy ratchet's
-    # first CI run ("Cannot find implementation or library stub for module named
-    # 'openai'", llm_provider.py). OpenAI is the documented PRIMARY CV-parsing
-    # provider (CLAUDE.md; default gpt-4o-mini) and llm_provider.py:297 does
-    # `from openai import AsyncOpenAI` — but no install path ever installed it:
-    # the Dockerfiles ran a bare `pip install`, and it was in neither pyproject
-    # nor a requirements.txt.
-    # In production the import raised ImportError, which llm_provider.py:154's
-    # `except Exception` swallowed as "provider failed, try the next one" — so
-    # OpenAI silently NEVER ran and every parse quietly used a free-tier fallback.
-    # NOTE: declaring it means OpenAI now actually runs when OPENAI_API_KEY is
-    # set — i.e. real paid usage begins. That is the documented intent; unset the
-    # key to keep using the free tiers.
-    "openai>=1.0.0",
-    "google-generativeai>=0.8.0",
-    "groq>=0.11.0",
-    "cerebras-cloud-sdk>=1.0.0",
+    # DELETED 2026-09-21 (decision 28, slice B): `openai`,
+    # `google-generativeai`, `groq` and `cerebras-cloud-sdk`. They existed for
+    # ONE module, `services/profile/llm_provider.py`, which read the user's CV /
+    # LinkedIn / GitHub on Job360's behalf. Job360 has no brain of its own any
+    # more: it stores the raw text and the user's own agent writes the
+    # structured fields back through `update_profile`. No runtime code imports
+    # an LLM SDK — keep it that way (a new SDK here is a product decision, not a
+    # dependency bump).
     # Batch 2 — multi-user auth layer.
     "argon2-cffi>=23.1.0",          # password hashing (argon2id, OWASP-recommended)
     "itsdangerous>=2.2.0",          # signed session cookies

@@ -921,20 +921,31 @@ def _li_pdf():
 
 
 class TestLinkedInMergedReflectsRealExtraction:
-    def test_upload_that_merges_nothing_does_not_report_success(
+    def test_a_read_that_finds_no_structure_still_stores_the_text(
         self, api, monkeypatch
     ) -> None:
-        """A layout the heuristic liked but extraction could not read must
-        not be told 'LinkedIn profile enriched' — it must be a 422 the owner
-        can act on, not a lying 200."""
+        """An export whose Top-Skills sidebar is empty is still a GOOD upload.
+
+        REWRITTEN FOR DECISION 28 (2026-09-21). This used to demand a 422
+        whenever extraction produced no ``linkedin_skills`` / ``linkedin_positions``
+        — correct while Job360 did the reading, because a profile with neither
+        held nothing usable. It is the wrong question now: what an upload
+        DELIVERS is the export's TEXT, which the user's own agent reads to fill
+        the sections. Rejecting an export because our structural pass found no
+        sidebar would throw away exactly the thing the agent needs.
+
+        The guard that still catches a genuinely bad file is
+        ``_looks_like_linkedin(text)``, which raises BEFORE any profile field
+        is touched — pinned by
+        ``test_a_file_that_does_not_look_like_linkedin_at_all_is_a_422`` below.
+        """
         import src.api.routes.profile as profile_route
 
         _stub_linkedin_read(monkeypatch)
 
         async def _extracts_nothing(profile):
-            # Extraction genuinely RAN (this is the point — the pre-check
-            # heuristic already passed) but produced no LinkedIn signal at
-            # all, same as a real parse of a layout the LLM can't handle.
+            # The read genuinely RAN and found no structure — a two-column
+            # export with its Skills section collapsed, which is common.
             return profile
 
         monkeypatch.setattr(profile_route, "run_two_pass_extraction", _extracts_nothing)
@@ -942,16 +953,19 @@ class TestLinkedInMergedReflectsRealExtraction:
 
         r = api.post("/api/profile/linkedin", files=_li_pdf())
 
-        assert r.status_code == 422, (
-            f"a merge that produced nothing must not be a 200: {r.status_code} {r.text}"
+        assert r.status_code == 200, f"a captured export must not be rejected: {r.text}"
+        assert r.json()["merged"] is True
+        got = api.get("/api/profile").json()
+        # The receipt is stamped because the thing it confirms DID happen:
+        # the export's text is on the profile.
+        assert got["summary"]["linkedin_filename"] == "li.pdf"
+        # And the profile reports LinkedIn as connected, because it is — the
+        # text is there for the agent to read. Reading only skills-or-positions
+        # here used to answer False immediately after this 200.
+        assert got["summary"]["has_linkedin"] is True, (
+            "a stored export must read as connected, or the screen and the MCP "
+            "tool both deny a LinkedIn the profile plainly holds"
         )
-        assert "linkedin" in r.text.lower() or "pdf" in r.text.lower(), (
-            "the 422 copy must tell the owner what to do differently"
-        )
-        # No receipt for a connection that did not happen (mirrors the CV /
-        # GitHub receipt contract already pinned above).
-        got = api.get("/api/profile").json()["summary"]
-        assert got["linkedin_filename"] == "", "a failed merge left a receipt behind"
 
     def test_upload_that_actually_merges_still_succeeds(self, api, monkeypatch) -> None:
         """CONTROL for the test above — a real merge must still be a 200."""
@@ -1004,46 +1018,65 @@ class TestLinkedIn415NamesOnlyPdf:
 
 
 class TestLinkedInReuploadDoesNotUnionForever:
-    def test_reupload_resets_linkedin_owned_fields_before_re_extracting(
+    def test_reupload_resets_what_it_can_reread_and_keeps_what_it_cannot(
         self, api, monkeypatch
     ) -> None:
-        """Finding 6 — a second export must not UNION onto the first one's
-        linkedin_-owned fields forever.
+        """Finding 6, split in two by decision 28 (2026-09-21).
 
-        CONTROL: the fake extraction below always APPENDS one entry to
-        `linkedin_courses` (simulating what every real linkedin_* merge does
-        when nothing clears the field first). If the route stopped calling
-        `_clear_prefixed(cv, "linkedin_")` before re-extracting, the second
-        upload would see 2 entries instead of 1 — this test would then fail,
-        proving it can actually detect the regression it guards against.
+        A second export must not UNION onto the first one's structural fields
+        forever — so the route resets them before re-reading. But it must ALSO
+        not clear the prose sections, because since decision 28 nothing in this
+        codebase can refill them: positions, courses, honors and the rest are
+        written by the user's own agent through ``update_profile``, and a
+        blanket ``_clear_prefixed(cv, "linkedin_")`` would delete that work
+        permanently on every re-upload.
+
+        So the reset is scoped to ``_LINKEDIN_STRUCTURAL_FIELDS`` — exactly
+        what ``deterministic_linkedin_fields`` can produce — and this test
+        pins both halves of that line at once.
+
+        CONTROL: the fake extraction below APPENDS to both shelves on every
+        run. A structural shelf that is correctly reset first can therefore
+        only ever hold ONE entry; an agent-owned shelf that is correctly left
+        alone accumulates. Swap the reset back to the whole ``linkedin_``
+        prefix and the second assertion fails; drop the reset entirely and the
+        first one does.
         """
         import src.api.routes.profile as profile_route
 
         _stub_linkedin_read(monkeypatch)
 
-        async def _appends_one_course(profile):
+        async def _appends_to_both(profile):
             cv = profile.cv_data
-            cv.linkedin_skills = ["Python"]  # so the upload is a real merge
-            # linkedin_courses is list[dict] (CVData) — a course is a
-            # structured row, not a bare string.
+            # STRUCTURAL: the route resets this before calling us, so an
+            # append can never accumulate.
+            cv.linkedin_skills = [*cv.linkedin_skills, f"Skill-{len(cv.linkedin_skills) + 1}"]
+            # AGENT-OWNED: stands in for what an agent wrote via
+            # update_profile. linkedin_courses is list[dict] on CVData — a
+            # course is a structured row, not a bare string.
             cv.linkedin_courses = [
                 *cv.linkedin_courses,
                 {"name": f"Course-{len(cv.linkedin_courses) + 1}"},
             ]
             return profile
 
-        monkeypatch.setattr(profile_route, "run_two_pass_extraction", _appends_one_course)
+        monkeypatch.setattr(profile_route, "run_two_pass_extraction", _appends_to_both)
         _register_and_login(api, "li-reupload@example.com")
 
         for _ in range(2):
             r = api.post("/api/profile/linkedin", files=_li_pdf())
             assert r.status_code == 200, r.text
 
-        subs = api.get("/api/profile").json()["linkedin_subsections"]
-        course_names = [c.get("name") for c in subs["courses"]]
-        assert course_names == ["Course-1"], (
-            "a re-upload unioned onto the previous LinkedIn export instead of "
-            f"resetting linkedin_-owned fields first: {course_names}"
+        body = api.get("/api/profile").json()
+        skills = body["skills_by_source"]["linkedin"]
+        assert skills == ["Skill-1"], (
+            "a re-upload unioned onto the previous export's STRUCTURAL fields "
+            f"instead of resetting them first: {skills}"
+        )
+        course_names = [c.get("name") for c in body["linkedin_subsections"]["courses"]]
+        assert course_names == ["Course-1", "Course-2"], (
+            "THE DATA LOSS: a re-upload cleared an agent-owned LinkedIn "
+            f"section that nothing can refill: {course_names}"
         )
 
     def test_reupload_does_not_wipe_the_cvs_own_job_titles(
@@ -1117,22 +1150,28 @@ def test_cv_industries_reaches_the_api_response(api, monkeypatch) -> None:
 
 
 class TestAFailedLinkedInReuploadKeepsTheOldData:
-    """A rejected re-upload must not cost the user the LinkedIn they already had.
+    """A re-upload must not cost the user the LinkedIn they already had.
 
     THE BUG THIS PINS, found by the review pass and reproduced live against
-    Postgres before the fix: ``has_linkedin`` went True -> False and every
-    ``linkedin_*`` field emptied.
+    Postgres before the first fix: ``has_linkedin`` went True -> False and
+    every ``linkedin_*`` field emptied.
 
-    The route clears the linkedin_* fields, writes the new raw text, then calls
-    ``_extract_save_trigger`` -- which calls ``save_profile`` UNCONDITIONALLY as
-    part of its body. Only after that save could ``merged`` be computed. So a
-    second upload that passed the cheap shape heuristic but extracted nothing
-    PERSISTED the wipe and then returned an honest-looking "re-export and try
-    again", with no hint that anything had been lost.
+    HOW THE FIX WORKS NOW (decision 28, 2026-09-21). It used to be a
+    snapshot-and-restore: the route wiped every ``linkedin_*`` field, and if
+    the LLM pass then produced nothing it put the snapshot back and answered
+    422. That whole mechanism is gone, because the thing it protected against
+    is gone: the route no longer wipes what it cannot rewrite. Its reset is
+    scoped to the STRUCTURAL fields the deterministic read actually produces
+    (``_LINKEDIN_STRUCTURAL_FIELDS``), and the twelve prose shelves —
+    positions, languages, projects, volunteer, courses, honors, publications,
+    patents, organizations, test_scores, recommendations, interests — belong to
+    the user's agent and are never touched.
 
-    The three tests in TestLinkedInMergedReflectsRealExtraction cannot catch
-    this: every one of them starts from a profile with no prior LinkedIn, so
-    there is nothing to destroy. This one seeds a good upload FIRST.
+    So the promise is now structural rather than transactional, and the test
+    asserts the promise, not the mechanism. The tests in
+    TestLinkedInMergedReflectsRealExtraction cannot catch this: every one of
+    them starts from a profile with no prior LinkedIn, so there is nothing to
+    destroy. This one seeds a good upload FIRST.
     """
 
     def test_a_rejected_reupload_leaves_the_previous_linkedin_intact(
@@ -1166,18 +1205,21 @@ class TestAFailedLinkedInReuploadKeepsTheOldData:
             profile_route, "run_two_pass_extraction", _extracts_nothing
         )
         second = api.post("/api/profile/linkedin", files=_li_pdf())
-        assert second.status_code == 422, (
-            f"a merge that produced nothing must still be rejected: {second.text}"
+        assert second.status_code == 200, (
+            f"a captured export is a good upload: {second.text}"
         )
 
         after = api.get("/api/profile").json()
         assert after["summary"]["has_linkedin"] is True, (
-            "THE DATA LOSS: a rejected re-upload deleted the LinkedIn profile "
-            "the user already had. The wipe is saved before `merged` is known, "
-            "so the rollback has to be persisted too."
+            "THE DATA LOSS: a re-upload whose read found nothing deleted the "
+            "LinkedIn profile the user already had."
         )
-        assert "kept" in second.text.lower(), (
-            "the 422 copy does not tell the user their existing data survived"
+        # The agent-owned shelf specifically — the one nothing in this codebase
+        # can refill, so a wipe here would be permanent.
+        assert after["linkedin_subsections"]["positions"], (
+            "THE DATA LOSS THAT MATTERS MOST: the dated positions the user's "
+            "agent wrote were cleared by a re-upload, and no code path can "
+            "ever put them back."
         )
 
     def test_a_successful_reupload_still_replaces_the_old_data(

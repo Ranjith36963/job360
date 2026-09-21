@@ -32,12 +32,29 @@ class TestMissingDataFileDegradesGracefully:
         empty vocabulary cached poisons every later test in the SESSION. That
         really happened (2026-08-13) and stayed invisible until
         `tests/test_shipped_data.py` started asserting the vocabulary is
-        non-empty."""
+        non-empty.
+
+        BOTH CACHES, and the second one is the whole point. This cleared
+        `_seniority_terms` only, and `detect_seniority` below reads
+        `_seniority_noise` too — so the single test in this class cached
+        `None` for the noise pattern under the broken `_DATA` and nothing ever
+        cleared it. Every later `detect_seniority` in the session then skipped
+        noise stripping, which is exactly the poisoning this docstring warns
+        about, one cache over: "Head of Year 5" came back DIRECTOR.
+
+        It stayed hidden because some earlier file in the full suite happened
+        to warm the noise cache from the real data first. Deleting a few test
+        files in the decision-28 slice removed that accident and six tests went
+        red on CI — never locally, where a subset runs and the order differs.
+        A cleanup that names one of two module globals is not cleanup.
+        """
         from src.services.profile import seniority
 
         seniority._seniority_terms.cache_clear()
+        seniority._seniority_noise.cache_clear()
         yield
         seniority._seniority_terms.cache_clear()
+        seniority._seniority_noise.cache_clear()
 
     def test_seniority_terms_file_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from src.services.profile import seniority

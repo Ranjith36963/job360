@@ -126,11 +126,13 @@ jobs:
           # Absent keys are simply not probed — absent is not broken. But if
           # NONE are set the script exits 2, because a probe with nothing to
           # probe is blind, not clean.
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          # email_sender.py falls back to SMTP_PASSWORD when it looks like a
+          # Resend key, and the probe mirrors that fallback — so without this
+          # line an installation keyed that way reads as "no email credential
+          # at all" and opens a daily "nobody can log in" issue while login
+          # works fine. A false alarm on the loudest possible subject.
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
           PROBE_FORCE_RED: ${{ inputs.drill && '1' || '' }}
@@ -157,12 +159,12 @@ jobs:
           code="${{ steps.probe.outputs.dead }}"
           # TWO ALARMS, because they have TWO DIFFERENT FIXES (same lesson as
           # accuracy-audit.yml). "dead" = a key we own stopped working -> rotate
-          # it. "missing" = we never had one -> create one, and three of the four
-          # are free. Blurring them sends the owner to the wrong page.
+          # it. "missing" = we never had one -> create one. Blurring them sends
+          # the owner to the wrong page.
           if [ "${{ inputs.drill }}" = "true" ]; then
             title="DRILL: provider probe test - not a real problem"
           elif [ "$code" = "3" ]; then
-            title="KEYS: no LLM provider is configured - the judge cannot run"
+            title="KEYS: no email credential is configured - nobody can log in"
           else
             title="KEYS: a provider credential is dead"
           fi
@@ -189,7 +191,7 @@ jobs:
             # Both titles close here: whichever fix the owner applied (rotated a
             # dead key, or created a first one), a clean probe proves it worked.
             for t in "KEYS: a provider credential is dead" \
-                     "KEYS: no LLM provider is configured - the judge cannot run"; do
+                     "KEYS: no email credential is configured - nobody can log in"; do
               n=$(gh issue list --state open --json number,title \
                     --jq ".[] | select(.title==\"$t\") | .number" | head -1)
               # `if`, not `[ -n "$n" ] && ...` — under `set -e` a false test as

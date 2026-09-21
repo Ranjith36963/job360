@@ -326,8 +326,8 @@ export function CVUpload({
             </h3>
             <p className="text-xs text-muted-foreground">
               {hasCV
-                ? "Your CV has been parsed — this is what your agent reads"
-                : "PDF or DOCX — we extract skills, titles, and more"}
+                ? "Your CV is stored — this is what your agent reads"
+                : "PDF or DOCX — Job360 stores the text; your connected agent fills in the rest"}
             </p>
           </div>
           {hasCV && (
@@ -335,17 +335,23 @@ export function CVUpload({
           )}
         </div>
 
-        {/* ── HOW MUCH OF THIS CV DID WE ACTUALLY UNDERSTAND? ───────────────
-            Measured on 7 real CVs, the parser captured 18-48% of what people
-            had written. Nothing on screen said so, so nobody could know their
-            profile was thin — they just quietly got worse matches forever.
+        {/* ── HOW MUCH OF THIS CV IS ON THE PROFILE? ───────────────────────
+            Measured on 7 real CVs, the structural read captured 18-48% of what
+            people had written. Nothing on screen said so, so nobody could know
+            their profile was thin.
+
+            Since decision 28 that gap is EXPECTED right after an upload, and
+            it is the agent's to close: Job360 reads only what it can prove
+            structurally, the connected agent reads the rest of the text and
+            writes it back. So this banner now says who fills it in, not "add
+            it by hand".
 
             Deliberately lives HERE and not in CVViewer: CVViewer is rendered
             nowhere (a Playwright run proved it), and a warning in a dead
             component is the same as no warning at all.
 
-            Silent on a good extraction. A banner that appears every time is a
-            banner nobody reads. */}
+            Silent on a good read. A banner that appears every time is a banner
+            nobody reads. */}
         {(() => {
           const q = (cvDetail as { extraction_score?: {
             verdict?: string; coverage?: number; problems?: string[];
@@ -365,12 +371,19 @@ export function CVUpload({
             >
               <p className="font-semibold mb-1">
                 {broken
-                  ? "We could not read much of this CV"
-                  : `We understood about ${pct}% of this CV`}
+                  ? "Only the text of this CV is stored so far"
+                  : `About ${pct}% of this CV is on your profile so far`}
               </p>
               <p className="text-muted-foreground mb-2">
-                Anything we missed will not be matched against jobs. Add what is
-                missing in your preferences on the right.
+                Job360 stores the text and the parts it can read structurally.{" "}
+                <a
+                  href="/settings/connect"
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  Connect your agent
+                </a>{" "}
+                and ask it to fill in your profile — or add what is missing in
+                your preferences on the right.
               </p>
               {q.problems?.length ? (
                 <ul className="list-disc pl-4 space-y-0.5 text-muted-foreground">
@@ -579,7 +592,14 @@ export function CVUpload({
           Enrich Your Profile
         </h3>
         <p className="text-xs text-muted-foreground mb-4">
-          Optional: add LinkedIn and GitHub data for better matching
+          Optional: add LinkedIn and GitHub. Job360 stores what it reads there;{" "}
+          <a
+            href="/settings/connect"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            your connected agent
+          </a>{" "}
+          fills in the rest.
         </p>
 
         {/* LinkedIn */}

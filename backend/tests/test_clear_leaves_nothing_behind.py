@@ -79,9 +79,6 @@ class TestClearingTheCV:
                        "after this call. The Clear button uses _clear_cv, which "
                        "does empty it; that path is covered below.",
         "cv_uploaded_at": "same upload receipt",
-        "llm_input_hashes": "only the cv/linkedin keys are dropped; github and "
-                            "about_me hashes must survive or we re-bill for "
-                            "inputs the user never touched",
     }
 
     def test_nothing_cv_owned_survives(self) -> None:
@@ -126,14 +123,13 @@ class TestClearingTheCV:
                 "data loss."
             )
 
-    def test_the_github_and_about_me_hashes_survive(self) -> None:
-        """Dropping them would force a paid re-read of inputs that did not
-        change."""
-        from src.services.profile.two_pass import reset_cv_owned_fields
-
-        cv = CVData(llm_input_hashes={"cv": "a", "linkedin": "b", "github": "c", "about_me": "d"})
-        reset_cv_owned_fields(cv)
-        assert sorted(cv.llm_input_hashes) == ["about_me", "github"]
+    # test_the_github_and_about_me_hashes_survive used to live here. It pinned
+    # ``llm_input_hashes`` — a {input: sha256} cache of which inputs the paid
+    # LLM passes had already read, so an unchanged input was not re-billed.
+    # Decision 28 (2026-09-21) deleted the LLM passes, so the field is gone
+    # from CVData entirely (models.py:49). There is no paid call left to skip,
+    # so there is nothing left for that test to guard — deleted rather than
+    # rewritten to assert on a field that no longer exists.
 
 
 class TestClearingLinkedIn:
@@ -160,14 +156,8 @@ class TestClearingLinkedIn:
 
         cv = CVData()
         _fill_every_field(cv)
-        # Realistic keys — the blanket filler puts junk in here, which would
-        # make the assertion below pass or fail for the wrong reason.
-        cv.llm_input_hashes = {"cv": "a", "linkedin": "b", "github": "c"}
         _clear_linkedin(cv)
         assert cv.skills and cv.name and cv.raw_text
-        # A LinkedIn clear must not force the CV to be re-extracted.
-        assert "cv" in cv.llm_input_hashes
-        assert "linkedin" not in cv.llm_input_hashes
 
 
 class TestClearingGitHub:
@@ -210,7 +200,6 @@ class TestClearingEverything:
 
         survivors = _non_empty(cv)
         allowed = {
-            "llm_input_hashes",  # the about_me hash only, by this point
             "about_me_inferred_skills",  # owned by preferences, cleared with them
         }
         unexpected = survivors - allowed

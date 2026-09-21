@@ -199,12 +199,19 @@ function ConnectAppCard() {
 // One recipe per assistant. Verified against each vendor's own docs
 // 2026-09-20 — plan names and menu paths only go here once we've checked
 // them there; do not extend this list from memory.
+//
+// `ready` is a live measurement, not a guess: each assistant's real OAuth
+// callback was posted to production's own /api/oauth/register on 2026-09-21
+// and the server's answer (accepted vs. "invalid_redirect_uri") recorded
+// here. A "blocked" entry means the CALLBACK for that assistant is not yet
+// in the server's allow-list — nothing about the assistant itself.
 // ---------------------------------------------------------------------------
 
 type AssistantRecipe = {
   name: string;
   plans: string;
   steps: string;
+  ready: boolean;
 };
 
 const ASSISTANT_RECIPES: AssistantRecipe[] = [
@@ -213,29 +220,34 @@ const ASSISTANT_RECIPES: AssistantRecipe[] = [
     plans: "Every plan, including Free (Free gets one custom connector).",
     steps:
       "Settings → Connectors → Add custom connector → paste the address above → Connect. Sign-in happens automatically.",
+    ready: true,
   },
   {
     name: "ChatGPT",
     plans: "Plus, Pro, Business, Enterprise or Edu.",
     steps:
       "Settings → Apps & Connectors → turn on Developer mode → add the address above as a server.",
+    ready: true,
   },
   {
     name: "Perplexity",
     plans: "Pro, Max or Enterprise.",
     steps:
       "Settings → Connectors → Add custom remote connector → paste the address above → choose OAuth.",
+    ready: false,
   },
   {
     name: "Grok",
     plans: "Paid accounts.",
     steps: "Add an MCP connection with the address above.",
+    ready: true,
   },
   {
     name: "Gemini",
     plans: "Gemini Enterprise / Business editions only.",
     steps:
       "An admin adds the address above as a custom MCP server connection. The consumer Gemini app doesn't support this yet.",
+    ready: false,
   },
 ];
 
@@ -257,6 +269,18 @@ function AssistantRecipesCard() {
               <p className="font-medium">{a.name}</p>
               <p className="text-xs text-muted-foreground">{a.plans}</p>
               <p className="text-xs text-muted-foreground">{a.steps}</p>
+              <p
+                className={
+                  a.ready
+                    ? "text-xs text-emerald-600 dark:text-emerald-400"
+                    : "text-xs text-amber-600 dark:text-amber-400"
+                }
+                data-testid={`assistant-status-${a.name.toLowerCase()}`}
+              >
+                {a.ready
+                  ? "Ready."
+                  : "Ask the owner to allowlist this assistant's callback first."}
+              </p>
             </li>
           ))}
         </ul>

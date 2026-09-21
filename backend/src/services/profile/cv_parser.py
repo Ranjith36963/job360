@@ -1,8 +1,14 @@
-"""CV text extraction (PDF/DOCX) and LLM-powered analysis.
+"""CV text extraction (PDF/DOCX) and deterministic, structural field reading.
 
-Text extraction uses pdfplumber/python-docx (binary file reading).
-All understanding, extraction, and classification is done by LLM.
-Zero hardcoded patterns, zero domain-specific regex, zero keyword lists.
+Text extraction uses pdfplumber/python-docx (binary file reading). What we read
+off that text is STRUCTURE only — the delimited "Skills" and "Summary" sections,
+their list/parenthesis tokens, and font-size section boundaries. Zero hardcoded
+patterns, zero domain-specific regex, zero keyword lists (hard rule #28).
+
+Decision 28 (2026-09-21): Job360 has no brain of its own. The CV prompt and its
+LLM pass (``llm_cv_fields_from_text``) lived here and are gone. We keep the raw
+text; the user's own agent reads it (``get_profile``) and writes the structured
+fields back (``update_profile``).
 """
 
 from __future__ import annotations
@@ -17,102 +23,6 @@ from src.services.profile.models import CVData
 from src.utils.loop_guard import cpu_bound
 
 logger = logging.getLogger("job360.profile.cv_parser")
-
-# ── LLM prompt for CV analysis ──────────────────────────────────
-
-_CV_SYSTEM = """You are an expert CV/resume analyst. You extract ALL professional information from CVs across ANY domain — technology, medical, legal, construction, finance, education, or any other field.
-
-Your job is to extract EVERYTHING a recruiter or job matching engine would need. Miss nothing. Every skill, every achievement, every role, every metric, every certification matters.
-
-You return structured JSON. Nothing else."""
-
-_CV_PROMPT = """Analyze this CV/resume text and extract ALL professional information. Be exhaustive — extract every single skill, technology, tool, methodology, certification, achievement, and qualification mentioned anywhere in the document.
-
-Return a JSON object with exactly these fields:
-
-{{
-  "name": "Full name of the candidate",
-  "headline": "Their stated role/title from the CV header (e.g., 'AI/ML Engineer | Generative AI Specialist' or 'Cardiology Consultant')",
-  "location": "Their location (e.g., 'United Kingdom', 'London')",
-  "summary": "Their professional summary paragraph, verbatim from the CV",
-  "skills": [
-    "Every skill, technology, tool, framework, methodology, domain expertise mentioned ANYWHERE in the CV. Include compound terms like 'AWS Bedrock', 'Docker deployment', 'HIPAA compliance', 'Contract negotiation'. Include soft skills, domain-specific skills, certification topics. Be exhaustive — if they mentioned it, extract it."
-  ],
-  "experience": [
-    {{
-      "company": "Company name",
-      "title": "Job title/role",
-      "dates": "Date range as written",
-      "location": "Location if mentioned",
-      "bullets": ["Each achievement/responsibility as a separate string"]
-    }}
-  ],
-  "education": [
-    {{
-      "degree": "Degree name",
-      "institution": "University/school name",
-      "dates": "Date range",
-      "details": ["Coursework, dissertation, projects — each as separate string"]
-    }}
-  ],
-  "projects": [
-    {{
-      "name": "Project name",
-      "description": "What it does and what they built, in their words",
-      "technologies": ["Each tool/framework named for THIS project"],
-      "dates": "Date range if written"
-    }}
-  ],
-  "certifications": [
-    "Each certification with issuer and date, as a single string"
-  ],
-  "achievements": [
-    "Every quantified achievement (percentages, metrics, time improvements, cost savings). Extract the full phrase, e.g., 'achieving 95% response accuracy', 'reducing query latency by 35%'"
-  ],
-  "experience_level": "One of: intern, junior, mid, senior, lead, principal, director — infer from experience duration and roles",
-  "industries": ["Industries/domains they have experience in"],
-  "languages": ["Human languages they speak, if mentioned"],
-  "right_to_work": "Their stated work-authorisation status, VERBATIM, if the CV says it (e.g. 'British citizen', 'Indefinite Leave to Remain', 'Graduate Route visa until 2027', 'requires sponsorship'). Return null if the CV does not mention it — never infer it from nationality, name or place of study.",
-  "career_domain": "The ONE coarse career bucket that best fits this person's OVERALL career. Must be EXACTLY one of: software_engineering, data_and_ai, product_and_design, marketing_and_growth, sales_and_bizdev, finance_and_accounting, operations_and_supply, human_resources, legal_and_compliance, healthcare_and_lifesciences, education_and_research, engineering_physical, customer_support, media_and_content, skilled_trades, other. Return null (not a guess) when the CV genuinely does not fit any bucket clearly."
-}}
-
-RULES:
-1. Extract every CONCRETE skill — tools, technologies, frameworks, methods, named
-   competencies, domains, certifications. When in doubt about a concrete skill, include it
-   (a missed skill is a missed job match).
-2. Skills should be individual items, not section labels. "Python" not "Programming Languages: Python".
-3. For a single compound tool keep it whole: "AWS Bedrock". BUT when a skill lists tools in parentheses, extract the parent AND each tool inside as SEPARATE skills — "AWS (Bedrock, SageMaker, S3, CloudWatch)" → "AWS", "AWS Bedrock", "SageMaker", "S3", "CloudWatch"; "Python (Pandas, NumPy, Matplotlib)" → "Python", "Pandas", "NumPy", "Matplotlib"; "OCR (Tesseract)" → "OCR", "Tesseract".
-4. Include achievements with their metrics: "achieving 90% accuracy" not just "90%".
-5. If something appears in both the skills section AND experience bullets, include it once in skills.
-6. Domain-agnostic: whether it's "TensorFlow" or "HIPAA compliance" or "Contract negotiation" — extract it.
-7. Extract named CATEGORIES and ACRONYMS too, not only the products under them. When the CV
-   names a category/acronym alongside specific tools (e.g. "EDR Tool: CrowdStrike, Defender"
-   or "SIEM, EDR and MDR tools"), extract BOTH the acronym/category ("EDR", "MDR", "SIEM")
-   AND each product ("CrowdStrike", "Defender"). Domain initialisms ARE skills.
-8. Skills are concrete and transferable. Do NOT turn a vague job DUTY into a skill — skip
-   generic activities like "reporting", "teamwork", "collaboration", "documentation",
-   "communication" UNLESS stated as a named competency, framework, or methodology.
-9. MINE THE PROSE — not just the skills section. A skill counts even when it appears ONLY
-   inside a project, an experience bullet, or an education detail and is never listed in the
-   skills section. When a sentence shows a technique, architecture, method, model, algorithm,
-   or concept being used, built, trained, or applied, extract that technique/method/concept
-   ITSELF as a skill (e.g. a bullet describing a system built with a convolutional network
-   demonstrates that architecture; a bullet saying transfer learning was applied demonstrates
-   that method; a bullet about a trained forecasting model demonstrates that modelling skill).
-   This applies to EVERY domain, not just software (e.g. a clinical audit, a litigation
-   strategy, a structural load calculation are skills demonstrated in prose). Do NOT limit
-   skills to the items already written in the skills section — the strongest signal often
-   hides in what the person actually DID.
-10. For "career_domain", classify only when the evidence clearly points to ONE bucket from
-    the fixed list above. A wrong guess corrupts downstream archetype-aware scoring, so a
-    CV that spans multiple domains equally, or doesn't fit any bucket confidently, gets
-    null — never invent a value outside the listed set.
-
-CV TEXT:
----
-{cv_text}
----"""
-
 
 # ── File reading (infrastructure — not LLM) ─────────────────────
 
@@ -265,68 +175,6 @@ def extract_text(file_path: str) -> str:
     else:
         logger.warning("Unsupported file type: %s", ext)
         return ""
-
-
-# ── LLM-powered CV analysis ─────────────────────────────────────
-
-_SECTION_HINT_HEADINGS = (
-    "summary",
-    "experience",
-    "education",
-    "skills",
-    "certifications",
-    "projects",
-    "achievements",
-)
-
-
-# TAGGED, BECAUSE THE CALLER'S `to_thread` IS NOT THE GUARD — this is.
-# `parse_cv_async` now offloads this call, so today's path is safe. But that is
-# the CALLER remembering, and the whole thesis of `@cpu_bound` (post-mortem §4)
-# is that the guard moved from the caller to the callee precisely because
-# callers forget: the next `await`-less call from async code would push every
-# PDF page through pdfplumber on the loop thread. The tag makes that LOUD, not
-# impossible — it raises in tests and dev, but in PRODUCTION it logs an ERROR +
-# one Sentry message and then runs the work anyway (a slow response beats a
-# 500), so `asyncio.to_thread` at the call site is still required.
-# Fixing the one call site and not tagging the function is exactly the
-# half-measure that let this bug class bite three times.
-# (CodeRabbit, PR #386.)
-@cpu_bound
-def _build_section_hint(file_path: str) -> str:
-    """Batch 1.7b — pre-segment the PDF via font-size clustering and
-    emit a compact hint block the LLM can use as structural guidance.
-
-    Returns an empty string when the file isn't a PDF, pdfplumber
-    can't read it, no sections are detected, or no recognised heading
-    has a body. On success returns a ``SECTIONS_HINT:\\n[KEY]\\n
-    body\\n...`` block suitable for appending to the prompt — the
-    main prompt still hands the LLM the full raw text, so this hint
-    supplements rather than replaces. Matches plan §4.7's "pre-
-    segmented sections reduce ambiguity, do not gate extraction".
-    """
-    path = Path(file_path)
-    if path.suffix.lower() != ".pdf":
-        return ""
-    sections = extract_sections_from_pdf(file_path)
-    if not sections:
-        return ""
-
-    parts: list[str] = []
-    for key in _SECTION_HINT_HEADINGS:
-        body = sections.get(key, "").strip()
-        if body:
-            # Truncate to keep the hint compact; the main prompt
-            # already has the full text, so hints stay brief.
-            if len(body) > 1200:
-                body = body[:1200] + "…"
-            parts.append(f"[{key.upper()}]\n{body}")
-    if not parts:
-        return ""
-    return (
-        "\n\nPRE-SEGMENTED SECTIONS (from PDF layout analysis — use as "
-        "structural hints; the full raw text above is authoritative):\n" + "\n\n".join(parts)
-    )
 
 
 # ── CV deterministic pass (Pass 1) — no LLM, plain text heuristics ──
@@ -525,8 +373,9 @@ def _det_collect_section(
 
 
 # NOTE (CLAUDE.md rule #28): the hardcoded prose skill-term + common-tool
-# vocabularies that used to live here were removed. The deterministic pass does
-# NOT carry skill knowledge; semantic prose→skill recognition is the LLM's job.
+# vocabularies that used to live here were removed. This pass does NOT carry
+# skill knowledge; semantic prose→skill recognition belongs to the user's own
+# agent (decision 28), never to a keyword list here.
 
 
 _DET_WRAP_MIN_LEN = 40  # a line shorter than this didn't hit the page margin,
@@ -673,13 +522,15 @@ def _det_collapse_acronyms(skills: list[str]) -> list[str]:
 
 
 def deterministic_cv_fields(raw_text: str) -> dict[str, Any]:
-    """Pass 1 for the CV — pull base fields from text with NO LLM.
+    """Read the base CV fields off the text — STRUCTURE only.
 
     Conservative by design: only the clearly-delimited "Skills" and
     "Summary" sections are read. Returns ``{"skills": [...], "summary": str}``.
-    The LLM pass later enhances this; this pass guarantees *something* lands
-    even when no LLM key is configured, and lets the orchestrator re-run on a
-    later change from the stored ``raw_text``.
+    Since decision 28 this is the WHOLE of Job360's own reading of a CV —
+    everything semantic (roles, dates, achievements, the skills stated only in
+    prose) belongs to the user's agent, which reads ``raw_text`` and writes the
+    fields back with ``update_profile``. Re-runs from the stored ``raw_text``,
+    so no field ever depends on still having the original file.
     """
     if not raw_text or not raw_text.strip():
         return {"skills": [], "summary": ""}
@@ -721,29 +572,27 @@ def deterministic_cv_fields(raw_text: str) -> dict[str, Any]:
     skills = _det_collapse_acronyms(skills)
 
     # NOTE: no hardcoded skill-keyword scanning here (CLAUDE.md rule #28).
-    # The deterministic pass reads STRUCTURE only (the Skills section + its
-    # list/parenthesis tokens). Semantic skills stated in prose are the LLM
-    # pass's job — see llm_cv_fields_from_text.
+    # This pass reads STRUCTURE only (the Skills section + its list/parenthesis
+    # tokens). Semantic skills stated in prose are the user's AGENT's job — it
+    # reads the same raw_text off get_profile and writes them with
+    # update_profile (decision 28).
     summary = " ".join(_det_collect_section(lines, _DET_SUMMARY_HEADINGS)).strip()
     return {"skills": skills, "summary": summary}
 
 
 async def parse_cv_async(file_path: str) -> CVData:
-    """Parse a CV file using LLM analysis. Works for ANY professional domain.
+    """Read a CV file into a ``CVData`` — raw text plus the deterministic fields.
 
-    Batch 1.1 — routes through ``llm_extract_validated`` with
-    ``CVSchema`` so LLM output is type-checked at the boundary and
-    self-corrected on validation failure (up to 2 retries).
+    Decision 28 (2026-09-21): this used to hand the text to an LLM provider
+    chain and return whatever the model said the CV contained. Job360 no longer
+    has a model of its own. It extracts the text (PDF/DOCX), reads the
+    STRUCTURE it can prove — the delimited Skills and Summary sections — and
+    stops there. The user's own agent reads ``raw_text`` through ``get_profile``
+    and writes the structured fields back through ``update_profile``.
 
-    Batch 1.7b — when the input is a PDF, font-size section
-    segmentation supplements the raw text with a pre-segmented hint
-    block. The LLM still sees the full raw text; hints just reduce
-    ambiguity on multi-column or heading-heavy layouts. Graceful
-    no-op for non-PDFs / pdfplumber failures / no-sections cases.
-
-    The untyped ``_llm_result_to_cvdata`` adapter is kept below as a
-    fallback for callers that pass pre-fetched dicts OR when strict
-    validation fails after all retries (review fix #3).
+    Raises ``RuntimeError`` when no text can be extracted at all (corrupt file,
+    scanned image, unsupported format) — that is a real upload failure and the
+    caller must surface it.
     """
     # pdfplumber/python-docx are synchronous and CPU-bound; a 2-page PDF was
     # measured stalling the loop 2,399 ms (tests/test_upload_does_not_block_loop.py).
@@ -755,59 +604,28 @@ async def parse_cv_async(file_path: str) -> CVData:
             "File may be corrupted, empty, or in an unsupported format. "
             "Only PDF and DOCX files are supported."
         )
-
-    # PDF-only font-size section hint (needs the file). The LLM extraction
-    # itself works purely off text — see ``llm_cv_fields_from_text``.
-    #
-    # OFFLOADED FOR THE SAME REASON AS `extract_text` above, and it was
-    # missed the first time round: `_build_section_hint` opens the PDF again and
-    # pushes every page through `extract_sections_from_pdf`. Leaving it on the
-    # loop meant a CV upload could still stall unrelated requests — the exact
-    # defect this change exists to remove, surviving in the very next statement
-    # after the fix. Offloading one of two blocking calls in a function leaves
-    # the function blocking. (CodeRabbit, PR #386.)
-    section_hint = await asyncio.to_thread(_build_section_hint, file_path)
-    return await llm_cv_fields_from_text(raw_text, section_hint=section_hint)
+    return cv_data_from_text(raw_text)
 
 
-async def llm_cv_fields_from_text(raw_text: str, section_hint: str = "") -> CVData:
-    """Pass 2 for the CV — LLM extraction from raw text only (no file needed).
+def cv_data_from_text(raw_text: str) -> CVData:
+    """Build a ``CVData`` from already-extracted CV text — deterministic only.
 
-    Factored out of ``parse_cv_async`` so the two-pass orchestrator can re-run
-    the CV LLM pass on a later profile change from the stored ``cv.raw_text``,
-    without the original upload. Same validation + graceful-degradation
-    contract as the file path (Batch 1.1 / review fix #3).
+    The whole of Job360's own reading of a CV, in one place: keep the text,
+    plus the skills and summary the structural pass can prove. Every other
+    shelf stays empty until the user's agent fills it.
     """
-    from src.services.profile.llm_provider import llm_extract, llm_extract_validated
-    from src.services.profile.schemas import CVSchema, cv_schema_to_cvdata
-
-    prompt = _CV_PROMPT.format(cv_text=raw_text) + section_hint
-
-    try:
-        schema = await llm_extract_validated(prompt, CVSchema, system=_CV_SYSTEM)
-        return cv_schema_to_cvdata(schema, raw_text)
-    except RuntimeError as e:
-        # Review fix #3 — preserve pre-Batch-1.1 graceful-degradation
-        # contract. Validation exhaustion (LLM produced JSON that
-        # couldn't be coerced after retries) falls back to the
-        # defensive path so callers still get a best-effort CVData.
-        # Genuine provider-chain failures (no API keys, all providers
-        # down) still raise so operators are alerted.
-        msg = str(e).lower()
-        if "validation" in msg:
-            logger.warning("CVSchema validation exhausted retries; using defensive coercion: %s", e)
-            try:
-                raw = await llm_extract(prompt, system=_CV_SYSTEM)
-                return _llm_result_to_cvdata(raw_text, raw)
-            except Exception as e2:  # noqa: BLE001
-                logger.warning("Defensive fallback also failed; returning CVData with raw_text only: %s", e2)
-                return CVData(raw_text=raw_text)
-        logger.error("LLM CV analysis failed: %s", e)
-        raise
+    det = deterministic_cv_fields(raw_text)
+    skills, cv_skills_esco = _maybe_normalise_skills_via_esco(det.get("skills", []))
+    return CVData(
+        raw_text=raw_text,
+        skills=skills,
+        cv_skills_esco=cv_skills_esco,
+        summary=det.get("summary", ""),
+    )
 
 
 def parse_cv(file_path: str) -> CVData:
-    """Synchronous wrapper for parse_cv_async (used by CLI)."""
+    """Synchronous wrapper for parse_cv_async (used by the CLI)."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -821,10 +639,6 @@ def parse_cv(file_path: str) -> CVData:
             return pool.submit(lambda: asyncio.run(parse_cv_async(file_path))).result()
     else:
         return asyncio.run(parse_cv_async(file_path))
-
-
-from src.services.profile._llm_utils import coerce_str as _coerce_str  # noqa: E402
-from src.services.profile._llm_utils import coerce_str_list as _coerce_str_list  # noqa: E402
 
 
 def _maybe_normalise_skills_via_esco(
@@ -873,151 +687,3 @@ def _maybe_normalise_skills_via_esco(
         else:
             canonical.append(raw)
     return canonical, esco_map
-
-
-def _coerce_career_domain(value: Any) -> str | None:
-    """Validate a raw LLM ``career_domain`` string against the same closed
-    enum the typed path enforces (``schemas.CareerDomain``), so this untyped
-    fallback adapter can't write a bucket the strict path would have
-    rejected. Unknown/blank/invalid values become ``None`` (never guess) —
-    mirrors ``CVSchema._domain_nullable``.
-
-    Local import, not module-level: ``schemas.py`` imports THIS module at
-    module level (for ``_maybe_normalise_skills_via_esco``), so a top-level
-    `import schemas` here would cycle. cv_parser stays import-free of
-    schemas at module scope; only this function pays the cost, once, on the
-    rare defensive-fallback path.
-    """
-    from src.services.profile.schemas import CareerDomain  # noqa: PLC0415 — see docstring
-
-    if not isinstance(value, str):
-        return None
-    v = value.strip().lower()
-    if v in ("", "unknown", "n/a", "none"):
-        return None
-    try:
-        return CareerDomain(v).value
-    except ValueError:
-        return None
-
-
-def _llm_result_to_cvdata(raw_text: str, result: dict[str, Any]) -> CVData:
-    """Convert LLM JSON response to CVData dataclass.
-
-    Defensive: all fields are type-guarded so weaker LLMs (Cerebras llama3.1-8b,
-    Groq llama-3.3-70b) that deviate from the schema don't crash the parser.
-    """
-    # Scoring-semantic fields (flow into SearchConfig)
-    skills = _coerce_str_list(result.get("skills"))
-    # Step-1.5 S1.5-D/E — opt-in ESCO normalisation. No-op when
-    # ESCO_SKILL_NORMALISATION_ENABLED is false or the ESCO index is missing.
-    skills, cv_skills_esco = _maybe_normalise_skills_via_esco(skills)
-
-    # Display-only fields (NOT used in scoring — kept separate to avoid pollution)
-    name = _coerce_str(result.get("name"))
-    headline = _coerce_str(result.get("headline"))
-    location = _coerce_str(result.get("location"))
-    achievements = _coerce_str_list(result.get("achievements"))
-    # ADAPTER-PARITY FIX (2026-08-07). `cv_schema_to_cvdata` (the live path)
-    # has plumbed `industries` / `cv_languages` through since "review fix #1"
-    # and now plumbs `career_domain` too — this fallback adapter (only
-    # reached when strict CVSchema validation exhausts its retries) silently
-    # dropped all three. Same bug shape as `cv_positions` before it: one
-    # adapter got the fix, the other didn't. See test_adapter_parity.py.
-    industries = _coerce_str_list(result.get("industries"))
-    cv_languages = _coerce_str_list(result.get("languages"))
-    career_domain = _coerce_career_domain(result.get("career_domain"))
-
-    # Education: flatten nested dicts to list of strings for display
-    education_lines: list[str] = []
-    # Finding 7 (Pillar-1 closeout audit, 2026-08-16) — MIRRORS
-    # schemas.cv_schema_to_cvdata. Per-degree details (dissertation,
-    # coursework, course project) used to be appended straight into
-    # `education_lines`, mixed in with the degree/institution text where
-    # nothing could tell a detail bullet from a qualification line. They get
-    # their own shelf now, same as the live adapter — this is exactly the
-    # kind of one-adapter-fixed-the-other-wasn't drift `test_adapter_parity`
-    # exists to catch.
-    education_details: list[str] = []
-    edu_raw = result.get("education", [])
-    if isinstance(edu_raw, list):
-        for edu in edu_raw:
-            if isinstance(edu, dict):
-                degree = _coerce_str(edu.get("degree"))
-                institution = _coerce_str(edu.get("institution"))
-                dates = _coerce_str(edu.get("dates"))
-                if degree:
-                    education_lines.append(degree)
-                if institution:
-                    line = institution
-                    if dates:
-                        line += f" | {dates}"
-                    education_lines.append(line)
-                education_details.extend(_coerce_str_list(edu.get("details")))
-            elif isinstance(edu, str):
-                education_lines.append(edu)
-
-    # Experience: separate job_titles (roles) from companies — don't overload one field
-    job_titles: list[str] = []
-    companies: list[str] = []
-    experience_lines: list[str] = []
-    # STRUCTURED experience (2026-08-06). The prompt above has always asked for
-    # {company, title, dates, location, bullets}, but this adapter kept only the
-    # flattened title/company lists and discarded dates + location + the
-    # title<->company pairing. Nothing downstream could then say which role was
-    # held where, for how long, or how recently — the reason the engine has no
-    # skill-recency signal. The flat lists stay (the scorer's SearchConfig and
-    # every existing consumer read them); this preserves the full record too.
-    cv_positions: list[dict[str, Any]] = []
-    exp_raw = result.get("experience", [])
-    if isinstance(exp_raw, list):
-        for exp in exp_raw:
-            if isinstance(exp, dict):
-                company = _coerce_str(exp.get("company"))
-                title = _coerce_str(exp.get("title"))
-                bullets = _coerce_str_list(exp.get("bullets"))
-                if title:
-                    job_titles.append(title)
-                if company:
-                    companies.append(company)
-                for bullet in bullets:
-                    experience_lines.append(bullet)
-                if title or company:
-                    cv_positions.append({
-                        "company": company,
-                        "title": title,
-                        "dates": _coerce_str(exp.get("dates")),
-                        "location": _coerce_str(exp.get("location")),
-                        "bullets": bullets,
-                    })
-            elif isinstance(exp, str):
-                job_titles.append(exp)
-
-    # Certifications: already type-guarded
-    certifications = _coerce_str_list(result.get("certifications"))
-
-    # Summary
-    summary = _coerce_str(result.get("summary"))
-
-    return CVData(
-        raw_text=raw_text,
-        # Scoring-semantic: ONLY clean skills (no name/headline/achievements pollution)
-        skills=skills,
-        job_titles=job_titles,
-        companies=companies,
-        education=education_lines,
-        certifications=certifications,
-        summary=summary,
-        experience_text="\n".join(experience_lines),
-        cv_positions=cv_positions,
-        # Display-only (accessed via CVData.highlights property for CV viewer)
-        name=name,
-        headline=headline,
-        location=location,
-        achievements=achievements,
-        cv_skills_esco=cv_skills_esco,
-        cv_industries=industries,
-        cv_languages=cv_languages,
-        career_domain=career_domain,
-        cv_education_details=education_details,
-    )

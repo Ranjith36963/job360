@@ -1006,9 +1006,9 @@ export interface paths {
          *
          *     ``section``: cv | linkedin | github | preferences | all.
          *
-         *     Deliberately does NOT re-run extraction: there is nothing to extract, and a
-         *     paid LLM round-trip to rebuild an empty profile would be waste. The stored
-         *     snapshot taken by ``save_profile`` is what makes this reversible.
+         *     Deliberately does NOT re-run extraction: there is nothing left to read, so
+         *     rebuilding an emptied profile would be pure waste. The stored snapshot taken
+         *     by ``save_profile`` is what makes this reversible.
          *
          *     CLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored
          *     profile, so emptying only the base left every agent edit in the cleared
@@ -1126,16 +1126,22 @@ export interface paths {
          * Upload Linkedin
          * @description Enrich user profile with a LinkedIn 'Save to PDF' profile export.
          *
-         *     FAILS LOUDLY (2026-08-16, audit finding 4). This used to compute `merged`
-         *     from `_looks_like_linkedin(text)` alone — a cheap PRE-extraction heuristic
-         *     (2 of 3 markers: URL / 3+ headings / page footer) — and return HTTP 200
-         *     with `merged=True` whenever that heuristic passed, regardless of what the
-         *     real extraction (deterministic + LLM) actually produced. A layout the
-         *     heuristic likes but the extractor cannot parse told the owner "LinkedIn
-         *     profile enriched" while storing nothing usable. `merged` is now computed
-         *     the SAME way `has_linkedin` is in `_build_profile_response`:
-         *     `bool(cv.linkedin_skills or cv.linkedin_positions)`, checked AFTER
-         *     extraction runs — and a merge that yields nothing is a 422, not a 200.
+         *     WHAT A SUCCESSFUL UPLOAD MEANS (decision 28, 2026-09-21). Job360 stores the
+         *     export's TEXT — that is the deliverable, because the user's own agent reads
+         *     it (`get_profile`) and writes the sections back (`update_profile`). So a
+         *     file that IS a LinkedIn export and yields text is a 200; the rejection
+         *     happens BEFORE any profile field is touched, when the text does not look
+         *     like an export at all.
+         *
+         *     Success used to mean "did a model find skills or positions in it"
+         *     (`bool(cv.linkedin_skills or cv.linkedin_positions)`, checked after
+         *     extraction, 422 otherwise). That was right while Job360 did the reading and
+         *     is wrong now: an export whose Top-Skills sidebar is collapsed would be
+         *     rejected and its text — the thing the agent actually needs — thrown away.
+         *
+         *     The reset before the re-read is SCOPED to the structural fields this route
+         *     can rewrite. The prose sections (positions, courses, honors, …) belong to
+         *     the agent and are never cleared, because nothing here could refill them.
          */
         post: operations["upload_linkedin_api_profile_linkedin_post"];
         delete?: never;

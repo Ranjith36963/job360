@@ -12,14 +12,14 @@ from src.services.profile.models import UserPreferences
 logger = logging.getLogger("job360.profile.preferences")
 
 
-# ── Preferences deterministic pass (Pass 1) — STRUCTURE only, NO LLM ─
+# ── Reading about_me — STRUCTURE only, and that is the whole of it ───
 #
 # Structural label words a user might type in their free-text blurb to introduce
 # an explicit list (e.g. "Skills: X, Y" / "Tech stack: A, B"). These are
 # DOCUMENT-STRUCTURE markers — the same kind the CV deterministic pass keys off
 # ("Skills"/"Summary" headings) — NOT a skill vocabulary. CLAUDE.md rule #28 bans
 # hardcoded *skill* lists, not section labels. Free prose with no such marker
-# yields nothing here; the LLM pass (llm_infer_from_about_me) handles prose.
+# yields nothing here and stays untouched prose for the user's agent to read.
 _ABOUT_ME_SKILL_MARKERS = (
     "skills", "technical skills", "core skills", "key skills",
     "technologies", "tech stack", "stack", "tools", "tooling",
@@ -329,15 +329,13 @@ def sanitize_preferences(
 
 
 def deterministic_about_me_fields(about_me: str) -> list[str]:
-    """Pass 1 for preferences over ``about_me`` — STRUCTURE only, NO LLM.
+    """Read ``about_me`` — STRUCTURE only. This is the whole pass.
 
     Pulls items the user explicitly listed after a structural label such as
     ``"Skills:"`` / ``"Technologies:"``. No skill vocabulary and no semantic
     guessing (CLAUDE.md rule #28) — a free-prose blurb with no such marker
-    returns ``[]``; the LLM pass (``llm_infer_from_about_me``) mines prose.
-
-    Mirrors the CV/LinkedIn deterministic passes so every input has a real,
-    independent deterministic half that feeds the same merge.
+    returns ``[]``, and stays untouched prose for the user's agent to read
+    (decision 28).
     """
     if not about_me or not about_me.strip():
         return []
@@ -358,66 +356,12 @@ def deterministic_about_me_fields(about_me: str) -> list[str]:
     return out
 
 
-# ── Preferences LLM pass (Pass 2) — mine free-text about_me ─────────
-
-_ABOUT_ME_SYSTEM = (
-    "You read a job-seeker's free-text 'about me' blurb and name the concrete "
-    "professional skills it implies. You return JSON only and never invent "
-    "skills the text does not support."
-)
-
-_ABOUT_ME_PROMPT = """Read this job-seeker's free-text "about me" and extract the concrete
-professional SKILLS it implies — tools, methods, domains, specialities.
-
-Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
-
-Rules:
-- Only skills the text actually supports. Do not invent.
-- Individual items, not categories.
-- Extract BOTH named tools AND the higher-level capabilities they imply —
-  "production GenAI systems" → "Production GenAI"; "cloud-scale deployments" →
-  "Cloud Deployment"; "vector databases (ChromaDB, FAISS)" → "Vector Databases",
-  "ChromaDB", "FAISS".
-- Domain-agnostic: technical OR non-technical (e.g. "Stakeholder Management", "HIPAA Compliance", "Welding").
-
-ABOUT ME:
----
-{about_me}
----"""
-
-
-# NOTE (CLAUDE.md rule #28): the deterministic about_me skill scanner that used
-# to live here was removed — it relied on hardcoded skill-term vocabularies.
-# Mining the free-text about_me for skills is the LLM's job (llm_infer_from_about_me).
-
-
-async def llm_infer_from_about_me(about_me: str) -> list[str]:
-    """Pass 2 for preferences — mine the free-text ``about_me`` for skills the
-    structured form never captured.
-
-    Returns ``[]`` (never raises) on blank input or provider failure. Blank
-    input never calls the LLM (cost guard).
-    """
-    if not about_me or not about_me.strip():
-        return []
-    prompt = _ABOUT_ME_PROMPT.format(about_me=about_me.strip())
-    try:
-        from src.services.profile.llm_provider import llm_extract  # noqa: PLC0415
-        result = await llm_extract(prompt, system=_ABOUT_ME_SYSTEM)
-    except Exception as e:  # noqa: BLE001 — never crash the pass
-        logger.warning("about_me LLM skill inference failed: %s", e)
-        return []
-
-    raw = result.get("skills") if isinstance(result, dict) else None
-    if not isinstance(raw, list):
-        return []
-    out: list[str] = []
-    seen: set[str] = set()
-    for s in raw:
-        if isinstance(s, str) and s.strip() and s.strip().lower() not in seen:
-            out.append(s.strip())
-            seen.add(s.strip().lower())
-    return out
+# NOTE (CLAUDE.md rule #28 + decision 28, 2026-09-21): the deterministic
+# about_me skill scanner that used to live here was removed first — it relied on
+# hardcoded skill-term vocabularies. The LLM pass that replaced it
+# (``_ABOUT_ME_SYSTEM``, ``_ABOUT_ME_PROMPT``, ``llm_infer_from_about_me``) is
+# now gone too. Job360 stores ``about_me`` verbatim; mining prose for skills is
+# the user's agent's job, written back with ``update_profile``.
 
 
 def _split_and_clean(value: str) -> list[str]:

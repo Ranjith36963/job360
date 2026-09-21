@@ -80,24 +80,14 @@ def _loop_guard_strict(monkeypatch):
     monkeypatch.setenv("LOOP_WATCHDOG_ENABLED", "false")
 
 
-@pytest.fixture(autouse=True)
-def _offline_openai(monkeypatch):
-    """Keep the WHOLE suite offline for LLMs (rule #4).
-
-    The repo ``.env`` carries real keys for OpenAI + the free tiers, and
-    ``settings.py`` reads them at import. Any un-mocked ``llm_extract`` /
-    ``llm_extract_fast`` call would otherwise hit a live provider — slow, flaky,
-    and non-deterministic. Blank ALL provider keys here; a test that genuinely
-    exercises a provider patches its key back with ``patch.object``. Un-mocked
-    LLM calls then raise the no-key error, which every caller handles gracefully.
-    """
-    try:
-        import src.services.profile.llm_provider as _lp
-
-        for _k in ("OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY"):
-            monkeypatch.setattr(_lp, _k, "", raising=False)
-    except Exception:
-        pass
+# REMOVED 2026-09-21 (decision 28, slice B): the ``_offline_openai`` autouse
+# fixture. It blanked OPENAI_API_KEY / GEMINI_API_KEY / GROQ_API_KEY /
+# CEREBRAS_API_KEY on ``services.profile.llm_provider`` so that an un-mocked
+# call in any test could not reach a live provider with the real keys sitting in
+# the repo ``.env`` (rule #4: always mock HTTP, never live). There is no
+# provider module and no key to blank any more — Job360 owns no model — so the
+# fixture had nothing left to protect. The rule it served still stands for every
+# other outbound call, and ``aioresponses`` still enforces it.
 
 
 @pytest.fixture(autouse=True)
