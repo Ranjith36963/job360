@@ -99,14 +99,19 @@ def test_normalise_swallows_normaliser_exceptions(monkeypatch):
 
 
 def test_full_cv_parse_pipeline_populates_esco_map(fake_esco):
-    """End-to-end: a fake LLM result containing 'Py' should land in CVData
-    with skills=['Python'] AND cv_skills_esco={'Python': 'esco://...'}."""
-    from src.services.profile.cv_parser import _llm_result_to_cvdata
+    """End-to-end: a CV whose Skills section reads 'Py' should land in CVData
+    with skills=['Python'] AND cv_skills_esco={'Python': 'esco://...'}.
 
-    cvdata = _llm_result_to_cvdata(
-        raw_text="dummy",
-        result={"skills": ["Py", "Bespoke Tooling"]},
-    )
+    Decision 28 (2026-09-21) deleted ``_llm_result_to_cvdata`` along with the
+    CV LLM pass — there is no model result to adapt any more. The live path
+    into ``_maybe_normalise_skills_via_esco`` today is
+    ``cv_parser.cv_data_from_text``, which builds a CVData straight off the
+    raw CV text (structural skills + summary), so the test now drives that
+    function instead of a result dict a model used to hand back.
+    """
+    from src.services.profile.cv_parser import cv_data_from_text
+
+    cvdata = cv_data_from_text("Skills\nPy, Bespoke Tooling\n")
     assert "Python" in cvdata.skills
     assert "Bespoke Tooling" in cvdata.skills
     assert cvdata.cv_skills_esco == {"Python": "esco://skill/python"}

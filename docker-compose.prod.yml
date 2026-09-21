@@ -70,12 +70,12 @@ services:
       SESSION_SECRET: ${SESSION_SECRET}
       CHANNEL_ENCRYPTION_KEY: ${CHANNEL_ENCRYPTION_KEY}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
-      # LLM provider keys (all optional — CV parsing and the tailor degrade
-      # to the next provider when one is empty)
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # LLM provider keys REMOVED 2026-09-21 (decision 28): Job360 has no model
+      # of its own. GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY and
+      # OPENAI_API_KEY used to be injected here for the profile's provider
+      # pool, which is deleted along with its four SDKs. Handing a container
+      # credentials no code can use is pure blast radius — anyone who reaches
+      # the process reads keys the app would never have spent.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     depends_on:
       postgres:

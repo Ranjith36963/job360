@@ -1,17 +1,23 @@
-"""The profile re-extraction cost cap must actually bite.
+"""The profile re-extraction cap must actually bite.
 
 Why this exists
 ---------------
-Every profile change re-runs the FULL two-pass extraction — 4+ paid LLM calls
-over CV / LinkedIn / GitHub / about_me — from stored data. Five routes reach the
-same code path (`_extract_save_trigger`), and nothing bounded how often a user
-could trigger it.
+Every profile change re-runs the FULL extraction over CV / LinkedIn / GitHub /
+about_me from stored data. Five routes reach the same code path
+(`_extract_save_trigger`), and nothing bounded how often a user could trigger
+it.
 
-That was harmless while it was free. It stopped being free on 2026-07-19: the
-`openai` dependency had never actually been installed in production (the import
-raised, a broad `except` swallowed it, and every parse quietly fell back to a
-free tier), so declaring it turned the primary PAID provider on for the first
-time. The uncapped loop that previously cost nothing now bills.
+It was a COST cap when it was written: each re-run made four paid LLM calls on
+Job360's key, and declaring the `openai` dependency on 2026-07-19 turned the
+paid primary on for the first time, so an uncapped loop that had cost nothing
+started billing.
+
+Decision 28 (2026-09-21) deleted those calls — Job360 owns no model, and a
+re-extraction is now pure local CPU. The cap stays anyway, and this file stays
+with it: five routes still let one account spin the same pdf-text re-read as
+fast as it can post, and an unbounded loop is a resource question whether or not
+anyone is billed for it. The name `PROFILE_EXTRACT_MAX_PER_HOUR` no longer
+implies a bill.
 
 These tests assert BEHAVIOUR (the 13th call is refused, the extraction does not
 run) rather than "the setting exists" — a config-presence test would pass against

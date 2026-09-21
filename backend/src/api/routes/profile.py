@@ -92,11 +92,17 @@ def _build_profile_response(
         job_titles=profile.cv_data.job_titles,
         skills_count=len(profile.cv_data.skills),
         cv_length=len(profile.cv_data.raw_text),
-        # Any merged LinkedIn signal counts — skills OR positions. Mirrors the
-        # upload route's own `merged = skills or positions`; checking only
-        # linkedin_skills left has_linkedin=False after a successful upload that
-        # yielded positions but no detected skills.
-        has_linkedin=bool(profile.cv_data.linkedin_skills or profile.cv_data.linkedin_positions),
+        # ANY stored LinkedIn signal counts, and since decision 28 the first
+        # of them is the raw TEXT: a successful upload stores the export's
+        # text, and the user's agent fills the sections from it afterwards.
+        # Reading only skills-or-positions said "not connected" right after a
+        # 200 for any export with a collapsed Top-Skills sidebar — the screen
+        # and the MCP tool both denying a LinkedIn the profile plainly holds.
+        has_linkedin=bool(
+            profile.cv_data.linkedin_raw_text
+            or profile.cv_data.linkedin_skills
+            or profile.cv_data.linkedin_positions
+        ),
         has_github=bool(profile.cv_data.github_languages),
         education=profile.cv_data.education,
         experience_level=profile.preferences.experience_level,
@@ -232,15 +238,16 @@ def _build_profile_response(
     }
     # EVERYTHING ELSE GitHub gave us. Measured on a live profile 2026-08-09:
     # languages (14) and topics (10) reached the screen, while 49 frameworks,
-    # 13 repos and 30 LLM-read skills sat in the database appearing NOWHERE —
+    # 13 repos and 30 model-read skills sat in the database appearing NOWHERE —
     # 92 pieces of signal stored and shown to nobody, the same shape as
     # cv_positions and the upload receipts before them.
     #
     # This is the input where it matters most: GitHub evidence outranks a CV
     # claim. A CV says "FastAPI"; a requirements.txt in shipped code PROVES it,
     # which is why skill_tiering weights github_dep/github_llm (1.5) above
-    # github_lang (1.0). That evidence was already scoring the user's matches —
-    # they simply could not see it.
+    # github_lang (1.0). (`github_llm` is the legacy source label for the
+    # deleted GitHub model pass — the shelf still holds what it wrote for
+    # existing users, and nothing fills it now; see CVData.github_llm_skills.)
     github_detail: dict[str, Any] = {
         "username": profile.preferences.github_username or "",
         "connected_at": getattr(cv, "github_connected_at", "") or "",
@@ -761,17 +768,18 @@ async def _extract_save_trigger(
     Used by every profile-input route so the merged single-extraction flow is
     defined once.
 
-    COST CAP (docs/fable/08 "Cost economics — NOT audited"):
-    Each call fans out to 4+ paid LLM passes, and ANY profile change re-runs ALL
-    of them from stored data. Nothing bounded how often a user could trigger that
-    — five routes reach this function, and a user editing their profile in a loop
-    was an unbounded spend vector.
+    THE CAP (``PROFILE_EXTRACT_MAX_PER_HOUR``):
+    ANY profile change re-reads ALL four stored inputs, and five routes reach
+    this function — so a user editing their profile in a loop was an unbounded
+    spend vector. It was a COST cap: each call fanned out to four paid LLM
+    passes on Job360's key, and declaring the `openai` dependency on 2026-07-19
+    turned the paid primary on for the first time, so a loop that had cost
+    nothing started billing.
 
-    This became real rather than theoretical on 2026-07-19: `openai` had never
-    actually been installed in production (the import raised, a broad `except`
-    swallowed it, and every parse silently fell back to a free tier). Declaring
-    the dependency turned the primary PAID provider on for the first time — so the
-    uncapped loop that previously cost nothing now bills.
+    Decision 28 (2026-09-21) deleted those calls — the re-read is pure local
+    CPU now, and nobody is billed for it. The cap stays: five routes still let
+    one account spin the same work as fast as it can post, which is a resource
+    question with or without an invoice.
 
     Reuses the existing limiter rather than inventing a counter: it already
     supports a shared Redis backend (RATE_LIMIT_REDIS), so the cap holds across
@@ -790,9 +798,9 @@ async def _extract_save_trigger(
             status_code=429,
             detail=(
                 f"Too many profile updates in the last hour "
-                f"(limit {PROFILE_EXTRACT_MAX_PER_HOUR}). Each update re-runs AI "
-                "extraction over your CV, LinkedIn and GitHub — please wait a "
-                "few minutes and try again."
+                f"(limit {PROFILE_EXTRACT_MAX_PER_HOUR}). Each update re-reads "
+                "your stored CV, LinkedIn and GitHub — please wait a few "
+                "minutes and try again."
             ),
         )
     await run_two_pass_extraction(profile)
@@ -863,6 +871,22 @@ async def upsert_profile(
     return load_profile_response(user.id)[1]
 
 
+# The ``linkedin_*`` fields ``deterministic_linkedin_fields`` can actually
+# produce. A LinkedIn re-upload resets exactly these and nothing else — every
+# other ``linkedin_*`` shelf is written by the user's agent through
+# ``update_profile`` (decision 28) and Job360 must never clear what it cannot
+# refill. Keep this in step with ``linkedin_parser.deterministic_linkedin_fields``
+# and the structural half of ``enrich_cv_from_linkedin``.
+_LINKEDIN_STRUCTURAL_FIELDS = (
+    "linkedin_skills",
+    "linkedin_summary",
+    "linkedin_headline",
+    "linkedin_industry",
+    "linkedin_contact",
+    "linkedin_raw_text",
+)
+
+
 @router.post("/profile/linkedin", response_model=LinkedInResponse)
 async def upload_linkedin(
     file: UploadFile = File(...),  # noqa: B008 — FastAPI dependency-injection idiom
@@ -870,16 +894,22 @@ async def upload_linkedin(
 ) -> LinkedInResponse:
     """Enrich user profile with a LinkedIn 'Save to PDF' profile export.
 
-    FAILS LOUDLY (2026-08-16, audit finding 4). This used to compute `merged`
-    from `_looks_like_linkedin(text)` alone — a cheap PRE-extraction heuristic
-    (2 of 3 markers: URL / 3+ headings / page footer) — and return HTTP 200
-    with `merged=True` whenever that heuristic passed, regardless of what the
-    real extraction (deterministic + LLM) actually produced. A layout the
-    heuristic likes but the extractor cannot parse told the owner "LinkedIn
-    profile enriched" while storing nothing usable. `merged` is now computed
-    the SAME way `has_linkedin` is in `_build_profile_response`:
-    `bool(cv.linkedin_skills or cv.linkedin_positions)`, checked AFTER
-    extraction runs — and a merge that yields nothing is a 422, not a 200.
+    WHAT A SUCCESSFUL UPLOAD MEANS (decision 28, 2026-09-21). Job360 stores the
+    export's TEXT — that is the deliverable, because the user's own agent reads
+    it (`get_profile`) and writes the sections back (`update_profile`). So a
+    file that IS a LinkedIn export and yields text is a 200; the rejection
+    happens BEFORE any profile field is touched, when the text does not look
+    like an export at all.
+
+    Success used to mean "did a model find skills or positions in it"
+    (`bool(cv.linkedin_skills or cv.linkedin_positions)`, checked after
+    extraction, 422 otherwise). That was right while Job360 did the reading and
+    is wrong now: an export whose Top-Skills sidebar is collapsed would be
+    rejected and its text — the thing the agent actually needs — thrown away.
+
+    The reset before the re-read is SCOPED to the structural fields this route
+    can rewrite. The prose sections (positions, courses, honors, …) belong to
+    the agent and are never cleared, because nothing here could refill them.
     """
     # Bounded read — see the CV endpoint: caps memory for oversized uploads.
     content = await file.read(10 * 1024 * 1024 + 1)
@@ -897,8 +927,8 @@ async def upload_linkedin(
         raise HTTPException(status_code=415, detail="Only PDF files are accepted")
     tmp_path = save_upload_to_temp(content, suffix)
     try:
-        # Capture RAW LinkedIn text only; the single extractor below turns it
-        # into skills/positions (deterministic + LLM).
+        # Capture RAW LinkedIn text; the single extractor below reads the
+        # structure it can prove and keeps the rest of the text for the agent.
         # Off the event loop for the same reason as the CV path above:
         # pdfplumber is synchronous, and blocking here froze the API for
         # every other request while one person enriched their profile.
@@ -921,85 +951,61 @@ async def upload_linkedin(
         # saves; see the note on ``storage.load_profile``.
         profile = load_profile(user.id, with_overlay=False) or UserProfile()
         cv = profile.cv_data
-        # Finding 6 — reset what THIS input owns before the new upload lands,
-        # exactly as _capture_cv_raw calls reset_cv_owned_fields for the CV
-        # route. Without this, a second export only ever UNIONS into the
-        # linkedin_-owned fields (courses/honors/projects/... all reuse the
-        # same list-union merge as job_titles/education/certifications), so a
-        # section removed on LinkedIn since the last upload could never
-        # disappear from the profile. job_titles/education/certifications are
-        # JOINTLY owned with the CV (enrich_cv_from_linkedin unions into
-        # them, the CV pass does too) and are deliberately NOT touched here —
-        # they have no `linkedin_` prefix, so this scoped reset cannot reach
-        # them, and it must not: a LinkedIn re-upload is not a CV re-upload,
-        # and wiping the CV's own contribution to those lists would be the
-        # opposite failure. The trade-off this accepts: a title/degree/cert
-        # LinkedIn contributed under an OLD export can outlive that export
-        # until the CV itself is re-uploaded (which resets the joint fields
-        # AND drops the LinkedIn hash — see reset_cv_owned_fields). Fixing
-        # that fully needs per-entry provenance on those three lists, which
-        # does not exist yet and is out of this unit's file list.
-        # SNAPSHOT BEFORE THE RESET — the 422 below must not cost the user the
-        # LinkedIn data they already had.
+        # Finding 6 — reset what THIS input owns before the new upload
+        # lands, so a value the previous export put there cannot outlive it.
+        # job_titles/education/certifications are JOINTLY owned with the CV
+        # (both inputs union into them) and are deliberately NOT touched: a
+        # LinkedIn re-upload is not a CV re-upload, and wiping the CV's own
+        # contribution would be the opposite failure. The trade-off that
+        # accepts: a title/degree/cert LinkedIn contributed under an OLD
+        # export outlives that export until the CV itself is re-uploaded.
         #
-        # `_extract_save_trigger` calls `save_profile` unconditionally as part
-        # of its body, so by the time `merged` can be computed the wiped state
-        # is ALREADY PERSISTED. Without this snapshot, a second upload that
-        # passes the cheap shape heuristic but extracts nothing deletes a
-        # previously good LinkedIn profile and then returns an honest-looking
-        # "re-export and try again" — the user is never told anything was lost.
-        # Caught by the review pass, reproduced live against Postgres:
-        # has_linkedin went True -> False and every linkedin_* field emptied.
+        # CLEAR ONLY WHAT THIS PARSE CAN REWRITE.
         #
-        # upload_github two routes below gets this right by computing `merged`
-        # from an in-memory result BEFORE it saves anything. The LinkedIn route
-        # cannot copy that shape directly (its merge happens inside the shared
-        # extraction pass, not in a returnable value), so it restores instead.
-        _previous_linkedin = {
-            f.name: copy.deepcopy(getattr(cv, f.name))
-            for f in dataclasses.fields(CVData)
-            if f.name.startswith("linkedin_")
-        }
-        _previous_li_hash = cv.llm_input_hashes.get("linkedin")
-
-        _clear_prefixed(cv, "linkedin_")
+        # This used to be `_clear_prefixed(cv, "linkedin_")` — every
+        # ``linkedin_*`` field back to its default — because the LLM pass
+        # refilled them all from the new export, so a section deleted on
+        # LinkedIn had to be able to disappear here too.
+        #
+        # Decision 28 took that pass away. A blanket clear now empties twelve
+        # prose shelves that NOTHING in this codebase can refill: positions,
+        # languages, projects, volunteer, courses, honors, publications,
+        # patents, organizations, test_scores, recommendations, interests are
+        # the user's AGENT's to write, and a re-upload would delete its work
+        # permanently. So the reset is scoped to the fields
+        # ``deterministic_linkedin_fields`` actually produces — the structural
+        # half — and the agent-owned half is left standing.
+        for _name in _LINKEDIN_STRUCTURAL_FIELDS:
+            setattr(cv, _name, copy.deepcopy(getattr(CVData(), _name)))
         cv.linkedin_raw_text = text
-        # No re-score yet: this profile is provisional until `merged`
-        # below says extraction produced real signal. Queueing it here
-        # scores the whole catalog against a CLEARED LinkedIn shelf on
-        # every rejected re-upload.
         await _extract_save_trigger(profile, user.id)
 
-        # merged = did extraction actually PRODUCE LinkedIn signal — not "did
-        # the file merely resemble a LinkedIn export". Mirrors has_linkedin.
-        merged = bool(cv.linkedin_skills or cv.linkedin_positions)
-        if not merged:
-            # Put back exactly what was there, and PERSIST the restoration —
-            # an in-memory rollback would be undone by the save that already
-            # happened above.
-            for name, value in _previous_linkedin.items():
-                setattr(cv, name, value)
-            if _previous_li_hash is None:
-                cv.llm_input_hashes.pop("linkedin", None)
-            else:
-                cv.llm_input_hashes["linkedin"] = _previous_li_hash
-            save_profile(profile, user.id, "linkedin_upload_rejected")
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "We read the PDF but found no skills or work history in "
-                    "it. Your existing LinkedIn data has been kept. Re-export "
-                    "from LinkedIn (profile -> More -> Save to PDF) and make "
-                    "sure the Skills and Experience sections are expanded, "
-                    "not collapsed, before saving."
-                ),
-            )
+        # THE GUARD IS THE ORDER, NOT A SECOND CHECK.
+        #
+        # This block used to snapshot every ``linkedin_*`` field, compute
+        # `merged = bool(cv.linkedin_skills or cv.linkedin_positions)` after
+        # extraction, and on a False restore the snapshot and answer 422 — the
+        # 2026-08-16 audit's fix for a route that said "LinkedIn profile
+        # enriched" when the extractor had produced nothing.
+        #
+        # Both halves of that are gone, and both for the same reason. The
+        # scoped reset above means a parse that reads nothing leaves the
+        # previous data in place, so there is no snapshot to restore. And the
+        # test itself no longer means anything: since decision 28 the
+        # DELIVERABLE of this upload is the export's TEXT — the user's agent
+        # reads it and writes the sections back — so "did a model find skills
+        # in it" is the wrong question, and an export with a collapsed
+        # Top-Skills sidebar would be rejected while holding everything the
+        # agent needs.
+        #
+        # What still rejects a bad upload is the `_looks_like_linkedin(text)`
+        # check ABOVE, which raises before a single profile field is touched.
+        # That is the same "order is the safety guard" contract the CV route
+        # states, and it is now the only one this route needs.
 
-        # Upload receipt — see the CV path. Recorded only on a MERGED
-        # upload, and only now that we KNOW it merged (not merely that the
-        # pre-extraction heuristic liked the layout): a PDF that read as
-        # LinkedIn-shaped but yielded nothing must not claim a connection
-        # that did not happen.
+        # Upload receipt — see the CV path. Stamped once the export's text is
+        # stored, which is what a LinkedIn connection now MEANS: the receipt
+        # confirms exactly the thing that happened.
         cv.linkedin_filename = os.path.basename(file.filename or "")[:255]
         cv.linkedin_uploaded_at = datetime.now(timezone.utc).isoformat()
         save_profile(profile, user.id, "linkedin_upload")
@@ -1067,9 +1073,11 @@ async def upload_github(
     # BASE profile (``with_overlay=False``) — this route mutates and saves;
     # see the note on ``storage.load_profile``.
     profile = load_profile(user.id, with_overlay=False) or UserProfile()
-    # enrich_cv_from_github captures the RAW GitHub signals (repos_brief,
-    # languages, deterministic frameworks). The single extractor below then adds
-    # the GitHub LLM pass and re-runs the others from stored raw.
+    # enrich_cv_from_github captures the RAW GitHub signals (repos_brief with
+    # its README excerpts, languages, deterministic frameworks). The single
+    # extractor below re-reads every stored input so one save leaves the whole
+    # profile consistent. Nothing here reads the prose for meaning — that is the
+    # user's agent's job (decision 28).
     profile.cv_data = enrich_cv_from_github(profile.cv_data, github_data)
     profile.preferences.github_username = clean_username
     # Did the lookup actually YIELD anything? A handle that is well-formed but
@@ -1110,12 +1118,12 @@ async def upload_github(
 # you are always reading the sum of every previous attempt.
 #
 # Each scope clears the fields that input OWNS, and nothing else, so clearing
-# LinkedIn cannot take the CV with it. Two details matter:
-#   * the matching ``llm_input_hashes`` entry is dropped, or a later re-upload of
-#     the SAME file would be treated as "already read" and skipped; and
-#   * every clear goes through ``save_profile``, which snapshots first — so a
-#     clear is undoable from the History drawer, which is what makes an
-#     irreversible-sounding button safe.
+# LinkedIn cannot take the CV with it. Every clear goes through
+# ``save_profile``, which snapshots first — so a clear is undoable from the
+# History drawer, which is what makes an irreversible-sounding button safe.
+# (Each scope also used to drop a ``llm_input_hashes`` entry so a re-upload of
+# the SAME file was not skipped as "already read". That cache went with the LLM
+# passes in decision 28 — there is no paid call left to skip.)
 
 _CLEAR_SCOPES = ("cv", "linkedin", "github", "preferences", "all")
 
@@ -1127,7 +1135,6 @@ def _clear_cv(cv: CVData) -> None:
     cv.cv_filename = ""
     cv.cv_uploaded_at = ""
     cv.extraction_score = {}
-    cv.llm_input_hashes.pop("cv", None)
 
 
 def _clear_prefixed(cv: CVData, prefix: str) -> None:
@@ -1151,7 +1158,6 @@ def _clear_prefixed(cv: CVData, prefix: str) -> None:
     remembering it exists.
     """
     import copy
-    import dataclasses
 
     pristine = CVData()
     for f in dataclasses.fields(CVData):
@@ -1169,12 +1175,10 @@ def _clear_prefixed(cv: CVData, prefix: str) -> None:
 
 def _clear_linkedin(cv: CVData) -> None:
     _clear_prefixed(cv, "linkedin_")
-    cv.llm_input_hashes.pop("linkedin", None)
 
 
 def _clear_github(cv: CVData, prefs: UserPreferences) -> None:
     _clear_prefixed(cv, "github_")
-    cv.llm_input_hashes.pop("github", None)
     # Lives on UserPreferences, not CVData, so the prefix sweep cannot reach it.
     prefs.github_username = ""  # the handle belongs to this section
 
@@ -1188,9 +1192,9 @@ async def clear_profile_section(
 
     ``section``: cv | linkedin | github | preferences | all.
 
-    Deliberately does NOT re-run extraction: there is nothing to extract, and a
-    paid LLM round-trip to rebuild an empty profile would be waste. The stored
-    snapshot taken by ``save_profile`` is what makes this reversible.
+    Deliberately does NOT re-run extraction: there is nothing left to read, so
+    rebuilding an emptied profile would be pure waste. The stored snapshot taken
+    by ``save_profile`` is what makes this reversible.
 
     CLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored
     profile, so emptying only the base left every agent edit in the cleared
@@ -1232,7 +1236,6 @@ async def clear_profile_section(
         # about_me-derived skills live on the CV object but are owned by the
         # preferences the user typed, so a full clear takes them too.
         cv.about_me_inferred_skills = []
-        cv.llm_input_hashes.pop("about_me", None)
 
     profile.preferences = prefs
     save_profile(profile, user.id, f"clear_{section}")

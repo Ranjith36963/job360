@@ -11,7 +11,10 @@ silently drop them again:
   * each repo's README excerpt → repos_brief[i]['readme_excerpt']
   * the {u}/{u} profile README → github_profile_readme
   * pinned repos reorder the probe so curated work is read first (authed only)
-  * all of the above flow into the LLM pass's prompt (rule #28: prose → LLM)
+  * all of the above are FETCHED and STORED, never read by Job360 itself —
+    decision 28 (2026-09-21) deleted the GitHub LLM pass that used to read this
+    prose. It stays on the profile so the user's own agent can read it through
+    ``get_profile`` and write back whatever skills it finds.
 
 Every network call is mocked (rule #4 — the suite runs offline).
 """
@@ -101,7 +104,7 @@ async def test_fetch_attaches_repo_readme_excerpt(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_readme_excerpt_is_truncated(monkeypatch):
-    """A giant README is truncated so it can't blow the LLM prompt budget."""
+    """A giant README is truncated so a stored profile can't grow unbounded."""
     monkeypatch.setattr(github_enricher, "GITHUB_TOKEN", "")
     monkeypatch.setattr(github_enricher, "README_EXCERPT_CHARS", 50)
     repos = [{"name": "big", "language": "Go", "description": "", "fork": False,
@@ -245,68 +248,13 @@ async def test_pinned_is_noop_when_unauthenticated(monkeypatch):
     session.post.assert_not_called()
 
 
-# ── The LLM pass reads the new prose ────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_llm_pass_prompt_includes_bio_readme_and_excerpts():
-    """The self-description + README excerpts must reach the model. Capture the
-    prompt and assert the prose is in it."""
-    captured = {}
-
-    async def fake_extract(prompt, system=None):
-        captured["prompt"] = prompt
-        return {"skills": ["RAG"]}
-
-    briefs = [{"name": "agent", "language": "Python", "description": "",
-               "topics": [], "readme_excerpt": "Built with LangGraph for RAG."}]
-
-    with patch("src.services.profile.llm_provider.llm_extract", side_effect=fake_extract):
-        out = await github_enricher.llm_infer_github_skills(
-            briefs, bio="Bio: NLP engineer", profile_readme="I love Cloudflare Workers.")
-
-    p = captured["prompt"]
-    assert "NLP engineer" in p            # bio
-    assert "Cloudflare Workers" in p      # profile readme
-    assert "LangGraph" in p               # repo readme excerpt
-    assert out == ["RAG"]
-
-
-@pytest.mark.asyncio
-async def test_llm_pass_runs_on_self_description_alone():
-    """Even with zero repos, a bio/profile README is reason enough to call the
-    LLM — a user can have a rich profile README and few public repos."""
-    called = {"n": 0}
-
-    async def fake_extract(prompt, system=None):
-        called["n"] += 1
-        return {"skills": ["Computer Vision"]}
-
-    with patch("src.services.profile.llm_provider.llm_extract", side_effect=fake_extract):
-        out = await github_enricher.llm_infer_github_skills(
-            [], bio="", profile_readme="Portfolio: I ship computer-vision models.")
-
-    assert called["n"] == 1, "a self-description alone should still call the LLM"
-    assert out == ["Computer Vision"]
-
-
-@pytest.mark.asyncio
-async def test_llm_pass_empty_when_nothing_to_read():
-    """No repos, no bio, no README → no LLM call at all (cost guard)."""
-    called = {"n": 0}
-
-    async def fake_extract(prompt, system=None):
-        called["n"] += 1
-        return {"skills": []}
-
-    with patch("src.services.profile.llm_provider.llm_extract", side_effect=fake_extract):
-        out = await github_enricher.llm_infer_github_skills([], bio="", profile_readme="")
-
-    assert called["n"] == 0
-    assert out == []
-
-
 # ── enrich_cv_from_github stores the new prose ──────────────────────
+#
+# NOTE (decision 28, 2026-09-21): a "GitHub LLM pass" section used to live here
+# — three tests pinning that bio/README/profile-README prose reached an
+# internal LLM prompt (``llm_infer_github_skills``). That function is deleted;
+# Job360 fetches and stores the prose (below) and stops there. Reading it for
+# meaning is the user's own agent's job now, over ``get_profile``.
 
 
 def test_enrich_stores_bio_and_profile_readme():

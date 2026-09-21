@@ -120,9 +120,17 @@ test.describe("Extraction quality is visible to the user", () => {
     // The number must be in PLAIN words. "coverage 0.18" means nothing to the
     // person whose CV it is; "about 18%" does.
     await expect(warning).toContainText("18%");
-    await expect(warning).toContainText(/understood/i);
-    // And it must say what it COSTS them, not just that a number is low.
-    await expect(warning).toContainText(/will not be matched/i);
+    await expect(warning).toContainText(/on your profile/i);
+    // And it must say WHO closes the gap. Decision 28 (2026-09-21): Job360
+    // stores the text and reads only the structure it can prove; the rest is
+    // the connected agent's to fill. This used to read "will not be matched
+    // against jobs / add what is missing yourself", which was true while
+    // Job360 did the reading and is a dead end now — it told the person to
+    // retype their own CV instead of naming the thing that does it for them.
+    await expect(warning).toContainText(/connect your agent/i);
+    await expect(
+      warning.getByRole("link", { name: /connect your agent/i })
+    ).toHaveAttribute("href", "/settings/connect");
     // The specific problems are shown so the warning is actionable.
     await expect(warning).toContainText(/no job titles/i);
   });

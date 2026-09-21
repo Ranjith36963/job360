@@ -498,8 +498,10 @@ REGISTRY: dict[str, Guard] = {
     ),
     "scripts/provider_probe.py": Guard(
         status="owed",
-        reason="calls paid LLM providers; a drill would spend money on every CI run "
-        "unless it stubs the client",
+        reason="calls a live credential endpoint; a drill needs a recorded 401/422 "
+        "pair to stand in for Resend (the four LLM keys it also probed went with "
+        "the provider pool, decision 28). PROBE_FORCE_RED=1 proves the ALARM "
+        "chain end-to-end from external-health.yml, not the probe's own verdict",
         since="2026-08-16",
     ),
     "scripts/sentry_poll.py": Guard(

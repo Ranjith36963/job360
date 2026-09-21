@@ -1,31 +1,43 @@
 """Batch 1.x.1 review-fix regression tests.
 
-One test per issue raised in the Pillar 1 review (issues #1, #2, #3,
-#5, #6, #8). Each test nails down the specific behavior the fix
-introduces so it cannot silently regress.
+One test per surviving issue raised in the Pillar 1 review. Originally
+issues #1, #2, #3, #5, #6 and #8 each got a test here; #3, #6 and half
+of #1 covered LLM behavior that decision 28 deleted outright (see
+below), so what remains is #1's non-LLM half, #2 and #5. Each test
+nails down the specific behavior the fix introduces so it cannot
+silently regress.
+
+Decision 28 (2026-09-21) deleted every LLM pass from the profile
+pipeline — the CV parser, LinkedIn parser, GitHub enricher and
+preferences module are all deterministic now. That killed the
+subject of several fixes here outright:
+
+- #1's schema half (``CVSchema`` → ``CVData`` mapping for industries
+  and languages) — ``schemas.py`` and its ``cv_schema_to_cvdata``
+  converter are gone. The surviving half (CVData carries
+  ``cv_languages`` through to JSON Resume export) still applies, since
+  ``cv_languages`` is just a plain dataclass field now populated by
+  deterministic extraction instead of an LLM schema.
+- #3 (validation-exhaustion fallback in ``parse_cv_async``) and #6
+  (retry-prompt error trimming in ``llm_extract_validated``) tested
+  LLM retry/validation machinery that no longer exists at all —
+  ``llm_provider.py`` is deleted. A deleted behavior needs no
+  regression test.
+- #8 (``build_skill_entries`` dedup) never had a test body here to
+  begin with — just a stale section header — so there was nothing to
+  keep or delete.
+
+What's left covers dependency-file parsing (#2, pure regex/TOML
+parsing, untouched by decision 28) and the legacy-hydrate audit stamp
+(#5, storage/migrations, untouched by decision 28).
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
-
-import pytest
-
 from src.services.profile import dep_file_parser
 from src.services.profile.models import CVData
-from src.services.profile.schemas import CVSchema, cv_schema_to_cvdata
 
-# ── #1: CVSchema.industries + languages plumbed into CVData ────────
-
-
-def test_fix1_schema_industries_and_languages_land_on_cvdata():
-    schema = CVSchema.model_validate({
-        "industries": ["Healthcare", "Biotechnology"],
-        "languages": ["English", "French", "Mandarin"],
-    })
-    cv = cv_schema_to_cvdata(schema, raw_text="x")
-    assert cv.cv_industries == ["Healthcare", "Biotechnology"]
-    assert cv.cv_languages == ["English", "French", "Mandarin"]
+# ── #1: CVData.cv_languages surfaces through JSON Resume export ────
 
 
 def test_fix1_json_resume_export_surfaces_cv_languages():
@@ -96,102 +108,14 @@ indeed = ["python-jobspy"]
 """
     # Runtime-only: [project.optional-dependencies] (dev/test/feature extras) is
     # excluded to drop tooling noise (eslint/pytest/ruff...). A rare real feature
-    # extra (python-jobspy) is the casualty — the LLM pass recovers it. Structural
-    # runtime-vs-dev split, not a keyword denylist (rule #28).
+    # extra (python-jobspy) is the casualty and stays uncaptured — there is no
+    # LLM pass left to recover it (decision 28). Structural runtime-vs-dev
+    # split, not a keyword denylist (rule #28).
     names = dep_file_parser.parse_pyproject_toml(content)
     assert "fastapi" in names
     assert "pytest" not in names
     assert "ruff" not in names
     assert "python-jobspy" not in names
-
-
-# ── #3: parse_cv_async graceful degradation on validation exhaustion
-
-
-@pytest.mark.asyncio
-async def test_fix3_validation_exhaustion_returns_defensive_cvdata(tmp_path):
-    """When llm_extract_validated raises a validation RuntimeError,
-    parse_cv_async must fall back to the defensive dict path rather
-    than propagate the error.
-    """
-    from src.services.profile import cv_parser
-
-    # Fake a PDF-read return value
-    fake_text = "Some CV text"
-
-    # Simulate: validated path fails with validation error; plain
-    # llm_extract succeeds with a partial dict.
-    validation_error = RuntimeError("LLM output failed CVSchema validation after 3 attempts: ...")
-
-    plain_llm_result = {"name": "Ada", "skills": ["Python"]}
-
-    with patch.object(cv_parser, "extract_text", return_value=fake_text), \
-         patch("src.services.profile.llm_provider.llm_extract_validated",
-               new=AsyncMock(side_effect=validation_error)), \
-         patch("src.services.profile.llm_provider.llm_extract",
-               new=AsyncMock(return_value=plain_llm_result)):
-        cv = await cv_parser.parse_cv_async("fake.pdf")
-
-    # Defensive path produced a CVData with the salvaged skills, not a 500.
-    assert cv.raw_text == fake_text
-    assert cv.name == "Ada"
-    assert "Python" in cv.skills
-
-
-@pytest.mark.asyncio
-async def test_fix3_provider_failure_still_raises(tmp_path):
-    """Validation fallback must NOT swallow real provider failures
-    (no API keys, all providers down) — operators need that signal.
-    """
-    from src.services.profile import cv_parser
-
-    provider_error = RuntimeError("No LLM API key configured")
-
-    with patch.object(cv_parser, "extract_text", return_value="x"), \
-         patch("src.services.profile.llm_provider.llm_extract_validated",
-               new=AsyncMock(side_effect=provider_error)):
-        with pytest.raises(RuntimeError, match="No LLM API key"):
-            await cv_parser.parse_cv_async("fake.pdf")
-
-
-# ── #6: retry loop trims error text ────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_fix6_retry_prompt_trims_to_first_five_errors():
-    """Build a ValidationError with 10 nested problems and assert the
-    retry prompt only contains 5 of them.
-    """
-    from src.services.profile.llm_provider import llm_extract_validated
-
-    # Emit a payload that produces many errors (10 invalid-type fields)
-    bad = {
-        "skills": 42,  # not a list → 1 error
-        "experience": 42,  # not a list → 1 error
-        "education": 42,
-        "certifications": [{"not": "valid"} for _ in range(15)],  # each fails _lists_of_strings coercion — actually coerces fine
-        "career_domain": "definitely_not_a_real_bucket",
-    }
-    good = {"name": "Eve"}
-    captured_prompts: list[str] = []
-
-    async def fake_extract(prompt: str, system: str = ""):
-        captured_prompts.append(prompt)
-        return bad if len(captured_prompts) == 1 else good
-
-    with patch("src.services.profile.llm_provider.llm_extract", side_effect=fake_extract):
-        result = await llm_extract_validated("base prompt", CVSchema, max_retries=2)
-
-    assert result.name == "Eve"
-    # Retry prompt must reference "showing first N of M errors" wording
-    retry_prompt = captured_prompts[1]
-    assert "showing first" in retry_prompt
-    # Body only enumerates 5 bullet lines
-    bullet_count = retry_prompt.count("\n- ")
-    assert bullet_count <= 5
-
-
-# ── #8: build_skill_entries dedups same-source duplicates ──────────
 
 
 # ── #5: legacy_hydrate source_action ───────────────────────────────

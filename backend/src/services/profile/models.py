@@ -42,25 +42,16 @@ class CVData:
     links: list[str] = field(default_factory=list)
     # The universal extraction gate's verdict on THIS profile (coverage,
     # precision, completeness, input health, overall, problems). Written by
-    # run_two_pass_extraction after both passes merge. Advisory: it never
+    # run_two_pass_extraction at the end of the read. Advisory: it never
     # blocks a save, it tells the product when a profile is too thin to match
     # anything so it can escalate instead of failing silently.
     extraction_score: dict[str, Any] = field(default_factory=dict)
-    # Which inputs the paid LLM passes have ALREADY read, as {input: sha256}.
-    # Keys: "cv", "linkedin", "github", "about_me".
-    #
-    # WHY. Every profile change re-runs the whole extraction, and each run makes
-    # a paid LLM call per input. Change one preference and we re-read an
-    # unchanged CV, again, at full price. The only guard was a blunt
-    # PROFILE_EXTRACT_MAX_PER_HOUR rate limit, which caps the bleeding rather
-    # than stopping it — and punishes the user with a 429 for our waste.
-    #
-    # We store the input's hash, NOT the LLM's output, because the output is
-    # already here: every pass merges into this same CVData. So an unchanged
-    # hash means "that call's result is already in these fields" and the call
-    # can simply be skipped. A hash is only recorded after a pass SUCCEEDS —
-    # otherwise one provider outage would permanently skip that input.
-    llm_input_hashes: dict[str, str] = field(default_factory=dict)
+    # NOTE (decision 28, 2026-09-21): ``llm_input_hashes`` lived here — a
+    # {input: sha256} cache of which inputs the paid LLM passes had already
+    # read, so an unchanged CV was not re-billed on every preference edit. It
+    # cached CALLS, not user data, and there are no calls left to cache, so the
+    # field is gone. Stored rows keep the key harmlessly:
+    # ``storage._filter_fields`` drops anything CVData no longer declares.
     # LinkedIn-sourced data
     linkedin_positions: list[dict[str, Any]] = field(default_factory=list)
     linkedin_skills: list[str] = field(default_factory=list)
@@ -78,7 +69,7 @@ class CVData:
     # Now it has a shelf of its own. The two texts are different documents, not
     # duplicates: a CV summary is written for recruiters and is heavily edited;
     # a LinkedIn About is looser, first-person, and states motivation and
-    # direction that a CV omits — exactly the prose the LLM judge reads best.
+    # direction that a CV omits — the richest prose an agent can read.
     linkedin_summary: str = ""
     # The LinkedIn HEADLINE — the tagline under the person's name.
     #
@@ -87,9 +78,9 @@ class CVData:
     # Skills, Certifications) FIRST, so the name and headline land in the middle
     # of the text rather than at the top. ``_split_sections`` looks for a header
     # block before the first heading, finds nothing, and returns 0 characters.
-    # The deterministic pass is structure-only by design, and this layout
-    # defeats structure — so the headline is read by the LLM instead (rule #28
-    # safe: prose comprehension, not a keyword table).
+    # The parse is structure-only by design, and this layout defeats
+    # structure — so on such an export this shelf stays empty until the user's
+    # agent reads the raw text and fills it (decision 28).
     #
     # It is worth its own shelf rather than filling ``headline``, which the CV
     # owns. On a real profile the two say different things: the CV's was
@@ -97,9 +88,10 @@ class CVData:
     # stack AND states "Open to AI/ML Engineer Roles UK" — an availability,
     # role and location claim that appears in no other input.
     linkedin_headline: str = ""
-    # Two-pass extraction — the raw text pdfplumber pulled from the LinkedIn
-    # "Save to PDF" export. Stored so the LLM pass can re-run on any profile
-    # change WITHOUT the user re-uploading the file (the temp file is deleted
+    # The raw text pdfplumber pulled from the LinkedIn "Save to PDF" export.
+    # THE PRODUCT'S CORE PROMISE SINCE DECISION 28: this is what the user's
+    # agent reads (through ``get_profile``) to fill the prose sections, and it
+    # is stored so nothing has to re-upload the file (the temp file is deleted
     # after the first parse). Empty when no LinkedIn PDF was ever uploaded.
     linkedin_raw_text: str = ""
     # Batch 1.5 — expanded LinkedIn sections (Languages, Projects,
@@ -153,20 +145,23 @@ class CVData:
     # separate from github_skills_inferred so downstream can audit
     # where a skill came from (language signal vs declared dependency).
     github_frameworks: list[str] = field(default_factory=list)
-    # Two-pass extraction — a compact list of {name, description, topics}
-    # for the user's public repos. Stored so the GitHub LLM pass can re-run
-    # offline (no re-fetch) on a later profile change.
+    # A compact list of {name, description, topics, readme_excerpt} for the
+    # user's public repos. Stored for the user's agent to read, and so no
+    # later profile change has to re-fetch GitHub.
     github_repos_brief: list[dict[str, Any]] = field(default_factory=list)
-    # Two-pass extraction — skills the LLM inferred by reading repo prose
-    # (names/descriptions/topics) that the hard-coded language/topic lookup
-    # tables can't recognise (e.g. "LangChain", "RAG"). Separate field so
-    # skill-tiering can weight this signal independently.
+    # LEGACY, KEPT FOR THE DATA (decision 28, 2026-09-21). Skills the deleted
+    # GitHub LLM pass read out of repo prose (e.g. "LangChain", "RAG") that the
+    # raw language/topic signals can't show. NOTHING WRITES THIS ANY MORE — the
+    # user's agent writes what it reads into ``skills`` via ``update_profile``.
+    # The field stays so existing profiles keep the entries they already have
+    # (readers: the profile response's `github.llm_skills`, skill-tiering,
+    # `preferences._EXTRACTED_SKILL_SHELVES`), and stays empty for new ones.
     github_llm_skills: list[str] = field(default_factory=list)
     # "Read 100% of GitHub" (2026-08-05) — the two richest SELF-AUTHORED prose
-    # signals on a profile. Stored so the GitHub LLM pass can re-read them
-    # offline on a later profile change (mirrors github_repos_brief). Both are
-    # prose fed only to the LLM pass (rule #28 safe — never a hardcoded map),
-    # and persist automatically via the asdict() blob, no migration.
+    # signals on a profile. Stored for the user's agent to read, and so a later
+    # profile change needs no re-fetch (mirrors github_repos_brief). We never
+    # map their words to skills ourselves (rule #28), and they persist
+    # automatically via the asdict() blob, no migration.
     #   github_bio: the /users/{u} identity block (bio + name/company/blog/
     #               location/hireable) — the developer describing themselves.
     #   github_profile_readme: the {u}/{u} special-repo README — the portfolio
@@ -177,8 +172,8 @@ class CVData:
     # twitter, hireable, account_created_at, followers, public_repos.
     #
     # All of these were ALREADY fetched in the same /users/{u} request and then
-    # flattened into ``github_bio`` as one sentence — fine for a human or an LLM
-    # prompt, useless to anything that must compare, filter or score. You cannot
+    # flattened into ``github_bio`` as one sentence — fine to read, useless to
+    # anything that must compare, filter or score. You cannot
     # match on a sentence.
     #
     # Two are matching-grade: ``hireable`` is GitHub's own "open to work" flag,
@@ -190,11 +185,12 @@ class CVData:
     # a JSON blob and ``storage._filter_fields`` drops unknown keys, so old rows
     # load with {}.
     github_identity: dict[str, Any] = field(default_factory=dict)
-    # CV experience, STRUCTURED (2026-08-06). The CV LLM prompt has always
-    # asked for {company, title, dates, location, bullets} per role, but the
-    # adapter flattened it into unpaired ``job_titles`` + ``companies`` lists
-    # and threw ``dates``/``location`` away entirely — so nothing downstream
-    # could tell WHICH title was held at WHICH company, for HOW LONG, or how
+    # CV experience, STRUCTURED (2026-08-06). One ordered record of the career:
+    # {company, title, dates, location, bullets} per role. AGENT-WRITTEN since
+    # decision 28 — our own parse never reads a role off a CV. The flat
+    # ``job_titles`` + ``companies`` lists came first and threw
+    # ``dates``/``location`` away entirely — so nothing could tell WHICH title
+    # was held at WHICH company, for HOW LONG, or how
     # RECENTLY. That is why no skill-recency signal exists anywhere in the
     # engine. Each entry: {company, title, dates, location, bullets: [str]}.
     # Mirrors ``linkedin_positions`` (the only previously-structured source);
@@ -223,7 +219,7 @@ class CVData:
     # connected and how many repos were read (len(github_repos_brief)).
     github_connected_at: str = ""
     # Batch 1.1 — archetype classification (CareerDomain enum value).
-    # Optional; None means "LLM did not classify".
+    # Optional; None means "nobody has classified this profile".
     #
     # This comment used to claim it was "consumed by archetype-aware scoring".
     # That was false for months: no scorer, judge or vector read it, and the
@@ -232,11 +228,12 @@ class CVData:
     # ``llm_matcher.profile_to_matcher_text``. There is still no archetype
     # WEIGHTING; if one is added, say so here then, not before.
     career_domain: Optional[str] = None
-    # Batch 1.x.1 (review fix #1) — CV-extracted fields that the
-    # CVSchema already parses but the original adapter silently
-    # dropped. Separate from ``linkedin_*`` equivalents so the JSON
-    # Resume export distinguishes CV-stated languages/industries from
-    # LinkedIn-stated ones.
+    # Batch 1.x.1 (review fix #1) — facts a CV states about where the person
+    # has worked and which human languages they speak. Separate from the
+    # ``linkedin_*`` equivalents so the JSON Resume export distinguishes
+    # CV-stated languages/industries from LinkedIn-stated ones.
+    # AGENT-WRITTEN since decision 28: Job360's own read of a CV never fills
+    # these.
     # RENAMED from ``industries`` (2026-08-09). ``UserPreferences`` declares an
     # ``industries`` too, and the two mean opposite things: this one is a FACT
     # extracted from the CV (where the person has worked), the other is a
@@ -247,12 +244,13 @@ class CVData:
     # ``storage._filter_fields`` drops unknown keys, so old rows load with [].
     cv_industries: list[str] = field(default_factory=list)
     cv_languages: list[str] = field(default_factory=list)
-    # The CV's own statement of seniority, as the LLM read it.
+    # The CV's own statement of seniority, as the user's agent read it.
     #
-    # ``cv_parser``'s prompt has always asked for this ("One of: intern, junior,
-    # mid, senior, lead, principal, director — infer from experience duration
-    # and roles") and ``CVSchema`` has always declared it. The adapter never
-    # passed it on, so it was paid for on every CV parse and dropped.
+    # The deleted CV prompt asked for this ("One of: intern, junior, mid,
+    # senior, lead, principal, director — infer from experience duration and
+    # roles") and the deleted CVSchema declared it, but for months the adapter
+    # never passed it on, so it was paid for on every CV parse and dropped.
+    # Since decision 28 the user's agent supplies it through update_profile.
     #
     # That left ``experience_level_inferred`` depending solely on
     # ``seniority.infer_experience_level``, which reads dated job TITLES — so a
@@ -298,21 +296,25 @@ class CVData:
     # named course project is often the strongest evidence they have.
     cv_education_details: list[str] = field(default_factory=list)
     # Step-1.5 S1.5-D — ESCO normalisation map populated by
-    # ``cv_parser._llm_result_to_cvdata`` when ``ESCO_SKILL_NORMALISATION_ENABLED=true`` and
+    # ``cv_parser.cv_data_from_text`` when ``ESCO_SKILL_NORMALISATION_ENABLED=true`` and
     # the ESCO index is on disk. Maps the *canonical* skill label (which
     # also replaces the entry in ``skills``) → its ESCO concept URI. Empty
     # when ESCO is off / unavailable — gracefully matches the pre-ESCO
     # behaviour. ProfileResponse expansion surfaces this as
     # ``skill_provenance``.
     cv_skills_esco: dict[str, str] = field(default_factory=dict)
-    # Two-pass extraction — skills the LLM mined from the user's free-text
-    # ``preferences.about_me``. Stored on CVData (the skill container) so
-    # skill-tiering can weight this "user's own words" signal. Empty when
-    # about_me is blank or the LLM pass is unavailable.
+    # Skills read off the user's free-text ``preferences.about_me`` — the
+    # items they listed after a structural label ("Skills: X, Y"). Stored on
+    # CVData (the skill container) so skill-tiering can weight this "user's own
+    # words" signal. Empty when about_me is blank or is pure prose; mining
+    # prose for meaning is the agent's job (decision 28).
     about_me_inferred_skills: list[str] = field(default_factory=list)
-    # LLM-suggested ADJACENT skills (neighbours of what the user already has, e.g.
-    # PyTorch → TensorFlow/Keras). These are SUGGESTIONS the user opts into — they
-    # are NEVER counted in tiering/scoring, so matching only uses real skills.
+    # LEGACY, KEPT FOR THE DATA (decision 28, 2026-09-21). ADJACENT skills
+    # (neighbours of what the user already has, e.g. PyTorch →
+    # TensorFlow/Keras) that the deleted curation pass offered as opt-in
+    # suggestions. NOTHING WRITES THIS ANY MORE — suggesting what someone
+    # should learn is an opinion about their career, which is the agent's to
+    # hold, not ours. Existing suggestions keep showing; new profiles get none.
     suggested_skills: list[str] = field(default_factory=list)
 
     @classmethod

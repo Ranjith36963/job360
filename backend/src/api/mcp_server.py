@@ -231,10 +231,57 @@ def build_server() -> MCPServer:
         )
         return _tool_error(HTTPException(status_code=422, detail=problems))
 
+    # How much stored text one `get_profile` call may hand back per document,
+    # and how many repo briefs. Deliberately larger than any real CV (a dense
+    # two-page CV is ~6 KB of text) so the cap is invisible in practice and
+    # only bites a pathological input.
+    _RAW_DOC_CHARS = 120_000
+    _RAW_REPOS = 60
+
+    def _raw_block(cv: Any) -> dict[str, Any]:
+        """The stored documents the agent reads, bounded, with a truncation flag."""
+        docs = {
+            "cv": cv.raw_text or "",
+            "linkedin": cv.linkedin_raw_text or "",
+            "github_bio": cv.github_bio or "",
+            "github_profile_readme": cv.github_profile_readme or "",
+        }
+        repos = list(cv.github_repos_brief or [])
+        truncated = len(repos) > _RAW_REPOS or any(
+            len(v) > _RAW_DOC_CHARS for v in docs.values()
+        )
+        out: dict[str, Any] = {k: v[:_RAW_DOC_CHARS] for k, v in docs.items()}
+        out["github_repos"] = repos[:_RAW_REPOS]
+        out["truncated"] = truncated
+        return out
+
     @mcp.tool()
     async def get_profile() -> dict[str, Any]:
-        """The user's Job360 profile summary: is it complete, job titles, skill count,
-        experience level, and which inputs (CV / LinkedIn / GitHub) they have given."""
+        """The user's Job360 profile, and the raw text you are meant to read.
+
+        Job360 extracts TEXT from the CV, the LinkedIn export and GitHub, and
+        stores the structure it can prove (the skills listed under a Skills
+        heading, the summary, the contact block). It does not read the document
+        for meaning — that is YOUR job.
+
+        So: read `raw.cv`, `raw.linkedin`, `raw.github_bio`,
+        `raw.github_profile_readme` and `raw.github_repos` here, then write what
+        you found back with `update_profile`. **`editable_paths` is the exact,
+        closed list of what you may write** — skills, job titles, education,
+        certifications, achievements, name, headline, location, summary,
+        languages, links, right-to-work, and the preferences. Their current
+        values are in `fields`. Dated work history and projects are NOT
+        writable yet (`cv_data.cv_positions`, `cv_data.cv_projects`); put a
+        role's substance into `cv_data.job_titles` and `cv_data.summary` until
+        they are. What you write survives every later re-upload — Job360 never
+        overwrites or clears it.
+
+        Also returned: whether the profile is complete, job titles, skill count,
+        experience level, which inputs the user has given, your own past edits
+        (`agent_edits`), and the newest `lessons` the user flagged for next
+        time. `raw` keys are empty strings when that input was never given; if
+        `raw.truncated` is true, a document was longer than the cap and you are
+        seeing its opening — the full text is on the web profile page."""
         # ONE profile read for the whole tool call. `load_profile_response` is
         # the same function `GET /profile` itself is (same 404, same rendering),
         # and it hands back BOTH the UserProfile object and the rendered
@@ -276,6 +323,21 @@ def build_server() -> MCPServer:
             # tailoring the next CV; write a new one with
             # record_event(event_type="lesson").
             "lessons": [row.model_dump() for row in resp.lessons],
+            # DECISION 28 (2026-09-21) — the point of the product. Job360 has no
+            # model of its own, so the agent must be able to READ the documents
+            # it is asked to fill the profile from. Without this block
+            # `update_profile` is a door onto an empty room: the summary above
+            # says "has_cv: true" and nothing here says what the CV says.
+            # Stored text, never a re-fetch — the uploaded file is long gone.
+            #
+            # CAPPED, like every other list in this payload (`lessons` by
+            # PROFILE_LESSONS_MAX, `top_skills[:15]`). A CV is a few kilobytes,
+            # but the upload route accepts 10 MB and `github_repos_brief`
+            # carries a README excerpt per repo — an uncapped block could hand
+            # a client a multi-megabyte tool result in one call. The cap is
+            # generous enough that a real CV or LinkedIn export is never cut,
+            # and `truncated` says so out loud when one is.
+            "raw": _raw_block(profile.cv_data),
         }
 
     @mcp.tool()
@@ -675,11 +737,17 @@ def build_server() -> MCPServer:
 
     @mcp.tool()
     async def update_profile(edits: list[dict[str, Any]]) -> dict[str, Any]:
-        """Correct or fill in something the extraction got wrong or missed —
-        location, headline, skills, a preference. Each edit is
-        {"path": <one of get_profile's editable_paths>, "value": <new value,
-        or null to clear back to what extraction says>}. An unknown path or a
-        wrongly-typed value is refused with the allowed set/values named.
+        """Write the profile — this is how the structured fields get filled.
+
+        Job360 only reads a document's STRUCTURE (decision 28). Everything it
+        cannot prove is yours to supply: read `get_profile`'s `raw` texts, then
+        send what you found here. Also use it to correct something the
+        structural read got wrong, or a preference the user told you.
+
+        Each edit is {"path": <one of get_profile's editable_paths>, "value":
+        <new value, or null to clear back to what the structural read says>}.
+        An unknown path or a wrongly-typed value is refused with the allowed
+        set/values named. Send several edits in one call.
         A re-extraction (a fresh CV/LinkedIn/GitHub) never undoes your edit —
         only clearing it does."""
         try:

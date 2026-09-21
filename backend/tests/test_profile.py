@@ -1,10 +1,26 @@
 """Tests for the src/services/profile/ package — models, cv_parser,
-preferences, storage.
+preferences.
 
 Slice 5 (#483) removed the sections that tested the job SCORER's side of
 this package: `keyword_generator` (the board-query builder), `SearchConfig`
-and `JobScorer` are all deleted. What is left is profile extraction — the
-half the mission keeps.
+and `JobScorer` are all deleted.
+
+Decision 28 (2026-09-21) then removed every LLM pass the profile pipeline
+had: the CV prompt and its provider chain, the two dict/schema -> CVData
+adapters (`_llm_result_to_cvdata`, `cv_schema_to_cvdata`), `schemas.py`
+(`CVSchema`, `CareerDomain`, `ExperienceEntry`, `EducationEntry`) and the
+about-me / LinkedIn / GitHub LLM inference passes. Job360 no longer turns a
+parsed CV into structured fields itself — the user's own agent reads
+`raw_text` off `get_profile` and writes the fields back with
+`update_profile`. Every test whose subject was that LLM behaviour (prompt
+content, schema validation, the adapters, "the model returns X") is gone
+with it; nothing here re-homes those assertions onto another function,
+because the flattening they tested no longer happens anywhere.
+
+What is left, and what this file tests: text extraction (PDF/DOCX), the
+deterministic structural CV pass (`cv_parser.deterministic_cv_fields` /
+`cv_data_from_text`) including ESCO skill normalisation, preference
+validation/sanitising/merging, and CVData/UserProfile model behaviour.
 """
 
 
@@ -165,274 +181,43 @@ class TestPreferences:
 
 
 # -----------------------------------------------------------------------
-# Edge cases — storage, cv_parser, single-char skills
+# ESCO skill normalisation — Step-1.5 S1.5-D
 # -----------------------------------------------------------------------
-
-# -----------------------------------------------------------------------
-# LLM CV Parser
-# -----------------------------------------------------------------------
-
-
-class TestLLMCVParser:
-    """Tests for the LLM-based CV parser."""
-
-    def test_llm_result_to_cvdata_tech_cv(self):
-        """LLM result for a tech CV populates CVData correctly."""
-        from src.services.profile.cv_parser import _llm_result_to_cvdata
-
-        result = {
-            "name": "Ranjith Guruprakash",
-            "headline": "AI/ML Engineer | Generative AI Specialist",
-            "location": "United Kingdom",
-            "summary": "AI/ML Engineer with 1.5 years of experience.",
-            "skills": ["Python", "PyTorch", "TensorFlow", "AWS Bedrock", "Docker"],
-            "experience": [
-                {
-                    "company": "Calnex",
-                    "title": "AI Solutions Engineer",
-                    "dates": "June 2025",
-                    "location": "UK",
-                    "bullets": ["Built RAG pipeline"],
-                }
-            ],
-            "education": [
-                {
-                    "degree": "MSc AI and Robotics",
-                    "institution": "Univ of Hertfordshire",
-                    "dates": "2022-2024",
-                    "details": ["Neural Networks", "Machine Learning"],
-                }
-            ],
-            "certifications": ["AWS Certified AI Practitioner (2025)"],
-            "achievements": ["achieving 95% response accuracy"],
-            "experience_level": "mid",
-            "industries": ["AI/ML"],
-            "languages": ["English"],
-        }
-
-        cv = _llm_result_to_cvdata("raw cv text here", result)
-        # Scoring-semantic fields: ONLY clean skills (no name/achievement pollution)
-        assert "Python" in cv.skills
-        assert "AWS Bedrock" in cv.skills
-        assert "Ranjith Guruprakash" not in cv.skills  # name is in cv.name, not skills
-        assert "achieving 95% response accuracy" not in cv.skills  # in cv.achievements
-        # Display-only fields
-        assert cv.name == "Ranjith Guruprakash"
-        assert "Generative AI" in cv.headline
-        assert "Kingdom" in cv.location
-        assert "achieving 95% response accuracy" in cv.achievements
-        # Companies and titles are separate
-        assert any("Calnex" in c for c in cv.companies)
-        assert any("AI Solutions Engineer" in t for t in cv.job_titles)
-        assert "Calnex" not in " ".join(cv.job_titles)  # company stays out of titles
-        # Education and certifications
-        assert any("MSc" in e for e in cv.education)
-        assert any("AWS" in c for c in cv.certifications)
-        # Finding 7 (Pillar-1 closeout audit) — the fallback adapter must
-        # mirror the live adapter: education sub-bullets (coursework/thesis)
-        # land on their OWN shelf, not mixed into the "degree — institution"
-        # lines (a fix that left them mixed in would fail this — the two
-        # adapters would disagree on what `cv.education` even contains).
-        assert cv.cv_education_details == ["Neural Networks", "Machine Learning"]
-        assert not any("Neural Networks" in e for e in cv.education)
-        assert "1.5 years" in cv.summary
-        # highlights property merges everything for the CV viewer
-        assert "Ranjith Guruprakash" in cv.highlights
-        assert "Python" in cv.highlights
-        assert "Calnex" in cv.highlights
-        assert "achieving 95% response accuracy" in cv.highlights
-
-    def test_llm_result_to_cvdata_medical_cv(self):
-        """LLM result for a medical CV works just as well — domain-agnostic."""
-        from src.services.profile.cv_parser import _llm_result_to_cvdata
-
-        result = {
-            "name": "Dr. Sarah Thompson",
-            "headline": "Cardiology Consultant",
-            "location": "London, UK",
-            "summary": "Experienced cardiologist with 10 years of clinical practice.",
-            "skills": [
-                "Echocardiography",
-                "Cardiac Catheterization",
-                "HIPAA",
-                "Patient Triage",
-                "EHR Systems",
-                "Clinical Trials",
-                "Medical Research",
-            ],
-            "experience": [
-                {
-                    "company": "NHS Royal Free",
-                    "title": "Cardiology Consultant",
-                    "dates": "2018-Present",
-                    "location": "London",
-                    "bullets": ["Led cardiac unit with 40% reduced wait times"],
-                }
-            ],
-            "education": [
-                {
-                    "degree": "MBBS Medicine",
-                    "institution": "University of Oxford",
-                    "dates": "2004-2010",
-                    "details": ["Honours in Cardiology"],
-                }
-            ],
-            "certifications": ["MRCP Cardiology — Royal College of Physicians (2012)"],
-            "achievements": ["reduced patient wait times by 40%"],
-            "experience_level": "senior",
-            "industries": ["Healthcare", "Cardiology"],
-            "languages": ["English", "French"],
-        }
-
-        cv = _llm_result_to_cvdata("raw medical cv text", result)
-        assert "Echocardiography" in cv.skills
-        assert "HIPAA" in cv.skills
-        assert "Patient Triage" in cv.skills
-        # Scoring-safe: name is NOT in skills
-        assert "Dr. Sarah Thompson" not in cv.skills
-        assert cv.name == "Dr. Sarah Thompson"
-        assert cv.headline == "Cardiology Consultant"
-        assert any("Cardiology Consultant" in t for t in cv.job_titles)
-        assert any("NHS Royal Free" in c for c in cv.companies)
-        assert any("Oxford" in e for e in cv.education)
-        assert any("MRCP" in c for c in cv.certifications)
-        # Highlights for CV viewer merges everything
-        assert "Dr. Sarah Thompson" in cv.highlights
-        assert "HIPAA" in cv.highlights
-        assert "NHS Royal Free" in cv.highlights
-
-    def test_llm_result_to_cvdata_empty(self):
-        """Empty LLM result produces empty CVData without crashing."""
-        from src.services.profile.cv_parser import _llm_result_to_cvdata
-
-        cv = _llm_result_to_cvdata("some raw text", {})
-        assert cv.raw_text == "some raw text"
-        assert cv.skills == []
-        assert cv.job_titles == []
-        assert cv.education == []
-
-    def test_llm_result_type_guard_string_skills(self):
-        """Weaker LLMs may return 'skills' as a comma-separated string — handle it."""
-        from src.services.profile.cv_parser import _llm_result_to_cvdata
-
-        result = {"skills": "Python, Java, Docker, Kubernetes"}
-        cv = _llm_result_to_cvdata("text", result)
-        assert "Python" in cv.skills
-        assert "Java" in cv.skills
-        assert "Docker" in cv.skills
-        assert "Kubernetes" in cv.skills
-
-    def test_llm_result_type_guard_none_skills(self):
-        """LLM returning None for skills should not crash."""
-        from src.services.profile.cv_parser import _llm_result_to_cvdata
-
-        cv = _llm_result_to_cvdata("text", {"skills": None, "achievements": None})
-        assert cv.skills == []
-        assert cv.achievements == []
-
-    def test_llm_result_type_guard_dict_items(self):
-        """LLM returning list of dicts instead of strings — extract name field."""
-        from src.services.profile.cv_parser import _llm_result_to_cvdata
-
-        result = {"skills": [{"name": "Python"}, {"name": "Docker"}, {"skill": "AWS"}]}
-        cv = _llm_result_to_cvdata("text", result)
-        assert "Python" in cv.skills
-        assert "Docker" in cv.skills
-        assert "AWS" in cv.skills
-
-    def test_llm_result_type_guard_wrong_types(self):
-        """Numbers, bools, nested dicts should be coerced or dropped, never crash."""
-        from src.services.profile.cv_parser import _llm_result_to_cvdata
-
-        result = {
-            "name": 123,  # wrong type
-            "skills": ["Python", None, 42, {"name": "Docker"}],  # mixed
-            "headline": ["not", "a", "string"],  # wrong type
-            "summary": None,
-        }
-        cv = _llm_result_to_cvdata("text", result)
-        assert cv.name == "123"  # coerced
-        assert cv.headline == ""  # wrong type → empty
-        assert cv.summary == ""
-        assert "Python" in cv.skills
-        assert "Docker" in cv.skills
-        # None and 42 dropped from list cleanly
+#
+# Decision 28 deleted both the LLM adapters that used to call
+# `_maybe_normalise_skills_via_esco` (`_llm_result_to_cvdata` and
+# `schemas.cv_schema_to_cvdata`). The normaliser itself survives — it is now
+# called once, from `cv_parser.cv_data_from_text`, the single deterministic
+# pass every CV goes through. Same behaviour, one call site instead of two
+# that could (and did) disagree.
 
 
-class TestCvPromptRequestsCareerDomain:
-    """BUG 1a (Pillar-1 audit 2026-08-07). `_CV_PROMPT`'s JSON schema never
-    asked for `career_domain`, even though `CVSchema.career_domain` and the
-    `CareerDomain` enum have existed since Batch 1.1 — so the LLM had no
-    reason to ever return one. Asserts PROMPT CONTENT (matches the style of
-    test_cv_prompt_steering.py), not LLM behaviour."""
-
-    def test_prompt_asks_for_career_domain(self):
-        from src.services.profile import cv_parser
-
-        p = cv_parser._CV_PROMPT.lower()
-        assert '"career_domain"' in p
-
-    def test_prompt_lists_the_real_enum_members_not_invented_values(self):
-        """The allowed values in the prompt must be the ACTUAL `CareerDomain`
-        members — a mismatched or partial list would have the model return
-        buckets `CVSchema` then rejects, wasting a retry."""
-        from src.services.profile import cv_parser
-        from src.services.profile.schemas import CareerDomain
-
-        p = cv_parser._CV_PROMPT
-        for member in CareerDomain:
-            assert member.value in p, f"{member.value!r} missing from the CV prompt"
-
-    def test_prompt_tells_the_model_to_return_null_when_unclear(self):
-        """Steering against guessing — a wrong classification corrupts
-        downstream archetype-aware scoring more than an absent one."""
-        from src.services.profile import cv_parser
-
-        p = cv_parser._CV_PROMPT.lower()
-        assert "null" in p
-        assert "guess" in p
-
-
-class TestCvSchemaEscoNormalisation:
-    """BUG 2 (Pillar-1 audit 2026-08-07). `_maybe_normalise_skills_via_esco`
-    was only ever called from `cv_parser._llm_result_to_cvdata` — the untyped
-    DEFENSIVE FALLBACK, reached only when strict `CVSchema` validation
-    exhausts its retries. `cv_schema_to_cvdata` (the path every successful
-    extraction actually returns through) built `CVData(...)` with no
-    `cv_skills_esco=` argument at all, so prod (`SEMANTIC_ENABLED=true`)
-    shipped `cv_skills_esco={}` on every profile regardless of the flag.
-    """
-
-    def _schema(self):
-        from src.services.profile.schemas import CVSchema
-
-        return CVSchema(skills=["Python", "Docker"])
-
+class TestCvDataFromTextEscoNormalisation:
     def test_populates_cv_skills_esco_when_esco_data_is_available(self):
         from unittest.mock import patch
 
-        from src.services.profile.schemas import cv_schema_to_cvdata
+        from src.services.profile.cv_parser import cv_data_from_text
 
         fake_map = {"Python": "http://esco/python"}
         with patch(
-            "src.services.profile.schemas._maybe_normalise_skills_via_esco",
+            "src.services.profile.cv_parser._maybe_normalise_skills_via_esco",
             return_value=(["Python", "Docker"], fake_map),
         ) as mock_norm:
-            cv = cv_schema_to_cvdata(self._schema(), "raw")
+            cv = cv_data_from_text("Skills\nPython, Docker")
 
         mock_norm.assert_called_once_with(["Python", "Docker"])
         assert cv.cv_skills_esco == fake_map
 
     def test_returns_empty_dict_without_raising_when_esco_unavailable(self):
         """Flag-off / no-index-on-disk is the DEFAULT runtime state
-        (`SEMANTIC_ENABLED` defaults false, root rule #18) — this must
-        degrade to `{}` silently, never raise. No mocking: the test
+        (`ESCO_SKILL_NORMALISATION_ENABLED` defaults false, root rule #18) —
+        this must degrade to `{}` silently, never raise. No mocking: the test
         environment genuinely has the flag off and no ESCO index on disk
         (conftest.py + no backend/data/esco/), so the real normaliser runs
         its own no-op path."""
-        from src.services.profile.schemas import cv_schema_to_cvdata
+        from src.services.profile.cv_parser import cv_data_from_text
 
-        cv = cv_schema_to_cvdata(self._schema(), "raw")
+        cv = cv_data_from_text("Skills\nPython, Docker")
         assert cv.cv_skills_esco == {}
         assert cv.skills == ["Python", "Docker"]
 
@@ -493,58 +278,10 @@ def test_has_linkedin_true_from_positions_even_without_skills():
     assert resp.summary.has_linkedin is True
 
 
-class TestCvSchemaCarriesDatedExperience:
-    """PILLAR-1 AUDIT FINDING (2026-08-07, profile: Pavan).
-
-    PR #241 added `cv_positions` to `cv_parser._llm_result_to_cvdata` — but
-    `llm_cv_fields_from_text` returns through `schemas.cv_schema_to_cvdata`,
-    so the fix reached no real extraction. Measured on a live CV: the LLM
-    returned "Freelance AI Trainer & Subject Matter Expert, 2023 - 2024" and
-    cv_positions still came out 0. Two adapters for one contract was the bug.
-    """
-
-    def _schema(self):
-        from src.services.profile.schemas import CVSchema, ExperienceEntry
-
-        return CVSchema(
-            skills=["python"],
-            experience=[
-                ExperienceEntry(
-                    company="Acme", title="ML Engineer", dates="2023 - 2024",
-                    location="London", bullets=["Built pipelines"],
-                ),
-                ExperienceEntry(
-                    company="", title="Freelance AI Trainer", dates="2022 - 2023",
-                    location="Remote", bullets=[],
-                ),
-            ],
-        )
-
-    def test_dated_positions_survive_the_schema_adapter(self):
-        from src.services.profile.schemas import cv_schema_to_cvdata
-
-        cv = cv_schema_to_cvdata(self._schema(), "raw cv text")
-        assert len(cv.cv_positions) == 2, "experience entries were dropped"
-        first = cv.cv_positions[0]
-        assert first["title"] == "ML Engineer"
-        assert first["company"] == "Acme"
-        assert first["dates"] == "2023 - 2024", "dates discarded again"
-        assert first["location"] == "London"
-        assert first["bullets"] == ["Built pipelines"]
-
-    def test_title_and_company_stay_paired(self):
-        """The flat lists cannot express WHICH title was held WHERE — a
-        company-less entry silently shifts every later pairing."""
-        from src.services.profile.schemas import cv_schema_to_cvdata
-
-        cv = cv_schema_to_cvdata(self._schema(), "raw")
-        assert cv.cv_positions[1]["title"] == "Freelance AI Trainer"
-        assert cv.cv_positions[1]["company"] == ""
-        # the legacy flat lists are exactly the trap: 2 titles, 1 company
-        assert len(cv.job_titles) == 2 and len(cv.companies) == 1
-
-    def test_entries_without_title_or_company_are_skipped(self):
-        from src.services.profile.schemas import CVSchema, ExperienceEntry, cv_schema_to_cvdata
-
-        schema = CVSchema(experience=[ExperienceEntry(bullets=["orphan bullet"])])
-        assert cv_schema_to_cvdata(schema, "raw").cv_positions == []
+# NOTE (decision 28, 2026-09-21): `TestCvSchemaCarriesDatedExperience` lived
+# here — it asserted that `schemas.cv_schema_to_cvdata` turned LLM-returned
+# experience entries into `cv.cv_positions`. That whole adapter is deleted:
+# Job360 does not extract dated positions from a CV any more, the user's
+# agent reads `raw_text` and writes `cv_positions` back via `update_profile`.
+# Nothing to re-home the assertions onto — the flattening they tested no
+# longer happens anywhere.
