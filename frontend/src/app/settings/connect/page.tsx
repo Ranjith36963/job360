@@ -197,9 +197,18 @@ function ConnectAppCard() {
 
 // ---------------------------------------------------------------------------
 // One recipe per assistant. Verified against each vendor's own docs
-// (2026-09-20; the ChatGPT plan line re-checked against OpenAI's help centre
-// 2026-09-21) — plan names and menu paths only go here once we've checked
-// them there; do not extend this list from memory.
+// (2026-09-20; the ChatGPT plan line re-checked 2026-09-21) — plan names and
+// menu paths only go here once we've checked them there; do not extend this
+// list from memory.
+//
+// ChatGPT's own docs disagree on Plus/Pro: OpenAI's help centre
+// (help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
+// says full MCP support "including modify/write actions" is rolling out only
+// to Business, Enterprise and Edu, with Plus/Pro limited to read/fetch; its
+// developer guide (developers.openai.com/api/docs/guides/developer-mode) says
+// developer mode gives full read/write MCP to Pro, Plus, Business, Enterprise
+// and Education alike. Until OpenAI reconciles that, the recipe below states
+// the cautious reading — Job360's two workflows both write.
 //
 // `ready` is a HAND-WRITTEN RESULT OF A DATED MANUAL CHECK, not a live
 // reading. On LAST_CHECKED each assistant's real OAuth callback was posted to
@@ -234,7 +243,7 @@ const ASSISTANT_RECIPES: AssistantRecipe[] = [
   {
     name: "ChatGPT",
     plans:
-      "Business, Enterprise or Edu. Job360 needs a connector that can write, and OpenAI ships that on those plans only — Plus and Pro can't finish these workflows.",
+      "Business, Enterprise or Edu — OpenAI documents full write support there. Plus and Pro may be read-only for this: OpenAI's help centre says so, though its developer guide claims full read/write for every paid plan. Until OpenAI settles that, don't rely on Plus/Pro to finish these workflows.",
     steps:
       "An admin or owner turns on Developer mode in Workspace settings, adds the address above as a custom app, then publishes it to the workspace.",
     ready: true,
