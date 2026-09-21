@@ -130,8 +130,8 @@ jobs:
           # email_sender.py falls back to SMTP_PASSWORD when it looks like a
           # Resend key, and the probe mirrors that fallback — so without this
           # line an installation keyed that way reads as "no email credential
-          # at all" and opens a daily "nobody can log in" issue while login
-          # works fine. A false alarm on the loudest possible subject.
+          # in CI secrets" and opens a daily issue while login works fine. A
+          # false alarm on the loudest possible subject.
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
@@ -164,7 +164,7 @@ jobs:
           if [ "${{ inputs.drill }}" = "true" ]; then
             title="DRILL: provider probe test - not a real problem"
           elif [ "$code" = "3" ]; then
-            title="KEYS: no email credential is configured - nobody can log in"
+            title="KEYS: no email credential in CI secrets - production status unverified"
           else
             title="KEYS: a provider credential is dead"
           fi
@@ -191,7 +191,7 @@ jobs:
             # Both titles close here: whichever fix the owner applied (rotated a
             # dead key, or created a first one), a clean probe proves it worked.
             for t in "KEYS: a provider credential is dead" \
-                     "KEYS: no email credential is configured - nobody can log in"; do
+                     "KEYS: no email credential in CI secrets - production status unverified"; do
               n=$(gh issue list --state open --json number,title \
                     --jq ".[] | select(.title==\"$t\") | .number" | head -1)
               # `if`, not `[ -n "$n" ] && ...` — under `set -e` a false test as

@@ -240,17 +240,27 @@ def main() -> int:
             return 3
         if no_email_key:
             print()
-            print("## No email credential is configured at all — LOGIN IS DOWN")
+            print(
+                "## No email credential is set as a GitHub Actions secret — "
+                "this probe cannot see Railway, so this is not a production verdict"
+            )
             print()
             print(
                 "Neither " + " nor ".join("`" + n + "`" for n in EMAIL_KEY_VARS)
-                + " form a usable email path (a Resend-compatible key, or the "
-                "COMPLETE SMTP_EMAIL + SMTP_PASSWORD pair — see "
-                "`email_sender._smtp_config`). Login is passwordless — a magic "
-                "link delivered by Resend — so with no email credential NOBODY "
-                "CAN LOG IN, and nothing else goes red: every live probe "
-                "injects a pre-made session cookie instead of walking the real "
-                "email path."
+                + " is set in this repo's Actions secrets (a Resend-compatible "
+                "key, or the COMPLETE SMTP_EMAIL + SMTP_PASSWORD pair — see "
+                "`email_sender._smtp_config`). This probe only ever reads the "
+                "CI/Actions secret set — it has no way to reach Railway or "
+                "production, so it cannot tell whether login actually works "
+                "right now. It can only say it has nothing to test."
+            )
+            print(
+                "\n**Fix:** `gh secret set RESEND_API_KEY` with the SAME value "
+                "production uses on Railway (`email_sender.py` falls back to "
+                "`SMTP_PASSWORD` when it looks like a Resend key), or the "
+                "complete `SMTP_EMAIL` + `SMTP_PASSWORD` pair — so this probe "
+                "watches the credential production actually depends on, "
+                "instead of nothing."
             )
             return 3
         return 2
@@ -266,25 +276,33 @@ def main() -> int:
         print(f"\n_Not configured, so not probed (absent is not broken): {', '.join(absent)}._")
 
     if no_email_key:
-        print("\n## No email credential is configured at all — LOGIN IS DOWN\n")
         print(
-            f"::error::No usable email path is configured "
-            f"({', '.join(EMAIL_KEY_VARS)} are all empty, or form an "
-            "incomplete SMTP pair) — the magic link cannot be sent, so "
-            "nobody can log in."
+            "\n## No email credential is set as a GitHub Actions secret — "
+            "this probe cannot see Railway, so this is not a production verdict\n"
         )
         print(
-            "\nThis is a CONFIG failure, and it is the one case where absence IS "
-            "breakage: there is no password fallback. It is invisible everywhere "
-            "else, because every live probe injects a pre-made session cookie "
-            "instead of walking the real email path.\n"
+            f"::error::No usable email credential is set in this repo's "
+            f"Actions secrets ({', '.join(EMAIL_KEY_VARS)} are all empty, or "
+            "form an incomplete SMTP pair). This probe only reads CI/Actions "
+            "secrets — it cannot see Railway or production, so this is NOT a "
+            "claim that login is broken. It is a claim that this probe has "
+            "nothing to test."
         )
         print(
-            "**Fix:** set `RESEND_API_KEY` as a repo Actions secret AND on the "
-            "Railway backend service (`email_sender.py` falls back to "
+            "\nThis is a CI-configuration gap, not a production diagnosis. It "
+            "is still worth fixing: every live probe elsewhere injects a "
+            "pre-made session cookie instead of walking the real email path, "
+            "so nothing else here would catch a genuinely dead production key "
+            "either — this alarm just cannot speak to whether that is "
+            "happening right now.\n"
+        )
+        print(
+            "**Fix:** `gh secret set RESEND_API_KEY` with the SAME value "
+            "production uses on Railway (`email_sender.py` falls back to "
             "`SMTP_PASSWORD` when it looks like a Resend key), or set the "
-            "complete `SMTP_EMAIL` + `SMTP_PASSWORD` pair. An unset Actions "
-            "secret renders as an EMPTY string, which is how this hides."
+            "complete `SMTP_EMAIL` + `SMTP_PASSWORD` pair, so this probe "
+            "watches the credential production actually depends on. An unset "
+            "Actions secret renders as an EMPTY string, which is how this hides."
         )
 
     if dead:
@@ -292,9 +310,14 @@ def main() -> int:
         for name, _v, detail in dead:
             print(f"- **{name}** — {detail}")
         print(
-            "\nA rejected key fails on EVERY call until a human rotates it. If "
-            "`resend` is on this list, nobody can log in at all — the login link "
-            "is the only way in."
+            "\nA rejected key fails on EVERY call until a human rotates it. "
+            "This verdict is real — it comes from a live call to the "
+            "provider's own API, not just a CI-local check — but it is a "
+            "verdict about the CI/Actions copy of the key. If that is the "
+            "SAME value production uses on Railway, nobody can log in right "
+            "now. If Railway holds a different value for it, only the CI "
+            "copy is proven dead — check Railway's copy too before assuming "
+            "production is affected."
         )
         return 1
 
