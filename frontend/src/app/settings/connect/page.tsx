@@ -186,24 +186,166 @@ function ConnectAppCard() {
             </Button>
           </div>
         </div>
-        <div className="space-y-3 text-xs text-muted-foreground">
-          <p>
-            <span className="font-medium text-foreground">Claude.ai</span> —
-            Settings → Connectors → Add custom connector → paste the address →
-            Connect.
-          </p>
-          <p>
-            <span className="font-medium text-foreground">
-              ChatGPT (Plus/Pro)
-            </span>{" "}
-            — Settings → turn on Developer mode → Connectors → Create → paste
-            the address → Create.
-          </p>
-          <p>
-            Claude Code and other MCP clients use a personal token instead —
-            create one below.
-          </p>
-        </div>
+        <p className="text-xs text-muted-foreground">
+          Claude Code and other MCP clients that take a bearer token instead
+          of a sign-in — create a personal token below.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// One recipe per assistant. Verified against each vendor's own docs
+// (2026-09-20; the ChatGPT plan line re-checked 2026-09-21) — plan names and
+// menu paths only go here once we've checked them there; do not extend this
+// list from memory.
+//
+// ChatGPT's own docs disagree on Plus/Pro: OpenAI's help centre
+// (help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
+// says full MCP support "including modify/write actions" is rolling out only
+// to Business, Enterprise and Edu, with Plus/Pro limited to read/fetch; its
+// developer guide (developers.openai.com/api/docs/guides/developer-mode) says
+// developer mode gives full read/write MCP to Pro, Plus, Business, Enterprise
+// and Education alike. Until OpenAI reconciles that, the recipe below states
+// the cautious reading — Job360's two workflows both write.
+//
+// `ready` is a HAND-WRITTEN RESULT OF A DATED MANUAL CHECK, not a live
+// reading. On LAST_CHECKED each assistant's real OAuth callback was posted to
+// production's own /api/oauth/register and the server's answer (accepted vs.
+// "invalid_redirect_uri") written down here. Nothing on this page reads the
+// deployment's allow-list at runtime, so if the owner adds or removes a
+// callback afterwards these values go stale until someone re-runs the check
+// and edits them — which is why every line the user sees carries the date.
+// A "blocked" entry means the CALLBACK for that assistant was not in the
+// server's allow-list that day — nothing about the assistant itself.
+// ---------------------------------------------------------------------------
+
+/** The day the callbacks below were last posted to /api/oauth/register. */
+const LAST_CHECKED = "21 September 2026";
+
+type AssistantRecipe = {
+  name: string;
+  plans: string;
+  steps: string;
+  /** Result of the manual check on LAST_CHECKED — not a live status. */
+  ready: boolean;
+};
+
+const ASSISTANT_RECIPES: AssistantRecipe[] = [
+  {
+    name: "Claude",
+    plans: "Every plan, including Free (Free gets one custom connector).",
+    steps:
+      "Settings → Connectors → Add custom connector → paste the address above → Connect. Sign-in happens automatically.",
+    ready: true,
+  },
+  {
+    name: "ChatGPT",
+    plans:
+      "Business, Enterprise or Edu — OpenAI documents full write support there. Plus and Pro may be read-only for this: OpenAI's help centre says so, though its developer guide claims full read/write for every paid plan. Until OpenAI settles that, don't rely on Plus/Pro to finish these workflows.",
+    steps:
+      "An admin or owner turns on Developer mode in Workspace settings, adds the address above as a custom app, then publishes it to the workspace.",
+    ready: true,
+  },
+  {
+    name: "Perplexity",
+    plans: "Pro, Max or Enterprise.",
+    steps:
+      "Settings → Connectors → Add custom remote connector → paste the address above → choose OAuth.",
+    ready: false,
+  },
+  {
+    name: "Grok",
+    plans: "Paid accounts.",
+    steps: "Add an MCP connection with the address above.",
+    ready: true,
+  },
+  {
+    name: "Gemini",
+    plans: "Gemini Enterprise / Business editions only.",
+    steps:
+      "An admin adds the address above as a custom MCP server connection. The consumer Gemini app doesn't support this yet.",
+    ready: false,
+  },
+];
+
+function AssistantRecipesCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Connect your assistant</CardTitle>
+        <CardDescription>
+          Job360 has no AI of its own — your assistant is the intelligence,
+          Job360 is where it stores and remembers what it does for you. Same
+          address for every assistant, from the card above.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ul className="divide-y divide-border/40">
+          {ASSISTANT_RECIPES.map((a) => (
+            <li key={a.name} className="space-y-1 py-3">
+              <p className="font-medium">{a.name}</p>
+              <p className="text-xs text-muted-foreground">{a.plans}</p>
+              <p className="text-xs text-muted-foreground">{a.steps}</p>
+              <p
+                className={
+                  a.ready
+                    ? "text-xs text-emerald-600 dark:text-emerald-400"
+                    : "text-xs text-amber-600 dark:text-amber-400"
+                }
+                data-testid={`assistant-status-${a.name.toLowerCase()}`}
+              >
+                {a.ready
+                  ? `Worked when we checked, on ${LAST_CHECKED}.`
+                  : `Did not work when we checked, on ${LAST_CHECKED} — ask the owner to allowlist this assistant's callback first.`}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// What to actually say, once connected — the two workflows the MCP tools
+// carry (docs/product/VISION.md decision 28): build the profile, apply to a
+// job. Plain prompts, no marketing.
+// ---------------------------------------------------------------------------
+
+const EXAMPLE_PROMPTS: { label: string; prompt: string }[] = [
+  {
+    label: "Build your profile",
+    prompt: "Build my Job360 profile from the CV I just uploaded.",
+  },
+  {
+    label: "Apply to a job",
+    prompt: "Write me a tailored CV for the job I just brought and save it.",
+  },
+];
+
+function ExamplePromptsCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>What to say to your assistant</CardTitle>
+        <CardDescription>
+          Once connected, just ask in plain words — the assistant picks the
+          right tools.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ul className="divide-y divide-border/40">
+          {EXAMPLE_PROMPTS.map((e) => (
+            <li key={e.label} className="space-y-1 py-3">
+              <p className="text-xs font-medium text-muted-foreground">
+                {e.label}
+              </p>
+              <p className="font-mono text-sm">&quot;{e.prompt}&quot;</p>
+            </li>
+          ))}
+        </ul>
       </CardContent>
     </Card>
   );
@@ -521,6 +663,8 @@ export default function ConnectAgentPage() {
         </p>
       </div>
       <ConnectAppCard />
+      <AssistantRecipesCard />
+      <ExamplePromptsCard />
       <ConnectedAppsCard
         grants={grants}
         loading={grantsLoading}

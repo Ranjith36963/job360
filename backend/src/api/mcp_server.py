@@ -57,7 +57,14 @@ INSTRUCTIONS = (
     "LLM of its own: it never ranks, scores, recommends or writes anything itself — "
     "you write the CV and cover letter, it versions, renders and remembers them. "
     "Nothing here submits an application anywhere; record_application only records "
-    "a fact the user states."
+    "a fact the user states. Two flows without our website: (1) build the "
+    "profile — get_profile returns `raw` (the CV/LinkedIn/GitHub text Job360 "
+    "extracted) and `editable_paths`; read `raw`, then write the structured "
+    "fields with update_profile. Dated positions and projects are not writable "
+    "yet, so put a role's substance in cv_data.job_titles and cv_data.summary. "
+    "(2) apply to a job — bring_job, then get_job + get_profile, judge fit "
+    "yourself and save_fit, write the CV/cover letter yourself and save_artifact, "
+    "then record_application once the user says they applied."
 )
 
 # The user behind the request being served. Set by the ASGI shim per request,
@@ -585,7 +592,10 @@ def build_server() -> MCPServer:
         Pick the dimensions that matter for THIS job (for one ad that may be
         depth in a stack, domain knowledge, leadership, location, pay; for
         another something else). Job360 never names an axis or scores one;
-        it draws exactly what you send. Omit `axes` and no chart is shown."""
+        it draws exactly what you send. Omit `axes` and no chart is shown.
+
+        Next: write the tailored CV / cover letter yourself and save it with
+        save_artifact."""
         try:
             body = applications_route.SaveFitRequest(
                 score=score, verdict=verdict, gaps=gaps, reasoning=reasoning,

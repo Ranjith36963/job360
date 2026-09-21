@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import posthog from "posthog-js";
 import { User, CheckCircle, AlertCircle, History } from "lucide-react";
@@ -319,6 +320,13 @@ export default function ProfilePage() {
                   {profile?.summary.is_complete
                     ? "Your profile is ready for your agent"
                     : "Upload your CV — Job360 stores the text; your connected agent fills in the rest"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Or let your AI assistant fill this in for you —{" "}
+                  <Link href="/settings/connect" className="underline">
+                    connect it
+                  </Link>
+                  .
                 </p>
               </div>
             </div>
