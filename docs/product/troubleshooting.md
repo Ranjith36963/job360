@@ -82,9 +82,16 @@ were deleted, along with `OPENAI_API_KEY`, `OPENAI_MODEL`, `GEMINI_API_KEY`,
 any MCP client at `/api/mcp` (see `docs/product/VISION.md`), then ask it to:
 
 1. call `get_profile` — the `raw` key carries the CV text, the LinkedIn export
-   text, the GitHub bio, the profile README and the repo briefs;
-2. read them, and call `update_profile` with the roles, dates, companies,
-   projects, certifications and the skills that are only stated in prose.
+   text, the GitHub bio, the profile README and the repo briefs. The
+   `editable_paths` key lists the exact dotted paths `update_profile` accepts
+   right now — read it, don't assume a shape;
+2. read the raw text, and call `update_profile` with the certifications,
+   education and the skills that are only stated in prose. Dated work history
+   and a separate projects list are **not yet writable** — they aren't in
+   `editable_paths`, and `update_profile` returns 422 for a path outside it —
+   so fold the substance of a role into the writable fields that exist today,
+   such as `cv_data.job_titles` and `cv_data.summary`, until dated history and
+   projects are supported.
 
 What the agent writes survives every later re-upload — nothing in the extractor
 clears a field the agent set.

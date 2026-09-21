@@ -283,10 +283,17 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
         )
 
     # ── (4) Preferences ── raw = prefs.about_me ────────────────────────
-    if prefs.about_me:
-        _merge_str_list(
-            cv.about_me_inferred_skills, deterministic_about_me_fields(prefs.about_me)
-        )
+    # about_me_inferred_skills is DERIVED from about_me (an input the user
+    # typed, not something the user's agent wrote through update_profile), so
+    # unlike every other shelf here it must be RECOMPUTED from the CURRENT
+    # about_me on every run instead of merged. Fill-if-present
+    # (_merge_str_list) is append-only: editing about_me from "Skills:
+    # Python" to "Skills: Go" left both, and clearing about_me left the
+    # stale list forever. There is no agent-written value to protect here —
+    # only a structural parse of text the user can still see and edit, so
+    # clearing then refilling from the parser is the correct — and safe —
+    # rule for this one field.
+    cv.about_me_inferred_skills = list(deterministic_about_me_fields(prefs.about_me))
 
     # Collapse line-wrap fragments + cross-source duplicates in the free-text
     # lists so the profile shows each certification / qualification ONCE (a CV +

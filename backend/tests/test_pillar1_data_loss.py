@@ -24,6 +24,7 @@ now, so there are no LLM edges left to stub out.
 from __future__ import annotations
 
 import asyncio
+import copy
 import dataclasses
 from typing import Any
 
@@ -108,18 +109,28 @@ class TestLinkedInSectionsSurviveReExtraction:
         for f in _LI_FIELDS:
             setattr(cv, f, ["ProbeSkill"] if f == "linkedin_skills"
                     else [{"probe": f}])
+        # Capture the EXACT value, not just "is it truthy" — a truthiness
+        # check still passes when a re-extraction overwrites an agent-written
+        # value with different non-empty data (CodeRabbit, PR #608). deepcopy
+        # because these are mutable lists/dicts the orchestrator mutates in
+        # place.
+        original = {f: copy.deepcopy(getattr(cv, f)) for f in _LI_FIELDS}
         profile = UserProfile(cv_data=cv, preferences=UserPreferences())
 
         after1 = asyncio.run(two_pass.run_two_pass_extraction(profile))
         for f in _LI_FIELDS:
-            assert getattr(after1.cv_data, f), f"{f} was wiped on the first re-extraction"
+            assert getattr(after1.cv_data, f) == original[f], (
+                f"{f} was changed (wiped OR overwritten) on the first re-extraction"
+            )
 
         # A second run (e.g. the user edits an unrelated preference and the
         # whole profile is re-read again) must not wipe it either — this is
         # the exact repeat-run shape the original cache-hit bug had.
         after2 = asyncio.run(two_pass.run_two_pass_extraction(after1))
         for f in _LI_FIELDS:
-            assert getattr(after2.cv_data, f), f"{f} was wiped on the second re-extraction"
+            assert getattr(after2.cv_data, f) == original[f], (
+                f"{f} was changed (wiped OR overwritten) on the second re-extraction"
+            )
 
 
 class TestEveryLinkedInShelfSurvivesReExtraction:
@@ -168,17 +179,23 @@ class TestEveryLinkedInShelfSurvivesReExtraction:
         cv = CVData()
         for f in shelves:
             setattr(cv, f.name, self._probe_for(f.name, getattr(pristine, f.name)))
+        # EXACT value, not truthiness — see the class above for why a
+        # truthiness check misses an overwrite with different non-empty data.
+        original = {f.name: copy.deepcopy(getattr(cv, f.name)) for f in shelves}
 
         profile = UserProfile(cv_data=cv, preferences=UserPreferences())
         after = asyncio.run(two_pass.run_two_pass_extraction(profile))
 
-        dropped = [f.name for f in shelves if not getattr(after.cv_data, f.name)]
-        assert not dropped, (
+        changed = [
+            f.name for f in shelves
+            if getattr(after.cv_data, f.name) != original[f.name]
+        ]
+        assert not changed, (
             "These LinkedIn shelves were pre-populated (as if the user's own "
-            f"agent had written them) and then wiped by a re-extraction: {dropped}. "
+            f"agent had written them) and then changed by a re-extraction: {changed}. "
             "enrich_cv_from_linkedin must only ever ADD what it actually parsed "
-            "structurally — never assign an empty value over something already "
-            "there."
+            "structurally — never assign an empty value, or a different "
+            "non-empty one, over something already there."
         )
 
 

@@ -622,6 +622,52 @@ class TestTwoPassOrchestrator:
         assert out.cv_data.github_llm_skills == ["LangChain"]
 
 
+class TestAboutMeInferredSkillsAreRecomputed:
+    """``about_me_inferred_skills`` is the ONE exception to the fill-if-present
+    rule the class above pins: unlike ``cv_positions`` / ``linkedin_positions``
+    / ``github_llm_skills``, nothing about it is agent-written. It is a
+    structural parse of ``preferences.about_me`` — an input the USER typed and
+    can still edit — so it must be RECOMPUTED from the CURRENT about_me on
+    every run, not merged onto whatever was there before.
+
+    CodeRabbit (PR #608): the old code called ``_merge_str_list`` here, which
+    is append-only. Editing about_me from "Skills: Python" to "Skills: Go"
+    left both Python and Go on the shelf, and clearing about_me entirely left
+    the stale list forever — the opposite of what an append-only merge is
+    supposed to protect.
+    """
+
+    @pytest.mark.asyncio
+    async def test_changing_about_me_leaves_only_the_new_skills(self):
+        from src.services.profile import two_pass
+
+        cv = CVData(about_me_inferred_skills=["Python"])
+        prefs = UserPreferences(about_me="Skills: Go")
+        profile = UserProfile(cv_data=cv, preferences=prefs)
+
+        out = await two_pass.run_two_pass_extraction(profile)
+
+        assert out.cv_data.about_me_inferred_skills == ["Go"], (
+            "Python survived a change to about_me — the shelf was merged, "
+            "not recomputed"
+        )
+
+    @pytest.mark.asyncio
+    async def test_clearing_about_me_clears_the_derived_skills(self):
+        from src.services.profile import two_pass
+
+        cv = CVData(about_me_inferred_skills=["Python"])
+        prefs = UserPreferences(about_me="")
+        profile = UserProfile(cv_data=cv, preferences=prefs)
+
+        out = await two_pass.run_two_pass_extraction(profile)
+
+        assert out.cv_data.about_me_inferred_skills == [], (
+            "clearing about_me must clear the skills derived from it — they "
+            "are not agent-written and have no reason to survive"
+        )
+
+
 # ── CV REPLACEMENT — a new upload must not inherit the previous CV ──────────
 
 

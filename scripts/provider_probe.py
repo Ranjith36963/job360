@@ -68,7 +68,19 @@ FORCE_RED = os.getenv("PROBE_FORCE_RED", "") == "1"
 # LLM pool is gone (decision 28), so EMAIL is now the capability with that
 # shape, and it is the worse one: no email credential means no magic link,
 # which means nobody can log in.
-EMAIL_KEY_VARS = ("RESEND_API_KEY", "SMTP_PASSWORD")
+#
+# A CONFIGURED email path is a Resend-compatible key (``RESEND_API_KEY``, or
+# ``SMTP_PASSWORD`` holding one — see the resend-key detection below) OR the
+# COMPLETE native-SMTP pair. ``SMTP_PASSWORD`` alone is neither: mirror
+# ``email_sender._smtp_config()``, which refuses to send unless BOTH
+# ``SMTP_EMAIL`` and ``SMTP_PASSWORD`` are set (CodeRabbit, PR #608 — this
+# used to treat ``SMTP_PASSWORD`` alone as "configured" for the purposes of
+# this constant, so with no ``RESEND_API_KEY`` and only ``SMTP_PASSWORD``
+# set, nothing was probed, no alarm fired, and the probe exited 2 — a code
+# the workflow does not alarm on). Kept as a display list for the alarm
+# messages below; ``main()`` computes "is anything actually configured"
+# itself (a full SMTP pair, not just one of these three being non-empty).
+EMAIL_KEY_VARS = ("RESEND_API_KEY", "SMTP_EMAIL", "SMTP_PASSWORD")
 
 
 def _probe(url: str, headers: dict[str, str], payload: dict | None = None) -> tuple[str, str]:
@@ -142,6 +154,11 @@ def main() -> int:
     if not resend_key and env("SMTP_PASSWORD").startswith("re_"):
         resend_key = env("SMTP_PASSWORD")
     resend_from = env("SMTP_FROM") or env("SMTP_EMAIL") or "onboarding@resend.dev"
+    # The other real email path: a COMPLETE native-SMTP pair. Mirrors
+    # email_sender._smtp_config(), which refuses to send unless BOTH vars are
+    # set — SMTP_PASSWORD alone can never send (CodeRabbit, PR #608).
+    smtp_pair_configured = bool(env("SMTP_EMAIL")) and bool(env("SMTP_PASSWORD"))
+    smtp_pair_unprobed = False
     if resend_key:
         verdict, detail = _probe(
             "https://api.resend.com/emails",
@@ -162,6 +179,14 @@ def main() -> int:
             domain = resend_from.split("@")[-1]
             detail = f"{detail} (sender domain `{domain}` — check the key AND that this domain is verified)"
         results.append(("resend (LOGIN DEPENDS ON THIS)", verdict, detail))
+    elif smtp_pair_configured:
+        # A real, complete SMTP credential — but this probe has no cheap,
+        # mail-free way to authenticate against a raw SMTP server the way it
+        # does against Resend's HTTP API (an intentionally-invalid body).
+        # Treating this as "absent" would relight the exact blind spot this
+        # file exists to kill: a configured-but-unchecked credential must
+        # alarm, not go quiet.
+        smtp_pair_unprobed = True
     else:
         absent.append("RESEND_API_KEY")
 
@@ -181,7 +206,14 @@ def main() -> int:
     # way it already does, with no issue and no triage. An environment with zero
     # secrets trivially has zero email keys — that is the SAME alarm, not a
     # separate blind-probe case, and it must be reported as such.
-    no_email_key = all(not env(name) for name in EMAIL_KEY_VARS)
+    #
+    # CONFIGURED means a Resend-compatible key OR the complete SMTP pair —
+    # anything else (including SMTP_PASSWORD alone) is "no email key". This
+    # used to be `all(not env(name) for name in EMAIL_KEY_VARS)`, which
+    # counted a lone SMTP_PASSWORD as configured even though it can never
+    # send: that produced empty `results`, `no_email_key == False`, and a
+    # silent exit 2 that the workflow does not alarm on.
+    no_email_key = not resend_key and not smtp_pair_configured
 
     if not results:
         print("::error::no provider credentials are configured, so nothing could be probed.")
@@ -189,16 +221,36 @@ def main() -> int:
             "This is a BLIND result, not a clean one. Add the provider keys as repo "
             "secrets, or this loop will report success forever while proving nothing."
         )
+        if smtp_pair_unprobed:
+            print()
+            print("## SMTP_EMAIL/SMTP_PASSWORD are set but this probe cannot check native SMTP — UNPROBED")
+            print()
+            print(
+                "A complete SMTP pair is configured (see "
+                "`email_sender._smtp_config`), but this script has no cheap, "
+                "mail-free way to authenticate against a raw SMTP server the "
+                "way it does against Resend's HTTP API. Configured-but-unprobed "
+                "is an alarm, not a clean pass."
+            )
+            print(
+                "\n**Fix:** verify the SMTP account by hand, or set "
+                "`RESEND_API_KEY` (or a Resend key in `SMTP_PASSWORD`) so this "
+                "probe can check the credential automatically."
+            )
+            return 3
         if no_email_key:
             print()
             print("## No email credential is configured at all — LOGIN IS DOWN")
             print()
             print(
                 "Neither " + " nor ".join("`" + n + "`" for n in EMAIL_KEY_VARS)
-                + " is set. Login is passwordless — a magic link delivered by "
-                "Resend — so with no email credential NOBODY CAN LOG IN, and "
-                "nothing else goes red: every live probe injects a pre-made "
-                "session cookie instead of walking the real email path."
+                + " form a usable email path (a Resend-compatible key, or the "
+                "COMPLETE SMTP_EMAIL + SMTP_PASSWORD pair — see "
+                "`email_sender._smtp_config`). Login is passwordless — a magic "
+                "link delivered by Resend — so with no email credential NOBODY "
+                "CAN LOG IN, and nothing else goes red: every live probe "
+                "injects a pre-made session cookie instead of walking the real "
+                "email path."
             )
             return 3
         return 2
@@ -216,8 +268,10 @@ def main() -> int:
     if no_email_key:
         print("\n## No email credential is configured at all — LOGIN IS DOWN\n")
         print(
-            f"::error::Both email keys are empty ({', '.join(EMAIL_KEY_VARS)}) — "
-            "the magic link cannot be sent, so nobody can log in."
+            f"::error::No usable email path is configured "
+            f"({', '.join(EMAIL_KEY_VARS)} are all empty, or form an "
+            "incomplete SMTP pair) — the magic link cannot be sent, so "
+            "nobody can log in."
         )
         print(
             "\nThis is a CONFIG failure, and it is the one case where absence IS "
@@ -228,7 +282,8 @@ def main() -> int:
         print(
             "**Fix:** set `RESEND_API_KEY` as a repo Actions secret AND on the "
             "Railway backend service (`email_sender.py` falls back to "
-            "`SMTP_PASSWORD` when it looks like a Resend key). An unset Actions "
+            "`SMTP_PASSWORD` when it looks like a Resend key), or set the "
+            "complete `SMTP_EMAIL` + `SMTP_PASSWORD` pair. An unset Actions "
             "secret renders as an EMPTY string, which is how this hides."
         )
 
