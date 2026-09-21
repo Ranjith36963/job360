@@ -3,11 +3,11 @@
 Covers the real bug (model wrote "Monox" for "Monzo") and the two safety
 properties: a correct name is never touched, and an unrelated real word is
 never rewritten into a source name.
+
+Decision 28 (slice A) took the generator away; these are the library's own
+properties, which is where the guardrail actually lives.
 """
 
-import pytest
-
-from src.services.tailoring.generator import generate_document
 from src.services.tailoring.integrity import proper_nouns, repair_proper_nouns
 
 
@@ -67,24 +67,3 @@ def test_proper_nouns_extractor():
     got = proper_nouns("Worked at Monzo and GitHub using AWS and python.")
     assert {"Monzo", "GitHub", "AWS"} <= got
     assert "python" not in got  # lowercase -> not a proper noun
-
-
-@pytest.mark.asyncio
-async def test_generator_applies_the_repair():
-    """End-to-end through the generator: a stubbed LLM emits the typo,
-    the returned document has it corrected."""
-
-    async def fake_llm(_prompt, _system):
-        return {"document": "Backend engineer at Monox. Python, AWS."}
-
-    doc = await generate_document(
-        doc_kind="cv",
-        cv_text="Backend engineer at Monzo. Python, AWS.",
-        job_title="Backend Engineer",
-        company="Monzo",
-        job_description="Build payments infrastructure at Monzo.",
-        llm_extract_fn=fake_llm,
-    )
-    assert "Monzo" in doc.document
-    assert "Monox" not in doc.document
-    assert doc.flagged_terms == []

@@ -652,6 +652,28 @@ async def get_artifact(
     return dict(row) if row else None
 
 
+async def latest_artifact(
+    db: JobDatabase, user_id: str, application_id: int, kind: str
+) -> Optional[dict[str, Any]]:
+    """The NEWEST saved version of one kind, in full. ``None`` when the user has
+    saved none of that kind yet.
+
+    Decision 28 (slice A): ``save_artifact`` is the only door a tailored CV /
+    cover letter comes through — the agent writes the text, Job360 versions it.
+    This is the read the web's render/provenance/download path uses to find
+    "the current one", and the same row ``_resolve_receipt_artifact`` freezes
+    into a receipt when the caller names no version.
+    """
+    cur = await db._db.execute(
+        "SELECT id, kind, version_no, text, made_by, model, profile_version, label, chars, created_at "
+        "FROM application_artifacts WHERE application_id = ? AND user_id = ? AND kind = ? "
+        "ORDER BY version_no DESC LIMIT 1",
+        (application_id, user_id, kind),
+    )
+    row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def _list_artifacts(db: JobDatabase, application_id: int, *, with_text: bool) -> list[dict[str, Any]]:
     cur = await db._db.execute(
         "SELECT id, kind, version_no, text, made_by, model, profile_version, label, chars, created_at "
@@ -809,13 +831,7 @@ async def _resolve_receipt_artifact(
         if row is None:
             raise SpineError(404, f"{kind} artifact not found")
         return dict(row)
-    cur = await db._db.execute(
-        "SELECT id, version_no, text FROM application_artifacts "
-        "WHERE application_id = ? AND user_id = ? AND kind = ? ORDER BY version_no DESC LIMIT 1",
-        (application_id, user_id, kind),
-    )
-    row = await cur.fetchone()
-    return dict(row) if row else None
+    return await latest_artifact(db, user_id, application_id, kind)
 
 
 async def record_receipt(

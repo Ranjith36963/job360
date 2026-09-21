@@ -1,7 +1,7 @@
 """MCP endpoint at /api/mcp — the same routes, reached by an agent with a token.
 
 Contract (docs/plans/2026-09-03-mcp-server/spec.md R4): no bearer → 401 with a
-``WWW-Authenticate: Bearer`` challenge; eight tools; each tool calls the existing
+``WWW-Authenticate: Bearer`` challenge; seventeen tools; each tool calls the existing
 route function in-process as the token's user; route errors surface as tool
 errors carrying the HTTP status and detail; another user's rows are unreachable.
 
@@ -21,7 +21,8 @@ EXPECTED_TOOLS = {
     "get_profile",
     "bring_job",
     "get_job",
-    "tailor_documents",
+    # Decision 28 (slice A) deleted `tailor_documents`: Job360 has no LLM, the
+    # agent writes the CV itself and saves it with `save_artifact`. 18 -> 17.
     "get_tailored_documents",
     "record_application",
     "list_receipts",

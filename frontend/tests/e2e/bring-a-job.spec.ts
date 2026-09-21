@@ -161,10 +161,10 @@ test.describe("Bring a job", () => {
     await expect(page.getByText(BROUGHT_JOB.title)).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText(BROUGHT_JOB.company)).toBeVisible();
 
-    // The tailor fallback lives on the application page now.
-    await expect(
-      page.getByRole("heading", { name: /tailor my ats-friendly cv/i })
-    ).toBeVisible();
+    // The documents card lives on the application page now, and since
+    // decision 28 (slice A) it points at the user's own agent — Job360
+    // offers to write nothing.
+    await expect(page.getByRole("heading", { name: /ask your agent/i })).toBeVisible();
   });
 
   test("empty receipts page points to Bring a job", async ({ page, context }) => {

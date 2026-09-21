@@ -1,8 +1,10 @@
 """Job360 as an MCP server — the same routes, reached by an agent.
 
 Mounted at ``/api/mcp`` (streamable HTTP, stateless, JSON responses) so any MCP
-client — Claude Code first — can bring a job, read the fit, tailor documents,
-record "I applied" and read receipts, as the user, with a personal token.
+client — Claude Code first — can bring a job, record its own fit verdict, save
+the CV and cover letter it wrote, record "I applied" and read receipts, as the
+user, with a personal token. Decision 28 (slice A): no tool here writes text
+for the agent — Job360 stores, versions and renders what the agent saves.
 
 Design (docs/plans/2026-09-03-mcp-server/spec.md R4):
 
@@ -51,8 +53,9 @@ INSTRUCTIONS = (
     "Job360 is the memory of a job hunt AFTER the click: the user brings a job "
     "(they found it themselves — never search for jobs on their behalf), YOU judge "
     "whether it fits and Job360 STORES your verdict, your tailored CV and cover "
-    "letter, and an immutable receipt when the user says they applied. Job360 never "
-    "ranks, scores or recommends a job itself — it remembers what you decided. "
+    "letter, and an immutable receipt when the user says they applied. Job360 has no "
+    "LLM of its own: it never ranks, scores, recommends or writes anything itself — "
+    "you write the CV and cover letter, it versions, renders and remembers them. "
     "Nothing here submits an application anywhere; record_application only records "
     "a fact the user states."
 )
@@ -154,16 +157,18 @@ def _job_detail(job: Any, application_id: int) -> dict[str, Any]:
 def _bundle(bundle: Any) -> dict[str, Any]:
     return {
         "job_id": bundle.job_id,
+        "application_id": bundle.application_id,
         "documents": [
             {
                 "doc_kind": d.doc_kind,
-                "status": d.status,
-                "text": d.polished if d.polished is not None else d.ai_draft,
-                "flagged_terms": d.flagged_terms,
+                "text": d.text,
+                "artifact_id": d.artifact_id,
+                "version_no": d.version_no,
+                "made_by": d.made_by,
+                "updated_at": d.updated_at,
             }
             for d in bundle.documents
         ],
-        "quota": {"used": bundle.quota_used, "limit": bundle.quota_limit},
     }
 
 
@@ -206,7 +211,7 @@ def _receipt_full(r: Any) -> dict[str, Any]:
 
 
 def build_server() -> MCPServer:
-    """Create the MCPServer with the eighteen tools. Imports the SDK here (rule #16)."""
+    """Create the MCPServer with the seventeen tools. Imports the SDK here (rule #16)."""
     from mcp.server import MCPServer
     from pydantic import ValidationError
     from starlette.responses import Response
@@ -394,24 +399,10 @@ def build_server() -> MCPServer:
         return _job_detail(resp, int(app_row["id"]) if app_row else 0)
 
     @mcp.tool()
-    async def tailor_documents(job_id: int) -> dict[str, Any]:
-        """Generate a tailored CV and cover letter for this job from the user's stored
-        CV (an LLM call; counts against the monthly free quota — a 402 error means the
-        quota is used up). Returns the documents and any flagged terms the user should
-        check before applying."""
-        try:
-            async with _request_db() as db:
-                resp = await tailor_route.generate(job_id, db, await _verified_user())
-        except HTTPException as exc:
-            _audit("tailor_documents", "error", job_id=job_id, http_status=exc.status_code)
-            raise _tool_error(exc) from None
-        _audit("tailor_documents", "ok", job_id=job_id)
-        return _bundle(resp)
-
-    @mcp.tool()
     async def get_tailored_documents(job_id: int) -> dict[str, Any]:
-        """The tailored CV and cover letter already generated for this job (no LLM call).
-        404 if none exist yet — call tailor_documents first."""
+        """The newest saved CV and cover letter for this job. Job360 writes neither —
+        YOU write them (from get_profile + get_job) and save them with save_artifact;
+        this reads back what is saved. Empty list when nothing is saved yet."""
         try:
             async with _request_db() as db:
                 resp = await tailor_route.get_tailored(job_id, db, await _verified_user())
@@ -549,9 +540,11 @@ def build_server() -> MCPServer:
     async def save_artifact(
         application_id: int, kind: str, text: str, label: str = "", model: Optional[str] = None
     ) -> dict[str, Any]:
-        """Save a new version of a CV / cover letter / answers / outreach note
-        for this application. Every save is a NEW version — nothing is ever
-        overwritten; both old and new stay readable forever."""
+        """Save a CV / cover letter / answers / outreach note for this application.
+        Write the tailored text YOURSELF from get_profile + get_job — Job360 has no
+        LLM — then save it here (kind = "cv" | "cover_letter" | "answers" |
+        "outreach"). Every save is a NEW version: nothing is overwritten, Job360
+        versions it and renders DOCX / PDF from it."""
         try:
             body = applications_route.SaveArtifactRequest(kind=kind, text=text, label=label, model=model)
         except ValidationError as exc:

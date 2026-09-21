@@ -54,7 +54,8 @@ TOOL_ROUTES = {
     # ROUTE moved to `GET /api/applications/job/{job_id}` — per-user, so an id
     # the caller never brought reads as 404 instead of somebody else's paste.
     "get_job": ("applications", "get_job", {"job_id": 987654321}),
-    "tailor_documents": ("tailor", "generate", {"job_id": 987654321}),
+    # Decision 28 (slice A) deleted `tailor_documents` — Job360 writes no text.
+    # The reader stays, and stays `require_verified_user` like its route.
     "get_tailored_documents": ("tailor", "get_tailored", {"job_id": 987654321}),
     # C1 (application-spine review) — rewired onto the rich receipt route;
     # the tool's own call shape (job_id, channel, note) is unchanged.
@@ -143,8 +144,8 @@ def test_the_parity_table_covers_every_tool():
 
 def test_the_tailor_routes_really_are_gated():
     """If this ever flips, the parity test below is testing nothing."""
-    assert _route_requires_verified("tailor", "generate")
     assert _route_requires_verified("tailor", "get_tailored")
+    assert _route_requires_verified("tailor", "download")
     assert not _route_requires_verified("bring", "bring_job")
 
 

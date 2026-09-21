@@ -1,19 +1,24 @@
-"""Per-User AI CV & Cover Letter routes (docs/product/peruser_cv_coverletter.md).
+"""The tailored CV / cover letter the AGENT wrote — read it, edit it, render it.
 
-Every endpoint is per-user (rule #12/#25): ``require_verified_user`` + all queries
-scoped by ``user.id`` (never a user_id from the path/body → no IDOR). Generation is
-quota-gated (guardrail #1). The LLM call is done synchronously here (reliable +
-testable, no Redis dependency) — and now that is the ONLY path: the ARQ task
-that used to mirror it went with `src/workers/` in slice 5 (#483).
+Decision 28 (2026-09-21, slice A): Job360 has no brain of its own. The user's
+agent reads ``get_profile`` + ``get_job``, writes the tailored CV and cover
+letter itself, and saves the text with ``save_artifact``. Job360 versions it,
+shows which lines are grounded in the user's own CV, takes a human edit as a
+NEW version, and renders DOCX / PDF. **Nothing here calls an LLM** — the
+generator, its prompts, the monthly quota and ``POST /tailor/{job_id}/generate``
+went with decision 28.
 
-Test seam: ``llm_extract`` and ``load_profile`` live on this module so tests
-monkeypatch them here (``monkeypatch.setattr(tailor, "llm_extract", fake)``).
+The documents therefore live in ONE place: ``application_artifacts``, through
+the spine (M3 — every version kept forever, nothing rewritten). These routes
+are readers and renderers over that history; the only write is a human edit,
+and it is a new version like any other.
 
-DECISION 28 (2026-09-21): ``llm_extract`` no longer resolves to a provider —
-Job360 has no model of its own, and ``services/profile/llm_provider.py`` was
-deleted with the profile's LLM passes. The name stays as the injection point;
-calling it raises, so this route answers 503 until the tailor slice replaces
-web generation with the agent writing the document. See issue #491.
+Every endpoint is per-user (rule #12/#25): ``require_verified_user`` + the
+application is resolved from (caller, job_id), never from a user id in the
+path or body → no IDOR.
+
+Test seam: ``load_profile`` is imported into this module so tests monkeypatch
+it here (``monkeypatch.setattr(tailor, "load_profile", fake)``).
 """
 
 from __future__ import annotations
@@ -26,30 +31,16 @@ from pydantic import BaseModel, Field
 
 from src.api.auth_deps import CurrentUser, require_verified_user
 from src.api.dependencies import get_request_db
-from src.core.settings import TAILOR_FREE_PER_MONTH
 from src.repositories.database import JobDatabase
-from src.services.profile.storage import current_profile_version_id, load_profile
-from src.services.tailoring import DOC_KINDS, generate_document
+from src.services.applications import spine as applications_spine
+from src.services.applications.spine import SpineError
+from src.services.profile.storage import load_profile
+from src.services.tailoring import DOC_KINDS
 from src.services.tailoring.docx import render_docx
-from src.services.tailoring.generator import EmptyCVError
-from src.services.tailoring.patterns import derive_patterns, summarize_patterns
+from src.services.tailoring.patterns import derive_patterns
 from src.services.tailoring.pdf import render_pdf
 from src.services.tailoring.provenance import annotate_provenance
 from src.utils.logger import get_audit_logger, get_logger
-
-
-async def llm_extract(prompt: str, system: str = "") -> dict[str, Any]:
-    """The tailor's model seam — no model behind it (decision 28).
-
-    Job360 does not own an LLM. Tests inject a fake here; in production this
-    raises, ``generate_document``'s caller below turns it into a 503, and the
-    user's own agent writes the document instead.
-    """
-    raise RuntimeError(
-        "Job360 has no model of its own (decision 28) — ask your connected "
-        "agent to write this document and store it with an MCP tool"
-    )
-
 
 router = APIRouter(tags=["tailor"])
 
@@ -59,44 +50,44 @@ logger = get_logger("api.tailor")
 # ── Response / request models ─────────────────────────────────────────────────
 
 class TailoredDocOut(BaseModel):
+    """One saved version of a tailored document — the newest of its kind."""
+
     doc_kind: str
-    ai_draft: str
-    polished: str | None = None
-    status: str = "draft"
-    model: str | None = None
+    text: str
+    artifact_id: int
+    version_no: int
+    # Who wrote it, as the spine recorded it at save time: the agent's own name
+    # (MCP `save_artifact`) or "human" (an edit made here). No LLM provider.
+    made_by: str
     updated_at: str | None = None
-    # Proper nouns in the draft that match nothing in the source CV/job — possible
-    # fabrications for the user to review before applying (guardrail #2). Usually empty.
-    flagged_terms: list[str] = []
 
 
 class TailorBundle(BaseModel):
     job_id: int
+    application_id: int
     documents: list[TailoredDocOut]
-    quota_used: int
-    quota_limit: int
 
 
 class TailorSaveRequest(BaseModel):
     # N6 — a tailored CV/cover letter tops out at a few thousand words; cap the
     # edit body so a client can't push a multi-MB blob into the DB unbounded.
+    # The spine caps it again at APPLICATION_ARTIFACT_MAX_CHARS.
     text: str = Field(max_length=50_000)
 
 
 class ProvenanceSegment(BaseModel):
     text: str
-    grounded: bool  # True = grounded in the user's CV/job (their fact); False = AI-added
+    grounded: bool  # True = grounded in the user's CV/job (their fact); False = added
 
 
-def _doc_out(row: dict[str, Any]) -> TailoredDocOut:
+def _doc_out(kind: str, row: dict[str, Any]) -> TailoredDocOut:
     return TailoredDocOut(
-        doc_kind=row["doc_kind"],
-        ai_draft=row.get("ai_draft", ""),
-        polished=row.get("polished"),
-        status=row.get("status", "draft"),
-        model=row.get("model"),
-        updated_at=row.get("updated_at"),
-        flagged_terms=row.get("flagged_terms", []) or [],
+        doc_kind=kind,
+        text=row.get("text") or "",
+        artifact_id=int(row["id"]),
+        version_no=int(row["version_no"]),
+        made_by=row.get("made_by") or "",
+        updated_at=row.get("created_at"),
     )
 
 
@@ -105,45 +96,31 @@ def _check_kind(doc_kind: str) -> None:
         raise HTTPException(status_code=404, detail=f"unknown doc kind {doc_kind!r}")
 
 
-async def _bundle(db: JobDatabase, user_id: str, job_id: int) -> TailorBundle:
-    rows = await db.get_tailored_docs(user_id, job_id)
-    used = await db.count_tailored_usage_month(user_id)
-    return TailorBundle(
-        job_id=job_id,
-        documents=[_doc_out(r) for r in rows],
-        quota_used=used,
-        quota_limit=TAILOR_FREE_PER_MONTH,
-    )
+async def _application_id(db: JobDatabase, user_id: str, job_id: int) -> int:
+    """The caller's application for this job. 404 when they never brought it —
+    the same answer a job belonging to somebody else gives (no IDOR oracle)."""
+    row = await applications_spine.get_application_by_job(db, user_id, job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No application for job {job_id}.")
+    return int(row["id"])
 
 
-async def _mirror_artifact_version(
-    db: JobDatabase, user_id: str, job_id: int, kind: str, text: str, *, made_by: str, model: str | None
-) -> None:
-    """R15 — write-through into the application spine's version history.
-
-    ``tailored_documents`` keeps its DELETE+INSERT behaviour (it is the
-    editor's working copy); this is the memory. Non-fatal by design: a
-    (user, job) pair reached via the legacy search path may have no
-    `applications` row at all (nothing was ever brought), and a mirror
-    failure must never break the tailoring feature it is mirroring.
-    """
-    from src.services.applications import spine as applications_spine  # noqa: PLC0415
-    from src.services.applications.spine import SpineError  # noqa: PLC0415
-
-    application = await applications_spine.get_application_by_job(db, user_id, job_id)
-    if application is None:
-        return
-    try:
-        await applications_spine.save_artifact(
-            db, user_id=user_id, application_id=application["id"], kind=kind, text=text,
-            made_by=made_by, model=model,
+async def _latest(db: JobDatabase, user_id: str, application_id: int, kind: str) -> dict[str, Any]:
+    row = await applications_spine.latest_artifact(db, user_id, application_id, kind)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No {kind} saved for this application yet — ask your agent to write one "
+                "and save it (MCP `save_artifact`)."
+            ),
         )
-    except SpineError:
-        logger.warning("tailor artifact mirror failed", extra={"job_id": job_id, "kind": kind})
+    return row
 
 
 def _load_cv_text(user_id: str) -> str:
-    """Full CV text = stored CV + LinkedIn text (the ONLY facts the LLM may use)."""
+    """The user's own CV text (stored CV + LinkedIn) — the ground truth the
+    provenance view highlights against."""
     profile = load_profile(user_id)  # sync (pgsync shim), fast single-row
     if profile is None:
         return ""
@@ -154,112 +131,22 @@ def _load_cv_text(user_id: str) -> str:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.post("/tailor/{job_id}/generate", response_model=TailorBundle)
-async def generate(
-    job_id: int,
-    db: JobDatabase = Depends(get_request_db),
-    user: CurrentUser = Depends(require_verified_user),
-) -> TailorBundle:
-    """Generate a tailored CV + cover letter for (caller, job). Quota-gated."""
-    job = await db.get_job_by_id(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-
-    # Guardrail #1 — paid/capped. No premium plan exists yet, so everyone is on the
-    # free monthly cap; a real premium tier will bypass this later.
-    used = await db.count_tailored_usage_month(user.id)
-    if used >= TAILOR_FREE_PER_MONTH:
-        raise HTTPException(
-            status_code=402,
-            detail=(
-                f"Monthly free limit reached ({used}/{TAILOR_FREE_PER_MONTH}). "
-                "Tailored documents are a premium feature."
-            ),
-        )
-
-    cv_text = _load_cv_text(user.id)
-    if not cv_text:
-        raise HTTPException(
-            status_code=400,
-            detail="No CV on file — upload your CV on the Profile page before tailoring.",
-        )
-
-    # Slice 5 (#483) deleted the judge/scorer that computed a "why it fits"
-    # reason (user_feed.llm_reason); the mission sweep dropped user_feed
-    # itself. Job360 never computes fit — the agent does — so this is
-    # always empty now.
-    fit_reason = ""
-
-    # PROVENANCE — which profile snapshot produced these documents.
-    #
-    # `tailored_documents.profile_version` has existed since migration 0023
-    # ("which user_profile_versions snapshot fed the draft") and
-    # `upsert_tailored_doc` has always accepted it, but this — the only caller —
-    # never passed it. Production therefore held tailored documents with no
-    # provenance at all.
-    #
-    # It matters because this is the most expensive and most personal artifact
-    # the product makes: a paid LLM call, sent to a real employer. Without the
-    # stamp there is no way to answer "which version of my profile wrote this?",
-    # and no way to find the documents generated from a profile later discovered
-    # to be wrong — the CV-blend bug produced exactly such profiles.
-    #
-    # Resolved ONCE, outside the loop, so the CV and the cover letter can never
-    # be attributed to different versions of the same profile.
-    profile_version = current_profile_version_id(user.id)
-
-    for kind in DOC_KINDS:
-        # Layer 2 (per-user): the user's own past KEPT docs → 'write like me'.
-        examples = await db.get_user_kept_docs(user.id, kind, limit=3)
-        # Layer 1 (universal, cold-start only): patterns-only structural guidance,
-        # used when the user has no history of their own yet.
-        universal = ""
-        if not examples:
-            universal = summarize_patterns(await db.get_tailoring_patterns(kind), kind)
-        try:
-            doc = await generate_document(
-                doc_kind=kind,
-                cv_text=cv_text,
-                job_title=job.get("title", ""),
-                company=job.get("company", ""),
-                job_description=job.get("description", ""),
-                fit_reason=fit_reason,
-                user_examples=examples,
-                universal_patterns=universal,
-                llm_extract_fn=llm_extract,
-            )
-        except EmptyCVError:
-            raise HTTPException(status_code=400, detail="No CV text to reshape.")
-        except Exception:  # noqa: BLE001 — surface LLM failure clearly, don't 500 silently
-            # No user/job interpolation in the message — logger.exception already
-            # captures the full traceback; keeping user-controlled values out of
-            # the log line avoids the CodeQL log-injection flag (they're a UUID +
-            # int, so harmless, but the scanner can't prove that).
-            logger.exception("tailor generation failed")
-            raise HTTPException(status_code=503, detail="Generation failed, please try again.")
-        await db.upsert_tailored_doc(
-            user.id, job_id, kind, doc.document,
-            model=doc.model, flagged_terms=doc.flagged_terms,
-            profile_version=profile_version,
-        )
-        await _mirror_artifact_version(db, user.id, job_id, kind, doc.document, made_by="web:tailor", model=doc.model)
-
-    await db.record_tailored_usage(user.id, job_id)
-    get_audit_logger().info(
-        "tailor_generate",
-        extra={"user_id": user.id, "job_id": job_id, "quota_used": used + 1},
-    )
-    return await _bundle(db, user.id, job_id)
-
-
 @router.get("/tailor/{job_id}", response_model=TailorBundle)
 async def get_tailored(
     job_id: int,
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
 ) -> TailorBundle:
-    """Return the caller's tailored docs for a job (empty list if none generated)."""
-    return await _bundle(db, user.id, job_id)
+    """The newest saved CV and cover letter for this job (empty list if the
+    agent has saved none yet). Older versions stay readable on the application
+    page — ``GET /applications/{id}``."""
+    application_id = await _application_id(db, user.id, job_id)
+    documents = []
+    for kind in DOC_KINDS:
+        row = await applications_spine.latest_artifact(db, user.id, application_id, kind)
+        if row is not None:
+            documents.append(_doc_out(kind, row))
+    return TailorBundle(job_id=job_id, application_id=application_id, documents=documents)
 
 
 @router.get("/tailor/{job_id}/{doc_kind}/provenance", response_model=list[ProvenanceSegment])
@@ -269,17 +156,16 @@ async def provenance(
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
 ) -> list[dict[str, Any]]:
-    """Per-line provenance for the doc: which lines are the user's OWN facts (grounded
-    in their CV + the job) vs lines the AI added. Deterministic, no LLM — shown before
-    download so the user can verify what's real (user request / guardrail #2)."""
+    """Per-line provenance for the newest saved version: which lines are the
+    user's OWN facts (grounded in their CV + the job ad) and which were added.
+    Deterministic, no LLM — shown before download so the user can verify what is
+    real (guardrail #2)."""
     _check_kind(doc_kind)
-    row = await db.get_tailored_doc(user.id, job_id, doc_kind)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Nothing to check — generate first.")
-    text = row.get("polished") or row.get("ai_draft") or ""
+    application_id = await _application_id(db, user.id, job_id)
+    row = await _latest(db, user.id, application_id, doc_kind)
     job = await db.get_job_by_id(job_id)
     source = _load_cv_text(user.id) + "\n" + (job.get("description", "") if job else "")
-    return annotate_provenance(text, source)
+    return annotate_provenance(row.get("text") or "", source)
 
 
 @router.patch("/tailor/{job_id}/{doc_kind}", response_model=TailoredDocOut)
@@ -290,20 +176,26 @@ async def save_edit(
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
 ) -> TailoredDocOut:
-    """Save the user's edited/polished version (guardrail #3 — always editable)."""
+    """Save the user's own edit as a NEW version (guardrail #3 — always
+    editable). Nothing is overwritten: the agent's version and every earlier
+    edit stay readable forever (M3), and the edit is stamped ``made_by="human"``."""
     _check_kind(doc_kind)
-    existing = await db.get_tailored_doc(user.id, job_id, doc_kind)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="No draft to edit — generate first.")
-    row = await db.save_tailored_polished(user.id, job_id, doc_kind, body.text)
-    if row is None:
-        # The doc existed at the check above but was deleted before the UPDATE
-        # landed. save_tailored_polished re-reads the row, so it returns None.
-        # Without this guard _doc_out(None) raised TypeError -> HTTP 500, which
-        # tells the user "we broke" for what is really "it's gone".
-        raise HTTPException(status_code=404, detail="Draft no longer exists.")
-    await _mirror_artifact_version(db, user.id, job_id, doc_kind, body.text, made_by="human", model=row.get("model"))
-    return _doc_out(row)
+    application_id = await _application_id(db, user.id, job_id)
+    try:
+        saved = await applications_spine.save_artifact(
+            db, user_id=user.id, application_id=application_id, kind=doc_kind,
+            text=body.text, made_by="human",
+        )
+    except SpineError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    return TailoredDocOut(
+        doc_kind=doc_kind,
+        text=body.text,
+        artifact_id=int(saved["artifact_id"]),
+        version_no=int(saved["version_no"]),
+        made_by="human",
+        updated_at=saved.get("created_at"),
+    )
 
 
 @router.post("/tailor/{job_id}/{doc_kind}/keep", response_model=TailoredDocOut)
@@ -313,22 +205,19 @@ async def keep(
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
 ) -> TailoredDocOut:
-    """Mark KEPT → the learning trigger (§5 learn-from-kept-only)."""
+    """"This is the one I'm using" — the learning trigger (§5 learn-from-kept-only).
+
+    Writes nothing to the document: the version history IS the record (decision
+    26 — no Keep flag on an artifact). All it does is record the STRUCTURE of the
+    kept text in the universal patterns store (§7 privacy — never content)."""
     _check_kind(doc_kind)
-    existing = await db.get_tailored_doc(user.id, job_id, doc_kind)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Nothing to keep — generate first.")
-    row = await db.keep_tailored_doc(user.id, job_id, doc_kind)
-    if row is None:
-        # Deleted between the existence check and the UPDATE — same race as
-        # save_edit. Guarding here also protects _learn_universal, which would
-        # otherwise be fed None and pollute the learned-patterns store.
-        raise HTTPException(status_code=404, detail="Document no longer exists.")
-    await _learn_universal(db, doc_kind, row)
+    application_id = await _application_id(db, user.id, job_id)
+    row = await _latest(db, user.id, application_id, doc_kind)
+    await _learn_universal(db, doc_kind, row.get("text") or "")
     get_audit_logger().info(
         "tailor_keep", extra={"user_id": user.id, "job_id": job_id, "doc_kind": doc_kind}
     )
-    return _doc_out(row)
+    return _doc_out(doc_kind, row)
 
 
 @router.post("/tailor/{job_id}/{doc_kind}/download")
@@ -339,24 +228,23 @@ async def download(
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_verified_user),
 ) -> Response:
-    """Download the polished (or draft) doc as an ATS-friendly PDF or DOCX. Marks it KEPT.
+    """Download the newest saved version as an ATS-friendly PDF or DOCX.
 
     ``fmt`` = ``pdf`` (default) | ``docx``.
 
-    POST, not GET (docs/fable/01 S6): this endpoint MUTATES — it marks the doc kept
-    and feeds `_learn_universal`. A side-effecting GET is both wrong HTTP semantics
-    and a CSRF hole: `OriginCheckMiddleware` only guards unsafe methods, and a
-    cross-site top-level link click still sends the SameSite=Lax cookie. As POST it
-    is Origin-checked like every other mutation. The frontend already fetches this
-    as a blob, so the method change is transparent there.
+    POST, not GET (docs/fable/01 S6): this endpoint MUTATES — it feeds
+    `_learn_universal`. A side-effecting GET is both wrong HTTP semantics and a
+    CSRF hole: `OriginCheckMiddleware` only guards unsafe methods, and a
+    cross-site top-level link click still sends the SameSite=Lax cookie. As POST
+    it is Origin-checked like every other mutation. The frontend already fetches
+    this as a blob, so the method is transparent there.
     """
     _check_kind(doc_kind)
     if fmt not in ("pdf", "docx"):
         raise HTTPException(status_code=400, detail="format must be 'pdf' or 'docx'")
-    row = await db.get_tailored_doc(user.id, job_id, doc_kind)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Nothing to download — generate first.")
-    text = row.get("polished") or row.get("ai_draft") or ""
+    application_id = await _application_id(db, user.id, job_id)
+    row = await _latest(db, user.id, application_id, doc_kind)
+    text = row.get("text") or ""
     title = "Curriculum Vitae" if doc_kind == "cv" else "Cover Letter"
 
     # Rendering is synchronous and CPU-bound (fpdf2 / python-docx build the
@@ -373,9 +261,8 @@ async def download(
         content = await asyncio.to_thread(render_pdf, text, title=title)
         media_type = "application/pdf"
 
-    # Downloading counts as 'used' → keep it + learn from it (§5).
-    kept = await db.keep_tailored_doc(user.id, job_id, doc_kind)
-    await _learn_universal(db, doc_kind, kept or row)
+    # Downloading counts as 'used' → learn from it (§5).
+    await _learn_universal(db, doc_kind, text)
 
     filename = f"{doc_kind}_{job_id}.{fmt}"
     return Response(
@@ -385,11 +272,8 @@ async def download(
     )
 
 
-async def _learn_universal(db: JobDatabase, doc_kind: str, row: dict[str, Any] | None) -> None:
-    """Layer 1 (§6/§7): store PATTERNS ONLY from a kept doc — never content/PII."""
-    if not row:
-        return
-    text = row.get("polished") or row.get("ai_draft") or ""
+async def _learn_universal(db: JobDatabase, doc_kind: str, text: str) -> None:
+    """Layer 1 (§6/§7): store PATTERNS ONLY from a used doc — never content/PII."""
     if not text.strip():
         return
     import json as _json

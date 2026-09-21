@@ -688,61 +688,69 @@ async def test_get_application_omits_artifact_text_by_default(authenticated_asyn
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# R15 — tailoring stays, as a web fallback that also versions
+# R15 — the tailor reads and renders the spine's versions (decision 28)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 @pytest.mark.asyncio
-async def test_tailor_generate_also_writes_an_artifact_version(authenticated_async_context, monkeypatch):
-    from src.api.routes import tailor as tailor_route
-    from src.services.tailoring.generator import GeneratedDoc
-
-    async def _fake_generate(*, doc_kind: str, **kwargs: Any) -> GeneratedDoc:
-        return GeneratedDoc(doc_kind=doc_kind, document=f"a generated {doc_kind}", model="test-model", flagged_terms=[])
-
-    monkeypatch.setattr(tailor_route, "generate_document", _fake_generate)
-    monkeypatch.setattr(
-        tailor_route, "_load_cv_text", lambda user_id: "Real CV text with enough content to generate from."
-    )
-
+async def test_tailor_reads_the_version_the_agent_saved(authenticated_async_context):
+    """Decision 28 slice A: `save_artifact` is the only door. What the agent
+    saves is what `GET /tailor/{job_id}` hands back — newest version per kind."""
     async with authenticated_async_context() as client:
-        bring_resp = await client.post("/api/jobs/bring", json=_AD)
-        job_id = bring_resp.json()["job"]["id"]
-        application_id = bring_resp.json()["application_id"]
+        brought = await _bring(client)
+        job_id = brought["job"]["id"]
+        application_id = brought["application_id"]
 
-        gen = await client.post(f"/api/tailor/{job_id}/generate")
-        assert gen.status_code == 200, gen.text
+        await _save_artifact(client, application_id, "cv", "agent-written cv v1")
+        v2 = await _save_artifact(client, application_id, "cv", "agent-written cv v2")
+        await _save_artifact(client, application_id, "cover_letter", "dear hiring manager")
 
-        detail = await _get_application(client, application_id)
-    artifacts = detail.json()["artifacts"]
-    assert any(a["made_by"] == "web:tailor" for a in artifacts)
+        bundle = await client.get(f"/api/tailor/{job_id}")
+
+    assert bundle.status_code == 200, bundle.text
+    body = bundle.json()
+    assert body["application_id"] == application_id
+    docs = {d["doc_kind"]: d for d in body["documents"]}
+    assert set(docs) == {"cv", "cover_letter"}
+    assert docs["cv"]["text"] == "agent-written cv v2"  # newest, not the first
+    assert docs["cv"]["artifact_id"] == v2.json()["artifact_id"]
+    assert docs["cv"]["version_no"] == 2
 
 
 @pytest.mark.asyncio
-async def test_tailor_save_edit_writes_a_human_version(authenticated_async_context, monkeypatch):
-    from src.api.routes import tailor as tailor_route
-    from src.services.tailoring.generator import GeneratedDoc
-
-    async def _fake_generate(*, doc_kind: str, **kwargs: Any) -> GeneratedDoc:
-        return GeneratedDoc(doc_kind=doc_kind, document=f"a generated {doc_kind}", model="test-model", flagged_terms=[])
-
-    monkeypatch.setattr(tailor_route, "generate_document", _fake_generate)
-    monkeypatch.setattr(
-        tailor_route, "_load_cv_text", lambda user_id: "Real CV text with enough content to generate from."
-    )
-
+async def test_tailor_save_edit_writes_a_human_version(authenticated_async_context):
+    """A human edit is a NEW version stamped `human` — the agent's own version
+    is never overwritten (M3)."""
     async with authenticated_async_context() as client:
-        bring_resp = await client.post("/api/jobs/bring", json=_AD)
-        job_id = bring_resp.json()["job"]["id"]
-        application_id = bring_resp.json()["application_id"]
-        await client.post(f"/api/tailor/{job_id}/generate")
+        brought = await _bring(client)
+        job_id = brought["job"]["id"]
+        application_id = brought["application_id"]
+        await _save_artifact(client, application_id, "cv", "the agent's cv")
 
         edited = await client.patch(f"/api/tailor/{job_id}/cv", json={"text": "my hand-edited cv"})
         assert edited.status_code == 200, edited.text
+        assert edited.json()["made_by"] == "human"
+        assert edited.json()["version_no"] == 2
 
-        detail = await _get_application(client, application_id)
+        detail = await _get_application(client, application_id, with_artifact_text=True)
     artifacts = detail.json()["artifacts"]
     assert any(a["made_by"] == "human" for a in artifacts)
+    assert {a["text"] for a in artifacts} == {"the agent's cv", "my hand-edited cv"}
+
+
+@pytest.mark.asyncio
+async def test_tailor_404s_when_the_agent_saved_nothing(authenticated_async_context):
+    """Nothing to render is a 404 that names the door, not a 500."""
+    async with authenticated_async_context() as client:
+        brought = await _bring(client)
+        job_id = brought["job"]["id"]
+
+        bundle = await client.get(f"/api/tailor/{job_id}")
+        assert bundle.status_code == 200 and bundle.json()["documents"] == []
+
+        resp = await client.post(f"/api/tailor/{job_id}/cv/download")
+    assert resp.status_code == 404
+    assert "save_artifact" in resp.json()["detail"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════

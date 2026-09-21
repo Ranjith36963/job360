@@ -89,7 +89,7 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 | `whats_new` | everything since a timestamp (replaces push for now) |
 | `export_history` | applications + events + versions + outcomes as clean JSON |
 | `stats` | cheap counts: reply / interview rate per CV version, per role |
-| `tailor_documents` | **web fallback only** — our own tailoring for users with no agent |
+| `get_tailored_documents` | the newest saved CV / cover letter — **we write neither** (decision 28); the agent writes them and saves them with `save_artifact`, the web renders DOCX / PDF from the saved text |
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
 `api/routes/well_known.py`), with personal `j360_…` tokens as the CLI fallback.
@@ -147,7 +147,7 @@ applications and events in the database, not a doc.
 | 14 | Profile | **Keep our extraction, add `update_profile`.** One profile; multiple = later. |
 | 15 | Build order | **OAuth → spine → URL fetch → contacts/stats/profile edits.** |
 | 16 | URL fetch | **Both link and text must work on the web.** Paste is the fallback. |
-| 17 | Our LLM code | **Tailor stays as web fallback; scorer/judge/enrichment off.** |
+| 17 | Our LLM code | **Tailor stays as web fallback; scorer/judge/enrichment off.** *(The tailor half is superseded by decision 28, 2026-09-21: no LLM of ours at all — the agent writes, we render.)* |
 | 18 | Success measure | **Owner uses it daily for his own hunt.** |
 
 Taken from the 2026-09-02 pivot without re-asking: recruiters later and
@@ -171,6 +171,12 @@ consent-first; everything free; no auto-submit at volume; global from day one.
 |---|---|---|
 | 26 | "Do we really need the Keep button? Do we always go back and forth between the web and the chat?" | **No Keep button.** The version that counts is the one the receipt names (`record_application`'s `cv_artifact_id` / `cover_letter_artifact_id`) — that fact already exists, and a Keep on the web would be a "do" door (rule 5) forcing a chat ↔ web round trip. The web stays the record: it shows original vs any version and marks the applied one. Version numbers stay internal; the human sees "Original", "Applied". Decision 21's Keep is withdrawn. |
 | 27 | "This is global, not only the UK. Every country has its own visa rules. Only flag it when you see it in the job description." | **Job360 knows nothing about visas.** No country rule, no keyword scan, no guess when the ad is silent. Two stored facts — the agent's reading of the ad (`sponsors` / `no_sponsorship` / `unknown` + the ad sentence + the job's ISO country) and the candidate's own list of countries where they need no sponsorship — and one comparison: list membership. `unknown` or an empty list shows nothing (rule #29). |
+
+### Addition, 2026-09-21 (the owner, on our own LLM)
+
+| # | Question | Decision |
+|---|---|---|
+| 28 | "Do we need any model of our own?" | **Job360 has no brain of its own.** The user's agent (Claude, ChatGPT, Perplexity, Grok, Gemini — connected over MCP) reads, judges and writes; Job360 stores, versions, renders and remembers. This **replaces the "tailor stays as a web fallback" half of decision 17** — the tailor's LLM is gone; what stays is the part a browser cannot do for itself: version history, per-line provenance, keep/download, DOCX and PDF rendering of text the agent saved with `save_artifact`. Four slices: **A** removes the tailor LLM (this PR), **B** removes the profile LLM passes, **C** teaches the agents, **D** fixes the copy. Market check 2026-09-20 — custom MCP connectors are available on Claude (all plans, including Free), ChatGPT Plus/Pro, Perplexity Pro/Max, Grok paid and Gemini business: a seeker who can use Job360 at all already has an agent, so a second-rate model of ours is cost, not value. |
 
 ## Older docs this supersedes
 

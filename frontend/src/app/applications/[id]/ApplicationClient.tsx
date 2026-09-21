@@ -154,14 +154,18 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           Documents
         </h2>
         <ArtifactVersions applicationId={detail.id} artifacts={detail.artifacts} receipts={detail.receipts} />
-        {!hasCvArtifact && (
-          <div className="mt-4">
+        <div className="mt-4">
+          {!hasCvArtifact && (
             <p className="mb-2 text-xs text-muted-foreground">
-              No CV for this job yet. Your agent can write one and save it here — or:
+              No CV for this job yet — your agent writes it and saves it here.
             </p>
-            <TailorSection jobId={detail.job_id} />
-          </div>
-        )}
+          )}
+          <TailorSection
+            jobId={detail.job_id}
+            applicationId={detail.id}
+            hasDocuments={detail.artifacts.length > 0}
+          />
+        </div>
       </section>
 
       {detail.receipts.length > 0 && (
