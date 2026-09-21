@@ -51,4 +51,29 @@ describe("FitRadar", () => {
     expect(pointsOf("fit-radar-role")[0]).toEqual([100, 36]);
     expect(pointsOf("fit-radar-you")[0]).toEqual([100, 100]);
   });
+
+  it("wraps a long axis label into two lines and widens the viewBox so it isn't clipped", () => {
+    const longName = "CS fundamentals (distributed, HPC)";
+    const { container } = render(
+      <FitRadar axes={[{ name: longName, role: 75, you: 40 }, AXES[1], AXES[2]]} size={200} />
+    );
+
+    const longLabel = screen
+      .getAllByTestId("fit-radar-axis")
+      .find((el) => el.textContent === longName);
+    expect(longLabel).toBeDefined();
+    expect(longLabel?.querySelectorAll("tspan")).toHaveLength(2);
+
+    const viewBox = container.querySelector("svg")?.getAttribute("viewBox") ?? "";
+    const firstNumber = Number(viewBox.split(" ")[0]);
+    expect(firstNumber).toBeLessThan(-20);
+  });
+
+  it("renders a short axis label as a single tspan", () => {
+    render(<FitRadar axes={[{ name: "RAG", role: 50, you: 50 }, AXES[1], AXES[2]]} size={200} />);
+
+    const shortLabel = screen.getAllByTestId("fit-radar-axis").find((el) => el.textContent === "RAG");
+    expect(shortLabel).toBeDefined();
+    expect(shortLabel?.querySelectorAll("tspan")).toHaveLength(1);
+  });
 });

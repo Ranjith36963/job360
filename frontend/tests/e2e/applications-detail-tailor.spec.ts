@@ -1,12 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * The web tailor fallback lives on the application page now — the sourcing
- * era's job pages are gone (docs/plans/2026-09-05-delete-sourcing-era,
- * spec.md R9). Pinned here:
+ * The documents card lives on the application page — the sourcing era's job
+ * pages are gone (docs/plans/2026-09-05-delete-sourcing-era, spec.md R9), and
+ * decision 28 (2026-09-21, slice A) took the web tailor's LLM with it. Pinned:
  *
- *   1. `/applications/{id}` renders the tailor section (TailorSection),
- *      reachable without ever visiting a `/jobs/{id}` page.
+ *   1. `/applications/{id}` renders the "Ask your agent" card (TailorSection)
+ *      with NO way to generate a document, reachable without a `/jobs/{id}` page.
  *   2. `/jobs/1` and `/dashboard` — the deleted sourcing routes — 404.
  *
  * Hermetic (frontend-only), same pattern as applications-home.spec.ts: fake
@@ -80,8 +80,8 @@ async function mockBackend(page: Page) {
   });
 }
 
-test.describe("Application detail — the tailor fallback moved here (R9)", () => {
-  test("renders the tailor section without ever visiting a job page", async ({
+test.describe("Application detail — the documents card lives here (R9)", () => {
+  test("renders the 'Ask your agent' card without ever visiting a job page", async ({
     page,
     context,
   }) => {
@@ -93,12 +93,17 @@ test.describe("Application detail — the tailor fallback moved here (R9)", () =
     await expect(page.getByText("Platform Engineer")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText("Northwind")).toBeVisible();
 
-    // The tailor fallback (TailorSection) — two entry points, CV and cover letter.
+    // The "Ask your agent" card — the recipe, the connect link, and no LLM of
+    // our own anywhere on the page (decision 28, slice A).
+    await expect(page.getByRole("heading", { name: /ask your agent/i })).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: /tailor my ats-friendly cv/i })
+      page.getByText(/write a tailored CV for application 8181 and save it/i)
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: /tailor my cv/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /create cover letter/i })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /connect your agent/i })
+    ).toHaveAttribute("href", "/settings/connect");
+    await expect(page.getByRole("button", { name: /tailor my cv/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /generate/i })).toHaveCount(0);
 
     // "View ad" reads the job's own URL — no dependency on a /jobs/{id} page.
     await expect(page.getByRole("link", { name: /view ad/i })).toHaveAttribute(

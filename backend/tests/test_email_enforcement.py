@@ -32,8 +32,9 @@ async def test_a_gated_route_blocks_an_unverified_user(authenticated_async_conte
     route body runs.
 
     The route under test was `POST /api/search`; slice 5 (#483) deleted it.
-    The tailor is the gate's remaining holder — and the reason the gate exists
-    at all is unchanged: it guards the routes that SPEND a paid LLM call.
+    The tailor is the gate's remaining holder. Decision 28 took its LLM away,
+    so the reason moved with it: these are the routes that hand the user a
+    finished document (PDF / DOCX) — the address behind them must be real.
     """
     uid = authenticated_async_context.fixture_user_id
     # conftest verifies the fixture user by default; un-verify for this test.
@@ -43,6 +44,6 @@ async def test_a_gated_route_blocks_an_unverified_user(authenticated_async_conte
     conn.close()
 
     async with authenticated_async_context() as client:
-        resp = await client.post("/api/tailor/1/generate", json={})
+        resp = await client.get("/api/tailor/1")
     assert resp.status_code == 403
     assert resp.json()["detail"] == "email_not_verified"

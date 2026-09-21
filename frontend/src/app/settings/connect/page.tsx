@@ -515,8 +515,9 @@ export default function ConnectAgentPage() {
         <h1 className="text-3xl font-semibold">Connect an agent</h1>
         <p className="mt-2 text-muted-foreground">
           Let Claude Code (or any MCP client) work your Job360 account: bring
-          a job link, read your profile, tailor documents, record that you
-          applied. A personal token is the key; you can revoke it any time.
+          a job link, read your profile, save the CV and cover letter it writes
+          for you, record that you applied. A personal token is the key; you can
+          revoke it any time.
         </p>
       </div>
       <ConnectAppCard />

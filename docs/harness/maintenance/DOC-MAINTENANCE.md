@@ -45,10 +45,9 @@ One HTML comment — invisible when the doc renders, parseable by the tripwire:
 
 LIVING headers (tag + freshness date) are stamped by the `/sync` skill, run by
 hand or by whoever's PR touched the doc. All other headers are applied by
-`/doc-audit` Phase B after the user approves the classification. The PR-time
-tripwire (`doc-sync.yml`) verifies LIVING docs carry the right tag and a
-fresh date on every pull request; untagged non-living docs surface in the
-next audit, not as a standing alarm.
+`/doc-audit` Phase B after the user approves the classification. The tag and
+the date are checked only for `doc_sync_check.LIVING_DOCS`; the wider
+`doc_sync_check.living_stamped_docs()` set gets the structural guards only.
 
 ## 2. Plan lifecycle (fixes the "implemented docs still lying around" problem)
 
@@ -109,9 +108,8 @@ require a human — the Loop-1 lesson holds where it matters.
 5. **Every code PR declares its doc impact** — one line in the PR body:
    `docs: updated <files>` or `docs: no impact`. Reviewer (human or agent)
    checks the claim.
-6. **Every LIVING doc carries a freshness stamp** — `<!-- last-verified:
-   YYYY-MM-DD by /sync -->` near the top, updated by every Tier-2 run, so
-   staleness is measurable ("verified 40 days ago" is itself a finding).
+6. **A freshness stamp is required where it is checked** — the docs listed in
+   `doc_sync_check.LIVING_DOCS`, against `doc_sync_check.STALE_DAYS`.
 
 7. **One doc-writing session at a time.** `/sync` and `/doc-audit` both edit
    docs; with parallel agent sessions, two doc branches on the same evening

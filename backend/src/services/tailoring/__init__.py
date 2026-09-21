@@ -1,19 +1,21 @@
-"""Per-User AI CV & Cover Letter tailoring (docs/product/peruser_cv_coverletter.md).
+"""Rendering and checking of a tailored CV / cover letter.
 
-Turns a user's ONE stored CV + a job's description + the judge's fit reason into a
-CV and cover letter tailored to that job, then learns from the user's edits.
+Decision 28 (2026-09-21, slice A): Job360 has no brain of its own. The user's
+agent writes the tailored CV and cover letter and saves the text with
+``save_artifact``; this package never calls an LLM. What is left is the part a
+browser cannot do for itself:
 
-Guardrails (spec §4) are enforced here:
-  - #2 never fabricate  -> locked system prompts in ``prompts.py``
-  - #5 ATS-friendly     -> plain-text output + ``pdf.py`` renders a machine-readable PDF
-  - §6 2-layer learning -> per-user few-shot (Layer 2) + universal patterns (Layer 1)
-  - §7 privacy          -> universal layer stores structural PATTERNS only, no content
+  - ``docx.py`` / ``pdf.py``  — ATS-friendly rendering of saved text
+  - ``provenance.py``        — which lines are grounded in the user's own CV
+  - ``integrity.py``         — proper nouns that match nothing in the source
+  - ``patterns.py``          — structure only (no content), the §7 privacy line
+
+``generator.py`` and ``prompts.py`` were deleted with the tailor's LLM.
 """
 
-from src.services.tailoring.generator import (
-    DOC_KINDS,
-    GeneratedDoc,
-    generate_document,
-)
+# The two document kinds the tailor routes render. A subset of
+# ``settings.APPLICATION_ARTIFACT_KINDS`` — "answers" and "outreach" are saved
+# and versioned like any artifact, but nothing renders them as a document.
+DOC_KINDS = ("cv", "cover_letter")
 
-__all__ = ["DOC_KINDS", "GeneratedDoc", "generate_document"]
+__all__ = ["DOC_KINDS"]
