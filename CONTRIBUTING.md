@@ -113,8 +113,10 @@ Per-service install and run instructions: [`backend/README.md`](backend/README.m
 [`frontend/README.md`](frontend/README.md).
 
 The root `setup.sh` / `setup.bat` are **stale** — both finish by telling you to run
-`python -m src.cli run` and `bash cron_setup.sh`, deleted in slice 5 (#483), and
-advertise the sourcing-era `REED_API_KEY` / `ADZUNA_*` / `JSEARCH_API_KEY`.
+`python -m src.cli run`, a verb deleted in slice 5 (#483) (`src.cli` registers only
+`api` and `setup-profile`), and both advertise the sourcing-era `REED_API_KEY` /
+`ADZUNA_*` / `JSEARCH_API_KEY`. `setup.sh` adds a `bash cron_setup.sh` step for a
+file that is not in the repo.
 
 ## Where scripts live
 
