@@ -152,10 +152,11 @@ The full table — every method, path and router file, generated from the router
 
 ### Environment Variables
 
-There is no list. `grep -rn "os.getenv\|os.environ.get" backend/src` finds every
-knob — most sit in `core/settings.py`, but not all: `FRONTEND_ORIGIN` is read in
-`api.main`, `REQUIRE_EMAIL_VERIFICATION` in `api.auth_deps.require_verified_user`,
-the `SMTP_*` family in `services.auth.email_sender`.
+There is no single list, and no grep finds them all — `core.settings._env_list`
+and `validate_required_env` read under variable names. Most knobs are
+`os.getenv` calls in `core/settings.py`; the rest sit where they are used —
+`FRONTEND_ORIGIN` in `api.main`, `REQUIRE_EMAIL_VERIFICATION` in
+`api.auth_deps.require_verified_user`, `SMTP_*` in `services.auth.email_sender`.
 
 - `.env` lives in the repo root (see `.env.example`).
 - Required in production: `core.settings._REQUIRED_PROD_VARS`, enforced at boot

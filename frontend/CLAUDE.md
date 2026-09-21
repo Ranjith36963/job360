@@ -18,8 +18,8 @@ of text — say what happened, what I did, what's next.
 
 The Job360 web app: **Next.js 16 (App Router) + React 19 + Tailwind 4**, talking to
 the FastAPI backend on `:8000`. `package.json` is the dependency list — the UI
-primitives are `@base-ui/react`, composed via the `render` prop, never Radix's
-`asChild`. Auth is cookie-session, guarded in `src/middleware.ts`.
+primitives are `@base-ui/react`, not Radix. Auth is cookie-session, guarded in
+`src/middleware.ts`.
 
 ## Owner rule #29 — empty preferences stay SILENT (never default, never require)
 

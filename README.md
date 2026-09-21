@@ -79,7 +79,7 @@ cd ..
 docker compose -f docker-compose.dev.yml up -d postgres
 
 # 4. Configure env
-cp .env.example .env   # edit DATABASE_URL / DATABASE_PUBLIC_URL and any API keys
+cp .env.example .env   # edit DATABASE_URL and any API keys
 
 # 5. Run the backend — FastAPI on :8000, MCP at /api/mcp
 cd backend
@@ -128,7 +128,7 @@ Job360 is **pull, not push** (VISION.md decision 11): the seeker reads `GET /wha
 
 ## Configuration
 
-Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL` / `DATABASE_PUBLIC_URL`, `FRONTEND_ORIGIN`, `SITE_BASE_URL`, and `RESEND_API_KEY` (system email — magic-link login and password reset — needs it). Every other knob: `grep -rn "os.getenv\|os.environ.get" backend/src` — most are in `core/settings.py`, not all.
+Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL`, `FRONTEND_ORIGIN`, `SITE_BASE_URL`, and `RESEND_API_KEY` (system email — magic-link login and password reset — needs it). `DATABASE_PUBLIC_URL` is for Railway database tooling only (`backend/scripts/observe.py`), not the app. Most other knobs are in `core/settings.py`, not all — see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Contributing
 

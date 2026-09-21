@@ -109,11 +109,12 @@ present; the scope decision and the files that made it are in the run summary.
 
 ## Local setup
 
-- **Unix / macOS:** `bash setup.sh`
-- **Windows:** `setup.bat`
-
 Per-service install and run instructions: [`backend/README.md`](backend/README.md),
 [`frontend/README.md`](frontend/README.md).
+
+The root `setup.sh` / `setup.bat` are **stale** — both finish by telling you to run
+`python -m src.cli run` and `bash cron_setup.sh`, deleted in slice 5 (#483), and
+advertise the sourcing-era `REED_API_KEY` / `ADZUNA_*` / `JSEARCH_API_KEY`.
 
 ## Where scripts live
 
