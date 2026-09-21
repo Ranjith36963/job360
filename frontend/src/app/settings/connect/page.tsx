@@ -186,24 +186,123 @@ function ConnectAppCard() {
             </Button>
           </div>
         </div>
-        <div className="space-y-3 text-xs text-muted-foreground">
-          <p>
-            <span className="font-medium text-foreground">Claude.ai</span> —
-            Settings → Connectors → Add custom connector → paste the address →
-            Connect.
-          </p>
-          <p>
-            <span className="font-medium text-foreground">
-              ChatGPT (Plus/Pro)
-            </span>{" "}
-            — Settings → turn on Developer mode → Connectors → Create → paste
-            the address → Create.
-          </p>
-          <p>
-            Claude Code and other MCP clients use a personal token instead —
-            create one below.
-          </p>
-        </div>
+        <p className="text-xs text-muted-foreground">
+          Claude Code and other MCP clients that take a bearer token instead
+          of a sign-in — create a personal token below.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// One recipe per assistant. Verified against each vendor's own docs
+// 2026-09-20 — plan names and menu paths only go here once we've checked
+// them there; do not extend this list from memory.
+// ---------------------------------------------------------------------------
+
+type AssistantRecipe = {
+  name: string;
+  plans: string;
+  steps: string;
+};
+
+const ASSISTANT_RECIPES: AssistantRecipe[] = [
+  {
+    name: "Claude",
+    plans: "Every plan, including Free (Free gets one custom connector).",
+    steps:
+      "Settings → Connectors → Add custom connector → paste the address above → Connect. Sign-in happens automatically.",
+  },
+  {
+    name: "ChatGPT",
+    plans: "Plus, Pro, Business, Enterprise or Edu.",
+    steps:
+      "Settings → Apps & Connectors → turn on Developer mode → add the address above as a server.",
+  },
+  {
+    name: "Perplexity",
+    plans: "Pro, Max or Enterprise.",
+    steps:
+      "Settings → Connectors → Add custom remote connector → paste the address above → choose OAuth.",
+  },
+  {
+    name: "Grok",
+    plans: "Paid accounts.",
+    steps: "Add an MCP connection with the address above.",
+  },
+  {
+    name: "Gemini",
+    plans: "Gemini Enterprise / Business editions only.",
+    steps:
+      "An admin adds the address above as a custom MCP server connection. The consumer Gemini app doesn't support this yet.",
+  },
+];
+
+function AssistantRecipesCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Connect your assistant</CardTitle>
+        <CardDescription>
+          Job360 has no AI of its own — your assistant is the intelligence,
+          Job360 is where it stores and remembers what it does for you. Same
+          address for every assistant, from the card above.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ul className="divide-y divide-border/40">
+          {ASSISTANT_RECIPES.map((a) => (
+            <li key={a.name} className="space-y-1 py-3">
+              <p className="font-medium">{a.name}</p>
+              <p className="text-xs text-muted-foreground">{a.plans}</p>
+              <p className="text-xs text-muted-foreground">{a.steps}</p>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// What to actually say, once connected — the two workflows the MCP tools
+// carry (docs/product/VISION.md decision 28): build the profile, apply to a
+// job. Plain prompts, no marketing.
+// ---------------------------------------------------------------------------
+
+const EXAMPLE_PROMPTS: { label: string; prompt: string }[] = [
+  {
+    label: "Build your profile",
+    prompt: "Build my Job360 profile from the CV I just uploaded.",
+  },
+  {
+    label: "Apply to a job",
+    prompt: "Write me a tailored CV for the job I just brought and save it.",
+  },
+];
+
+function ExamplePromptsCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>What to say to your assistant</CardTitle>
+        <CardDescription>
+          Once connected, just ask in plain words — the assistant picks the
+          right tools.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ul className="divide-y divide-border/40">
+          {EXAMPLE_PROMPTS.map((e) => (
+            <li key={e.label} className="space-y-1 py-3">
+              <p className="text-xs font-medium text-muted-foreground">
+                {e.label}
+              </p>
+              <p className="font-mono text-sm">&quot;{e.prompt}&quot;</p>
+            </li>
+          ))}
+        </ul>
       </CardContent>
     </Card>
   );
@@ -521,6 +620,8 @@ export default function ConnectAgentPage() {
         </p>
       </div>
       <ConnectAppCard />
+      <AssistantRecipesCard />
+      <ExamplePromptsCard />
       <ConnectedAppsCard
         grants={grants}
         loading={grantsLoading}

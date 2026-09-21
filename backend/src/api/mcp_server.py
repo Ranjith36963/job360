@@ -57,7 +57,11 @@ INSTRUCTIONS = (
     "LLM of its own: it never ranks, scores, recommends or writes anything itself — "
     "you write the CV and cover letter, it versions, renders and remembers them. "
     "Nothing here submits an application anywhere; record_application only records "
-    "a fact the user states."
+    "a fact the user states. Two flows without our website: (1) build the "
+    "profile — get_profile, then write what's missing with update_profile; "
+    "(2) apply to a job — bring_job, then get_job + get_profile, judge fit "
+    "yourself and save_fit, write the CV/cover letter yourself and save_artifact, "
+    "then record_application once the user says they applied."
 )
 
 # The user behind the request being served. Set by the ASGI shim per request,
@@ -233,8 +237,13 @@ def build_server() -> MCPServer:
 
     @mcp.tool()
     async def get_profile() -> dict[str, Any]:
-        """The user's Job360 profile summary: is it complete, job titles, skill count,
-        experience level, and which inputs (CV / LinkedIn / GitHub) they have given."""
+        """The user's Job360 profile: is it complete, job titles, skill count,
+        experience level, which inputs (CV / LinkedIn / GitHub) they have given,
+        your own past edits (agent_edits), and the newest lessons flagged for
+        next time. `fields` gives the CURRENT value of every path in
+        `editable_paths` — the closed set you may write with update_profile.
+        Dated positions/projects are not writable yet — put a role's substance
+        into cv_data.job_titles and cv_data.summary."""
         # ONE profile read for the whole tool call. `load_profile_response` is
         # the same function `GET /profile` itself is (same 404, same rendering),
         # and it hands back BOTH the UserProfile object and the rendered
@@ -523,7 +532,10 @@ def build_server() -> MCPServer:
         Pick the dimensions that matter for THIS job (for one ad that may be
         depth in a stack, domain knowledge, leadership, location, pay; for
         another something else). Job360 never names an axis or scores one;
-        it draws exactly what you send. Omit `axes` and no chart is shown."""
+        it draws exactly what you send. Omit `axes` and no chart is shown.
+
+        Next: write the tailored CV / cover letter yourself and save it with
+        save_artifact."""
         try:
             body = applications_route.SaveFitRequest(
                 score=score, verdict=verdict, gaps=gaps, reasoning=reasoning,
@@ -675,8 +687,9 @@ def build_server() -> MCPServer:
 
     @mcp.tool()
     async def update_profile(edits: list[dict[str, Any]]) -> dict[str, Any]:
-        """Correct or fill in something the extraction got wrong or missed —
-        location, headline, skills, a preference. Each edit is
+        """Write the profile: use this with get_profile to fill in what
+        extraction missed, or to correct something it got wrong — location,
+        headline, skills, a preference. Each edit is
         {"path": <one of get_profile's editable_paths>, "value": <new value,
         or null to clear back to what extraction says>}. An unknown path or a
         wrongly-typed value is refused with the allowed set/values named.
