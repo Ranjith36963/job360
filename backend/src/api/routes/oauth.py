@@ -43,7 +43,7 @@ _CORS_NO_STORE = {"Cache-Control": "no-store", "Access-Control-Allow-Origin": "*
 _MAX_REGISTER_BODY_BYTES = 16 * 1024
 _SCOPE_DESCRIPTIONS = {
     oauth_flow.SUPPORTED_SCOPE: (
-        "read your profile, bring jobs, tailor documents and record applications"
+        "read your profile, bring jobs, save documents you write and record applications"
     ),
 }
 
