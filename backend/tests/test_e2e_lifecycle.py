@@ -157,8 +157,8 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
         email = "e2e@example.com"
         _register(client, email)
         assert client.get("/api/auth/me").status_code == 200
-        # the tailor is gated until verified (it spends an LLM call)
-        assert client.post("/api/tailor/1/generate").status_code == 403
+        # the tailor is gated until verified (it hands out a finished document)
+        assert client.get("/api/tailor/1").status_code == 403
         _mark_verified(app_db, email)
 
         # CV upload → deterministic skills
@@ -226,10 +226,10 @@ def test_full_lifecycle_fills_every_log_stream(client, app_db, caplog, monkeypat
 
 
 def test_edge_unverified_user_blocked_from_the_tailor(client):
-    """The one remaining `require_verified_user` gate: tailoring spends a paid
-    LLM call. Bringing a job does not, so it is `require_user` only."""
+    """The one remaining `require_verified_user` gate: the tailor hands the user
+    a finished PDF / DOCX. Bringing a job does not, so it is `require_user` only."""
     _register(client, "unverified@example.com")
-    assert client.post("/api/tailor/1/generate").status_code == 403  # email_not_verified
+    assert client.get("/api/tailor/1").status_code == 403  # email_not_verified
 
 
 def test_edge_login_lockout_after_five_failures(client):

@@ -84,8 +84,9 @@ def _to_summary(row: dict[str, Any]) -> ReceiptSummary:
 
 
 def _sent_text(doc: dict[str, Any] | None) -> tuple[str | None, str | None]:
-    """The document the user would actually have sent: their polished edit if
-    they made one, else the AI draft. (None, None) when there is no document.
+    """LEGACY (pre-decision-28) `tailored_documents` row → the text the user
+    would have sent: their polished edit if they made one, else the draft.
+    (None, None) when there is no such row. Nothing writes that table any more.
     """
     if not doc:
         return None, None
@@ -94,6 +95,22 @@ def _sent_text(doc: dict[str, Any] | None) -> tuple[str | None, str | None]:
     if doc.get("ai_draft"):
         return doc["ai_draft"], "ai_draft"
     return None, None
+
+
+async def _document_sent(
+    db: JobDatabase, user_id: str, application: dict[str, Any] | None, job_id: int, kind: str
+) -> tuple[str | None, str | None]:
+    """The document to freeze: the newest version saved on the application
+    spine (what the agent wrote), else a legacy `tailored_documents` row."""
+    from src.services.applications import spine as applications_spine  # noqa: PLC0415
+
+    if application is not None:
+        artifact = await applications_spine.latest_artifact(
+            db, user_id, int(application["id"]), kind
+        )
+        if artifact and (artifact.get("text") or "").strip():
+            return artifact["text"], "artifact"
+    return _sent_text(await db.get_tailored_doc(user_id, job_id, kind))
 
 
 @router.post("/receipts/{job_id}", response_model=Receipt, status_code=201)
@@ -113,9 +130,6 @@ async def create_receipt(
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    cv_text, cv_origin = _sent_text(await db.get_tailored_doc(user.id, job_id, "cv"))
-    cl_text, cl_origin = _sent_text(await db.get_tailored_doc(user.id, job_id, "cover_letter"))
-
     # Mark applied FIRST — `create_application` is an upsert (INSERT OR
     # IGNORE), so the application row (and its id) exists before the receipt
     # does. R8's `application_id` is then part of the receipt's own INSERT
@@ -124,6 +138,13 @@ async def create_receipt(
     # UPDATE/DELETE against `application_receipts`.
     await db.create_application(job_id, user.id)
     application = await applications_spine.get_application_by_job(db, user.id, job_id)
+
+    # Decision 28 (2026-09-21): the documents live in `application_artifacts`
+    # — the agent writes them and `save_artifact` versions them. Nothing has
+    # written `tailored_documents` since, so that read is a fallback for rows
+    # this account made before the change, never the first answer.
+    cv_text, cv_origin = await _document_sent(db, user.id, application, job_id, "cv")
+    cl_text, cl_origin = await _document_sent(db, user.id, application, job_id, "cover_letter")
 
     receipt = await db.insert_receipt(
         user_id=user.id,

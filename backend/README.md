@@ -3,7 +3,8 @@
 
 FastAPI backend for Job360 — the memory layer for the seeker's own AI agent
 (`../docs/product/VISION.md`): profile extraction, bring-a-job, application
-receipts, the CV tailor (web fallback) and the MCP server at `/api/mcp`.
+receipts, the CV tailor (renders and versions what the agent writes — decision
+28, no LLM of ours) and the MCP server at `/api/mcp`.
 The legacy search-and-score pipeline (job sources, scoring, semantic retrieval)
 was deleted 2026-09-05 (roadmap slice 5, #483); git history is the only record
 (`backend/tests/test_sourcing_era_deleted.py::test_archive_deleted`).

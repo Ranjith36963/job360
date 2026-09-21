@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Download, Loader2, Sparkles, Eye } from "lucide-react";
+import { Download, Eye } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  generateTailored,
   getTailored,
   saveTailored,
   downloadTailored,
@@ -22,17 +21,17 @@ import {
   type TailorFormat,
   type ProvenanceSegment,
 } from "@/lib/api";
-import { ApiError } from "@/lib/api-error";
 import { toast } from "@/lib/toast";
 import type { TailorBundle, TailorDocKind, TailoredDocOut } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
-// TailorPanel — per-user AI CV + cover letter editor (docs/product/peruser_cv_coverletter.md §3.5)
+// TailorPanel — the saved CV / cover letter, edited and downloaded.
 //
-// Dialog with a CV / Cover Letter tab pair. Every doc is ALWAYS editable
-// (guardrail #3) — the textarea is seeded from `polished ?? ai_draft` and
-// Save (PATCH) is available from the first render. Download marks the doc
-// kept server-side, which is also the edit-feedback learning trigger (§5).
+// Decision 28 (slice A): the AGENT writes these documents and saves them; this
+// panel never generates anything. What it does is what a browser can't ask an
+// agent for — read the newest saved version, highlight which lines are the
+// user's own facts, save an edit as a NEW version, and download an ATS-friendly
+// PDF / DOCX.
 // ---------------------------------------------------------------------------
 
 const TABS: { key: TailorDocKind; label: string }[] = [
@@ -55,11 +54,6 @@ function docFor(
   return bundle?.documents.find((d) => d.doc_kind === kind);
 }
 
-function seedText(bundle: TailorBundle | null, kind: TailorDocKind): string {
-  const doc = docFor(bundle, kind);
-  return doc?.polished ?? doc?.ai_draft ?? "";
-}
-
 export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: TailorPanelProps) {
   const [bundle, setBundle] = useState<TailorBundle | null>(null);
   const [texts, setTexts] = useState<Record<TailorDocKind, string>>({
@@ -69,10 +63,9 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
   const [activeTab, setActiveTab] = useState<TailorDocKind>("cv");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  // Per-line provenance (your facts vs AI-added) — lazy-loaded per tab on toggle.
+  // Per-line provenance (your facts vs added lines) — lazy-loaded per tab on toggle.
   const [showProv, setShowProv] = useState<Record<TailorDocKind, boolean>>({
     cv: false,
     cover_letter: false,
@@ -98,13 +91,16 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
 
   const applyBundle = useCallback((b: TailorBundle) => {
     setBundle(b);
-    setTexts({ cv: seedText(b, "cv"), cover_letter: seedText(b, "cover_letter") });
-    // Fresh docs → stale fact-highlights no longer apply.
+    setTexts({
+      cv: b.documents.find((d) => d.doc_kind === "cv")?.text ?? "",
+      cover_letter: b.documents.find((d) => d.doc_kind === "cover_letter")?.text ?? "",
+    });
+    // Fresh versions → stale fact-highlights no longer apply.
     setProv({ cv: null, cover_letter: null });
     setShowProv({ cv: false, cover_letter: false });
   }, []);
 
-  // Fetch existing docs every time the panel opens for this job.
+  // Fetch the saved versions every time the panel opens for this job.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -118,7 +114,7 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
       .catch((err: unknown) => {
         if (!cancelled) {
           setError(
-            err instanceof Error ? err.message : "Failed to load tailored documents"
+            err instanceof Error ? err.message : "Failed to load saved documents"
           );
         }
       })
@@ -130,28 +126,6 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
     };
   }, [open, jobId, applyBundle, initialKind]);
 
-  async function handleGenerate() {
-    setGenerating(true);
-    try {
-      const b = await generateTailored(jobId);
-      applyBundle(b);
-      toast.success("Tailored CV + cover letter generated");
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 402) {
-        toast.error(
-          err.detail ||
-            "Monthly free limit reached — tailoring is a premium feature."
-        );
-      } else if (err instanceof ApiError && err.status === 400) {
-        toast.error("Upload your CV first on the Profile page.");
-      } else {
-        toast.apiError(err, "Failed to generate tailored documents");
-      }
-    } finally {
-      setGenerating(false);
-    }
-  }
-
   async function handleSave(kind: TailorDocKind) {
     setSaving(true);
     try {
@@ -161,7 +135,9 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
         const others = prev.documents.filter((d) => d.doc_kind !== kind);
         return { ...prev, documents: [...others, doc] };
       });
-      toast.success(`${kind === "cv" ? "CV" : "Cover letter"} saved`);
+      toast.success(
+        `${kind === "cv" ? "CV" : "Cover letter"} saved as v${doc.version_no}`
+      );
       // Edited text → previous fact-highlights are stale; drop them.
       setProv((p) => ({ ...p, [kind]: null }));
       setShowProv((p) => ({ ...p, [kind]: false }));
@@ -190,7 +166,7 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[88vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Tailor my CV</DialogTitle>
+          <DialogTitle>Saved documents</DialogTitle>
         </DialogHeader>
 
         {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
@@ -202,36 +178,10 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
 
         {!loading && !error && (
           <>
-            <div className="flex items-center justify-between gap-2">
-              {bundle && (
-                <Badge variant="secondary" className="text-xs">
-                  {bundle.quota_used}/{bundle.quota_limit} used this month
-                </Badge>
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5 ml-auto"
-                onClick={handleGenerate}
-                disabled={generating}
-              >
-                {generating ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-                {generating
-                  ? "Generating…"
-                  : hasDocs
-                  ? "Regenerate"
-                  : "Generate"}
-              </Button>
-            </div>
-
-            {!hasDocs && !generating && (
+            {!hasDocs && (
               <p className="text-sm text-muted-foreground">
-                No tailored documents yet — click Generate to create a CV and
-                cover letter for this job.
+                Nothing saved for this job yet. Ask your agent to write a tailored
+                CV and save it — every version it saves shows up here.
               </p>
             )}
 
@@ -249,12 +199,11 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
                 </TabsList>
                 {TABS.map((t) => (
                   <TabsContent key={t.key} value={t.key} className="space-y-3">
-                    {(docFor(bundle, t.key)?.flagged_terms?.length ?? 0) > 0 && (
-                      <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                        <span className="font-semibold">⚠ Review — these may be invented:</span>{" "}
-                        {(docFor(bundle, t.key)?.flagged_terms ?? []).join(", ")}. Check
-                        them against your real CV before you apply.
-                      </div>
+                    {docFor(bundle, t.key) && (
+                      <Badge variant="secondary" className="text-xs">
+                        v{docFor(bundle, t.key)?.version_no} · saved by{" "}
+                        {docFor(bundle, t.key)?.made_by}
+                      </Badge>
                     )}
                     {showProv[t.key] && prov[t.key] ? (
                       <div className="space-y-2">
@@ -265,7 +214,7 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
                           </span>
                           <span className="inline-flex items-center gap-1.5">
                             <span className="h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden="true" />
-                            AI-added / reshaped — verify before you send
+                            Added on top — verify before you send
                           </span>
                         </div>
                         <div className="min-h-[300px] max-h-[45vh] overflow-y-auto rounded-md border p-3 font-mono text-xs leading-relaxed">
@@ -278,7 +227,7 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
                                   : "rounded bg-amber-500/10 px-1 text-amber-200"
                               }
                             >
-                              {seg.text || " "}
+                              {seg.text || " "}
                             </div>
                           ))}
                         </div>
@@ -300,7 +249,7 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
                         onClick={() => handleSave(t.key)}
                         disabled={saving || showProv[t.key]}
                       >
-                        {saving ? "Saving…" : "Save"}
+                        {saving ? "Saving…" : "Save as new version"}
                       </Button>
                       <Button
                         size="sm"

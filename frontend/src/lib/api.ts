@@ -381,16 +381,10 @@ type _Schemas = components["schemas"];
 
 // ---- Tailored docs ----
 //
-// Per-user AI CV + cover letter (docs/product/peruser_cv_coverletter.md). Generation is
-// quota-gated (402 when the monthly free limit is reached) and requires a CV on
-// file (400 when none). Every write here is a plain async function + toast +
-// queryClient.invalidateQueries at the call site — no useMutation in this codebase.
-
-export async function generateTailored(jobId: number): Promise<TailorBundle> {
-  return request<TailorBundle>(`/api/tailor/${jobId}/generate`, {
-    method: "POST",
-  });
-}
+// Decision 28 (2026-09-21, slice A): Job360 has no LLM. The user's AGENT writes
+// the tailored CV / cover letter and saves it (MCP `save_artifact`); these calls
+// read the newest saved version back, save a human edit as a NEW version, and
+// render DOCX / PDF. There is no generate call any more.
 
 export async function getTailored(jobId: number): Promise<TailorBundle> {
   return request<TailorBundle>(`/api/tailor/${jobId}`);
@@ -402,7 +396,7 @@ export interface ProvenanceSegment {
   grounded: boolean;
 }
 
-/** Per-line provenance for a tailored doc — your facts vs what the AI added. */
+/** Per-line provenance for a saved doc — your own facts vs lines added on top. */
 export async function getTailoredProvenance(
   jobId: number,
   kind: TailorDocKind

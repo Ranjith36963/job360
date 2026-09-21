@@ -1358,31 +1358,13 @@ export interface paths {
         };
         /**
          * Get Tailored
-         * @description Return the caller's tailored docs for a job (empty list if none generated).
+         * @description The newest saved CV and cover letter for this job (empty list if the
+         *     agent has saved none yet). Older versions stay readable on the application
+         *     page — ``GET /applications/{id}``.
          */
         get: operations["get_tailored_api_tailor__job_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tailor/{job_id}/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate
-         * @description Generate a tailored CV + cover letter for (caller, job). Quota-gated.
-         */
-        post: operations["generate_api_tailor__job_id__generate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1404,7 +1386,9 @@ export interface paths {
         head?: never;
         /**
          * Save Edit
-         * @description Save the user's edited/polished version (guardrail #3 — always editable).
+         * @description Save the user's own edit as a NEW version (guardrail #3 — always
+         *     editable). Nothing is overwritten: the agent's version and every earlier
+         *     edit stay readable forever (M3), and the edit is stamped ``made_by="human"``.
          */
         patch: operations["save_edit_api_tailor__job_id___doc_kind__patch"];
         trace?: never;
@@ -1420,16 +1404,16 @@ export interface paths {
         put?: never;
         /**
          * Download
-         * @description Download the polished (or draft) doc as an ATS-friendly PDF or DOCX. Marks it KEPT.
+         * @description Download the newest saved version as an ATS-friendly PDF or DOCX.
          *
          *     ``fmt`` = ``pdf`` (default) | ``docx``.
          *
-         *     POST, not GET (docs/fable/01 S6): this endpoint MUTATES — it marks the doc kept
-         *     and feeds `_learn_universal`. A side-effecting GET is both wrong HTTP semantics
-         *     and a CSRF hole: `OriginCheckMiddleware` only guards unsafe methods, and a
-         *     cross-site top-level link click still sends the SameSite=Lax cookie. As POST it
-         *     is Origin-checked like every other mutation. The frontend already fetches this
-         *     as a blob, so the method change is transparent there.
+         *     POST, not GET (docs/fable/01 S6): this endpoint MUTATES — it feeds
+         *     `_learn_universal`. A side-effecting GET is both wrong HTTP semantics and a
+         *     CSRF hole: `OriginCheckMiddleware` only guards unsafe methods, and a
+         *     cross-site top-level link click still sends the SameSite=Lax cookie. As POST
+         *     it is Origin-checked like every other mutation. The frontend already fetches
+         *     this as a blob, so the method is transparent there.
          */
         post: operations["download_api_tailor__job_id___doc_kind__download_post"];
         delete?: never;
@@ -1449,7 +1433,11 @@ export interface paths {
         put?: never;
         /**
          * Keep
-         * @description Mark KEPT → the learning trigger (§5 learn-from-kept-only).
+         * @description "This is the one I'm using" — the learning trigger (§5 learn-from-kept-only).
+         *
+         *     Writes nothing to the document: the version history IS the record (decision
+         *     26 — no Keep flag on an artifact). All it does is record the STRUCTURE of the
+         *     kept text in the universal patterns store (§7 privacy — never content).
          */
         post: operations["keep_api_tailor__job_id___doc_kind__keep_post"];
         delete?: never;
@@ -1467,9 +1455,10 @@ export interface paths {
         };
         /**
          * Provenance
-         * @description Per-line provenance for the doc: which lines are the user's OWN facts (grounded
-         *     in their CV + the job) vs lines the AI added. Deterministic, no LLM — shown before
-         *     download so the user can verify what's real (user request / guardrail #2).
+         * @description Per-line provenance for the newest saved version: which lines are the
+         *     user's OWN facts (grounded in their CV + the job ad) and which were added.
+         *     Deterministic, no LLM — shown before download so the user can verify what is
+         *     real (guardrail #2).
          */
         get: operations["provenance_api_tailor__job_id___doc_kind__provenance_get"];
         put?: never;
@@ -3230,42 +3219,35 @@ export interface components {
         };
         /** TailorBundle */
         TailorBundle: {
+            /** Application Id */
+            application_id: number;
             /** Documents */
             documents: components["schemas"]["TailoredDocOut"][];
             /** Job Id */
             job_id: number;
-            /** Quota Limit */
-            quota_limit: number;
-            /** Quota Used */
-            quota_used: number;
         };
         /** TailorSaveRequest */
         TailorSaveRequest: {
             /** Text */
             text: string;
         };
-        /** TailoredDocOut */
+        /**
+         * TailoredDocOut
+         * @description One saved version of a tailored document — the newest of its kind.
+         */
         TailoredDocOut: {
-            /** Ai Draft */
-            ai_draft: string;
+            /** Artifact Id */
+            artifact_id: number;
             /** Doc Kind */
             doc_kind: string;
-            /**
-             * Flagged Terms
-             * @default []
-             */
-            flagged_terms: string[];
-            /** Model */
-            model?: string | null;
-            /** Polished */
-            polished?: string | null;
-            /**
-             * Status
-             * @default draft
-             */
-            status: string;
+            /** Made By */
+            made_by: string;
+            /** Text */
+            text: string;
             /** Updated At */
             updated_at?: string | null;
+            /** Version No */
+            version_no: number;
         };
         /** TokenCreated */
         TokenCreated: {
@@ -5482,41 +5464,6 @@ export interface operations {
         };
     };
     get_tailored_api_tailor__job_id__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                job_id: number;
-            };
-            cookie?: {
-                job360_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TailorBundle"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generate_api_tailor__job_id__generate_post: {
         parameters: {
             query?: never;
             header?: {

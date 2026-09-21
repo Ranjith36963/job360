@@ -143,10 +143,13 @@ describe("ApplicationClient — six-question layout", () => {
     }
   });
 
-  it("does not render the tailor fallback when a CV artifact already exists", async () => {
+  it("points at the user's own agent instead of offering to write the CV", async () => {
     render(<ApplicationClient applicationId={42} />);
     await screen.findByText("Staff Engineer");
 
+    // Decision 28 (slice A): Job360 has no LLM — no generate button anywhere.
+    expect(screen.getByRole("heading", { name: /ask your agent/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /tailor my cv/i })).toBeNull();
     expect(
       screen.queryByRole("heading", { name: /tailor my ats-friendly cv/i })
     ).toBeNull();

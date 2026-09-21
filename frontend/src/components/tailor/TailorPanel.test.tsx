@@ -2,15 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TailorPanel } from "./TailorPanel";
-import { ApiError } from "@/lib/api-error";
 import type { TailorBundle, TailoredDocOut } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
-// Mocks
+// Mocks — decision 28 (slice A): there is no generate call to mock any more.
 // ---------------------------------------------------------------------------
 
 const mockGetTailored = vi.fn();
-const mockGenerateTailored = vi.fn();
 const mockSaveTailored = vi.fn();
 const mockDownloadTailored = vi.fn();
 
@@ -18,7 +16,6 @@ const mockGetProvenance = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   getTailored: (...args: unknown[]) => mockGetTailored(...args),
-  generateTailored: (...args: unknown[]) => mockGenerateTailored(...args),
   saveTailored: (...args: unknown[]) => mockSaveTailored(...args),
   downloadTailored: (...args: unknown[]) => mockDownloadTailored(...args),
   getTailoredProvenance: (...args: unknown[]) => mockGetProvenance(...args),
@@ -44,10 +41,10 @@ vi.mock("@/lib/toast", () => ({
 function makeDoc(overrides: Partial<TailoredDocOut> = {}): TailoredDocOut {
   return {
     doc_kind: "cv",
-    ai_draft: "AI CV draft text",
-    polished: null,
-    status: "draft",
-    model: "cerebras",
+    text: "The CV my agent wrote",
+    artifact_id: 11,
+    version_no: 1,
+    made_by: "agent:claude",
     updated_at: null,
     ...overrides,
   };
@@ -56,12 +53,11 @@ function makeDoc(overrides: Partial<TailoredDocOut> = {}): TailoredDocOut {
 function makeBundle(overrides: Partial<TailorBundle> = {}): TailorBundle {
   return {
     job_id: 42,
+    application_id: 3,
     documents: [
-      makeDoc({ doc_kind: "cv", ai_draft: "AI CV draft text" }),
-      makeDoc({ doc_kind: "cover_letter", ai_draft: "AI cover letter draft" }),
+      makeDoc({ doc_kind: "cv", text: "The CV my agent wrote" }),
+      makeDoc({ doc_kind: "cover_letter", text: "The cover letter my agent wrote", artifact_id: 12 }),
     ],
-    quota_used: 1,
-    quota_limit: 10,
     ...overrides,
   };
 }
@@ -72,44 +68,45 @@ describe("TailorPanel", () => {
     mockGetTailored.mockResolvedValue(makeBundle());
   });
 
-  it("shows CV and Cover Letter tabs with the AI draft seeded in", async () => {
+  it("shows CV and Cover Letter tabs with the saved text seeded in", async () => {
     render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
 
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /^cv$/i })).toBeInTheDocument();
     });
     expect(screen.getByRole("tab", { name: /cover letter/i })).toBeInTheDocument();
-    expect(screen.getByDisplayValue("AI CV draft text")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("The CV my agent wrote")).toBeInTheDocument();
   });
 
-  it("shows the quota usage", async () => {
+  it("names the version and who saved it", async () => {
     render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
     await waitFor(() => {
-      expect(screen.getByText("1/10 used this month")).toBeInTheDocument();
+      expect(screen.getByText(/v1 · saved by agent:claude/i)).toBeInTheDocument();
     });
   });
 
-  it("offers Generate when no documents exist yet", async () => {
+  it("offers NO generate button — the agent writes, we render (decision 28)", async () => {
     mockGetTailored.mockResolvedValue(makeBundle({ documents: [] }));
     render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /^generate$/i })).toBeInTheDocument();
+      expect(screen.getByText(/nothing saved for this job yet/i)).toBeInTheDocument();
     });
-    expect(screen.queryByDisplayValue(/AI CV draft/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /generate/i })).toBeNull();
+    expect(screen.queryByText(/used this month/i)).toBeNull();
   });
 
   it("Save calls saveTailored with the edited text for the active tab", async () => {
     mockSaveTailored.mockResolvedValue(
-      makeDoc({ doc_kind: "cv", polished: "Edited CV text" })
+      makeDoc({ doc_kind: "cv", text: "Edited CV text", version_no: 2, made_by: "human" })
     );
     render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
 
-    const textarea = await screen.findByDisplayValue("AI CV draft text");
+    const textarea = await screen.findByDisplayValue("The CV my agent wrote");
     await userEvent.clear(textarea);
     await userEvent.type(textarea, "Edited CV text");
 
-    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save as new version/i }));
 
     await waitFor(() => {
       expect(mockSaveTailored).toHaveBeenCalledWith(42, "cv", "Edited CV text");
@@ -121,7 +118,7 @@ describe("TailorPanel", () => {
     mockDownloadTailored.mockResolvedValue(undefined);
     render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
 
-    await screen.findByDisplayValue("AI CV draft text");
+    await screen.findByDisplayValue("The CV my agent wrote");
     await userEvent.click(screen.getByRole("button", { name: /download pdf/i }));
 
     await waitFor(() => {
@@ -133,7 +130,7 @@ describe("TailorPanel", () => {
     mockDownloadTailored.mockResolvedValue(undefined);
     render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
 
-    await screen.findByDisplayValue("AI CV draft text");
+    await screen.findByDisplayValue("The CV my agent wrote");
     await userEvent.click(screen.getByRole("button", { name: /download docx/i }));
 
     await waitFor(() => {
@@ -141,14 +138,14 @@ describe("TailorPanel", () => {
     });
   });
 
-  it("Highlight my facts fetches provenance and shows grounded + AI-added lines", async () => {
+  it("Highlight my facts fetches provenance and shows grounded + added lines", async () => {
     mockGetProvenance.mockResolvedValue([
       { text: "Senior ML Engineer at Monzo", grounded: true },
       { text: "Led a team of fifty across three continents", grounded: false },
     ]);
     render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
 
-    await screen.findByDisplayValue("AI CV draft text");
+    await screen.findByDisplayValue("The CV my agent wrote");
     await userEvent.click(
       screen.getByRole("button", { name: /highlight my facts/i })
     );
@@ -160,41 +157,13 @@ describe("TailorPanel", () => {
       await screen.findByText(/senior ml engineer at monzo/i)
     ).toBeInTheDocument();
     expect(screen.getByText(/led a team of fifty/i)).toBeInTheDocument();
-    expect(screen.getByText(/ai-added/i)).toBeInTheDocument(); // legend present
+    expect(screen.getByText(/added on top/i)).toBeInTheDocument(); // legend present
   });
 
-  it("shows a limit-reached toast on 402 from Generate", async () => {
-    mockGetTailored.mockResolvedValue(makeBundle({ documents: [] }));
-    mockGenerateTailored.mockRejectedValue(
-      new ApiError(
-        402,
-        "Monthly free limit reached (10/10). Tailored documents are a premium feature."
-      )
-    );
+  it("surfaces a load failure instead of an empty panel", async () => {
+    mockGetTailored.mockRejectedValue(new Error("boom"));
     render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
 
-    const generateBtn = await screen.findByRole("button", { name: /^generate$/i });
-    await userEvent.click(generateBtn);
-
-    await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith(
-        expect.stringMatching(/monthly free limit reached/i)
-      );
-    });
-  });
-
-  it("shows an 'upload your CV' toast on 400 from Generate", async () => {
-    mockGetTailored.mockResolvedValue(makeBundle({ documents: [] }));
-    mockGenerateTailored.mockRejectedValue(new ApiError(400, "No CV on file"));
-    render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
-
-    const generateBtn = await screen.findByRole("button", { name: /^generate$/i });
-    await userEvent.click(generateBtn);
-
-    await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith(
-        expect.stringMatching(/upload your cv/i)
-      );
-    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("boom");
   });
 });
