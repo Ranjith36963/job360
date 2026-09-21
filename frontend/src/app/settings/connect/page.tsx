@@ -197,20 +197,29 @@ function ConnectAppCard() {
 
 // ---------------------------------------------------------------------------
 // One recipe per assistant. Verified against each vendor's own docs
-// 2026-09-20 — plan names and menu paths only go here once we've checked
+// (2026-09-20; the ChatGPT plan line re-checked against OpenAI's help centre
+// 2026-09-21) — plan names and menu paths only go here once we've checked
 // them there; do not extend this list from memory.
 //
-// `ready` is a live measurement, not a guess: each assistant's real OAuth
-// callback was posted to production's own /api/oauth/register on 2026-09-21
-// and the server's answer (accepted vs. "invalid_redirect_uri") recorded
-// here. A "blocked" entry means the CALLBACK for that assistant is not yet
-// in the server's allow-list — nothing about the assistant itself.
+// `ready` is a HAND-WRITTEN RESULT OF A DATED MANUAL CHECK, not a live
+// reading. On LAST_CHECKED each assistant's real OAuth callback was posted to
+// production's own /api/oauth/register and the server's answer (accepted vs.
+// "invalid_redirect_uri") written down here. Nothing on this page reads the
+// deployment's allow-list at runtime, so if the owner adds or removes a
+// callback afterwards these values go stale until someone re-runs the check
+// and edits them — which is why every line the user sees carries the date.
+// A "blocked" entry means the CALLBACK for that assistant was not in the
+// server's allow-list that day — nothing about the assistant itself.
 // ---------------------------------------------------------------------------
+
+/** The day the callbacks below were last posted to /api/oauth/register. */
+const LAST_CHECKED = "21 September 2026";
 
 type AssistantRecipe = {
   name: string;
   plans: string;
   steps: string;
+  /** Result of the manual check on LAST_CHECKED — not a live status. */
   ready: boolean;
 };
 
@@ -224,9 +233,10 @@ const ASSISTANT_RECIPES: AssistantRecipe[] = [
   },
   {
     name: "ChatGPT",
-    plans: "Plus, Pro, Business, Enterprise or Edu.",
+    plans:
+      "Business, Enterprise or Edu. Job360 needs a connector that can write, and OpenAI ships that on those plans only — Plus and Pro can't finish these workflows.",
     steps:
-      "Settings → Apps & Connectors → turn on Developer mode → add the address above as a server.",
+      "An admin or owner turns on Developer mode in Workspace settings, adds the address above as a custom app, then publishes it to the workspace.",
     ready: true,
   },
   {
@@ -278,8 +288,8 @@ function AssistantRecipesCard() {
                 data-testid={`assistant-status-${a.name.toLowerCase()}`}
               >
                 {a.ready
-                  ? "Ready."
-                  : "Ask the owner to allowlist this assistant's callback first."}
+                  ? `Worked when we checked, on ${LAST_CHECKED}.`
+                  : `Did not work when we checked, on ${LAST_CHECKED} — ask the owner to allowlist this assistant's callback first.`}
               </p>
             </li>
           ))}
