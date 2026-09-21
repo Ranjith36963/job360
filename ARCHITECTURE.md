@@ -48,7 +48,7 @@ job360/
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
 │   └── tests/                        # file count: `docs/GENERATED.md` (collected-test count: measure it, never quote it)
-├── frontend/                         # Next.js 16 + React 19 + Tailwind 4 + shadcn
+├── frontend/                         # Next.js 16 + React 19 + Tailwind 4
 │   └── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
 ├── docs/
 │   └── product/                      # VISION.md (the mission), product_design_rules.md
@@ -152,18 +152,15 @@ The full table — every method, path and router file, generated from the router
 
 ### Environment Variables
 
-`backend/src/core/settings.py` is the only list. Every knob is an `os.getenv`
-call there with the comment that says why it exists and what it costs to move —
-a table here is a second copy that falls behind silently (it had drifted 22
-variables behind by 2026-09-15, including `SITE_BASE_URL`, which `README.md`
-tells you to set).
+There is no single list, and no grep finds them all — `core.settings._env_list`
+and `validate_required_env` read under variable names. Most knobs are
+`os.getenv` calls in `core/settings.py`; the rest sit where they are used —
+`FRONTEND_ORIGIN` in `api.main`, `REQUIRE_EMAIL_VERIFICATION` in
+`api.auth_deps.require_verified_user`, `SMTP_*` in `services.auth.email_sender`.
 
 - `.env` lives in the repo root (see `.env.example`).
 - Required in production: `core.settings._REQUIRED_PROD_VARS`, enforced at boot
-  by `core.settings.validate_required_env`. Everything else is optional.
-- Tuning constants that are NOT env-readable live in the same file; changing
-  them in `.env` does nothing.
-- Data outputs go to `backend/data/` (gitignored).
+  by `core.settings.validate_required_env`.
 
 ---
 
