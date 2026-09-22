@@ -15,9 +15,6 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 **Standing gates (note in every report until resolved):**
 - **LinkedIn enrich (#12)** needs a sample LinkedIn PDF in `test-artifacts/`.
 - **GitHub enrich (#13)** hits **live GitHub** (rate-limited; needs a real handle).
-- **LLM CV parse (#11)** walks `llm_provider.llm_extract`'s chain (order pinned by
-  `tests/test_llm_provider.py::test_llm_extract_prefers_openai`); free-tier daily quotas can
-  exhaust → extraction may degrade to titles-only or fall back slowly. Not a bug.
 
 ---
 
@@ -28,7 +25,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 ## B. Auth (full lifecycle)
 > Every route in this section lives under `/api/auth/` — the router is `backend/src/api/routes/auth.py`. Read each path off it; do not infer one from the item text.
 - [ ] 3. Register → 201, `users` row lands, cookie issued
-- [ ] 4. Email verify — the request, confirm and email-verified routes; enforcement is ON by default and blocks the routes that spend an LLM call — the tailor (`tests/test_email_enforcement.py`) — so verify this user before exercising those
+- [ ] 4. Email verify — the request, confirm and email-verified routes; enforcement is ON by default and blocks the tailor routes (`tests/test_email_enforcement.py`) — so verify this user before exercising those
 - [ ] 5. Login + session — `GET /api/auth/me` resolves the exact user from the cookie
 - [ ] 6. Password reset **request** → 204 (send is SMTP-conditional)
 - [ ] 7. Password reset **confirm** → 204 with a token
@@ -37,7 +34,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 - [ ] 10. Session persists — 30-day cookie max-age (`auth._set_session_cookie`)
 
 ## C. Profile
-- [ ] 11. CV upload + LLM parse → `POST /api/profile` 200, skills+titles returned, `user_profiles` row lands
+- [ ] 11. CV upload → `POST /api/profile` 200, skills returned, `user_profiles` row lands
 - [ ] 12. LinkedIn enrich → `POST /profile/linkedin` (GATED: needs sample LinkedIn PDF)
 - [ ] 13. GitHub enrich → `POST /profile/github` (CODE: hits live GitHub)
 - [ ] 14. Profile → agent — `GET /api/profile` returns what the CV contains; an unset preference is ABSENT, not zero (rule #29)
