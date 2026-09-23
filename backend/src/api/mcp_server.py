@@ -1,10 +1,10 @@
 """Job360 as an MCP server — the same routes, reached by an agent.
 
-Mounted at ``/api/mcp`` (streamable HTTP, stateless, JSON responses) so any MCP
-client — Claude Code first — can bring a job, record its own fit verdict, save
-the CV and cover letter it wrote, record "I applied" and read receipts, as the
-user, with a personal token. Decision 28 (slice A): no tool here writes text
-for the agent — Job360 stores, versions and renders what the agent saves.
+Mounted at ``/api/mcp`` (streamable HTTP, stateless) so any MCP client —
+Claude Code first — can bring a job, record its own fit verdict, save the CV
+and cover letter it wrote, record "I applied" and read receipts, as the user,
+with a personal token. Decision 28 (slice A): no tool here writes text for
+the agent — Job360 stores, versions and renders what the agent saves.
 
 Design (docs/plans/2026-09-03-mcp-server/spec.md R4):
 
@@ -20,12 +20,17 @@ Design (docs/plans/2026-09-03-mcp-server/spec.md R4):
   task group; :func:`mcp_runtime` builds the server and enters it. The app
   lifespan uses it in prod; tests use it too, because the auth fixture
   swaps the lifespan for a no-op. With no runtime the mount answers 503.
+* **A deploy must not need a manual reconnect.**
+  :class:`_AnnounceToolListChanged` tells each user's client, once per
+  process, that the tool list changed — see that class for the whole story
+  and for what it still cannot guarantee.
 * Heavy imports (the ``mcp`` SDK, the route modules) stay inside functions
   (rule #16): CLI runs and test collection never pay for them.
 """
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 from contextlib import AbstractAsyncContextManager
 from contextvars import ContextVar
@@ -42,6 +47,8 @@ from src.utils.logger import get_audit_logger, get_logger
 
 if TYPE_CHECKING:  # pragma: no cover — type-only; the SDK is lazy-imported at runtime
     from mcp.server import MCPServer
+    from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
+    from mcp_types import Tool as McpTool
     from starlette.types import Receive, Scope, Send
 
     from src.repositories.database import JobDatabase
@@ -71,8 +78,13 @@ INSTRUCTIONS = (
 # read by every tool. Context-local, so concurrent requests never cross.
 _current_user: ContextVar[Optional[CurrentUser]] = ContextVar("mcp_current_user", default=None)
 
-# The live SDK ASGI handler. None until mcp_runtime() is entered.
+# The live SDK ASGI handlers. None until mcp_runtime() is entered. `_handler`
+# is the leg a client's Accept header selects by default (SSE responses while
+# announcing is on, JSON otherwise); `_json_handler` is the JSON-only fallback
+# that exists only while announcing is on, for a client that did not accept
+# text/event-stream. See `mcp_runtime` for why there are two.
 _handler: Optional[Callable[[Scope, Receive, Send], Awaitable[None]]] = None
+_json_handler: Optional[Callable[[Scope, Receive, Send], Awaitable[None]]] = None
 
 
 # ── Tool plumbing ──────────────────────────────────────────────────────────────
@@ -217,8 +229,14 @@ def _receipt_full(r: Any) -> dict[str, Any]:
     }
 
 
-def build_server() -> MCPServer:
-    """Create the MCPServer with the seventeen tools. Imports the SDK here (rule #16)."""
+def build_server(version: str = "") -> MCPServer:
+    """Create the MCPServer with the seventeen tools. Imports the SDK here (rule #16).
+
+    ``version`` becomes ``serverInfo.version`` in the ``initialize`` result;
+    :func:`mcp_runtime` passes :func:`tools_fingerprint` so the wire says which
+    tool surface this process serves. Left empty the server reports no version,
+    exactly as before.
+    """
     from mcp.server import MCPServer
     from pydantic import ValidationError
     from starlette.responses import Response
@@ -230,7 +248,7 @@ def build_server() -> MCPServer:
     from src.api.routes import tailor as tailor_route
     from src.services.applications import spine as applications_spine
 
-    mcp = MCPServer(SERVER_NAME, instructions=INSTRUCTIONS)
+    mcp = MCPServer(SERVER_NAME, instructions=INSTRUCTIONS, version=version)
 
     def _validation_error(exc: ValidationError) -> Exception:
         problems = "; ".join(
@@ -783,19 +801,199 @@ def build_server() -> MCPServer:
     return mcp
 
 
+# ── Telling a connected client the tool list moved ─────────────────────────────
+
+
+def tools_fingerprint(tools: list[McpTool]) -> str:
+    """A short, stable id for the tool surface: every tool name + input schema.
+
+    Reported as ``serverInfo.version``, so an ``initialize`` result says which
+    tool surface this process is serving. Production has no other honest
+    version signal — ``/api/health`` returns a hardcoded ``"1.0.0"``
+    (CLAUDE.md) — so this is the only way to tell from outside whether a
+    deploy changed the tools an agent can see.
+
+    It is an **instrument, not a mechanism**: no MCP revision obliges a client
+    to re-fetch when ``serverInfo.version`` changes. It makes the change
+    observable; :class:`_AnnounceToolListChanged` is what tries to act on it.
+    """
+    payload = json.dumps(
+        [[t.name, t.input_schema] for t in sorted(tools, key=lambda t: t.name)],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def _declare_tools_list_changed(result: HandlerResult) -> HandlerResult:
+    """Stamp ``capabilities.tools.listChanged = true`` on an ``initialize`` result.
+
+    The spec (2025-06-18 / 2025-11-25 ``server/tools``) only lets a server send
+    ``notifications/tools/list_changed`` if it declared the ``listChanged``
+    capability, and a client that is told ``false`` is entitled to cache the
+    tool list forever — which is exactly what we observed.
+
+    The SDK derives the flag from a ``NotificationOptions`` the streamable-HTTP
+    path never lets us supply: ``mcp/server/runner.py`` calls
+    ``create_initialization_options()`` with no arguments, so the flag is
+    always ``False`` on a handshake-era wire (measured: ``list_changed=False``
+    at 2024-11-05 → 2025-11-25, ``True`` at 2026-07-28, where it is derived
+    from ``subscriptions/listen`` being served instead).
+
+    So it is stamped here, on the wire shape — which is the protocol and does
+    not move between SDK versions — and deliberately in the same class that
+    sends the notification, so the promise and the delivery cannot drift.
+    """
+    if not isinstance(result, dict):  # pragma: no cover — initialize always dumps to a dict
+        return result
+    capabilities = result.get("capabilities")
+    if isinstance(capabilities, dict):
+        tools = capabilities.get("tools")
+        if isinstance(tools, dict):
+            tools["listChanged"] = True
+    return result
+
+
+class _AnnounceToolListChanged:
+    """Tell a client that cached an older tool list to fetch it again.
+
+    **Why.** 2026-09-20: a deploy gave ``save_fit`` an optional ``axes``
+    parameter. Claude.ai, already connected, kept answering from the tool list
+    it had cached and told the user "save_fit has no axes field" until they
+    disconnected and reconnected the connector by hand. A deploy restarts the
+    process, so every MCP session is dropped and remade — and the client still
+    did not re-fetch. The owner cannot ask every user to reconnect per deploy.
+
+    **Where the notification rides.** A stateless mount has no standalone
+    back-channel (``mcp/server/streamable_http_manager.py``: the stateless path
+    builds the connection with the no-channel sentinel, so
+    ``session.send_tool_list_changed()`` is silently dropped). The one channel
+    it does have is *this POST's own response stream*, which exists only when
+    the transport answers in SSE rather than a single JSON body (the SDK:
+    "``is_json_response_enabled`` … removes the request-scoped back-channel …
+    its notifications are dropped"). Hence ``json_response`` is off whenever
+    this middleware is installed — the two are one decision, made in
+    :func:`mcp_runtime` off ``settings.MCP_ANNOUNCE_TOOLS_CHANGED``.
+
+    **When.** On the first request of *any* method each user makes after this
+    process started — once per user per deploy, because the deploy restarts
+    the process and empties the set. Deliberately not narrowed to
+    ``tools/call``: most clients open with ``tools/list``, and being told then
+    means they heal *before* the first tool call rather than after one wrong
+    answer. Re-fetching cannot loop — the second ``tools/list`` finds the user
+    already told.
+
+    Not on ``initialize``: the SDK handles it inline with the read loop
+    parked, so anything written there reaches the wire *before* the initialize
+    response, and a client that has not finished its handshake is entitled to
+    ignore it. Every other request's stream is live and post-handshake.
+
+    **What it cannot guarantee.** No MCP revision makes the client's re-fetch
+    mandatory — the 2025-06-18 and 2025-11-25 specs put the only normative
+    sentence on the *server* ("servers that declared the ``listChanged``
+    capability SHOULD send a notification"); the client-side re-fetch appears
+    only in a non-normative sequence diagram. So this gives a conforming
+    client everything it needs to notice, and cannot make it look.
+    """
+
+    # Bound on the "already told" set, so a long-lived process cannot grow it
+    # without limit. Past it the middleware simply stops announcing — which is
+    # the pre-2026-09-20 behaviour, not a new failure — and by then the process
+    # has been up long enough that everyone reconnecting after the deploy has.
+    MAX_TRACKED_USERS = 50_000
+
+    def __init__(self) -> None:
+        # user_id -> already told, for the life of this process. One id per
+        # user who actually called a tool; a deploy clears it by restarting.
+        self._announced: set[str] = set()
+
+    async def __call__(self, ctx: ServerRequestContext[Any, Any], call_next: CallNext) -> HandlerResult:
+        if ctx.method == "initialize":
+            return _declare_tools_list_changed(await call_next(ctx))
+        # Announce BEFORE the handler runs: the notification then leads the
+        # request's stream whatever the handler does, including raising.
+        if ctx.request_id is not None:  # a request has a stream; a notification does not
+            await self._announce_once(ctx)
+        return await call_next(ctx)
+
+    async def _announce_once(self, ctx: ServerRequestContext[Any, Any]) -> None:
+        """Write the notification onto this request's own stream, at most once per user.
+
+        Marked as told *before* the send, not after. The SDK's notification
+        path never raises on a dead stream — it swallows
+        ``BrokenResourceError``/``ClosedResourceError`` and debug-logs the drop
+        — so "no exception" is not evidence of delivery, and treating it as
+        evidence would silently re-announce forever to a client that hung up.
+        At-most-once per process is the honest contract.
+        """
+        from mcp_types import ToolListChangedNotification
+
+        user = _current_user.get()
+        if user is None or user.id in self._announced:
+            return
+        if len(self._announced) >= self.MAX_TRACKED_USERS:  # pragma: no cover — 50k users on one process
+            return
+        self._announced.add(user.id)
+        # `related_request_id` is the selector: present = this request's own
+        # stream, absent = the standalone channel a stateless mount lacks.
+        await ctx.session.send_notification(ToolListChangedNotification(), related_request_id=ctx.request_id)
+        logger.info(
+            "mcp_tools_list_changed_sent",
+            extra={"event": "mcp_tools_list_changed_sent", "user_id": user.id, "method": ctx.method},
+        )
+
+
 # ── Runtime + ASGI mount ───────────────────────────────────────────────────────
+
+
+def _build_handler(
+    *, version: str, announce: bool, security: Any
+) -> tuple[Any, Callable[[Scope, Receive, Send], Awaitable[None]]]:
+    """One stateless streamable-HTTP leg: its session manager and ASGI handler.
+
+    ``announce`` picks the whole leg, not a detail of it: an SSE response
+    stream is the only back-channel a stateless mount has, so the middleware
+    that announces a tool-list change and the SSE response mode are the same
+    decision (see :class:`_AnnounceToolListChanged`).
+    """
+    from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
+
+    mcp = build_server(version=version)
+    if announce:
+        mcp.middleware.append(_AnnounceToolListChanged())
+    # Builds the session manager as a side effect; the Starlette app it returns
+    # (routes + its own lifespan) is not used — the shim below IS the route.
+    mcp.streamable_http_app(
+        streamable_http_path="/",
+        json_response=not announce,
+        stateless_http=True,
+        transport_security=security,
+    )
+    manager = mcp.session_manager
+    return manager, StreamableHTTPASGIApp(manager)
 
 
 @contextlib.asynccontextmanager
 async def mcp_runtime() -> AsyncIterator[None]:
-    """Build the server and run the SDK session manager for the duration.
+    """Build the server(s) and run the SDK session manager(s) for the duration.
 
     Entered by the app lifespan in production and by tests directly. Re-entrant
     across separate ``async with`` blocks (a fresh server each time) — the SDK's
     manager itself cannot be restarted, so we never try.
+
+    **Two legs, chosen by the client's own ``Accept`` header.** Announcing a
+    tool-list change needs each POST answered with its own SSE stream, and the
+    SDK 406s an SSE-mode request unless the client accepts both
+    ``application/json`` and ``text/event-stream`` (wildcards count). The MCP
+    spec says a client MUST accept both, so in practice every conforming client
+    lands on the SSE leg and is told. Anything narrower gets exactly the
+    transport it asked for — silent, and unchanged from before — because a
+    client that cannot read SSE must not be broken by a change whose whole
+    point is convenience. Content negotiation is what ``Accept`` is for; see
+    :func:`_pick_handler`. ``MCP_ANNOUNCE_TOOLS_CHANGED=0`` collapses this back
+    to the single JSON leg.
     """
-    global _handler
-    from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
+    global _handler, _json_handler
     from mcp.server.transport_security import TransportSecuritySettings
 
     from src.core import settings
@@ -807,23 +1005,39 @@ async def mcp_runtime() -> AsyncIterator[None]:
     else:
         security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
-    mcp = build_server()
-    # Builds the session manager as a side effect; the Starlette app it returns
-    # (routes + its own lifespan) is not used — the shim below IS the route.
-    mcp.streamable_http_app(
-        streamable_http_path="/",
-        json_response=True,
-        stateless_http=True,
-        transport_security=security,
-    )
-    manager = mcp.session_manager
-    async with manager.run():
-        _handler = StreamableHTTPASGIApp(manager)
-        logger.info("mcp_runtime_started", extra={"event": "mcp_runtime_started"})
+    # serverInfo.version is a fingerprint of the tool surface, and the tools
+    # only exist once a server is built — so build a throwaway one to read the
+    # list, then the real one(s) stamped with it. Registering eighteen
+    # decorated functions is microseconds; the lazy imports are already warm.
+    fingerprint = tools_fingerprint(await build_server().list_tools())
+    announce = settings.MCP_ANNOUNCE_TOOLS_CHANGED
+
+    async with contextlib.AsyncExitStack() as stack:
+        manager, handler = _build_handler(version=fingerprint, announce=announce, security=security)
+        await stack.enter_async_context(manager.run())
+        json_handler: Optional[Callable[[Scope, Receive, Send], Awaitable[None]]] = None
+        if announce:
+            json_manager, json_handler = _build_handler(
+                version=fingerprint, announce=False, security=security
+            )
+            await stack.enter_async_context(json_manager.run())
+        # Published only once every leg is running: a half-built runtime must
+        # leave the mount answering 503, never route to a dead manager.
+        _handler, _json_handler = handler, json_handler
+        logger.info(
+            "mcp_runtime_started",
+            extra={
+                "event": "mcp_runtime_started",
+                # The one honest "which tools is prod serving" signal in the
+                # logs; compare it across deploys to see the surface move.
+                "tools_fingerprint": fingerprint,
+                "announce_tools_changed": announce,
+            },
+        )
         try:
             yield
         finally:
-            _handler = None
+            _handler = _json_handler = None
             logger.info("mcp_runtime_stopped", extra={"event": "mcp_runtime_stopped"})
 
 
@@ -853,6 +1067,31 @@ def _mcp_challenge_headers() -> dict[str, str]:
             f'Bearer realm="job360", resource_metadata="{resource_metadata}", scope="{SUPPORTED_SCOPE}"'
         )
     }
+
+
+def _pick_handler(request: Request) -> Optional[Callable[[Scope, Receive, Send], Awaitable[None]]]:
+    """The transport leg this client asked for, by its ``Accept`` header.
+
+    The SSE leg (the one that can announce a tool-list change) 406s a request
+    unless the client accepts BOTH ``application/json`` and
+    ``text/event-stream``, so anything narrower is handed the JSON leg instead
+    of an error. Both legs serve the same tools through the same routes; they
+    differ only in the response media type and therefore in whether the server
+    has a back-channel to speak on.
+
+    The SDK's own ``check_accept_headers`` is the predicate, deliberately —
+    a substring test for ``text/event-stream`` would disagree with it in both
+    directions: it would send ``Accept: */*`` (what a plain httpx or requests
+    client sends, and what the SDK happily serves SSE to) down the silent JSON
+    leg, and it would send ``Accept: text/event-stream`` alone to the SSE leg
+    to collect a 406. One predicate, no drift.
+    """
+    if _json_handler is None:  # announcing off (or no runtime): one leg, or none
+        return _handler
+    from mcp.server.streamable_http import check_accept_headers
+
+    has_json, has_sse = check_accept_headers(request)
+    return _handler if (has_json and has_sse) else _json_handler
 
 
 async def _mcp_asgi(scope: Scope, receive: Receive, send: Send) -> None:
@@ -892,7 +1131,7 @@ async def _mcp_asgi(scope: Scope, receive: Receive, send: Send) -> None:
             {"detail": "token audience does not match this resource"}, _mcp_challenge_headers(),
         )
         return
-    handler = _handler
+    handler = _pick_handler(request)
     if handler is None:
         await _send_json(scope, receive, send, 503, {"detail": "MCP server not running"})
         return
