@@ -33,7 +33,7 @@ Railway is GitHub-linked to `Ranjith36963/job360`, branch `main`. **Every merge 
 
 ## 🎯 The mission (decided 2026-09-03 — read `docs/product/VISION.md` first)
 
-**Job360 is the memory and context layer for the seeker's own AI agent.** The agent finds the job, judges fit, writes the CV, reads Gmail, applies. We store the profile, every artifact version, every typed event, the receipt. **We never source, rank or recommend jobs** (product rule 4). New feature test (rule 5): *could Claude Code / ChatGPT do this with its own tools? Then expose a store tool, not a do tool.* Work list + issue per slice: `STATUS.md`. The old search pipeline was deleted in slice 5 (#483, 2026-09-05).
+**Job360 is the memory and context layer for the seeker's own AI agent.** The agent finds the job, judges fit, writes the CV, reads Gmail, applies. We store the profile, every artifact version, every typed event, the receipt. **We never source, rank or recommend jobs** (product rule 4). New feature test (rule 5): *could Claude Code / ChatGPT do this with its own tools? Then expose a store tool, not a do tool.* The old search pipeline was deleted in slice 5 (#483, 2026-09-05).
 
 ## Quick Orientation
 
@@ -74,5 +74,5 @@ npm run dev | build | lint | type-check | test:unit | test:e2e
 - `ARCHITECTURE.md` — system overview, full directory tree, DB schema, dependencies. Env vars are read off `core/settings.py`, never a doc table.
 - `docs/README.md` — index of every surviving doc (product, operations, harness). History lives in git log, not in docs.
 - `docs/product/product_design_rules.md` — the owner's product rules in full (rules 4–6 are the mission).
-- `STATUS.md` — current phase, what is live on main, what is next. `CONTRIBUTING.md` — branch/commit/PR conventions. `backend/README.md` / `frontend/README.md` — install + run.
+- `STATUS.md` — current phase, what is live on main. `CONTRIBUTING.md` — branch/commit/PR conventions. `backend/README.md` / `frontend/README.md` — install + run.
 - Second brain: older project memory lives at `D:\second-brain\wiki\projects\job360\`.

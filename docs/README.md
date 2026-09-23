@@ -25,7 +25,6 @@ in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
 | **Contribute / open a PR** | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | **Know the rules I must not break** | [`../.claude/skills/hard-rules/SKILL.md`](../.claude/skills/hard-rules/SKILL.md) |
 | **Debug a runtime problem** | [`product/troubleshooting.md`](product/troubleshooting.md) |
-| **Know what to build next** | [`../STATUS.md`](../STATUS.md) — what is live, what is next |
 | **Deploy / run a backup / restore** | [`product/DEPLOY.md`](product/DEPLOY.md) · [`product/RUNBOOK-backups.md`](product/RUNBOOK-backups.md) |
 | **Respond to a security incident** | [`product/BREACH-RUNBOOK.md`](product/BREACH-RUNBOOK.md) · [`../SECURITY.md`](../SECURITY.md) |
 
@@ -35,7 +34,7 @@ in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
 
 | Doc | What it is |
 |---|---|
-| [`product/VISION.md`](product/VISION.md) | **The mission.** Agent thinks, Job360 remembers; never source/rank; build order; the decision log through 2026-09-11. |
+| [`product/VISION.md`](product/VISION.md) | **The mission.** Agent thinks, Job360 remembers; never source/rank; build order; the decision log. |
 | [`product/product_design_rules.md`](product/product_design_rules.md) | The owner's product rules in full — rules 4–6 (never source, agent thinks, free/pull) are the mission. |
 
 ---

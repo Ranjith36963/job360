@@ -64,8 +64,8 @@ npm run check:types-drift # regenerate api-types from backend OpenAPI + fail if 
 ## The API-types drift guard (don't fight it — regenerate)
 
 `src/lib/api-types.ts` is **generated** from the backend's OpenAPI schema, NOT
-hand-edited. The commit gate (`scripts/agent-gate.sh`) runs `check:types-drift` and
-**blocks the commit** if the checked-in types don't match the backend. After any
+hand-edited. The commit gate (`scripts/agent-gate.sh`) **blocks the commit** if
+the checked-in types don't match the backend. After any
 backend route/response change: run `npm run gen:types`, commit the regenerated
 `api-types.ts` + `openapi.json` together. Hand-editing them will fail the gate.
 
