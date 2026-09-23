@@ -297,8 +297,8 @@ function AssistantRecipesCard() {
                 data-testid={`assistant-status-${a.name.toLowerCase()}`}
               >
                 {a.ready
-                  ? `Worked when we checked, on ${LAST_CHECKED}.`
-                  : `Did not work when we checked, on ${LAST_CHECKED} — ask the owner to allowlist this assistant's callback first.`}
+                  ? `Job360 accepted this assistant's sign-in address when we checked, on ${LAST_CHECKED}. We have not run a full connection from inside the assistant.`
+                  : `Job360 refused this assistant's sign-in address when we checked, on ${LAST_CHECKED} — ask the owner to allowlist its callback first.`}
               </p>
             </li>
           ))}
