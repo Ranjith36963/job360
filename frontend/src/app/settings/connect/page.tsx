@@ -222,7 +222,7 @@ function ConnectAppCard() {
 // ---------------------------------------------------------------------------
 
 /** The day the callbacks below were last posted to /api/oauth/register. */
-const LAST_CHECKED = "21 September 2026";
+const LAST_CHECKED = "23 September 2026";
 
 type AssistantRecipe = {
   name: string;
@@ -253,7 +253,7 @@ const ASSISTANT_RECIPES: AssistantRecipe[] = [
     plans: "Pro, Max or Enterprise.",
     steps:
       "Settings → Connectors → Add custom remote connector → paste the address above → choose OAuth.",
-    ready: false,
+    ready: true,
   },
   {
     name: "Grok",
@@ -266,7 +266,7 @@ const ASSISTANT_RECIPES: AssistantRecipe[] = [
     plans: "Gemini Enterprise / Business editions only.",
     steps:
       "An admin adds the address above as a custom MCP server connection. The consumer Gemini app doesn't support this yet.",
-    ready: false,
+    ready: true,
   },
 ];
 
