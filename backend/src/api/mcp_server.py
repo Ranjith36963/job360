@@ -516,7 +516,9 @@ def build_server() -> MCPServer:
         read off the stored state. Branch on `next_step.code`: judge_fit → call
         save_fit; write_cv → save_artifact(kind="cv"); apply → the human applies,
         then record_application; record_receipt → record_application; schedule →
-        record_event(interview_scheduled, scheduled_at=…); lesson → record_event(
+        record_event(interview_scheduled, scheduled_at=…); record_outcome → the
+        interview date has passed, record how it went via record_event (
+        interview_done, offer, or rejected); lesson → record_event(
         event_type="lesson"). wait / interview / await_outcome / decide / closed
         need nothing from you."""
         try:

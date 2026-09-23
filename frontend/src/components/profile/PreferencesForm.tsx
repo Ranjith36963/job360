@@ -438,7 +438,7 @@ export function PreferencesForm({
         <div>
           <h3 className="font-heading text-base font-semibold">Preferences</h3>
           <p className="text-xs text-muted-foreground">
-            Customize your job search criteria
+            What you want — your agent reads this when it judges a job
           </p>
         </div>
         {/* In the card header, not at the bottom: this form autosaves, so there

@@ -60,7 +60,7 @@ describe("eventLabel", () => {
 
   it("labels every note-family event type", () => {
     expect(eventLabel({ event_type: "fit_judged" })).toBe("Fit judged");
-    expect(eventLabel({ event_type: "artifact_saved" })).toBe("Artifact saved");
+    expect(eventLabel({ event_type: "artifact_saved" })).toBe("Document saved");
     expect(eventLabel({ event_type: "contact_added" })).toBe("Contact added");
     expect(eventLabel({ event_type: "outreach_sent" })).toBe("Outreach sent");
     expect(eventLabel({ event_type: "note" })).toBe("Note");

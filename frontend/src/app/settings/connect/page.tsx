@@ -24,6 +24,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { formatDateTime } from "@/lib/format-date";
 
 // ---------------------------------------------------------------------------
 // Connect an agent — personal API tokens for the MCP server at /api/mcp.
@@ -49,8 +50,8 @@ function connectCommand(token: string): string {
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "never";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+  const out = formatDateTime(iso);
+  return out || iso;
 }
 
 /** Just the host, so the row reads "chatgpt.com" not the full callback URL. */

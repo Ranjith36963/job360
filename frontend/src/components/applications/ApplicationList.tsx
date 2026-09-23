@@ -89,7 +89,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
         const activityParts = [
           relativeTime(app.last_event_at),
           app.events > 0 ? `${app.events} event${app.events === 1 ? "" : "s"}` : "",
-          artifactCount > 0 ? `${artifactCount} artifact${artifactCount === 1 ? "" : "s"}` : "",
+          artifactCount > 0 ? `${artifactCount} document${artifactCount === 1 ? "" : "s"}` : "",
           app.receipts > 0 ? `${app.receipts} receipt${app.receipts === 1 ? "" : "s"}` : "",
         ].filter(Boolean);
 

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ApplicationFit } from "@/lib/api";
+import { formatDateTime } from "@/lib/format-date";
 
 /**
  * The fit verdict — STORED, never computed by Job360 (VISION rule 4). This
@@ -40,7 +41,7 @@ export function FitPanel({ fit }: { fit: ApplicationFit | null }) {
         </ul>
       )}
       <p className="mt-2 text-xs text-muted-foreground/70">
-        recorded by {fit.recorded_by} · {new Date(fit.recorded_at).toLocaleString()}
+        recorded by {fit.recorded_by} · {formatDateTime(fit.recorded_at)}
       </p>
     </div>
   );
