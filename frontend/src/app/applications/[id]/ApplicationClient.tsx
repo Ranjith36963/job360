@@ -17,6 +17,7 @@ import { LessonForm } from "@/components/applications/LessonForm";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 import { VisaSelect } from "@/components/applications/VisaSelect";
 import { STATUS_LABEL } from "@/lib/event-labels";
+import { formatDateTime } from "@/lib/format-date";
 
 /** The application record: status, the durable job snapshot (spec R2 —
  * survives the catalog purging the live row), every artifact version, the
@@ -117,7 +118,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           />
           {detail.interview_at && (
             <span className="rounded-full bg-accent/20 px-3 py-1 text-sm font-medium text-accent-foreground">
-              Interview {new Date(detail.interview_at).toLocaleString()}
+              Interview {formatDateTime(detail.interview_at)}
             </span>
           )}
           {detail.status === "considering" && (
@@ -194,7 +195,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
               <li key={event.id} data-testid="lesson-here" className="glass-card rounded-lg p-3 text-sm">
                 <p>{event.detail}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {new Date(event.occurred_at).toLocaleString()}
+                  {formatDateTime(event.occurred_at)}
                 </p>
               </li>
             ))}

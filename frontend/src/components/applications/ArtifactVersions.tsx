@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { getApplicationArtifact, getArtifactDiff } from "@/lib/api";
 import type { ApplicationArtifact, ApplicationReceiptEntry, ArtifactDiff as ArtifactDiffData } from "@/lib/api";
 import { ArtifactDiff } from "@/components/applications/ArtifactDiff";
+import { formatDate } from "@/lib/format-date";
 
 /**
  * Every version of every artifact, grouped by kind — "every version still
@@ -158,7 +159,7 @@ export function ArtifactVersions({
                       </span>
                     </button>
                     <span className="text-xs text-muted-foreground">
-                      {new Date(artifact.created_at).toLocaleDateString()}
+                      {formatDate(artifact.created_at)}
                     </span>
                     <button
                       type="button"

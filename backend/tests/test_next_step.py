@@ -4,10 +4,15 @@ the pure function, plus one round-trip through the route and the MCP tool.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from httpx import AsyncClient
 
 from src.services.applications.next_step import next_step
+
+_BEFORE_INTERVIEW = datetime(2026, 9, 1, tzinfo=timezone.utc)
+_AFTER_INTERVIEW = datetime(2026, 9, 23, tzinfo=timezone.utc)
 
 _AD = {
     "title": "AI Engineer",
@@ -28,7 +33,8 @@ _AD = {
         (dict(status="applied", has_fit=True, cv_versions=2, receipts=1, interview_at=None, has_lesson=False), "wait"),
         (dict(status="replied", has_fit=True, cv_versions=2, receipts=1, interview_at=None, has_lesson=False), "respond"),
         (dict(status="interview_requested", has_fit=True, cv_versions=2, receipts=1, interview_at=None, has_lesson=False), "schedule"),
-        (dict(status="interview_requested", has_fit=True, cv_versions=2, receipts=1, interview_at="2026-09-22T09:00:00+00:00", has_lesson=False), "interview"),
+        (dict(status="interview_requested", has_fit=True, cv_versions=2, receipts=1, interview_at="2026-09-22T09:00:00+00:00", has_lesson=False, now=_BEFORE_INTERVIEW), "interview"),
+        (dict(status="interview_requested", has_fit=True, cv_versions=2, receipts=1, interview_at="2026-09-22T09:00:00+00:00", has_lesson=False, now=_AFTER_INTERVIEW), "record_outcome"),
         (dict(status="interview_done", has_fit=True, cv_versions=2, receipts=1, interview_at=None, has_lesson=False), "await_outcome"),
         (dict(status="offer", has_fit=True, cv_versions=2, receipts=1, interview_at=None, has_lesson=False), "decide"),
         (dict(status="rejected", has_fit=True, cv_versions=2, receipts=1, interview_at=None, has_lesson=False), "lesson"),
@@ -42,10 +48,23 @@ def test_every_state_maps_to_one_next_step(kwargs, code):
     assert out["label"]
 
 
-def test_the_interview_label_carries_the_date():
+def test_the_future_interview_label_has_no_raw_timestamp():
     out = next_step(status="interview_scheduled", has_fit=True, cv_versions=1, receipts=1,
-                    interview_at="2026-09-22T09:00:00+00:00", has_lesson=False)
-    assert "2026-09-22T09:00:00+00:00" in out["label"]
+                    interview_at="2026-09-22T09:00:00+00:00", has_lesson=False, now=_BEFORE_INTERVIEW)
+    assert out["code"] == "interview"
+    assert "2026-09-22T09:00:00+00:00" not in out["label"]
+
+
+def test_a_z_suffixed_interview_at_parses():
+    out = next_step(status="interview_scheduled", has_fit=True, cv_versions=1, receipts=1,
+                    interview_at="2026-09-22T09:00:00Z", has_lesson=False, now=_BEFORE_INTERVIEW)
+    assert out["code"] == "interview"
+
+
+def test_an_unparseable_interview_at_is_treated_as_upcoming():
+    out = next_step(status="interview_scheduled", has_fit=True, cv_versions=1, receipts=1,
+                    interview_at="not a date", has_lesson=False, now=_AFTER_INTERVIEW)
+    assert out["code"] == "interview"
 
 
 async def _bring(client: AsyncClient) -> int:

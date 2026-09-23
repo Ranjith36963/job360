@@ -3,6 +3,7 @@
 import type { ApplicationEvent } from "@/lib/api";
 import { eventLabel } from "@/lib/event-labels";
 import { WhoChip } from "@/components/applications/WhoChip";
+import { formatDateTime } from "@/lib/format-date";
 
 /** The whole append-only event log, in `occurred_at` order (spec R3/R11). A
  * superseded event (retired by a correcting event, spec R3) is shown struck
@@ -25,7 +26,7 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
               {eventLabel(event)}
             </span>
             <span className="text-xs text-muted-foreground">
-              {new Date(event.occurred_at).toLocaleString()}
+              {formatDateTime(event.occurred_at)}
             </span>
           </div>
           {event.detail && <p className="mt-1 text-muted-foreground">{event.detail}</p>}
@@ -35,12 +36,12 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
               {event.source.sender}
               {event.source.subject && ` — “${event.source.subject}”`}
               {event.source.received_at &&
-                ` · received ${new Date(event.source.received_at).toLocaleString()}`}
+                ` · received ${formatDateTime(event.source.received_at)}`}
             </p>
           )}
           {event.scheduled_at && (
             <p className="mt-1 text-xs font-medium text-foreground">
-              Scheduled for {new Date(event.scheduled_at).toLocaleString()}
+              Scheduled for {formatDateTime(event.scheduled_at)}
             </p>
           )}
           <div className="mt-1 flex items-center gap-1.5">

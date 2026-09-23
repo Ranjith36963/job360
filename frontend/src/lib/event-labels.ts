@@ -54,7 +54,7 @@ export const STATUS_LABEL: Record<string, string> = {
  * non-status ("note-family") event types. */
 export const EVENT_LABEL: Record<string, string> = {
   fit_judged: "Fit judged",
-  artifact_saved: "Artifact saved",
+  artifact_saved: "Document saved",
   contact_added: "Contact added",
   outreach_sent: "Outreach sent",
   note: "Note",

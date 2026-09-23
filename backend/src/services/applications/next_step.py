@@ -5,12 +5,30 @@ the interview datetime, whether a lesson was flagged. It is a state machine
 over the record, never a judgement of the job (VISION rule 4), and the same
 function feeds the web header and ``get_application`` so an agent reading
 the record sees the same next step the human does.
+
+``code`` values: judge_fit, write_cv, apply, record_receipt, wait, respond,
+schedule, interview, record_outcome, await_outcome, decide, lesson, closed,
+none.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Mapping, Optional
 
 _CLOSED = ("rejected", "withdrawn", "ghosted")
+
+
+def _parse_interview_at(value: str) -> Optional[datetime]:
+    """Parse an ISO 8601 timestamp (a trailing "Z" is accepted as UTC).
+    Returns ``None`` when it cannot be parsed — the caller then treats the
+    interview as upcoming rather than failing the whole response."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def next_step(
@@ -21,9 +39,13 @@ def next_step(
     receipts: int,
     interview_at: Optional[str],
     has_lesson: bool,
+    now: datetime | None = None,
 ) -> dict[str, str]:
     """``{"code": …, "label": …}`` — ``code`` is a closed vocabulary an agent
-    can branch on; ``label`` is the sentence the web shows."""
+    can branch on; ``label`` is the sentence the web shows. ``now`` defaults
+    to the real clock (UTC) and only exists so tests can pin it."""
+    if now is None:
+        now = datetime.now(timezone.utc)
     if status == "considering":
         if not has_fit:
             return {"code": "judge_fit", "label": "No fit judged yet — ask your agent to judge it"}
@@ -38,7 +60,10 @@ def next_step(
         return {"code": "respond", "label": "They replied — respond or record the outcome"}
     if status in ("interview_requested", "interview_scheduled"):
         if interview_at:
-            return {"code": "interview", "label": f"Interview {interview_at}"}
+            parsed = _parse_interview_at(interview_at)
+            if parsed is None or parsed > now:
+                return {"code": "interview", "label": "Interview booked — prepare for it"}
+            return {"code": "record_outcome", "label": "Interview date has passed — record how it went"}
         return {"code": "schedule", "label": "Interview requested — add the date when you have it"}
     if status == "interview_done":
         return {"code": "await_outcome", "label": "Interview done — waiting for the outcome"}
