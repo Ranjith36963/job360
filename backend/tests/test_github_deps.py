@@ -184,7 +184,8 @@ def test_parse_manifest_unknown_filename():
 
 
 # NOTE (CLAUDE.md rule #28): dependency_map (hardcoded dep-name→skill) was retired.
-# _fetch_repo_frameworks now returns raw dependency names; the LLM pass canonicalises.
+# _fetch_repo_frameworks now returns raw dependency names; the user's own agent
+# canonicalises them (decision 28 — Job360 keeps no skill vocabulary of its own).
 
 
 # ── github_enricher — temporal weighting ────────────────────────────
@@ -261,7 +262,8 @@ def test_normalize_github_username_non_string():
 
 # NOTE (CLAUDE.md rule #28): tests for the hardcoded dev-tooling denylist and the
 # description-term scanner were removed along with those functions — GitHub skill
-# semantics now come from raw API signals + the LLM pass, not hardcoded keyword lists.
+# semantics now come from raw API signals only; naming what they mean is the
+# user's own agent's job (decision 28), not a pass Job360 runs on its own key.
 
 
 @pytest.mark.asyncio
@@ -423,46 +425,7 @@ async def test_fetch_github_profile_aggregates_frameworks():
     assert set(frameworks) == {"FastAPI", "Pydantic", "React", "Next.js"}
 
 
-# ── GitHub LLM pass (Pass 2) — infer skills from repo prose ─────────
-
-
-@pytest.mark.asyncio
-async def test_llm_infer_github_skills_parses_skills():
-    """The LLM reads repo name/description/topics and returns extra skills
-    the hard-coded lookup table can't know (e.g. 'LangChain', 'RAG')."""
-    seen = {}
-
-    async def fake_llm(prompt, system=""):
-        seen["prompt"] = prompt
-        return {"skills": ["LangChain", "RAG", "Vector Search"]}
-
-    repos_brief = [
-        {"name": "rag-bot", "description": "A retrieval bot built with langchain", "topics": ["llm"]},
-    ]
-    with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
-        skills = await github_enricher.llm_infer_github_skills(repos_brief)
-
-    assert "rag-bot" in seen["prompt"]  # repo data reached the prompt
-    assert "LangChain" in skills and "RAG" in skills
-
-
-@pytest.mark.asyncio
-async def test_llm_infer_github_skills_includes_language_in_prompt():
-    """Diagnosis fix: the repo's primary language must reach the LLM prompt so
-    the model can reason about the stack (a TypeScript repo ≠ a Python repo)."""
-    seen = {}
-
-    async def fake_llm(prompt, system=""):
-        seen["prompt"] = prompt
-        return {"skills": ["React"]}
-
-    repos_brief = [
-        {"name": "site", "language": "TypeScript", "description": "portfolio", "topics": []},
-    ]
-    with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
-        await github_enricher.llm_infer_github_skills(repos_brief)
-
-    assert "TypeScript" in seen["prompt"]
+# ── repos_brief — the raw prose+structure the user's agent later reads ──
 
 
 @pytest.mark.asyncio
@@ -491,39 +454,11 @@ async def test_fetch_github_profile_brief_carries_language():
 
 
 @pytest.mark.asyncio
-async def test_llm_infer_github_skills_empty_input_skips_llm():
-    """No repos → return [] without ever calling the LLM (cost guard)."""
-    called = False
-
-    async def fake_llm(prompt, system=""):
-        nonlocal called
-        called = True
-        return {"skills": ["should-not-happen"]}
-
-    with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
-        skills = await github_enricher.llm_infer_github_skills([])
-
-    assert skills == []
-    assert called is False
-
-
-@pytest.mark.asyncio
-async def test_llm_infer_github_skills_llm_failure_returns_empty():
-    """Provider error must not crash the pass — returns [] (never raises)."""
-    async def boom(prompt, system=""):
-        raise RuntimeError("no LLM key configured")
-
-    repos_brief = [{"name": "r", "description": "d", "topics": []}]
-    with patch("src.services.profile.llm_provider.llm_extract", new=boom):
-        skills = await github_enricher.llm_infer_github_skills(repos_brief)
-
-    assert skills == []
-
-
-@pytest.mark.asyncio
 async def test_fetch_github_profile_includes_repos_brief():
-    """fetch_github_profile exposes repos_brief (name/description/topics) so the
-    LLM pass can re-run offline on a later profile change."""
+    """fetch_github_profile exposes repos_brief (name/description/topics) so a
+    later profile save can re-derive the deterministic GitHub fields
+    (``deterministic_github_fields``) offline, and so the user's own agent has
+    the raw material to read without Job360 re-fetching anything."""
     now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     repos = [
         {"name": "rag-bot", "language": "Python", "description": "RAG with langchain",

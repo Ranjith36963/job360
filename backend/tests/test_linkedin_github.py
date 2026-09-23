@@ -1,22 +1,39 @@
 """Tests for LinkedIn PDF parser and GitHub profile enricher.
 
 LinkedIn input format is a profile PDF (LinkedIn's "Save to PDF" export),
-not a ZIP of CSVs. The enrichment dict schema and ``enrich_cv_from_linkedin``
-signature are preserved, so downstream tests (``TestEnrichCVFromLinkedIn``,
-``TestKeywordGeneratorWithEnrichedData``) are unchanged.
+not a ZIP of CSVs.
+
+Decision 28 (2026-09-21) removed the LLM pass from both parsers: Job360 has
+no model of its own any more, so what these files test changed too.
+
+  * LinkedIn: the parser is now ONE deterministic layer (pdfplumber + heading
+    split). It reads the structural fields it can prove — the "Top Skills"
+    sidebar plus inline "Technologies: ..." lines, summary, industry,
+    headline, and the Contact block — and keeps the full extracted text on
+    ``raw_text``. The prose sections (positions, education, certifications,
+    honors, ...) come back EMPTY from a parse; the user's own agent reads
+    ``raw_text`` and writes those sections back with ``update_profile``. So
+    every test that used to mock an LLM to fabricate positions/education/
+    certifications is gone — there is nothing left to mock, and asserting an
+    LLM-shaped value would be asserting a fact the parser can no longer
+    produce. What remains here proves the deterministic extraction (section
+    split, header fields, skills, inline tech lines, the Contact block) and
+    the ``enrich_cv_from_linkedin`` merge contract (fill-if-present, never
+    clears a shelf).
+  * GitHub: ``fetch_github_profile`` and ``_infer_skills`` were already
+    deterministic (rule #28 — no hardcoded language/topic->skill map) and
+    are unchanged by decision 28; their tests are unchanged too.
 """
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.services.profile.linkedin_parser import (
-    _coerce_certifications,
-    _coerce_education,
-    _coerce_positions,
     _dewrap_columns,
+    _empty_linkedin_data,
     _extract_header_fields,
     _extract_skills,
     _looks_like_linkedin,
@@ -282,64 +299,18 @@ class TestDeterministicExtraction:
         assert skills == ["Python", "SQL"]
 
 
-class TestCoercionShaping:
-    def test_coerce_positions_drops_missing_title(self):
-        raw = [{"company": "Google"}, {"title": "Engineer", "company": "Meta"}]
-        assert _coerce_positions(raw) == [
-            {"title": "Engineer", "company": "Meta", "start": "", "end": "", "description": ""}
-        ]
-
-    def test_coerce_education_drops_missing_school(self):
-        raw = [{"degree": "MSc"}, {"school": "MIT", "degree": "MSc CS"}]
-        out = _coerce_education(raw)
-        assert len(out) == 1 and out[0]["school"] == "MIT"
-
-    def test_coerce_certifications_drops_missing_name(self):
-        raw = [{"authority": "AWS"}, {"name": "AWS SA", "authority": "Amazon"}]
-        out = _coerce_certifications(raw)
-        assert len(out) == 1 and out[0]["name"] == "AWS SA"
-
-    def test_coerce_handles_non_list(self):
-        assert _coerce_positions(None) == []
-        assert _coerce_education("oops") == []
-        assert _coerce_certifications({"not": "a list"}) == []
-
-
 # ---------------------------------------------------------------------------
-# End-to-end parse_linkedin_pdf (with mocked LLM)
+# End-to-end parse_linkedin_pdf — deterministic (decision 28: no LLM pass)
 # ---------------------------------------------------------------------------
-
-@pytest.fixture
-def mock_linkedin_llm():
-    """Mock llm_extract to return canned responses keyed on prompt section."""
-    async def fake_llm(prompt: str, system: str = "") -> dict:
-        if "Experience section" in prompt:
-            return {"positions": [
-                {"title": "Software Engineer", "company": "Google",
-                 "start": "Jan 2020", "end": "Dec 2022", "description": "Built ML pipelines"},
-                {"title": "Senior Engineer", "company": "Meta",
-                 "start": "Jan 2023", "end": "Present", "description": "Led AI team"},
-            ]}
-        if "Education section" in prompt:
-            return {"education": [
-                {"school": "MIT", "degree": "MSc Computer Science",
-                 "start": "2016", "end": "2018", "notes": ""}
-            ]}
-        if "certifications section" in prompt:
-            return {"certifications": [
-                {"name": "AWS Solutions Architect", "authority": "Amazon",
-                 "start": "2021", "end": "2024"}
-            ]}
-        return {}
-    # _llm_json imports llm_extract lazily from the provider module, so patching
-    # the provider module is what takes effect at call time.
-    with patch("src.services.profile.llm_provider.llm_extract", new=fake_llm):
-        yield
-
 
 class TestParseLinkedInPdfEndToEnd:
     @pytest.mark.asyncio
-    async def test_full_parse(self, tmp_path, mock_linkedin_llm):
+    async def test_full_parse(self, tmp_path):
+        """A LinkedIn export with every section present still comes back with
+        ONLY the structural fields filled. Positions/education/certifications
+        are prose sections the parser deliberately leaves alone since decision
+        28 — they arrive empty, and the full text is on ``raw_text`` for the
+        user's agent to read and write back with ``update_profile``."""
         path = _make_linkedin_pdf(
             tmp_path,
             summary="Experienced ML engineer",
@@ -353,15 +324,14 @@ class TestParseLinkedInPdfEndToEnd:
         assert data["headline"] == "ML Engineer, Technology"
         assert data["industry"] == "Technology"
         assert data["skills"] == ["Python", "SQL", "Machine Learning", "Docker"]
-        assert len(data["positions"]) == 2
-        assert data["positions"][0]["title"] == "Software Engineer"
-        assert data["positions"][0]["company"] == "Google"
-        assert len(data["education"]) == 1
-        assert data["education"][0]["school"] == "MIT"
-        assert len(data["certifications"]) == 1
-        assert data["certifications"][0]["name"] == "AWS Solutions Architect"
+        # Prose sections: deliberately empty. No LLM pass reads them any more.
+        assert data["positions"] == []
+        assert data["education"] == []
+        assert data["certifications"] == []
+        # The full text is kept so the user's agent can read the prose itself.
+        assert "raw_text" in data and "Software Engineer at Google" in data["raw_text"]
 
-    def test_sync_wrapper_returns_same_shape(self, tmp_path, mock_linkedin_llm):
+    def test_sync_wrapper_returns_same_shape(self, tmp_path):
         path = _make_linkedin_pdf(
             tmp_path,
             summary="x",
@@ -379,14 +349,15 @@ class TestParseLinkedInPdfEndToEnd:
         # because it was asserting the same stale shape the merger produced.
         # A test that pins a hand-typed duplicate of the thing under test can
         # only ever confirm that both copies are wrong in the same way.
-        from src.services.profile.linkedin_parser import _empty_linkedin_data
-
+        # (``llm_linkedin_fields`` is gone since decision 28, but the lesson —
+        # derive the key set from the schema, never retype it — still holds.)
         assert set(data.keys()) == set(_empty_linkedin_data().keys())
         assert data["skills"] == ["Python"]
 
     @pytest.mark.asyncio
-    async def test_skills_only_requires_no_llm(self, tmp_path):
-        """If only Skills section exists, no LLM call needed — still works offline."""
+    async def test_skills_only_still_works(self, tmp_path):
+        """If only the Skills section exists, the parse still succeeds — there
+        is no second pass to wait on or fail."""
         path = _make_linkedin_pdf(
             tmp_path,
             summary="",
@@ -394,7 +365,6 @@ class TestParseLinkedInPdfEndToEnd:
             skills=["Python", "Rust"],
             certifications=None,
         )
-        # No mock installed — should still succeed because no LLM calls fire.
         data = await parse_linkedin_pdf_async(str(path))
         assert data["skills"] == ["Python", "Rust"]
         assert data["positions"] == []
@@ -409,7 +379,8 @@ class TestLinkedInRawTextStorage:
     @pytest.mark.asyncio
     async def test_parse_returns_raw_text(self, tmp_path):
         """parse_linkedin_pdf_async exposes the extracted text under 'raw_text'
-        so the two-pass orchestrator can re-run the LLM pass without the file."""
+        so the user's agent can read the prose sections (and a caller can
+        re-run structural extraction) without asking for the PDF again."""
         path = _make_linkedin_pdf(
             tmp_path,
             summary="",
@@ -457,28 +428,6 @@ class TestLinkedInPdfErrors:
         assert data["positions"] == []
         assert data["skills"] == []
         assert data["summary"] == ""
-
-    @pytest.mark.asyncio
-    async def test_llm_failure_returns_partial_data(self, tmp_path):
-        """If the LLM provider raises, deterministic fields still populate."""
-        path = _make_linkedin_pdf(
-            tmp_path,
-            summary="Hello world",
-            experience=["Some role"],
-            skills=["Python"],
-        )
-
-        async def boom(*_a, **_kw):
-            raise RuntimeError("llm down")
-
-        with patch("src.services.profile.llm_provider.llm_extract", new=boom):
-            data = await parse_linkedin_pdf_async(str(path))
-        assert data["summary"] == "Hello world"
-        assert data["skills"] == ["Python"]
-        # LLM-sourced fields stay empty, not crashed:
-        assert data["positions"] == []
-        assert data["education"] == []
-        assert data["certifications"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -565,7 +514,8 @@ class TestEnrichCVFromLinkedIn:
 class TestInferSkills:
     # Rule #28: _infer_skills returns the RAW GitHub language/topic strings
     # (no hardcoded mapping). Languages keep their casing; topics get a cosmetic
-    # hyphen->space cleanup. The LLM pass canonicalises meaning downstream.
+    # hyphen->space cleanup. The user's own agent canonicalises meaning downstream
+    # (decision 28 — Job360 has no model of its own).
     def test_languages_raw_ranked_by_bytes(self):
         languages = {"Python": 50000, "JavaScript": 30000, "HCL": 10000}
         skills = _infer_skills(languages, set())

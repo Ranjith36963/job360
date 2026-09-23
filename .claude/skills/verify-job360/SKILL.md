@@ -183,7 +183,6 @@ These cost real time the first time. Reading them here saves the next run.
 - **`user_profiles` stores the CV under the `cv_data` JSON column** (siblings: `preferences`, `linkedin_data`, `github_data`) — there is NO `profile_json` column. Use `cv_data` for direct DB skill/title checks.
 - **Login is brute-force-locked**, and the throttle key is (email, client IP) — read `api.routes.auth.login`, caps in `core.settings.LOGIN_MAX_ATTEMPTS` / `LOGIN_LOCKOUT_WINDOW_SECONDS`. So from one sweeping machine a deliberately-failed email stays locked even with the right password: use a **throwaway email** for the lockout test, or a later legit login reads as a false 429.
 - **Minting an agent token needs a browser session, not a verified email.** An unverified user mints fine (`tests/test_token_mint_gate.py::test_an_unverified_session_can_still_mint_a_token`); the 403 you can actually hit is `session_required`, from a token trying to mint a token. The gated routes are the ones declaring `Depends(require_verified_user)` — grep that exact form, never the qualified name (every route imports the bare symbol, so `api.auth_deps.require_verified_user` matches nothing); today only `routes/tailor.py` declares it. CV upload does NOT, so do not expect a 403 there.
-- **Gemini free tier returns 429 (quota 0); the Groq/Cerebras fallback handles it.** Don't flag the Gemini 429 as a failure — the fallback chain saving the profile ("Profile saved for user …") is the success signal.
 
 ## Tools this skill uses
 

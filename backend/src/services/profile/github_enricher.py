@@ -7,7 +7,7 @@ inference:
   ``requirements.txt`` / ``pyproject.toml`` / ``Cargo.toml`` / ``Gemfile``
   / ``go.mod`` / ``composer.json`` via the GitHub Contents API, runs
   each through ``dep_file_parser``, and keeps the dependency names
-  VERBATIM — canonicalising them to skills is the LLM pass's job. An
+  VERBATIM — canonicalising them to skills is the user's agent's job. An
   earlier version routed them through a hand-typed
   ``dependency_map.lookup_skill``; that module was deleted under rule #28
   (no hardcoded skill vocabularies) and this line described it for weeks
@@ -127,7 +127,7 @@ README_REPOS_UNAUTHED = 4
 
 # NOTE (CLAUDE.md rule #28): the hardcoded LANGUAGE_TO_SKILL and TOPIC_TO_SKILL
 # maps were removed. _infer_skills uses the raw GitHub language/topic strings;
-# the LLM pass canonicalises their meaning.
+# the user's agent canonicalises their meaning.
 
 
 def _headers() -> dict[str, str]:
@@ -231,7 +231,7 @@ async def _fetch_repo_frameworks(
 
     CLAUDE.md rule #28: NO hardcoded dependency→skill map. We parse the manifest
     *structure* (still data — dep_file_parser) and return the dependency names
-    verbatim; the LLM pass canonicalises which of them are recruiter-relevant
+    verbatim; the user's agent canonicalises which of them are recruiter-relevant
     skills. Aggregation + dedup happens at the caller.
     """
     fetches = [
@@ -277,7 +277,7 @@ def _identity_fields(user: dict[str, Any]) -> dict[str, Any]:
     """The /users/{u} identity block kept as TYPED VALUES, not a sentence.
 
     ``_compose_bio`` folds these same fields into one display string. That is
-    fine for a human and for an LLM prompt, and useless for anything that has
+    fine for a human to read, and useless for anything that has
     to compare, filter or score — you cannot match on a sentence.
 
     Two are genuine matching signals, which is why these are shelves and not
@@ -317,8 +317,8 @@ def _identity_fields(user: dict[str, Any]) -> dict[str, Any]:
 
 def _compose_bio(user: dict[str, Any]) -> str:
     """Fold the /users/{u} identity fields into one short self-description
-    string for the LLM pass. Only non-empty fields are included, so a sparse
-    profile yields a short line and a rich one yields more."""
+    string, stored for the user's agent to read. Only non-empty fields are
+    included, so a sparse profile yields a short line and a rich one more."""
     parts: list[str] = []
     for label, key in (
         ("Name", "name"), ("Bio", "bio"), ("Company", "company"),
@@ -339,7 +339,7 @@ def _decode_readme(payload: Any, limit: int) -> str:
     """Decode a GitHub ``/readme`` payload (base64 JSON) to a truncated string.
 
     Returns ``""`` on a missing/oversized/malformed payload. Truncation keeps
-    the LLM prompt bounded — the first ``limit`` chars of a README carry the
+    the stored excerpt bounded — the first ``limit`` chars of a README carry the
     'what this is / what it's built with' summary; the tail is usually install
     steps and licence boilerplate."""
     if not isinstance(payload, dict):
@@ -516,7 +516,7 @@ async def fetch_github_profile(
             repositories.sort(key=lambda r: pin_rank.get(r["name"], len(pin_rank) + 1))
 
         # The developer's own identity block (bio / name / company / location /
-        # blog / hireable). One cheap request; prose fed to the LLM pass.
+        # blog / hireable). One cheap request; prose stored for the agent.
         user_obj = await _fetch_user(session, username)
 
         # Fetch per-repo language breakdown with temporal weight.
@@ -567,9 +567,10 @@ async def fetch_github_profile(
         # ── READMEs — the richest per-repo prose. A repo `description` is often
         # one line or null; the README is where "what this is / what it's built
         # with" actually lives. Fetched for the top `readme_n` repos (pinned
-        # first after the reorder), truncated, and fed ONLY to the LLM pass
-        # (rule #28 safe). Routes through _fetch_readme → _get_json so tests stay
-        # offline. A failed/absent README just yields no excerpt for that repo.
+        # first after the reorder), truncated, and STORED for the user's agent
+        # to read (rule #28 safe — we never map words to skills ourselves).
+        # Routes through _fetch_readme → _get_json so tests stay offline. A
+        # failed/absent README just yields no excerpt for that repo.
         readme_targets = repositories[:readme_n]
         readme_results = await asyncio.gather(
             *[_fetch_readme(session, username, r["name"], README_EXCERPT_CHARS)
@@ -581,10 +582,10 @@ async def fetch_github_profile(
             if isinstance(res, str) and res:
                 readme_by_name[r["name"]] = res
 
-        # Two-pass — compact repo briefs for the LLM pass. Keep a repo if it has
+        # Compact repo briefs, stored on the profile. Keep a repo if it has
         # ANY prose worth reading: a description, topics, a language, OR a README
-        # we just fetched. Each brief carries its README excerpt so the offline
-        # re-run reads the same prose without re-fetching.
+        # we just fetched. Each brief carries its README excerpt, so the agent
+        # reads the same prose later without anyone re-fetching it.
         repos_brief: list[dict[str, Any]] = []
         for r in repositories:
             excerpt = readme_by_name.get(r["name"], "")
@@ -634,7 +635,7 @@ async def fetch_github_profile(
             "profile_readme": profile_readme,
             # STRUCTURED identity. Every field below was ALREADY fetched in the
             # same /users/{u} request and then flattened into the `bio` string —
-            # readable by a human and by the LLM, but unqueryable by anything
+            # readable by a human, but unqueryable by anything
             # else. A string cannot be matched on.
             #
             # Two of these are matching-grade signals, which is why this is not
@@ -650,16 +651,16 @@ async def fetch_github_profile(
 
 
 # NOTE (CLAUDE.md rule #28): the hardcoded description-term vocabulary and the
-# dev-tooling denylist that used to live here were removed. Repo descriptions are
-# read by the LLM pass (llm_infer_github_skills); the deterministic side only
-# surfaces the raw signals the GitHub API itself returns.
+# dev-tooling denylist that used to live here were removed. Repo descriptions
+# are read by the USER'S AGENT (decision 28); this module only surfaces the raw
+# signals the GitHub API itself returns.
 
 
 def _infer_skills(languages: dict[str, int], topics: set[str]) -> list[str]:
     """Surface the raw GitHub signals as candidate skills — languages ranked by
     (weighted) code bytes, then repo topics. CLAUDE.md rule #28: NO hardcoded
     language/topic→skill map; the API strings are used as-is (topics only get a
-    cosmetic hyphen→space cleanup), and the LLM pass canonicalises meaning."""
+    cosmetic hyphen→space cleanup); meaning is the agent's to name."""
     seen: set[str] = set()
     skills: list[str] = []
 
@@ -678,16 +679,16 @@ def _infer_skills(languages: dict[str, int], topics: set[str]) -> list[str]:
 
 
 def deterministic_github_fields(repos_brief: list[dict[str, Any]]) -> list[str]:
-    """Pass 1 for GitHub over the STORED repo briefs — STRUCTURE only, NO LLM.
+    """Read the STORED repo briefs — STRUCTURE only. This is the whole pass.
 
     Surfaces the repo *topics* the GitHub API attached to each repo (cosmetic
     hyphen→space cleanup), deduped. No skill map and no prose mining
-    (CLAUDE.md rule #28) — reading repo descriptions for meaning is the LLM
-    pass's job (``llm_infer_github_skills``).
+    (CLAUDE.md rule #28) — reading repo descriptions, READMEs and the bio for
+    meaning belongs to the user's own agent (decision 28), which writes what it
+    finds back with ``update_profile``.
 
-    Exists so the two-pass GitHub lane has a real deterministic half that reads
-    the SAME stored raw (``cv.github_repos_brief``) the LLM half reads — mirroring
-    the CV/LinkedIn/preferences deterministic passes.
+    Reads the stored raw (``cv.github_repos_brief``), never the network, so it
+    re-runs on any later profile change without re-fetching.
     """
     seen: set[str] = set()
     out: list[str] = []
@@ -710,113 +711,13 @@ def deterministic_github_fields(repos_brief: list[dict[str, Any]]) -> list[str]:
     return out
 
 
-# ── GitHub LLM pass (Pass 2) — read repo prose for extra skills ─────
-
-_GITHUB_LLM_SYSTEM = (
-    "You are an expert at reading a developer's GitHub repositories and naming "
-    "the concrete technologies, frameworks, and domains they demonstrate. You "
-    "return JSON only and never invent skills the text does not support."
-)
-
-_GITHUB_LLM_PROMPT = """Below is a developer's public GitHub presence: an optional self-description
-(their profile bio and portfolio README), followed by their repositories —
-each with a name, language, description, topic tags, and (when available) an
-excerpt of the repo's README.
-
-Infer the concrete technical SKILLS this developer demonstrates: frameworks,
-libraries, tools, platforms, and technical domains. Focus on things a
-hard-coded language/topic table would MISS — e.g. "LangChain", "RAG",
-"Computer Vision", "Fraud Detection", "Cloudflare Workers". The README excerpts
-and self-description are the richest source — read them carefully.
-
-Return JSON: {{"skills": ["Skill One", "Skill Two", ...]}}
-
-Rules:
-- GROUNDED ONLY: every skill must be supported by words actually present in the
-  self-description, a name, description, topics, or a README excerpt. Do NOT
-  guess a tech stack from a repo's purpose — e.g. for "cold outreach platform"
-  do not assume "Gmail API"/"GPT-4o" unless named.
-- Individual items, not categories ("PyTorch", not "ML frameworks").
-- Skip bare programming languages (Python/Java/etc.) — those are covered elsewhere.
-
-{self_desc}REPOSITORIES:
----
-{repos}
----"""
-
-
-async def llm_infer_github_skills(
-    repos_brief: list[dict[str, Any]],
-    *,
-    bio: str = "",
-    profile_readme: str = "",
-) -> list[str]:
-    """Pass 2 for GitHub — ask the LLM to read repo prose and name skills the
-    hard-coded ``LANGUAGE_TO_SKILL`` / ``TOPIC_TO_SKILL`` tables can't know.
-
-    Reads, in order of richness: the profile bio + portfolio README (the
-    developer's self-description), each repo's README excerpt, then the
-    name/description/topics. All are prose the LLM canonicalises — no hardcoded
-    map (rule #28).
-
-    Returns ``[]`` (never raises) when there is nothing worth reading or the
-    provider chain fails — graceful no-op, mirroring the deterministic path.
-    The empty-input branch never calls the LLM (cost guard).
-    """
-    bio = (bio or "").strip()
-    profile_readme = (profile_readme or "").strip()
-    if not (repos_brief or bio or profile_readme):
-        return []
-
-    lines: list[str] = []
-    for r in repos_brief:
-        name = (r.get("name") or "").strip()
-        lang = (r.get("language") or "").strip()
-        desc = (r.get("description") or "").strip()
-        topics = ", ".join(t for t in (r.get("topics") or []) if t)
-        readme = (r.get("readme_excerpt") or "").strip()
-        if not (name or desc or topics or lang or readme):
-            continue
-        lang_tag = f" [language: {lang}]" if lang else ""
-        entry = f"- {name}:{lang_tag} {desc} [topics: {topics}]"
-        if readme:
-            entry += f"\n  README: {readme}"
-        lines.append(entry)
-
-    # A self-description block (bio + portfolio README) may exist even with no
-    # repo prose — a valid reason to call the LLM on its own.
-    self_desc = ""
-    if bio or profile_readme:
-        sd_parts = []
-        if bio:
-            sd_parts.append(bio)
-        if profile_readme:
-            sd_parts.append(f"Profile README:\n{profile_readme}")
-        self_desc = "DEVELOPER SELF-DESCRIPTION:\n---\n" + "\n\n".join(sd_parts) + "\n---\n\n"
-
-    if not lines and not self_desc:
-        return []
-
-    prompt = _GITHUB_LLM_PROMPT.format(
-        self_desc=self_desc, repos="\n".join(lines) or "(none)"
-    )
-    try:
-        from src.services.profile.llm_provider import llm_extract  # noqa: PLC0415
-        result = await llm_extract(prompt, system=_GITHUB_LLM_SYSTEM)
-    except Exception as e:  # noqa: BLE001 — never crash the pass
-        logger.warning("GitHub LLM skill inference failed: %s", e)
-        return []
-
-    raw = result.get("skills") if isinstance(result, dict) else None
-    if not isinstance(raw, list):
-        return []
-    out: list[str] = []
-    seen: set[str] = set()
-    for s in raw:
-        if isinstance(s, str) and s.strip() and s.strip().lower() not in seen:
-            out.append(s.strip())
-            seen.add(s.strip().lower())
-    return out
+# NOTE (decision 28, 2026-09-21) — the GitHub LLM pass lived here and is gone:
+# ``_GITHUB_LLM_SYSTEM``, ``_GITHUB_LLM_PROMPT`` and
+# ``llm_infer_github_skills``, which read repo READMEs, the bio and the profile
+# README and named the skills they demonstrate. Job360 still FETCHES all of
+# that prose and stores it (``cv.github_repos_brief`` carries each README
+# excerpt, plus ``github_bio`` / ``github_profile_readme``); reading meaning out
+# of it is the user's agent's job, written back with ``update_profile``.
 
 
 def enrich_cv_from_github(cv: CVData, github_data: dict[str, Any]) -> CVData:
@@ -827,8 +728,8 @@ def enrich_cv_from_github(cv: CVData, github_data: dict[str, Any]) -> CVData:
     the language/topic-derived skills, so the same framework never
     appears twice in a downstream SearchConfig.
 
-    Two-pass — also stores ``github_repos_brief`` so the LLM pass can re-run
-    offline on a later profile change.
+    Also stores ``github_repos_brief`` — the prose the user's agent reads,
+    kept so nothing has to re-fetch it on a later profile change.
     """
     seen_skills = {s.lower() for s in cv.skills}
 
@@ -848,7 +749,7 @@ def enrich_cv_from_github(cv: CVData, github_data: dict[str, Any]) -> CVData:
     cv.github_topics = github_data.get("topics", [])
     cv.github_skills_inferred = new_github_skills
     cv.github_frameworks = new_frameworks
-    # Two-pass — keep repo briefs for offline LLM re-runs. Only overwrite when
+    # Keep repo briefs — the agent's reading material. Only overwrite when
     # a non-empty value arrives, so a partial re-enrich never wipes them.
     if github_data.get("repos_brief"):
         cv.github_repos_brief = github_data["repos_brief"]

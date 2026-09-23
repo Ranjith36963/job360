@@ -58,7 +58,9 @@ railway add --database postgres      # managed Postgres → DATABASE_URL
 # Backend service (uploads backend/, builds backend/Dockerfile)
 railway add --service backend
 railway variables --service backend --set "DATABASE_URL=${{Postgres.DATABASE_URL}}" \
-  --set "SESSION_SECRET=..." --set "GEMINI_API_KEY=..." --set "APP_ENV=production" ...
+  --set "SESSION_SECRET=..." --set "RESEND_API_KEY=..." --set "APP_ENV=production" ...
+# (No LLM key: Job360 owns no model — decision 28. RESEND_API_KEY is the one
+#  that matters most, because login is a magic link.)
 # Which variables prod refuses to boot without: core.settings._REQUIRED_PROD_VARS.
 cd backend && railway up --service backend --detach && cd ..
 railway domain --service backend     # → public API URL

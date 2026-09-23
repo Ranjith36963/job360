@@ -54,28 +54,71 @@ if hasattr(sys.stdout, "reconfigure"):
 
 # workflow file -> (max hours between runs, why that number)
 # Generous by ~1.5x the real cadence: this must catch "stopped", not "slipped".
-# GitHub's own cron is best-effort and can drift by tens of minutes.
+# GitHub's own cron is best-effort and can drift by tens of minutes — and on
+# this repo, by HOURS: issue #612 (2026-09-21) was a false STOPPED alarm on
+# uptime.yml because the real drift is 4-6h on a "every 10 min" cron, not
+# minutes. Every entry below was re-measured the same day against
+# `gh run list --workflow <file> --event schedule -L 8`, filtered to
+# successful scheduled runs, largest gap in the sample. Only entries whose
+# measured gap exceeded the existing budget were raised; the rest were
+# already generous and are left alone.
 EXPECTED: dict[str, tuple[float, str]] = {
-    "uptime.yml": (3, "every 10 min"),
+    # #612: measured 2026-09-21, 8 most recent scheduled runs, all green —
+    # gaps 1h53m to 5h56m. A 3h budget could not survive that, and didn't:
+    # the watcher was never stopped. Raised to 8h for headroom over the
+    # measured worst case.
+    "uptime.yml": (8, "every 10 min"),
     # Gained its cron in #525 (2026-09-08) and drifted out of this roster until
     # slice 4 (2026-09-11) ran the roster check — the exact blind spot below.
-    # 6h, NOT 2h. Both this and finding-watch also fire on events, and GitHub's
-    # cron is best-effort: on 2026-09-12 the arm went 2.7h and finding-watch
-    # 4.1h between runs on a quiet repo and the watchdog raised #561 for two
-    # loops that were fine. A limit tighter than the scheduler's own slack is
-    # a permanent false alarm, and a permanent alarm is how a loop dies.
-    "auto-merge.yml": (6, "every 20 min + events"),
+    # Both this and finding-watch also fire on events, and GitHub's cron is
+    # best-effort: on 2026-09-12 the arm went 2.7h and finding-watch 4.1h
+    # between runs on a quiet repo and the watchdog raised #561 for two loops
+    # that were fine, so the budget was raised 2h -> 6h. Re-measured
+    # 2026-09-21 (8 most recent scheduled runs): the worst gap had grown again,
+    # to 7h06m — past the 6h budget this file had just raised it to. Raised to
+    # 10h. A limit tighter than the scheduler's own slack is a permanent false
+    # alarm, and a permanent alarm is how a loop dies.
+    "auto-merge.yml": (10, "every 20 min + events"),
+    # Measured 2026-09-21: worst gap 9h14m over 8 scheduled runs (mixed with
+    # workflow_dispatch reruns). Already generous at 14h; left alone.
     "synthetic-live.yml": (14, "every 6h"),
+    # Measured 2026-09-21: a clean ~24h cadence over 8 daily runs, worst gap
+    # ~24h24m. Already generous at 36h; left alone.
     "db-backup.yml": (36, "daily 02:17"),
+    # Measured 2026-09-21: a clean ~24h cadence over 8 daily runs, worst gap
+    # ~25h12m. Already generous at 36h; left alone.
     "ci-offline.yml": (36, "daily 06:00"),
-    "finding-watch.yml": (6, "every 30 min + events"),  # see auto-merge.yml above
+    # Re-measured 2026-09-21 alongside auto-merge.yml (8 most recent scheduled
+    # runs): worst gap 6h50m — also past the 6h budget. Raised to 10h, same as
+    # auto-merge.yml, for the same reason. See auto-merge.yml above.
+    "finding-watch.yml": (10, "every 30 min + events"),
+    # Measured 2026-09-21: a clean ~24-26h cadence over 8 daily runs, worst gap
+    # ~25h53m. Already generous at 36h; left alone.
     "absence.yml": (36, "daily 08:00"),
+    # Measured 2026-09-21: a clean ~24-26h cadence over 8 daily runs, worst gap
+    # ~26h03m. Already generous at 36h; left alone.
     "security-watch.yml": (36, "daily 08:20"),
+    # Measured 2026-09-21: a clean ~24-26h cadence over 8 daily runs (this is
+    # issue #613's workflow — its CONCLUSION was red, but it never stopped
+    # RUNNING); worst gap ~25h45m. Already generous at 36h; left alone.
     "external-health.yml": (36, "daily 07:10"),
+    # Measured 2026-09-21: a clean ~24-26h cadence over 8 daily runs, worst gap
+    # ~26h20m. Already generous at 36h; left alone.
     "dependabot-auto.yml": (36, "daily 09:30"),
+    # Measured 2026-09-21: a clean ~24-26h cadence over 8 daily runs, worst gap
+    # ~26h20m. Already generous at 36h; left alone.
     "pr-shepherd.yml": (36, "daily 09:45"),
+    # Measured 2026-09-21: weekly Monday cadence over 8 scheduled runs, worst
+    # gap ~7d5h38m (173.6h). Already generous at 9*24=216h; left alone.
     "security.yml": (9 * 24, "weekly Mon 04:00"),
+    # Measured 2026-09-21: weekly Monday cadence over 8 scheduled runs, worst
+    # gap ~7d5h44m (173.7h), same window as security.yml. Already generous at
+    # 9*24=216h; left alone.
     "codeql.yml": (9 * 24, "weekly Mon 05:00"),
+    # Measured 2026-09-21: only ONE scheduled run visible in run history
+    # (2026-09-01, monthly cadence has too few samples to measure a real gap
+    # from). Not exceeding its 32-day budget; left alone for lack of evidence
+    # either way, not because it was re-confirmed generous.
     "revert-main.yml": (32 * 24, "monthly, 1st 06:00"),
     # ci.yml is event-triggered only — silence is normal, so it is
     # deliberately NOT watched here. Watching it would produce a permanent
