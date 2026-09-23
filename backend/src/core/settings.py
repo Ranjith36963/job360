@@ -179,6 +179,14 @@ API_TOKEN_FAIL_MAX_PER_MIN = int(os.getenv("API_TOKEN_FAIL_MAX_PER_MIN", "30"))
 # Empty = off: the backend sits behind the Next rewrite, so the Host header is
 # Railway's internal name, not job360.uk. The bearer token is the real guard.
 MCP_ALLOWED_HOSTS = [h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+# Tell a connected MCP client its cached tool list is stale, once per user per
+# process (2026-09-20: `save_fit` grew an `axes` parameter and Claude.ai kept
+# answering from the list it cached at connect time until the user reconnected
+# the connector by hand). ON declares `tools.listChanged` and answers each POST
+# with its own SSE stream — the only back-channel a stateless mount has — so the
+# notification has somewhere to ride. OFF restores the silent JSON-only
+# transport exactly: the kill switch if a client cannot read SSE.
+MCP_ANNOUNCE_TOOLS_CHANGED = os.getenv("MCP_ANNOUNCE_TOOLS_CHANGED", "1").lower() in {"1", "true", "yes", "on"}
 
 # OAuth 2.1 authorization server for MCP clients (docs/plans/2026-09-03-oauth-mcp).
 # Read through `settings.X` at call time, never bound at import — tests monkeypatch them.
