@@ -109,13 +109,16 @@ def _mcp_client(token: str, *, mode: str = "auto", on_message: _Notifications | 
 
 
 @pytest.mark.asyncio
-async def test_the_handshake_wire_declares_tools_list_changed(authenticated_async_context):
+async def test_the_handshake_wire_declares_tools_list_changed(authenticated_async_context, monkeypatch):
     """The capability the spec demands before the notification is even legal.
 
     Measured on the SDK: without the stamp this is ``False`` at every handshake
     revision (2024-11-05 → 2025-11-25) — a client told ``false`` may cache the
     tool list forever, which is the bug this whole file exists for.
     """
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "MCP_ANNOUNCE_TOOLS_CHANGED", True)
     from src.api.mcp_server import mcp_runtime
 
     token = await _mint_token(authenticated_async_context)
@@ -156,11 +159,27 @@ async def test_server_info_version_is_the_tool_surface_fingerprint(authenticated
     }
     assert tools_fingerprint(changed) != expected
 
+    # A client also sees `description` and `output_schema` from `tools/list`
+    # (CodeRabbit, PR #604): a wording-only or output-schema-only deploy must
+    # move the fingerprint too, or `serverInfo.version` would lie about it.
+    desc_changed = [t.model_copy(deep=True) for t in await build_server().list_tools()]
+    bring = next(t for t in desc_changed if t.name == "bring_job")
+    bring.description = (bring.description or "") + " (reworded)"
+    assert tools_fingerprint(desc_changed) != expected, "a description-only change must move the fingerprint"
+
+    schema_changed = [t.model_copy(deep=True) for t in await build_server().list_tools()]
+    bring2 = next(t for t in schema_changed if t.name == "bring_job")
+    bring2.output_schema = {**(bring2.output_schema or {}), "title": "changed"}
+    assert tools_fingerprint(schema_changed) != expected, "an output-schema-only change must move the fingerprint"
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", [HANDSHAKE, MODERN])
-async def test_first_tool_call_tells_the_client_the_tool_list_changed(authenticated_async_context, mode):
+async def test_first_tool_call_tells_the_client_the_tool_list_changed(authenticated_async_context, mode, monkeypatch):
     """The end-to-end claim: a connected client is told, without reconnecting."""
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "MCP_ANNOUNCE_TOOLS_CHANGED", True)
     from src.api.mcp_server import mcp_runtime
 
     token = await _mint_token(authenticated_async_context)
@@ -208,13 +227,16 @@ async def test_first_tool_call_tells_the_client_the_tool_list_changed(authentica
 
 
 @pytest.mark.asyncio
-async def test_told_once_per_user_not_once_per_connection(authenticated_async_context):
+async def test_told_once_per_user_not_once_per_connection(authenticated_async_context, monkeypatch):
     """Reconnecting does not re-announce: the key is the user, for this process.
 
     A client that drops and re-dials (or a second client on the same account)
     must not be told again — the tool list did not move between those two
     connections. Only a restart, which is what a deploy is, empties the set.
     """
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "MCP_ANNOUNCE_TOOLS_CHANGED", True)
     from src.api.mcp_server import mcp_runtime
 
     token = await _mint_token(authenticated_async_context)
@@ -270,7 +292,7 @@ async def test_the_told_once_bookkeeping_is_keyed_by_user_not_by_process():
 
 
 @pytest.mark.asyncio
-async def test_a_json_only_client_is_served_json_not_a_406(authenticated_async_context):
+async def test_a_json_only_client_is_served_json_not_a_406(authenticated_async_context, monkeypatch):
     """Announcing must not break a client that cannot read SSE.
 
     The announcement rides an SSE response stream, and the SDK 406s an
@@ -283,6 +305,9 @@ async def test_a_json_only_client_is_served_json_not_a_406(authenticated_async_c
     from httpx import ASGITransport, AsyncClient
 
     from src.api.main import app
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "MCP_ANNOUNCE_TOOLS_CHANGED", True)
     from src.api.mcp_server import mcp_runtime
 
     token = await _mint_token(authenticated_async_context)

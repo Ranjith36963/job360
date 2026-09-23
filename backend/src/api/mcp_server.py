@@ -805,7 +805,7 @@ def build_server(version: str = "") -> MCPServer:
 
 
 def tools_fingerprint(tools: list[McpTool]) -> str:
-    """A short, stable id for the tool surface: every tool name + input schema.
+    """A short, stable id for the tool surface: every client-visible tool field.
 
     Reported as ``serverInfo.version``, so an ``initialize`` result says which
     tool surface this process is serving. Production has no other honest
@@ -813,12 +813,20 @@ def tools_fingerprint(tools: list[McpTool]) -> str:
     (CLAUDE.md) — so this is the only way to tell from outside whether a
     deploy changed the tools an agent can see.
 
+    Covers name, description, input schema and output schema — everything
+    ``tools/list`` actually hands a client (CodeRabbit, PR #604). A
+    description-only or output-schema-only deploy must move this fingerprint
+    too, or ``serverInfo.version`` would silently lie about what changed.
+
     It is an **instrument, not a mechanism**: no MCP revision obliges a client
     to re-fetch when ``serverInfo.version`` changes. It makes the change
     observable; :class:`_AnnounceToolListChanged` is what tries to act on it.
     """
     payload = json.dumps(
-        [[t.name, t.input_schema] for t in sorted(tools, key=lambda t: t.name)],
+        [
+            [t.name, t.description, t.input_schema, t.output_schema]
+            for t in sorted(tools, key=lambda t: t.name)
+        ],
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -903,8 +911,8 @@ class _AnnounceToolListChanged:
     MAX_TRACKED_USERS = 50_000
 
     def __init__(self) -> None:
-        # user_id -> already told, for the life of this process. One id per
-        # user who actually called a tool; a deploy clears it by restarting.
+        # Already told, for the life of this process. One entry per user who
+        # sent any non-initialize request; a deploy clears it by restarting.
         self._announced: set[str] = set()
 
     async def __call__(self, ctx: ServerRequestContext[Any, Any], call_next: CallNext) -> HandlerResult:
@@ -1007,7 +1015,7 @@ async def mcp_runtime() -> AsyncIterator[None]:
 
     # serverInfo.version is a fingerprint of the tool surface, and the tools
     # only exist once a server is built — so build a throwaway one to read the
-    # list, then the real one(s) stamped with it. Registering eighteen
+    # list, then the real one(s) stamped with it. Registering seventeen
     # decorated functions is microseconds; the lazy imports are already warm.
     fingerprint = tools_fingerprint(await build_server().list_tools())
     announce = settings.MCP_ANNOUNCE_TOOLS_CHANGED
