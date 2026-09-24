@@ -1248,8 +1248,13 @@ async def clear_profile_section(
     if section in ("preferences", "all"):
         # A fresh preferences object — but the GitHub handle is owned by the
         # GitHub section, so clearing PREFERENCES alone must not disconnect it.
+        # The guessed level is owned by the CV/LinkedIn history, not the form:
+        # keep it here ("all" recomputes it from what remains, below).
         keep_handle = "" if section == "all" else prefs.github_username
-        prefs = UserPreferences(github_username=keep_handle)
+        prefs = UserPreferences(
+            github_username=keep_handle,
+            experience_level_inferred=prefs.experience_level_inferred,
+        )
     if section == "all":
         # about_me-derived skills live on the CV object but are owned by the
         # preferences the user typed, so a full clear takes them too.

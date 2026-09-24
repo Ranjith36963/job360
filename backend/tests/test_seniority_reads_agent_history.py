@@ -122,6 +122,18 @@ async def test_an_unrelated_preferences_save_keeps_the_stored_level(
         assert body["preferences"]["experience_level_inferred"] == "mid"
 
 
+@pytest.mark.asyncio
+async def test_clearing_preferences_keeps_the_stored_level(authenticated_async_context, fixture_user_id):
+    # "Clear preferences" resets what the user typed, not what their history implies.
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id, typed="junior", inferred="mid")
+        resp = await client.post("/api/profile/clear", data={"section": "preferences"})
+        assert resp.status_code == 200, resp.text
+        body = (await client.get("/api/profile")).json()
+        assert body["preferences"]["experience_level"] == ""
+        assert body["preferences"]["experience_level_inferred"] == "mid"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # (c) the user's own level wins
 # ═══════════════════════════════════════════════════════════════════════════
