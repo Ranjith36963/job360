@@ -40,6 +40,8 @@ describe("VisaSelect", () => {
       />
     );
 
+    fireEvent.click(screen.getByTestId("visa-edit"));
+
     fireEvent.change(screen.getByTestId("visa-select"), {
       target: { value: "no_sponsorship" },
     });

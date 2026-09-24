@@ -188,6 +188,7 @@ test.describe("Flag for next time (slice 9)", () => {
     await page.goto(`/applications/${APPLICATION_ID}`);
     await expect(page.getByText("Platform Engineer")).toBeVisible({ timeout: 20_000 });
 
+    await page.getByTestId("lesson-add-toggle").click();
     await page.getByTestId("lesson-input").fill("Always mention the Kubernetes cert.");
     await page.getByTestId("lesson-submit").click();
 

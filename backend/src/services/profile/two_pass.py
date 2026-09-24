@@ -48,7 +48,7 @@ from src.services.profile.preferences import (
     deterministic_about_me_fields,
     merge_cv_and_preferences,
 )
-from src.services.profile.seniority import infer_experience_level
+from src.services.profile.seniority import infer_from_cv
 
 logger = logging.getLogger("job360.profile.two_pass")
 
@@ -346,8 +346,8 @@ async def run_two_pass_extraction(profile: UserProfile) -> UserProfile:
         # Dated job TITLES are the stronger, structural signal, so they win.
         # ``cv_experience_level`` is the fallback for a career whose titles
         # carry no seniority word — also agent-written now.
-        from_titles = infer_experience_level(cv.cv_positions, cv.linkedin_positions)
-        inferred = from_titles or (cv.cv_experience_level or "").strip()
+        # (Same rule the overlay read door applies — `seniority.infer_from_cv`.)
+        inferred = infer_from_cv(cv)
         # ONLY WRITE A VALUE, NEVER A BLANK.
         #
         # Both inputs are agent-written since decision 28 — our own read of a

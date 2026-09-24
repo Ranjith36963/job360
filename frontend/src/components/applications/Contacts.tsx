@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { toast } from "sonner";
 import { addContact } from "@/lib/api";
 import type { Contact } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
@@ -58,10 +59,10 @@ export function Contacts({
     setList(contacts);
   }, [contacts]);
 
+  const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
 
   const setField = useCallback(
     (field: keyof typeof EMPTY_FORM) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -76,7 +77,6 @@ export function Contacts({
       const name = form.name.trim();
       if (!name) return;
       setFormError(null);
-      setNote(null);
       setSubmitting(true);
       try {
         const body: {
@@ -96,10 +96,10 @@ export function Contacts({
           prev.some((c) => c.id === result.contact.id) ? prev : [...prev, result.contact]
         );
         if (result.already_existed) {
-          setNote("This person is already on this application.");
-        } else {
-          setForm(EMPTY_FORM);
+          toast("This person is already on this application.");
         }
+        setForm(EMPTY_FORM);
+        setFormOpen(false);
       } catch (err) {
         setFormError(apiErrorMessage(err, "Could not add this person."));
       } finally {
@@ -113,9 +113,7 @@ export function Contacts({
     <div className="flex flex-col gap-4">
       {list.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No people yet. Your agent can add one with the MCP{" "}
-          <code className="rounded bg-muted/40 px-1 py-0.5 text-xs">add_contact</code> tool, or
-          use the form below.
+          No people yet. Your assistant can add one, or use the button below.
         </p>
       ) : (
         <ul data-testid="contacts-list" className="flex flex-col gap-2">
@@ -149,6 +147,16 @@ export function Contacts({
         </ul>
       )}
 
+      {!formOpen ? (
+        <button
+          type="button"
+          data-testid="contacts-add-toggle"
+          onClick={() => setFormOpen(true)}
+          className="self-start text-sm font-medium text-primary hover:underline"
+        >
+          + Add person
+        </button>
+      ) : (
       <form onSubmit={submit} className="glass-card flex flex-col gap-3 rounded-lg p-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Add a person
@@ -205,17 +213,33 @@ export function Contacts({
         </div>
 
         {formError && <p className="text-xs text-destructive">{formError}</p>}
-        {note && <p className="text-xs text-muted-foreground">{note}</p>}
 
-        <Button
-          type="submit"
-          size="sm"
-          disabled={submitting || !form.name.trim()}
-          className="self-start"
-        >
-          {submitting ? "Adding…" : "Add person"}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            type="submit"
+            size="sm"
+            disabled={submitting || !form.name.trim()}
+            className="self-start"
+          >
+            {submitting ? "Adding…" : "Add person"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={submitting}
+            onClick={() => {
+              setFormOpen(false);
+              setFormError(null);
+              setForm(EMPTY_FORM);
+            }}
+            className="self-start"
+          >
+            Cancel
+          </Button>
+        </div>
       </form>
+      )}
     </div>
   );
 }

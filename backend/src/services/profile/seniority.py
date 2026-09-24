@@ -548,3 +548,30 @@ def infer_experience_level(
         return ""
     except Exception:  # noqa: BLE001 — a failed inference must never cost a save
         return ""
+
+
+# The CVData fields `infer_from_cv` reads, as overlay paths. When the agent's
+# overlay (``services/profile/edits.py``) carries any of them, the stored
+# inference was computed WITHOUT that value, so the read door recomputes it
+# off the effective profile — see ``edits.apply_overlay_rows``.
+INFERENCE_INPUT_PATHS = frozenset({
+    "cv_data.cv_positions",
+    "cv_data.linkedin_positions",
+    "cv_data.cv_experience_level",
+})
+
+
+def infer_from_cv(cv: Any) -> str:
+    """The inferred level for one ``CVData``: dated titles first, then the
+    CV's own stated level. ``""`` when neither says anything (rule #29).
+
+    The ONE rule, shared by extraction (``two_pass``, over the stored
+    profile) and the overlay read door (``edits.apply_overlay_rows``, over
+    stored + agent edits), so the two can never disagree about what a given
+    history means.
+    """
+    from_titles = infer_experience_level(
+        getattr(cv, "cv_positions", None), getattr(cv, "linkedin_positions", None)
+    )
+    stated = getattr(cv, "cv_experience_level", "") or ""
+    return from_titles or (stated.strip() if isinstance(stated, str) else "")

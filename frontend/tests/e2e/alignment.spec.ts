@@ -152,14 +152,11 @@ test.describe("Alignment — the fit picture on the application page", () => {
     await expect(radar.getByTestId("fit-radar-you")).toHaveAttribute("points", /.+/);
     await expect(radar.locator("figcaption").getByText("The role asks", { exact: true })).toBeVisible();
 
-    await expect(
-      page.getByText("2 of 3 of your skills appear in this ad")
-    ).toBeVisible();
+    await expect(page.getByText("This ad mentions 2 of your skills")).toBeVisible();
 
     const inAd = page.getByTestId("skills-in-ad");
     await expect(inAd.locator("li")).toHaveCount(2);
-    const notInAd = page.getByTestId("skills-not-in-ad");
-    await expect(notInAd.locator("li")).toHaveCount(1);
+    await expect(page.getByTestId("skills-not-in-ad")).toHaveCount(0);
   });
 });
 

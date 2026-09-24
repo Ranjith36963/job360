@@ -180,7 +180,7 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
           <>
             {!hasDocs && (
               <p className="text-sm text-muted-foreground">
-                Nothing saved for this job yet. Ask your agent to write a tailored
+                Nothing saved for this job yet. Ask your assistant to write a tailored
                 CV and save it — every version it saves shows up here.
               </p>
             )}

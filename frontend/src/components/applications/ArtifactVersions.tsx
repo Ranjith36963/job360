@@ -6,6 +6,24 @@ import type { ApplicationArtifact, ApplicationReceiptEntry, ArtifactDiff as Arti
 import { ArtifactDiff } from "@/components/applications/ArtifactDiff";
 import { formatDate } from "@/lib/format-date";
 
+/** Plain words for who/what made a version (owner decision 6, 2026-09-24):
+ * `web:tailor` -> "Made on the website", `agent:<Name>` -> "Written by
+ * <Name>". Anything else (e.g. a bare "web" or "agent" from an older/mocked
+ * payload) renders as-is — it is already plain text, never a code-font tool
+ * name. */
+function describeMadeBy(madeBy: string): string {
+  if (madeBy === "web:tailor") return "Made on the website";
+  if (madeBy.startsWith("agent:")) return `Written by ${madeBy.slice("agent:".length)}`;
+  return madeBy;
+}
+
+/** Approximate page count from a character count — chars/3000, minimum 1
+ * page (owner decision 6). */
+function pageCount(chars: number): string {
+  const pages = Math.max(1, Math.round(chars / 3000));
+  return `${pages} page${pages === 1 ? "" : "s"}`;
+}
+
 /**
  * Every version of every artifact, grouped by kind — "every version still
  * readable" (spec's done-when). Artifact TEXT is off by default on
@@ -117,7 +135,7 @@ export function ArtifactVersions({
   if (artifacts.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No documents yet. Your agent saves every CV and cover letter version here.
+        No documents yet. Your assistant saves every CV and cover letter version here.
       </p>
     );
   }
@@ -155,7 +173,7 @@ export function ArtifactVersions({
                         </span>
                       )}
                       <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        {artifact.made_by} · {artifact.chars} chars
+                        {describeMadeBy(artifact.made_by)} · {pageCount(artifact.chars)}
                       </span>
                     </button>
                     <span className="text-xs text-muted-foreground">

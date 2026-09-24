@@ -10,7 +10,7 @@ vi.mock("@/lib/api", () => ({
 describe("LessonForm", () => {
   beforeEach(() => recordApplicationEvent.mockReset());
 
-  it("records a lesson event with the trimmed text and calls onRecorded", async () => {
+  it("starts folded behind '+ Add a lesson', and records a lesson event with the trimmed text", async () => {
     recordApplicationEvent.mockResolvedValue({
       event_id: 1,
       application_id: 42,
@@ -21,6 +21,9 @@ describe("LessonForm", () => {
     const onRecorded = vi.fn().mockResolvedValue(undefined);
 
     render(<LessonForm applicationId={42} onRecorded={onRecorded} />);
+
+    expect(screen.queryByTestId("lesson-input")).toBeNull();
+    fireEvent.click(screen.getByTestId("lesson-add-toggle"));
 
     fireEvent.change(screen.getByTestId("lesson-input"), {
       target: { value: "  Always mention the Kubernetes cert.  " },
@@ -34,10 +37,13 @@ describe("LessonForm", () => {
       })
     );
     await waitFor(() => expect(onRecorded).toHaveBeenCalled());
+    // Folds again after a successful save.
+    await waitFor(() => expect(screen.queryByTestId("lesson-input")).toBeNull());
   });
 
   it("disables the submit button when the input is empty", () => {
     render(<LessonForm applicationId={42} onRecorded={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("lesson-add-toggle"));
     expect(screen.getByTestId("lesson-submit")).toBeDisabled();
   });
 });
