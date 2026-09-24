@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { formatDate } from "@/lib/format-date";
 
 const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "" };
 // One stable empty list. An inline `= []` default would be a NEW array every
@@ -141,7 +142,7 @@ export function Contacts({
               )}
               <p className="mt-1 text-[11px] text-muted-foreground/70">
                 added by {contact.added_by} ·{" "}
-                {new Date(contact.created_at).toLocaleDateString()}
+                {formatDate(contact.created_at)}
               </p>
             </li>
           ))}

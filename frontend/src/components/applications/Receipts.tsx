@@ -1,4 +1,5 @@
 import type { ApplicationReceiptEntry } from "@/lib/api";
+import { formatDate } from "@/lib/format-date";
 
 function formatFieldValue(value: unknown): string {
   if (value === null || value === undefined) return "—";
@@ -27,7 +28,7 @@ export function Receipts({ receipts }: { receipts: ApplicationReceiptEntry[] }) 
             <div className="flex items-center justify-between gap-2">
               <span className="font-medium">{receipt.channel || "Applied"}</span>
               <span className="text-xs text-muted-foreground">
-                {new Date(receipt.sent_at).toLocaleDateString()}
+                {formatDate(receipt.sent_at)}
               </span>
             </div>
             {(receipt.cv_artifact_id != null || receipt.cover_letter_artifact_id != null) && (

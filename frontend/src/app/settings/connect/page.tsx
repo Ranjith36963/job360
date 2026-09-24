@@ -24,6 +24,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { formatDateTime } from "@/lib/format-date";
 
 // ---------------------------------------------------------------------------
 // Connect an agent — personal API tokens for the MCP server at /api/mcp.
@@ -49,8 +50,8 @@ function connectCommand(token: string): string {
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "never";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+  const out = formatDateTime(iso);
+  return out || iso;
 }
 
 /** Just the host, so the row reads "chatgpt.com" not the full callback URL. */
@@ -222,7 +223,7 @@ function ConnectAppCard() {
 // ---------------------------------------------------------------------------
 
 /** The day the callbacks below were last posted to /api/oauth/register. */
-const LAST_CHECKED = "21 September 2026";
+const LAST_CHECKED = "23 September 2026";
 
 type AssistantRecipe = {
   name: string;
@@ -253,7 +254,7 @@ const ASSISTANT_RECIPES: AssistantRecipe[] = [
     plans: "Pro, Max or Enterprise.",
     steps:
       "Settings → Connectors → Add custom remote connector → paste the address above → choose OAuth.",
-    ready: false,
+    ready: true,
   },
   {
     name: "Grok",
@@ -266,7 +267,7 @@ const ASSISTANT_RECIPES: AssistantRecipe[] = [
     plans: "Gemini Enterprise / Business editions only.",
     steps:
       "An admin adds the address above as a custom MCP server connection. The consumer Gemini app doesn't support this yet.",
-    ready: false,
+    ready: true,
   },
 ];
 
@@ -297,8 +298,8 @@ function AssistantRecipesCard() {
                 data-testid={`assistant-status-${a.name.toLowerCase()}`}
               >
                 {a.ready
-                  ? `Worked when we checked, on ${LAST_CHECKED}.`
-                  : `Did not work when we checked, on ${LAST_CHECKED} — ask the owner to allowlist this assistant's callback first.`}
+                  ? `Job360 accepted this assistant's sign-in address when we checked, on ${LAST_CHECKED}. We have not run a full connection from inside the assistant.`
+                  : `Job360 refused this assistant's sign-in address when we checked, on ${LAST_CHECKED} — ask the owner to allowlist its callback first.`}
               </p>
             </li>
           ))}

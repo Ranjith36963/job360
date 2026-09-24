@@ -126,7 +126,7 @@ export default function BringJobPage() {
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Bring a job</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Paste a link and we&apos;ll try to fill the form, or paste the ad you found. We keep
-          it, tailor your CV, and keep a receipt of exactly what you sent.
+          it, every CV your agent writes for it, and a receipt of exactly what you sent.
         </p>
       </div>
 

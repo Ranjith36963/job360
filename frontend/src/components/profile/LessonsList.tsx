@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { BookOpen } from "lucide-react";
 import { listLessons, type Lesson } from "@/lib/api";
+import { formatDate } from "@/lib/format-date";
 
 /** Profile page's "Lessons" section (slice 9, #516) — every lesson flagged
  * from any application's timeline, newest first, linking back to its
@@ -62,7 +63,7 @@ export function LessonsList() {
                     {l.job_title || "Untitled role"} · {l.job_company}
                   </Link>
                   {" · "}
-                  {new Date(l.occurred_at).toLocaleDateString()}
+                  {formatDate(l.occurred_at)}
                 </p>
               </li>
             ))}
