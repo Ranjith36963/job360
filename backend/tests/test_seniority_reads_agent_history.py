@@ -200,6 +200,99 @@ def test_overlay_recompute_never_invents_a_level():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Clearing / replacing an input takes the level it implied with it
+# (CodeRabbit on #630: a STORED inference outlived the history behind it)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# 48 months, no tier word -> "mid" (3 <= years < 6 in seniority._YEARS_BANDS).
+LINKEDIN_FOUR_YEARS: list[dict[str, Any]] = [
+    {"title": "Engineer", "company": "Initech", "start": "Jan 2020", "end": "Dec 2023"},
+]
+
+
+def _seed_stored_level(user_id: str, *, cv_positions: list, linkedin_positions: list, inferred: str) -> None:
+    """A base profile whose STORED inferred level came from its own history."""
+    from src.services.profile.models import CVData, UserPreferences, UserProfile
+    from src.services.profile.storage import save_profile
+
+    profile = UserProfile(
+        cv_data=CVData(
+            raw_text="Python engineer.\nSkills: Python, SQL",
+            skills=["Python", "SQL"],
+            cv_positions=list(cv_positions),
+            linkedin_positions=list(linkedin_positions),
+            linkedin_raw_text="LinkedIn export text" if linkedin_positions else "",
+        ),
+        preferences=UserPreferences(experience_level_inferred=inferred),
+    )
+    save_profile(profile, user_id, source_action="cv_upload")
+
+
+@pytest.mark.asyncio
+async def test_clearing_the_cv_clears_the_level_it_implied(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_stored_level(fixture_user_id, cv_positions=EIGHT_YEARS, linkedin_positions=[], inferred="senior")
+        assert (await client.get("/api/profile")).json()["preferences"]["experience_level_inferred"] == "senior"
+
+        resp = await client.post("/api/profile/clear", data={"section": "cv"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["preferences"]["experience_level_inferred"] == "", "no history left, no level (rule 29)"
+        body = (await client.get("/api/profile")).json()
+        assert body["preferences"]["experience_level_inferred"] == ""
+
+
+@pytest.mark.asyncio
+async def test_clearing_the_cv_keeps_the_level_the_remaining_history_implies(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_stored_level(
+            fixture_user_id, cv_positions=EIGHT_YEARS, linkedin_positions=LINKEDIN_FOUR_YEARS, inferred="senior"
+        )
+        resp = await client.post("/api/profile/clear", data={"section": "cv"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["preferences"]["experience_level_inferred"] == "mid"
+
+
+@pytest.mark.asyncio
+async def test_clearing_the_cv_after_an_agent_write_clears_the_level(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_stored_level(fixture_user_id, cv_positions=[], linkedin_positions=[], inferred="senior")
+        await _write_positions(client, EIGHT_YEARS)
+        resp = await client.post("/api/profile/clear", data={"section": "cv"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["preferences"]["experience_level_inferred"] == ""
+
+
+@pytest.mark.asyncio
+async def test_clearing_linkedin_clears_the_level_it_implied(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_stored_level(fixture_user_id, cv_positions=[], linkedin_positions=LINKEDIN_FOUR_YEARS, inferred="mid")
+        resp = await client.post("/api/profile/clear", data={"section": "linkedin"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["preferences"]["experience_level_inferred"] == ""
+
+
+@pytest.mark.asyncio
+async def test_a_new_cv_does_not_inherit_the_old_cvs_level(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    import src.api.routes.profile as profile_route
+
+    async with authenticated_async_context() as client:
+        _seed_stored_level(fixture_user_id, cv_positions=EIGHT_YEARS, linkedin_positions=[], inferred="senior")
+        monkeypatch.setattr(
+            profile_route, "extract_text",
+            lambda path: "Grace Hopper\nSummary\nCompiler pioneer.\nSkills: COBOL, Fortran\n",
+        )
+        up = await client.post(
+            "/api/profile/cv", files={"cv": ("new_cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")}
+        )
+        assert up.status_code == 200, up.text
+        assert up.json()["preferences"]["experience_level_inferred"] == ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # (f) the web profile and MCP get_profile agree
 # ═══════════════════════════════════════════════════════════════════════════
 

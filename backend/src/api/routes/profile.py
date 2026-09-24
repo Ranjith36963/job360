@@ -55,6 +55,7 @@ from src.services.profile.models import (
     UserProfile,
 )
 from src.services.profile.preferences import sanitize_preferences
+from src.services.profile.seniority import infer_from_cv
 from src.services.profile.storage import (
     list_profile_versions,
     load_profile,
@@ -525,6 +526,9 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
         # existing profile completely untouched. We only discard the old CV once
         # the new one is known to be readable.
         reset_cv_owned_fields(profile.cv_data)
+        # The old CV's positions are gone, so is the level they implied;
+        # extraction below refills it only if the remaining history says so.
+        _reinfer_level_from_what_remains(profile)
         profile.cv_data.raw_text = raw_text
         # Upload receipt — WHAT was uploaded and WHEN. Set here, right where the
         # new CV replaces the old one, so a re-upload always names the CURRENT
@@ -1125,6 +1129,20 @@ async def upload_github(
 _CLEAR_SCOPES = ("cv", "linkedin", "github", "preferences", "all")
 
 
+def _reinfer_level_from_what_remains(profile: UserProfile) -> None:
+    """Recompute the STORED ``experience_level_inferred`` from the history the
+    base still holds, right after an input's history was removed.
+
+    The stored value was derived from positions that are now gone; kept as it
+    was, the profile would still say "senior" with nothing behind it.
+    Extraction's "never write a blank" guard (``two_pass``) exists so a routine
+    save cannot erase an answer — but here the evidence itself was removed, so
+    an empty result is the truth and is written (rule #29: empty stays empty).
+    Same rule as extraction and the overlay read door: ``infer_from_cv``.
+    """
+    profile.preferences.experience_level_inferred = infer_from_cv(profile.cv_data)
+
+
 def _clear_cv(cv: CVData) -> None:
     """Everything the CV owns, including its receipt and quality verdict."""
     reset_cv_owned_fields(cv)  # the canonical "what the CV owns" list
@@ -1235,6 +1253,9 @@ async def clear_profile_section(
         cv.about_me_inferred_skills = []
 
     profile.preferences = prefs
+    if section in ("cv", "linkedin", "all"):
+        # Both clear dated positions the stored level was read from.
+        _reinfer_level_from_what_remains(profile)
     save_profile(profile, user.id, f"clear_{section}")
 
     # The overlay half of the clear. Prefixes, not a hand-written path list —
