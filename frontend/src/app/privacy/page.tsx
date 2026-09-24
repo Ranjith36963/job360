@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 };
 
 // A legal document states when it changed; never derive this at render time.
-const LAST_UPDATED = "5 September 2026";
+const LAST_UPDATED = "24 September 2026";
 
 const SUBPROCESSORS: {
   name: string;
@@ -15,18 +15,6 @@ const SUBPROCESSORS: {
   dataShared: string;
   location: string;
 }[] = [
-  {
-    name: "OpenAI",
-    purpose: "CV parsing and tailored-document generation (primary AI provider)",
-    dataShared: "Text extracted from your CV / LinkedIn PDF; job descriptions",
-    location: "USA",
-  },
-  {
-    name: "Google (Gemini), Groq, Cerebras",
-    purpose: "CV parsing (fallback AI providers, used only if the primary fails)",
-    dataShared: "Text extracted from your CV / LinkedIn PDF",
-    location: "USA",
-  },
   {
     name: "Railway",
     purpose: "Application hosting and database",
@@ -130,9 +118,10 @@ export default function PrivacyPage() {
           <ul className="mt-2 list-disc space-y-2 pl-5">
             <li>
               <span className="text-foreground">Contract</span> — storing the
-              jobs and applications you bring, generating tailored documents
-              you request, serving your own connected AI agent&rsquo;s
-              requests, and operating your account.
+              jobs and applications you bring, storing and rendering the
+              tailored documents you or your connected AI assistant write,
+              serving your own connected AI agent&rsquo;s requests, and
+              operating your account.
             </li>
             <li>
               <span className="text-foreground">Consent</span> — product
@@ -153,17 +142,20 @@ export default function PrivacyPage() {
 
         <section>
           <h2 className="text-lg font-medium text-foreground">
-            AI processing — read this part
+            AI access — read this part
           </h2>
           <p className="mt-2">
-            When you upload a CV or LinkedIn PDF, or generate a tailored CV or
-            cover letter, the text is sent to the AI providers listed below to
-            be parsed or drafted. This is core to how Job360 works — without
-            it, we cannot build your profile or draft a tailored document. We
-            use these providers&rsquo; business APIs, which contractually do
-            not use your content to train their models. Your original files
-            and the extracted profile stay on our servers; the AI providers
-            process text transiently.
+            Job360 runs no AI of its own, and it sends your data to no AI
+            provider. Your CV, profile, and every document you or your
+            assistant write stay on Job360&rsquo;s servers. If you choose to
+            connect your own AI assistant (for example Claude or ChatGPT),
+            that assistant reads and writes your Job360 data only through the
+            connection you authorised — nothing more, and only while that
+            connection exists. What your assistant does with your data once
+            it has read it is governed by that assistant&rsquo;s own terms
+            and privacy policy, not this one. You can revoke a connection at
+            any time in Settings → Connect, which immediately stops that
+            assistant&rsquo;s access.
           </p>
         </section>
 
