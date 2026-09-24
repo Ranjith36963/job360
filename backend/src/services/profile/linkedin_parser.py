@@ -324,6 +324,26 @@ _TECH_LINE = re.compile(
 _TECH_SPLIT = re.compile(r"[•·|,]|\s-\s")
 
 
+def _is_mid_item_wrap(nxt: str) -> bool:
+    """True when ``nxt`` is the rest of a tech list the PDF wrapped mid-item.
+
+    Called only while inside a "Technologies:" run, after the previous line
+    did NOT end on a bullet. LinkedIn's PDF wraps by width, so a list can
+    break inside an item: "... • Vector" then "Databases • Python". The
+    signal is purely STRUCTURAL (rule #28 — no word lists): the next line is
+    non-blank, is not a section heading or a new tech line, is not
+    bullet-led (that case is already absorbed), and itself carries a list
+    bullet — so it is list text, not the next prose line or company name.
+    A final item wrapped with no later bullet ("... • Vector" / "Databases")
+    is indistinguishable from the next line of prose and is left alone.
+    """
+    if not nxt or nxt.lower() in _HEADING_SET or _TECH_LINE.match(nxt):
+        return False
+    if nxt[:1] in {"•", "·", "-"}:
+        return False
+    return "•" in nxt or "·" in nxt
+
+
 def _extract_inline_tech_skills(text: str) -> list[str]:
     """Deterministically pull skills from inline 'Technologies: A • B • C' lines
     in the experience body (incl. a wrapped continuation line starting '•').
@@ -344,12 +364,15 @@ def _extract_inline_tech_skills(text: str) -> list[str]:
         buf = [m.group(1)]
         j = i + 1
         # Keep absorbing wrapped continuation lines. A wrap is signalled either
-        # by the previous line ending on a dangling bullet ("OpenAI API •") or
-        # by the next line starting with a bullet ("• Python • ...").
+        # by the previous line ending on a dangling bullet ("OpenAI API •"),
+        # by the next line starting with a bullet ("• Python • ..."), or by the
+        # PDF breaking the list MID-ITEM ("... • Vector" / "Databases • Python")
+        # — see ``_is_mid_item_wrap``. Buffered lines are joined with a space,
+        # so a mid-item wrap heals to "Vector Databases" before the split.
         while j < len(lines):
             prev_dangles = buf[-1].rstrip().endswith(("•", "·"))
             nxt = lines[j].strip()
-            if prev_dangles or nxt[:1] in {"•", "·", "-"}:
+            if prev_dangles or nxt[:1] in {"•", "·", "-"} or _is_mid_item_wrap(nxt):
                 buf.append(lines[j])
                 j += 1
             else:

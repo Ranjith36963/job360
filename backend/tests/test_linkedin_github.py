@@ -106,6 +106,53 @@ class TestInlineTechSkills:
         text = "Continuously learning: Prompt engineering • Vector databases • RLHF • AI evaluation frameworks\n"
         sk = set(_extract_inline_tech_skills(text))
         assert {"Prompt engineering", "Vector databases", "RLHF", "AI evaluation frameworks"}.issubset(sk)
+
+    def test_mid_item_wrap_heals_vector_databases(self):
+        """The PDF wraps the list INSIDE an item ("... • Vector" / "Databases
+        • Python"). The owner's stored skills held a bare "Vector" from this."""
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = (
+            "Technologies: Docker • AWS Bedrock • Vector\n"
+            "Databases • Python\n"
+            "Next Company\n"
+        )
+        sk = _extract_inline_tech_skills(text)
+        assert sk == ["Docker", "AWS Bedrock", "Vector Databases", "Python"]
+        assert "Vector" not in sk
+        assert "Databases" not in sk
+
+    def test_mid_item_wrap_heals_data_preprocessing(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = (
+            "Technologies: Python • Pandas • Data\n"
+            "Preprocessing • Scikit-learn\n"
+        )
+        sk = _extract_inline_tech_skills(text)
+        assert sk == ["Python", "Pandas", "Data Preprocessing", "Scikit-learn"]
+        assert "Data" not in sk
+        assert "Preprocessing" not in sk
+
+    def test_unwrapped_list_unchanged(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = "Technologies: Docker • AWS Bedrock • Redis\nLed a team of five.\n"
+        assert _extract_inline_tech_skills(text) == ["Docker", "AWS Bedrock", "Redis"]
+
+    def test_heading_on_next_line_not_joined(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = "Technologies: Docker • Vector\nEducation\nMSc • Computer Science\n"
+        assert _extract_inline_tech_skills(text) == ["Docker", "Vector"]
+
+    def test_blank_line_not_joined(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = "Technologies: Docker • Vector\n\nDatabases • Python\n"
+        sk = _extract_inline_tech_skills(text)
+        assert sk == ["Docker", "Vector"]
+        assert "Vector Databases" not in sk
 from src.services.profile.github_enricher import (
     _infer_skills,
     enrich_cv_from_github,
