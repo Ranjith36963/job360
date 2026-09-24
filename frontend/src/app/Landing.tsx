@@ -59,7 +59,7 @@ const FEATURES = [
     icon: Shield,
     title: "Secure by Design",
     description:
-      "OAuth 2.1 sign-in means only the agents you approve can act for you. Built and hosted in the UK at job360.uk.",
+      "OAuth 2.1 sign-in means only the agents you approve can act for you, and you can revoke any of them at any time.",
     stagger: 6,
   },
 ] as const;
@@ -85,9 +85,9 @@ const STATS = [
   },
   {
     icon: Shield,
-    value: "UK",
-    label: "Hosted",
-    description: "job360.uk, OAuth 2.1 secured",
+    value: "OAuth 2.1",
+    label: "Secured",
+    description: "Only the agents you approve",
   },
 ] as const;
 
@@ -301,7 +301,7 @@ export default function Landing() {
                 step: "01",
                 title: "Upload your CV",
                 description:
-                  "Drop your PDF or DOCX, add LinkedIn and GitHub. Job360 extracts your skills, titles, experience and education automatically.",
+                  "Drop your PDF or DOCX, add LinkedIn and GitHub. Job360 keeps the text; your connected assistant fills in your skills, roles and history.",
                 icon: Upload,
               },
               {
@@ -395,7 +395,7 @@ export default function Landing() {
               </Link>
             </div>
             <p className="animate-fade-in-up stagger-4 mt-6 text-xs text-muted-foreground/60">
-              UK-hosted at job360.uk. No spam, no fluff.
+              No spam, no fluff.
             </p>
           </div>
         </div>
