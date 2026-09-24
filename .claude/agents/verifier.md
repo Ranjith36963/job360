@@ -47,7 +47,7 @@ A table, one row per requirement and per neighbour flow:
 Then:
 - **Console errors** (verbatim, with the step they appeared on) — or "none".
 - **Network failures** (non-2xx, with the URL) — or "none".
-- **Coverage bounds**: what you could NOT exercise (no backend? no LLM key? no
+- **Coverage bounds**: what you could NOT exercise (no backend? no
   second user?). A verdict is only as wide as its test; say where the edge is.
 - **Contradictions**: anything the implementer's summary claimed that you did not see.
 

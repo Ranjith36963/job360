@@ -20,7 +20,7 @@ review against THIS project's rules and patterns — not generic style.
 - **Per-user routes** `Depends(require_user)` + scope by `user.id`, never accept `user_id`
   from path/body (rules #12/#25); account-mgmt verifies current password then clears the
   session cookie (rule #26).
-- **No hardcoded skill/keyword lists** in `src/services/profile/` (rule #28) — LLM + structural passes only. **ESCO is inert scaffolding, not live** (never built/shipped, gitignored, no build step); do not accept "it uses ESCO" as justification for anything.
+- **No hardcoded skill/keyword lists** in `src/services/profile/` — rule #28 in the hard-rules skill states the ban and names the two ESCO gates that pin it.
 - **Next.js 16** (frontend rule #22): `params`/`cookies()`/`searchParams` awaited; no
   `"use client"` on a `page.tsx` that also needs `generateMetadata`.
 - **Tests mock HTTP** with `aioresponses` (rule #4) — no live network.
