@@ -312,7 +312,10 @@ def build_server(version: str = "") -> MCPServer:
         stays under the per-edit list cap.
 
         Also returned: whether the profile is complete, job titles,
-        experience level, which inputs the user has given, your own past edits
+        `experience_level` (the user's own choice — it wins) and
+        `experience_level_inferred` (read off the dated work history, including
+        the positions you write; the fallback when the user chose none; empty
+        when the history says nothing), which inputs the user has given, your own past edits
         (`agent_edits`), and the newest `lessons` the user flagged for next
         time. `raw` keys are empty strings when that input was never given; if
         `raw.truncated` is true, a document was longer than the cap and you are
@@ -348,6 +351,12 @@ def build_server(version: str = "") -> MCPServer:
             "skills_count": s.skills_count,
             "skills": profile_skills(profile),
             "experience_level": s.experience_level,
+            # The level READ OFF the dated work history (including the
+            # `cv_data.cv_positions` you wrote) — the same value the web
+            # profile returns in `preferences`. A separate key so it can never
+            # pass for the user's own choice above, which always wins; "" when
+            # the history says nothing (rule #29).
+            "experience_level_inferred": resp.preferences.get("experience_level_inferred", "") or "",
             "education": s.education,
             "has_cv": s.cv_length > 0,
             "has_linkedin": s.has_linkedin,

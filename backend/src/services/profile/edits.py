@@ -40,6 +40,7 @@ from src.services.profile.models import (
     UserPreferences,
     UserProfile,
 )
+from src.services.profile.seniority import INFERENCE_INPUT_PATHS, infer_from_cv
 
 
 class ProfileEditError(Exception):
@@ -578,6 +579,7 @@ def apply_overlay_rows(profile: UserProfile, rows: list[dict[str, Any]]) -> User
     which returns the rows to its caller and must not read them twice.
     """
     valid_paths = set(editable_paths())
+    touched_inference = False
     for row in rows:
         path = row["path"]
         if path not in valid_paths:
@@ -588,6 +590,18 @@ def apply_overlay_rows(profile: UserProfile, rows: list[dict[str, Any]]) -> User
         head, _, field_name = path.partition(".")
         target: Any = profile.cv_data if head == "cv_data" else profile.preferences
         setattr(target, field_name, row["value"])
+        touched_inference = touched_inference or path in INFERENCE_INPUT_PATHS
+    if touched_inference:
+        # The stored ``experience_level_inferred`` was computed at extraction
+        # time off the STORED history, which never contains what the agent
+        # wrote here. Recompute it off the EFFECTIVE history, in this one read
+        # door, so every reader (web, MCP, tailor) sees the level the agent's
+        # history implies — derived on read, never stored a second time. An
+        # empty result stays empty (rule #29): the agent's history is now the
+        # history, and it says nothing about seniority. The user's own
+        # ``preferences.experience_level`` is a separate field this never
+        # touches: typed wins, inferred is only the fallback (seniority.py).
+        profile.preferences.experience_level_inferred = infer_from_cv(profile.cv_data)
     return profile
 
 
