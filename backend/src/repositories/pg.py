@@ -125,6 +125,28 @@ DEFAULT_DSN = _normalize_dsn(
 # When False (production) every connection uses the ``public`` schema.
 TEST_MODE = False
 
+# Schemas THIS PROCESS has created under schema-per-path isolation (test mode
+# only). Several Claude sessions run the test suite in parallel against the
+# same shared dev Postgres, so a session's end-of-run cleanup must drop only
+# the ``t_*``/``mem_*`` schemas it itself created — never sweep every schema
+# matching the naming pattern, or one session's sessionfinish deletes schemas
+# a concurrent session's tests are still using mid-run (2026-09-24 bug: this
+# produced "relation \"users\" does not exist" / "no schema has been selected"
+# failures in the OTHER session). Populated by ``_open_raw`` (async) and
+# ``pgsync.connect`` (sync) — the only two places that issue CREATE SCHEMA.
+CREATED_SCHEMAS: set[str] = set()
+
+
+def register_created_schema(schema: str) -> None:
+    """Record a schema this process created/touched, for scoped cleanup.
+
+    Called after ``CREATE SCHEMA IF NOT EXISTS`` succeeds (or hits
+    ``DuplicateSchema`` — a concurrent creator in the SAME run, which still
+    means this process now owns/uses that schema). ``"public"`` is never
+    passed here; production always uses ``public`` and never reaches this.
+    """
+    CREATED_SCHEMAS.add(schema)
+
 
 def configure(dsn: str) -> None:
     """Point the helper at ``dsn`` (called by settings on import)."""
@@ -528,6 +550,7 @@ async def _open_raw(schema: str) -> psycopg.AsyncConnection[Row]:
                 # creator (Postgres races on the pg_namespace unique index).
                 # The schema now exists — that's all we needed.
                 pass
+            register_created_schema(schema)
             # The search_path is the per-test schema and NOTHING else. It used to
             # end in ", public", which quietly defeated the isolation it exists to
             # provide: Postgres resolves an unqualified table by WALKING the path,
