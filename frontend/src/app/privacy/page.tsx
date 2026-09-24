@@ -19,7 +19,7 @@ const SUBPROCESSORS: {
     name: "Railway",
     purpose: "Application hosting and database",
     dataShared: "All service data (encrypted in transit and at rest)",
-    location: "EU/USA",
+    location: "Global (servers currently in the USA)",
   },
   {
     name: "Resend",
