@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { CVViewer } from "./CVViewer";
 import type { CVDetail } from "@/lib/types";
 
@@ -61,6 +61,9 @@ const githubDetail = {
   profile_readme: "# Hello, I build things",
 };
 
+// Owner decision, 2026-09-24: the GitHub detail card is folded behind
+// "Show what we read from GitHub", collapsed by default — open it so these
+// tests can see the content they pin.
 function renderViewer(detail: Record<string, unknown> | undefined) {
   render(
     <CVViewer
@@ -69,6 +72,7 @@ function renderViewer(detail: Record<string, unknown> | undefined) {
       githubDetail={detail}
     />
   );
+  fireEvent.click(screen.getByTestId("github-detail-toggle"));
 }
 
 describe("GitHub detail shows everything GitHub gave us", () => {

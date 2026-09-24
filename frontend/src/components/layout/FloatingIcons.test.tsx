@@ -16,9 +16,14 @@
  * "tidying" -z-10 back to z-0.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { FloatingIcons } from "./FloatingIcons";
+
+let mockPathname = "/";
+vi.mock("next/navigation", () => ({
+  usePathname: () => mockPathname,
+}));
 
 describe("FloatingIcons — decoration stays behind content", () => {
   it("renders the layer with a negative z-index and no z-0", () => {
@@ -37,5 +42,32 @@ describe("FloatingIcons — decoration stays behind content", () => {
 
     expect(layer.getAttribute("aria-hidden")).toBe("true");
     expect(layer.className).toContain("pointer-events-none");
+  });
+});
+
+describe("FloatingIcons — fainter everywhere but the landing page and /login", () => {
+  it("stays at full opacity on the landing page", () => {
+    mockPathname = "/";
+    const { getByTestId } = render(<FloatingIcons />);
+    const layer = getByTestId("floating-icons");
+    expect(layer.style.getPropertyValue("--icon-opacity-scale")).toBe("1");
+  });
+
+  it("stays at full opacity on /login", () => {
+    mockPathname = "/login";
+    const { getByTestId } = render(<FloatingIcons />);
+    const layer = getByTestId("floating-icons");
+    expect(layer.style.getPropertyValue("--icon-opacity-scale")).toBe("1");
+  });
+
+  it("drops to about a third of the opacity on a signed-in page", () => {
+    mockPathname = "/applications";
+    const { getByTestId } = render(<FloatingIcons />);
+    const layer = getByTestId("floating-icons");
+    const scale = Number(layer.style.getPropertyValue("--icon-opacity-scale"));
+    expect(scale).toBeCloseTo(1 / 3, 5);
+
+    const firstIcon = layer.firstElementChild as HTMLElement;
+    expect(Number(firstIcon.style.opacity)).toBeCloseTo(0.1 / 3, 5);
   });
 });

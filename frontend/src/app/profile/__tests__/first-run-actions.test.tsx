@@ -50,14 +50,14 @@ describe("ProfilePage — first run, no profile yet", () => {
       expect(screen.getByText(/drop your cv here/i)).toBeInTheDocument(),
     );
 
-    expect(screen.queryByRole("button", { name: /export json resume/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /download profile/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /history/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /clear profile/i })).toBeNull();
 
-    // The meter still reports the empty state honestly (rule #29: an empty
-    // shelf says "empty", it does not hide itself).
-    expect(screen.getByText("No profile")).toBeInTheDocument();
-    expect(screen.getByText("0%")).toBeInTheDocument();
+    // The one-line header still reports the empty state honestly (rule #29:
+    // an empty shelf says "empty", it does not hide itself) — everything is
+    // missing on a brand-new profile.
+    expect(screen.getByText(/^To finish:/)).toBeInTheDocument();
 
     // ...and this is the FIRST-VISIT state, not the generic failure banner.
     // Without this the test would still pass if the 404 fell through to the

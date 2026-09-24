@@ -1,17 +1,19 @@
 /**
- * Profile completeness meter — no double-counting a single answer.
+ * Profile header's one-line status — no double-counting a single answer.
  *
- * THE BUG, as measured. calcCompleteness paid a typed preferred job title
- * TWICE: once for the 15% "Has job titles" bucket (`prefTitles.length > 0`),
- * and again for the 15% "Has preferences" bucket, which OR'd in that exact
- * same `prefTitles.length > 0` check. One answer, two buckets, 30% of the
- * meter for something that should only earn 15%.
+ * THE BUG (as originally measured against the old %/"Almost there" meter,
+ * removed 2026-09-24 in favour of this one line naming what is missing).
+ * calcCompleteness paid a typed preferred job title TWICE: once for the
+ * "Has job titles" bucket (`prefTitles.length > 0`), and again for the "Has
+ * preferences" bucket, which OR'd in that exact same check. One answer, two
+ * buckets — "preferences" read as satisfied when nothing about work
+ * arrangement, experience level or about_me had actually been set.
  *
- * This test pins a profile shape with ONLY a CV (40%) and ONE typed job title
- * (15%) — nothing else filled in. The honest total is 55%. The bug would have
- * read 70%, because the same job title paid for "Has preferences" too even
- * though no actual preference field (work arrangement, experience level,
- * about me) was ever set.
+ * This test pins a profile shape with ONLY a CV and ONE typed job title —
+ * nothing else filled in. The honest missing list is "skills, preferences,
+ * LinkedIn, GitHub" (a CV and job titles are both covered). The bug would
+ * have dropped "preferences" from that list too, because the same typed
+ * title silently satisfied it.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -29,14 +31,14 @@ vi.mock("@/lib/api", async (importOriginal) => ({
       is_complete: false,
       job_titles: [], // no CV-extracted titles
       skills_count: 0,
-      cv_length: 100, // has a CV -> +40
+      cv_length: 100, // has a CV — not missing
       has_linkedin: false,
       has_github: false,
       education: [],
       experience_level: "",
     },
     preferences: {
-      target_job_titles: ["Data Scientist"], // the ONE typed answer -> +15
+      target_job_titles: ["Data Scientist"], // the ONE typed answer — job titles not missing
       additional_skills: [],
       // Nothing here counts as a real preference: "any" and "" are both
       // "not chosen" (rule #29), and about_me is blank.
@@ -50,17 +52,21 @@ vi.mock("@/lib/api", async (importOriginal) => ({
   }),
 }));
 
-describe("ProfilePage — completeness meter does not double-count", () => {
+describe("ProfilePage header — does not double-count a typed job title", () => {
   beforeEach(() => {
     sessionStorage.clear();
   });
 
-  it("a CV plus one typed job title reads 55%, not 70%", async () => {
+  it("names skills, preferences, LinkedIn and GitHub as missing — not a CV or job titles", async () => {
     render(<ProfilePage />);
 
-    // 40 (CV) + 15 (job title, counted once) = 55. If the double-count bug
-    // were still present, the same title would also satisfy "Has
-    // preferences" and this would read 70%.
-    expect(await screen.findByText("55%")).toBeInTheDocument();
+    // If the double-count bug were still present, the typed job title would
+    // also satisfy "preferences" and it would be missing from this line.
+    const header = await screen.findByText(/^To finish:/);
+    expect(header).toHaveTextContent(
+      "To finish: add skills, add preferences, add LinkedIn, add GitHub"
+    );
+    expect(header).not.toHaveTextContent("add a CV");
+    expect(header).not.toHaveTextContent("add job titles");
   });
 });

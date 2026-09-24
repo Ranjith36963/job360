@@ -426,6 +426,9 @@ class ApplicationSummaryOut(BaseModel):
     job_id: int
     job_title: str
     job_company: str
+    # 2026-09-24 — the list card's title fallback needs the ad link's host
+    # when both job_title and job_company are empty.
+    job_url: str = ""
     status: str
     last_event_at: Optional[str]
     events: int
@@ -435,6 +438,9 @@ class ApplicationSummaryOut(BaseModel):
     visa_signal: str = "unknown"
     visa_country: str = ""
     needs_sponsorship: Optional[bool] = None
+    # 2026-09-24 — the list card's "Next:" line; same state machine and same
+    # fields `get_application`'s `next_step` reads, batched for the page.
+    next_step: NextStepOut
 
 
 class ListApplicationsResponse(BaseModel):

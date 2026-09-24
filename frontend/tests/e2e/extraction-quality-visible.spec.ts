@@ -127,9 +127,9 @@ test.describe("Extraction quality is visible to the user", () => {
     // against jobs / add what is missing yourself", which was true while
     // Job360 did the reading and is a dead end now — it told the person to
     // retype their own CV instead of naming the thing that does it for them.
-    await expect(warning).toContainText(/connect your agent/i);
+    await expect(warning).toContainText(/connect your assistant/i);
     await expect(
-      warning.getByRole("link", { name: /connect your agent/i })
+      warning.getByRole("link", { name: /connect your assistant/i })
     ).toHaveAttribute("href", "/settings/connect");
     // The specific problems are shown so the warning is actionable.
     await expect(warning).toContainText(/no job titles/i);

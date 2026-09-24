@@ -42,7 +42,7 @@ export function JsonResumeExportButton() {
       ) : (
         <Download className="h-3.5 w-3.5" />
       )}
-      {loading ? "Exporting…" : "Export JSON Resume"}
+      {loading ? "Downloading…" : "Download profile"}
     </Button>
   );
 }

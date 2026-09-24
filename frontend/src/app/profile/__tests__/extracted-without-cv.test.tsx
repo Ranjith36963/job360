@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import ProfilePage from "../page";
 
 vi.mock("next/navigation", () => ({
@@ -129,10 +129,16 @@ describe("ProfilePage — LinkedIn/GitHub render without a CV (Unit B)", () => {
 
     render(<ProfilePage />);
 
-    // LinkedIn work history — proves the LinkedIn subsections rendered.
+    // Both detail cards are folded behind a toggle by default (owner
+    // decision, 2026-09-24) — open them to see the content this test pins.
     await waitFor(() => {
-      expect(screen.getByText("Senior Backend Engineer")).toBeInTheDocument();
+      expect(screen.getByTestId("linkedin-detail-toggle")).toBeInTheDocument();
     });
+    fireEvent.click(screen.getByTestId("linkedin-detail-toggle"));
+    fireEvent.click(screen.getByTestId("github-detail-toggle"));
+
+    // LinkedIn work history — proves the LinkedIn subsections rendered.
+    expect(screen.getByText("Senior Backend Engineer")).toBeInTheDocument();
     expect(screen.getByText(/Acme Robotics/)).toBeInTheDocument();
 
     // GitHub repo — proves the GitHub detail rendered too, in the same pass.
@@ -161,6 +167,10 @@ describe("ProfilePage — LinkedIn/GitHub render without a CV (Unit B)", () => {
     expect(
       screen.getByText("Backend engineer with 5 years experience.")
     ).toBeInTheDocument();
+
+    // Both detail cards are folded behind a toggle by default; open them.
+    fireEvent.click(screen.getByTestId("linkedin-detail-toggle"));
+    fireEvent.click(screen.getByTestId("github-detail-toggle"));
     expect(screen.getByText("Senior Backend Engineer")).toBeInTheDocument();
     expect(screen.getByText("job-matcher")).toBeInTheDocument();
   });
