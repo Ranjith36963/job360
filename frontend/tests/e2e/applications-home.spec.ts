@@ -187,9 +187,6 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
   }) => {
     await context.addCookies([SESSION_COOKIE]);
     await mockBackend(page);
-    // Accept any native confirm() the "Mark Applied" button on the
-    // application page raises — a no-op when it uses something else.
-    page.on("dialog", (dialog) => void dialog.accept());
 
     await page.goto("/");
 
@@ -207,10 +204,10 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     await page.goto(`/applications/${APPLICATION_ID}`);
     await expect(page.getByText(/data engineer/i).first()).toBeVisible({ timeout: 20_000 });
 
-    await page
-      .getByRole("button", { name: /mark.*applied|i applied|record application|applied/i })
-      .first()
-      .click();
+    // PR #631 — Mark Applied asks first, with an inline Confirm/Cancel
+    // (never a native dialog): click it, then confirm.
+    await page.getByTestId("mark-applied").click();
+    await page.getByTestId("mark-applied-confirm").click();
     await expect(page.getByText(/^applied$/i).first()).toBeVisible({ timeout: 20_000 });
 
     // The list reflects the same change — reload the home page.
