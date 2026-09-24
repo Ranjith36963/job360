@@ -38,30 +38,7 @@ Nothing here is scored, ranked or recommended. The candidate profile (CV + Linke
 
 Two deployables share one Postgres database. The backend is a FastAPI app whose product path is `POST /api/jobs/bring` (`api/routes/bring.py`) → the application spine (`services/applications/spine.py`, append-only events/artifacts/receipts) → tailoring as a web fallback (`api/routes/tailor.py`) → the MCP server (`api/mcp_server.py`), with `services/profile/` feeding profile data into all of it. `src/repositories/pg.py` is the single DB door — an aiosqlite-shaped async driver that rewrites legacy SQLite SQL to Postgres at runtime; every module imports it as `from src.repositories import pg as aiosqlite`. The frontend is a Next.js app that is a thin screen over the same routes.
 
-```
-job360/
-├── backend/
-│   ├── main.py                  # FastAPI uvicorn entry (thin)
-│   └── src/
-│       ├── api/
-│       │   └── routes/          # bring, receipts, applications, tailor, profile,
-│       │                        # auth, tokens, oauth, well_known, health, client_log
-│       ├── services/
-│       │   ├── applications/    # the Application object + append-only event/artifact log
-│       │   ├── profile/         # CV / LinkedIn / GitHub extraction
-│       │   ├── fetch/           # the URL-fetch web fallback + its SSRF guard
-│       │   └── tailoring/       # the CV/cover-letter tailor web fallback
-│       ├── repositories/        # Postgres via psycopg3 (aiosqlite-shaped shim)
-│       └── utils/
-├── backend/migrations/          # forward/reverse SQL migration pairs + runner.py
-└── frontend/
-    └── src/
-        ├── app/                 # Next.js App Router pages
-        ├── components/
-        └── lib/                 # fetch wrapper, generated API types, query keys
-```
-
-Every path above exists today; a fuller tree with the generated fact table (migration head, route/hard-rule counts, etc.) lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md) — read that for the deep reference, not this file.
+The directory tree and the generated fact table (migration head, route and hard-rule counts) live in [`ARCHITECTURE.md`](./ARCHITECTURE.md) — read that for the deep reference, not this file.
 
 ## Quick Start
 
