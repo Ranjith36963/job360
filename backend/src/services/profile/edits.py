@@ -14,13 +14,17 @@ accepted. Values are typed by the field's own annotation (R10), not by a
 hand-written table — the two exceptions are ``preferences.work_arrangement``
 and ``preferences.experience_level``, which are closed-set strings sharing
 the vocabulary the web form uses (``models.VALID_WORK_ARRANGEMENTS`` /
-``VALID_EXPERIENCE_LEVELS``).
+``VALID_EXPERIENCE_LEVELS``). A third exception (slice B2): the record lists
+``cv_data.cv_positions`` / ``cv_data.cv_projects`` are ``list[dict]``, which
+an annotation cannot describe, so their closed key set is ``RECORD_SCHEMAS``.
 """
 from __future__ import annotations
 
 import json
 import math
+import re
 import typing
+import unicodedata
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -210,6 +214,224 @@ def _validate_number(path: str, value: Any) -> float:
     return number
 
 
+# ── Record lists (slice B2, decision 28) ─────────────────────────────────────
+# ``cv_data.cv_positions`` and ``cv_data.cv_projects`` are ``list[dict]`` —
+# the one editable shape a field annotation cannot describe, so the key set is
+# declared here. It is the shape every reader already expects: the CVData
+# comments in ``models.py``, ``seniority._position_boundaries`` (one combined
+# ``dates`` string), ``preferences`` (title/company/location/bullets) and the
+# web ``CVViewer`` (company/title/dates/location/bullets;
+# name/description/technologies/dates). A key outside the set is a 422 naming
+# it — never silently dropped, never stored.
+#
+# Field kinds: ``line`` one line, <= PROFILE_EDIT_MAX_ITEM_CHARS; ``text`` may
+# keep line breaks, <= PROFILE_EDIT_MAX_CHARS; ``dates`` a date range,
+# normalised (see ``_validate_dates``); ``bullets`` a list of lines, each <=
+# PROFILE_EDIT_MAX_BULLET_CHARS; ``tags`` a de-duplicated list of short lines.
+RECORD_SCHEMAS: dict[str, dict[str, str]] = {
+    "cv_data.cv_positions": {
+        "company": "line", "title": "line", "dates": "dates", "location": "line", "bullets": "bullets",
+    },
+    "cv_data.cv_projects": {
+        "name": "line", "description": "text", "technologies": "tags", "dates": "dates",
+    },
+}
+# A record must say WHAT it is — a position with neither a title nor a company
+# (or a project with no name) is not shown by any reader and is refused.
+_RECORD_IDENTITY: dict[str, tuple[str, ...]] = {
+    "cv_data.cv_positions": ("title", "company"),
+    "cv_data.cv_projects": ("name",),
+}
+
+# What "control character" means — the same set ``services.applications.spine``
+# refuses in an email source (S3 of slice 6): Unicode Cc (C0, DEL, C1), the
+# Zl/Zp line terminators, and the bidi embeddings/overrides/isolates. Here they
+# are STRIPPED (replaced by a space, then whitespace collapsed) rather than
+# refused: a PDF copy-paste routinely carries a stray tab or form feed.
+_BANNED_CATEGORIES = frozenset({"Cc", "Zl", "Zp"})
+_BANNED_CHARS = frozenset(
+    chr(cp) for cp in (0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069)
+)
+
+
+def _strip_control(text: str, *, keep_newlines: bool = False) -> str:
+    """Replace every control/bidi char with a space and collapse whitespace.
+
+    ``keep_newlines`` keeps ``\\n`` (``\\r\\n``/``\\r`` normalised to it) as the
+    one allowed line break, collapsing spaces within each line.
+    """
+    if keep_newlines:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    out = "".join(
+        ch if (keep_newlines and ch == "\n")
+        else (" " if ch in _BANNED_CHARS or unicodedata.category(ch) in _BANNED_CATEGORIES else ch)
+        for ch in text
+    )
+    if keep_newlines:
+        lines = [" ".join(line.split()) for line in out.split("\n")]
+        return "\n".join(lines).strip()
+    return " ".join(out.split())
+
+
+_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+_MONTH_PATTERN = (
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
+    r"sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+)
+_POINT = r"(?:(?P<{m}>" + _MONTH_PATTERN + r")\.?\s+)?(?P<{y}>(?:19|20)\d{{2}})"
+_ONGOING = r"present|current|currently|now|ongoing"
+# One boundary, or "start <sep> end" where end may be ongoing; "2019 to date"
+# is its own spelling because "to" is also a separator.
+_DATES_RE = re.compile(
+    r"^" + _POINT.format(m="sm", y="sy")
+    + r"(?:\s*(?:-|–|—|\bto\b)\s*(?:" + _POINT.format(m="em", y="ey") + r"|(?P<ongoing>" + _ONGOING + r"))"
+    + r"|\s+(?P<todate>to\s+date))?$",
+    re.IGNORECASE,
+)
+_DATES_HINT = "use 'Jan 2020 – Present', 'Mar 2018 – Jun 2020', '2019 – 2021' or '2020'"
+
+
+def _validate_dates(where: str, value: str) -> str:
+    """Validate one ``dates`` string and return its canonical form.
+
+    Canonical is ``"Mon YYYY – Mon YYYY"`` (months optional, the end may be
+    ``Present``), joined with an en dash — exactly what
+    ``seniority._position_boundaries`` splits and ``_parse_year_month`` reads,
+    and what the web shows verbatim. Empty stays empty (unknown dates are
+    silent, rule #29). Refused: a string that is not one of those shapes, an
+    end before its start, ``Present`` as a start, and a year more than one
+    year in the future.
+    """
+    if not value:
+        return ""
+    match = _DATES_RE.match(value)
+    if not match:
+        raise ProfileEditError(422, f"{where}: {value!r} is not a date range — {_DATES_HINT}")
+
+    def _point(month: str | None, year: str) -> tuple[str, int, int | None]:
+        if month:
+            idx = _MONTHS.index(month[:3].lower())
+            return f"{_MONTHS[idx].title()} {year}", int(year), idx + 1
+        return year, int(year), None
+
+    start_text, start_year, start_month = _point(match.group("sm"), match.group("sy"))
+    latest = datetime.now(timezone.utc).year + 1
+    if start_year > latest:
+        raise ProfileEditError(422, f"{where}: {value!r} starts after {latest}")
+    if match.group("ongoing") or match.group("todate"):
+        return f"{start_text} – Present"
+    if not match.group("ey"):
+        return start_text
+    end_text, end_year, end_month = _point(match.group("em"), match.group("ey"))
+    if end_year > latest:
+        raise ProfileEditError(422, f"{where}: {value!r} ends after {latest}")
+    if (end_year, end_month or 12) < (start_year, start_month or 1):
+        raise ProfileEditError(422, f"{where}: {value!r} ends before it starts")
+    return f"{start_text} – {end_text}"
+
+
+def _record_line(where: str, value: Any, limit: int, setting: str) -> str:
+    if not isinstance(value, str):
+        raise ProfileEditError(422, f"{where} must be a string, got {type(value).__name__}")
+    text = _strip_control(value)
+    if len(text) > limit:
+        raise ProfileEditError(422, f"{where} exceeds the {limit}-character limit ({setting})")
+    return text
+
+
+def _record_lines(where: str, value: Any, limit: int, setting: str, *, dedup: bool) -> list[str]:
+    if not isinstance(value, list):
+        raise ProfileEditError(422, f"{where} must be a list of strings, got {type(value).__name__}")
+    out: list[str] = []
+    seen: set[str] = set()
+    for i, item in enumerate(value):
+        text = _record_line(f"{where}[{i}]", item, limit, setting)
+        key = text.lower()
+        if not text or (dedup and key in seen):
+            continue
+        seen.add(key)
+        out.append(text)
+    if len(out) > settings.PROFILE_EDIT_MAX_RECORD_ITEMS:
+        raise ProfileEditError(
+            422,
+            f"{where} exceeds the {settings.PROFILE_EDIT_MAX_RECORD_ITEMS}-item limit "
+            "(PROFILE_EDIT_MAX_RECORD_ITEMS)",
+        )
+    return out
+
+
+def _validate_records(path: str, value: Any) -> list[dict[str, Any]]:
+    """Validate a whole record list (the write REPLACES the list).
+
+    Every record comes back with EVERY key of its schema, missing ones filled
+    with ``""``/``[]``, so readers always see one stable shape.
+    """
+    schema = RECORD_SCHEMAS[path]
+    allowed = ", ".join(schema)
+    if not isinstance(value, list):
+        raise ProfileEditError(
+            422, f"{path} must be a list of objects with keys {allowed}, got {type(value).__name__}"
+        )
+    if len(value) > settings.PROFILE_EDIT_MAX_RECORDS:
+        raise ProfileEditError(
+            422,
+            f"{path} exceeds the {settings.PROFILE_EDIT_MAX_RECORDS}-record limit (PROFILE_EDIT_MAX_RECORDS)",
+        )
+    records: list[dict[str, Any]] = []
+    for i, raw in enumerate(value):
+        where = f"{path}[{i}]"
+        if not isinstance(raw, dict):
+            raise ProfileEditError(
+                422, f"{where} must be an object with keys {allowed}, got {type(raw).__name__}"
+            )
+        unknown = [str(k) for k in raw if k not in schema]
+        if unknown:
+            raise ProfileEditError(
+                422, f"{where}: unknown key {unknown[0]!r} — allowed keys: {allowed}"
+            )
+        record: dict[str, Any] = {}
+        for key, kind in schema.items():
+            item_where = f"{where}.{key}"
+            field_value = raw.get(key)
+            if kind == "bullets":
+                record[key] = [] if field_value is None else _record_lines(
+                    item_where, field_value, settings.PROFILE_EDIT_MAX_BULLET_CHARS,
+                    "PROFILE_EDIT_MAX_BULLET_CHARS", dedup=False,
+                )
+            elif kind == "tags":
+                record[key] = [] if field_value is None else _record_lines(
+                    item_where, field_value, settings.PROFILE_EDIT_MAX_ITEM_CHARS,
+                    "PROFILE_EDIT_MAX_ITEM_CHARS", dedup=True,
+                )
+            elif field_value is None:
+                record[key] = ""
+            elif kind == "text":
+                if not isinstance(field_value, str):
+                    raise ProfileEditError(
+                        422, f"{item_where} must be a string, got {type(field_value).__name__}"
+                    )
+                text = _strip_control(field_value, keep_newlines=True)
+                if len(text) > settings.PROFILE_EDIT_MAX_CHARS:
+                    raise ProfileEditError(
+                        422,
+                        f"{item_where} exceeds the {settings.PROFILE_EDIT_MAX_CHARS}-character limit "
+                        "(PROFILE_EDIT_MAX_CHARS)",
+                    )
+                record[key] = text
+            else:  # line / dates
+                text = _record_line(
+                    item_where, field_value, settings.PROFILE_EDIT_MAX_ITEM_CHARS, "PROFILE_EDIT_MAX_ITEM_CHARS"
+                )
+                record[key] = _validate_dates(item_where, text) if kind == "dates" else text
+        identity = _RECORD_IDENTITY[path]
+        if not any(record[k] for k in identity):
+            raise ProfileEditError(
+                422, f"{where} needs a non-empty {' or '.join(identity)}"
+            )
+        records.append(record)
+    return records
+
+
 def validate_edit(path: str, value: Any) -> Any:
     """Normalise ``value`` for ``path``, or raise ``ProfileEditError(422, ...)``.
 
@@ -226,6 +448,13 @@ def validate_edit(path: str, value: Any) -> Any:
         return None
     if path in _CLOSED_SET_PATHS:
         return _validate_closed_set(path, value, _CLOSED_SET_PATHS[path])
+    if path in RECORD_SCHEMAS:
+        return _bound_encoded_size(
+            path,
+            _validate_records(path, value),
+            limit=settings.PROFILE_EDIT_MAX_RECORDS_CHARS,
+            setting="PROFILE_EDIT_MAX_RECORDS_CHARS",
+        )
 
     ftype = _field_type(path)
     origin = typing.get_origin(ftype)
@@ -243,7 +472,9 @@ def validate_edit(path: str, value: Any) -> Any:
     return _bound_encoded_size(path, normalised)
 
 
-def _bound_encoded_size(path: str, value: Any) -> Any:
+def _bound_encoded_size(
+    path: str, value: Any, *, limit: int | None = None, setting: str = "PROFILE_EDIT_MAX_CHARS"
+) -> Any:
     """S9 — the ENCODED size is bounded too, not just the shape.
 
     ``PROFILE_EDIT_MAX_CHARS`` already caps a single string, and
@@ -253,12 +484,13 @@ def _bound_encoded_size(path: str, value: Any) -> Any:
     string to be. ``value`` is stored as ``json.dumps(value)``, so the honest
     bound is over the encoded form, applied identically to every type.
     """
+    cap = settings.PROFILE_EDIT_MAX_CHARS if limit is None else limit
     encoded = len(json.dumps(value))
-    if encoded > settings.PROFILE_EDIT_MAX_CHARS:
+    if encoded > cap:
         raise ProfileEditError(
             422,
             f"{path} encodes to {encoded} characters, over the "
-            f"{settings.PROFILE_EDIT_MAX_CHARS}-character limit (PROFILE_EDIT_MAX_CHARS)",
+            f"{cap}-character limit ({setting})",
         )
     return value
 
