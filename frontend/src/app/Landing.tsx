@@ -19,47 +19,53 @@ import {
 // recommends jobs (VISION rule 4); the pitch is the memory layer AFTER the
 // click, for the seeker's own AI agent — not a search or matching engine.
 // See docs/product/VISION.md.
+// Owner's positioning (2026-09-24): "Job360 is the shared job-hunt record for
+// your AI assistant: context, memory and every version, in one place any
+// assistant can read and write." Audience: people who already use an AI
+// assistant. First action: connect it. The assistant judges and writes, the
+// user applies — Job360 never applies for anyone.
+const ASSISTANTS = "Claude, ChatGPT, Perplexity, Grok or Gemini";
+
 const FEATURES = [
   {
-    icon: Globe,
-    title: "Bring Any Job",
+    icon: Radar,
+    title: "Context",
     description:
-      "Paste a job you found anywhere — a URL or the raw text. Job360 stores the ad and keeps it even after the listing disappears.",
+      "Your assistant starts every chat already knowing your CV, LinkedIn, GitHub and what you want next. No more pasting your CV in again.",
     stagger: 1,
   },
   {
-    icon: Target,
-    title: "One Application, One Record",
+    icon: Brain,
+    title: "Memory",
     description:
-      "Every job you bring becomes a single application: every CV and cover-letter version, every event, and the receipt of what you actually sent.",
+      "Every job you bring, every step (applied, interview, offer) and every fit note is kept with its date. Pick up where you left off, in any chat.",
     stagger: 2,
   },
   {
     icon: Layers,
-    title: "Every Version, Forever",
+    title: "Every Version",
     description:
-      "Every CV, cover letter and edit you ever save is kept — nothing is overwritten. Come back a year later and read exactly what you sent.",
+      "Every CV and cover letter your assistant writes is saved as a new version. Nothing is overwritten, and the receipt shows exactly what you sent.",
     stagger: 3,
   },
   {
-    icon: Radar,
-    title: "Built From Your Real History",
+    icon: Globe,
+    title: "Bring Any Job",
     description:
-      "Your profile comes from your CV, LinkedIn and GitHub — the real facts your agent needs, kept in one place.",
+      "Paste a link or the text of a job you found anywhere. Job360 keeps the ad, even after the listing disappears.",
     stagger: 4,
   },
   {
-    icon: Brain,
-    title: "Your Agent's Memory",
-    description:
-      "Connect your own Claude or ChatGPT over MCP so it can read your profile and applications, and write straight back into them.",
+    icon: Plug,
+    title: "Any Assistant",
+    description: `${ASSISTANTS}: they all read and write the same record. Switch assistants and keep everything.`,
     stagger: 5,
   },
   {
     icon: Shield,
-    title: "Secure by Design",
+    title: "You Stay in Control",
     description:
-      "OAuth 2.1 sign-in means only the agents you approve can act for you, and you can revoke any of them at any time.",
+      "Only the assistants you approve can connect, and you can disconnect any of them at any time.",
     stagger: 6,
   },
 ] as const;
@@ -72,22 +78,22 @@ const STATS = [
     description: "Every CV & cover letter kept",
   },
   {
-    icon: Brain,
-    value: "MCP",
-    label: "Agent access",
-    description: "Your own Claude or ChatGPT reads and writes",
+    icon: Plug,
+    value: "5",
+    label: "Assistants",
+    description: "Claude, ChatGPT, Perplexity, Grok, Gemini",
   },
   {
     icon: Clock,
     value: "Every",
-    label: "Event",
-    description: "Typed, timestamped, kept",
+    label: "Step",
+    description: "Dated and kept",
   },
   {
     icon: Shield,
-    value: "OAuth 2.1",
-    label: "Secured",
-    description: "Only the agents you approve",
+    value: "You",
+    label: "Decide",
+    description: "Which assistants can connect",
   },
 ] as const;
 
@@ -139,7 +145,7 @@ export default function Landing() {
           {/* Pill badge */}
           <div className="animate-fade-in-up stagger-1 mb-8 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/[0.06] px-4 py-1.5 text-sm text-primary">
             <Sparkles className="h-3.5 w-3.5" />
-            <span className="font-medium">Your Career Memory Layer</span>
+            <span className="font-medium">Works with {ASSISTANTS}</span>
           </div>
 
           {/* Headline — each line staggers in, neon glow */}
@@ -148,15 +154,12 @@ export default function Landing() {
             style={{ textShadow: '0 0 80px oklch(0.89 0.29 128 / 0.15), 0 0 40px oklch(0.89 0.29 128 / 0.08)' }}
           >
             <span className="animate-fade-in-up stagger-2 block">
-              Your CV.
+              The shared job-hunt record
             </span>
             <span className="animate-fade-in-up stagger-3 block mt-1">
-              Every Application.
-            </span>
-            <span className="animate-fade-in-up stagger-4 block mt-1">
-              One{" "}
+              for your{" "}
               <span className="bg-gradient-to-r from-primary via-lime-300 to-primary bg-clip-text text-transparent">
-                Record
+                AI assistant
               </span>
               .
             </span>
@@ -164,35 +167,34 @@ export default function Landing() {
 
           {/* Subtitle */}
           <p className="animate-fade-in-up stagger-5 mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground sm:text-xl">
-            Upload your CV, bring the jobs you find, and let Job
+            Context, memory and every version, in one place any assistant can
+            read and write. Your assistant judges fit and writes the CV. You
+            apply. Job
             <span className="bg-gradient-to-r from-primary via-lime-300 to-primary bg-clip-text text-transparent font-semibold">
               360
             </span>{" "}
-            keep every document, every event, and the receipt — so your own
-            AI agent always has the full story.
+            keeps the record.
           </p>
 
-          {/* CTAs */}
+          {/* CTAs — connecting the assistant comes first (owner, 2026-09-24):
+              the product does nothing until an assistant reads and writes.
+              A signed-out visitor is bounced to /login?next=... by
+              middleware.ts, same as any other protected route. */}
           <div className="animate-fade-in-up stagger-6 mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
             <Link
-              href="/profile"
+              href="/settings/connect"
               className="group inline-flex h-12 items-center gap-2 rounded-xl bg-primary px-8 text-sm font-semibold text-primary-foreground shadow-[0_0_30px_oklch(0.89_0.29_128/0.4)] transition-all hover:shadow-[0_0_50px_oklch(0.89_0.29_128/0.6)] hover:brightness-110 hover:scale-105"
             >
-              <Upload className="h-4 w-4" />
-              Get Started
+              <Plug className="h-4 w-4" />
+              Connect your assistant
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Link>
-            {/* Second, secondary path — the whole product depends on the user
-                connecting their own agent, so it belongs beside the primary
-                CTA, not buried behind a gear icon. A signed-out visitor is
-                bounced to /login?next=/settings/connect by middleware.ts,
-                same as any other protected route. */}
             <Link
-              href="/settings/connect"
+              href="/profile"
               className="inline-flex h-12 items-center gap-2 rounded-xl border border-border/60 bg-transparent px-8 text-sm font-semibold text-foreground transition-colors hover:border-primary/60 hover:text-primary"
             >
-              <Plug className="h-4 w-4" />
-              Connect an agent
+              <Upload className="h-4 w-4" />
+              Upload your CV
             </Link>
           </div>
         </div>
@@ -245,15 +247,15 @@ export default function Landing() {
           {/* Section header */}
           <div className="animate-fade-in-up stagger-1 mx-auto max-w-2xl text-center mb-12 lg:mb-16">
             <p className="text-sm font-semibold uppercase tracking-widest text-primary">
-              Everything you need
+              What Job360 keeps
             </p>
             <h2 className="font-heading mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
-              Built for serious job seekers
+              Context, memory and every version
             </h2>
             <p className="mt-4 text-muted-foreground text-lg">
-              Not another job board. Job360 is the memory layer that keeps
-              every job, document and event straight — so your own AI agent
-              can act on it.
+              Not a job board, and no AI of its own. Job360 keeps your whole
+              job hunt in one place, so your assistant can pick it up in any
+              chat.
             </p>
           </div>
 
@@ -299,23 +301,22 @@ export default function Landing() {
             {[
               {
                 step: "01",
-                title: "Upload your CV",
-                description:
-                  "Drop your PDF or DOCX, add LinkedIn and GitHub. Job360 keeps the text; your connected assistant fills in your skills, roles and history.",
-                icon: Upload,
+                title: "Connect your assistant",
+                description: `Connect ${ASSISTANTS}. Add your CV, LinkedIn and GitHub, and your assistant fills in your skills, roles and history.`,
+                icon: Plug,
               },
               {
                 step: "02",
                 title: "Bring the job you found",
                 description:
-                  "Paste a URL or the raw text for a job you found anywhere. Job360 stores the ad and starts one application record, even after the listing disappears.",
+                  "Paste a link or the text of a job you found anywhere. Job360 keeps the ad and starts one record for that application.",
                 icon: Zap,
               },
               {
                 step: "03",
-                title: "Let your agent take it from there",
+                title: "Your assistant works, Job360 remembers",
                 description:
-                  "Your own Claude or ChatGPT reads your profile and application over MCP — judges fit, drafts the CV, and applies. Job360 remembers everything it did.",
+                  "Your assistant judges fit and writes the CV. You apply. Job360 keeps every version, every step and the receipt of what you sent.",
                 icon: Target,
               },
             ].map(({ step, title, description, icon: Icon }, i) => (
@@ -367,31 +368,31 @@ export default function Landing() {
 
           <div className="relative">
             <h2 className="animate-fade-in-up stagger-1 font-heading text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
-              Ready to give your{" "}
+              Give your{" "}
               <span className="bg-gradient-to-r from-primary via-lime-300 to-primary bg-clip-text text-transparent">
-                agent
+                assistant
               </span>{" "}
-              a memory?
+              the full story
             </h2>
             <p className="animate-fade-in-up stagger-2 mx-auto mt-4 max-w-xl text-lg text-muted-foreground">
-              Upload your CV, bring the jobs you find, and give your own AI
-              agent everything it needs to apply well.
+              Connect your assistant, bring the jobs you find, and keep your
+              whole job hunt in one shared record.
             </p>
             <div className="animate-fade-in-up stagger-3 mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
               <Link
-                href="/profile"
+                href="/settings/connect"
                 className="group inline-flex h-14 items-center gap-3 rounded-xl bg-primary px-10 text-base font-semibold text-primary-foreground shadow-[0_0_30px_oklch(0.89_0.29_128/0.4)] transition-all hover:shadow-[0_0_50px_oklch(0.89_0.29_128/0.6)] hover:brightness-110 hover:scale-105"
               >
-                <Upload className="h-5 w-5" />
-                Upload Your CV
+                <Plug className="h-5 w-5" />
+                Connect your assistant
                 <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
               </Link>
               <Link
-                href="/settings/connect"
+                href="/profile"
                 className="inline-flex h-14 items-center gap-3 rounded-xl border border-border/60 bg-transparent px-10 text-base font-semibold text-foreground transition-colors hover:border-primary/60 hover:text-primary"
               >
-                <Plug className="h-5 w-5" />
-                Connect an agent
+                <Upload className="h-5 w-5" />
+                Upload your CV
               </Link>
             </div>
             <p className="animate-fade-in-up stagger-4 mt-6 text-xs text-muted-foreground/60">

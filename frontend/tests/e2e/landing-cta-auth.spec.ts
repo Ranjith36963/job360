@@ -3,7 +3,7 @@ import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 /**
  * Landing-CTA → Profile journeys.
  *
- * The homepage CTAs ("Get Started" / "Upload Your CV") link to /profile, a
+ * The homepage "Upload your CV" CTAs link to /profile, a
  * route protected by middleware.ts. This spec locks in the contract that a
  * logged-OUT visitor is sent through sign-in/registration first and only
  * reaches /profile once authenticated, while a logged-IN visitor goes straight
@@ -55,32 +55,24 @@ async function signedIn(context: BrowserContext) {
 test.describe("Landing CTA → profile journeys", () => {
   // ── Logged out: the CTAs gate behind sign-in, remembering /profile ────────
 
-  test("logged-out 'Get Started' redirects to sign-in with next=/profile", async ({
+  test("logged-out 'Upload your CV' redirects to sign-in with next=/profile", async ({
     page,
   }) => {
     await page.goto("/");
-    await page.getByRole("link", { name: /get started/i }).click();
+    await page.getByRole("link", { name: /upload your cv/i }).first().click();
     // Generous timeout: Next dev cold-compiles /login on first hit.
     await expect(page).toHaveURL(/\/login\?next=%2Fprofile/, { timeout: 40_000 });
   });
 
-  test("logged-out 'Upload Your CV' redirects to sign-in with next=/profile", async ({
-    page,
-  }) => {
-    await page.goto("/");
-    await page.getByRole("link", { name: /upload your cv/i }).click();
-    await expect(page).toHaveURL(/\/login\?next=%2Fprofile/, { timeout: 40_000 });
-  });
-
-  // Agentic UX audit (2026-09-08) — the hero's secondary CTA links straight
-  // to /settings/connect; href check only, no navigation needed here since
-  // the middleware redirect for a protected route is already covered above.
-  test("hero 'Connect an agent' link points at /settings/connect", async ({
+  // Owner, 2026-09-24 — connecting the assistant is the hero's FIRST action;
+  // href check only, the middleware redirect for a protected route is covered
+  // above.
+  test("hero 'Connect your assistant' link points at /settings/connect", async ({
     page,
   }) => {
     await page.goto("/");
     await expect(
-      page.getByRole("link", { name: /connect an agent/i }).first()
+      page.getByRole("link", { name: /connect your assistant/i }).first()
     ).toHaveAttribute("href", "/settings/connect");
   });
 
@@ -88,7 +80,7 @@ test.describe("Landing CTA → profile journeys", () => {
   //
   // R14 (docs/plans/2026-09-04-application-spine) — a signed-in visitor's "/"
   // is now the applications home, not the marketing landing page, so there is
-  // no more "Get Started" CTA to click for this journey. The behaviour this
+  // no landing CTA to click for this journey. The behaviour this
   // journey actually protects — a real session reaches a protected page with
   // no sign-in detour — is asserted directly against /profile instead.
 
@@ -124,7 +116,7 @@ test.describe("Landing CTA → profile journeys", () => {
     await expect(page.getByRole("heading", { name: /your applications/i })).toBeVisible({
       timeout: 20_000,
     });
-    await expect(page.getByRole("link", { name: /get started/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /connect your assistant/i })).toHaveCount(0);
   });
 
   // ── Journey 2: returning user → sign in → /profile ────────────────────────

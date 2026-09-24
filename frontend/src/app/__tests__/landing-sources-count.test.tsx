@@ -43,7 +43,14 @@ describe("Landing page — no source-count copy (R14)", () => {
 
   it("still renders the hero headline", () => {
     const { getByText } = render(<Landing />);
-    expect(getByText("Your CV.")).toBeInTheDocument();
+    expect(getByText("The shared job-hunt record")).toBeInTheDocument();
+  });
+
+  // Owner, 2026-09-24 — the assistant judges and writes, the USER applies.
+  // Job360 records an application; nothing here submits one.
+  it("never claims the assistant applies for you", () => {
+    const { container } = render(<Landing />);
+    expect(container.textContent ?? "").not.toMatch(/\bapplies\b/i);
   });
 });
 

@@ -34,20 +34,23 @@ const jetbrainsMono = JetBrains_Mono({
 // C2 (application-spine review, VISION rule 4) — Job360 never sources or
 // ranks jobs; the meta/OpenGraph/Twitter copy used to advertise a source
 // count and a multi-factor score on every page. Mission copy instead.
-const TAGLINE = "Your career memory. Your agent's context.";
+// Owner's positioning line (2026-09-24).
+const TITLE = "Job360 — The shared job-hunt record for your AI assistant";
+const TAGLINE =
+  "Context, memory and every version, in one place any assistant can read and write.";
 
 export const metadata: Metadata = {
-  title: "Job360 — Your agent's memory",
-  description: `${TAGLINE} Job360 remembers every application, every version, every outcome for the AI agent doing your job search.`,
+  title: TITLE,
+  description: `The shared job-hunt record for your AI assistant. ${TAGLINE}`,
   openGraph: {
-    title: "Job360 — Your agent's memory",
+    title: TITLE,
     description: TAGLINE,
     type: "website",
     siteName: "Job360",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Job360 — Your agent's memory",
+    title: TITLE,
     description: TAGLINE,
   },
 };
