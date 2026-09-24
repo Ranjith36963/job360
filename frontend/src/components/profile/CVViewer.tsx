@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   FileText,
   Briefcase,
@@ -19,6 +20,7 @@ import {
   Code2,
   Hash,
   Trophy,
+  ChevronDown,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EditedMark } from "@/components/profile/EditedMark";
@@ -31,9 +33,6 @@ interface CVViewerProps {
    *  Optional; each editable field looks up its own `cv_data.<field>` path and
    *  renders nothing extra when there is no active edit for it. */
   agentEdits?: AgentEdit[];
-  /** skill -> list of raw provenance source labels (e.g. "cv_explicit", "linkedin").
-   *  Optional — when absent, skills render as a plain list with no source hint. */
-  skillProvenance?: Record<string, string[]>;
   /** ProfileResponse.linkedin_subsections — { languages, projects, volunteer, courses }.
    *  Each entry is a loosely-typed dict from the LLM parse; fields are read defensively. */
   linkedinSubsections?: Record<string, Record<string, unknown>[]>;
@@ -158,50 +157,6 @@ function normalizeLinkedinPosition(raw: Record<string, unknown>): LinkedinPositi
   };
 }
 
-// ── Skill provenance — map raw evidence-source labels (skill_tiering.py's
-// `_SOURCE_WEIGHTS` keys) to the same 4 user-facing buckets the "Your Skills"
-// section on the profile page already groups by, so the colour language
-// stays consistent across the page. ─────────────────────────────────────────
-
-const SOURCE_BUCKET: Record<string, "cv" | "linkedin" | "github" | "preferences"> = {
-  cv_explicit: "cv",
-  linkedin: "linkedin",
-  github_lang: "github",
-  github_dep: "github",
-  user_declared: "preferences",
-  about_me_llm: "preferences",
-};
-
-const BUCKET_LABEL: Record<string, string> = {
-  cv: "CV",
-  linkedin: "LinkedIn",
-  github: "GitHub",
-  preferences: "you added",
-};
-
-/** Human-readable "Found in: CV, LinkedIn" string for a skill badge's title
- * tooltip, or null when there's no provenance to show. Matches case- and
- * whitespace-insensitively since evidence names aren't guaranteed to be the
- * exact same string casing as `cv.skills`. */
-function provenanceTooltip(
-  skill: string,
-  provenance: Record<string, string[]> | undefined
-): string | null {
-  if (!provenance) return null;
-  const norm = (s: string) => s.trim().toLowerCase();
-  const key = Object.keys(provenance).find((k) => norm(k) === norm(skill));
-  if (!key) return null;
-  const buckets = Array.from(
-    new Set(
-      provenance[key]
-        .map((s) => SOURCE_BUCKET[s])
-        .filter((b): b is "cv" | "linkedin" | "github" | "preferences" => Boolean(b))
-    )
-  );
-  if (!buckets.length) return null;
-  return `Found in: ${buckets.map((b) => BUCKET_LABEL[b]).join(", ")}`;
-}
-
 /** Small "icon + uppercase label" header used by every extracted section. */
 function SectionLabel({
   icon: Icon,
@@ -227,7 +182,6 @@ function SectionLabel({
 
 export function CVViewer({
   cv,
-  skillProvenance,
   linkedinSubsections,
   githubTemporal,
   githubDetail,
@@ -236,6 +190,13 @@ export function CVViewer({
   const editOf = (field: string) => findAgentEdit(agentEdits, `cv_data.${field}`);
   // (The showFullCV toggle and its highlight terms went with the "Full CV
   // Text" panel — that text now lives only in the CV Uploaded card.)
+
+  // Owner decision, 2026-09-24: both detail dumps are real content a person
+  // may want to check, but neither is something most visits need — so both
+  // stay collapsed until asked for, same reasoning as the raw CV text fold
+  // in CVUpload.tsx.
+  const [linkedinDetailOpen, setLinkedinDetailOpen] = useState(false);
+  const [githubDetailOpen, setGithubDetailOpen] = useState(false);
 
   // Projects the CV states. Defensive field reads for the same reason as
   // cv_positions: these rows are LLM output with no strict wire schema.
@@ -437,30 +398,10 @@ export function CVViewer({
           </div>
         )}
 
-        {/* Skills */}
-        {cv.skills.length > 0 && (
-          <div className="mb-5">
-            <div className="flex items-center gap-2 mb-2">
-              <Wrench className="h-3.5 w-3.5 text-primary" />
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Skills Extracted ({cv.skills.length})
-              </span>
-              <EditedMark edit={editOf("skills")} />
-            </div>
-            <div className="flex flex-wrap gap-1.5 pl-5">
-              {cv.skills.map((skill) => (
-                <Badge
-                  key={skill}
-                  variant="secondary"
-                  className="text-xs skill-matched"
-                  title={provenanceTooltip(skill, skillProvenance) ?? undefined}
-                >
-                  {skill}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Skills — shown ONCE, in the "Your Skills" panel below (owner
+            decision, 2026-09-24). This card used to print its own "Skills
+            Extracted (N)" chip list too — the same skills, a second time,
+            on the same page. */}
 
         {/* Job Titles / Experience */}
         {cv.job_titles.length > 0 && (
@@ -699,11 +640,29 @@ export function CVViewer({
       {/* ── LinkedIn detail ────────────────────────────── */}
       {hasLinkedinDetail && (
         <div className="glass-card rounded-xl p-6">
-          <h3 className="font-heading text-base font-semibold mb-4 flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="linkedin-detail-toggle"
+            onClick={() => setLinkedinDetailOpen((open) => !open)}
+            aria-expanded={linkedinDetailOpen}
+            className="flex w-full items-center gap-2 text-left"
+          >
             <Link2 className="h-4 w-4 text-[#0A66C2]" />
-            LinkedIn detail
-          </h3>
+            <h3 className="font-heading text-base font-semibold flex-1">
+              LinkedIn detail
+            </h3>
+            <span className="text-xs font-medium text-muted-foreground">
+              {linkedinDetailOpen ? "Hide" : "Show what we read from LinkedIn"}
+            </span>
+            <ChevronDown
+              className={`h-4 w-4 text-muted-foreground transition-transform ${
+                linkedinDetailOpen ? "rotate-180" : ""
+              }`}
+            />
+          </button>
 
+          {linkedinDetailOpen && (
+          <div data-testid="linkedin-detail-content" className="mt-4">
           {/* Work History — parsed and stored since Batch 1.5 but never
               exposed until now; same visual style as the CV Work History
               section above (title · company · dates, description under
@@ -1074,17 +1033,37 @@ export function CVViewer({
               </ul>
             </div>
           )}
+          </div>
+          )}
         </div>
       )}
 
       {/* ── GitHub detail ──────────────────────────────── */}
       {hasGithubDetail && (
         <div className="glass-card rounded-xl p-6">
-          <h3 className="font-heading text-base font-semibold mb-4 flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="github-detail-toggle"
+            onClick={() => setGithubDetailOpen((open) => !open)}
+            aria-expanded={githubDetailOpen}
+            className="flex w-full items-center gap-2 text-left"
+          >
             <GitBranch className="h-4 w-4 text-[#8B5CF6]" />
-            GitHub detail
-          </h3>
+            <h3 className="font-heading text-base font-semibold flex-1">
+              GitHub detail
+            </h3>
+            <span className="text-xs font-medium text-muted-foreground">
+              {githubDetailOpen ? "Hide" : "Show what we read from GitHub"}
+            </span>
+            <ChevronDown
+              className={`h-4 w-4 text-muted-foreground transition-transform ${
+                githubDetailOpen ? "rotate-180" : ""
+              }`}
+            />
+          </button>
 
+          {githubDetailOpen && (
+          <div data-testid="github-detail-content" className="mt-4">
           {/* Identity — the developer's OWN words about themselves, kept as
               values rather than a sentence. "Open to work" and location are
               the two that a future matcher can actually act on. */}
@@ -1255,6 +1234,8 @@ export function CVViewer({
                 {ghProfileReadme}
               </pre>
             </div>
+          )}
+          </div>
           )}
         </div>
       )}

@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { toast } from "sonner";
 import posthog from "posthog-js";
-import { User, CheckCircle, AlertCircle, History } from "lucide-react";
+import { User, AlertCircle, History } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { CVUpload } from "@/components/profile/CVUpload";
@@ -98,64 +97,62 @@ function hasGithubShelf(
   });
 }
 
-// ── Completeness calculation ────────────────────────────────
+// ── What's missing (owner decision, 2026-09-24) ─────────────
+//
+// The header used to show a %/"Almost there" meter. A percentage answers
+// "how much" — it never told a seeker what to actually DO next. This reuses
+// the exact same six buckets the old meter scored (CV, job titles, skills,
+// preferences, LinkedIn, GitHub) but names the missing ones instead of
+// scoring them, so the header can read "To finish: add LinkedIn, add
+// preferences" — one line, one to-do list, no arithmetic to interpret.
 
-function calcCompleteness(profile: ProfileResponse | null): {
-  percent: number;
-  label: string;
-} {
-  if (!profile) return { percent: 0, label: "No profile" };
+function missingPieces(profile: ProfileResponse | null): string[] {
+  const summary = profile?.summary;
+  const preferences = profile?.preferences;
 
-  const { summary, preferences } = profile;
-  let score = 0;
-
-  // Has CV: 40%
-  if (summary.cv_length > 0) score += 40;
-
-  // Has job titles: 15%
+  // Has job titles — same OR as the old "Has job titles" bucket.
   const prefTitles = Array.isArray(
     (preferences as Record<string, unknown>)?.target_job_titles
   )
     ? ((preferences as Record<string, unknown>).target_job_titles as string[])
     : [];
-  if (summary.job_titles.length > 0 || prefTitles.length > 0) score += 15;
 
-  // Has skills: 15%
+  // Has skills — same OR as the old "Has skills" bucket.
   const prefSkills = Array.isArray(
     (preferences as Record<string, unknown>)?.additional_skills
   )
     ? ((preferences as Record<string, unknown>).additional_skills as string[])
     : [];
-  if (summary.skills_count > 0 || prefSkills.length > 0) score += 15;
 
-  // Has preferences (at least work arrangement or experience or about_me): 15%
-  //
-  // `prefTitles.length > 0` used to be OR'd in here too, but that is the exact
-  // same signal the "Has job titles" bucket above already pays for -- one
-  // typed title satisfied BOTH buckets, so the meter double-counted a single
-  // answer as 30% of completeness instead of 15%. Each bucket must measure a
-  // DISTINCT thing: this one now looks only at fields no other bucket counts.
-  const prefs = preferences as Record<string, unknown>;
+  // Has preferences (work arrangement, experience level, or about_me) — a
+  // typed job title does NOT also satisfy this (the double-count bug the old
+  // meter had): each bucket below measures a distinct thing.
+  const prefs = preferences as Record<string, unknown> | undefined;
   const hasPrefs =
     (prefs?.work_arrangement && prefs.work_arrangement !== "any") ||
     (prefs?.experience_level && prefs.experience_level !== "") ||
     (typeof prefs?.about_me === "string" && prefs.about_me.length > 0);
-  if (hasPrefs) score += 15;
 
-  // Has LinkedIn: 7.5%
-  if (summary.has_linkedin) score += 7.5;
+  const missing: string[] = [];
+  if (!summary || summary.cv_length === 0) missing.push("a CV");
+  if (!summary || (summary.job_titles.length === 0 && prefTitles.length === 0)) {
+    missing.push("job titles");
+  }
+  if (!summary || (summary.skills_count === 0 && prefSkills.length === 0)) {
+    missing.push("skills");
+  }
+  if (!hasPrefs) missing.push("preferences");
+  if (!summary || !summary.has_linkedin) missing.push("LinkedIn");
+  if (!summary || !summary.has_github) missing.push("GitHub");
+  return missing;
+}
 
-  // Has GitHub: 7.5%
-  if (summary.has_github) score += 7.5;
-
-  const percent = Math.round(score);
-
-  let label = "Getting started";
-  if (percent >= 100) label = "Complete";
-  else if (percent >= 70) label = "Almost there";
-  else if (percent >= 40) label = "Good progress";
-
-  return { percent, label };
+/** The one header line (owner decision, 2026-09-24): nothing missing reads
+ * as ready; otherwise it names exactly what is missing, nothing vaguer. */
+function headerLine(profile: ProfileResponse | null): string {
+  const missing = missingPieces(profile);
+  if (missing.length === 0) return "Your profile is ready for your assistant";
+  return `To finish: ${missing.map((piece) => `add ${piece}`).join(", ")}`;
 }
 
 // ── Page component ──────────────────────────────────────────
@@ -279,7 +276,7 @@ export default function ProfilePage() {
     []
   );
 
-  const { percent, label } = calcCompleteness(profile);
+  const oneLineStatus = headerLine(profile);
 
   // R11 — the current agent-edit overlay. The backend types this field as a
   // bare `dict[str, Any]` (it has no dedicated Pydantic model of its own), so
@@ -300,7 +297,7 @@ export default function ProfilePage() {
       </div>
 
       <div className="relative mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:py-12">
-        {/* ── Header + Completeness ───────────────────── */}
+        {/* ── Header ───────────────────────────────────── */}
         <div className="animate-fade-in-up stagger-1 mb-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
@@ -311,23 +308,11 @@ export default function ProfilePage() {
                 <h1 className="font-heading text-2xl font-bold tracking-tight sm:text-3xl">
                   <span className="text-gradient-lime">Profile</span>
                 </h1>
-                <p className="text-sm text-muted-foreground">
-                  {/* Decision 28 — say who does what. Job360 stores the text
-                      it is given; the connected agent reads it and writes the
-                      structured fields back. A new user who is told only
-                      "upload your CV" waits for an extraction that is never
-                      coming. */}
-                  {profile?.summary.is_complete
-                    ? "Your profile is ready for your agent"
-                    : "Upload your CV — Job360 stores the text; your connected agent fills in the rest"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Or let your AI assistant fill this in for you —{" "}
-                  <Link href="/settings/connect" className="underline">
-                    connect it
-                  </Link>
-                  .
-                </p>
+                {/* Owner decision, 2026-09-24: ONE line, naming what is
+                    actually missing (reusing the same six completeness
+                    inputs the old %/"Almost there" meter scored) instead of
+                    a percentage nobody could act on. */}
+                <p className="text-sm text-muted-foreground">{oneLineStatus}</p>
               </div>
             </div>
 
@@ -361,44 +346,6 @@ export default function ProfilePage() {
               />
             </div>
             )}
-
-            {/* Completeness badge */}
-            <div className="flex w-full items-center gap-3 sm:w-auto">
-              {percent >= 100 ? (
-                <CheckCircle className="h-5 w-5 text-score-high" />
-              ) : (
-                <AlertCircle className="h-5 w-5 shrink-0 text-muted-foreground" />
-              )}
-              {/* w-full below sm: the parent stacks on a phone, so a bare
-                  min-w-[160px] left the track floating at 160px against
-                  full-width text — at 0% that reads as a broken progress bar
-                  rather than an empty one. From sm up the row is horizontal and
-                  160px is the intended compact width. */}
-              <div className="w-full sm:w-auto sm:min-w-[160px]">
-                <div className="flex items-baseline justify-between mb-1">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {label}
-                  </span>
-                  <span className="font-mono text-xs font-bold text-foreground">
-                    {percent}%
-                  </span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-700 ease-out"
-                    style={{
-                      width: `${percent}%`,
-                      background:
-                        percent >= 70
-                          ? "oklch(0.89 0.29 128)"
-                          : percent >= 40
-                            ? "oklch(0.78 0.25 130)"
-                            : "oklch(0.75 0.15 85)",
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -484,7 +431,6 @@ export default function ProfilePage() {
               hasGithubShelf(profile?.github_temporal, profile?.github_detail)) && (
               <CVViewer
                 cv={profile?.cv_detail ?? EMPTY_CV_DETAIL}
-                skillProvenance={profile?.skill_provenance}
                 linkedinSubsections={profile?.linkedin_subsections}
                 githubTemporal={profile?.github_temporal}
                 githubDetail={profile?.github_detail}

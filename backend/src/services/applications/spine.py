@@ -1119,8 +1119,8 @@ async def list_applications(
     total = int((await cur.fetchone())[0])
 
     cur = await db._db.execute(
-        f"SELECT id, job_id, job_title, job_company, status, last_event_at, "  # noqa: S608
-        f"visa_signal, visa_country FROM applications "
+        f"SELECT id, job_id, job_title, job_company, job_url, status, last_event_at, "  # noqa: S608
+        f"visa_signal, visa_country, fit_recorded_at FROM applications "
         f"WHERE {where_sql} ORDER BY last_event_at DESC NULLS LAST, id DESC LIMIT ? OFFSET ?",
         [*params, limit, offset],
     )
@@ -1128,24 +1128,67 @@ async def list_applications(
 
     # Slice 7 — fact 2 once per request, so every card can carry its badge.
     from src.services.applications import visa as visa_service  # noqa: PLC0415
+    from src.services.applications.next_step import next_step  # noqa: PLC0415
 
     countries = await visa_service.user_work_countries(db, user_id)
+
+    # 2026-09-24 — the list's "Next:" line needs interview_at and has_lesson,
+    # both read off application_events. One query for the whole page (never
+    # N+1): the same "a correcting event supersedes the one it names" rule
+    # get_application_detail's per-application read uses, just computed for
+    # every application_id in this page at once.
+    app_ids = [r["id"] for r in rows]
+    interview_at_by_app: dict[int, str] = {}
+    has_lesson_by_app: dict[int, bool] = {}
+    if app_ids:
+        placeholders = ",".join("?" for _ in app_ids)
+        ev_cur = await db._db.execute(
+            f"SELECT id, application_id, event_type, scheduled_at, corrects_event_id "  # noqa: S608 — placeholders, not values
+            f"FROM application_events WHERE application_id IN ({placeholders}) "
+            f"AND (event_type = 'lesson' OR scheduled_at IS NOT NULL OR corrects_event_id IS NOT NULL) "
+            f"ORDER BY occurred_at ASC, id ASC",
+            app_ids,
+        )
+        ev_rows = [dict(r) for r in await ev_cur.fetchall()]
+        superseded_ids = {r["corrects_event_id"] for r in ev_rows if r.get("corrects_event_id") is not None}
+        for r in ev_rows:
+            if r["id"] in superseded_ids:
+                continue
+            app_id = r["application_id"]
+            if r.get("scheduled_at"):
+                interview_at_by_app[app_id] = r["scheduled_at"]  # rows are occurred_at ASC — last write wins
+            if r["event_type"] == "lesson":
+                has_lesson_by_app[app_id] = True
 
     out = []
     for r in rows:
         app_id = r["id"]
         signal = r.get("visa_signal") or "unknown"
         country = r.get("visa_country") or ""
+        artifact_counts = await _artifact_counts_by_kind(db, app_id)
+        receipts_count = await _count(db, "application_receipts", "application_id", app_id)
         out.append(
             {
                 "id": app_id, "job_id": r["job_id"], "job_title": r["job_title"] or "",
-                "job_company": r["job_company"] or "", "status": r["status"],
+                "job_company": r["job_company"] or "", "job_url": r.get("job_url") or "",
+                "status": r["status"],
                 "last_event_at": r.get("last_event_at"),
                 "visa_signal": signal, "visa_country": country,
                 "needs_sponsorship": visa_service.needs_sponsorship(signal, country, countries),
                 "events": await _count(db, "application_events", "application_id", app_id),
-                "artifacts": await _artifact_counts_by_kind(db, app_id),
-                "receipts": await _count(db, "application_receipts", "application_id", app_id),
+                "artifacts": artifact_counts,
+                "receipts": receipts_count,
+                # 2026-09-24 — same state machine `get_application` feeds its
+                # header with, over the same stored facts (S21: real values,
+                # not a schema-presence default).
+                "next_step": next_step(
+                    status=r["status"],
+                    has_fit=bool(r.get("fit_recorded_at")),
+                    cv_versions=artifact_counts.get("cv", 0),
+                    receipts=receipts_count,
+                    interview_at=interview_at_by_app.get(app_id),
+                    has_lesson=has_lesson_by_app.get(app_id, False),
+                ),
             }
         )
     return {"applications": out, "total": total}

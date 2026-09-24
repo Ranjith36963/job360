@@ -34,11 +34,18 @@ function applicationSummary(status: string) {
     job_id: JOB_ID,
     job_title: "Data Engineer",
     job_company: "Northwind",
+    job_url: "https://northwind.example/careers/7",
     status,
     last_event_at: "2026-09-04T00:00:00Z",
     events: status === "considering" ? 1 : 2,
     artifacts: { cv: 2 },
     receipts: status === "considering" ? 0 : 1,
+    // 2026-09-24 — the list card's "Next:" line reads this, same shape
+    // `get_application`'s next_step already carries.
+    next_step:
+      status === "considering"
+        ? { code: "apply", label: "CV ready — apply, then mark it applied" }
+        : { code: "wait", label: "Applied — waiting to hear back" },
   };
 }
 
@@ -107,6 +114,10 @@ function applicationDetail(status: string) {
             },
           ]
         : [],
+    next_step:
+      status === "considering"
+        ? { code: "apply", label: "CV ready — apply, then mark it applied" }
+        : { code: "wait", label: "Applied — waiting to hear back" },
   };
 }
 
@@ -176,6 +187,9 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
   }) => {
     await context.addCookies([SESSION_COOKIE]);
     await mockBackend(page);
+    // Accept any native confirm() the "Mark Applied" button on the
+    // application page raises — a no-op when it uses something else.
+    page.on("dialog", (dialog) => void dialog.accept());
 
     await page.goto("/");
 
@@ -187,13 +201,25 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     // must not exist on a page a signed-in user can navigate.
     await expect(page.getByRole("link", { name: /^dashboard$/i })).toHaveCount(0);
 
-    // Record "applied" with CV v2 — whichever control the home/record page
-    // exposes for it, it must call the receipt endpoint (mocked above).
+    // Owner decision (2026-09-24): "Mark Applied" writes a permanent receipt,
+    // so it no longer lives on the scannable list — only on the application
+    // page, behind a confirm. Open the record and record "applied" there.
+    await page.goto(`/applications/${APPLICATION_ID}`);
+    await expect(page.getByText(/data engineer/i).first()).toBeVisible({ timeout: 20_000 });
+
     await page
       .getByRole("button", { name: /mark.*applied|i applied|record application|applied/i })
       .first()
       .click();
     await expect(page.getByText(/^applied$/i).first()).toBeVisible({ timeout: 20_000 });
+
+    // The list reflects the same change — reload the home page.
+    await page.goto("/");
+    await expect(page.getByText(/^applied$/i).first()).toBeVisible({ timeout: 20_000 });
+    // ...and the list row no longer offers a Mark Applied button at all.
+    await expect(
+      page.getByRole("button", { name: /mark applied/i })
+    ).toHaveCount(0);
 
     // Open the application record: two CV versions listed, both open with
     // their own text — "every version still readable" (done-when).

@@ -1824,10 +1824,16 @@ export interface components {
             job_id: number;
             /** Job Title */
             job_title: string;
+            /**
+             * Job Url
+             * @default
+             */
+            job_url: string;
             /** Last Event At */
             last_event_at: string | null;
             /** Needs Sponsorship */
             needs_sponsorship?: boolean | null;
+            next_step: components["schemas"]["NextStepOut"];
             /** Receipts */
             receipts: number;
             /** Status */

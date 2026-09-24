@@ -30,8 +30,11 @@ describe("ProfilePage — L7 typed 404 handling", () => {
 
     render(<ProfilePage />);
 
+    // The one-line header (owner decision, 2026-09-24) reports the empty
+    // state honestly — everything is missing on a profile that doesn't
+    // exist yet. This replaced the old "No profile" completeness label.
     await waitFor(() => {
-      expect(screen.getByText(/no profile/i)).toBeInTheDocument();
+      expect(screen.getByText(/^To finish:/)).toBeInTheDocument();
     });
 
     expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();

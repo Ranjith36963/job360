@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { CVViewer } from "./CVViewer";
 import type { CVDetail } from "@/lib/types";
 
@@ -31,8 +31,14 @@ const cv = {
   achievements: [],
 } as unknown as CVDetail;
 
+// Owner decision, 2026-09-24: the LinkedIn detail card is folded behind
+// "Show what we read from LinkedIn", collapsed by default — open it (when
+// there is a card at all — an empty LinkedIn shelf renders no card, and
+// therefore no toggle to click) so these tests can see the content they pin.
 function renderWith(sub: Record<string, Record<string, unknown>[]>) {
   render(<CVViewer cv={cv} linkedinSubsections={sub} />);
+  const toggle = screen.queryByTestId("linkedin-detail-toggle");
+  if (toggle) fireEvent.click(toggle);
 }
 
 describe("LinkedIn detail shows every section", () => {

@@ -568,7 +568,10 @@ def build_server(version: str = "") -> MCPServer:
         status: Optional[str] = None, updated_since: Optional[str] = None, limit: int = 20, offset: int = 0
     ) -> dict[str, Any]:
         """The user's applications (newest activity first). Filter by status
-        (e.g. "considering", "applied", "interview_scheduled")."""
+        (e.g. "considering", "applied", "interview_scheduled"). Each row carries
+        next_step ({code, label}) — the same next-thing-to-do state machine
+        get_application's next_step uses, so you can branch on it without a
+        second read."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(status, updated_since, limit, offset, db, _user())

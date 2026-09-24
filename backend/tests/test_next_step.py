@@ -97,6 +97,56 @@ async def test_the_route_moves_the_next_step_as_the_record_grows(authenticated_a
 
 
 @pytest.mark.asyncio
+async def test_list_next_step_matches_detail_next_step(authenticated_async_context):
+    """2026-09-24 — the applications list card's next_step must be the exact
+    same value `get_application`'s next_step reads, at every stage the
+    record moves through (fit, CV, receipt, a scheduled interview, a
+    rejection, a lesson). The list computes it from one batched events
+    query (spine.list_applications), never per-row — this proves the batch
+    agrees with the per-application read, not just that it runs."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+
+        async def _list_next_step() -> dict:
+            resp = await client.get("/api/applications")
+            assert resp.status_code == 200, resp.text
+            row = next(a for a in resp.json()["applications"] if a["id"] == app_id)
+            return row["next_step"]
+
+        async def _detail_next_step() -> dict:
+            resp = await client.get(f"/api/applications/{app_id}")
+            assert resp.status_code == 200, resp.text
+            return resp.json()["next_step"]
+
+        async def _assert_matches() -> None:
+            list_step = await _list_next_step()
+            detail_step = await _detail_next_step()
+            assert list_step == detail_step
+
+        await _assert_matches()  # judge_fit
+        await client.put(f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "good"})
+        await _assert_matches()  # write_cv
+        await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "cv v1"})
+        await _assert_matches()  # apply
+        await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "company site"})
+        await _assert_matches()  # wait
+        await client.post(f"/api/applications/{app_id}/events", json={"event_type": "interview_requested"})
+        await _assert_matches()  # schedule (no date yet)
+        await client.post(
+            f"/api/applications/{app_id}/events",
+            json={"event_type": "interview_scheduled", "scheduled_at": "2027-06-01T09:00:00+00:00"},
+        )
+        await _assert_matches()  # interview (date in the future)
+        await client.post(f"/api/applications/{app_id}/events", json={"event_type": "rejected"})
+        await _assert_matches()  # lesson
+        await client.post(
+            f"/api/applications/{app_id}/events",
+            json={"event_type": "lesson", "detail": "ask about base first"},
+        )
+        await _assert_matches()  # closed
+
+
+@pytest.mark.asyncio
 async def test_the_agent_sees_the_same_next_step(authenticated_async_context, fixture_user_id):
     pytest.importorskip("mcp")
     from src.api import mcp_server

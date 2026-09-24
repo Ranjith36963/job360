@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import {
   Briefcase,
   FileText,
@@ -71,7 +72,17 @@ function generateIcons(count: number) {
 
 const ICONS = generateIcons(100);
 
+// Owner decision, 2026-09-24: the pattern stays at full strength only where
+// it is doing a marketing job — the signed-out landing page and /login.
+// Everywhere a signed-in user is actually working, it must not compete with
+// real content, so it renders at about a third of that opacity.
+const BRIGHT_PATHS = new Set(["/", "/login"]);
+const DIM_SCALE = 1 / 3;
+
 export function FloatingIcons() {
+  const pathname = usePathname();
+  const opacityScale = pathname !== null && BRIGHT_PATHS.has(pathname) ? 1 : DIM_SCALE;
+
   return (
     // -z-10, not z-0. This layer is fixed and therefore POSITIONED, and a
     // positioned element paints above non-positioned siblings even at z-0 — so
@@ -86,7 +97,9 @@ export function FloatingIcons() {
     // Trust the screenshot here, not the stacking read.
     <div
       aria-hidden
+      data-testid="floating-icons"
       className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
+      style={{ "--icon-opacity-scale": opacityScale } as React.CSSProperties}
     >
       {ICONS.map(({ Icon, x, y, size, rotation, delay }, i) => (
         <div
@@ -96,7 +109,7 @@ export function FloatingIcons() {
             left: `${x}%`,
             top: `${y}%`,
             transform: `rotate(${rotation}deg)`,
-            opacity: 0.10,
+            opacity: 0.10 * opacityScale,
             animation: `icon-float 20s ease-in-out ${delay}s infinite`,
           }}
         >

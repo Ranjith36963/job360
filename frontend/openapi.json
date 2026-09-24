@@ -805,6 +805,11 @@
             "title": "Job Title",
             "type": "string"
           },
+          "job_url": {
+            "default": "",
+            "title": "Job Url",
+            "type": "string"
+          },
           "last_event_at": {
             "anyOf": [
               {
@@ -826,6 +831,9 @@
               }
             ],
             "title": "Needs Sponsorship"
+          },
+          "next_step": {
+            "$ref": "#/components/schemas/NextStepOut"
           },
           "receipts": {
             "title": "Receipts",
@@ -855,7 +863,8 @@
           "last_event_at",
           "events",
           "artifacts",
-          "receipts"
+          "receipts",
+          "next_step"
         ],
         "title": "ApplicationSummaryOut",
         "type": "object"

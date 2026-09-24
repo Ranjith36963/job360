@@ -438,7 +438,7 @@ export function PreferencesForm({
         <div>
           <h3 className="font-heading text-base font-semibold">Preferences</h3>
           <p className="text-xs text-muted-foreground">
-            What you want — your agent reads this when it judges a job
+            What you want — your assistant reads this when it judges a job
           </p>
         </div>
         {/* In the card header, not at the bottom: this form autosaves, so there
@@ -514,7 +514,7 @@ export function PreferencesForm({
           tags={industries}
           onChange={setIndustries}
           placeholder="e.g. FinTech, Healthcare, AI"
-          description="Context for your agent — most jobs are not affected by this at all."
+          description="Context for your assistant — most jobs are not affected by this at all."
           trailing={<EditedMark edit={editOf("industries")} />}
         />
 
@@ -663,7 +663,7 @@ export function PreferencesForm({
           tags={negativeKeywords}
           onChange={setNegativeKeywords}
           placeholder="e.g. sales, recruiter"
-          description="Titles or roles you don't want. Your agent reads this when judging fit."
+          description="Titles or roles you don't want. Your assistant reads this when judging fit."
           variant="destructive"
           trailing={<EditedMark edit={editOf("negative_keywords")} />}
         />
@@ -675,7 +675,7 @@ export function PreferencesForm({
             <EditedMark edit={editOf("about_me")} />
           </Label>
           <p className="text-xs text-muted-foreground -mt-1">
-            Brief professional summary — your agent uses it as context
+            Brief professional summary — your assistant uses it as context
           </p>
           <Textarea
             value={aboutMe}

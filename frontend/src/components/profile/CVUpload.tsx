@@ -12,6 +12,7 @@ import {
   Wrench,
   GraduationCap,
   Award,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -184,6 +185,10 @@ export function CVUpload({
   const [githubLoading, setGithubLoading] = useState(false);
   const [linkedinLoading, setLinkedinLoading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  // Owner decision, 2026-09-24: the raw CV text is real content someone may
+  // want to check against what was highlighted, but it is a wall of text —
+  // collapsed by default so it does not lead the page.
+  const [rawTextOpen, setRawTextOpen] = useState(false);
 
   const hasCV = profile && profile.cv_length > 0;
 
@@ -326,8 +331,8 @@ export function CVUpload({
             </h3>
             <p className="text-xs text-muted-foreground">
               {hasCV
-                ? "Your CV is stored — this is what your agent reads"
-                : "PDF or DOCX — Job360 stores the text; your connected agent fills in the rest"}
+                ? "Your CV is stored — this is what your assistant reads"
+                : "PDF or DOCX — Job360 stores the text; your connected assistant fills in the rest"}
             </p>
           </div>
           {hasCV && (
@@ -380,7 +385,7 @@ export function CVUpload({
                   href="/settings/connect"
                   className="underline underline-offset-2 hover:text-foreground"
                 >
-                  Connect your agent
+                  Connect your assistant
                 </a>{" "}
                 and ask it to fill in your profile — or add what is missing in
                 your preferences on the right.
@@ -501,57 +506,79 @@ export function CVUpload({
                 THE single copy on the page (owner decision 2026-08-08): the
                 identical panel inside CVViewer ("Full CV Text") was removed
                 rather than this one, because this is the card a user looks at
-                for the CV they just uploaded. */}
+                for the CV they just uploaded. Folded behind a toggle (owner
+                decision, 2026-09-24): it is real content, but a wall of text
+                should not be the first thing on the page. */}
             {cvDetail && cvDetail.raw_text && (
-              <div className="rounded-lg bg-muted/20 border border-border/40 p-4 max-h-[500px] overflow-y-auto">
-                <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-foreground/85">
-                  {buildHighlightedCV(cvDetail.raw_text, highlightTerms)}
-                </pre>
+              <div>
+                <button
+                  type="button"
+                  data-testid="raw-cv-text-toggle"
+                  onClick={() => setRawTextOpen((open) => !open)}
+                  aria-expanded={rawTextOpen}
+                  className="flex w-full items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 transition-transform ${
+                      rawTextOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                  {rawTextOpen ? "Hide the text we read from your CV" : "Show the text we read from your CV"}
+                </button>
+                {rawTextOpen && (
+                  <div data-testid="raw-cv-text-content" className="mt-2 space-y-2">
+                    <div className="rounded-lg bg-muted/20 border border-border/40 p-4 max-h-[500px] overflow-y-auto">
+                      <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-foreground/85">
+                        {buildHighlightedCV(cvDetail.raw_text, highlightTerms)}
+                      </pre>
+                    </div>
+
+                    {/* Legend — only for categories this CV actually highlighted.
+                        It used to print all four unconditionally, so a CV that yielded
+                        six skills and nothing else still advertised amber Education and
+                        purple Certifications swatches that appear nowhere in the text
+                        above. That reads as "we found your degree, it is up there
+                        somewhere" when we did not find it — the opposite of rule #29's
+                        empty shelves staying silent. It also let a four-item legend
+                        wrap awkwardly, stranding "Certifications" on its own line. */}
+                    {(() => {
+                      const LEGEND = [
+                        { category: "skill", label: "Skills", swatch: "bg-primary/30 border-primary/60" },
+                        { category: "title", label: "Roles", swatch: "bg-blue-500/30 border-blue-400/60" },
+                        { category: "education", label: "Education", swatch: "bg-amber-500/25 border-amber-400/50" },
+                        { category: "certification", label: "Certifications", swatch: "bg-purple-500/25 border-purple-400/50" },
+                      ] as const;
+                      // Match buildHighlightedCV's own eligibility rule (it drops terms
+                      // of 2 characters or fewer, above), otherwise a CV whose only
+                      // skill is "Go" would advertise a Skills key with nothing
+                      // highlighted — the same "key for a colour that never appears"
+                      // problem this block exists to remove, one level down.
+                      const present = LEGEND.filter((l) =>
+                        highlightTerms.some(
+                          (t) => t.category === l.category && t.text.trim().length > 2
+                        )
+                      );
+                      if (present.length === 0) return null;
+                      return (
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
+                          <span className="font-medium">
+                            Highlighted = what your assistant reads:
+                          </span>
+                          {present.map((l) => (
+                            <span key={l.category} className="flex items-center gap-1">
+                              <span
+                                className={`inline-block w-3 h-2 rounded-sm border-b-2 ${l.swatch}`}
+                              />
+                              {l.label}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
             )}
-
-            {/* Legend — only for categories this CV actually highlighted.
-                It used to print all four unconditionally, so a CV that yielded
-                six skills and nothing else still advertised amber Education and
-                purple Certifications swatches that appear nowhere in the text
-                above. That reads as "we found your degree, it is up there
-                somewhere" when we did not find it — the opposite of rule #29's
-                empty shelves staying silent. It also let a four-item legend
-                wrap awkwardly, stranding "Certifications" on its own line. */}
-            {(() => {
-              const LEGEND = [
-                { category: "skill", label: "Skills", swatch: "bg-primary/30 border-primary/60" },
-                { category: "title", label: "Roles", swatch: "bg-blue-500/30 border-blue-400/60" },
-                { category: "education", label: "Education", swatch: "bg-amber-500/25 border-amber-400/50" },
-                { category: "certification", label: "Certifications", swatch: "bg-purple-500/25 border-purple-400/50" },
-              ] as const;
-              // Match buildHighlightedCV's own eligibility rule (it drops terms
-              // of 2 characters or fewer, above), otherwise a CV whose only
-              // skill is "Go" would advertise a Skills key with nothing
-              // highlighted — the same "key for a colour that never appears"
-              // problem this block exists to remove, one level down.
-              const present = LEGEND.filter((l) =>
-                highlightTerms.some(
-                  (t) => t.category === l.category && t.text.trim().length > 2
-                )
-              );
-              if (present.length === 0) return null;
-              return (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
-                  <span className="font-medium">
-                    Highlighted = what your agent reads:
-                  </span>
-                  {present.map((l) => (
-                    <span key={l.category} className="flex items-center gap-1">
-                      <span
-                        className={`inline-block w-3 h-2 rounded-sm border-b-2 ${l.swatch}`}
-                      />
-                      {l.label}
-                    </span>
-                  ))}
-                </div>
-              );
-            })()}
 
             {/* Re-upload + clear, side by side: the two things you do to a CV
                 that is already here. */}
@@ -589,15 +616,15 @@ export function CVUpload({
       {/* ── Enrichment Section ──────────────────────────── */}
       <div className="glass-card rounded-xl p-6 animate-fade-in-up stagger-2">
         <h3 className="font-heading text-base font-semibold mb-1">
-          Enrich Your Profile
+          Add LinkedIn and GitHub
         </h3>
         <p className="text-xs text-muted-foreground mb-4">
-          Optional: add LinkedIn and GitHub. Job360 stores what it reads there;{" "}
+          Optional. Job360 stores what it reads there;{" "}
           <a
             href="/settings/connect"
             className="underline underline-offset-2 hover:text-foreground"
           >
-            your connected agent
+            your connected assistant
           </a>{" "}
           fills in the rest.
         </p>
@@ -638,7 +665,7 @@ export function CVUpload({
               ) : (
                 <Upload className="h-3.5 w-3.5" />
               )}
-              {profile?.has_linkedin ? "Re-enrich" : "Enrich"} LinkedIn
+              {profile?.has_linkedin ? "Upload LinkedIn again" : "Add LinkedIn"}
             </Button>
           </div>
           {profile?.has_linkedin && (
@@ -703,7 +730,7 @@ export function CVUpload({
               ) : (
                 <GitBranch className="h-3.5 w-3.5" />
               )}
-              Enrich GitHub
+              Add GitHub
             </Button>
           </div>
           {/* GitHub has no file — the handle IS the receipt, with the repo

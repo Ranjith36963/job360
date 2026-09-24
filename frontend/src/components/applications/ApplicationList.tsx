@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
-import { listApplications, recordApplicationReceipt } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { listApplications } from "@/lib/api";
 import type { ApplicationSummary } from "@/lib/api";
 import { STATUS_LABEL } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
@@ -19,48 +18,66 @@ import { VisaBadge } from "@/components/applications/VisaBadge";
  * The applications home + the `/applications` list page share this list —
  * both render the same summary rows (spec R11 `GET /applications`).
  *
- * "Mark Applied" is the fastest path from "considering" to a receipt: it
- * calls `record_application` (spec R8) with no artifact named, so it freezes
- * whatever the newest CV/cover-letter version already is (or none).
+ * "Mark Applied" writes a permanent receipt (spec R8) — a real-world fact
+ * ("I applied"), not a status toggle — so it lives only on the application
+ * page now, behind a confirm, never here in a scannable list a stray click
+ * could hit.
  */
+
+/** "Untitled role" → the company → the ad link's host → "Untitled job"
+ * (owner decision, 2026-09-24). Never blank: something must sit in the
+ * title slot for a card to be scannable. */
+function titleFor(app: ApplicationSummary): string {
+  if (app.job_title) return app.job_title;
+  if (app.job_company) return app.job_company;
+  if (app.job_url) {
+    try {
+      return new URL(app.job_url).host;
+    } catch {
+      // Not a parseable absolute URL — fall through to the last resort.
+    }
+  }
+  return "Untitled job";
+}
+
 export function ApplicationList({ limit = 50 }: { limit?: number }) {
   const [applications, setApplications] = useState<ApplicationSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [markingId, setMarkingId] = useState<number | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await listApplications({ limit });
-      setApplications(res.applications);
-      setError(null);
-    } catch {
-      setError("Could not load your applications.");
-    }
-  }, [limit]);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    let cancelled = false;
+    listApplications({ limit })
+      .then((res) => {
+        if (cancelled) return;
+        setApplications(res.applications);
+        setError(null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError("Could not load your applications.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [limit]);
 
-  const markApplied = useCallback(
-    async (id: number) => {
-      setMarkingId(id);
-      try {
-        await recordApplicationReceipt(id, {});
-        await load();
-      } catch (err) {
-        // C10 (application-spine review) — an unhandled rejection here left
-        // the button stuck on "Marking…" forever with no feedback: the
-        // `finally` below always clears `markingId`, but nothing ever told
-        // the user the call actually failed.
-        const msg = err instanceof Error ? err.message : "Could not mark this application applied.";
-        toast.error(msg);
-      } finally {
-        setMarkingId(null);
-      }
-    },
-    [load]
-  );
+  // Browser-side only — one chip per status actually present in this list,
+  // plus "All". Counts move with the data; there is no server-side facet
+  // query for this.
+  const statusCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const app of applications ?? []) {
+      counts.set(app.status, (counts.get(app.status) ?? 0) + 1);
+    }
+    return counts;
+  }, [applications]);
+
+  const visibleApplications = useMemo(() => {
+    if (!applications) return applications;
+    if (statusFilter === "all") return applications;
+    return applications.filter((app) => app.status === statusFilter);
+  }, [applications, statusFilter]);
 
   if (error) {
     return <p className="text-sm text-destructive">{error}</p>;
@@ -83,52 +100,71 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
   }
 
   return (
-    <ul className="flex flex-col gap-3">
-      {applications.map((app) => {
-        const artifactCount = Object.values(app.artifacts ?? {}).reduce((a, b) => a + b, 0);
-        const activityParts = [
-          relativeTime(app.last_event_at),
-          app.events > 0 ? `${app.events} event${app.events === 1 ? "" : "s"}` : "",
-          artifactCount > 0 ? `${artifactCount} document${artifactCount === 1 ? "" : "s"}` : "",
-          app.receipts > 0 ? `${app.receipts} receipt${app.receipts === 1 ? "" : "s"}` : "",
-        ].filter(Boolean);
-
-        return (
-        <li
-          key={app.id}
-          className="glass-card flex items-center justify-between gap-4 rounded-xl p-4"
+    <div className="flex flex-col gap-4">
+      <div data-testid="status-filter" className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setStatusFilter("all")}
+          aria-pressed={statusFilter === "all"}
+          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            statusFilter === "all"
+              ? "bg-primary text-primary-foreground"
+              : "bg-primary/10 text-primary hover:bg-primary/20"
+          }`}
         >
-          <Link href={`/applications/${app.id}`} className="min-w-0 flex-1">
-            <p className="truncate font-semibold">{app.job_title || "Untitled role"}</p>
-            <p className="truncate text-sm text-muted-foreground">{app.job_company}</p>
-            {activityParts.length > 0 && (
-              <p data-testid="row-activity" className="mt-0.5 truncate text-xs text-muted-foreground/70">
-                {activityParts.join(" · ")}
-              </p>
-            )}
-          </Link>
-          <div className="flex shrink-0 items-center gap-3">
-            <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-              {STATUS_LABEL[app.status] ?? app.status}
-            </span>
-            <VisaBadge
-              signal={app.visa_signal ?? "unknown"}
-              needsSponsorship={app.needs_sponsorship}
-            />
-            {app.status === "considering" && (
-              <button
-                type="button"
-                onClick={() => void markApplied(app.id)}
-                disabled={markingId === app.id}
-                className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                {markingId === app.id ? "Marking…" : "Mark Applied"}
-              </button>
-            )}
-          </div>
-        </li>
-        );
-      })}
-    </ul>
+          All ({applications.length})
+        </button>
+        {[...statusCounts.entries()].map(([status, count]) => (
+          <button
+            key={status}
+            type="button"
+            onClick={() => setStatusFilter(status)}
+            aria-pressed={statusFilter === status}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              statusFilter === status
+                ? "bg-primary text-primary-foreground"
+                : "bg-primary/10 text-primary hover:bg-primary/20"
+            }`}
+          >
+            {STATUS_LABEL[status] ?? status} ({count})
+          </button>
+        ))}
+      </div>
+
+      {visibleApplications && visibleApplications.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No applications with this status.</p>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {visibleApplications?.map((app) => (
+            <li
+              key={app.id}
+              className="glass-card flex items-center justify-between gap-4 rounded-xl p-4"
+            >
+              <Link href={`/applications/${app.id}`} className="min-w-0 flex-1">
+                <p className="truncate font-semibold">{titleFor(app)}</p>
+                <p className="truncate text-sm text-muted-foreground">{app.job_company}</p>
+                <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground/70">
+                  <span>{relativeTime(app.last_event_at)}</span>
+                  {app.next_step?.label && (
+                    <span data-testid="row-next-step" className="truncate text-primary">
+                      Next: {app.next_step.label}
+                    </span>
+                  )}
+                </p>
+              </Link>
+              <div className="flex shrink-0 items-center gap-3">
+                <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                  {STATUS_LABEL[app.status] ?? app.status}
+                </span>
+                <VisaBadge
+                  signal={app.visa_signal ?? "unknown"}
+                  needsSponsorship={app.needs_sponsorship}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

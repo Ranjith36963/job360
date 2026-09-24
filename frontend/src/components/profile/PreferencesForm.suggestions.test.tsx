@@ -246,6 +246,6 @@ describe("PreferencesForm — words to avoid in job titles", () => {
     // "Negative Keywords" implied a filter, which was never true even when
     // there was a scorer: the job still appeared, just ranked lower.
     const help = screen.getByText(/titles or roles you don't want/i);
-    expect(help.textContent).toMatch(/agent/i);
+    expect(help.textContent).toMatch(/assistant/i);
   });
 });

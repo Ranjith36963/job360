@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { CVViewer } from "./CVViewer";
 import type { CVDetail } from "@/lib/types";
 
@@ -53,11 +53,6 @@ const FULL_CV: CVDetail = {
   extraction_score: { verdict: "good", coverage: 0.9 },
 };
 
-const SKILL_PROVENANCE = {
-  Python: ["cv_explicit", "github_lang"],
-  TypeScript: ["linkedin"],
-};
-
 const LINKEDIN_SUBSECTIONS = {
   positions: [
     {
@@ -94,7 +89,6 @@ describe("CVViewer — extracted sections", () => {
     render(
       <CVViewer
         cv={FULL_CV}
-        skillProvenance={SKILL_PROVENANCE}
         linkedinSubsections={LINKEDIN_SUBSECTIONS}
         githubTemporal={GITHUB_TEMPORAL}
       />
@@ -111,11 +105,13 @@ describe("CVViewer — extracted sections", () => {
     expect(screen.getByText("Beta Corp", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("2021 – Present")).toBeInTheDocument();
 
-    // Skills carry a provenance tooltip
-    const pythonBadge = screen.getByText("Python");
-    expect(pythonBadge).toHaveAttribute("title", "Found in: CV, GitHub");
+    // Skills are shown ONCE, in the "Your Skills" panel on the profile page
+    // (owner decision, 2026-09-24) — this card no longer prints its own
+    // "Skills Extracted" chip list, so Python/TypeScript do not appear here.
+    expect(screen.queryByText(/Skills Extracted/)).not.toBeInTheDocument();
 
-    // LinkedIn detail
+    // LinkedIn detail — folded behind a toggle by default; open it.
+    fireEvent.click(screen.getByTestId("linkedin-detail-toggle"));
     expect(screen.getByText("LinkedIn detail")).toBeInTheDocument();
     expect(screen.getByText(/French/)).toBeInTheDocument();
     expect(screen.getByText("Open Source Router")).toBeInTheDocument();
@@ -133,7 +129,8 @@ describe("CVViewer — extracted sections", () => {
       screen.getByText("Owned the checkout flow end to end.")
     ).toBeInTheDocument();
 
-    // GitHub detail
+    // GitHub detail — also folded behind a toggle by default; open it.
+    fireEvent.click(screen.getByTestId("github-detail-toggle"));
     expect(screen.getByText("GitHub detail")).toBeInTheDocument();
     expect(screen.getByText(/TypeScript · 80%/)).toBeInTheDocument();
     expect(screen.getByText("fastapi")).toBeInTheDocument();
