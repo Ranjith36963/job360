@@ -25,9 +25,9 @@ describe("TailorSection", () => {
     });
   });
 
-  it("tells the user the sentence that makes their own agent write the CV", () => {
+  it("tells the user the sentence that makes their own assistant write the CV", () => {
     render(<TailorSection jobId={7} applicationId={3} />);
-    expect(screen.getByText(/ask your agent/i)).toBeInTheDocument();
+    expect(screen.getByText(/ask your assistant/i)).toBeInTheDocument();
     expect(
       screen.getByText(/write a tailored CV for application 3 and save it/i)
     ).toBeInTheDocument();
@@ -35,7 +35,7 @@ describe("TailorSection", () => {
 
   it("links to the connect page", () => {
     render(<TailorSection jobId={7} applicationId={3} />);
-    expect(screen.getByRole("link", { name: /connect your agent/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /connect your assistant/i })).toHaveAttribute(
       "href",
       "/settings/connect"
     );

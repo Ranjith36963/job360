@@ -5,7 +5,7 @@ import { test, expect, type Page } from "@playwright/test";
  * pages are gone (docs/plans/2026-09-05-delete-sourcing-era, spec.md R9), and
  * decision 28 (2026-09-21, slice A) took the web tailor's LLM with it. Pinned:
  *
- *   1. `/applications/{id}` renders the "Ask your agent" card (TailorSection)
+ *   1. `/applications/{id}` renders the "Ask your assistant" card (TailorSection)
  *      with NO way to generate a document, reachable without a `/jobs/{id}` page.
  *   2. `/jobs/1` and `/dashboard` — the deleted sourcing routes — 404.
  *
@@ -81,7 +81,7 @@ async function mockBackend(page: Page) {
 }
 
 test.describe("Application detail — the documents card lives here (R9)", () => {
-  test("renders the 'Ask your agent' card without ever visiting a job page", async ({
+  test("renders the 'Ask your assistant' card without ever visiting a job page", async ({
     page,
     context,
   }) => {
@@ -93,14 +93,14 @@ test.describe("Application detail — the documents card lives here (R9)", () =>
     await expect(page.getByText("Platform Engineer")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText("Northwind")).toBeVisible();
 
-    // The "Ask your agent" card — the recipe, the connect link, and no LLM of
-    // our own anywhere on the page (decision 28, slice A).
-    await expect(page.getByRole("heading", { name: /ask your agent/i })).toBeVisible();
+    // The "Ask your assistant" card — the recipe, the connect link, and no
+    // LLM of our own anywhere on the page (decision 28, slice A).
+    await expect(page.getByRole("heading", { name: /ask your assistant/i })).toBeVisible();
     await expect(
       page.getByText(/write a tailored CV for application 8181 and save it/i)
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: /connect your agent/i })
+      page.getByRole("link", { name: /connect your assistant/i })
     ).toHaveAttribute("href", "/settings/connect");
     await expect(page.getByRole("button", { name: /tailor my cv/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /generate/i })).toHaveCount(0);

@@ -110,8 +110,9 @@ test.describe("Application detail — People section", () => {
       timeout: 10_000,
     });
     await expect(page.getByText("No people yet.")).toBeVisible();
-    await expect(page.getByText("add_contact")).toBeVisible();
+    await expect(page.getByText(/MCP/i)).toHaveCount(0);
 
+    await page.getByTestId("contacts-add-toggle").click();
     await page.getByLabel("Name").fill(newContact.name);
     await page.getByLabel("Role").fill(newContact.role);
     await page.getByLabel("Email").fill(newContact.email);
@@ -175,6 +176,7 @@ test.describe("Application detail — People section", () => {
       timeout: 10_000,
     });
 
+    await page.getByTestId("contacts-add-toggle").click();
     await page.getByLabel("Name").fill("A very long name");
     await page.getByRole("button", { name: "Add person" }).click();
 

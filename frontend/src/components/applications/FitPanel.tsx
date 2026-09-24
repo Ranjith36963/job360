@@ -12,7 +12,7 @@ export function FitPanel({ fit }: { fit: ApplicationFit | null }) {
   if (!fit) {
     return (
       <p className="text-sm text-muted-foreground">
-        No fit judgement recorded yet — your agent can save one with `save_fit`.
+        No fit judgement recorded yet — your assistant can save one with `save_fit`.
       </p>
     );
   }

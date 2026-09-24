@@ -13,7 +13,7 @@ interface TailorSectionProps {
 }
 
 /**
- * "Ask your agent" — decision 28 (2026-09-21, slice A).
+ * "Ask your assistant" — decision 28 (2026-09-21, slice A).
  *
  * Job360 has no brain of its own, so this card no longer offers to write a CV.
  * It tells the user the one sentence that makes their own agent do it, links to
@@ -28,15 +28,15 @@ export function TailorSection({ jobId, applicationId, hasDocuments = false }: Ta
       <div className="space-y-1.5">
         <h2 className="flex items-center gap-2 font-heading text-base font-semibold">
           <Bot className="h-4 w-4 text-primary" aria-hidden="true" />
-          Ask your agent
+          Ask your assistant
         </h2>
         <p className="text-sm text-muted-foreground">
-          In Claude, ChatGPT or any MCP client with Job360 connected, say:{" "}
+          In Claude, ChatGPT or any assistant connected to Job360, say:{" "}
           <span className="font-medium text-foreground">
             &ldquo;write a tailored CV for application {applicationId} and save it&rdquo;
           </span>
-          . It writes the document; Job360 keeps every version and renders the PDF
-          or DOCX.
+          . It writes the document; Job360 keeps every version and makes the PDF
+          or Word file.
         </p>
       </div>
 
@@ -45,7 +45,7 @@ export function TailorSection({ jobId, applicationId, hasDocuments = false }: Ta
           href="/settings/connect"
           className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-2 text-sm font-medium transition-colors hover:bg-primary/10 hover:border-primary/40"
         >
-          Connect your agent
+          Connect your assistant
         </Link>
         {hasDocuments && (
           <button

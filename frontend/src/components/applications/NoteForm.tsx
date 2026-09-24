@@ -24,6 +24,8 @@ export function NoteForm({
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const [open, setOpen] = useState(false);
+
   const submit = useCallback(async () => {
     const detail = text.trim();
     if (!detail) return;
@@ -31,6 +33,7 @@ export function NoteForm({
     try {
       await recordApplicationEvent(applicationId, { event_type: "note", detail });
       setText("");
+      setOpen(false);
       await onRecorded();
     } catch (err) {
       toast.error(apiErrorMessage(err, "Could not add this note."));
@@ -38,6 +41,19 @@ export function NoteForm({
       setSubmitting(false);
     }
   }, [applicationId, text, onRecorded]);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        data-testid="note-add-toggle"
+        onClick={() => setOpen(true)}
+        className="mt-3 text-sm font-medium text-primary hover:underline"
+      >
+        + Add a note
+      </button>
+    );
+  }
 
   return (
     <div className="mt-3 flex flex-col gap-2">
@@ -49,16 +65,31 @@ export function NoteForm({
         rows={2}
         maxLength={NOTE_MAX_CHARS}
       />
-      <Button
-        type="button"
-        size="sm"
-        data-testid="note-submit"
-        disabled={submitting || !text.trim()}
-        onClick={() => void submit()}
-        className="self-start"
-      >
-        {submitting ? "Adding…" : "Add note"}
-      </Button>
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          size="sm"
+          data-testid="note-submit"
+          disabled={submitting || !text.trim()}
+          onClick={() => void submit()}
+          className="self-start"
+        >
+          {submitting ? "Adding…" : "Add note"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={submitting}
+          onClick={() => {
+            setOpen(false);
+            setText("");
+          }}
+          className="self-start"
+        >
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 }

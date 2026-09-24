@@ -68,16 +68,16 @@ function tspanTexts(lines: string[]): string[] {
   return lines.length === 1 ? lines : [`${lines[0]} `, lines[1]];
 }
 
-/** Per-tspan `dy` (relative vertical offset) for a wrapped label, given
- * where it sits: top labels grow downward (toward the chart is fine — the
- * padding is on the outside), bottom labels stack upward so they don't run
- * into the chart, and side labels are simply centred on the axis point. */
-function lineDy(textAnchor: "start" | "middle" | "end", isTop: boolean, lineCount: number): string[] {
-  if (lineCount === 1) return ["0"];
+/** Per-tspan `dy` in `em` (relative vertical offset) for a wrapped label,
+ * given where it sits: top labels grow downward (toward the chart is fine —
+ * the padding is on the outside), bottom labels stack upward so they don't
+ * run into the chart, and side labels are simply centred on the axis point. */
+function lineDy(textAnchor: "start" | "middle" | "end", isTop: boolean, lineCount: number): number[] {
+  if (lineCount === 1) return [0];
   if (textAnchor === "middle") {
-    return isTop ? ["0", "1.2em"] : ["-1.2em", "1.2em"];
+    return isTop ? [0, 1.2] : [-1.2, 1.2];
   }
-  return ["-0.6em", "1.2em"];
+  return [-0.6, 1.2];
 }
 
 /**
@@ -104,7 +104,10 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
   const wrappedLabels = axes.map((axis) => wrapLabel(axis.name));
   const longestLineChars = Math.max(...wrappedLabels.flat().map((line) => line.length));
   const padX = Math.ceil(longestLineChars * fontSize * 0.62) + 8;
-  const padY = fontSize * 1.4;
+  // Extra room for the small "asks N · you N" value line under each label
+  // (owner decision 3, 2026-09-24).
+  const valueFontSize = fontSize * 0.8;
+  const padY = fontSize * 1.4 + valueFontSize * 1.6;
 
   return (
     <figure data-testid="fit-radar" className="mt-4">
@@ -115,7 +118,7 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
         aria-labelledby="fit-radar-title"
       >
         <title id="fit-radar-title">
-          Fit picture: what the role asks and what you bring, on {n} lines your agent chose
+          Fit picture: what the role asks and what you bring, on {n} lines your assistant chose
         </title>
         {RINGS.map((ring) => (
           <polygon
@@ -172,24 +175,43 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
           const textAnchor = anchor(p.x, cx);
           const lines = wrappedLabels[i];
           const texts = tspanTexts(lines);
-          const dys = lineDy(textAnchor, p.y < cy, lines.length);
+          const isTop = p.y < cy;
+          const dys = lineDy(textAnchor, isTop, lines.length);
+          // Where the LAST label line's baseline actually lands, so the value
+          // line below it never overlaps a 2-line wrapped label. `dy` is
+          // cumulative in SVG, so sum the whole chain rather than assuming one
+          // of lineDy's cases — side-anchored labels net +0.6em, not +1.2em.
+          const lastLineExtra = dys.reduce((total, dy) => total + dy, 0) * fontSize;
+          const valueY = (p.y + lastLineExtra + fontSize * 1.15).toFixed(1);
           return (
-            <text
-              key={axis.name}
-              data-testid="fit-radar-axis"
-              x={x}
-              y={p.y.toFixed(1)}
-              textAnchor={textAnchor}
-              dominantBaseline="middle"
-              fontSize={fontSize}
-              className="fill-current text-foreground"
-            >
-              {texts.map((line, idx) => (
-                <tspan key={idx} x={x} dy={dys[idx]}>
-                  {line}
-                </tspan>
-              ))}
-            </text>
+            <g key={axis.name}>
+              <text
+                data-testid="fit-radar-axis"
+                x={x}
+                y={p.y.toFixed(1)}
+                textAnchor={textAnchor}
+                dominantBaseline="middle"
+                fontSize={fontSize}
+                className="fill-current text-foreground"
+              >
+                {texts.map((line, idx) => (
+                  <tspan key={idx} x={x} dy={`${dys[idx]}em`}>
+                    {line}
+                  </tspan>
+                ))}
+              </text>
+              <text
+                data-testid="fit-radar-axis-value"
+                x={x}
+                y={valueY}
+                textAnchor={textAnchor}
+                dominantBaseline="middle"
+                fontSize={valueFontSize}
+                className="fill-current text-muted-foreground"
+              >
+                {`asks ${axis.role} · you ${axis.you}`}
+              </text>
+            </g>
           );
         })}
       </svg>

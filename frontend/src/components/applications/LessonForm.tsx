@@ -23,6 +23,7 @@ export function LessonForm({
 }) {
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [open, setOpen] = useState(false);
 
   const submit = useCallback(async () => {
     const detail = text.trim();
@@ -31,6 +32,7 @@ export function LessonForm({
     try {
       await recordApplicationEvent(applicationId, { event_type: "lesson", detail });
       setText("");
+      setOpen(false);
       await onRecorded();
     } catch (err) {
       toast.error(apiErrorMessage(err, "Could not flag this lesson."));
@@ -39,10 +41,23 @@ export function LessonForm({
     }
   }, [applicationId, text, onRecorded]);
 
+  if (!open) {
+    return (
+      <button
+        type="button"
+        data-testid="lesson-add-toggle"
+        onClick={() => setOpen(true)}
+        className="mt-3 text-sm font-medium text-primary hover:underline"
+      >
+        + Add a lesson
+      </button>
+    );
+  }
+
   return (
     <div className="mt-3 flex flex-col gap-2">
       <p className="text-xs text-muted-foreground">
-        A lesson your agent reads before the next application.
+        A lesson your assistant reads before the next application.
       </p>
       <Textarea
         data-testid="lesson-input"
@@ -52,16 +67,31 @@ export function LessonForm({
         rows={2}
         maxLength={LESSON_MAX_CHARS}
       />
-      <Button
-        type="button"
-        size="sm"
-        data-testid="lesson-submit"
-        disabled={submitting || !text.trim()}
-        onClick={() => void submit()}
-        className="self-start"
-      >
-        {submitting ? "Flagging…" : "Flag for next time"}
-      </Button>
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          size="sm"
+          data-testid="lesson-submit"
+          disabled={submitting || !text.trim()}
+          onClick={() => void submit()}
+          className="self-start"
+        >
+          {submitting ? "Flagging…" : "Flag for next time"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={submitting}
+          onClick={() => {
+            setOpen(false);
+            setText("");
+          }}
+          className="self-start"
+        >
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 }

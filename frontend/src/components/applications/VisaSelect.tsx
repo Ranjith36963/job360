@@ -8,9 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+/** Plain-word summary of the currently-stored signal, for the folded view. */
+const SIGNAL_SUMMARY: Record<string, string> = {
+  unknown: "Ad says nothing",
+  sponsors: "Sponsors visas",
+  no_sponsorship: "No sponsorship",
+};
+
 /** What the ad says about sponsorship (slice 7, #514). Job360 never guesses —
  *  this hydrates from the currently-stored visa fields and writes back the
- *  same three: signal, country, detail. */
+ *  same three: signal, country, detail. Folded by default (owner decision 4,
+ *  2026-09-24): a one-line summary with an Edit button reveals the form. */
 export function VisaSelect({
   applicationId,
   visa,
@@ -20,6 +28,7 @@ export function VisaSelect({
   visa: VisaShape;
   onSaved: () => Promise<void>;
 }) {
+  const [editing, setEditing] = useState(false);
   const [signal, setSignal] = useState(visa.signal);
   const [country, setCountry] = useState(visa.country ?? "");
   const [detail, setDetail] = useState(visa.detail ?? "");
@@ -41,6 +50,7 @@ export function VisaSelect({
         visa_country: country.trim().toUpperCase(),
         visa_detail: detail,
       });
+      setEditing(false);
       await onSaved();
     } catch (err) {
       toast.error(apiErrorMessage(err, "Could not save the visa signal."));
@@ -49,8 +59,48 @@ export function VisaSelect({
     }
   }, [applicationId, signal, country, detail, onSaved]);
 
+  // Cancel throws the draft away: re-hydrate from what's actually stored, so
+  // reopening Edit never shows an abandoned edit as if it were the seeker's
+  // considered signal (Job360 never guesses).
+  const cancel = useCallback(() => {
+    setSignal(visa.signal);
+    setCountry(visa.country ?? "");
+    setDetail(visa.detail ?? "");
+    setEditing(false);
+  }, [visa.signal, visa.country, visa.detail]);
+
+  const summary = SIGNAL_SUMMARY[visa.signal] ?? visa.signal;
+
+  if (!editing) {
+    return (
+      <div className="mt-4">
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Visa / sponsorship
+        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p data-testid="visa-summary" className="text-sm text-muted-foreground">
+            {summary}
+            {visa.country ? ` · ${visa.country}` : ""}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="visa-edit"
+            onClick={() => setEditing(true)}
+          >
+            Edit
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="mt-3 flex flex-col gap-2">
+    <div className="mt-4 flex flex-col gap-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Visa / sponsorship
+      </p>
       <p className="text-xs text-muted-foreground">
         What the ad says about sponsorship. Job360 never guesses — leave it as
         &quot;Ad says nothing&quot; unless the ad says.
@@ -98,16 +148,29 @@ export function VisaSelect({
           />
         </div>
       </div>
-      <Button
-        type="button"
-        size="sm"
-        data-testid="visa-save"
-        disabled={saving}
-        onClick={() => void save()}
-        className="self-start"
-      >
-        {saving ? "Saving…" : "Save"}
-      </Button>
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          size="sm"
+          data-testid="visa-save"
+          disabled={saving}
+          onClick={() => void save()}
+          className="self-start"
+        >
+          {saving ? "Saving…" : "Save"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          data-testid="visa-cancel"
+          disabled={saving}
+          onClick={cancel}
+          className="self-start"
+        >
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 }
