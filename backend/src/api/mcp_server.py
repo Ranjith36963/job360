@@ -67,8 +67,8 @@ INSTRUCTIONS = (
     "a fact the user states. Two flows without our website: (1) build the "
     "profile — get_profile returns `raw` (the CV/LinkedIn/GitHub text Job360 "
     "extracted) and `editable_paths`; read `raw`, then write the structured "
-    "fields with update_profile. Dated positions and projects are not writable "
-    "yet, so put a role's substance in cv_data.job_titles and cv_data.summary. "
+    "fields with update_profile, including dated work history "
+    "(cv_data.cv_positions) and projects (cv_data.cv_projects). "
     "(2) apply to a job — bring_job, then get_job + get_profile, judge fit "
     "yourself and save_fit, write the CV/cover letter yourself and save_artifact, "
     "then record_application once the user says they applied."
@@ -294,12 +294,11 @@ def build_server(version: str = "") -> MCPServer:
         you found back with `update_profile`. **`editable_paths` is the exact,
         closed list of what you may write** — skills, job titles, education,
         certifications, achievements, name, headline, location, summary,
-        languages, links, right-to-work, and the preferences. Their current
-        values are in `fields`. Dated work history and projects are NOT
-        writable yet (`cv_data.cv_positions`, `cv_data.cv_projects`); put a
-        role's substance into `cv_data.job_titles` and `cv_data.summary` until
-        they are. What you write survives every later re-upload — Job360 never
-        overwrites or clears it.
+        languages, links, right-to-work, dated work history
+        (`cv_data.cv_positions`), projects (`cv_data.cv_projects`) and the
+        preferences. Their current values are in `fields`; `update_profile`
+        documents the record shape of the two lists. What you write survives
+        every later re-upload — Job360 never overwrites or clears it.
 
         `skills` is THE user's skill list — the same one, with the same count
         (`skills_count`), that the web profile page and the application page
@@ -798,6 +797,15 @@ def build_server(version: str = "") -> MCPServer:
         `preferences.excluded_skills` (value = the current list from
         get_profile's `fields` plus the new names); rewriting `cv_data.skills`
         only reaches the CV's share and is capped per edit.
+
+        Work history and projects are lists of records, and a write REPLACES
+        the whole list (send every role, not only the new one):
+        `cv_data.cv_positions` = [{"title", "company", "dates", "location",
+        "bullets": [str]}], title or company required;
+        `cv_data.cv_projects` = [{"name", "description", "technologies":
+        [str], "dates"}], name required. No other keys. `dates` is
+        "Jan 2020 – Present", "Mar 2018 – Jun 2020", "2019 – 2021" or "2020",
+        stored in that form.
         A re-extraction (a fresh CV/LinkedIn/GitHub) never undoes your edit —
         only clearing it does."""
         try:

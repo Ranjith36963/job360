@@ -86,12 +86,13 @@ any MCP client at `/api/mcp` (see `docs/product/VISION.md`), then ask it to:
    `editable_paths` key lists the exact dotted paths `update_profile` accepts
    right now — read it, don't assume a shape;
 2. read the raw text, and call `update_profile` with the certifications,
-   education and the skills that are only stated in prose. Dated work history
-   and a separate projects list are **not yet writable** — they aren't in
-   `editable_paths`, and `update_profile` returns 422 for a path outside it —
-   so fold the substance of a role into the writable fields that exist today,
-   such as `cv_data.job_titles` and `cv_data.summary`, until dated history and
-   projects are supported.
+   education, the skills that are only stated in prose, the dated work
+   history (`cv_data.cv_positions`) and the projects (`cv_data.cv_projects`).
+   The two lists take records with a closed key set — the `update_profile`
+   tool description gives the shape — and a write replaces the whole list.
+   A record with an unknown key, a wrong type, an over-long field or a date
+   that is not a range like `Jan 2020 – Present` is refused with a 422 that
+   names the problem.
 
 What the agent writes survives every later re-upload — nothing in the extractor
 clears a field the agent set.
