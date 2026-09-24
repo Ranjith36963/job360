@@ -435,6 +435,9 @@ PROFILE_EDITABLE_PATHS = (
     "preferences.experience_level", "preferences.about_me", "preferences.needs_visa",
     # Slice 7 — ISO alpha-2 codes where the candidate needs no sponsorship.
     "preferences.work_authorization_countries",
+    # Slice B2 (decision 28) — dated work history and projects, as lists of
+    # records with a closed key set (services/profile/edits.py RECORD_SCHEMAS).
+    "cv_data.cv_positions", "cv_data.cv_projects",
 )
 # Env-added paths must ALSO be declared dataclass fields — an unknown one is a
 # startup error, not an accepted path.
@@ -444,6 +447,17 @@ PROFILE_EDIT_MAX_CHARS = int(os.getenv("PROFILE_EDIT_MAX_CHARS", "2000"))
 PROFILE_EDIT_MAX_LIST_ITEMS = int(os.getenv("PROFILE_EDIT_MAX_LIST_ITEMS", "100"))
 PROFILE_EDIT_MAX_ITEM_CHARS = int(os.getenv("PROFILE_EDIT_MAX_ITEM_CHARS", "200"))
 PROFILE_EDIT_MAX_PER_HOUR = int(os.getenv("PROFILE_EDIT_MAX_PER_HOUR", "120"))  # S7 — per USER
+# Slice B2 — the record-list paths (cv_data.cv_positions / cv_data.cv_projects).
+# Short fields (title, company, location, dates, name, one technology) reuse
+# PROFILE_EDIT_MAX_ITEM_CHARS; a project description reuses PROFILE_EDIT_MAX_CHARS.
+PROFILE_EDIT_MAX_RECORDS = int(os.getenv("PROFILE_EDIT_MAX_RECORDS", "50"))  # records per list
+# bullets / technologies per record
+PROFILE_EDIT_MAX_RECORD_ITEMS = int(os.getenv("PROFILE_EDIT_MAX_RECORD_ITEMS", "30"))
+PROFILE_EDIT_MAX_BULLET_CHARS = int(os.getenv("PROFILE_EDIT_MAX_BULLET_CHARS", "500"))
+# The ENCODED bound for one record-list write (S9). PROFILE_EDIT_MAX_CHARS
+# (2000) bounds every other path, but one honest work history is longer than
+# that, so the record lists get their own ceiling.
+PROFILE_EDIT_MAX_RECORDS_CHARS = int(os.getenv("PROFILE_EDIT_MAX_RECORDS_CHARS", "60000"))
 
 
 # Outbound HTTP defaults. Kept through slice 5 (#483) on purpose: the URL
