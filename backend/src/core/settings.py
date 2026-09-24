@@ -135,12 +135,6 @@ LOGIN_LOCKOUT_WINDOW_SECONDS = int(os.getenv("LOGIN_LOCKOUT_WINDOW_SECONDS", "90
 # Requires REDIS_URL to be set; ignored otherwise.
 RATE_LIMIT_REDIS = os.getenv("RATE_LIMIT_REDIS", "false").lower() in ("1", "true", "yes")
 
-# Per-User AI CV & Cover Letter (docs/product/peruser_cv_coverletter.md) — guardrail #1:
-# each generation is a paid LLM call, so cap free usage. One generation = one CV +
-# cover letter for one job. When a real premium plan lands, premium users bypass this
-# cap (no plan column exists yet — everyone is on the free cap for now).
-TAILOR_FREE_PER_MONTH = int(os.getenv("TAILOR_FREE_PER_MONTH", "10"))
-
 # ESCO skill normalisation (services/profile/skill_normalizer.py) — OFF by
 # default. Replaces `SEMANTIC_ENABLED`, which gated two unrelated things: the
 # job side's embeddings/ChromaDB retrieval (deleted with the sourcing era,
