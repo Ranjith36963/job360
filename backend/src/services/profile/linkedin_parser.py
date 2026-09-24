@@ -335,13 +335,60 @@ def _is_mid_item_wrap(nxt: str) -> bool:
     bullet-led (that case is already absorbed), and itself carries a list
     bullet — so it is list text, not the next prose line or company name.
     A final item wrapped with no later bullet ("... • Vector" / "Databases")
-    is indistinguishable from the next line of prose and is left alone.
+    carries no bullet to go on; ``_is_width_wrap_tail`` decides that case
+    from the line width instead.
     """
     if not nxt or nxt.lower() in _HEADING_SET or _TECH_LINE.match(nxt):
         return False
     if nxt[:1] in {"•", "·", "-"}:
         return False
     return "•" in nxt or "·" in nxt
+
+
+# Fewer non-blank lines than this and a "document line width" is noise, so
+# the width rule stays off (a short pasted snippet has no real line width).
+_WRAP_WIDTH_MIN_LINES = 8
+
+
+def _document_line_width(lines: list[str]) -> int | None:
+    """The PDF's own full line width, measured from the text itself: the 95th
+    percentile of non-blank line lengths (the max can be an outlier line).
+    ``None`` when there are too few lines to measure."""
+    lengths = sorted(len(ln.rstrip()) for ln in lines if ln.strip())
+    if len(lengths) < _WRAP_WIDTH_MIN_LINES:
+        return None
+    return lengths[min(len(lengths) - 1, int(len(lengths) * 0.95))]
+
+
+def _is_width_wrap_tail(last: str, nxt: str, width: int | None) -> bool:
+    """True when the tech run's last line was CUT by the PDF mid-item and
+    ``nxt`` is the rest of that final item ("... • Vector" / "Databases").
+
+    Structural only (rule #28): ``last`` ends with no bullet or separator and
+    runs close to the document's full line width
+    (``settings.LINKEDIN_WRAP_WIDTH_RATIO``), AND the next word could not
+    have fitted on it. ``nxt`` must be a short fragment: non-blank, not a
+    heading, not a new tech line, not bullet-led, carrying no bullet (that is
+    the mid-item rule's case) and not itself a full-width line of prose.
+    """
+    from src.core import settings  # noqa: PLC0415 — read live, per call
+
+    if width is None:
+        return False
+    last = last.rstrip()
+    if not last or last.endswith(("•", "·", "|", ",", "-")):
+        return False
+    threshold = settings.LINKEDIN_WRAP_WIDTH_RATIO * width
+    if len(last) < threshold:
+        return False
+    if not nxt or nxt.lower() in _HEADING_SET or _TECH_LINE.match(nxt):
+        return False
+    if nxt[:1] in {"•", "·", "-"} or "•" in nxt or "·" in nxt:
+        return False
+    if len(nxt) >= threshold:
+        return False
+    first_word = nxt.split()[0]
+    return len(last) + 1 + len(first_word) > width
 
 
 def _extract_inline_tech_skills(text: str) -> list[str]:
@@ -353,6 +400,7 @@ def _extract_inline_tech_skills(text: str) -> list[str]:
     deterministic pass misses Docker/AWS Bedrock/RAG/etc. that are stated outright.
     """
     lines = text.splitlines()
+    width = _document_line_width(lines)
     out: list[str] = []
     seen: set[str] = set()
     i = 0
@@ -377,6 +425,12 @@ def _extract_inline_tech_skills(text: str) -> list[str]:
                 j += 1
             else:
                 break
+        # The run's LAST item cut by the page edge ("... • Vector" then
+        # "Databases"): no bullet follows, so only the line width can tell.
+        # Joins one fragment and ends the run — never chains further.
+        if j < len(lines) and _is_width_wrap_tail(lines[j - 1], lines[j].strip(), width):
+            buf.append(lines[j])
+            j += 1
         for tok in _TECH_SPLIT.split(" ".join(buf)):
             t = tok.strip().lstrip("•·-").strip()
             if t and 1 < len(t) <= 40 and t.lower() not in seen:
