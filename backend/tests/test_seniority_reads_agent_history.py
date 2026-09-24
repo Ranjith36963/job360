@@ -109,6 +109,19 @@ async def test_no_assistant_history_leaves_the_stored_level(authenticated_async_
         assert resp.json()["profile"]["preferences"]["experience_level_inferred"] == "mid"
 
 
+@pytest.mark.asyncio
+async def test_an_unrelated_preferences_save_keeps_the_stored_level(
+    authenticated_async_context, fixture_user_id
+):
+    # The form never carries the derived level; saving salary must not reset it.
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id, inferred="mid")
+        resp = await client.post("/api/profile", data={"preferences": json.dumps({"salary_min": 50000})})
+        assert resp.status_code == 200, resp.text
+        body = (await client.get("/api/profile")).json()
+        assert body["preferences"]["experience_level_inferred"] == "mid"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # (c) the user's own level wins
 # ═══════════════════════════════════════════════════════════════════════════

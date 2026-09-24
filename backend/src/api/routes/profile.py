@@ -668,6 +668,9 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         experience_level=_normalize_experience_level(
             pref_dict.get("experience_level", existing.experience_level)
         ),
+        # Derived from CV/LinkedIn history, never on the form — carry it forward
+        # or a routine preferences save resets the guessed level to "".
+        experience_level_inferred=existing.experience_level_inferred,
         negative_keywords=pref_dict.get("negative_keywords", []),
         about_me=pref_dict.get("about_me", ""),
         # normalize_github_username here too, not only in the dedicated GitHub
