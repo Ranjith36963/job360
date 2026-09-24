@@ -162,6 +162,14 @@ ESCO_SKILL_NORMALISATION_ENABLED = os.getenv(
 # Set 0 to disable the cap entirely.
 PROFILE_EXTRACT_MAX_PER_HOUR = int(os.getenv("PROFILE_EXTRACT_MAX_PER_HOUR", "12"))
 
+# LinkedIn PDF line-wrap detection (services/profile/linkedin_parser.py). A
+# "Technologies:" line that ends WITHOUT a bullet was cut by the PDF when its
+# length is at least this fraction of the document's own line width (the 95th
+# percentile of its line lengths). The owner's real export had cut lines at
+# 69/75 and 71/75 (0.92, 0.95); 0.85 leaves margin for proportional fonts.
+# Read live via `settings.X` so tests can monkeypatch it.
+LINKEDIN_WRAP_WIDTH_RATIO = float(os.getenv("LINKEDIN_WRAP_WIDTH_RATIO", "0.85"))
+
 # Personal API tokens + MCP (docs/plans/2026-09-03-mcp-server). Read through
 # `settings.X` at call time, never bound at import — tests monkeypatch them.
 # Active (unrevoked) tokens one user may hold. 10 = one per client/machine.

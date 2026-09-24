@@ -106,6 +106,160 @@ class TestInlineTechSkills:
         text = "Continuously learning: Prompt engineering • Vector databases • RLHF • AI evaluation frameworks\n"
         sk = set(_extract_inline_tech_skills(text))
         assert {"Prompt engineering", "Vector databases", "RLHF", "AI evaluation frameworks"}.issubset(sk)
+
+    def test_mid_item_wrap_heals_vector_databases(self):
+        """The PDF wraps the list INSIDE an item ("... • Vector" / "Databases
+        • Python"). The owner's stored skills held a bare "Vector" from this."""
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = (
+            "Technologies: Docker • AWS Bedrock • Vector\n"
+            "Databases • Python\n"
+            "Next Company\n"
+        )
+        sk = _extract_inline_tech_skills(text)
+        assert sk == ["Docker", "AWS Bedrock", "Vector Databases", "Python"]
+        assert "Vector" not in sk
+        assert "Databases" not in sk
+
+    def test_mid_item_wrap_heals_data_preprocessing(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = (
+            "Technologies: Python • Pandas • Data\n"
+            "Preprocessing • Scikit-learn\n"
+        )
+        sk = _extract_inline_tech_skills(text)
+        assert sk == ["Python", "Pandas", "Data Preprocessing", "Scikit-learn"]
+        assert "Data" not in sk
+        assert "Preprocessing" not in sk
+
+    def test_unwrapped_list_unchanged(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = "Technologies: Docker • AWS Bedrock • Redis\nLed a team of five.\n"
+        assert _extract_inline_tech_skills(text) == ["Docker", "AWS Bedrock", "Redis"]
+
+    def test_heading_on_next_line_not_joined(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = "Technologies: Docker • Vector\nEducation\nMSc • Computer Science\n"
+        assert _extract_inline_tech_skills(text) == ["Docker", "Vector"]
+
+    # The owner's REAL export (prod read 2026-09-24): the two Technologies runs
+    # are copied verbatim, including where the PDF cut them. Both cut items are
+    # the LAST item, so no bullet follows — only the line width can tell. The
+    # prose around them is neutral filler of the same widths (the real export's
+    # line widths were p95 75 / max 80); no personal or contact data.
+    _OWNER_DOC = (
+        "- Designed a retrieval pipeline that answered internal support questions\n"
+        "  for the platform team, cutting the time spent on repeated tickets by\n"
+        "  a clear margin and freeing engineers for product work across quarters\n"
+        "- Built an evaluation harness that scored every model change against a\n"
+        "  fixed question set before release, so regressions were caught early\n"
+        "capabilities into product roadmap, accelerating feature development cycle by\n"
+        "25%\n"
+        "Technologies: Docker • AWS Bedrock • AWS S3 • Chroma DB • Redis • Linux\n"
+        "• Python • RAG Pipelines • Generative AI • Multi-Agent Systems • Vector\n"
+        "Databases\n"
+        "Second Company\n"
+        "AI / ML intern\n"
+        "October 2024 - January 2025 (4 months)\n"
+        "- Trained a video classification model on a labelled clip set and wrote\n"
+        "  the data loaders, augmentation steps and the evaluation reporting code\n"
+        "- Implemented LangChain framework for orchestrating complex AI workflows\n"
+        "and prompt engineering optimization\n"
+        "Technologies: Python • TensorFlow • PyTorch • LangChain • OpenAI API •\n"
+        "Gemini API • Large Language Models • NLP • Video Understanding • Data\n"
+        "Preprocessing\n"
+        "Education\n"
+        "Some University\n"
+    )
+
+    def test_owner_real_export_heals_last_item_wraps(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        sk = _extract_inline_tech_skills(self._OWNER_DOC)
+        assert "Vector Databases" in sk
+        assert "Data Preprocessing" in sk
+        for stub in ("Vector", "Databases", "Data", "Preprocessing"):
+            assert stub not in sk
+        # The line after the healed fragment is never pulled in.
+        assert not any("Second Company" in s or "Education" in s for s in sk)
+        assert sk[-1] == "Data Preprocessing"
+        assert sk[:11] == [
+            "Docker", "AWS Bedrock", "AWS S3", "Chroma DB", "Redis", "Linux",
+            "Python", "RAG Pipelines", "Generative AI", "Multi-Agent Systems",
+            "Vector Databases",
+        ]
+
+    def test_owner_export_through_deterministic_fields(self):
+        """Same text through the public entry point the upload path uses."""
+        from src.services.profile.linkedin_parser import deterministic_linkedin_fields
+
+        # Headings + page footer so the text is recognised as a LinkedIn export.
+        doc = (
+            "Top Skills\nMachine Learning\nSummary\nEngineer.\nExperience\n"
+            + self._OWNER_DOC
+            + "Page 1 of 2\n"
+        )
+        skills = deterministic_linkedin_fields(doc)["skills"]
+        assert "Vector Databases" in skills and "Data Preprocessing" in skills
+        assert "Vector" not in skills and "Data" not in skills
+
+    def test_width_rule_off_when_ratio_unreachable(self, monkeypatch):
+        """The ratio is a live setting: above 1.0 no line is 'full width', so
+        the last-item rule never fires (stubs come back, proving it's the rule)."""
+        from src.core import settings
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        monkeypatch.setattr(settings, "LINKEDIN_WRAP_WIDTH_RATIO", 1.5)
+        sk = _extract_inline_tech_skills(self._OWNER_DOC)
+        assert "Vector" in sk and "Vector Databases" not in sk
+
+    def test_short_tech_line_not_joined_in_full_document(self):
+        """A tech line well short of the page width was NOT cut: the next
+        line (a company name) stays out, even in a full-width document."""
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        doc = self._OWNER_DOC.replace(
+            "Technologies: Docker • AWS Bedrock • AWS S3 • Chroma DB • Redis • Linux\n"
+            "• Python • RAG Pipelines • Generative AI • Multi-Agent Systems • Vector\n"
+            "Databases\n",
+            "Technologies: Docker • Redis • Linux\n",
+        )
+        sk = _extract_inline_tech_skills(doc)
+        assert "Linux" in sk
+        assert not any("Second Company" in s for s in sk)
+
+    def test_full_width_line_then_prose_not_joined(self):
+        """A full-width tech line followed by a full-width prose line: the
+        prose is not a short fragment, so it is not joined."""
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        doc = self._OWNER_DOC.replace(
+            "Databases\n",
+            "Databases were migrated to a managed service with nightly snapshot jobs\n",
+        )
+        sk = _extract_inline_tech_skills(doc)
+        assert "Vector" in sk
+        assert not any("migrated" in s for s in sk)
+
+    def test_full_width_line_then_heading_not_joined(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        doc = self._OWNER_DOC.replace("Preprocessing\nEducation\n", "Education\n")
+        sk = _extract_inline_tech_skills(doc)
+        assert "Data" in sk
+        assert "Data Education" not in sk
+
+    def test_blank_line_not_joined(self):
+        from src.services.profile.linkedin_parser import _extract_inline_tech_skills
+
+        text = "Technologies: Docker • Vector\n\nDatabases • Python\n"
+        sk = _extract_inline_tech_skills(text)
+        assert sk == ["Docker", "Vector"]
+        assert "Vector Databases" not in sk
 from src.services.profile.github_enricher import (
     _infer_skills,
     enrich_cv_from_github,
