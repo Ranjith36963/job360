@@ -195,6 +195,9 @@ test.describe("Visa signal — application detail", () => {
     await expect(page.getByTestId("visa-detail").first()).toBeVisible();
     await expect(page.getByText("We cannot offer visa sponsorship.").first()).toBeVisible();
 
+    // The visa form is folded behind Edit by default (decision 4).
+    await page.getByTestId("visa-edit").click();
+
     // The select control hydrates from the current visa values.
     await expect(page.getByTestId("visa-select")).toHaveValue("no_sponsorship");
     await expect(page.getByTestId("visa-country")).toHaveValue("DE");

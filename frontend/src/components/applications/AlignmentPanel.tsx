@@ -4,11 +4,6 @@ import { useEffect, useState } from "react";
 import { getAlignment, type Alignment } from "@/lib/api";
 import { FitRadar } from "./FitRadar";
 
-// Past this many pills, "Not in the ad" reads as a wall rather than a list —
-// fold the rest behind "Show all N" so a large profile doesn't dominate the
-// Fit section.
-const SKILLS_FOLD_LIMIT = 12;
-
 /** Colour for the fit-score bar fill — thresholds match the rest of the app's
  * "verdict" language (nothing here computes a score; it only paints one
  * that's already stored). */
@@ -34,13 +29,11 @@ export function AlignmentPanel({
   const [data, setData] = useState<Alignment | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showAllSkills, setShowAllSkills] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setShowAllSkills(false);
     (async () => {
       try {
         const res = await getAlignment(applicationId);
@@ -68,60 +61,62 @@ export function AlignmentPanel({
     return null;
   }
 
-  const { fit, skills_in_ad, skills_not_in_ad, skills_total, ad_chars } = data;
+  const { fit, skills_in_ad, skills_total, ad_chars } = data;
+
+  // Owner decision 3 (2026-09-24): when there is no fit, the whole panel is
+  // one line pointing at the assistant — no score, no gaps, no skills.
+  if (!fit) {
+    return (
+      <div className="glass-card rounded-xl p-4">
+        <p className="text-sm text-muted-foreground">
+          No fit yet — ask your assistant to judge this job.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="glass-card rounded-xl p-4">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Fit
-        </span>
-        {fit?.score != null ? (
-          <div className="flex flex-1 items-center gap-3">
+      {fit.score != null && (
+        <div className="flex items-center gap-3">
+          <div
+            data-testid="fit-score-bar"
+            className="h-2 flex-1 rounded-full bg-muted"
+          >
             <div
-              data-testid="fit-score-bar"
-              className="h-2 flex-1 rounded-full bg-muted"
-            >
-              <div
-                className={`h-2 rounded-full ${barColor(fit.score)}`}
-                style={{ width: `${fit.score}%` }}
-              />
-            </div>
-            <span className="shrink-0 text-sm font-semibold">{fit.score}/100</span>
+              className={`h-2 rounded-full ${barColor(fit.score)}`}
+              style={{ width: `${fit.score}%` }}
+            />
           </div>
-        ) : null}
-      </div>
-
-      {!fit && (
-        <p className="mt-2 text-sm text-muted-foreground">
-          No fit judgement yet — your agent saves one with save_fit.
-        </p>
+          <span className="shrink-0 text-sm font-semibold">{fit.score}/100</span>
+        </div>
       )}
 
-      {fit && (
+      <p className="mt-2 font-semibold">{fit.verdict ?? "No verdict text"}</p>
+      {fit.gaps.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            What the job asks for that you lack — from your assistant
+          </p>
+          <ul className="flex flex-wrap gap-1.5">
+            {fit.gaps.map((gap) => (
+              <li
+                key={gap}
+                data-testid="fit-gap"
+                className="rounded-full bg-destructive/10 px-2.5 py-0.5 text-xs text-destructive"
+              >
+                {gap}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {fit.axes.length >= 3 && (
         <>
-          <p className="mt-2 font-semibold">{fit.verdict ?? "No verdict text"}</p>
-          {fit.gaps.length > 0 && (
-            <ul className="mt-2 flex flex-wrap gap-1.5">
-              {fit.gaps.map((gap) => (
-                <li
-                  key={gap}
-                  data-testid="fit-gap"
-                  className="rounded-full bg-destructive/10 px-2.5 py-0.5 text-xs text-destructive"
-                >
-                  {gap}
-                </li>
-              ))}
-            </ul>
-          )}
-          {fit.axes.length >= 3 && (
-            <>
-              <FitRadar axes={fit.axes} />
-              <p className="mt-1 text-center text-xs text-muted-foreground/70">
-                The lines are your agent&apos;s own choice for this job.
-              </p>
-            </>
-          )}
+          <FitRadar axes={fit.axes} />
+          <p className="mt-1 text-center text-xs text-muted-foreground/70">
+            The lines are your agent&apos;s own choice for this job.
+          </p>
         </>
       )}
 
@@ -135,52 +130,20 @@ export function AlignmentPanel({
         ) : (
           <>
             <p data-testid="skills-summary" className="text-sm text-muted-foreground">
-              {skills_in_ad.length} of {skills_total} of your skills appear in this ad
+              This ad mentions {skills_in_ad.length} of your skills
             </p>
-            <div className="mt-2 grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div data-testid="skills-in-ad">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  In the ad
-                </p>
-                <ul className="flex flex-wrap gap-1.5">
-                  {skills_in_ad.map((skill) => (
-                    <li
-                      key={skill}
-                      className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs text-emerald-600 dark:text-emerald-400"
-                    >
-                      {skill}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div data-testid="skills-not-in-ad">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Not in the ad
-                </p>
-                <ul className="flex flex-wrap gap-1.5">
-                  {(showAllSkills ? skills_not_in_ad : skills_not_in_ad.slice(0, SKILLS_FOLD_LIMIT)).map(
-                    (skill) => (
-                      <li
-                        key={skill}
-                        className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground"
-                      >
-                        {skill}
-                      </li>
-                    )
-                  )}
-                </ul>
-                {skills_not_in_ad.length > SKILLS_FOLD_LIMIT && (
-                  <button
-                    type="button"
-                    data-testid="skills-show-all"
-                    onClick={() => setShowAllSkills((prev) => !prev)}
-                    className="mt-1.5 text-xs font-medium text-primary hover:underline"
+            {skills_in_ad.length > 0 && (
+              <ul data-testid="skills-in-ad" className="mt-2 flex flex-wrap gap-1.5">
+                {skills_in_ad.map((skill) => (
+                  <li
+                    key={skill}
+                    className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs text-emerald-600 dark:text-emerald-400"
                   >
-                    {showAllSkills ? "Show fewer" : `Show all ${skills_not_in_ad.length}`}
-                  </button>
-                )}
-              </div>
-            </div>
+                    {skill}
+                  </li>
+                ))}
+              </ul>
+            )}
           </>
         )}
       </div>

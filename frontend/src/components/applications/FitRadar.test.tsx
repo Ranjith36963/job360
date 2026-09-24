@@ -41,6 +41,18 @@ describe("FitRadar", () => {
     expect(screen.getByText("You bring")).toBeInTheDocument();
   });
 
+  it("draws a small 'asks N · you N' value line under each axis label", () => {
+    render(<FitRadar axes={AXES} size={200} />);
+
+    const values = screen.getAllByTestId("fit-radar-axis-value");
+    expect(values.map((el) => el.textContent)).toEqual([
+      "asks 100 · you 0",
+      "asks 50 · you 50",
+      "asks 0 · you 100",
+      "asks 100 · you 100",
+    ]);
+  });
+
   it("draws nothing with fewer than three axes — no picture, no placeholder", () => {
     const { container } = render(<FitRadar axes={AXES.slice(0, 2)} />);
     expect(container).toBeEmptyDOMElement();

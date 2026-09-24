@@ -16,6 +16,7 @@ import { NoteForm } from "@/components/applications/NoteForm";
 import { LessonForm } from "@/components/applications/LessonForm";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 import { VisaSelect } from "@/components/applications/VisaSelect";
+import { StatusMenu } from "@/components/applications/StatusMenu";
 import { STATUS_LABEL } from "@/lib/event-labels";
 import { formatDateTime } from "@/lib/format-date";
 
@@ -26,6 +27,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   const [detail, setDetail] = useState<ApplicationDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [marking, setMarking] = useState(false);
+  const [markConfirming, setMarkConfirming] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const load = useCallback(async () => {
@@ -46,6 +48,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
     setMarking(true);
     try {
       await recordApplicationReceipt(applicationId, {});
+      setMarkConfirming(false);
       await load();
     } catch (err) {
       // C10 (application-spine review) — see ApplicationList.tsx's identical
@@ -107,10 +110,14 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             </p>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary">
+        <div className="flex flex-wrap items-center gap-3">
+          <span
+            data-testid="status-label"
+            className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary"
+          >
             {STATUS_LABEL[detail.status] ?? detail.status}
           </span>
+          <StatusMenu applicationId={detail.id} onRecorded={load} />
           <VisaBadge
             signal={visa.signal}
             needsSponsorship={visa.needs_sponsorship}
@@ -121,16 +128,42 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
               Interview {formatDateTime(detail.interview_at)}
             </span>
           )}
-          {detail.status === "considering" && (
-            <button
-              type="button"
-              onClick={() => void markApplied()}
-              disabled={marking}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-            >
-              {marking ? "Marking…" : "Mark Applied"}
-            </button>
-          )}
+          {detail.status === "considering" &&
+            (!markConfirming ? (
+              <button
+                type="button"
+                data-testid="mark-applied"
+                onClick={() => setMarkConfirming(true)}
+                disabled={marking}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                Mark Applied
+              </button>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
+                <span>
+                  Record that you applied? This creates a receipt that can&apos;t be deleted.
+                </span>
+                <button
+                  type="button"
+                  data-testid="mark-applied-confirm"
+                  onClick={() => void markApplied()}
+                  disabled={marking}
+                  className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  {marking ? "Recording…" : "Confirm"}
+                </button>
+                <button
+                  type="button"
+                  data-testid="mark-applied-cancel"
+                  onClick={() => setMarkConfirming(false)}
+                  disabled={marking}
+                  className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            ))}
           {detail.job.job_url && (
             <a
               href={detail.job.job_url}
@@ -211,7 +244,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           onClick={() => setHistoryOpen((open) => !open)}
           className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
         >
-          {historyOpen ? "Hide history" : `Show history (${detail.events.length} events)`}
+          {historyOpen ? "Hide history" : `Show history (${detail.events.length})`}
         </button>
         {historyOpen && (
           <>

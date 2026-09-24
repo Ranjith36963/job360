@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { AlignmentPanel } from "./AlignmentPanel";
 import type { Alignment } from "@/lib/api";
 
@@ -30,7 +30,7 @@ function payload(overrides: Partial<Alignment> = {}): Alignment {
 describe("AlignmentPanel", () => {
   beforeEach(() => getAlignment.mockReset());
 
-  it("renders the score bar, verdict, gap pills, and skill columns", async () => {
+  it("renders the score bar, verdict, labelled gap pills, and the one-line skills summary", async () => {
     getAlignment.mockResolvedValue(payload());
     render(<AlignmentPanel applicationId={8383} />);
 
@@ -41,35 +41,33 @@ describe("AlignmentPanel", () => {
     expect(fill).toHaveStyle({ width: "68%" });
     expect(screen.getByText("68/100")).toBeInTheDocument();
 
+    expect(
+      screen.getByText("What the job asks for that you lack — from your assistant")
+    ).toBeInTheDocument();
     expect(screen.getAllByTestId("fit-gap")).toHaveLength(2);
 
-    expect(
-      screen.getByText("2 of 4 of your skills appear in this ad")
-    ).toBeInTheDocument();
+    expect(screen.getByText("This ad mentions 2 of your skills")).toBeInTheDocument();
 
     const inAd = screen.getByTestId("skills-in-ad");
     expect(inAd.querySelectorAll("li")).toHaveLength(2);
     expect(inAd).toHaveTextContent("Python");
     expect(inAd).toHaveTextContent("RAG");
 
-    const notInAd = screen.getByTestId("skills-not-in-ad");
-    expect(notInAd.querySelectorAll("li")).toHaveLength(2);
-    expect(notInAd).toHaveTextContent("LangGraph");
-    expect(notInAd).toHaveTextContent("Kubernetes");
+    expect(screen.queryByTestId("skills-not-in-ad")).toBeNull();
+    expect(screen.queryByText(/not in the ad/i)).toBeNull();
   });
 
-  it("shows the no-fit-judgement line and still shows the skill columns when fit is null", async () => {
+  it("shows one line and nothing else when fit is null", async () => {
     getAlignment.mockResolvedValue(payload({ fit: null }));
     render(<AlignmentPanel applicationId={8383} />);
 
     await waitFor(() =>
       expect(
-        screen.getByText("No fit judgement yet — your agent saves one with save_fit.")
+        screen.getByText("No fit yet — ask your assistant to judge this job.")
       ).toBeInTheDocument()
     );
 
-    expect(screen.getByTestId("skills-in-ad")).toBeInTheDocument();
-    expect(screen.getByTestId("skills-not-in-ad")).toBeInTheDocument();
+    expect(screen.queryByTestId("skills-in-ad")).toBeNull();
     expect(screen.queryByTestId("fit-score-bar")).toBeNull();
   });
 
@@ -82,26 +80,13 @@ describe("AlignmentPanel", () => {
     );
   });
 
-  it("folds 'Not in the ad' past 12 pills, and 'Show all' expands to the full list", async () => {
-    const thirteenSkills = Array.from({ length: 13 }, (_, i) => `Skill${i + 1}`);
-    getAlignment.mockResolvedValue(
-      payload({
-        skills_in_ad: [],
-        skills_not_in_ad: thirteenSkills,
-        skills_total: 13,
-      })
-    );
+  it("shows no skills-in-ad list when the ad mentions none", async () => {
+    getAlignment.mockResolvedValue(payload({ skills_in_ad: [], skills_total: 4 }));
     render(<AlignmentPanel applicationId={8383} />);
 
-    const notInAd = await screen.findByTestId("skills-not-in-ad");
-    await waitFor(() => expect(notInAd.querySelectorAll("li")).toHaveLength(12));
-
-    const showAll = screen.getByTestId("skills-show-all");
-    expect(showAll).toHaveTextContent("Show all 13");
-
-    fireEvent.click(showAll);
-
-    expect(notInAd.querySelectorAll("li")).toHaveLength(13);
-    expect(showAll).toHaveTextContent("Show fewer");
+    await waitFor(() =>
+      expect(screen.getByText("This ad mentions 0 of your skills")).toBeInTheDocument()
+    );
+    expect(screen.queryByTestId("skills-in-ad")).toBeNull();
   });
 });

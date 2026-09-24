@@ -184,3 +184,107 @@ describe("ApplicationClient — six-question layout", () => {
     );
   });
 });
+
+describe("ApplicationClient — Mark Applied asks first (decision 2)", () => {
+  beforeEach(() => {
+    getApplication.mockReset();
+    getAlignment.mockReset();
+    recordApplicationReceipt.mockReset();
+    getApplication.mockResolvedValue({ ...detail(), status: "considering" });
+    getAlignment.mockResolvedValue({
+      fit: null,
+      skills_in_ad: [],
+      skills_not_in_ad: [],
+      skills_total: 0,
+      ad_chars: 0,
+    });
+    recordApplicationReceipt.mockResolvedValue({
+      receipt_id: 1,
+      sent_at: "2026-09-16T00:00:00Z",
+      cv_artifact_id: 1,
+      cv_version_no: 1,
+      cover_letter_artifact_id: null,
+      channel: "",
+      confirmation: "",
+      url: "/applications/42",
+      event_id: 10,
+    });
+  });
+
+  it("does not POST on the first click — only after Confirm", async () => {
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+
+    fireEvent.click(screen.getByTestId("mark-applied"));
+    expect(recordApplicationReceipt).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/record that you applied\? this creates a receipt/i)
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("mark-applied-confirm"));
+
+    await waitFor(() => expect(recordApplicationReceipt).toHaveBeenCalledWith(42, {}));
+  });
+
+  it("Cancel closes the confirm without posting", async () => {
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+
+    fireEvent.click(screen.getByTestId("mark-applied"));
+    fireEvent.click(screen.getByTestId("mark-applied-cancel"));
+
+    expect(screen.queryByTestId("mark-applied-confirm")).toBeNull();
+    expect(recordApplicationReceipt).not.toHaveBeenCalled();
+  });
+});
+
+describe("ApplicationClient — status menu asks first (decision 1)", () => {
+  beforeEach(() => {
+    getApplication.mockReset();
+    getAlignment.mockReset();
+    recordApplicationEvent.mockReset();
+    getApplication.mockResolvedValue({ ...detail(), status: "considering" });
+    getAlignment.mockResolvedValue({
+      fit: null,
+      skills_in_ad: [],
+      skills_not_in_ad: [],
+      skills_total: 0,
+      ad_chars: 0,
+    });
+    recordApplicationEvent.mockResolvedValue({
+      event_id: 11,
+      application_id: 42,
+      event_type: "rejected",
+      status: "rejected",
+      status_changed: true,
+    });
+  });
+
+  it("does not POST when an option is chosen — only after Confirm", async () => {
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+
+    fireEvent.change(screen.getByTestId("status-menu"), { target: { value: "rejected" } });
+    expect(recordApplicationEvent).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/record "rejected"\? this is added to the history/i)
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("status-confirm"));
+
+    await waitFor(() =>
+      expect(recordApplicationEvent).toHaveBeenCalledWith(42, { event_type: "rejected" })
+    );
+  });
+
+  it("Cancel closes the confirm without posting", async () => {
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+
+    fireEvent.change(screen.getByTestId("status-menu"), { target: { value: "rejected" } });
+    fireEvent.click(screen.getByTestId("status-cancel"));
+
+    expect(screen.queryByTestId("status-confirm")).toBeNull();
+    expect(recordApplicationEvent).not.toHaveBeenCalled();
+  });
+});
