@@ -760,7 +760,9 @@ class TestEveryGithubShelfReachesTheApi:
         assert repo["pushed_at"].startswith("2026")
         # Dependency-file evidence: DEMONSTRATED usage, not a CV claim.
         assert "langgraph" in detail["frameworks"]
-        assert "TypeScript" in detail["skills_inferred"]
+        # github_skills_inferred (raw language + topic slugs) is not a skill
+        # shelf and is not shipped — it repeats the Languages / Topics shelves.
+        assert "skills_inferred" not in detail and "llm_skills" not in detail
         assert detail["bio"] == "Builds things"
         assert detail["profile_readme"] == "# Hello"
         # STRUCTURED identity. These were already fetched in the same

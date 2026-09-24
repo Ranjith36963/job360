@@ -331,6 +331,12 @@ APPLICATION_VISA_SIGNALS = ("sponsors", "no_sponsorship", "unknown")
 # candidate's own skills are checked against the stored ad text (a regex
 # per skill; the profile page caps skills well below this anyway).
 ALIGNMENT_MAX_SKILLS = int(os.getenv("ALIGNMENT_MAX_SKILLS", "200"))
+# The one skill list (`skill_tiering.profile_skills`): a GitHub language is a
+# skill only when it is the user's top language by bytes or holds at least
+# this share of all language bytes. Drops config-file "languages" (Procfile,
+# Batchfile, Just…) by PROPORTION, never by name (rule #28). Read at call
+# time, so a changed value applies without a restart of the reader.
+GITHUB_LANGUAGE_MIN_SHARE = float(os.getenv("GITHUB_LANGUAGE_MIN_SHARE", "0.005"))
 APPLICATION_VISA_DETAIL_MAX_CHARS = int(os.getenv("APPLICATION_VISA_DETAIL_MAX_CHARS", "500"))
 
 # R8 — record_application (the rich receipt).

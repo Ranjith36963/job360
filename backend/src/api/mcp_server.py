@@ -300,7 +300,18 @@ def build_server(version: str = "") -> MCPServer:
         documents the record shape of the two lists. What you write survives
         every later re-upload — Job360 never overwrites or clears it.
 
-        Also returned: whether the profile is complete, job titles, skill count,
+        `skills` is THE user's skill list — the same one, with the same count
+        (`skills_count`), that the web profile page and the application page
+        show: each entry is {"name", "sources"}, sources being where it was
+        found (`cv_explicit`, `linkedin`, `github_lang`, `user_declared`,
+        `about_me_llm`). To REMOVE a wrong skill (a line-wrap fragment, a
+        non-skill) from every surface, add its name to
+        `preferences.excluded_skills` with `update_profile` — send the current
+        `fields["preferences.excluded_skills"]` plus the new names. Do not
+        rewrite `cv_data.skills` to prune: exclusion reaches every source and
+        stays under the per-edit list cap.
+
+        Also returned: whether the profile is complete, job titles,
         experience level, which inputs the user has given, your own past edits
         (`agent_edits`), and the newest `lessons` the user flagged for next
         time. `raw` keys are empty strings when that input was never given; if
@@ -313,6 +324,7 @@ def build_server(version: str = "") -> MCPServer:
         # nothing extra. Calling the route and then re-loading the profile
         # meant four connections to answer one tool call.
         from src.services.profile import edits as profile_edits  # noqa: PLC0415
+        from src.services.profile.skill_tiering import profile_skills  # noqa: PLC0415
 
         user_id = _user().id
         try:
@@ -330,7 +342,11 @@ def build_server(version: str = "") -> MCPServer:
         return {
             "is_complete": s.is_complete,
             "job_titles": s.job_titles,
+            # THE one skill list (skill_tiering.profile_skills) — the same
+            # rows and count the web shows; built from the profile already
+            # loaded above, so no extra query.
             "skills_count": s.skills_count,
+            "skills": profile_skills(profile),
             "experience_level": s.experience_level,
             "education": s.education,
             "has_cv": s.cv_length > 0,
@@ -777,6 +793,10 @@ def build_server(version: str = "") -> MCPServer:
         <new value, or null to clear back to what the structural read says>}.
         An unknown path or a wrongly-typed value is refused with the allowed
         set/values named. Send several edits in one call.
+        To drop a wrong skill from every surface, add it to
+        `preferences.excluded_skills` (value = the current list from
+        get_profile's `fields` plus the new names); rewriting `cv_data.skills`
+        only reaches the CV's share and is capped per edit.
 
         Work history and projects are lists of records, and a write REPLACES
         the whole list (send every role, not only the new one):

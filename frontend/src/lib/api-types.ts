@@ -2673,11 +2673,6 @@ export interface components {
              * @default []
              */
             agent_edits: components["schemas"]["ProfileEditOut"][];
-            /**
-             * Ai Suggestions
-             * @default []
-             */
-            ai_suggestions: string[];
             /** Current Version Id */
             current_version_id?: number | null;
             cv_detail?: components["schemas"]["CVDetail"] | null;

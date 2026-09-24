@@ -2672,14 +2672,6 @@
             "title": "Agent Edits",
             "type": "array"
           },
-          "ai_suggestions": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Ai Suggestions",
-            "type": "array"
-          },
           "current_version_id": {
             "anyOf": [
               {

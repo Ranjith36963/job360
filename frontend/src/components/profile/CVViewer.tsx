@@ -166,7 +166,6 @@ function normalizeLinkedinPosition(raw: Record<string, unknown>): LinkedinPositi
 const SOURCE_BUCKET: Record<string, "cv" | "linkedin" | "github" | "preferences"> = {
   cv_explicit: "cv",
   linkedin: "linkedin",
-  github_llm: "github",
   github_lang: "github",
   github_dep: "github",
   user_declared: "preferences",
@@ -324,8 +323,12 @@ export function CVViewer({
   const asStrings = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   const ghFrameworks = asStrings(ghDetail.frameworks);
-  const ghInferred = asStrings(ghDetail.skills_inferred);
-  const ghLlmSkills = asStrings(ghDetail.llm_skills);
+  // No "skills" shelves here on purpose. The one skill list (backend
+  // skill_tiering.profile_skills) takes only significant languages from
+  // GitHub; the raw inferred list (every language + topic slug again) and the
+  // leftovers of our own deleted README-reading model (decision 28) are not
+  // skills and are no longer sent. Languages, topics, repos and frameworks
+  // stay, each on its own labelled shelf.
   // Structured identity → label/value rows. Only fields the person actually
   // filled in appear; an unset field stays absent rather than rendering an
   // empty row (rule #29). `hireable` is tri-state: shown only when GitHub has
@@ -381,8 +384,6 @@ export function CVViewer({
     ghTopics.length > 0 ||
     ghRepos.length > 0 ||
     ghFrameworks.length > 0 ||
-    ghInferred.length > 0 ||
-    ghLlmSkills.length > 0 ||
     Boolean(ghBio) ||
     Boolean(ghProfileReadme);
 
@@ -1137,9 +1138,9 @@ export function CVViewer({
           )}
 
           {/* ── Everything below was FETCHED, STORED, and shown to nobody ──
-              Measured 2026-08-09 on a live profile: 49 frameworks, 13 repos and
-              30 LLM-read skills sat in the database while only languages and
-              topics reached the screen. It is the input where invisibility
+              Measured 2026-08-09 on a live profile: 49 frameworks and 13 repos
+              sat in the database while only languages and topics reached the
+              screen. It is the input where invisibility
               costs most — a CV CLAIMS "FastAPI", a requirements.txt in shipped
               code PROVES it, which is stronger evidence than a CV mention
               alone. It was part of the stored profile already; they just
@@ -1232,44 +1233,6 @@ export function CVViewer({
                     className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-400"
                   >
                     {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {ghLlmSkills.length > 0 && (
-            <div className="mb-5">
-              <SectionLabel
-                icon={BookOpen}
-                text={`Skills read from your READMEs (${ghLlmSkills.length})`}
-              />
-              <ul className="flex flex-wrap gap-1.5 pl-5">
-                {ghLlmSkills.map((s) => (
-                  <li
-                    key={s}
-                    className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-400"
-                  >
-                    {s}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {ghInferred.length > 0 && (
-            <div className="mb-5">
-              <SectionLabel
-                icon={Code2}
-                text={`Skills inferred from repos (${ghInferred.length})`}
-              />
-              <ul className="flex flex-wrap gap-1.5 pl-5">
-                {ghInferred.map((s) => (
-                  <li
-                    key={s}
-                    className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-400"
-                  >
-                    {s}
                   </li>
                 ))}
               </ul>

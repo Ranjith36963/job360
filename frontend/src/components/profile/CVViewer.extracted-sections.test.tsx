@@ -54,7 +54,7 @@ const FULL_CV: CVDetail = {
 };
 
 const SKILL_PROVENANCE = {
-  Python: ["cv_explicit", "github_llm"],
+  Python: ["cv_explicit", "github_lang"],
   TypeScript: ["linkedin"],
 };
 

@@ -458,11 +458,9 @@ export default function ProfilePage() {
               {/* Right column: Preferences */}
               <PreferencesForm
                 preferences={profile?.preferences ?? {}}
-                // Suggestions are rendered INSIDE the form, next to Additional
-                // Skills, so a tap edits local state and rides the form's own
-                // debounced save. They used to sit further down this page as
-                // dead chips whose helper text told the user to retype them.
-                suggestions={profile?.ai_suggestions ?? []}
+                // No suggestions: the stored "skills that go with yours" were
+                // our own deleted model's output (decision 28) and are no
+                // longer sent. The user's agent can suggest; we remember.
                 onSave={handleSavePreferences}
                 onClear={profile ? () => handleClear("preferences") : undefined}
                 loading={loadingProfile}
@@ -523,11 +521,11 @@ export default function ProfilePage() {
                   chip: "bg-yellow-500/10 text-yellow-500",
                 },
               ];
-              const total = new Set(
-                GROUPS.flatMap((g) =>
-                  (bySource[g.key] ?? []).map((s) => s.toLowerCase())
-                )
-              ).size;
+              // THE one skill count, from the backend (skill_tiering.
+              // profile_skills) — the same number the CV card, the application
+              // page and the user's agent see. Never re-unioned here: a second
+              // count computed in the browser is how three numbers appeared.
+              const total = profile?.summary?.skills_count ?? 0;
               // Suggestions no longer keep this block alive: they moved into
               // the preferences form. This panel shows skills the user HAS, so
               // with none of those there is nothing to show.

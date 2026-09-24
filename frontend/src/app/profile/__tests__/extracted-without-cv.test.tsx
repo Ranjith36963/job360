@@ -51,7 +51,6 @@ const BASE_SUMMARY = {
 const NO_CV_PROFILE = {
   summary: BASE_SUMMARY,
   preferences: {},
-  ai_suggestions: [],
   cv_detail: null,
   skill_tiers: {},
   skill_esco: {},
@@ -164,5 +163,24 @@ describe("ProfilePage — LinkedIn/GitHub render without a CV (Unit B)", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Senior Backend Engineer")).toBeInTheDocument();
     expect(screen.getByText("job-matcher")).toBeInTheDocument();
+  });
+
+  it("'Your Skills' shows the backend's ONE count, never a browser re-count", async () => {
+    // The one skill list (backend skill_tiering.profile_skills) — the same
+    // number the CV card, the application page and the agent see. The groups
+    // below would re-union to 3; the header must say the backend's 7.
+    const api = await import("@/lib/api");
+    vi.mocked(api.getProfile).mockResolvedValueOnce({
+      ...WITH_CV_PROFILE,
+      summary: { ...WITH_CV_PROFILE.summary, skills_count: 7 },
+      skills_by_source: { cv: ["Python", "RAG"], github: ["Python", "TypeScript"] },
+    } as unknown as Awaited<ReturnType<typeof api.getProfile>>);
+
+    render(<ProfilePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("(7)")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("(3)")).not.toBeInTheDocument();
   });
 });

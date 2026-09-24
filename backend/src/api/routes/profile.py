@@ -87,10 +87,19 @@ def _build_profile_response(
     the SAME connection. Re-querying here would open a second connection per
     profile render, on the hottest read in the app (N4).
     """
+    # THE one skill list (skill_tiering.profile_skills) — the CV-card count,
+    # the grouped "Your Skills", the alignment panel and MCP get_profile all
+    # read it, so one person has one skill count. Built once per render.
+    from src.services.profile.skill_tiering import (  # noqa: PLC0415 — lazy
+        profile_skill_evidence,
+        tier_skills_by_evidence,
+    )
+
+    evidence = profile_skill_evidence(profile)
     summary = ProfileSummary(
         is_complete=profile.is_complete,
         job_titles=profile.cv_data.job_titles,
-        skills_count=len(profile.cv_data.skills),
+        skills_count=len(evidence),
         cv_length=len(profile.cv_data.raw_text),
         # ANY stored LinkedIn signal counts, and since decision 28 the first
         # of them is the raw TEXT: a successful upload stores the export's
@@ -145,29 +154,18 @@ def _build_profile_response(
     # per-skill evidence rows, then split into primary/secondary/tertiary
     # by accumulated weight. Empty dict if the helper raises (e.g. brand
     # new profile with no fields populated).
-    skill_tiers: dict[str, list[str]] = {}
-    skill_provenance: dict[str, list[str]] = {}
-    try:
-        from src.services.profile.skill_tiering import (  # noqa: PLC0415 — lazy
-            collect_evidence_from_profile,
-            tier_skills_by_evidence,
-        )
-
-        evidence = collect_evidence_from_profile(profile)
-        primary, secondary, tertiary = tier_skills_by_evidence(evidence)
-        skill_tiers = {
-            "primary": primary,
-            "secondary": secondary,
-            "tertiary": tertiary,
-        }
-        # Step-1.5 S3-E — collect (skill → list[source]) directly from
-        # the SkillEvidence rows (which carry the source list per skill).
-        # Skip ESCO normalisation here so the route stays cheap on a hot
-        # GET; ProfileResponse.skill_esco already carries the URI map.
-        skill_provenance = {ev.name: list(set(ev.sources)) for ev in evidence}
-    except Exception:
-        skill_tiers = {}
-        skill_provenance = {}
+    primary, secondary, tertiary = tier_skills_by_evidence(evidence)
+    skill_tiers: dict[str, list[str]] = {
+        "primary": primary,
+        "secondary": secondary,
+        "tertiary": tertiary,
+    }
+    # Step-1.5 S3-E — (skill → list[source]) straight from the SkillEvidence
+    # rows, in first-seen order. Skip ESCO normalisation here so the route
+    # stays cheap on a hot GET; ProfileResponse.skill_esco carries the URIs.
+    skill_provenance: dict[str, list[str]] = {
+        ev.name: list(dict.fromkeys(ev.sources)) for ev in evidence
+    }
 
     # Skills grouped by SOURCE for the source-based profile view. Maps each
     # provenance source label to a user-facing bucket; a skill with multiple
@@ -175,7 +173,6 @@ def _build_profile_response(
     _SOURCE_BUCKET = {  # noqa: N806 — constant-style lookup table, intentionally uppercase
         "cv_explicit": "cv",
         "linkedin": "linkedin",
-        "github_llm": "github",
         "github_lang": "github",
         "github_dep": "github",
         "user_declared": "preferences",
@@ -191,8 +188,10 @@ def _build_profile_response(
             if bucket and skill.lower() not in _seen_in_bucket[bucket]:
                 skills_by_source[bucket].append(skill)
                 _seen_in_bucket[bucket].add(skill.lower())
-    # AI suggestions — computed once at extraction, stored on CVData.
-    ai_suggestions: list[str] = list(getattr(cv, "suggested_skills", []) or [])
+    # The CV card lists the CV's share of THE one list — deduped, acronym
+    # pairs merged, minus excluded_skills — so its count matches "From your
+    # CV" in the grouped view. `highlights` (in-text marks) keeps the raw list.
+    cv_detail.skills = skills_by_source["cv"]
 
     # Step-1.5 S3-E — LinkedIn sub-sections + GitHub temporal map.
     linkedin_subsections: dict[str, list[dict[str, Any]]] = {
@@ -242,19 +241,18 @@ def _build_profile_response(
     # 92 pieces of signal stored and shown to nobody, the same shape as
     # cv_positions and the upload receipts before them.
     #
-    # This is the input where it matters most: GitHub evidence outranks a CV
-    # claim. A CV says "FastAPI"; a requirements.txt in shipped code PROVES it,
-    # which is why skill_tiering weights github_dep/github_llm (1.5) above
-    # github_lang (1.0). (`github_llm` is the legacy source label for the
-    # deleted GitHub model pass — the shelf still holds what it wrote for
-    # existing users, and nothing fills it now; see CVData.github_llm_skills.)
+    # These are GitHub's own labelled shelves (repos, dependency names), shown
+    # as what they are — NOT skills. The one skill list takes only significant
+    # languages from GitHub (skill_tiering.profile_skills). Two shelves are
+    # deliberately absent (the stored data is kept, just not read):
+    # `github_skills_inferred` (every language + topic slug again, already on
+    # the Languages / Topics shelves) and `github_llm_skills` (our own deleted
+    # LLM pass's output — decision 28).
     github_detail: dict[str, Any] = {
         "username": profile.preferences.github_username or "",
         "connected_at": getattr(cv, "github_connected_at", "") or "",
         "repos": list(getattr(cv, "github_repos_brief", []) or []),
         "frameworks": list(getattr(cv, "github_frameworks", []) or []),
-        "skills_inferred": list(getattr(cv, "github_skills_inferred", []) or []),
-        "llm_skills": list(getattr(cv, "github_llm_skills", []) or []),
         "identity": dict(getattr(cv, "github_identity", {}) or {}),
         "bio": getattr(cv, "github_bio", "") or "",
         "profile_readme": getattr(cv, "github_profile_readme", "") or "",
@@ -279,7 +277,6 @@ def _build_profile_response(
         skill_esco=getattr(cv, "cv_skills_esco", {}) or {},
         skill_provenance=skill_provenance,
         skills_by_source=skills_by_source,
-        ai_suggestions=ai_suggestions,
         linkedin_subsections=linkedin_subsections,
         github_temporal=github_temporal,
         github_detail=github_detail,

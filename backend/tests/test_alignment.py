@@ -83,7 +83,9 @@ async def test_alignment_draws_the_verdict_and_the_skill_split(authenticated_asy
     body: dict[str, Any] = resp.json()
     assert body["fit"]["score"] == 68 and body["fit"]["gaps"] == ["leading university"]
     assert body["skills_in_ad"] == ["Python", "RAG"]
-    assert body["skills_not_in_ad"] == ["LangGraph", "Kubernetes"]
+    # Order follows the one skill list (skill_tiering.profile_skills): the
+    # user's own typed skills are read first, then the CV.
+    assert body["skills_not_in_ad"] == ["Kubernetes", "LangGraph"]
     assert body["skills_total"] == 4
     assert body["ad_chars"] == len(_AD["description"])
 
