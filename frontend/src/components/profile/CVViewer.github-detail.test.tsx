@@ -157,12 +157,17 @@ describe("GitHub detail shows everything GitHub gave us", () => {
     expect(screen.getByText(/shipped code/i)).toBeTruthy();
   });
 
-  it("renders README-read skills and repo-inferred skills separately", () => {
+  it("shows no GitHub 'skills' shelves — they are not skills (one skill list)", () => {
+    // An older payload may still carry these keys; the viewer ignores them.
+    // `llm_skills` is our own deleted model's output (decision 28) and
+    // `skills_inferred` is raw language names + topic slugs.
     renderViewer(githubDetail);
-    expect(screen.getByText("Tailwind CSS")).toBeTruthy();
-    expect(screen.getByText("Dart")).toBeTruthy();
-    expect(screen.getByText(/READMEs \(2\)/)).toBeTruthy();
-    expect(screen.getByText(/inferred from repos \(2\)/)).toBeTruthy();
+    expect(screen.queryByText("Tailwind CSS")).not.toBeInTheDocument();
+    expect(screen.queryByText("Dart")).not.toBeInTheDocument();
+    expect(screen.queryByText(/READMEs \(/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/inferred from repos/)).not.toBeInTheDocument();
+    // Their own labelled shelves still render.
+    expect(screen.getByText(/Frameworks & libraries \(3\)/)).toBeTruthy();
   });
 
   it("renders the bio and profile README", () => {
@@ -184,7 +189,7 @@ describe("GitHub detail shows everything GitHub gave us", () => {
   it("renders what exists when the fetch was partial", () => {
     // A rate-limited enrich can return frameworks but no repos. Each block is
     // independent, so the page shows what it has instead of all-or-nothing.
-    renderViewer({ frameworks: ["fastapi"], repos: [], llm_skills: [] });
+    renderViewer({ frameworks: ["fastapi"], repos: [] });
     expect(screen.getByText("fastapi")).toBeTruthy();
     expect(screen.queryByText(/Repositories/)).not.toBeInTheDocument();
   });

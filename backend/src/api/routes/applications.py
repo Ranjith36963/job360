@@ -851,7 +851,10 @@ async def application_alignment(
         "fit": fit,
         "skills_in_ad": found,
         "skills_not_in_ad": missing,
-        "skills_total": len(found) + len(missing),
+        # THE one skill count (skill_tiering.profile_skills) — the same number
+        # the profile page and get_profile show. A skill too short to search
+        # safely (a lone "R") still counts as one of the candidate's skills.
+        "skills_total": len(skills),
         "ad_chars": len(ad_text),
     }
 

@@ -484,19 +484,20 @@ class TestLinkedInDeterministicPass:
 
 # ── Skill tiering — legacy two-pass shelves still contribute evidence ─
 #
-# github_llm_skills / about_me_inferred_skills are LEGACY (decision 28):
-# nothing writes them any more, but an existing profile that already has
-# entries there must keep counting them as evidence — the shelf just never
-# grows for a NEW profile.
+# github_llm_skills is our own deleted LLM's output (decision 28): the stored
+# values are KEPT (reversible) but no longer read as a skill anywhere — the
+# one skill list (skill_tiering.profile_skills). about_me_inferred_skills is
+# filled by the deterministic about-me parse, so it still counts.
 
 
 class TestSkillTieringNewSources:
-    def test_github_llm_skill_becomes_evidence(self):
+    def test_github_llm_skill_is_kept_but_not_read(self):
         from src.services.profile.skill_tiering import collect_evidence_from_profile
 
         prof = UserProfile(cv_data=CVData(github_llm_skills=["LangChain"]))
         ev = {e.name: e.sources for e in collect_evidence_from_profile(prof)}
-        assert "github_llm" in ev["LangChain"]
+        assert "LangChain" not in ev
+        assert prof.cv_data.github_llm_skills == ["LangChain"]  # stored data untouched
 
     def test_about_me_skill_becomes_evidence(self):
         from src.services.profile.skill_tiering import collect_evidence_from_profile
@@ -508,7 +509,7 @@ class TestSkillTieringNewSources:
     def test_new_sources_have_positive_weights(self):
         from src.services.profile.skill_tiering import _SOURCE_WEIGHTS
 
-        assert _SOURCE_WEIGHTS.get("github_llm", 0) > 0
+        assert "github_llm" not in _SOURCE_WEIGHTS
         assert _SOURCE_WEIGHTS.get("about_me_llm", 0) > 0
 
 

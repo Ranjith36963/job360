@@ -41,18 +41,20 @@ class TestDropsDuplicatesOfExtractedShelves:
         prefs = UserPreferences(additional_skills=["Python", "PyTorch"])
         assert sanitize_preferences(prefs, _cv()).additional_skills == []
 
-    def test_linkedin_and_github_skills_are_dropped_as_duplicates(self) -> None:
+    def test_linkedin_skills_are_dropped_as_duplicates(self) -> None:
         cv = CVData(
             skills=["Python"],
             linkedin_skills=["Kubernetes"],
+            # Not skill shelves any more (the one skill list): an entry that
+            # only sits here is NEW when the user types it.
             github_llm_skills=["Terraform"],
             github_skills_inferred=["Ansible"],
         )
         prefs = UserPreferences(additional_skills=[
-            "Kubernetes", "Terraform", "Ansible", "Redis",  # Redis is genuinely new
+            "Kubernetes", "Terraform", "Ansible", "Redis",
         ])
         out = sanitize_preferences(prefs, cv)
-        assert out.additional_skills == ["Redis"]
+        assert out.additional_skills == ["Terraform", "Ansible", "Redis"]
 
     def test_case_and_whitespace_insensitive(self) -> None:
         prefs = UserPreferences(additional_skills=["  python ", "PYTORCH"])

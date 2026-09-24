@@ -43,17 +43,11 @@ def skills_in_text(skills: list[str], text: str) -> tuple[list[str], list[str]]:
 
 
 def candidate_skills(profile: Any) -> list[str]:
-    """Every skill the profile holds, in the order the profile page shows
-    them: CV, LinkedIn, GitHub-inferred, then the ones the user typed."""
-    cv = profile.cv_data
-    prefs = profile.preferences
-    out: list[str] = []
-    for group in (
-        getattr(cv, "skills", None),
-        getattr(cv, "linkedin_skills", None),
-        getattr(cv, "github_skills_inferred", None),
-        getattr(prefs, "additional_skills", None),
-    ):
-        if isinstance(group, list):
-            out.extend(s for s in group if isinstance(s, str))
-    return out
+    """The candidate's skills — THE one list every surface shows
+    (``skill_tiering.profile_skills``): CV, LinkedIn, significant GitHub
+    languages and the ones the user typed, deduped, minus the user's own
+    ``excluded_skills``. So "N of M of your skills" uses the same M as the
+    profile page and ``get_profile``."""
+    from src.services.profile.skill_tiering import profile_skills  # noqa: PLC0415 — rule #16
+
+    return [row["name"] for row in profile_skills(profile)]

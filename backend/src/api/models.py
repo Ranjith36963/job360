@@ -68,6 +68,8 @@ class JobResponse(BaseModel):
 class ProfileSummary(BaseModel):
     is_complete: bool
     job_titles: list[str]
+    # THE one skill count — len(skill_tiering.profile_skills(profile)), the
+    # same number the grouped list, the alignment panel and get_profile use.
     skills_count: int
     cv_length: int
     has_linkedin: bool
@@ -193,9 +195,6 @@ class ProfileResponse(BaseModel):
     # provenance; a skill seen in >1 source appears under each. Empty when no
     # skills.
     skills_by_source: dict[str, list[str]] = {}
-    # AI-SUGGESTED adjacent skills (neighbours of what the user has). SUGGESTIONS
-    # only — the user opts in; never counted in tiering/scoring/matching.
-    ai_suggestions: list[str] = []
     # Step-1.5 S3-E — LinkedIn sub-sections for the profile detail UI.
     # Each value is the raw list of dicts as parsed by
     # ``services.profile.linkedin_parser`` — see CVData fields with the

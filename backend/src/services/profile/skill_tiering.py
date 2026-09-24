@@ -59,11 +59,16 @@ def significant_github_languages(languages: dict[str, Any]) -> list[str]:
 
     GitHub reports config-file 'languages' (Makefile, Dockerfile, Procfile,
     Batchfile, PowerShell, Just…) alongside real ones, but those are always a
-    tiny fraction of the bytes. Keep the top few by bytes plus anything ≥0.5% of
-    the total — that drops the config-file noise structurally (by proportion, not
-    a name denylist: rule #28) while keeping real secondary languages."""
+    tiny fraction of the bytes. Keep the top language plus anything holding at
+    least ``settings.GITHUB_LANGUAGE_MIN_SHARE`` of the total — that drops the
+    config-file noise structurally (by proportion, not a name denylist: rule
+    #28) while keeping real secondary languages. The share is read at call
+    time, so it is a live setting."""
+    from src.core import settings  # noqa: PLC0415 — read live, per call
+
     if not isinstance(languages, dict) or not languages:
         return []
+    min_share = settings.GITHUB_LANGUAGE_MIN_SHARE
     ranked = sorted(
         ((k, v) for k, v in languages.items()
          if isinstance(k, str) and isinstance(v, (int, float)) and v > 0),
@@ -72,8 +77,8 @@ def significant_github_languages(languages: dict[str, Any]) -> list[str]:
     total = sum(v for _, v in ranked) or 1
     out: list[str] = []
     for i, (lang, byts) in enumerate(ranked):
-        # The #1 language always shows; everything else must be ≥0.5% of bytes.
-        if i == 0 or byts / total >= 0.005:
+        # The #1 language always shows; everything else must hold the share.
+        if i == 0 or byts / total >= min_share:
             out.append(lang)
     return out
 
@@ -141,14 +146,12 @@ _SOURCE_WEIGHTS: dict[SourceName, float] = {
     "user_declared": 3.0,
     "cv_explicit": 2.0,
     "linkedin": 2.0,
-    # Two-pass LLM enhance sources. ``about_me_llm`` = skills the LLM mined
-    # from the user's own free-text blurb (the user's own words → trust on a
-    # par with an explicit CV mention). ``github_llm`` = skills the LLM read
-    # off repo prose (demonstrated usage but inferred → same trust as a
-    # declared dependency).
+    # ``about_me_llm`` (legacy label) = skills parsed from the user's own
+    # free-text blurb — the user's own words, trust on a par with an explicit
+    # CV mention. (``github_llm`` is gone: that shelf was our own deleted LLM's
+    # output and is no longer read as a skill — decision 28.)
     "about_me_llm": 2.0,
     "github_dep": 1.5,
-    "github_llm": 1.5,
     "github_lang": 1.0,
 }
 
@@ -241,20 +244,67 @@ def collect_evidence_from_profile(profile: Any) -> list[SkillEvidence]:
             _add(s, "cv_explicit")
         for s in getattr(cv, "linkedin_skills", []) or []:
             _add(s, "linkedin")
-        # GitHub contributes ONLY: (1) significant programming languages (byte-
-        # thresholded) and (2) the LLM-read repo skills. Raw dependency package
-        # names (github_frameworks: pytest, @capacitor/core, workbox-window) and
-        # raw repo topics (github_topics: gmail, slack, hitl) are build metadata,
-        # NOT user skills — surfacing them floods the profile and destroys trust.
-        # The meaningful frameworks (React, FastAPI) are recovered by the LLM pass.
+        # GitHub contributes ONLY its significant programming languages (byte-
+        # thresholded, `significant_github_languages`). Excluded BY SOURCE TYPE,
+        # never by word (rule #28):
+        #   * dependency package names (github_frameworks), raw repo topics
+        #     (github_topics) and github_skills_inferred (every language plus
+        #     every topic slug, unthresholded) are build metadata, not skills —
+        #     they stay visible on their own labelled GitHub shelves;
+        #   * github_llm_skills and suggested_skills are the leftovers of
+        #     Job360's own deleted LLM passes (decision 28). The stored values
+        #     are kept (reversible) but never read as skills. The user's agent
+        #     names skills from the raw README text via update_profile.
         for s in significant_github_languages(getattr(cv, "github_languages", {}) or {}):
             _add(s, "github_lang")
-        # Two-pass LLM enhance sources.
-        for s in getattr(cv, "github_llm_skills", []) or []:
-            _add(s, "github_llm")
+        # `about_me_llm` is a legacy LABEL: the shelf is now filled by the
+        # deterministic about-me parse (preferences.deterministic_about_me_fields)
+        # from text the user typed.
         for s in getattr(cv, "about_me_inferred_skills", []) or []:
             _add(s, "about_me_llm")
 
     # Collapse acronym↔expansion pairs (RAG ⇄ Retrieval Augmented Generation) so
     # the same skill isn't shown under two names.
     return _merge_acronym_expansions(list(evidence.values()))
+
+
+def _skill_key(name: str) -> str:
+    """The identity `collect_evidence_from_profile` dedupes on: casefold with
+    all whitespace removed ("Chroma DB" == "ChromaDB")."""
+    return re.sub(r"\s+", "", name).casefold()
+
+
+def profile_skill_evidence(profile: Any) -> list[SkillEvidence]:
+    """THE skill list, as evidence rows — every surface reads this.
+
+    `collect_evidence_from_profile` (dedupe + acronym merge + skill-shape
+    guard) minus the user's own ``preferences.excluded_skills``. The exclusion
+    list is the user's (or their agent's) data, not a vocabulary of ours, so
+    this is rule-#28 safe. Pass the OVERLAID profile (``load_profile`` default)
+    so agent edits count.
+    """
+    evidence = collect_evidence_from_profile(profile)
+    prefs = getattr(profile, "preferences", None)
+    excluded = {
+        _skill_key(s)
+        for s in (getattr(prefs, "excluded_skills", None) or [])
+        if isinstance(s, str) and s.strip()
+    }
+    if not excluded:
+        return evidence
+    return [e for e in evidence if _skill_key(e.name) not in excluded]
+
+
+def profile_skills(profile: Any) -> list[dict[str, Any]]:
+    """THE one definition of "your skills": ``[{"name", "sources"}]``.
+
+    Used by the profile page (header count and the grouped list), the
+    application alignment panel and MCP ``get_profile``, so one person has one
+    skill count everywhere. ``sources`` keeps attribution (``cv_explicit``,
+    ``linkedin``, ``github_lang``, ``user_declared``, ``about_me_llm``), in
+    first-seen order. Empty profile -> ``[]`` (rule #29: silent, not zero-filled).
+    """
+    return [
+        {"name": e.name, "sources": list(dict.fromkeys(e.sources))}
+        for e in profile_skill_evidence(profile)
+    ]

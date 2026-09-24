@@ -108,11 +108,16 @@ def _cv_get(cv_data: Any, name: str, default: Any) -> Any:
 # Every EXTRACTED skill shelf. A skill sitting in one of these was captured by
 # extraction — it is not something the user "added on top". Having it ALSO in
 # `additional_skills` (the "Added by you" box) is pure duplication.
+#
+# NOT here, by source type (the one skill list, skill_tiering.profile_skills):
+# `github_llm_skills` (our own deleted LLM's output, decision 28) and
+# `github_skills_inferred` (raw language names + topic slugs). Neither is read
+# as a skill any more, so a user typing one of those words into "Added by you"
+# is adding something genuinely new — stripping it would make the chip vanish
+# with nothing to show for it.
 _EXTRACTED_SKILL_SHELVES = (
     "skills",                 # CV skills
     "linkedin_skills",        # LinkedIn skills
-    "github_llm_skills",      # GitHub skills the LLM read
-    "github_skills_inferred", # GitHub skills from structure
     "cv_skills_esco",         # CV skills mapped to ESCO
 )
 
