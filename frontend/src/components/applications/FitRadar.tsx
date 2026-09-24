@@ -68,16 +68,16 @@ function tspanTexts(lines: string[]): string[] {
   return lines.length === 1 ? lines : [`${lines[0]} `, lines[1]];
 }
 
-/** Per-tspan `dy` (relative vertical offset) for a wrapped label, given
- * where it sits: top labels grow downward (toward the chart is fine — the
- * padding is on the outside), bottom labels stack upward so they don't run
- * into the chart, and side labels are simply centred on the axis point. */
-function lineDy(textAnchor: "start" | "middle" | "end", isTop: boolean, lineCount: number): string[] {
-  if (lineCount === 1) return ["0"];
+/** Per-tspan `dy` in `em` (relative vertical offset) for a wrapped label,
+ * given where it sits: top labels grow downward (toward the chart is fine —
+ * the padding is on the outside), bottom labels stack upward so they don't
+ * run into the chart, and side labels are simply centred on the axis point. */
+function lineDy(textAnchor: "start" | "middle" | "end", isTop: boolean, lineCount: number): number[] {
+  if (lineCount === 1) return [0];
   if (textAnchor === "middle") {
-    return isTop ? ["0", "1.2em"] : ["-1.2em", "1.2em"];
+    return isTop ? [0, 1.2] : [-1.2, 1.2];
   }
-  return ["-0.6em", "1.2em"];
+  return [-0.6, 1.2];
 }
 
 /**
@@ -177,9 +177,11 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
           const texts = tspanTexts(lines);
           const isTop = p.y < cy;
           const dys = lineDy(textAnchor, isTop, lines.length);
-          // The last label line's baseline, so the value line below it never
-          // overlaps a 2-line wrapped label (see lineDy's cumulative dy math).
-          const lastLineExtra = isTop && lines.length === 2 ? fontSize * 1.2 : 0;
+          // Where the LAST label line's baseline actually lands, so the value
+          // line below it never overlaps a 2-line wrapped label. `dy` is
+          // cumulative in SVG, so sum the whole chain rather than assuming one
+          // of lineDy's cases — side-anchored labels net +0.6em, not +1.2em.
+          const lastLineExtra = dys.reduce((total, dy) => total + dy, 0) * fontSize;
           const valueY = (p.y + lastLineExtra + fontSize * 1.15).toFixed(1);
           return (
             <g key={axis.name}>
@@ -193,7 +195,7 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
                 className="fill-current text-foreground"
               >
                 {texts.map((line, idx) => (
-                  <tspan key={idx} x={x} dy={dys[idx]}>
+                  <tspan key={idx} x={x} dy={`${dys[idx]}em`}>
                     {line}
                   </tspan>
                 ))}

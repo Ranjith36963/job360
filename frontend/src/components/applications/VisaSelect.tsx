@@ -59,6 +59,16 @@ export function VisaSelect({
     }
   }, [applicationId, signal, country, detail, onSaved]);
 
+  // Cancel throws the draft away: re-hydrate from what's actually stored, so
+  // reopening Edit never shows an abandoned edit as if it were the seeker's
+  // considered signal (Job360 never guesses).
+  const cancel = useCallback(() => {
+    setSignal(visa.signal);
+    setCountry(visa.country ?? "");
+    setDetail(visa.detail ?? "");
+    setEditing(false);
+  }, [visa.signal, visa.country, visa.detail]);
+
   const summary = SIGNAL_SUMMARY[visa.signal] ?? visa.signal;
 
   if (!editing) {
@@ -155,7 +165,7 @@ export function VisaSelect({
           variant="outline"
           data-testid="visa-cancel"
           disabled={saving}
-          onClick={() => setEditing(false)}
+          onClick={cancel}
           className="self-start"
         >
           Cancel
