@@ -424,26 +424,49 @@ def sample_empty_description_job():
     )
 
 
-def pytest_sessionfinish(session, exitstatus):
-    """Drop every per-test Postgres schema created during the run.
+def _drop_own_schemas() -> None:
+    """Drop only the per-test Postgres schemas THIS PROCESS created.
 
     Test-local fixtures that build their own tmp DB don't always drop their
-    schema; sweep them all at session end so the shared Postgres stays clean.
+    schema (e.g. a fixture whose teardown raised before reaching
+    ``drop_schema``); sweep the leftovers at session end so the shared
+    Postgres stays clean.
+
+    Several Claude sessions run the test suite in parallel against the SAME
+    shared dev Postgres. This used to ``SELECT ... WHERE schema_name LIKE
+    't\\_%' OR schema_name LIKE 'mem\\_%'`` and drop every match — which also
+    drops the schemas a CONCURRENT session's tests are still using mid-run.
+    Whichever run finished first deleted the other run's tables out from
+    under it, surfacing as "relation \"users\" does not exist", "no schema
+    has been selected to create in", or "_schema_migrations does not exist"
+    in the OTHER session (bug found 2026-09-24).
+
+    ``_pg.CREATED_SCHEMAS`` (populated by ``pg._open_raw`` and
+    ``pgsync.connect`` — see ``src/repositories/pg.py``) tracks exactly the
+    schemas this process created, so this only ever drops this run's own
+    schemas, never another session's.
     """
     import psycopg
 
+    schemas = sorted(_pg.CREATED_SCHEMAS)
+    if not schemas:
+        return
     try:
         conn = psycopg.connect(_pg.DEFAULT_DSN, autocommit=True)
     except psycopg.Error:
         return
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT schema_name FROM information_schema.schemata "
-                "WHERE schema_name LIKE 't\\_%' OR schema_name LIKE 'mem\\_%'"
-            )
-            schemas = [r[0] for r in cur.fetchall()]
             for s in schemas:
                 cur.execute(f'DROP SCHEMA IF EXISTS "{s}" CASCADE')
     finally:
         conn.close()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Drop every per-test Postgres schema THIS SESSION created.
+
+    See ``_drop_own_schemas`` for why this must be scoped to this process's
+    own schemas and never a blanket ``t_%``/``mem_%`` sweep.
+    """
+    _drop_own_schemas()

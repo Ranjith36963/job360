@@ -146,6 +146,7 @@ def connect(path: Optional[str] = None, *args: Any, **kwargs: Any) -> Connection
                 cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
             except (psycopg.errors.DuplicateSchema, psycopg.errors.UniqueViolation):
                 pass
+            pg.register_created_schema(schema)
             # NO ", public" fallback — see pg._open_raw for the full rationale.
             # A test schema must BE the whole database: an unknown db_path has to
             # raise UndefinedTable, not quietly bind to the real public catalog.
