@@ -57,7 +57,7 @@ export function LessonForm({
   return (
     <div className="mt-3 flex flex-col gap-2">
       <p className="text-xs text-muted-foreground">
-        A lesson your agent reads before the next application.
+        A lesson your assistant reads before the next application.
       </p>
       <Textarea
         data-testid="lesson-input"

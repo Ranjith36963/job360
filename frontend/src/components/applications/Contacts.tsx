@@ -113,7 +113,7 @@ export function Contacts({
     <div className="flex flex-col gap-4">
       {list.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No people yet. Your agent can add one, or use the button below.
+          No people yet. Your assistant can add one, or use the button below.
         </p>
       ) : (
         <ul data-testid="contacts-list" className="flex flex-col gap-2">

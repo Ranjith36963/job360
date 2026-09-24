@@ -115,7 +115,7 @@ export function AlignmentPanel({
         <>
           <FitRadar axes={fit.axes} />
           <p className="mt-1 text-center text-xs text-muted-foreground/70">
-            The lines are your agent&apos;s own choice for this job.
+            The lines are your assistant&apos;s own choice for this job.
           </p>
         </>
       )}
@@ -149,7 +149,7 @@ export function AlignmentPanel({
       </div>
 
       <p className="mt-4 text-xs text-muted-foreground/70">
-        Job360 draws what it stores: your agent&apos;s verdict and your own skills found
+        Job360 draws what it stores: your assistant&apos;s verdict and your own skills found
         in the ad. It does not judge.
       </p>
     </div>

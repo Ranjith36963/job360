@@ -148,7 +148,7 @@ describe("ApplicationClient — six-question layout", () => {
     await screen.findByText("Staff Engineer");
 
     // Decision 28 (slice A): Job360 has no LLM — no generate button anywhere.
-    expect(screen.getByRole("heading", { name: /ask your agent/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /ask your assistant/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /tailor my cv/i })).toBeNull();
     expect(
       screen.queryByRole("heading", { name: /tailor my ats-friendly cv/i })

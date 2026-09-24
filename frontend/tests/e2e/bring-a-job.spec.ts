@@ -164,7 +164,7 @@ test.describe("Bring a job", () => {
     // The documents card lives on the application page now, and since
     // decision 28 (slice A) it points at the user's own agent — Job360
     // offers to write nothing.
-    await expect(page.getByRole("heading", { name: /ask your agent/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /ask your assistant/i })).toBeVisible();
   });
 
   test("empty receipts page points to Bring a job", async ({ page, context }) => {

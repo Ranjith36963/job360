@@ -191,7 +191,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         <div className="mt-4">
           {!hasCvArtifact && (
             <p className="mb-2 text-xs text-muted-foreground">
-              No CV for this job yet — your agent writes it and saves it here.
+              No CV for this job yet — your assistant writes it and saves it here.
             </p>
           )}
           <TailorSection

@@ -135,7 +135,7 @@ export function ArtifactVersions({
   if (artifacts.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No documents yet. Your agent saves every CV and cover letter version here.
+        No documents yet. Your assistant saves every CV and cover letter version here.
       </p>
     );
   }

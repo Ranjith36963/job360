@@ -110,7 +110,7 @@ test.describe("Application detail — People section", () => {
       timeout: 10_000,
     });
     await expect(page.getByText("No people yet.")).toBeVisible();
-    await expect(page.getByTestId("section-people").getByText(/MCP/i)).toHaveCount(0);
+    await expect(page.getByText(/MCP/i)).toHaveCount(0);
 
     await page.getByTestId("contacts-add-toggle").click();
     await page.getByLabel("Name").fill(newContact.name);

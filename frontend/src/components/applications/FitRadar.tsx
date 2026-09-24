@@ -118,7 +118,7 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
         aria-labelledby="fit-radar-title"
       >
         <title id="fit-radar-title">
-          Fit picture: what the role asks and what you bring, on {n} lines your agent chose
+          Fit picture: what the role asks and what you bring, on {n} lines your assistant chose
         </title>
         {RINGS.map((ring) => (
           <polygon
