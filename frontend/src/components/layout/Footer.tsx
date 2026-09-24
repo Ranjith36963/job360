@@ -49,7 +49,7 @@ export function Footer() {
           {/* C2 (application-spine review) — VISION rule 4: Job360 never
               sources or ranks jobs. This footer advertised a source count on
               every page; replaced with the mission line. */}
-          Your career memory. Your agent&apos;s context.
+          The shared job-hunt record for your AI assistant.
         </p>
       </div>
     </footer>
