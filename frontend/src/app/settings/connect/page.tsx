@@ -5,10 +5,12 @@ import { toast } from "sonner";
 
 import {
   createToken,
+  getProfile,
   listGrants,
   listTokens,
   revokeGrant,
   revokeToken,
+  updateProfileFields,
   type OAuthGrant,
   type TokenCreated,
   type TokenSummary,
@@ -348,7 +350,42 @@ const DAILY_CHECK_PROMPT =
   "calling list_applications with due=true, then with quiet_days=7, and tell me " +
   "in plain words what's due today and what's gone quiet.";
 
-function DailyCheckCard() {
+/** Values `preferences.daily_check` can hold (backend `VALID_DAILY_CHECK_VALUES`
+ *  plus the "" not-asked-yet default — owner decision 2026-09-25). */
+export type DailyCheckState = "" | "scheduled" | "declined";
+
+/** Plain words for whatever a connected assistant already answered — never
+ * shown as a guess, since an empty value is silence (rule #29), not "no". */
+export function dailyCheckStatusLine(state: DailyCheckState): string {
+  if (state === "scheduled") return "Set up with your assistant.";
+  if (state === "declined") {
+    return "You said no — your assistant won't ask again.";
+  }
+  return "Your assistant will offer to set this up.";
+}
+
+/** Shown when the stored answer could not be read — never a guess. */
+export const DAILY_CHECK_LOAD_FAILED = "Couldn't load this — refresh to try again.";
+
+export function DailyCheckCard({
+  dailyCheck,
+  loadFailed = false,
+  onResetOffer,
+  resetting,
+}: {
+  /** `null` until the profile read succeeds: no status line, no button. */
+  dailyCheck: DailyCheckState | null;
+  loadFailed?: boolean;
+  onResetOffer: () => void;
+  resetting: boolean;
+}) {
+  const canReset =
+    !loadFailed && (dailyCheck === "scheduled" || dailyCheck === "declined");
+  const statusLine = loadFailed
+    ? DAILY_CHECK_LOAD_FAILED
+    : dailyCheck === null
+      ? null
+      : dailyCheckStatusLine(dailyCheck);
   return (
     <Card>
       <CardHeader>
@@ -360,6 +397,11 @@ function DailyCheckCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {statusLine !== null && (
+          <p className="text-sm" data-testid="daily-check-status">
+            {statusLine}
+          </p>
+        )}
         <textarea
           readOnly
           rows={6}
@@ -368,13 +410,27 @@ function DailyCheckCard() {
           data-testid="daily-check-prompt"
           onFocus={(e) => e.currentTarget.select()}
         />
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => copyText(DAILY_CHECK_PROMPT, "Prompt")}
-        >
-          Copy prompt
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => copyText(DAILY_CHECK_PROMPT, "Prompt")}
+          >
+            Copy prompt
+          </Button>
+          {canReset && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={resetting}
+              onClick={onResetOffer}
+              data-testid="daily-check-reset"
+            >
+              {resetting ? "Resetting…" : "Let my assistant offer again"}
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -655,6 +711,12 @@ export default function ConnectAgentPage() {
   const [grants, setGrants] = useState<OAuthGrant[]>([]);
   const [grantsLoading, setGrantsLoading] = useState(true);
 
+  // null = not read yet. Never default to "" — that would claim "your
+  // assistant will offer" before (or without) knowing the stored answer.
+  const [dailyCheck, setDailyCheck] = useState<DailyCheckState | null>(null);
+  const [dailyCheckLoadFailed, setDailyCheckLoadFailed] = useState(false);
+  const [resettingDailyCheck, setResettingDailyCheck] = useState(false);
+
   const refresh = useCallback(async () => {
     try {
       setTokens(await listTokens());
@@ -675,10 +737,40 @@ export default function ConnectAgentPage() {
     }
   }, []);
 
+  const refreshDailyCheck = useCallback(async () => {
+    try {
+      const profile = await getProfile();
+      const value = profile.preferences?.daily_check;
+      setDailyCheck(value === "scheduled" || value === "declined" ? value : "");
+      setDailyCheckLoadFailed(false);
+    } catch {
+      // No toast: this is a courtesy status, not the page's main content. The
+      // card says in neutral words that it could not load — never the "will
+      // offer" line, which would be a guess.
+      setDailyCheckLoadFailed(true);
+    }
+  }, []);
+
   useEffect(() => {
     refresh();
     refreshGrants();
-  }, [refresh, refreshGrants]);
+    refreshDailyCheck();
+  }, [refresh, refreshGrants, refreshDailyCheck]);
+
+  async function onResetDailyCheckOffer() {
+    setResettingDailyCheck(true);
+    try {
+      // No API call is made until this button is pressed — the status line
+      // above only ever READS what get_profile last returned.
+      await updateProfileFields([{ path: "preferences.daily_check", value: "" }]);
+      setDailyCheck("");
+      toast.success("Your assistant will offer the daily check again.");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Failed to reset the daily check offer."));
+    } finally {
+      setResettingDailyCheck(false);
+    }
+  }
 
   async function onCreated(t: TokenCreated) {
     setCreated(t);
@@ -720,7 +812,12 @@ export default function ConnectAgentPage() {
       <ConnectAppCard />
       <AssistantRecipesCard />
       <ExamplePromptsCard />
-      <DailyCheckCard />
+      <DailyCheckCard
+        dailyCheck={dailyCheck}
+        loadFailed={dailyCheckLoadFailed}
+        onResetOffer={onResetDailyCheckOffer}
+        resetting={resettingDailyCheck}
+      />
       <ConnectedAppsCard
         grants={grants}
         loading={grantsLoading}

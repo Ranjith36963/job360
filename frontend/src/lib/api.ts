@@ -145,6 +145,22 @@ export async function getProfile(): Promise<ProfileResponse> {
   return request<ProfileResponse>("/api/profile");
 }
 
+/**
+ * Apply 1..N agent-overlay edits to one or more profile fields (the same
+ * PATCH the connected assistant's `update_profile` MCP tool uses — R12).
+ * Returns the freshly-merged profile so a caller never needs a second
+ * round trip.
+ */
+export async function updateProfileFields(
+  edits: { path: string; value: unknown }[]
+): Promise<ProfileResponse> {
+  const res = await request<{ profile: ProfileResponse }>("/api/profile", {
+    method: "PATCH",
+    body: JSON.stringify({ edits }),
+  });
+  return res.profile;
+}
+
 export async function uploadProfile(
   cv: File | null,
   preferences?: PreferencesRequest

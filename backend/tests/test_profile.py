@@ -171,6 +171,23 @@ class TestPreferences:
         assert profile.preferences.preferred_workplace == "remote"
         assert profile.preferences.needs_visa is True
 
+    def test_apply_preferences_carries_daily_check_forward(self):
+        """Owner decision 2026-09-25 — the preferences FORM never sends
+        daily_check (only the connected assistant, via update_profile, sets
+        it). A routine web preferences save must not reset it, the same bug
+        class (PR #630) that already bit needs_visa/work_arrangement."""
+        import json
+
+        from src.api.routes.profile import _apply_preferences
+        from src.services.profile.models import CVData, UserProfile
+
+        profile = UserProfile(
+            cv_data=CVData(),
+            preferences=UserPreferences(daily_check="scheduled"),
+        )
+        _apply_preferences(json.dumps({"target_job_titles": ["AI Engineer"]}), profile)
+        assert profile.preferences.daily_check == "scheduled"
+
 
 # -----------------------------------------------------------------------
 # Profile storage — see tests/test_profile_storage.py for per-user

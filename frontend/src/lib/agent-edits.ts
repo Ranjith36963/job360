@@ -32,10 +32,18 @@ export function findAgentEdit(
   return edits?.find((e) => e.path === path && isAssistantActor(e.set_by));
 }
 
-/** How many `preferences.*` fields an assistant currently has set. */
+/** `preferences.*` paths that have no field on the preferences card — the
+ * daily-check answer lives on Settings → Connect (owner decision
+ * 2026-09-25), so it must not inflate a count that links to the card. */
+const NOT_ON_PREFERENCES_CARD = new Set(["preferences.daily_check"]);
+
+/** How many `preferences.*` fields on the card an assistant currently has set. */
 export function countAssistantPreferenceEdits(edits: AgentEdit[] | undefined): number {
   return (edits ?? []).filter(
-    (e) => e.path.startsWith("preferences.") && isAssistantActor(e.set_by)
+    (e) =>
+      e.path.startsWith("preferences.") &&
+      !NOT_ON_PREFERENCES_CARD.has(e.path) &&
+      isAssistantActor(e.set_by)
   ).length;
 }
 

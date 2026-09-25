@@ -34,6 +34,7 @@ from src.core.settings import DB_PATH
 from src.repositories import pgsync
 from src.services.auth import rate_limit
 from src.services.profile.models import (
+    VALID_DAILY_CHECK_VALUES,
     VALID_EXPERIENCE_LEVELS,
     VALID_WORK_ARRANGEMENTS,
     CVData,
@@ -57,11 +58,14 @@ class ProfileEditError(Exception):
         self.detail = detail
 
 
-# The two closed-set preference paths (R10) — same vocabulary as the web
-# form's normalisers in api/routes/profile.py.
+# The closed-set preference paths (R10). The first two share vocabulary with
+# the web form's normalisers in api/routes/profile.py; `daily_check` has no
+# web-form normaliser at all — it is written only through this overlay (owner
+# decision 2026-09-25).
 _CLOSED_SET_PATHS: dict[str, frozenset[str]] = {
     "preferences.work_arrangement": VALID_WORK_ARRANGEMENTS,
     "preferences.experience_level": VALID_EXPERIENCE_LEVELS,
+    "preferences.daily_check": VALID_DAILY_CHECK_VALUES,
 }
 
 _editable_paths_cache: tuple[str, ...] | None = None

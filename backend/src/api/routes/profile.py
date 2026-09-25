@@ -311,6 +311,12 @@ def _countries_or_422(value: Any) -> list[str]:
 
 _NOTES_PATH = "preferences.assistant_notes"
 
+# Preference fields the web preferences form does not own: written only
+# through the agent-edit overlay (update_profile / PATCH /api/profile). A web
+# preferences save ignores them in `_apply_preferences` and never records a
+# history row for them (owner decision 2026-09-25, daily-check offer).
+_OVERLAY_ONLY_PREFERENCES: frozenset[str] = frozenset({"daily_check"})
+
 
 def _notes_or_422(value: Any) -> list[str]:
     """The notes list through the SAME validator ``update_profile`` uses, or
@@ -471,7 +477,15 @@ async def update_profile(
         save_profile(UserProfile(), user.id, source_action="agent_edit")
 
     try:
-        applied = profile_edits.record_edits(user.id, actor, pairs)
+        # The hourly budget (PROFILE_EDIT_MAX_PER_HOUR) is the ASSISTANT's. A
+        # signed-in human at the browser (e.g. Settings → Connect's "Let my
+        # assistant offer again") never spends it — the same rule Take back,
+        # Keep and Clear follow (record_edits docstring). Bearer/OAuth callers,
+        # including every MCP update_profile call (/api/mcp is bearer-only),
+        # are never WEB_ACTOR and stay limited.
+        applied = profile_edits.record_edits(
+            user.id, actor, pairs, enforce_rate_limit=actor != profile_edits.WEB_ACTOR
+        )
     except profile_edits.ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -833,6 +847,18 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         work_authorization_countries=_countries_or_422(
             pref_dict.get("work_authorization_countries", existing.work_authorization_countries)
         ),
+        # Owner decision 2026-09-25 — the preferences form never sends this
+        # (it is written only by the connected assistant, through the
+        # agent-edit overlay). Not carrying it forward would reset the BASE
+        # object's copy on every routine web save — harmless on its own since
+        # the overlay wins on read, but the same "rebuilds from scratch"
+        # pattern already bit needs_visa/work_authorization_countries twice
+        # (PR #630), so it is carried forward here too rather than relying on
+        # the overlay alone. A posted `daily_check` key is ignored on purpose,
+        # and `_record_web_preference_changes` skips it too
+        # (`_OVERLAY_ONLY_PREFERENCES`), so a web save never writes a history
+        # row that would wipe the assistant's remembered answer.
+        daily_check=existing.daily_check,
         # Standing instructions for the assistant. Same partial-save shape: an
         # OMITTED key keeps the stored notes, an explicit [] clears them. Same
         # validator as update_profile (length cap, count cap, control chars
@@ -978,6 +1004,8 @@ def _record_web_preference_changes(
     for path in profile_edits.editable_paths():
         head, _, field_name = path.partition(".")
         if head != "preferences" or field_name not in submitted or path in skip:
+            continue
+        if field_name in _OVERLAY_ONLY_PREFERENCES:
             continue
         new_value = getattr(saved.preferences, field_name, None)
         if new_value == getattr(before, field_name, None):
@@ -1487,9 +1515,15 @@ async def clear_profile_section(
         # The guessed level is owned by the CV/LinkedIn history, not the form:
         # keep it here ("all" recomputes it from what remains, below).
         keep_handle = "" if section == "all" else prefs.github_username
+        # Owner decision 2026-09-25 — daily_check is not a job preference the
+        # "Clear preferences" button owns; it is the connected assistant's
+        # remembered answer to a one-time offer. Only a full "clear all"
+        # (starting the whole profile over) may reset it.
+        keep_daily_check = "" if section == "all" else prefs.daily_check
         prefs = UserPreferences(
             github_username=keep_handle,
             experience_level_inferred=prefs.experience_level_inferred,
+            daily_check=keep_daily_check,
         )
     if section == "all":
         # about_me-derived skills live on the CV object but are owned by the
@@ -1519,6 +1553,10 @@ async def clear_profile_section(
                 row["path"]
                 for row in profile_edits.current_overlay(user.id)
                 if str(row["path"]).startswith(cleared_prefixes)
+                # Same rule as the base-object rebuild above: a "preferences"
+                # clear must not touch the daily-check overlay row; only
+                # "all" may.
+                and not (section == "preferences" and row["path"] == "preferences.daily_check")
             ],
         )
 

@@ -331,6 +331,44 @@ async def test_cv_and_linkedin_reupload_leave_agent_records_exactly_equal(
     assert base.cv_data.cv_positions == []
 
 
+@pytest.mark.asyncio
+async def test_cv_and_linkedin_reupload_keep_daily_check(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    """Owner decision 2026-09-25 — daily_check lives in the overlay like
+    cv_positions/cv_projects above; a CV or LinkedIn re-upload must not
+    wipe it (the same "reset from scratch" bug class as PR #630)."""
+    import src.api.routes.profile as profile_route
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        resp = await _patch(client, {"path": "preferences.daily_check", "value": "scheduled"})
+        assert resp.status_code == 200, resp.text
+
+        monkeypatch.setattr(
+            profile_route, "extract_text",
+            lambda path: "Grace Hopper\nSummary\nCompiler pioneer.\nSkills: COBOL, Fortran\n",
+        )
+        up = await client.post(
+            "/api/profile/cv", files={"cv": ("new_cv.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")}
+        )
+        assert up.status_code == 200, up.text
+        assert up.json()["preferences"]["daily_check"] == "scheduled"
+
+        monkeypatch.setattr(
+            profile_route, "extract_linkedin_text",
+            lambda path: "Contact\nwww.linkedin.com/in/ada\nTop Skills\nSQL\nExperience\nAcme Ltd\nEngineer\n",
+        )
+        monkeypatch.setattr(profile_route, "_looks_like_linkedin", lambda text: True)
+        li = await client.post(
+            "/api/profile/linkedin", files={"file": ("li.pdf", io.BytesIO(b"%PDF-1.4\n%%EOF"), "application/pdf")}
+        )
+        assert li.status_code == 200, li.text
+
+        after = (await client.get("/api/profile")).json()
+        assert after["preferences"]["daily_check"] == "scheduled"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # MCP — the same route function, end to end with a bearer token
 # ═══════════════════════════════════════════════════════════════════════════

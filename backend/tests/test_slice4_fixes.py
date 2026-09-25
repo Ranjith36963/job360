@@ -100,6 +100,60 @@ async def test_p1_clear_all_clears_both_sections(authenticated_async_context, fi
         assert (await client.get("/api/profile")).json()["agent_edits"] == []
 
 
+@pytest.mark.asyncio
+async def test_clear_preferences_keeps_daily_check(authenticated_async_context, fixture_user_id):
+    """Owner decision 2026-09-25 — daily_check is not a job preference the
+    web "Clear preferences" button owns; it is the connected assistant's
+    remembered answer. Only "clear all" (starting the whole profile over)
+    may reset it."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (
+            await _patch(client, {"path": "preferences.daily_check", "value": "scheduled"})
+        ).status_code == 200
+        resp = await client.post("/api/profile/clear", data={"section": "preferences"})
+        assert resp.status_code == 200, resp.text
+        profile = (await client.get("/api/profile")).json()
+        assert profile["preferences"]["daily_check"] == "scheduled"
+        # other preferences ARE cleared, so this isn't a no-op clear
+        assert profile["preferences"]["target_job_titles"] == []
+
+
+@pytest.mark.asyncio
+async def test_clear_all_resets_daily_check(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (
+            await _patch(client, {"path": "preferences.daily_check", "value": "declined"})
+        ).status_code == 200
+        resp = await client.post("/api/profile/clear", data={"section": "all"})
+        assert resp.status_code == 200, resp.text
+        profile = (await client.get("/api/profile")).json()
+        assert profile["preferences"]["daily_check"] == ""
+
+
+@pytest.mark.asyncio
+async def test_web_preferences_save_never_records_daily_check(
+    authenticated_async_context, fixture_user_id
+):
+    """A preferences save (which now appends a web history row per changed
+    field, #636) must not write a daily_check row even if the payload carries
+    the key — the form does not own it, and a "" row would wipe the answer."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (
+            await _patch(client, {"path": "preferences.daily_check", "value": "scheduled"})
+        ).status_code == 200
+        resp = await client.post(
+            "/api/profile/preferences",
+            data={"preferences": json.dumps({"preferred_locations": ["Leeds"], "daily_check": ""})},
+        )
+        assert resp.status_code == 200, resp.text
+        profile = (await client.get("/api/profile")).json()
+        assert profile["preferences"]["daily_check"] == "scheduled"
+        assert profile["preferences"]["preferred_locations"] == ["Leeds"]
+
+
 # ── P2: extraction writers read the BASE, so the overlay never bakes in ──────
 
 
@@ -295,15 +349,27 @@ async def test_p3_rejected_first_edit_creates_no_profile(authenticated_async_con
 
 @pytest.mark.asyncio
 async def test_p3_422s_do_not_consume_the_edit_budget(authenticated_async_context, fixture_user_id, monkeypatch):
+    from httpx import ASGITransport
+
+    from src.api.main import app
     from src.core import settings
 
     monkeypatch.setattr(settings, "PROFILE_EDIT_MAX_PER_HOUR", 1)
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        for _ in range(3):
-            assert (await _patch(client, {"path": "cv_data.nope", "value": "x"})).status_code == 422
-        assert (await _patch(client, {"path": "cv_data.name", "value": "Ada"})).status_code == 200
-        assert (await _patch(client, {"path": "cv_data.name", "value": "Bea"})).status_code == 429
+        # The budget is the assistant's: a web session's PATCH is exempt, so
+        # this is exercised through a personal token.
+        minted = await client.post("/api/tokens", json={"name": "agent"})
+        assert minted.status_code == 201, minted.text
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {minted.json()['token']}"},
+        ) as agent:
+            for _ in range(3):
+                assert (await _patch(agent, {"path": "cv_data.nope", "value": "x"})).status_code == 422
+            assert (await _patch(agent, {"path": "cv_data.name", "value": "Ada"})).status_code == 200
+            assert (await _patch(agent, {"path": "cv_data.name", "value": "Bea"})).status_code == 429
 
 
 @pytest.mark.asyncio
