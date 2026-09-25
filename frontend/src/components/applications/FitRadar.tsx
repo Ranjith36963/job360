@@ -112,7 +112,23 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
   // The value line under each label is now the SAME size as the label
   // (owner decision 2026-09-25 — it used to be 0.8x and unreadable).
   const valueFontSize = fontSize;
-  const padY = fontSize * 1.4 + valueFontSize * 1.6;
+  // Gap between the name block and its value line, and the line-to-line
+  // step for a wrapped 2-line name (matches the 1.2em used in the tspan
+  // `dy` chain below) — both needed here so padY can be derived from the
+  // actual worst-case stack instead of a flat guess.
+  const valueGap = fontSize * 1.15;
+  const lineStep = fontSize * 1.2;
+  const textHalfHeight = fontSize * 0.6; // rough half-height of a text row
+  const maxLabelLines = Math.max(...wrappedLabels.map((lines) => lines.length));
+  // Top labels (owner fix 2026-09-25): the value line sits at labelR from
+  // centre — nearest the chart — and the (up to 2) name lines stack UPWARD
+  // above it, so nothing overlaps the polygon. Bottom labels are unchanged:
+  // they grow downward from labelR by the value line's gap only (the
+  // wrapped-line dy is balanced around the anchor, so line count doesn't
+  // add extra reach there).
+  const topReach = labelR + valueGap + (maxLabelLines - 1) * lineStep + textHalfHeight;
+  const bottomReach = labelR + valueGap + textHalfHeight;
+  const padY = Math.max(topReach - size / 2, bottomReach - size / 2, fontSize * 1.4 + valueFontSize * 1.6);
 
   return (
     <figure data-testid="fit-radar" className="mt-4">
@@ -181,19 +197,27 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
           const lines = wrappedLabels[i];
           const texts = tspanTexts(lines);
           const isTop = p.y < cy;
+          const isTopMiddle = isTop && textAnchor === "middle";
           const dys = lineDy(textAnchor, isTop, lines.length);
-          // Where the LAST label line's baseline actually lands, so the value
-          // line below it never overlaps a 2-line wrapped label. `dy` is
-          // cumulative in SVG, so sum the whole chain rather than assuming one
-          // of lineDy's cases — side-anchored labels net +0.6em, not +1.2em.
+          // Where the LAST label line's baseline lands relative to the text
+          // block's own anchor. `dy` is cumulative in SVG, so sum the whole
+          // chain rather than assuming one of lineDy's cases — side-anchored
+          // labels net +0.6em, not +1.2em.
           const lastLineExtra = dys.reduce((total, dy) => total + dy, 0) * fontSize;
-          const valueY = (p.y + lastLineExtra + fontSize * 1.15).toFixed(1);
+          // Top labels (owner fix 2026-09-25): the value line is the part of
+          // the block closest to the chart, pinned at labelR from centre —
+          // same spot the old single-anchor point used — and the name lines
+          // stack UPWARD, away from the chart, above it. Bottom and side
+          // labels are unchanged: the name block anchors at p.y and the value
+          // line sits `dy`+gap below its last line.
+          const textY = (isTopMiddle ? p.y - fontSize * 1.15 - lastLineExtra : p.y).toFixed(1);
+          const valueY = (isTopMiddle ? p.y : p.y + lastLineExtra + fontSize * 1.15).toFixed(1);
           return (
             <g key={axis.name}>
               <text
                 data-testid="fit-radar-axis"
                 x={x}
-                y={p.y.toFixed(1)}
+                y={textY}
                 textAnchor={textAnchor}
                 dominantBaseline="middle"
                 fontSize={fontSize}

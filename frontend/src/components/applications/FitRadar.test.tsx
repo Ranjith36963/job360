@@ -104,6 +104,43 @@ describe("FitRadar", () => {
     expect(firstNumber).toBeLessThan(-20);
   });
 
+  it("stacks a wrapped top label upward so it clears the outer ring (owner fix 2026-09-25)", () => {
+    const size = 200;
+    const cy = size / 2; // 100
+    const r = size * 0.32; // 64 — outer ring
+    const ringTop = cy - r; // 36 — the outer ring's top vertex
+
+    const longName = "CS fundamentals (distributed, HPC)";
+    render(<FitRadar axes={[{ name: longName, role: 75, you: 40 }, AXES[1], AXES[2]]} size={size} />);
+
+    const topLabel = screen.getAllByTestId("fit-radar-axis").find((el) => el.textContent === longName);
+    expect(topLabel).toBeDefined();
+
+    const textY = Number(topLabel?.getAttribute("y"));
+    const fontSize = Number(topLabel?.getAttribute("font-size"));
+    const tspans = Array.from(topLabel?.querySelectorAll("tspan") ?? []);
+    expect(tspans).toHaveLength(2);
+
+    // `dy` is cumulative in SVG — walk the chain to find the last tspan's
+    // actual y, the same way the browser would place it.
+    let lastTspanY = textY;
+    for (const tspan of tspans) {
+      lastTspanY += Number.parseFloat(tspan.getAttribute("dy") ?? "0") * fontSize;
+    }
+    expect(lastTspanY).toBeLessThan(ringTop);
+
+    // The value line ("asks 75 · you 40") is the part of the block closest
+    // to the chart — it must clear the ring too, which is the bug the owner
+    // reported (it used to overlap the polygon's top vertex).
+    const topValue = screen.getAllByTestId("fit-radar-axis-value")[0];
+    const valueY = Number(topValue.getAttribute("y"));
+    expect(valueY).toBeLessThan(ringTop);
+
+    // And the name block sits above (smaller y than) the value line — the
+    // whole block grows upward, away from the chart.
+    expect(lastTspanY).toBeLessThan(valueY);
+  });
+
   it("renders a short axis label as a single tspan", () => {
     render(<FitRadar axes={[{ name: "RAG", role: 50, you: 50 }, AXES[1], AXES[2]]} size={200} />);
 
