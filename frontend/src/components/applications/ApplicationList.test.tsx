@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ApplicationList } from "./ApplicationList";
 import type { ApplicationSummary } from "@/lib/api";
+import { formatDayMonth } from "@/lib/format-date";
 
 const listApplications = vi.fn();
 
@@ -55,7 +56,11 @@ describe("ApplicationList — Due filter (owner decision, 2026-09-25)", () => {
     await screen.findByText("Due Job");
 
     expect(screen.getByTestId("due-filter")).toHaveTextContent("Due (1)");
-    expect(screen.getByTestId("row-follow-up")).toHaveTextContent("Follow up 3 Oct");
+    // Dates follow the viewer's locale ("3 Oct" in the UK, "Oct 3" on a US
+    // CI runner), so compare against the formatter rather than one order.
+    expect(screen.getByTestId("row-follow-up")).toHaveTextContent(
+      `Follow up ${formatDayMonth("2026-10-03")}`,
+    );
   });
 
   it("filters to only due rows when the Due chip is clicked", async () => {
