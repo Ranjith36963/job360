@@ -16,7 +16,7 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.auth_deps import CurrentUser, require_user
+from src.api.auth_deps import CurrentUser, require_session_user, require_user
 from src.api.dependencies import save_upload_to_temp
 from src.api.models import (
     AgentEditOut,
@@ -490,8 +490,12 @@ async def update_profile(
 
 
 # ── One field's history + "Take back" (owner decision, 2026-09-25) ──────────
-# Both are WEB doors for the human. No MCP tool: an agent already reads the
-# whole log with export_history and clears a field with update_profile(null).
+# History, Take back and Keep are WEB doors for the human, and they are
+# SESSION-ONLY (`require_session_user`): a personal token or OAuth grant is an
+# assistant, and an assistant must never "accept" (Keep) its own edit on the
+# user's behalf, nor use the un-rate-limited Take back as a free edit door.
+# No MCP tool either: an agent already reads the whole log with
+# export_history and clears a field with update_profile(null).
 
 
 def _editable_path_or_422(path: str) -> str:
@@ -508,7 +512,7 @@ def _editable_path_or_422(path: str) -> str:
 @router.get("/profile/edits/history", response_model=ProfileEditHistoryResponse)
 async def profile_edit_history(
     path: str = Query(..., max_length=100),
-    user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI DI idiom
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> ProfileEditHistoryResponse:
     """Every change to ONE of the caller's profile fields, newest first.
 
@@ -526,7 +530,7 @@ async def profile_edit_history(
 @router.post("/profile/edits/take-back", response_model=ProfileResponse)
 async def take_back_edit(
     body: TakeBackRequest,
-    user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI DI idiom
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> ProfileResponse:
     """Take back the assistant's change to one field: it falls back to the
     value from the CV / the web form (the base profile).
@@ -559,7 +563,7 @@ async def take_back_edit(
 @router.post("/profile/edits/keep", response_model=ProfileResponse)
 async def keep_edit(
     body: TakeBackRequest,
-    user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI DI idiom
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
 ) -> ProfileResponse:
     """Keep the assistant's change to one field: the human accepts it as theirs.
 
@@ -583,6 +587,13 @@ async def keep_edit(
     ):
         raise HTTPException(status_code=404, detail=f"No assistant change to keep on {path}")
     value = copy.deepcopy(newest[0]["value"])
+    # VALIDATE BEFORE ANY WRITE. record_edits below re-validates, and a cap
+    # tightened since the assistant wrote this row would otherwise raise
+    # after the base was already saved — a 500 with half a Keep applied.
+    try:
+        profile_edits.validate_edit(path, value)
+    except profile_edits.ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     base = load_profile(user.id, with_overlay=False)
     if base is None:  # pragma: no cover — an overlay row implies a profile row (R8)
         raise HTTPException(status_code=404, detail="No profile found")

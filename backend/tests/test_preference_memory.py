@@ -677,6 +677,54 @@ async def test_keep_never_reaches_another_user(authenticated_async_context, fixt
         assert [r["set_by"] for r in await _history(client, "cv_data.location")] == ["token:claude"]
 
 
+@pytest.mark.asyncio
+async def test_keep_refuses_a_value_over_a_since_tightened_cap_and_writes_nothing(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    from src.core import settings
+    from src.services.profile.storage import load_profile
+
+    note = "Never apply to recruitment agencies"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert (await _patch(agent, {"path": NOTES_PATH, "value": [note]})).status_code == 200
+    monkeypatch.setattr(settings, "PROFILE_NOTE_MAX_CHARS", 10)
+    async with authenticated_async_context() as client:
+        resp = await client.post("/api/profile/edits/keep", json={"path": NOTES_PATH})
+        assert resp.status_code == 422 and "PROFILE_NOTE_MAX_CHARS" in resp.text
+        base = load_profile(fixture_user_id, with_overlay=False)
+        assert base is not None and base.preferences.assistant_notes == [], "the base is unchanged"
+        assert [r["set_by"] for r in await _history(client, NOTES_PATH)] == ["token:claude"], "no row written"
+        profile = (await client.get("/api/profile")).json()
+        assert profile["preferences"]["assistant_notes"] == [note]
+        assert [e["path"] for e in profile["agent_edits"]] == [NOTES_PATH], "the mark stays"
+
+
+@pytest.mark.asyncio
+async def test_history_take_back_and_keep_are_session_only(authenticated_async_context, fixture_user_id):
+    """Human web actions: a personal token (an assistant) is refused on all
+    three — it must not accept its own edit, nor use the un-rate-limited
+    Take back as an edit door. The same user's browser session works."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert (await _patch(agent, {"path": "cv_data.location", "value": "Manchester"})).status_code == 200
+        hist = await agent.get("/api/profile/edits/history", params={"path": "cv_data.location"})
+        keep = await agent.post("/api/profile/edits/keep", json={"path": "cv_data.location"})
+        back = await agent.post("/api/profile/edits/take-back", json={"path": "cv_data.location"})
+        for resp in (hist, keep, back):
+            assert resp.status_code in (401, 403), resp.text
+    async with authenticated_async_context() as client:
+        # Nothing the token tried was written.
+        assert [r["set_by"] for r in await _history(client, "cv_data.location")] == ["token:claude"]
+        kept = await client.post("/api/profile/edits/keep", json={"path": "cv_data.location"})
+        assert kept.status_code == 200, kept.text
+        assert kept.json()["cv_detail"]["location"] == "Manchester"
+
+
 def test_no_mcp_tool_keeps_or_takes_back():
     """An assistant cannot accept (or undo) its own edit on the user's behalf."""
     import inspect
