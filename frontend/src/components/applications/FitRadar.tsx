@@ -39,6 +39,16 @@ function anchor(x: number, cx: number): "start" | "middle" | "end" {
 
 const MAX_LABEL_LINE_CHARS = 18;
 
+/** Rough advance width of one character, in `em`. Only used to size the
+ * viewBox so no label is clipped; exported so the anti-clipping test can
+ * check the real requirement against the same model the chart draws with. */
+export const LABEL_CHAR_WIDTH_EM = 0.62;
+
+/** The "asks N · you N" line drawn under an axis label. */
+function valueText(axis: FitAxis): string {
+  return `asks ${axis.role} · you ${axis.you}`;
+}
+
 /**
  * Wrap an axis name into at most 2 lines, breaking only at spaces (never
  * mid-word). A single word longer than the limit stays whole on its own
@@ -69,9 +79,10 @@ function tspanTexts(lines: string[]): string[] {
 }
 
 /** Per-tspan `dy` in `em` (relative vertical offset) for a wrapped label,
- * given where it sits: top labels grow downward (toward the chart is fine —
- * the padding is on the outside), bottom labels stack upward so they don't
- * run into the chart, and side labels are simply centred on the axis point. */
+ * given where it sits: top labels grow downward from their anchor (the
+ * caller lifts that anchor so the block still ends up clear of the chart),
+ * bottom labels stack upward so they don't run into the chart, and side
+ * labels are simply centred on the axis point. */
 function lineDy(textAnchor: "start" | "middle" | "end", isTop: boolean, lineCount: number): number[] {
   if (lineCount === 1) return [0];
   if (textAnchor === "middle") {
@@ -101,17 +112,31 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
   // labels shrink the chart itself.
   const fontSize = size * 0.045;
 
-  // Labels hang outside the circle and can wrap to 2 lines; size the
-  // viewBox from what's actually going to be drawn so a long axis name is
-  // never clipped, on any side — but cap how far a long label can push the
-  // viewBox out, so a long name doesn't squeeze the chart down to fit inside
-  // a fixed max-width container (owner decision 2026-09-25).
-  const wrappedLabels = axes.map((axis) => wrapLabel(axis.name));
-  const longestLineChars = Math.max(...wrappedLabels.flat().map((line) => line.length));
-  const padX = Math.min(Math.ceil(longestLineChars * fontSize * 0.62) + 8, size * 0.28);
   // The value line under each label is now the SAME size as the label
   // (owner decision 2026-09-25 — it used to be 0.8x and unreadable).
   const valueFontSize = fontSize;
+
+  // Labels (and their value lines) hang outside the circle and can wrap to 2
+  // lines; size the viewBox from what's actually going to be drawn so a long
+  // axis name is never clipped, on any side. Pad by how far each label really
+  // overhangs its own edge, per axis: a flat "longest line" pad assumes the
+  // whole line sticks out past both edges, which is far more than any label
+  // needs and squeezes the chart down inside a fixed max-width container
+  // (owner decision 2026-09-25 — the chart itself must stay large).
+  const wrappedLabels = axes.map((axis) => wrapLabel(axis.name));
+  const labelOverhang = axes.map((axis, i) => {
+    const p = point(i, n, 100, cx, cy, labelR);
+    const textAnchor = anchor(p.x, cx);
+    const width = Math.max(
+      Math.max(...wrappedLabels[i].map((line) => line.length)) * fontSize * LABEL_CHAR_WIDTH_EM,
+      valueText(axis).length * valueFontSize * LABEL_CHAR_WIDTH_EM
+    );
+    // Where the text box starts, given the anchor the label is drawn with.
+    const left = textAnchor === "start" ? p.x : textAnchor === "end" ? p.x - width : p.x - width / 2;
+    return Math.max(-left, left + width - size);
+  });
+  // padX applies to both sides, so take the worst overhang of either edge.
+  const padX = Math.max(0, Math.ceil(Math.max(...labelOverhang))) + 8;
   // Gap between the name block and its value line, and the line-to-line
   // step for a wrapped 2-line name (matches the 1.2em used in the tspan
   // `dy` chain below) — both needed here so padY can be derived from the
@@ -120,12 +145,14 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
   const lineStep = fontSize * 1.2;
   const textHalfHeight = fontSize * 0.6; // rough half-height of a text row
   const maxLabelLines = Math.max(...wrappedLabels.map((lines) => lines.length));
-  // Top labels (owner fix 2026-09-25): the value line sits at labelR from
-  // centre — nearest the chart — and the (up to 2) name lines stack UPWARD
-  // above it, so nothing overlaps the polygon. Bottom labels are unchanged:
-  // they grow downward from labelR by the value line's gap only (the
-  // wrapped-line dy is balanced around the anchor, so line count doesn't
-  // add extra reach there).
+  // The TOP-MIDDLE label — the axis at 12 o'clock, the only one whose text
+  // sits directly over the polygon (owner fix 2026-09-25): its value line
+  // sits at labelR from centre — nearest the chart — and the (up to 2) name
+  // lines stack UPWARD above it, so nothing overlaps the polygon. Every
+  // other label (bottom, and the top ones anchored start/end) is unchanged:
+  // it grows downward from labelR by the value line's gap only, which stays
+  // clear of the ring because a start/end anchor also runs the text sideways,
+  // away from the chart. This is the tallest stack, so padY is derived from it.
   const topReach = labelR + valueGap + (maxLabelLines - 1) * lineStep + textHalfHeight;
   const bottomReach = labelR + valueGap + textHalfHeight;
   const padY = Math.max(topReach - size / 2, bottomReach - size / 2, fontSize * 1.4 + valueFontSize * 1.6);
@@ -204,12 +231,17 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
           // chain rather than assuming one of lineDy's cases — side-anchored
           // labels net +0.6em, not +1.2em.
           const lastLineExtra = dys.reduce((total, dy) => total + dy, 0) * fontSize;
-          // Top labels (owner fix 2026-09-25): the value line is the part of
-          // the block closest to the chart, pinned at labelR from centre —
-          // same spot the old single-anchor point used — and the name lines
-          // stack UPWARD, away from the chart, above it. Bottom and side
-          // labels are unchanged: the name block anchors at p.y and the value
-          // line sits `dy`+gap below its last line.
+          // Only the TOP-MIDDLE label is restacked (owner fix 2026-09-25):
+          // it is the one sitting directly above the polygon's top vertex, so
+          // growing its value line downward ran it into the ring. For it the
+          // value line is the part closest to the chart, pinned at labelR from
+          // centre — the same spot the old single anchor used — and the name
+          // lines stack UPWARD, away from the chart, above it.
+          // Every other label keeps the original placement: the name block
+          // anchors at p.y and the value line sits `dy`+gap below its last
+          // line. That is safe even for the other TOP axes, because a start/
+          // end anchor runs their text sideways past the ring's widest point
+          // rather than over it — see the n=6 test below.
           const textY = (isTopMiddle ? p.y - fontSize * 1.15 - lastLineExtra : p.y).toFixed(1);
           const valueY = (isTopMiddle ? p.y : p.y + lastLineExtra + fontSize * 1.15).toFixed(1);
           return (
@@ -238,7 +270,7 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
                 fontSize={valueFontSize}
                 className="fill-current text-muted-foreground"
               >
-                {`asks ${axis.role} · you ${axis.you}`}
+                {valueText(axis)}
               </text>
             </g>
           );
@@ -283,7 +315,10 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
         <tbody>
           {axes.map((axis) => (
             <tr key={axis.name} data-testid="fit-radar-row" className="border-b border-border/50 last:border-0">
-              <th scope="row" className="py-1 pr-2 text-left font-normal">
+              {/* Row header, not a plain cell: the axis name is what names
+               * both numbers in the row, so screen-reader table navigation
+               * must announce it alongside the column header. */}
+              <th scope="row" className="py-1 pr-2 text-left font-normal [overflow-wrap:anywhere]">
                 {axis.name}
               </th>
               <td className="px-1 py-1 text-right tabular-nums">{axis.role}</td>
