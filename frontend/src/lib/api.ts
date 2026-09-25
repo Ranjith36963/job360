@@ -633,6 +633,15 @@ export async function getProfileEditHistory(path: string): Promise<ProfileEditHi
 
 /** "Take back" an assistant's change: the field falls back to the CV / form
  *  value. Returns the rebuilt profile. */
+/** "Keep" an assistant's change: the human accepts it as their own (it moves
+ *  into the base, the mark goes). Returns the rebuilt profile. */
+export async function keepProfileEdit(path: string): Promise<ProfileResponse> {
+  return request<ProfileResponse>("/api/profile/edits/keep", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
 export async function takeBackProfileEdit(path: string): Promise<ProfileResponse> {
   return request<ProfileResponse>("/api/profile/edits/take-back", {
     method: "POST",

@@ -1078,6 +1078,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/edits/keep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep Edit
+         * @description Keep the assistant's change to one field: the human accepts it as theirs.
+         *
+         *     Writes the assistant's CURRENT value into the BASE profile, then appends
+         *     a row with that same value authored by the caller (``web`` in a browser).
+         *     The newest row is now the human's, so the mark goes, and a later "Take
+         *     back" has nothing to undo (404) — the value is the human's own now, and
+         *     survives any later autosave or re-extraction of the overlay.
+         *
+         *     Append-only (M3): the assistant's row stays in the history. Not
+         *     rate-limited (the human's own action). No MCP tool: an assistant cannot
+         *     accept its own edit on the user's behalf. 404 when the field has no live
+         *     assistant edit; the lookup is scoped by ``user.id`` (rule #12).
+         */
+        post: operations["keep_edit_api_profile_edits_keep_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/edits/take-back": {
         parameters: {
             query?: never;
@@ -3361,8 +3392,9 @@ export interface components {
         };
         /**
          * TakeBackRequest
-         * @description ``POST /profile/edits/take-back`` — the path whose assistant edit the
-         *     human is taking back. ``extra="forbid"``: no way to name another user.
+         * @description ``POST /profile/edits/take-back`` and ``/keep`` — the path whose
+         *     assistant edit the human takes back or keeps. ``extra="forbid"``: no way
+         *     to name another user.
          */
         TakeBackRequest: {
             /** Path */
@@ -5201,6 +5233,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfileEditHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    keep_edit_api_profile_edits_keep_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TakeBackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResponse"];
                 };
             };
             /** @description Validation Error */

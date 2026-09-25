@@ -20,6 +20,7 @@ import {
   uploadGithub,
   clearProfileSection,
   takeBackProfileEdit,
+  keepProfileEdit,
   type ClearSection,
 } from "@/lib/api";
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
@@ -264,6 +265,20 @@ export default function ProfilePage() {
     }
   }, []);
 
+  // "Keep" an assistant's change: the human accepts it as their own.
+  const handleKeep = useCallback(async (path: string) => {
+    setError(null);
+    try {
+      const data = await keepProfileEdit(path);
+      setProfile(data);
+      toast.success("Change kept");
+    } catch (err: unknown) {
+      const msg = apiErrorMessage(err, "Failed to keep the change");
+      setError(msg);
+      toast.error(msg);
+    }
+  }, []);
+
   const oneLineStatus = headerLine(profile);
   const extras = optionalExtras(profile);
 
@@ -417,6 +432,7 @@ export default function ProfilePage() {
                 loading={loadingProfile}
                 agentEdits={agentEdits}
                 onTakeBack={handleTakeBack}
+                onKeep={handleKeep}
                 showFieldHistory={Boolean(profile)}
               />
             </div>
@@ -442,6 +458,7 @@ export default function ProfilePage() {
                 githubDetail={profile?.github_detail}
                 agentEdits={agentEdits}
                 onTakeBack={handleTakeBack}
+                onKeep={handleKeep}
               />
             )}
 

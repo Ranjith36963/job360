@@ -4343,7 +4343,7 @@
       },
       "TakeBackRequest": {
         "additionalProperties": false,
-        "description": "``POST /profile/edits/take-back`` \u2014 the path whose assistant edit the\nhuman is taking back. ``extra=\"forbid\"``: no way to name another user.",
+        "description": "``POST /profile/edits/take-back`` and ``/keep`` \u2014 the path whose\nassistant edit the human takes back or keeps. ``extra=\"forbid\"``: no way\nto name another user.",
         "properties": {
           "path": {
             "title": "Path",
@@ -7945,6 +7945,82 @@
           }
         },
         "summary": "Profile Edit History",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/edits/keep": {
+      "post": {
+        "description": "Keep the assistant's change to one field: the human accepts it as theirs.\n\nWrites the assistant's CURRENT value into the BASE profile, then appends\na row with that same value authored by the caller (``web`` in a browser).\nThe newest row is now the human's, so the mark goes, and a later \"Take\nback\" has nothing to undo (404) \u2014 the value is the human's own now, and\nsurvives any later autosave or re-extraction of the overlay.\n\nAppend-only (M3): the assistant's row stays in the history. Not\nrate-limited (the human's own action). No MCP tool: an assistant cannot\naccept its own edit on the user's behalf. 404 when the field has no live\nassistant edit; the lookup is scoped by ``user.id`` (rule #12).",
+        "operationId": "keep_edit_api_profile_edits_keep_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeBackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Keep Edit",
         "tags": [
           "profile"
         ]

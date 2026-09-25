@@ -38,6 +38,8 @@ interface PreferencesFormProps {
   /** "Take back" an assistant's change to one path (it falls back to the CV /
    *  form value). Omitted = no Take back button on the marks. */
   onTakeBack?: (path: string) => Promise<void>;
+  /** "Keep" an assistant's change as the human's own. Omitted = no Keep button. */
+  onKeep?: (path: string) => Promise<void>;
   /** Show the small per-field "History" links. Off when there is no profile
    *  yet — there is no history to show on a first visit. */
   showFieldHistory?: boolean;
@@ -407,12 +409,13 @@ export function PreferencesForm({
   loading,
   agentEdits,
   onTakeBack,
+  onKeep,
   showFieldHistory = false,
 }: PreferencesFormProps) {
   const editOf = (field: string) => findAgentEdit(agentEdits, `preferences.${field}`);
   // The "Changed by … · was …" mark (+ Take back) for one field.
   const markOf = (field: string) => (
-    <EditedMark edit={editOf(field)} onTakeBack={onTakeBack} />
+    <EditedMark edit={editOf(field)} onTakeBack={onTakeBack} onKeep={onKeep} />
   );
   // The small per-field "History" link (one history: you + your assistant).
   const historyOf = (label: string, ...fields: string[]) =>
@@ -667,6 +670,7 @@ export function PreferencesForm({
             <EditedMark
               edit={editOf("salary_min") ?? editOf("salary_max")}
               onTakeBack={onTakeBack}
+              onKeep={onKeep}
             />
           </Label>
           <div className="grid grid-cols-2 gap-3">

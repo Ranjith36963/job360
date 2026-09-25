@@ -35,6 +35,8 @@ interface CVViewerProps {
   agentEdits?: AgentEdit[];
   /** "Take back" an assistant's change to one path. Omitted = no button. */
   onTakeBack?: (path: string) => Promise<void>;
+  /** "Keep" an assistant's change as the human's own. Omitted = no button. */
+  onKeep?: (path: string) => Promise<void>;
   /** ProfileResponse.linkedin_subsections — { languages, projects, volunteer, courses }.
    *  Each entry is a loosely-typed dict from the LLM parse; fields are read defensively. */
   linkedinSubsections?: Record<string, Record<string, unknown>[]>;
@@ -189,6 +191,7 @@ export function CVViewer({
   githubDetail,
   agentEdits,
   onTakeBack,
+  onKeep,
 }: CVViewerProps) {
   const editOf = (field: string) => findAgentEdit(agentEdits, `cv_data.${field}`);
   // (The showFullCV toggle and its highlight terms went with the "Full CV
@@ -366,20 +369,20 @@ export function CVViewer({
             {cv.name && (
               <h4 className="font-heading text-lg font-semibold text-foreground">
                 {cv.name}
-                <EditedMark edit={editOf("name")} onTakeBack={onTakeBack} />
+                <EditedMark edit={editOf("name")} onTakeBack={onTakeBack} onKeep={onKeep} />
               </h4>
             )}
             {cv.headline && (
               <p className="mt-0.5 text-sm text-muted-foreground">
                 {cv.headline}
-                <EditedMark edit={editOf("headline")} onTakeBack={onTakeBack} />
+                <EditedMark edit={editOf("headline")} onTakeBack={onTakeBack} onKeep={onKeep} />
               </p>
             )}
             {cv.location && (
               <p className="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground">
                 <MapPin className="h-3 w-3" />
                 {cv.location}
-                <EditedMark edit={editOf("location")} onTakeBack={onTakeBack} />
+                <EditedMark edit={editOf("location")} onTakeBack={onTakeBack} onKeep={onKeep} />
               </p>
             )}
           </div>
@@ -393,7 +396,7 @@ export function CVViewer({
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Professional Summary
               </span>
-              <EditedMark edit={editOf("summary")} onTakeBack={onTakeBack} />
+              <EditedMark edit={editOf("summary")} onTakeBack={onTakeBack} onKeep={onKeep} />
             </div>
             <p className="text-sm text-foreground/90 leading-relaxed pl-5 border-l-2 border-primary/20">
               {cv.summary_text}
@@ -414,7 +417,7 @@ export function CVViewer({
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Experience Found
               </span>
-              <EditedMark edit={editOf("job_titles")} onTakeBack={onTakeBack} />
+              <EditedMark edit={editOf("job_titles")} onTakeBack={onTakeBack} onKeep={onKeep} />
             </div>
             <div className="flex flex-wrap gap-1.5 pl-5">
               {cv.job_titles.map((title) => (
@@ -487,7 +490,7 @@ export function CVViewer({
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Education
               </span>
-              <EditedMark edit={editOf("education")} onTakeBack={onTakeBack} />
+              <EditedMark edit={editOf("education")} onTakeBack={onTakeBack} onKeep={onKeep} />
             </div>
             <ul className="space-y-1 pl-5 text-sm text-foreground/80">
               {cv.education.map((line, i) => (
@@ -507,7 +510,7 @@ export function CVViewer({
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Certifications
               </span>
-              <EditedMark edit={editOf("certifications")} onTakeBack={onTakeBack} />
+              <EditedMark edit={editOf("certifications")} onTakeBack={onTakeBack} onKeep={onKeep} />
             </div>
             <ul className="space-y-1 pl-5 text-sm text-foreground/80">
               {cv.certifications.map((cert, i) => (
@@ -539,7 +542,7 @@ export function CVViewer({
                   <dt className="text-muted-foreground">Right to work</dt>
                   <dd className="text-foreground/85">
                     {cv.cv_right_to_work}
-                    <EditedMark edit={editOf("cv_right_to_work")} onTakeBack={onTakeBack} />
+                    <EditedMark edit={editOf("cv_right_to_work")} onTakeBack={onTakeBack} onKeep={onKeep} />
                   </dd>
                 </div>
               )}
@@ -591,7 +594,7 @@ export function CVViewer({
             <SectionLabel
               icon={Trophy}
               text={`Achievements (${cv.achievements.length})`}
-              trailing={<EditedMark edit={editOf("achievements")} onTakeBack={onTakeBack} />}
+              trailing={<EditedMark edit={editOf("achievements")} onTakeBack={onTakeBack} onKeep={onKeep} />}
             />
             <ul className="space-y-1 pl-5 text-sm text-foreground/80">
               {cv.achievements.map((achievement, i) => (
@@ -614,7 +617,7 @@ export function CVViewer({
             <SectionLabel
               icon={Link2}
               text={`Links (${(cv.links ?? []).length})`}
-              trailing={<EditedMark edit={editOf("links")} onTakeBack={onTakeBack} />}
+              trailing={<EditedMark edit={editOf("links")} onTakeBack={onTakeBack} onKeep={onKeep} />}
             />
             <ul className="space-y-1 pl-5 text-sm text-foreground/80">
               {(cv.links ?? []).map((link, i) => (

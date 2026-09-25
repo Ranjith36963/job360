@@ -55,8 +55,21 @@ describe("EditedMark", () => {
     await waitFor(() => expect(onTakeBack).toHaveBeenCalledWith("preferences.salary_min"));
   });
 
-  it("shows no Take back button without a handler", () => {
+  it("shows no Take back or Keep button without a handler", () => {
     render(<EditedMark edit={edit()} />);
     expect(screen.queryByTestId("take-back")).toBeNull();
+    expect(screen.queryByTestId("keep")).toBeNull();
+  });
+
+  it("Keep calls back with the edited path; the label is unchanged, Keep sits before Take back", async () => {
+    const onKeep = vi.fn().mockResolvedValue(undefined);
+    const onTakeBack = vi.fn().mockResolvedValue(undefined);
+    render(<EditedMark edit={edit()} onKeep={onKeep} onTakeBack={onTakeBack} />);
+    expect(screen.getByTestId("agent-edit-mark").textContent).toBe("Changed by Claude · was £45k");
+    const buttons = screen.getAllByRole("button").map((b) => b.textContent);
+    expect(buttons).toEqual(["Keep", "Take back"]);
+    fireEvent.click(screen.getByRole("button", { name: "Keep Claude's change" }));
+    await waitFor(() => expect(onKeep).toHaveBeenCalledWith("preferences.salary_min"));
+    expect(onTakeBack).not.toHaveBeenCalled();
   });
 });

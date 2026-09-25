@@ -316,6 +316,81 @@ async def test_was_value_after_a_restore_is_what_take_back_gives(authenticated_a
         assert taken.json()["preferences"]["salary_min"] == 40000
 
 
+@pytest.mark.asyncio
+async def test_autosave_keeps_an_assistant_skill_list_the_cleaner_would_change(
+    authenticated_async_context, fixture_user_id
+):
+    """Review P3: the assistant sets additional_skills=["Python", "Rust"]
+    ("Python" is already a CV skill, which the web-save cleaner drops). The
+    human edits a location; the autosave posts the merged list back. The
+    assistant's edit must survive — mark, value and history untouched."""
+    from src.services.profile.storage import load_profile
+
+    path = "preferences.additional_skills"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert (await _patch(agent, {"path": path, "value": ["Python", "Rust"]})).status_code == 200
+    async with authenticated_async_context() as client:
+        shown = (await client.get("/api/profile")).json()["preferences"]
+        assert shown["additional_skills"] == ["Python", "Rust"]
+        resp = await _save_prefs(client, _full_form(shown, preferred_locations=["Leeds"]))
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["preferences"]["preferred_locations"] == ["Leeds"]
+        assert body["preferences"]["additional_skills"] == ["Python", "Rust"], "the assistant's list still shows"
+        edits = {e["path"]: e for e in body["agent_edits"]}
+        assert edits[path]["set_by"] == "token:claude", "the mark survives"
+        assert edits[path]["previous_value"] == []
+        assert [r["set_by"] for r in await _history(client, path)] == ["token:claude"], "no web row invented"
+        base = load_profile(fixture_user_id, with_overlay=False)
+        assert base is not None and base.preferences.additional_skills == []
+        taken = await client.post("/api/profile/edits/take-back", json={"path": path})
+        assert taken.json()["preferences"]["additional_skills"] == []
+
+
+_SKILL_SEQUENCES = [
+    ["web:Go", "agent:Python,Rust", "autosave"],
+    ["web:Go", "agent:Python,Rust", "autosave", "web:Go,Kotlin", "agent:Python,Scala", "autosave"],
+    ["agent:Python,Rust", "autosave", "restore:0", "autosave"],
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("steps", _SKILL_SEQUENCES, ids=["-".join(s) for s in _SKILL_SEQUENCES])
+async def test_invariant_holds_for_a_cleaned_list_field(authenticated_async_context, fixture_user_id, steps):
+    """The same invariant on additional_skills, the field the web-save cleaner
+    rewrites: "was X" equals the value right after Take back."""
+    path = "preferences.additional_skills"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+        for step in steps:
+            kind, _, arg = step.partition(":")
+            values = [v for v in arg.split(",") if v]
+            if kind == "web":
+                assert (await _save_prefs(client, {"additional_skills": values})).status_code == 200
+            elif kind == "agent":
+                async with _bearer_client(token) as agent:
+                    assert (await _patch(agent, {"path": path, "value": values})).status_code == 200
+            elif kind == "autosave":
+                shown = (await client.get("/api/profile")).json()["preferences"]
+                assert (await _save_prefs(client, _full_form(shown, about_me=f"n{len(step)}"))).status_code == 200
+            elif kind == "restore":
+                versions = (await client.get("/api/profile/versions", params={"limit": 100})).json()["versions"]
+                oldest_first = [v["id"] for v in reversed(versions)]
+                resp = await client.post(f"/api/profile/versions/{oldest_first[int(arg)]}/restore")
+                assert resp.status_code == 200, resp.text
+        profile = (await client.get("/api/profile")).json()
+        edits = {e["path"]: e for e in profile["agent_edits"]}
+        assert path in edits, f"{steps}: the assistant's edit must survive every autosave"
+        promised = edits[path]["previous_value"]
+        taken = await client.post("/api/profile/edits/take-back", json={"path": path})
+        assert taken.status_code == 200, taken.text
+        assert taken.json()["preferences"]["additional_skills"] == promised, steps
+
+
 _SEQUENCES = [
     ["web:40000", "agent:60000"],
     ["web:40000", "agent:60000", "autosave"],
@@ -324,6 +399,8 @@ _SEQUENCES = [
     ["web:40000", "web:50000", "agent:60000", "restore:1"],
     ["web:40000", "agent:60000", "autosave", "restore:0", "autosave"],
     ["web:40000", "agent:60000", "restore:0", "web:42000", "agent:61000", "autosave"],
+    ["web:40000", "agent:60000", "keep", "autosave", "agent:70000", "autosave"],
+    ["agent:60000", "keep", "restore:0", "agent:65000", "keep", "agent:66000"],
 ]
 
 
@@ -349,6 +426,9 @@ async def test_invariant_was_value_equals_the_value_after_take_back(
             elif kind == "autosave":
                 shown = (await client.get("/api/profile")).json()["preferences"]
                 assert (await _save_prefs(client, _full_form(shown, about_me=f"note {step}"))).status_code == 200
+            elif kind == "keep":
+                kept = await client.post("/api/profile/edits/keep", json={"path": path})
+                assert kept.status_code == 200, kept.text
             elif kind == "restore":
                 versions = (await client.get("/api/profile/versions", params={"limit": 100})).json()["versions"]
                 oldest_first = [v["id"] for v in reversed(versions)]
@@ -510,3 +590,98 @@ async def test_history_and_take_back_need_a_signed_in_user(authenticated_async_c
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anon:
         assert (await anon.get("/api/profile/edits/history", params={"path": "cv_data.location"})).status_code == 401
         assert (await anon.post("/api/profile/edits/take-back", json={"path": "cv_data.location"})).status_code == 401
+        assert (await anon.post("/api/profile/edits/keep", json={"path": "cv_data.location"})).status_code == 401
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5. Keep — the human accepts the assistant's value as their own
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_keep_makes_the_value_the_humans_and_survives_an_autosave(
+    authenticated_async_context, fixture_user_id, monkeypatch
+):
+    from src.core import settings
+    from src.services.profile.storage import load_profile
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (await _save_prefs(client, {"salary_min": 50000})).status_code == 200
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert (await _patch(agent, {"path": "preferences.salary_min", "value": 60000})).status_code == 200
+    monkeypatch.setattr(settings, "PROFILE_EDIT_MAX_PER_HOUR", 1)  # not rate-limited
+    async with authenticated_async_context() as client:
+        kept = await client.post("/api/profile/edits/keep", json={"path": "preferences.salary_min"})
+        assert kept.status_code == 200, kept.text
+        assert kept.json()["preferences"]["salary_min"] == 60000
+        assert kept.json()["agent_edits"] == [], "the mark goes"
+        base = load_profile(fixture_user_id, with_overlay=False)
+        assert base is not None and base.preferences.salary_min == 60000, "the value is in the BASE now"
+        rows = await _history(client, "preferences.salary_min")
+        assert [(r["value"], r["set_by"]) for r in rows] == [
+            (60000, "web"), (60000, "token:claude"), (50000, "web"),
+        ], "append-only: the assistant's row stays"
+
+        shown = (await client.get("/api/profile")).json()["preferences"]
+        assert (await _save_prefs(client, _full_form(shown, preferred_locations=["Leeds"]))).status_code == 200
+        after = (await client.get("/api/profile")).json()
+        assert after["preferences"]["salary_min"] == 60000, "a later autosave keeps the kept value"
+        assert after["agent_edits"] == []
+
+        # Nothing left to take back (or keep) — the value is the human's.
+        taken = await client.post("/api/profile/edits/take-back", json={"path": "preferences.salary_min"})
+        assert taken.status_code == 404
+        again = await client.post("/api/profile/edits/keep", json={"path": "preferences.salary_min"})
+        assert again.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_keep_works_on_a_cv_field_too(authenticated_async_context, fixture_user_id):
+    from src.services.profile.storage import load_profile
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert (await _patch(agent, {"path": "cv_data.location", "value": "Manchester"})).status_code == 200
+    async with authenticated_async_context() as client:
+        kept = await client.post("/api/profile/edits/keep", json={"path": "cv_data.location"})
+        assert kept.status_code == 200, kept.text
+        assert kept.json()["cv_detail"]["location"] == "Manchester"
+        base = load_profile(fixture_user_id, with_overlay=False)
+        assert base is not None and base.cv_data.location == "Manchester"
+
+
+@pytest.mark.asyncio
+async def test_keep_never_reaches_another_user(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert (await _patch(agent, {"path": "cv_data.location", "value": "Manchester"})).status_code == 200
+
+    cookie = await _second_user_session_cookie("keep-other@example.com")
+    async with _session_client(cookie) as other:
+        resp = await other.post("/api/profile/edits/keep", json={"path": "cv_data.location"})
+        assert resp.status_code == 404, resp.text
+        forged = await other.post("/api/profile/edits/keep", json={"path": "cv_data.location", "user_id": "x"})
+        assert forged.status_code == 422
+        bad = await other.post("/api/profile/edits/keep", json={"path": "cv_data.raw_text"})
+        assert bad.status_code == 422
+
+    async with authenticated_async_context() as client:
+        profile = (await client.get("/api/profile")).json()
+        assert [e["set_by"] for e in profile["agent_edits"]] == ["token:claude"], "the owner's mark is untouched"
+        assert [r["set_by"] for r in await _history(client, "cv_data.location")] == ["token:claude"]
+
+
+def test_no_mcp_tool_keeps_or_takes_back():
+    """An assistant cannot accept (or undo) its own edit on the user's behalf."""
+    import inspect
+
+    from src.api import mcp_server
+
+    src = inspect.getsource(mcp_server)
+    assert "keep_edit" not in src and "take_back_edit" not in src

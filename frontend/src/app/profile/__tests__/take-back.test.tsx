@@ -15,11 +15,13 @@ vi.mock("next/navigation", () => ({
 
 const getProfile = vi.fn();
 const takeBackProfileEdit = vi.fn();
+const keepProfileEdit = vi.fn();
 
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api")>()),
   getProfile: () => getProfile(),
   takeBackProfileEdit: (path: string) => takeBackProfileEdit(path),
+  keepProfileEdit: (path: string) => keepProfileEdit(path),
   listLessons: vi.fn().mockResolvedValue({ lessons: [], total: 0 }),
 }));
 
@@ -56,6 +58,7 @@ describe("ProfilePage — Take back", () => {
     sessionStorage.clear();
     getProfile.mockReset();
     takeBackProfileEdit.mockReset();
+    keepProfileEdit.mockReset();
   });
 
   it("takes back the assistant's change and drops the mark", async () => {
@@ -71,6 +74,19 @@ describe("ProfilePage — Take back", () => {
     await waitFor(() =>
       expect(takeBackProfileEdit).toHaveBeenCalledWith("preferences.work_arrangement")
     );
+    await waitFor(() => expect(screen.queryByTestId("agent-edit-mark")).toBeNull());
+    expect(screen.queryByText(/set by your assistant/)).toBeNull();
+  });
+
+  it("keeps the assistant's change: the value stays and the mark goes", async () => {
+    getProfile.mockResolvedValue(profile("remote", [EDIT]));
+    keepProfileEdit.mockResolvedValue(profile("remote", []));
+    render(<ProfilePage />);
+
+    await screen.findByTestId("agent-edit-mark");
+    fireEvent.click(screen.getByRole("button", { name: "Keep Claude's change" }));
+    await waitFor(() => expect(keepProfileEdit).toHaveBeenCalledWith("preferences.work_arrangement"));
+    expect(takeBackProfileEdit).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByTestId("agent-edit-mark")).toBeNull());
     expect(screen.queryByText(/set by your assistant/)).toBeNull();
   });

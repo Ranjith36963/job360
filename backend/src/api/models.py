@@ -186,8 +186,9 @@ class ProfileEditHistoryResponse(BaseModel):
 
 
 class TakeBackRequest(BaseModel):
-    """``POST /profile/edits/take-back`` — the path whose assistant edit the
-    human is taking back. ``extra="forbid"``: no way to name another user."""
+    """``POST /profile/edits/take-back`` and ``/keep`` — the path whose
+    assistant edit the human takes back or keeps. ``extra="forbid"``: no way
+    to name another user."""
 
     model_config = ConfigDict(extra="forbid")
 

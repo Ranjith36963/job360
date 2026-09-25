@@ -556,6 +556,50 @@ async def take_back_edit(
     return load_profile_response(user.id)[1]
 
 
+@router.post("/profile/edits/keep", response_model=ProfileResponse)
+async def keep_edit(
+    body: TakeBackRequest,
+    user: CurrentUser = Depends(require_user),  # noqa: B008 — FastAPI DI idiom
+) -> ProfileResponse:
+    """Keep the assistant's change to one field: the human accepts it as theirs.
+
+    Writes the assistant's CURRENT value into the BASE profile, then appends
+    a row with that same value authored by the caller (``web`` in a browser).
+    The newest row is now the human's, so the mark goes, and a later "Take
+    back" has nothing to undo (404) — the value is the human's own now, and
+    survives any later autosave or re-extraction of the overlay.
+
+    Append-only (M3): the assistant's row stays in the history. Not
+    rate-limited (the human's own action). No MCP tool: an assistant cannot
+    accept its own edit on the user's behalf. 404 when the field has no live
+    assistant edit; the lookup is scoped by ``user.id`` (rule #12).
+    """
+    path = _editable_path_or_422(body.path)
+    newest = profile_edits.path_history(user.id, path, 1)
+    if (
+        not newest
+        or newest[0]["value"] is None
+        or not profile_edits.is_assistant_actor(str(newest[0]["set_by"]))
+    ):
+        raise HTTPException(status_code=404, detail=f"No assistant change to keep on {path}")
+    value = copy.deepcopy(newest[0]["value"])
+    base = load_profile(user.id, with_overlay=False)
+    if base is None:  # pragma: no cover — an overlay row implies a profile row (R8)
+        raise HTTPException(status_code=404, detail="No profile found")
+    head, _, field_name = path.partition(".")
+    target: Any = base.cv_data if head == "cv_data" else base.preferences
+    setattr(target, field_name, copy.deepcopy(value))
+    save_profile(base, user.id, source_action="keep_edit")
+    profile_edits.record_edits(
+        user.id, actor_for(user), [(path, value)], enforce_rate_limit=False, store_as_given=True
+    )
+    get_audit_logger().info(
+        "profile_edit_kept",
+        extra={"event": "profile_edit_kept", "paths": [path], "actor": actor_for(user)},
+    )
+    return load_profile_response(user.id)[1]
+
+
 # ── Shared profile-input helpers — the upload pipeline in ONE place ──
 # Each of the four inputs has its OWN route (CV / Preferences / LinkedIn /
 # GitHub). CV + Preferences ALSO share the combined /profile route for backward
@@ -829,7 +873,11 @@ def _effective_preferences(user_id: str) -> UserPreferences:
 
 
 def _keep_base_under_assistant_edits(
-    profile: UserProfile, base_prefs: UserPreferences, before: UserPreferences, user: CurrentUser
+    preferences_json: str,
+    profile: UserProfile,
+    base_prefs: UserPreferences,
+    before: UserPreferences,
+    user: CurrentUser,
 ) -> set[str]:
     """Never let an assistant's overlay value leak into the BASE on a web save.
 
@@ -844,7 +892,21 @@ def _keep_base_under_assistant_edits(
     base's own value back on ``profile`` before it is saved. Only a value the
     human genuinely changed overwrites the base (and gets a web history row).
     Returns the paths kept, so the history step skips them.
+
+    "Unchanged" is judged on the POSTED RAW value as well as the stored one.
+    ``sanitize_preferences`` cleans a web save (it drops CV-duplicate skills)
+    but an assistant's write is never cleaned — so an untouched
+    ``additional_skills`` the assistant set to ["Python", "Rust"] comes back
+    from the cleaner as ["Rust"], which no longer equals the merged value.
+    Judged on the cleaned value alone, that untouched field read as a human
+    change and silently replaced the assistant's edit.
     """
+    try:
+        submitted = json.loads(preferences_json)
+    except json.JSONDecodeError:  # pragma: no cover — _apply_preferences parsed it already
+        submitted = {}
+    if not isinstance(submitted, dict):  # pragma: no cover — same
+        submitted = {}
     kept: set[str] = set()
     for row in profile_edits.current_overlay(user.id):
         path = str(row["path"])
@@ -853,7 +915,9 @@ def _keep_base_under_assistant_edits(
             continue
         if not hasattr(profile.preferences, field_name):  # pragma: no cover — defensive
             continue
-        if getattr(profile.preferences, field_name) == getattr(before, field_name, None):
+        shown = getattr(before, field_name, None)
+        posted_raw_unchanged = field_name in submitted and submitted[field_name] == shown
+        if posted_raw_unchanged or getattr(profile.preferences, field_name) == shown:
             setattr(profile.preferences, field_name, copy.deepcopy(getattr(base_prefs, field_name)))
             kept.add(path)
     return kept
@@ -1000,7 +1064,7 @@ async def upsert_preferences(
     profile = load_profile(user.id, with_overlay=False) or UserProfile()
     base_prefs = copy.deepcopy(profile.preferences)
     _apply_preferences(preferences, profile)
-    kept = _keep_base_under_assistant_edits(profile, base_prefs, before, user)
+    kept = _keep_base_under_assistant_edits(preferences, profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
     _record_web_preference_changes(preferences, before, profile, user, skip=kept)
     return load_profile_response(user.id)[1]
@@ -1029,7 +1093,7 @@ async def upsert_profile(
     if preferences is not None and before is not None:
         base_prefs = copy.deepcopy(profile.preferences)
         _apply_preferences(preferences, profile)
-        kept = _keep_base_under_assistant_edits(profile, base_prefs, before, user)
+        kept = _keep_base_under_assistant_edits(preferences, profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
     if preferences is not None and before is not None:
         _record_web_preference_changes(preferences, before, profile, user, skip=kept)
