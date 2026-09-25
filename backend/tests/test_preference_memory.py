@@ -223,17 +223,19 @@ async def test_note_count_cap_uses_the_list_limit(authenticated_async_context, f
 
 
 @pytest.mark.asyncio
-async def test_was_value_is_the_previous_row_else_the_base(authenticated_async_context, fixture_user_id):
+async def test_was_value_is_what_take_back_restores(authenticated_async_context, fixture_user_id):
+    """"was X" is the BASE value — exactly what Take back falls back to."""
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         assert (await _save_prefs(client, {"salary_min": 45000})).status_code == 200
         token = await _mint_token(client)
     async with _bearer_client(token) as agent:
-        # salary_min: previous row is the human's web save (45000)
+        # salary_min: the human's web save wrote the base (45000)
         assert (await _patch(agent, {"path": "preferences.salary_min", "value": 50000})).status_code == 200
-        # cv_data.location: no earlier row — previous is the BASE value
+        # cv_data.location: the CV's own value
         assert (await _patch(agent, {"path": "cv_data.location", "value": "Manchester"})).status_code == 200
-        # headline: agent twice — previous is the agent's own first value
+        # headline: agent twice — NOT the agent's first value (Take back would
+        # not restore that), but the base: the CV has no headline.
         await _patch(agent, {"path": "cv_data.headline", "value": "Data Engineer"})
         await _patch(agent, {"path": "cv_data.headline", "value": "Senior Data Engineer"})
     async with authenticated_async_context() as client:
@@ -241,8 +243,126 @@ async def test_was_value_is_the_previous_row_else_the_base(authenticated_async_c
     assert edits["preferences.salary_min"]["value"] == 50000
     assert edits["preferences.salary_min"]["previous_value"] == 45000
     assert edits["cv_data.location"]["previous_value"] == "London"
-    assert edits["cv_data.headline"]["previous_value"] == "Data Engineer"
+    assert edits["cv_data.headline"]["previous_value"] == ""
     assert edits["cv_data.headline"]["value"] == "Senior Data Engineer"
+
+
+def _full_form(prefs: dict[str, Any], **changes: Any) -> dict[str, Any]:
+    """What the web form's autosave posts: EVERY field, from the MERGED
+    profile the page shows, with the human's one change applied."""
+    keys = (
+        "target_job_titles", "additional_skills", "excluded_skills", "preferred_locations", "industries",
+        "salary_min", "salary_max", "work_arrangement", "experience_level", "negative_keywords",
+        "about_me", "needs_visa", "work_authorization_countries", "assistant_notes",
+    )
+    doc = {k: prefs.get(k) for k in keys}
+    doc.update(changes)
+    return doc
+
+
+@pytest.mark.asyncio
+async def test_autosave_does_not_leak_an_assistant_value_into_the_base(authenticated_async_context, fixture_user_id):
+    """Review P1: web 50000 → assistant 60000 → the human edits a location
+    (autosave posts salary 60000 back) → Take back must give 50000."""
+    from src.services.profile.storage import load_profile
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (await _save_prefs(client, {"salary_min": 50000})).status_code == 200
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert (await _patch(agent, {"path": "preferences.salary_min", "value": 60000})).status_code == 200
+    async with authenticated_async_context() as client:
+        shown = (await client.get("/api/profile")).json()["preferences"]
+        assert shown["salary_min"] == 60000
+        resp = await _save_prefs(client, _full_form(shown, preferred_locations=["Leeds"]))
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["preferences"]["preferred_locations"] == ["Leeds"]
+        assert body["preferences"]["salary_min"] == 60000, "the assistant's value still shows"
+        base = load_profile(fixture_user_id, with_overlay=False)
+        assert base is not None and base.preferences.salary_min == 50000, "the base keeps the human's value"
+        edits = {e["path"]: e for e in body["agent_edits"]}
+        assert edits["preferences.salary_min"]["previous_value"] == 50000, "the mark survives the autosave"
+        # No web row was invented for the salary the human did not touch.
+        assert [r["set_by"] for r in await _history(client, "preferences.salary_min")] == ["token:claude", "web"]
+
+        taken = await client.post("/api/profile/edits/take-back", json={"path": "preferences.salary_min"})
+        assert taken.status_code == 200, taken.text
+        assert taken.json()["preferences"]["salary_min"] == 50000
+
+
+@pytest.mark.asyncio
+async def test_was_value_after_a_restore_is_what_take_back_gives(authenticated_async_context, fixture_user_id):
+    """Review P2: base 40000 (a version) → web 50000 → assistant 60000 →
+    restore the 40000 version. The mark must say "was 40000", because Take
+    back now restores 40000."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (await _save_prefs(client, {"salary_min": 40000})).status_code == 200
+        versions = (await client.get("/api/profile/versions")).json()["versions"]
+        v40 = versions[0]["id"]  # newest first: the 40000 save
+        assert (await _save_prefs(client, {"salary_min": 50000})).status_code == 200
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert (await _patch(agent, {"path": "preferences.salary_min", "value": 60000})).status_code == 200
+    async with authenticated_async_context() as client:
+        restored = await client.post(f"/api/profile/versions/{v40}/restore")
+        assert restored.status_code == 200, restored.text
+        edits = {e["path"]: e for e in restored.json()["agent_edits"]}
+        assert restored.json()["preferences"]["salary_min"] == 60000, "restore leaves the assistant's edit"
+        assert edits["preferences.salary_min"]["previous_value"] == 40000
+        taken = await client.post("/api/profile/edits/take-back", json={"path": "preferences.salary_min"})
+        assert taken.json()["preferences"]["salary_min"] == 40000
+
+
+_SEQUENCES = [
+    ["web:40000", "agent:60000"],
+    ["web:40000", "agent:60000", "autosave"],
+    ["web:40000", "agent:60000", "web:45000", "agent:70000", "autosave"],
+    ["agent:60000", "agent:65000"],
+    ["web:40000", "web:50000", "agent:60000", "restore:1"],
+    ["web:40000", "agent:60000", "autosave", "restore:0", "autosave"],
+    ["web:40000", "agent:60000", "restore:0", "web:42000", "agent:61000", "autosave"],
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("steps", _SEQUENCES, ids=["-".join(s) for s in _SEQUENCES])
+async def test_invariant_was_value_equals_the_value_after_take_back(
+    authenticated_async_context, fixture_user_id, steps
+):
+    """For any mix of web saves, assistant edits, autosaves and restores: the
+    "was X" shown is exactly the value the field has right after Take back."""
+    path = "preferences.salary_min"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+        oldest_first: list[int] = []
+        for step in steps:
+            kind, _, arg = step.partition(":")
+            if kind == "web":
+                assert (await _save_prefs(client, {"salary_min": int(arg)})).status_code == 200
+            elif kind == "agent":
+                async with _bearer_client(token) as agent:
+                    assert (await _patch(agent, {"path": path, "value": int(arg)})).status_code == 200
+            elif kind == "autosave":
+                shown = (await client.get("/api/profile")).json()["preferences"]
+                assert (await _save_prefs(client, _full_form(shown, about_me=f"note {step}"))).status_code == 200
+            elif kind == "restore":
+                versions = (await client.get("/api/profile/versions", params={"limit": 100})).json()["versions"]
+                oldest_first = [v["id"] for v in reversed(versions)]
+                resp = await client.post(f"/api/profile/versions/{oldest_first[int(arg)]}/restore")
+                assert resp.status_code == 200, resp.text
+        profile = (await client.get("/api/profile")).json()
+        edits = {e["path"]: e for e in profile["agent_edits"]}
+        if path not in edits:
+            # Every sequence here ends with an assistant value in force.
+            pytest.fail(f"{steps}: expected a live assistant edit on {path}")
+        promised = edits[path]["previous_value"]
+        taken = await client.post("/api/profile/edits/take-back", json={"path": path})
+        assert taken.status_code == 200, taken.text
+        assert taken.json()["preferences"]["salary_min"] == promised, steps
 
 
 @pytest.mark.asyncio

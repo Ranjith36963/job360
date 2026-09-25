@@ -1640,10 +1640,11 @@ export interface components {
          * AgentEditOut
          * @description One live ASSISTANT edit on ``GET /profile``'s ``agent_edits``.
          *
-         *     ``previous_value`` is what the field held just before this edit: the
-         *     previous ``profile_edits`` row for the path when it carries a value, else
-         *     the base profile's value. ``None`` / ``""`` / ``[]`` all mean "it was
-         *     empty" — the page words them that way.
+         *     ``previous_value`` is the field's base value — what the CV / the user's
+         *     own saves hold under this edit, and so exactly what "Take back" restores
+         *     (the label never promises a value Take back would not produce).
+         *     ``None`` / ``""`` / ``[]`` all mean "it was empty" — the page words them
+         *     that way.
          */
         AgentEditOut: {
             /** Path */

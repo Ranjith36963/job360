@@ -617,42 +617,6 @@ def is_assistant_actor(set_by: str) -> bool:
     return bool(set_by) and set_by != WEB_ACTOR
 
 
-def previous_values(
-    user_id: str, conn: pgsync.Connection | None = None
-) -> dict[str, tuple[bool, Any]]:
-    """For each path, the row just BEFORE its newest one: ``{path: (found, value)}``.
-
-    ``found`` is False when that earlier row is a clear (``value IS NULL``):
-    the value before the newest row was then whatever the BASE profile holds,
-    which the caller knows and this module does not. A path with only one row
-    is absent from the result — same meaning. One statement (a window over
-    this user's rows), on the caller's connection when given. ``{}`` before
-    migration 0038.
-    """
-    sql = """
-        SELECT path, value FROM (
-            SELECT path, value,
-                   ROW_NUMBER() OVER (PARTITION BY path ORDER BY id DESC) AS rn
-            FROM profile_edits WHERE user_id = ?
-        ) ranked
-        WHERE rn = 2
-        """
-    try:
-        if conn is not None:
-            rows = conn.execute(sql, (user_id,)).fetchall()
-        else:
-            with pgsync.connect(str(DB_PATH)) as own_conn:
-                rows = own_conn.execute(sql, (user_id,)).fetchall()
-    except pgsync.OperationalError as exc:
-        if _is_missing_table(exc):
-            return {}
-        raise
-    out: dict[str, tuple[bool, Any]] = {}
-    for path, value in rows:
-        out[path] = (False, None) if value is None else (True, json.loads(value))
-    return out
-
-
 def path_history(user_id: str, path: str, limit: int) -> list[dict[str, Any]]:
     """Every row for one of ``user_id``'s paths, NEWEST first, at most ``limit``.
 

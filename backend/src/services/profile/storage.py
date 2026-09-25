@@ -358,11 +358,18 @@ def load_profile_with_overlay(
     one extra indexed statement, no N+1, no second connect.
 
     ``with_previous=True`` also stamps each overlay row with
-    ``previous_value``: what the field held just BEFORE that newest row — the
-    previous ``profile_edits`` row for the path when it carries a value, else
-    the BASE profile's value (read here, before the overlay is applied). One
-    more statement on the same connection; used by ``GET /profile`` so the
-    page can say "was …" next to an assistant's change.
+    ``previous_value``: the field's BASE value (read here, before the overlay
+    is applied). Used by ``GET /profile`` so the page can say "was …" next to
+    an assistant's change.
+
+    WHY THE BASE, NOT THE PREVIOUS HISTORY ROW. "Take back" appends a clear,
+    and a clear falls back to the base — so the base is exactly what Take
+    back will produce, and the label must always promise that value. An
+    older history row can differ from the base (an earlier assistant value,
+    or a web save that a version restore has since replaced); showing it
+    would make "was X" name a value Take back does not restore. In the
+    ordinary flow the two agree anyway: a web save writes the base AND its
+    history row.
     """
     _maybe_hydrate_legacy_json(user_id)
     from src.services.profile.edits import (
@@ -370,10 +377,8 @@ def load_profile_with_overlay(
         current_overlay,
         editable_paths,
         field_values,
-        previous_values,
     )
 
-    previous: dict[str, tuple[bool, Any]] = {}
     with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
             "SELECT cv_data, preferences FROM user_profiles WHERE user_id = ?",
@@ -383,8 +388,6 @@ def load_profile_with_overlay(
         if row is None:
             return None, []
         overlay = current_overlay(user_id, conn) if with_overlay else []
-        if with_overlay and with_previous and overlay:
-            previous = previous_values(user_id, conn)
     cv_raw = json.loads(row[0]) if row[0] else {}
     pref_raw = json.loads(row[1]) if row[1] else {}
     profile = UserProfile(
@@ -402,8 +405,7 @@ def load_profile_with_overlay(
             json.dumps(field_values(profile, [r["path"] for r in overlay if r["path"] in valid]))
         )
         for r in overlay:
-            found, value = previous.get(r["path"], (False, None))
-            r["previous_value"] = value if found else base.get(r["path"])
+            r["previous_value"] = base.get(r["path"])
     return apply_overlay_rows(profile, overlay), overlay
 
 

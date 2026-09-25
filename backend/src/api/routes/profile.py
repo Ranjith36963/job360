@@ -828,11 +828,43 @@ def _effective_preferences(user_id: str) -> UserPreferences:
     return merged.preferences if merged is not None else UserPreferences()
 
 
+def _keep_base_under_assistant_edits(
+    profile: UserProfile, base_prefs: UserPreferences, before: UserPreferences, user: CurrentUser
+) -> set[str]:
+    """Never let an assistant's overlay value leak into the BASE on a web save.
+
+    The form autosaves EVERY field, filled from the MERGED profile — so a
+    field the assistant set is posted back with the assistant's value, as if
+    the human had typed it. Written into the base, it would quietly become
+    permanent: "Take back" falls back to the base, and would then "restore"
+    the assistant's value, losing what the human had before.
+
+    So for every path whose newest row is an ASSISTANT row and whose posted
+    value equals what the page showed (``before``, the merged value), put the
+    base's own value back on ``profile`` before it is saved. Only a value the
+    human genuinely changed overwrites the base (and gets a web history row).
+    Returns the paths kept, so the history step skips them.
+    """
+    kept: set[str] = set()
+    for row in profile_edits.current_overlay(user.id):
+        path = str(row["path"])
+        head, _, field_name = path.partition(".")
+        if head != "preferences" or not profile_edits.is_assistant_actor(str(row["set_by"])):
+            continue
+        if not hasattr(profile.preferences, field_name):  # pragma: no cover — defensive
+            continue
+        if getattr(profile.preferences, field_name) == getattr(before, field_name, None):
+            setattr(profile.preferences, field_name, copy.deepcopy(getattr(base_prefs, field_name)))
+            kept.add(path)
+    return kept
+
+
 def _record_web_preference_changes(
     preferences_json: str,
     before: UserPreferences,
     saved: UserProfile,
     user: CurrentUser,
+    skip: set[str] | frozenset[str] = frozenset(),
 ) -> None:
     """After a preferences form save: append one ``profile_edits`` row, with
     the NEW value and ``set_by=web``, for every field the human CHANGED.
@@ -870,7 +902,7 @@ def _record_web_preference_changes(
     rows: list[tuple[str, Any]] = []
     for path in profile_edits.editable_paths():
         head, _, field_name = path.partition(".")
-        if head != "preferences" or field_name not in submitted:
+        if head != "preferences" or field_name not in submitted or path in skip:
             continue
         new_value = getattr(saved.preferences, field_name, None)
         if new_value == getattr(before, field_name, None):
@@ -966,9 +998,11 @@ async def upsert_preferences(
     """
     before = _effective_preferences(user.id)
     profile = load_profile(user.id, with_overlay=False) or UserProfile()
+    base_prefs = copy.deepcopy(profile.preferences)
     _apply_preferences(preferences, profile)
+    kept = _keep_base_under_assistant_edits(profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
-    _record_web_preference_changes(preferences, before, profile, user)
+    _record_web_preference_changes(preferences, before, profile, user, skip=kept)
     return load_profile_response(user.id)[1]
 
 
@@ -991,11 +1025,14 @@ async def upsert_profile(
     if cv is not None:
         content = await cv.read(10 * 1024 * 1024 + 1)
         await _capture_cv_raw(content, cv.filename, profile)
-    if preferences is not None:
+    kept: set[str] = set()
+    if preferences is not None and before is not None:
+        base_prefs = copy.deepcopy(profile.preferences)
         _apply_preferences(preferences, profile)
+        kept = _keep_base_under_assistant_edits(profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
     if preferences is not None and before is not None:
-        _record_web_preference_changes(preferences, before, profile, user)
+        _record_web_preference_changes(preferences, before, profile, user, skip=kept)
     return load_profile_response(user.id)[1]
 
 

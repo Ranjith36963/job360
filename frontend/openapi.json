@@ -90,7 +90,7 @@
         "type": "object"
       },
       "AgentEditOut": {
-        "description": "One live ASSISTANT edit on ``GET /profile``'s ``agent_edits``.\n\n``previous_value`` is what the field held just before this edit: the\nprevious ``profile_edits`` row for the path when it carries a value, else\nthe base profile's value. ``None`` / ``\"\"`` / ``[]`` all mean \"it was\nempty\" \u2014 the page words them that way.",
+        "description": "One live ASSISTANT edit on ``GET /profile``'s ``agent_edits``.\n\n``previous_value`` is the field's base value \u2014 what the CV / the user's\nown saves hold under this edit, and so exactly what \"Take back\" restores\n(the label never promises a value Take back would not produce).\n``None`` / ``\"\"`` / ``[]`` all mean \"it was empty\" \u2014 the page words them\nthat way.",
         "properties": {
           "path": {
             "title": "Path",
