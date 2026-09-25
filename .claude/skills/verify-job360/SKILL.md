@@ -174,10 +174,6 @@ These cost real time the first time. Reading them here saves the next run.
   `npm run type-check` AND `npm run lint` — they're CI gates and catch pre-existing
   breakage (e.g. `react-hooks/set-state-in-effect`: derive state from the initial
   `useState` value instead of calling setState synchronously in an effect).
-- **The app is dark-only by design** (`globals.css`: `:root` == `.dark`, comment
-  "the neon lime theme IS dark"). The navbar "Toggle theme" button flips the class but
-  there's no light palette, so light mode looks identical to dark — don't chase it as a
-  styling bug; it's a product decision (remove the toggle, or build a real light theme).
 - **A wrong multipart field name is a 422 that looks like a route bug and is a *driver* bug.** The profile routes do not share one field name — read them off `/openapi.json` or the signatures of `routes/profile.upload_cv` / `upsert_preferences` / `upload_linkedin` / `upload_github` / `upsert_profile`.
 - **CV extraction blocks the upload.** `routes/profile.upload_cv` awaits the two-pass extraction and returns the populated profile in the 200 (`tests/test_profile_upload.py::test_dedicated_cv_route_accepts_pdf`) — give the request a long client timeout, and don't poll for skills that already landed.
 - **The columns a profile write touches are `services/profile/storage.save_profile`'s** — read them there before querying `user_profiles` by hand.
