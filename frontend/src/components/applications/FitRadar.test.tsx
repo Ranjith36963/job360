@@ -30,15 +30,38 @@ describe("FitRadar", () => {
     expect(you[0]).toEqual([100, 100]); // you 0 on axis 0 → the centre
     expect(you[2]).toEqual([100, 164]); // you 100 on axis 2 (straight down)
 
-    // The readable version of the same numbers, for screen readers and tests.
-    expect(screen.getAllByTestId("fit-radar-row").map((el) => el.textContent)).toEqual([
-      "LLM depth: the role asks 100 of 100, you bring 0 of 100",
-      "Production ML: the role asks 50 of 100, you bring 50 of 100",
-      "Leadership: the role asks 0 of 100, you bring 100 of 100",
-      "London base: the role asks 100 of 100, you bring 100 of 100",
+    const legend = document.querySelector("figcaption");
+    expect(legend?.textContent).toContain("The role asks");
+    expect(legend?.textContent).toContain("You bring");
+  });
+
+  it("shows a visible table with one row per axis and the plain numbers", () => {
+    render(<FitRadar axes={AXES} size={200} />);
+
+    const table = screen.getByTestId("fit-radar-table");
+    expect(table).toBeVisible();
+
+    const rows = screen.getAllByTestId("fit-radar-row");
+    expect(rows).toHaveLength(AXES.length);
+    expect(rows.map((row) => Array.from(row.querySelectorAll("td")).map((td) => td.textContent))).toEqual([
+      ["LLM depth", "100", "0"],
+      ["Production ML", "50", "50"],
+      ["Leadership", "0", "100"],
+      ["London base", "100", "100"],
     ]);
-    expect(screen.getByText("The role asks")).toBeInTheDocument();
-    expect(screen.getByText("You bring")).toBeInTheDocument();
+
+    // Column headers name what the numbers mean.
+    expect(screen.getByRole("columnheader", { name: "Line" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "The role asks" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "You bring" })).toBeInTheDocument();
+  });
+
+  it("draws the value text at the same font size as the axis label (owner decision 2026-09-25)", () => {
+    render(<FitRadar axes={AXES} size={200} />);
+
+    const label = screen.getAllByTestId("fit-radar-axis")[0];
+    const value = screen.getAllByTestId("fit-radar-axis-value")[0];
+    expect(value.getAttribute("font-size")).toBe(label.getAttribute("font-size"));
   });
 
   it("draws a small 'asks N · you N' value line under each axis label", () => {

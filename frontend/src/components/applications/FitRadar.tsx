@@ -96,17 +96,22 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
   const r = size * 0.32;
   const labelR = r + size * 0.06;
   const n = axes.length;
-  const fontSize = size * 0.036;
+  // Owner decision (2026-09-25): the radar numbers were unreadable (~9px
+  // desktop, ~6px phone) — raise the base font factor and stop letting long
+  // labels shrink the chart itself.
+  const fontSize = size * 0.045;
 
   // Labels hang outside the circle and can wrap to 2 lines; size the
   // viewBox from what's actually going to be drawn so a long axis name is
-  // never clipped, on any side.
+  // never clipped, on any side — but cap how far a long label can push the
+  // viewBox out, so a long name doesn't squeeze the chart down to fit inside
+  // a fixed max-width container (owner decision 2026-09-25).
   const wrappedLabels = axes.map((axis) => wrapLabel(axis.name));
   const longestLineChars = Math.max(...wrappedLabels.flat().map((line) => line.length));
-  const padX = Math.ceil(longestLineChars * fontSize * 0.62) + 8;
-  // Extra room for the small "asks N · you N" value line under each label
-  // (owner decision 3, 2026-09-24).
-  const valueFontSize = fontSize * 0.8;
+  const padX = Math.min(Math.ceil(longestLineChars * fontSize * 0.62) + 8, size * 0.28);
+  // The value line under each label is now the SAME size as the label
+  // (owner decision 2026-09-25 — it used to be 0.8x and unreadable).
+  const valueFontSize = fontSize;
   const padY = fontSize * 1.4 + valueFontSize * 1.6;
 
   return (
@@ -233,13 +238,34 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
           You bring
         </span>
       </figcaption>
-      <ul className="sr-only">
-        {axes.map((axis) => (
-          <li key={axis.name} data-testid="fit-radar-row">
-            {axis.name}: the role asks {axis.role} of 100, you bring {axis.you} of 100
-          </li>
-        ))}
-      </ul>
+      {/* Visible readable table — the on-chart numbers are small even at the
+       * enlarged size, so this is the number everyone actually reads (owner
+       * decision 2026-09-25). Compact enough for a 360px phone: small text,
+       * tight padding, no horizontal scroll. */}
+      <table data-testid="fit-radar-table" className="mx-auto mt-3 w-full max-w-lg border-collapse text-xs">
+        <thead>
+          <tr className="border-b border-border text-left text-muted-foreground">
+            <th scope="col" className="py-1 pr-2 font-medium">
+              Line
+            </th>
+            <th scope="col" className="px-1 py-1 text-right font-medium">
+              The role asks
+            </th>
+            <th scope="col" className="py-1 pl-1 text-right font-medium">
+              You bring
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {axes.map((axis) => (
+            <tr key={axis.name} data-testid="fit-radar-row" className="border-b border-border/50 last:border-0">
+              <td className="py-1 pr-2">{axis.name}</td>
+              <td className="px-1 py-1 text-right tabular-nums">{axis.role}</td>
+              <td className="py-1 pl-1 text-right tabular-nums">{axis.you}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </figure>
   );
 }
