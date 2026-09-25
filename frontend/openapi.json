@@ -2201,6 +2201,19 @@
           "truncated": {
             "title": "Truncated",
             "type": "boolean"
+          },
+          "unlinked_contacts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ContactOut"
+            },
+            "title": "Unlinked Contacts",
+            "type": "array"
+          },
+          "unlinked_contacts_truncated": {
+            "default": false,
+            "title": "Unlinked Contacts Truncated",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2711,6 +2724,11 @@
                 "type": "null"
               }
             ]
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
           }
         },
         "title": "ListPeopleResponse",

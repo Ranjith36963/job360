@@ -138,24 +138,46 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _find_contact_by_email(
-    db: JobDatabase, application_id: Optional[int], user_id: str, email: str
+async def _find_contact_by_current_email(
+    db: JobDatabase,
+    application_id: Optional[int],
+    user_id: str,
+    email: str,
+    *,
+    exclude_contact_id: Optional[int] = None,
 ) -> Optional[dict[str, Any]]:
-    """R2 — the SAME contact by lower/trim email: scoped to the application
-    when linked, scoped to the USER when cold (migration 0046's two partial
-    unique indexes — one per application, one per user with no application)."""
+    """R2 — the SAME contact by CURRENT email: the base row's email UNLESS a
+    ``contact_edits`` row has since overridden it, in which case the LATEST
+    edit wins (bug fix, coordinator review 2026-09-26 — a base-row-only
+    lookup let an edited-away email keep matching its old owner forever, and
+    let a just-edited-TO email silently create a duplicate instead of
+    finding its new one). Scoped to the application when linked, to the USER
+    when cold (migration 0046's two partial unique indexes). ``exclude_
+    contact_id`` is used by ``update_contact``'s collision check — a contact
+    never collides with its own current email."""
     if application_id is not None:
-        cur = await db._db.execute(
-            "SELECT id, application_id, name, role, email, linkedin_url, notes, added_by, created_at "
-            "FROM application_contacts WHERE application_id = ? AND email = ?",
-            (application_id, email),
-        )
+        scope_sql = "ac.application_id = ?"
+        scope_param: Any = application_id
     else:
-        cur = await db._db.execute(
-            "SELECT id, application_id, name, role, email, linkedin_url, notes, added_by, created_at "
-            "FROM application_contacts WHERE user_id = ? AND application_id IS NULL AND email = ?",
-            (user_id, email),
-        )
+        scope_sql = "ac.application_id IS NULL AND ac.user_id = ?"
+        scope_param = user_id
+    exclude_sql = ""
+    params: list[Any] = [user_id, scope_param, email]
+    if exclude_contact_id is not None:
+        exclude_sql = " AND ac.id != ?"
+        params.append(exclude_contact_id)
+    cur = await db._db.execute(
+        f"SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, "  # noqa: S608
+        f"ac.added_by, ac.created_at FROM application_contacts ac "
+        f"LEFT JOIN ("
+        f"  SELECT contact_id, value FROM ("
+        f"    SELECT contact_id, value, ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY id DESC) AS rn "
+        f"    FROM contact_edits WHERE field = 'email' AND user_id = ?"
+        f"  ) t WHERE rn = 1"
+        f") le ON le.contact_id = ac.id "
+        f"WHERE {scope_sql} AND COALESCE(le.value, ac.email) = ?{exclude_sql}",
+        params,
+    )
     row = await cur.fetchone()
     return dict(row) if row else None
 
@@ -174,6 +196,66 @@ async def _count_unlinked_contacts(db: JobDatabase, user_id: str) -> int:
     )
     row = await cur.fetchone()
     return int(row[0]) if row else 0
+
+
+async def _create_contact_with_deferred_email(
+    db: JobDatabase,
+    user_id: str,
+    application_id: Optional[int],
+    actor: str,
+    *,
+    name: str,
+    role: str,
+    email: str,
+    linkedin_url: str,
+    notes: str,
+    occurred_at: str,
+) -> dict[str, Any]:
+    """The rare recovery path ``add_contact`` falls into when the base-row
+    UNIQUE index collides with a STALE identity — a different, still-existing
+    contact whose CURRENT email has since moved away via an edit, so nobody
+    owns ``email`` right now even though its raw slot is still taken (bug
+    fix, coordinator review 2026-09-26). Inserts the new row with an EMPTY
+    base email (never collides — 0046's partial index excludes ``''``) and
+    immediately records the real address as a ``contact_edits`` row, so the
+    CURRENT view is correct from the first read; the base row and its own
+    ``contact_added`` event go in the SAME transaction, same as the normal
+    path."""
+    now = datetime.now(timezone.utc).isoformat()
+    event_id: Optional[int] = None
+    async with db._db.transaction():
+        cur = await db._db.execute(
+            "INSERT INTO application_contacts "
+            "(user_id, application_id, name, role, email, linkedin_url, notes, added_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, application_id, name, role, "", linkedin_url, notes, actor, now),
+        )
+        contact_id = int(cur.lastrowid or 0)
+        await db._db.execute(
+            "INSERT INTO contact_edits (user_id, contact_id, field, value, recorded_at, recorded_by) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, contact_id, "email", email, now, actor),
+        )
+        if application_id is not None:
+            event = await append_event(
+                db, user_id=user_id, application_id=application_id, event_type="contact_added",
+                detail=f"{name} — {role}", payload={"contact_id": contact_id},
+                occurred_at=occurred_at, recorded_by=actor,
+            )
+            event_id = event["event_id"]
+    get_audit_logger().info(
+        "contact_added",
+        extra={
+            "event": "contact_added", "application_id": application_id, "contact_id": contact_id,
+            "has_email": bool(email), "name_chars": len(name), "deferred_email": True,
+        },
+    )
+    base_row = {
+        "id": contact_id, "application_id": application_id, "name": name, "role": role,
+        "email": "", "linkedin_url": linkedin_url, "notes": notes, "added_by": actor, "created_at": now,
+    }
+    view = await _full_contact_view(db, user_id, base_row)
+    return {"contact": view, "already_existed": False, "event_id": event_id}
 
 
 async def add_contact(
@@ -232,7 +314,7 @@ async def add_contact(
             raise SpineError(404, "application not found")
 
     if clean_email:
-        existing = await _find_contact_by_email(db, application_id, user_id, clean_email)
+        existing = await _find_contact_by_current_email(db, application_id, user_id, clean_email)
         if existing is not None:
             get_audit_logger().info(
                 "contact_already_existed",
@@ -292,10 +374,26 @@ async def add_contact(
         # race — see spine.py). The transaction block already rolled the
         # statement back, so the connection is usable again.
         if clean_email:
-            existing = await _find_contact_by_email(db, application_id, user_id, clean_email)
+            existing = await _find_contact_by_current_email(db, application_id, user_id, clean_email)
             if existing is not None:
                 view = await _full_contact_view(db, user_id, existing)
                 return {"contact": view, "already_existed": True, "event_id": None}
+            # Bug fix (coordinator review, 2026-09-26) — the partial UNIQUE
+            # index is on the BASE row's raw email, which an edit never
+            # touches. A collision here with NO current owner (just checked
+            # above) means the raw slot is still held by a DIFFERENT contact
+            # whose CURRENT email has since moved elsewhere via an edit — the
+            # base row is stale, but append-only means it can never be
+            # updated to release the slot. Nobody owns `clean_email` right
+            # now, so this genuinely IS a new contact: insert it with an
+            # EMPTY base email (outside the partial index — 0046's index is
+            # `WHERE email <> ''`) and park the real address in the edit
+            # overlay instead, in the same transaction as its own
+            # `contact_added` event.
+            return await _create_contact_with_deferred_email(
+                db, user_id, application_id, actor, name=clean_name, role=clean_role, email=clean_email,
+                linkedin_url=clean_linkedin, notes=clean_notes, occurred_at=occurred,
+            )
         raise
     get_audit_logger().info(
         "contact_added",
@@ -326,9 +424,13 @@ async def get_owned_contact(db: JobDatabase, user_id: str, contact_id: int) -> O
     return dict(row) if row else None
 
 
-async def list_contacts(db: JobDatabase, user_id: str, application_id: int) -> list[dict[str, Any]]:
+async def list_contacts(
+    db: JobDatabase, user_id: str, application_id: int, *, include_text: bool = True
+) -> list[dict[str, Any]]:
     """R3 — every contact on the application, oldest first, each carrying its
-    current (edit-overlaid) details, edit history, and outreach ledger."""
+    current (edit-overlaid) details, edit history, and outreach ledger.
+    ``include_text=False`` (export_history only — every other caller keeps
+    the default) strips outreach message/sent/reply text."""
     cur = await db._db.execute(
         "SELECT id, application_id, name, role, email, linkedin_url, notes, added_by, created_at "
         "FROM application_contacts WHERE user_id = ? AND application_id = ? ORDER BY id ASC",
@@ -337,7 +439,7 @@ async def list_contacts(db: JobDatabase, user_id: str, application_id: int) -> l
     rows = [dict(r) for r in await cur.fetchall()]
     out = []
     for r in rows:
-        out.append(await _full_contact_view(db, user_id, r))
+        out.append(await _full_contact_view(db, user_id, r, include_text=include_text))
     return out
 
 
@@ -415,6 +517,18 @@ async def update_contact(
     if not given:
         raise SpineError(422, "at least one field must be given")
 
+    # Bug fix (coordinator review, 2026-09-26) — an edit that would collide
+    # with ANOTHER contact's current email (same scope: same application, or
+    # both cold for this user) is refused, not silently created as a second
+    # identity for the same address.
+    new_email = given.get("email")
+    if new_email:
+        collision = await _find_contact_by_current_email(
+            db, contact.get("application_id"), user_id, new_email, exclude_contact_id=contact_id
+        )
+        if collision is not None:
+            raise SpineError(409, "another contact already has that email")
+
     existing_count = await _count_edits(db, contact_id)
     if existing_count + len(given) > settings.CONTACT_EDITS_PER_CONTACT_MAX:
         raise SpineError(
@@ -445,13 +559,17 @@ async def update_contact(
 # check, carrying a ``source_message_id`` for idempotent re-reads).
 
 
-def _serialize_outreach(row: dict[str, Any]) -> dict[str, Any]:
+def _serialize_outreach(row: dict[str, Any], *, include_text: bool = True) -> dict[str, Any]:
     return {
         "id": row["id"],
         "contact_id": row["contact_id"],
         "entry": row["entry"],
         "channel": row["channel"],
-        "text": row.get("text") or "",
+        # Bug fix (coordinator review, 2026-09-26) — export_history's
+        # `include_text=False` must strip outreach text the same way it
+        # already strips artifact/receipt text; the structure (entry,
+        # channel, dates) stays so the shape is uniform either way.
+        "text": (row.get("text") or "") if include_text else "",
         "version_no": row.get("version_no"),
         "occurred_at": row["occurred_at"],
         "recorded_at": row["recorded_at"],
@@ -469,10 +587,10 @@ async def _outreach_rows(db: JobDatabase, contact_id: int) -> list[dict[str, Any
     return [dict(r) for r in await cur.fetchall()]
 
 
-def _outreach_view(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    messages = [_serialize_outreach(r) for r in rows if r["entry"] == "message"]
-    sent = [_serialize_outreach(r) for r in rows if r["entry"] == "sent"]
-    replies = [_serialize_outreach(r) for r in rows if r["entry"] == "reply"]
+def _outreach_view(rows: list[dict[str, Any]], *, include_text: bool = True) -> dict[str, Any]:
+    messages = [_serialize_outreach(r, include_text=include_text) for r in rows if r["entry"] == "message"]
+    sent = [_serialize_outreach(r, include_text=include_text) for r in rows if r["entry"] == "sent"]
+    replies = [_serialize_outreach(r, include_text=include_text) for r in rows if r["entry"] == "reply"]
     return {
         "messages": messages,
         "sent": sent,
@@ -577,7 +695,8 @@ async def record_outreach(
             }
 
     clean_text = text or ""
-    if entry == "message":
+    is_message = entry == "message"
+    if is_message:
         if not clean_text.strip():
             raise SpineError(422, "text must not be empty for a message version")
         if len(clean_text) > settings.OUTREACH_MESSAGE_MAX_CHARS:
@@ -591,13 +710,11 @@ async def record_outreach(
                 f"too many message versions; cap is OUTREACH_VERSIONS_PER_CONTACT_MAX "
                 f"({settings.OUTREACH_VERSIONS_PER_CONTACT_MAX})",
             )
-        version_no: Optional[int] = version_count + 1
     else:
         if len(clean_text) > settings.OUTREACH_MESSAGE_MAX_CHARS:
             raise SpineError(
                 422, f"text exceeds OUTREACH_MESSAGE_MAX_CHARS ({settings.OUTREACH_MESSAGE_MAX_CHARS} chars)"
             )
-        version_no = None
 
     total = await _outreach_entry_count(db, contact_id)
     if total >= settings.OUTREACH_ENTRIES_PER_CONTACT_MAX:
@@ -607,6 +724,19 @@ async def record_outreach(
             f"({settings.OUTREACH_ENTRIES_PER_CONTACT_MAX})",
         )
 
+    # Bug fix (coordinator review, 2026-09-26) — every input must be VALIDATED
+    # before the rate limit is SPENT: a 422/404/429-cap answer must cost
+    # nothing, same reasoning as add_contact's own ordering. `occurred_at`/
+    # `follow_up_on` are parsed here, above the check_and_record call below,
+    # not after it.
+    occurred = parse_occurred_at(occurred_at)
+    application_id = contact.get("application_id")
+
+    parsed_follow_up: Any = FOLLOW_UP_UNSET
+    if follow_up_on is not None and application_id is not None:
+        today = await user_today(db, user_id)
+        parsed_follow_up = parse_follow_up_on(follow_up_on, today)
+
     # Owner decision, 2026-09-25 — same web-session exemption as add_contact
     # above: this hourly cap is the ASSISTANT's budget, never the human's.
     key = f"outreach:{user_id}"
@@ -615,47 +745,70 @@ async def record_outreach(
     ):
         raise SpineError(429, "outreach rate limit exceeded; try again in an hour")
 
-    occurred = parse_occurred_at(occurred_at)
     now = datetime.now(timezone.utc).isoformat()
-    application_id = contact.get("application_id")
-
-    parsed_follow_up: Any = FOLLOW_UP_UNSET
-    if follow_up_on is not None and application_id is not None:
-        today = await user_today(db, user_id)
-        parsed_follow_up = parse_follow_up_on(follow_up_on, today)
-
     event_id: Optional[int] = None
     final_follow_up_on: Optional[str] = None
-    try:
-        async with db._db.transaction():
-            cur = await db._db.execute(
-                "INSERT INTO contact_outreach "
-                "(user_id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, "
-                " recorded_by, source_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    user_id, contact_id, entry, channel, clean_text, version_no, occurred, now, actor,
-                    source_message_id or "",
-                ),
-            )
-            outreach_id = int(cur.lastrowid or 0)
-            if entry in ("sent", "reply") and application_id is not None:
-                event_type = "outreach_sent" if entry == "sent" else "outreach_replied"
-                event = await append_event(
-                    db, user_id=user_id, application_id=application_id, event_type=event_type,
-                    payload={"contact_id": contact_id, "outreach_id": outreach_id, "channel": channel},
-                    occurred_at=occurred, recorded_by=actor, follow_up_on=parsed_follow_up,
+    outreach_id: Optional[int] = None
+    version_no: Optional[int] = None
+
+    if is_message:
+        # Bug fix (coordinator review, 2026-09-26) — C4-style retry, same
+        # reasoning as spine.save_artifact's version race: two concurrent
+        # drafts for the same contact must never surface a raw 500, the
+        # loser just gets renumbered on retry. No `async with transaction()`
+        # here (same as save_artifact) — a single INSERT is already atomic
+        # under the autocommit shim; on a UNIQUE clash `rollback()` alone
+        # clears the error state so the connection is reusable for the retry.
+        for _attempt in range(5):
+            version_no = await _message_version_count(db, contact_id) + 1
+            try:
+                ins = await db._db.execute(
+                    "INSERT INTO contact_outreach "
+                    "(user_id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, "
+                    " recorded_by, source_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        user_id, contact_id, entry, channel, clean_text, version_no, occurred, now, actor,
+                        source_message_id or "",
+                    ),
                 )
-                event_id = event["event_id"]
-                final_follow_up_on = event["follow_up_on"]
-    except pg.IntegrityError:
-        if source_message_id:
-            existing = await _find_outreach_by_source(db, contact_id, source_message_id)
-            if existing is not None:
-                return {
-                    "outreach": _serialize_outreach(existing), "already_existed": True, "event_id": None,
-                    "follow_up_on": None,
-                }
-        raise
+            except pg.IntegrityError:
+                await db._db.rollback()
+                continue
+            outreach_id = int(ins.lastrowid or 0)
+            break
+        if outreach_id is None:
+            raise SpineError(429, "could not allocate a message version under concurrent writes — retry")
+    else:
+        try:
+            async with db._db.transaction():
+                cur = await db._db.execute(
+                    "INSERT INTO contact_outreach "
+                    "(user_id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, "
+                    " recorded_by, source_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        user_id, contact_id, entry, channel, clean_text, None, occurred, now, actor,
+                        source_message_id or "",
+                    ),
+                )
+                outreach_id = int(cur.lastrowid or 0)
+                if application_id is not None:
+                    event_type = "outreach_sent" if entry == "sent" else "outreach_replied"
+                    event = await append_event(
+                        db, user_id=user_id, application_id=application_id, event_type=event_type,
+                        payload={"contact_id": contact_id, "outreach_id": outreach_id, "channel": channel},
+                        occurred_at=occurred, recorded_by=actor, follow_up_on=parsed_follow_up,
+                    )
+                    event_id = event["event_id"]
+                    final_follow_up_on = event["follow_up_on"]
+        except pg.IntegrityError:
+            if source_message_id:
+                existing = await _find_outreach_by_source(db, contact_id, source_message_id)
+                if existing is not None:
+                    return {
+                        "outreach": _serialize_outreach(existing), "already_existed": True, "event_id": None,
+                        "follow_up_on": None,
+                    }
+            raise
 
     get_audit_logger().info(
         "outreach_recorded",
@@ -678,10 +831,13 @@ async def record_outreach(
 # ── Full-record readers ─────────────────────────────────────────────────────
 
 
-async def _full_contact_view(db: JobDatabase, user_id: str, base: dict[str, Any]) -> dict[str, Any]:
+async def _full_contact_view(
+    db: JobDatabase, user_id: str, base: dict[str, Any], *, include_text: bool = True
+) -> dict[str, Any]:
     """One contact row, current details + edit history + outreach ledger —
     the shape ``get_application``/``export_history``/``list_people(contact_id=…)``
-    all share."""
+    all share. ``include_text=False`` (export_history only) strips outreach
+    message/sent/reply text; every other reader keeps the default (full)."""
     contact_id = base["id"]
     edits = await _edit_history(db, user_id, contact_id)
     view = _serialize(base)
@@ -696,7 +852,7 @@ async def _full_contact_view(db: JobDatabase, user_id: str, base: dict[str, Any]
         history[field] = [base_entry, *field_edits]
     view["edit_history"] = history
     rows = await _outreach_rows(db, contact_id)
-    view["outreach"] = _outreach_view(rows)
+    view["outreach"] = _outreach_view(rows, include_text=include_text)
     return view
 
 
@@ -710,18 +866,76 @@ def _group_key(row: dict[str, Any]) -> str:
     return f"row:{row['id']}"
 
 
+async def _latest_edits_for_user(db: JobDatabase, user_id: str) -> dict[int, dict[str, str]]:
+    """The CURRENT value of every edited field, for every contact this user
+    owns — ONE query (bug fix, coordinator review 2026-09-26), so list_people's
+    grouping/filtering/display never goes N+1 reading contact_edits per row."""
+    cur = await db._db.execute(
+        "SELECT contact_id, field, value FROM ("
+        "  SELECT contact_id, field, value, "
+        "         ROW_NUMBER() OVER (PARTITION BY contact_id, field ORDER BY id DESC) AS rn "
+        "  FROM contact_edits WHERE user_id = ?"
+        ") ranked WHERE rn = 1",
+        (user_id,),
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+    by_contact: dict[int, dict[str, str]] = {}
+    for r in rows:
+        by_contact.setdefault(r["contact_id"], {})[r["field"]] = r["value"]
+    return by_contact
+
+
+def _apply_current_fields(row: dict[str, Any], edits: dict[str, str]) -> None:
+    """Overlay one contact row's fields with its latest edits, in place."""
+    for field in settings.CONTACT_EDIT_FIELDS:
+        if field in edits:
+            row[field] = edits[field]
+
+
+async def _contacts_by_current_email(db: JobDatabase, user_id: str, email: str) -> list[dict[str, Any]]:
+    """``list_people(email=…)``'s targeted lookup (bug fix, coordinator review
+    2026-09-26) — searches the CURRENT email (base row or its latest edit),
+    unbounded by ``LIST_PEOPLE_MAX``: a person's own linked-job count is
+    naturally small, so there is nothing here to page."""
+    clean = email.strip().lower()
+    cur = await db._db.execute(
+        "SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, "
+        "ac.added_by, ac.created_at, a.job_title, a.job_company "
+        "FROM application_contacts ac LEFT JOIN applications a ON a.id = ac.application_id "
+        "LEFT JOIN ("
+        "  SELECT contact_id, value FROM ("
+        "    SELECT contact_id, value, ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY id DESC) AS rn "
+        "    FROM contact_edits WHERE field = 'email' AND user_id = ?"
+        "  ) t WHERE rn = 1"
+        ") le ON le.contact_id = ac.id "
+        "WHERE ac.user_id = ? AND COALESCE(le.value, ac.email) = ? "
+        "ORDER BY ac.id DESC",
+        (user_id, user_id, clean),
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+    edits_by_contact = await _latest_edits_for_user(db, user_id)
+    for r in rows:
+        _apply_current_fields(r, edits_by_contact.get(r["id"], {}))
+    return rows
+
+
 async def list_people(
     db: JobDatabase, user_id: str, *, contact_id: Optional[int] = None, email: Optional[str] = None
 ) -> dict[str, Any]:
     """``GET /api/people`` / the ``list_people`` MCP tool.
 
     No ``contact_id`` — every person the user has ever added, grouped by
-    lower(email) else linkedin_url (the SAME recruiter linked to two jobs is
-    two rows but one person here — decision: "list_people groups by
-    lower(email) else linkedin_url"): jobs linked, current details (from the
-    oldest underlying row), last sent date + channel, replied yes/no, message
-    count, all aggregated across the person's rows. ``email`` narrows to one
-    person by exact (case-insensitive) match.
+    CURRENT lower(email) else linkedin_url (the SAME recruiter linked to two
+    jobs is two rows but one person here — decision: "list_people groups by
+    lower(email) else linkedin_url"): jobs linked, CURRENT details (base row
+    overlaid with the latest edit per field), last sent date + channel,
+    replied yes/no, message count, all aggregated across the person's rows.
+
+    ``email`` (bug fix, coordinator review 2026-09-26) narrows to one person
+    by CURRENT email, via a targeted SQL lookup that is never subject to
+    ``LIST_PEOPLE_MAX`` — a person's own linked-job count is naturally small.
+    Without ``email``, the newest ``LIST_PEOPLE_MAX`` contacts are listed
+    (newest first) and ``truncated`` says whether more exist.
 
     With ``contact_id`` — the full record for that ONE row (not merged):
     message versions, sent/reply marks, detail-edit history. Each person's
@@ -744,14 +958,32 @@ async def list_people(
         person["jobs"] = [job] if job else []
         return {"person": person}
 
-    cur = await db._db.execute(
-        "SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, "
-        "ac.added_by, ac.created_at, a.job_title, a.job_company "
-        "FROM application_contacts ac LEFT JOIN applications a ON a.id = ac.application_id "
-        "WHERE ac.user_id = ? ORDER BY ac.id ASC LIMIT ?",
-        (user_id, settings.LIST_PEOPLE_MAX),
-    )
-    rows = [dict(r) for r in await cur.fetchall()]
+    truncated = False
+    if email:
+        # Bug fix (coordinator review, 2026-09-26) — a targeted lookup by
+        # CURRENT email, unbounded by LIST_PEOPLE_MAX: filtering in SQL means
+        # a match outside the newest page is never silently missed.
+        rows = await _contacts_by_current_email(db, user_id, email)
+    else:
+        # Bug fix (coordinator review, 2026-09-26) — newest first (was oldest
+        # first), and one extra row fetched to detect truncation honestly
+        # instead of silently dropping the tail.
+        cur = await db._db.execute(
+            "SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, "
+            "ac.added_by, ac.created_at, a.job_title, a.job_company "
+            "FROM application_contacts ac LEFT JOIN applications a ON a.id = ac.application_id "
+            "WHERE ac.user_id = ? ORDER BY ac.id DESC LIMIT ?",
+            (user_id, settings.LIST_PEOPLE_MAX + 1),
+        )
+        rows = [dict(r) for r in await cur.fetchall()]
+        truncated = len(rows) > settings.LIST_PEOPLE_MAX
+        rows = rows[: settings.LIST_PEOPLE_MAX]
+        # Bug fix (coordinator review, 2026-09-26) — ONE query for every
+        # contact's latest edits (never N+1), applied before grouping so a
+        # person is found/grouped/displayed by their CURRENT details.
+        edits_by_contact = await _latest_edits_for_user(db, user_id)
+        for r in rows:
+            _apply_current_fields(r, edits_by_contact.get(r["id"], {}))
 
     groups: dict[str, list[dict[str, Any]]] = {}
     order: list[str] = []
@@ -766,8 +998,6 @@ async def list_people(
     for key in order:
         group_rows = groups[key]
         primary = group_rows[0]
-        if email and (primary.get("email") or "").strip().lower() != email.strip().lower():
-            continue
         jobs = [
             {
                 "application_id": r["application_id"], "job_title": r.get("job_title") or "",
@@ -797,16 +1027,20 @@ async def list_people(
                 "last_reply": summary["last_reply"],
             }
         )
-    return {"people": people}
+    return {"people": people, "truncated": truncated}
 
 
-async def list_unlinked_contacts(db: JobDatabase, user_id: str) -> list[dict[str, Any]]:
+async def list_unlinked_contacts(
+    db: JobDatabase, user_id: str, *, include_text: bool = True
+) -> list[dict[str, Any]]:
     """``export_history``'s top-level ``unlinked_contacts`` — every cold
-    contact (no application), each with its full outreach/edit record."""
+    contact (no application), each with its full edit record; outreach text
+    honours ``include_text`` (bug fix, coordinator review 2026-09-26) the
+    same way artifacts/receipts already do."""
     cur = await db._db.execute(
         "SELECT id, application_id, name, role, email, linkedin_url, notes, added_by, created_at "
         "FROM application_contacts WHERE user_id = ? AND application_id IS NULL ORDER BY id ASC",
         (user_id,),
     )
     rows = [dict(r) for r in await cur.fetchall()]
-    return [await _full_contact_view(db, user_id, r) for r in rows]
+    return [await _full_contact_view(db, user_id, r, include_text=include_text) for r in rows]

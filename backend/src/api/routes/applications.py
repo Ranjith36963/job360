@@ -682,6 +682,13 @@ class ExportHistoryResponse(BaseModel):
     # Empty = none (rule #29); their history is in `profile_edits`.
     assistant_notes: list[str] = []
     next_since: Optional[str] = None
+    # Owner decision, 2026-09-25 — cold (job-less) contacts, FIRST PAGE ONLY
+    # (bug fix, coordinator review 2026-09-26: a `since` cursor means this is
+    # a follow-up call, so this is always `[]` there — resending them on
+    # every page would duplicate the same data forever). Bounded against the
+    # same byte budget as everything else in this export.
+    unlinked_contacts: list[ContactOut] = []
+    unlinked_contacts_truncated: bool = False
 
 
 class AddContactResponse(BaseModel):
@@ -779,6 +786,10 @@ class PersonFullOut(ContactOut):
 class ListPeopleResponse(BaseModel):
     people: Optional[list[PersonOut]] = None
     person: Optional[PersonFullOut] = None
+    # Bug fix (coordinator review, 2026-09-26) — true when the no-`contact_id`,
+    # no-`email` listing was cut at LIST_PEOPLE_MAX (newest kept). Always
+    # `false` for the `contact_id`/`email` reads (never paged).
+    truncated: bool = False
 
 
 class StatsOverallOut(BaseModel):

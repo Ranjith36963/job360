@@ -2662,6 +2662,16 @@ export interface components {
             profile_edits_truncated: boolean;
             /** Truncated */
             truncated: boolean;
+            /**
+             * Unlinked Contacts
+             * @default []
+             */
+            unlinked_contacts: components["schemas"]["ContactOut"][];
+            /**
+             * Unlinked Contacts Truncated
+             * @default false
+             */
+            unlinked_contacts_truncated: boolean;
         };
         /** FetchUrlRequest */
         FetchUrlRequest: {
@@ -2882,6 +2892,11 @@ export interface components {
             /** People */
             people?: components["schemas"]["PersonOut"][] | null;
             person?: components["schemas"]["PersonFullOut"] | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
         };
         /** LivezResponse */
         LivezResponse: {

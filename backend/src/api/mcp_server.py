@@ -683,6 +683,14 @@ def build_server(version: str = "") -> MCPServer:
         same `contact_id`, once the USER says it went (Job360 never sends).
         A message version writes no timeline event; only sent/reply do."""
         if contact_id is not None and application_id is None:
+            # Bug fix (coordinator review, 2026-09-26) — the linked branch
+            # below already refuses a non-"outreach" kind via
+            # SaveArtifactRequest; the cold branch bypasses that model
+            # entirely (it builds a RecordOutreachRequest instead), so it
+            # must check this itself or a cold "cv"/"answers" save would
+            # silently become an outreach message.
+            if kind != "outreach":
+                raise _tool_error(HTTPException(422, "kind must be 'outreach' when contact_id is given"))
             try:
                 body = applications_route.RecordOutreachRequest(entry="message", channel=channel or "", text=text)
             except ValidationError as exc:
@@ -770,8 +778,8 @@ def build_server(version: str = "") -> MCPServer:
 
     @mcp.tool()
     async def record_event(
-        application_id: int,
         event_type: str,
+        application_id: Optional[int] = None,
         detail: str = "",
         payload: Optional[dict[str, Any]] = None,
         occurred_at: Optional[str] = None,
@@ -809,12 +817,61 @@ def build_server(version: str = "") -> MCPServer:
         person — `event_type` must then be "outreach_sent" (the USER told you
         the message went out — Job360 never sends) or "outreach_replied" (the
         user told you about a LinkedIn reply, or your daily check found one by
-        email — pass `source` for idempotent re-reads). The contact must be
-        linked to THIS application; a cold contact has no job to record this
-        against — use save_artifact/the person's own outreach history instead.
-        A reply from this person NEVER changes the job's status by itself —
-        record `replied` separately only if the reply is about the
-        application itself."""
+        email — pass `source` for idempotent re-reads). `application_id` is
+        then OPTIONAL: give it when the contact is linked to that job (it
+        must match the contact's own job, or this 422s); leave it out for a
+        cold contact (no job) — the call still records the ledger row and
+        `list_people` still shows it, it just writes no job-timeline event
+        (there is no job to write one to), so `follow_up_on` also 422s there
+        (a cold contact has no job to chase). Without `contact_id`,
+        `application_id` is required as before. A reply from this person
+        NEVER changes the job's status by itself — record `replied`
+        separately only if the reply is about the application itself."""
+        if contact_id is not None:
+            if event_type not in ("outreach_sent", "outreach_replied"):
+                raise _tool_error(
+                    HTTPException(
+                        422, "event_type must be 'outreach_sent' or 'outreach_replied' when contact_id is given"
+                    )
+                )
+            if not channel:
+                raise _tool_error(HTTPException(422, "channel is required when contact_id is given"))
+            if application_id is None:
+                # Bug fix (coordinator review, 2026-09-26) — a cold contact
+                # (or a linked one the caller doesn't want to name a job
+                # for) has no application to post an event against, so this
+                # goes straight through the shared outreach door instead of
+                # the per-application record_event route.
+                entry = "sent" if event_type == "outreach_sent" else "reply"
+                try:
+                    outreach_body = applications_route.RecordOutreachRequest(
+                        entry=entry, channel=channel, text=detail, occurred_at=occurred_at,
+                        source=applications_route.EventSource(**source) if source else None,
+                        follow_up_on=follow_up_on,
+                    )
+                except ValidationError as exc:
+                    raise _validation_error(exc) from None
+                try:
+                    async with _request_db() as db:
+                        resp = await applications_route.record_outreach(
+                            contact_id, outreach_body, Response(), db, _user()
+                        )
+                except HTTPException as exc:
+                    _audit("record_event", "error", contact_id=contact_id, http_status=exc.status_code)
+                    raise _tool_error(exc) from None
+                _audit("record_event", "ok", contact_id=contact_id, event_type=event_type)
+                outreach = resp["outreach"]
+                return {
+                    "event_id": resp["event_id"], "event_type": event_type,
+                    "occurred_at": outreach["occurred_at"], "recorded_at": outreach["recorded_at"],
+                    "recorded_by": outreach["recorded_by"], "status": "",
+                    "already_existed": resp["already_existed"], "scheduled_at": None,
+                    "follow_up_on": resp["follow_up_on"],
+                }
+        if application_id is None:
+            raise _tool_error(
+                HTTPException(422, "application_id is required unless contact_id names a cold contact")
+            )
         try:
             body = applications_route.RecordEventRequest(
                 event_type=event_type, detail=detail, payload=payload or {},

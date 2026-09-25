@@ -418,3 +418,358 @@ def test_outreach_replied_is_a_note_type_never_a_status_type():
 
     assert "outreach_replied" in settings.APPLICATION_NOTE_EVENT_TYPES
     assert "outreach_replied" not in settings.APPLICATION_STATUS_EVENT_TYPES
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Coordinator review, 2026-09-26 — 6 real bugs found in ebb71f6
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def _mint_token(client: AsyncClient, name: str = "agent") -> str:
+    resp = await client.post("/api/tokens", json={"name": name})
+    assert resp.status_code == 201, resp.text
+    return resp.json()["token"]
+
+
+def _mcp_client(token: str):
+    """Official MCP client wired straight into the FastAPI app (in-process) —
+    copied from test_mcp_server.py, never imported (fixture isolation)."""
+    import httpx2
+    from mcp.client import Client
+    from mcp.client.streamable_http import streamable_http_client
+
+    from src.api.main import app
+
+    http = httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    )
+    return Client(streamable_http_client("http://test/api/mcp", http_client=http))
+
+
+def _mcp_payload(result) -> dict:
+    import json
+
+    assert not result.is_error, result.content[0].text
+    return json.loads(result.content[0].text)
+
+
+def _mcp_error_text(result) -> str:
+    assert result.is_error, "expected a tool error"
+    return result.content[0].text
+
+
+# ── Bug 1 [P1] — cold contacts could never get sent/reply over MCP ─────────
+
+
+@pytest.mark.asyncio
+async def test_bug1_cold_contact_record_event_outreach_sent_over_http(authenticated_async_context):
+    """The HTTP-level mechanism record_event's MCP tool now uses for a cold
+    contact: POST /api/contacts/{id}/outreach directly (no application)."""
+    async with authenticated_async_context() as client:
+        added = await _add_person(client, email="cold@x.example")
+        contact_id = added.json()["contact"]["id"]
+        resp = await client.post(
+            f"/api/contacts/{contact_id}/outreach",
+            json={"entry": "sent", "channel": "linkedin"},
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["event_id"] is None  # cold — no job timeline to write to
+
+        people = await client.get("/api/people")
+        person = next(p for p in people.json()["people"] if contact_id in p["contact_ids"])
+        assert person["last_sent"]["channel"] == "linkedin"
+
+
+@pytest.mark.asyncio
+async def test_bug1_mcp_record_event_stores_sent_for_a_cold_contact(authenticated_async_context):
+    """MCP parity — the actual tool, not just the underlying route."""
+    pytest.importorskip("mcp")
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        added = await _add_person(client, email="cold-mcp@x.example")
+        contact_id = added.json()["contact"]["id"]
+        token = await _mint_token(client)
+
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            result = await mcp.call_tool(
+                "record_event",
+                {"event_type": "outreach_sent", "contact_id": contact_id, "channel": "linkedin"},
+            )
+            body = _mcp_payload(result)
+            assert body["event_id"] is None
+            assert body["already_existed"] is False
+
+            listed = await mcp.call_tool("list_people", {"contact_id": contact_id})
+            person = _mcp_payload(listed)["person"]
+            assert person["outreach"]["last_sent"]["channel"] == "linkedin"
+
+
+@pytest.mark.asyncio
+async def test_bug1_cold_reply_with_source_twice_is_one_row(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        added = await _add_person(client, email="cold-reply@x.example")
+        contact_id = added.json()["contact"]["id"]
+        source = {"kind": "email", "message_id": "<cold-reply-1@example.com>", "sender": "cold-reply@x.example"}
+        first = await client.post(
+            f"/api/contacts/{contact_id}/outreach",
+            json={"entry": "reply", "channel": "email", "source": source},
+        )
+        assert first.status_code == 201, first.text
+        again = await client.post(
+            f"/api/contacts/{contact_id}/outreach",
+            json={"entry": "reply", "channel": "email", "source": source},
+        )
+        assert again.status_code == 200, again.text
+        assert again.json()["already_existed"] is True
+
+        person = await client.get(f"/api/people?contact_id={contact_id}")
+        assert len(person.json()["person"]["outreach"]["replies"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_bug1_mcp_save_artifact_cold_wrong_kind_is_422(authenticated_async_context):
+    pytest.importorskip("mcp")
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        added = await _add_person(client, email="cold-kind@x.example")
+        contact_id = added.json()["contact"]["id"]
+        token = await _mint_token(client)
+
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            result = await mcp.call_tool(
+                "save_artifact", {"kind": "cv", "text": "x", "contact_id": contact_id, "channel": "email"}
+            )
+            assert "422" in _mcp_error_text(result)
+
+
+@pytest.mark.asyncio
+async def test_bug1_mcp_tools_list_is_still_19(authenticated_async_context):
+    pytest.importorskip("mcp")
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        token = await _mint_token(client)
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            listed = await mcp.list_tools()
+            assert len(listed.tools) == 19
+
+
+# ── Bug 2 [P1] — list_people / add_contact ignored contact edits ───────────
+
+
+@pytest.mark.asyncio
+async def test_bug2_edited_email_is_found_and_old_one_is_not(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        added = await _add_person(client, email="typo@x.example", role="Recruiter")
+        contact_id = added.json()["contact"]["id"]
+        patched = await client.patch(f"/api/contacts/{contact_id}", json={"email": "fixed@x.example"})
+        assert patched.status_code == 200, patched.text
+
+        found = await client.get("/api/people?email=fixed@x.example")
+        assert found.status_code == 200, found.text
+        people = found.json()["people"]
+        assert any(contact_id in p["contact_ids"] for p in people)
+        match = next(p for p in people if contact_id in p["contact_ids"])
+        assert match["email"] == "fixed@x.example"
+        assert match["role"] == "Recruiter"
+
+        gone = await client.get("/api/people?email=typo@x.example")
+        assert gone.json()["people"] == []
+
+
+@pytest.mark.asyncio
+async def test_bug2_add_contact_new_email_is_already_existed_old_email_is_new_row(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        added = await _add_person(client, email="original@x.example")
+        contact_id = added.json()["contact"]["id"]
+        await client.patch(f"/api/contacts/{contact_id}", json={"email": "changed@x.example"})
+
+        same_as_current = await _add_person(client, email="changed@x.example", name="Someone Else")
+        assert same_as_current.status_code == 200, same_as_current.text
+        assert same_as_current.json()["already_existed"] is True
+        assert same_as_current.json()["contact"]["id"] == contact_id
+
+        same_as_old = await _add_person(client, email="original@x.example", name="Fresh Person")
+        assert same_as_old.status_code == 201, same_as_old.text
+        assert same_as_old.json()["contact"]["id"] != contact_id
+
+
+@pytest.mark.asyncio
+async def test_bug2_colliding_cold_edit_is_409(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        a = await _add_person(client, email="a@x.example")
+        b = await _add_person(client, email="b@x.example")
+        b_id = b.json()["contact"]["id"]
+        resp = await client.patch(f"/api/contacts/{b_id}", json={"email": "a@x.example"})
+        assert resp.status_code == 409, resp.text
+        assert a.json()["contact"]["id"] != b_id
+
+
+# ── Bug 3 [P2] — concurrent message saves must never 500 ───────────────────
+
+
+@pytest.mark.asyncio
+async def test_bug3_concurrent_message_version_race_retries_instead_of_500(authenticated_async_context, monkeypatch):
+    from src.repositories.database import JobDatabase
+    from src.services.applications import contacts as contacts_service
+
+    async with authenticated_async_context() as client:
+        added = await _add_person(client, email="race@x.example")
+        contact_id = added.json()["contact"]["id"]
+
+    real_count = contacts_service._message_version_count
+    calls = {"n": 0}
+
+    async def racy_count(db: JobDatabase, cid: int) -> int:
+        # Simulate another writer landing version 1 between this call's
+        # count and its INSERT: the FIRST count call sees 0 (about to try
+        # version_no=1), but a rival row for version_no=1 already exists by
+        # the time the INSERT runs, so it must collide and retry.
+        n = await real_count(db, cid)
+        calls["n"] += 1
+        if calls["n"] == 1 and cid == contact_id:
+            async with db._db.transaction():
+                await db._db.execute(
+                    "INSERT INTO contact_outreach "
+                    "(user_id, contact_id, entry, channel, text, version_no, occurred_at, recorded_at, "
+                    " recorded_by, source_message_id) VALUES "
+                    "((SELECT user_id FROM application_contacts WHERE id = ?), ?, 'message', 'email', "
+                    " 'racer', 1, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', 'web', '')",
+                    (cid, cid),
+                )
+        return n
+
+    monkeypatch.setattr(contacts_service, "_message_version_count", racy_count)
+
+    async with authenticated_async_context() as client:
+        resp = await client.post(
+            f"/api/contacts/{contact_id}/outreach",
+            json={"entry": "message", "channel": "email", "text": "mine"},
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["outreach"]["version_no"] == 2
+
+
+# ── Bug 4 [P2] — record_outreach spent the rate slot before validating ─────
+
+
+@pytest.mark.asyncio
+async def test_bug4_bad_input_never_spends_the_rate_limit(authenticated_async_context, monkeypatch):
+    from src.api.main import app
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "OUTREACH_MAX_PER_HOUR", 1)
+    async with authenticated_async_context() as client:
+        added = await _add_person(client, email="budget@x.example")
+        contact_id = added.json()["contact"]["id"]
+        token = await _mint_token(client)
+
+    # A bearer/token actor (not "web") is what actually spends the outreach
+    # budget — a web session is exempt (owner decision), so this test must
+    # use a token to exercise the limiter at all.
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        bad = await agent.post(
+            f"/api/contacts/{contact_id}/outreach",
+            json={"entry": "sent", "channel": "email", "occurred_at": "not-a-date"},
+        )
+        assert bad.status_code == 422, bad.text
+        good = await agent.post(
+            f"/api/contacts/{contact_id}/outreach", json={"entry": "sent", "channel": "email"}
+        )
+        assert good.status_code == 201, good.text
+
+
+# ── Bug 5 [P2] — list_people read the OLDEST LIST_PEOPLE_MAX rows ──────────
+
+
+@pytest.mark.asyncio
+async def test_bug5_email_lookup_of_the_newest_still_found_when_over_the_cap(
+    authenticated_async_context, monkeypatch
+):
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "LIST_PEOPLE_MAX", 2)
+    async with authenticated_async_context() as client:
+        await _add_person(client, email="one@x.example", name="One")
+        await _add_person(client, email="two@x.example", name="Two")
+        await _add_person(client, email="three@x.example", name="Three")
+
+        found = await client.get("/api/people?email=three@x.example")
+        assert found.status_code == 200, found.text
+        assert any(p["email"] == "three@x.example" for p in found.json()["people"])
+
+        unfiltered = await client.get("/api/people")
+        assert unfiltered.status_code == 200, unfiltered.text
+        assert unfiltered.json()["truncated"] is True
+        assert len(unfiltered.json()["people"]) == 2
+
+
+# ── Bug 6 [P2] — export_history unlinked_contacts: unbounded/untruncated ───
+
+
+@pytest.mark.asyncio
+async def test_bug6_include_text_false_strips_outreach_text_everywhere(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        linked = await client.post(
+            f"/api/applications/{app_id}/contacts", json={"name": "Linked", "email": "linked@x.example"}
+        )
+        linked_id = linked.json()["contact"]["id"]
+        await client.post(
+            f"/api/applications/{app_id}/artifacts",
+            json={"kind": "outreach", "text": "secret linked text", "contact_id": linked_id, "channel": "email"},
+        )
+        cold = await _add_person(client, email="cold-export@x.example")
+        cold_id = cold.json()["contact"]["id"]
+        await client.post(
+            f"/api/contacts/{cold_id}/outreach",
+            json={"entry": "message", "channel": "email", "text": "secret cold text"},
+        )
+
+        export = await client.get("/api/applications/export?include_text=false")
+        assert export.status_code == 200, export.text
+        body = export.json()
+        blob = str(body)
+        assert "secret linked text" not in blob
+        assert "secret cold text" not in blob
+
+
+@pytest.mark.asyncio
+async def test_bug6_unlinked_contacts_only_on_the_first_page(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        await _add_person(client, email="page-one@x.example")
+        app_id = await _bring(client)
+
+        first = await client.get("/api/applications/export?include_text=true")
+        assert first.status_code == 200, first.text
+        first_body = first.json()
+        assert len(first_body["unlinked_contacts"]) == 1
+
+        # A `since` cursor is a follow-up call — unlinked_contacts must not
+        # repeat on every page.
+        since = first_body["applications"][0]["updated_at"] if first_body["applications"] else "2099-01-01"
+        second = await client.get(f"/api/applications/export?since={since}")
+        assert second.status_code == 200, second.text
+        assert second.json()["unlinked_contacts"] == []
+        assert app_id  # keep the linter/application reference honest
+
+
+@pytest.mark.asyncio
+async def test_bug6_unlinked_contacts_truncate_over_budget(authenticated_async_context, monkeypatch):
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "EXPORT_HISTORY_MAX_BYTES", 400)
+    async with authenticated_async_context() as client:
+        await _add_person(client, email="big-one@x.example", notes="x" * 300)
+        await _add_person(client, email="big-two@x.example", notes="y" * 300)
+
+        export = await client.get("/api/applications/export?include_text=true")
+        assert export.status_code == 200, export.text
+        assert export.json()["unlinked_contacts_truncated"] is True

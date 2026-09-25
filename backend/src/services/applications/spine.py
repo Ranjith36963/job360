@@ -1667,7 +1667,7 @@ async def export_history(
             "events": await list_events_for_display(db, r["id"]),
             "artifacts": await _artifact_metadata(db, r["id"], include_text=include_text),
             "receipts": await _list_receipts_for_application(db, user_id, r["id"], include_text=include_text),
-            "contacts": await list_contacts(db, user_id, r["id"]),
+            "contacts": await list_contacts(db, user_id, r["id"], include_text=include_text),
         }
         blob_size = len(json.dumps(app_blob, default=str).encode("utf-8"))
         if out_apps and total_bytes + blob_size > settings.EXPORT_HISTORY_MAX_BYTES:
@@ -1690,13 +1690,28 @@ async def export_history(
 
     # Owner decision, 2026-09-25 — cold contacts (no application) have no
     # home in `applications[].contacts`; this is where the export shows them.
-    unlinked_contacts = await list_unlinked_contacts(db, user_id)
-    total_bytes += len(json.dumps(unlinked_contacts, default=str).encode("utf-8"))
+    # Bug fix (coordinator review, 2026-09-26): FIRST PAGE ONLY (a `since`
+    # cursor means this is a follow-up call — cold contacts already went out
+    # on page one, and re-sending them on every page duplicates the same
+    # data forever), honours `include_text`, and is bounded against the SAME
+    # byte budget as everything else in this export, with its own truncated
+    # flag rather than growing the response unboundedly.
+    unlinked_contacts: list[dict[str, Any]] = []
+    unlinked_contacts_truncated = False
+    if not since:
+        for c in await list_unlinked_contacts(db, user_id, include_text=include_text):
+            size = len(json.dumps(c, default=str).encode("utf-8"))
+            if unlinked_contacts and total_bytes + size > settings.EXPORT_HISTORY_MAX_BYTES:
+                unlinked_contacts_truncated = True
+                break
+            unlinked_contacts.append(c)
+            total_bytes += size
 
     result: dict[str, Any] = {
         "applications": out_apps, "truncated": truncated, "bytes": total_bytes,
         "profile_edits": profile_edits, "profile_edits_truncated": edits_truncated,
         "assistant_notes": assistant_notes, "unlinked_contacts": unlinked_contacts,
+        "unlinked_contacts_truncated": unlinked_contacts_truncated,
     }
     if truncated:
         result["next_since"] = next_since
