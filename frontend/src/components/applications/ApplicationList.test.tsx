@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ApplicationList } from "./ApplicationList";
 import type { ApplicationSummary } from "@/lib/api";
+import { formatDayMonth } from "@/lib/format-date";
 
 const listApplications = vi.fn();
 
@@ -25,9 +26,64 @@ function summary(overrides: Partial<ApplicationSummary> = {}): ApplicationSummar
     visa_country: "",
     needs_sponsorship: null,
     next_step: { code: "judge_fit", label: "No fit judged yet — ask your agent to judge it" },
+    follow_up_on: null,
+    follow_up_due: false,
     ...overrides,
   };
 }
+
+describe("ApplicationList — Due filter (owner decision, 2026-09-25)", () => {
+  beforeEach(() => {
+    listApplications.mockReset();
+  });
+
+  it("shows no Due chip when nothing is due", async () => {
+    listApplications.mockResolvedValue({ applications: [summary()], total: 1 });
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    expect(screen.queryByTestId("due-filter")).toBeNull();
+  });
+
+  it("shows a Due chip with a count and an amber tag on the due row", async () => {
+    listApplications.mockResolvedValue({
+      applications: [
+        summary({ id: 1, job_title: "Due Job", follow_up_on: "2026-10-03", follow_up_due: true }),
+        summary({ id: 2, job_title: "Not Due Job", follow_up_due: false }),
+      ],
+      total: 2,
+    });
+    render(<ApplicationList />);
+    await screen.findByText("Due Job");
+
+    expect(screen.getByTestId("due-filter")).toHaveTextContent("Due (1)");
+    // Dates follow the viewer's locale ("3 Oct" in the UK, "Oct 3" on a US
+    // CI runner), so compare against the formatter rather than one order.
+    expect(screen.getByTestId("row-follow-up")).toHaveTextContent(
+      `Follow up ${formatDayMonth("2026-10-03")}`,
+    );
+  });
+
+  it("filters to only due rows when the Due chip is clicked", async () => {
+    listApplications.mockResolvedValue({
+      applications: [
+        summary({ id: 1, job_title: "Due Job", follow_up_on: "2026-10-03", follow_up_due: true }),
+        summary({ id: 2, job_title: "Not Due Job", follow_up_due: false }),
+      ],
+      total: 2,
+    });
+    render(<ApplicationList />);
+    await screen.findByText("Due Job");
+    expect(screen.getByText("Not Due Job")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("due-filter"));
+
+    await waitFor(() => expect(screen.queryByText("Not Due Job")).toBeNull());
+    expect(screen.getByText("Due Job")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("due-filter"));
+    await waitFor(() => expect(screen.getByText("Not Due Job")).toBeInTheDocument());
+  });
+});
 
 describe("ApplicationList — Mark Applied is gone from the row", () => {
   beforeEach(() => {

@@ -103,6 +103,8 @@ function detail(): DetailWithNextStep {
       },
     ],
     next_step: { code: "apply", label: "CV ready — apply, then mark it applied" },
+    follow_up_on: null,
+    follow_up_due: false,
   };
 }
 

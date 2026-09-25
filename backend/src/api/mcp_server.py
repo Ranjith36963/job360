@@ -71,7 +71,14 @@ INSTRUCTIONS = (
     "(cv_data.cv_positions) and projects (cv_data.cv_projects). "
     "(2) apply to a job — bring_job, then get_job + get_profile, judge fit "
     "yourself and save_fit, write the CV/cover letter yourself and save_artifact, "
-    "then record_application once the user says they applied."
+    "then record_application once the user says they applied. "
+    "(3) daily check — on a scheduled run, read the user's Gmail yourself and "
+    "record what you find with record_event (set `follow_up_on` when a "
+    "recruiter promises news by a date), then call list_applications with "
+    "due=true (what's due today) and again with quiet_days set (what's gone "
+    "quiet) to tell the user what needs attention. Recording news clears an "
+    "overdue follow-up automatically; pass `follow_up_on` on the same call "
+    "to set a new one."
 )
 
 # The user behind the request being served. Set by the ASGI shim per request,
@@ -572,8 +579,10 @@ def build_server(version: str = "") -> MCPServer:
         record_event(interview_scheduled, scheduled_at=…); record_outcome → the
         interview date has passed, record how it went via record_event (
         interview_done, offer, or rejected); lesson → record_event(
-        event_type="lesson"). wait / interview / await_outcome / decide / closed
-        need nothing from you."""
+        event_type="lesson"); follow_up → a follow-up date has arrived — chase
+        them or record what happened (record_event again clears it once the
+        news moves the status). wait / interview / await_outcome / decide /
+        closed need nothing from you."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.get_application(application_id, with_artifact_text, db, _user())
@@ -585,16 +594,28 @@ def build_server(version: str = "") -> MCPServer:
 
     @mcp.tool()
     async def list_applications(
-        status: Optional[str] = None, updated_since: Optional[str] = None, limit: int = 20, offset: int = 0
+        status: Optional[str] = None,
+        updated_since: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+        due: bool = False,
+        quiet_days: Optional[int] = None,
     ) -> dict[str, Any]:
         """The user's applications (newest activity first). Filter by status
         (e.g. "considering", "applied", "interview_scheduled"). Each row carries
         next_step ({code, label}) — the same next-thing-to-do state machine
         get_application's next_step uses, so you can branch on it without a
-        second read."""
+        second read. `due=true` — only applications whose follow_up_on has
+        arrived (soonest first); `quiet_days` — only applications with no
+        activity in that many days. Both skip closed applications (rejected/
+        withdrawn/ghosted). The daily-check routine ends its run with one call
+        of each."""
         try:
             async with _request_db() as db:
-                resp = await applications_route.list_applications(status, updated_since, limit, offset, db, _user())
+                resp = await applications_route.list_applications(
+                    status=status, updated_since=updated_since, limit=limit, offset=offset,
+                    due=due, quiet_days=quiet_days, db=db, user=_user(),
+                )
         except HTTPException as exc:
             _audit("list_applications", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
@@ -681,6 +702,7 @@ def build_server(version: str = "") -> MCPServer:
         corrects_event_id: Optional[int] = None,
         source: Optional[dict[str, Any]] = None,
         scheduled_at: Optional[str] = None,
+        follow_up_on: Optional[str] = None,
     ) -> dict[str, Any]:
         """Append one event to this application's history — replied, an
         interview stage, a note, a lesson learned. `occurred_at` may be in the
@@ -695,13 +717,21 @@ def build_server(version: str = "") -> MCPServer:
         already_existed=true and nothing is written; re-reading an inbox is
         safe. `scheduled_at` is the real interview datetime (ISO-8601 with a
         timezone) and is only accepted on interview_requested/
-        interview_scheduled."""
+        interview_scheduled. `follow_up_on` (YYYY-MM-DD) sets when to chase
+        this application next — works on ANY event_type, so a plain `note` can
+        carry it; omit it to leave the date alone, or send "" to clear it.
+        Recording news clears an overdue follow-up automatically (a
+        status-changing event — replied/interview_*/offer/rejected/withdrawn/
+        ghosted — clears a follow_up_on that has already arrived; a future one
+        is left alone, and passing `follow_up_on` yourself always wins).
+        list_applications(due=true) is how the user (or your next daily-check
+        run) finds what's arrived."""
         try:
             body = applications_route.RecordEventRequest(
                 event_type=event_type, detail=detail, payload=payload or {},
                 occurred_at=occurred_at, corrects_event_id=corrects_event_id,
                 source=applications_route.EventSource(**source) if source else None,
-                scheduled_at=scheduled_at,
+                scheduled_at=scheduled_at, follow_up_on=follow_up_on,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None

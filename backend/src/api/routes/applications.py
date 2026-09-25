@@ -124,6 +124,11 @@ class RecordEventRequest(BaseModel):
     corrects_event_id: Optional[int] = None
     source: Optional[EventSource] = None
     scheduled_at: Optional[str] = None
+    # Owner decision, 2026-09-25: omitted (`None`) leaves the slot untouched;
+    # `""` clears it; `YYYY-MM-DD` sets it. Works on any event_type — the
+    # daily-check agent sets it on a plain `note` as often as on a status
+    # event. `spine.parse_follow_up_on` does the real validation.
+    follow_up_on: Optional[str] = None
 
     def clamp_detail(self) -> str:
         cap = settings.APPLICATION_EVENT_DETAIL_MAX_CHARS
@@ -419,6 +424,10 @@ class ApplicationDetailOut(BaseModel):
     # over the record, never a judgement of the job). `code` is the closed
     # vocabulary an agent branches on; `label` is the sentence the web shows.
     next_step: NextStepOut
+    # Owner decision, 2026-09-25 — the follow-up date (in the caller's own
+    # timezone), and whether it has arrived. `null`/`false` when unset.
+    follow_up_on: Optional[str]
+    follow_up_due: bool
 
 
 class ApplicationSummaryOut(BaseModel):
@@ -441,6 +450,10 @@ class ApplicationSummaryOut(BaseModel):
     # 2026-09-24 — the list card's "Next:" line; same state machine and same
     # fields `get_application`'s `next_step` reads, batched for the page.
     next_step: NextStepOut
+    # Owner decision, 2026-09-25 — same pair as ApplicationDetailOut, so the
+    # list's "Due" chip and amber tag need no per-row detail fetch.
+    follow_up_on: Optional[str] = None
+    follow_up_due: bool = False
 
 
 class ListApplicationsResponse(BaseModel):
@@ -477,6 +490,11 @@ class RecordEventResponse(BaseModel):
     status: str
     already_existed: bool
     scheduled_at: Optional[str]
+    # Owner decision, 2026-09-25 — the CURRENT slot value after this call:
+    # the new value when this call set/cleared it, the unchanged value when
+    # it didn't touch it (omitted `follow_up_on`, or a duplicate source that
+    # wrote nothing at all — S corollary of R2).
+    follow_up_on: Optional[str]
 
 
 class RecordApplicationReceiptResponse(BaseModel):
@@ -699,12 +717,21 @@ async def list_applications(
     updated_since: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    # Owner decision, 2026-09-25 — "what's due" / "gone quiet", the two doors
+    # the daily-check prompt closes its run with.
+    due: bool = Query(False),
+    quiet_days: Optional[int] = Query(None, ge=1, le=settings.APPLICATION_QUIET_DAYS_MAX),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
-    return await spine.list_applications(
-        db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset
-    )
+    try:
+        return await spine.list_applications(
+            db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
+            due=due, quiet_days=quiet_days,
+        )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
 
 
 @router.get("/applications/job/{job_id}", response_model=JobResponse)
@@ -990,13 +1017,21 @@ async def record_event(
         occurred_at = spine.parse_occurred_at(body.occurred_at)
         source = spine.validate_source(body.source.model_dump() if body.source else None)
         scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
-        app_row = await spine.get_owned_application(db, user.id, application_id)
-        if app_row is None:
+        follow_up_on_arg: Any = spine.FOLLOW_UP_UNSET
+        if body.follow_up_on is not None:
+            today = await spine.user_today(db, user.id)
+            follow_up_on_arg = spine.parse_follow_up_on(body.follow_up_on, today)
+        if await spine.get_owned_application(db, user.id, application_id) is None:
             raise SpineError(404, "application not found")
+        # append_event always returns the REAL final follow_up_on — set,
+        # cleared, auto-cleared (an overdue date + a status event), replay-
+        # derived (a correction), or unchanged — so there is nothing left to
+        # patch here (coordinator review, 2026-09-25).
         return await spine.append_event(
             db, user_id=user.id, application_id=application_id, event_type=body.event_type,
             detail=detail, payload=payload, occurred_at=occurred_at, recorded_by=actor_for(user),
             corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
+            follow_up_on=follow_up_on_arg,
         )
     except SpineError as exc:
         _raise(exc)

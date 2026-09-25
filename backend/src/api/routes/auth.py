@@ -9,9 +9,10 @@ import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from src.api.auth_deps import (
     SESSION_COOKIE_NAME,
@@ -21,7 +22,7 @@ from src.api.auth_deps import (
 )
 from src.api.dependencies import get_request_db
 from src.api.middleware import _is_production
-from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS
+from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS, USER_TIMEZONE_MAX_CHARS
 from src.repositories import pg
 from src.repositories.database import JobDatabase
 from src.repositories.db_retry import open_db
@@ -94,6 +95,11 @@ class LoginRequest(BaseModel):
 class UserResponse(BaseModel):
     id: str
     email: str
+    # Owner decision, 2026-09-25 — the IANA zone name from `users.timezone`
+    # (migration 0012, default 'UTC'). Always present; the account settings
+    # page prefills the browser's own zone when this still reads the
+    # untouched default (rule #29 — only a real Save ever writes it).
+    timezone: str = "UTC"
 
 
 class RegisterResponse(BaseModel):
@@ -309,8 +315,44 @@ async def logout(
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(user: CurrentUser = Depends(require_user)) -> UserResponse:
-    return UserResponse(id=user.id, email=user.email)
+async def me(
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+) -> UserResponse:
+    cur = await db._db.execute("SELECT timezone FROM users WHERE id = ?", (user.id,))
+    row = await cur.fetchone()
+    tz = (dict(row).get("timezone") if row else None) or "UTC"
+    return UserResponse(id=user.id, email=user.email, timezone=tz)
+
+
+class TimezoneRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timezone: str = Field(..., max_length=USER_TIMEZONE_MAX_CHARS)
+
+
+class TimezoneResponse(BaseModel):
+    timezone: str
+
+
+@router.put("/me/timezone", response_model=TimezoneResponse)
+async def set_timezone(
+    body: TimezoneRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Owner decision, 2026-09-25 — the ONE write door for `users.timezone`
+    (browser-prefilled on the account settings page, but only ever SAVED
+    here, on an explicit press — rule #29). A name `ZoneInfo` cannot resolve
+    is refused with 422 naming the bad value; a valid one is stored and used
+    by `spine.user_today` for every "what's due today" read from then on."""
+    try:
+        ZoneInfo(body.timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(status_code=422, detail=f"unknown timezone: {body.timezone!r}") from None
+    await db._db.execute("UPDATE users SET timezone = ? WHERE id = ?", (body.timezone, user.id))
+    await db._db.commit()
+    return {"timezone": body.timezone}
 
 
 # ── GDPR Article 20 — data portability (docs/fable/05 C7) ────────────────────

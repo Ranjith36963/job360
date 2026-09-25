@@ -17,6 +17,7 @@ import { LessonForm } from "@/components/applications/LessonForm";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 import { VisaSelect } from "@/components/applications/VisaSelect";
 import { StatusMenu } from "@/components/applications/StatusMenu";
+import { FollowUpField } from "@/components/applications/FollowUpField";
 import { STATUS_LABEL } from "@/lib/event-labels";
 import { formatDateTime } from "@/lib/format-date";
 
@@ -118,6 +119,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             {STATUS_LABEL[detail.status] ?? detail.status}
           </span>
           <StatusMenu applicationId={detail.id} onRecorded={load} />
+          <FollowUpField applicationId={detail.id} followUpOn={detail.follow_up_on ?? null} onRecorded={load} />
           <VisaBadge
             signal={visa.signal}
             needsSponsorship={visa.needs_sponsorship}

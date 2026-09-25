@@ -360,6 +360,21 @@
               }
             ]
           },
+          "follow_up_due": {
+            "title": "Follow Up Due",
+            "type": "boolean"
+          },
+          "follow_up_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up On"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -430,7 +445,9 @@
           "interview_at",
           "receipts",
           "contacts",
-          "next_step"
+          "next_step",
+          "follow_up_on",
+          "follow_up_due"
         ],
         "title": "ApplicationDetailOut",
         "type": "object"
@@ -818,6 +835,22 @@
           "events": {
             "title": "Events",
             "type": "integer"
+          },
+          "follow_up_due": {
+            "default": false,
+            "title": "Follow Up Due",
+            "type": "boolean"
+          },
+          "follow_up_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up On"
           },
           "id": {
             "title": "Id",
@@ -3467,6 +3500,17 @@
             "title": "Event Type",
             "type": "string"
           },
+          "follow_up_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up On"
+          },
           "occurred_at": {
             "anyOf": [
               {
@@ -3525,6 +3569,17 @@
             "title": "Event Type",
             "type": "string"
           },
+          "follow_up_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up On"
+          },
           "occurred_at": {
             "title": "Occurred At",
             "type": "string"
@@ -3561,7 +3616,8 @@
           "recorded_by",
           "status",
           "already_existed",
-          "scheduled_at"
+          "scheduled_at",
+          "follow_up_on"
         ],
         "title": "RecordEventResponse",
         "type": "object"
@@ -4356,6 +4412,34 @@
         "title": "TakeBackRequest",
         "type": "object"
       },
+      "TimezoneRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "timezone": {
+            "maxLength": 64,
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timezone"
+        ],
+        "title": "TimezoneRequest",
+        "type": "object"
+      },
+      "TimezoneResponse": {
+        "properties": {
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timezone"
+        ],
+        "title": "TimezoneResponse",
+        "type": "object"
+      },
       "TokenCreated": {
         "properties": {
           "created_at": {
@@ -4504,6 +4588,11 @@
           },
           "id": {
             "title": "Id",
+            "type": "string"
+          },
+          "timezone": {
+            "default": "UTC",
+            "title": "Timezone",
             "type": "string"
           }
         },
@@ -4857,6 +4946,34 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "due",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Due",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "quiet_days",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 365,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Quiet Days"
             }
           },
           {
@@ -6398,6 +6515,82 @@
           }
         },
         "summary": "Get Email Verified",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/me/timezone": {
+      "put": {
+        "description": "Owner decision, 2026-09-25 \u2014 the ONE write door for `users.timezone`\n(browser-prefilled on the account settings page, but only ever SAVED\nhere, on an explicit press \u2014 rule #29). A name `ZoneInfo` cannot resolve\nis refused with 422 naming the bad value; a valid one is stored and used\nby `spine.user_today` for every \"what's due today\" read from then on.",
+        "operationId": "set_timezone_api_auth_me_timezone_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimezoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimezoneResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Timezone",
         "tags": [
           "auth"
         ]
