@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { ApplicationClient } from "@/app/applications/[id]/ApplicationClient";
 import type { ApplicationDetail } from "@/lib/api";
 
@@ -147,12 +147,12 @@ describe("ApplicationClient — six-question layout", () => {
     }
   });
 
-  it("right column (side) orders visa -> people -> lessons", async () => {
+  it("right column (side) orders actions -> visa -> people -> lessons", async () => {
     render(<ApplicationClient applicationId={42} />);
     await screen.findByText("Staff Engineer");
 
     const side = screen.getByTestId("app-col-side");
-    const order = ["section-visa", "section-people", "section-lessons"].map((id) =>
+    const order = ["app-actions", "section-visa", "section-people", "section-lessons"].map((id) =>
       screen.getByTestId(id)
     );
 
@@ -162,6 +162,19 @@ describe("ApplicationClient — six-question layout", () => {
     for (let i = 0; i < order.length - 1; i++) {
       expect(isBefore(order[i], order[i + 1])).toBe(true);
     }
+  });
+
+  it("the actions column carries Next, status, the status menu, Mark Applied and View ad", async () => {
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+
+    const actions = screen.getByTestId("app-actions");
+    const order = ["next-step", "status-label"].map((id) => within(actions).getByTestId(id));
+    for (let i = 0; i < order.length - 1; i++) {
+      expect(isBefore(order[i], order[i + 1])).toBe(true);
+    }
+    expect(within(actions).getByTestId("status-menu")).toBeInTheDocument();
+    expect(within(actions).getByRole("link", { name: /view ad/i })).toBeInTheDocument();
   });
 
   it("points at the user's own agent instead of offering to write the CV", async () => {
@@ -176,7 +189,7 @@ describe("ApplicationClient — six-question layout", () => {
     ).toBeNull();
   });
 
-  it("shows the next-step line under the company", async () => {
+  it("shows the next-step line in the actions column", async () => {
     render(<ApplicationClient applicationId={42} />);
     await screen.findByText("Staff Engineer");
 

@@ -153,6 +153,71 @@ async def test_list_next_step_matches_detail_next_step(authenticated_async_conte
 
 
 @pytest.mark.asyncio
+async def test_list_summary_matches_detail_for_location_fit_receipt_interview(authenticated_async_context):
+    """Owner decision, 2026-09-25 — the wide applications-list row reads
+    job_location, fit_score/fit_verdict, last_receipt_at and interview_at
+    straight off the list summary (never a per-row detail fetch). Each of
+    these is now filled by a batched query in spine.list_applications
+    (job_location/fit_* on the main SELECT, last_receipt_at off one grouped
+    query alongside the existing interview_at batch) — this proves the list
+    values agree with `get_application`'s own read of the same application,
+    not just that the fields exist (rule #21 — real values, not schema
+    presence)."""
+    async with authenticated_async_context() as client:
+        resp = await client.post("/api/jobs/bring", json=_AD)
+        assert resp.status_code == 200, resp.text
+        app_id = int(resp.json()["application_id"])
+
+        async def _list_row() -> dict:
+            r = await client.get("/api/applications")
+            assert r.status_code == 200, r.text
+            return next(a for a in r.json()["applications"] if a["id"] == app_id)
+
+        async def _detail() -> dict:
+            r = await client.get(f"/api/applications/{app_id}")
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        # Before any fit/receipt/interview: location is the bring-time
+        # snapshot, everything else stays silent (None/"" — rule #29).
+        row = await _list_row()
+        detail = await _detail()
+        assert row["job_location"] == detail["job"]["job_location"] == _AD["location"]
+        assert row["fit_score"] is None
+        assert row["fit_verdict"] == ""
+        assert detail["fit"] is None
+        assert row["last_receipt_at"] is None
+        assert row["interview_at"] is None
+        assert detail["interview_at"] is None
+
+        # Fit judged — the list score/verdict must match the detail's fit
+        # object exactly.
+        await client.put(f"/api/applications/{app_id}/fit", json={"score": 68, "verdict": "Strong match"})
+        row = await _list_row()
+        detail = await _detail()
+        assert row["fit_score"] == detail["fit"]["score"] == 68
+        assert row["fit_verdict"] == detail["fit"]["verdict"] == "Strong match"
+
+        # A receipt — the list's last_receipt_at must match the detail's
+        # (only) receipt's sent_at.
+        await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "company site"})
+        row = await _list_row()
+        detail = await _detail()
+        assert row["last_receipt_at"] == detail["receipts"][0]["sent_at"]
+        assert row["last_receipt_at"] is not None
+
+        # A scheduled interview — the list's interview_at must match the
+        # detail's top-level interview_at.
+        await client.post(
+            f"/api/applications/{app_id}/events",
+            json={"event_type": "interview_scheduled", "scheduled_at": "2027-06-01T09:00:00+00:00"},
+        )
+        row = await _list_row()
+        detail = await _detail()
+        assert row["interview_at"] == detail["interview_at"] == "2027-06-01T09:00:00+00:00"
+
+
+@pytest.mark.asyncio
 async def test_the_agent_sees_the_same_next_step(authenticated_async_context, fixture_user_id):
     pytest.importorskip("mcp")
     from src.api import mcp_server

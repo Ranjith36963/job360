@@ -836,6 +836,22 @@
             "title": "Events",
             "type": "integer"
           },
+          "fit_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fit Score"
+          },
+          "fit_verdict": {
+            "default": "",
+            "title": "Fit Verdict",
+            "type": "string"
+          },
           "follow_up_due": {
             "default": false,
             "title": "Follow Up Due",
@@ -856,6 +872,17 @@
             "title": "Id",
             "type": "integer"
           },
+          "interview_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview At"
+          },
           "job_company": {
             "title": "Job Company",
             "type": "string"
@@ -863,6 +890,11 @@
           "job_id": {
             "title": "Job Id",
             "type": "integer"
+          },
+          "job_location": {
+            "default": "",
+            "title": "Job Location",
+            "type": "string"
           },
           "job_title": {
             "title": "Job Title",
@@ -883,6 +915,17 @@
               }
             ],
             "title": "Last Event At"
+          },
+          "last_receipt_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Receipt At"
           },
           "needs_sponsorship": {
             "anyOf": [

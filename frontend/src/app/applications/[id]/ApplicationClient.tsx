@@ -97,105 +97,40 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         <ArrowLeft className="h-4 w-4" /> All applications
       </Link>
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-heading text-2xl font-bold">{detail.job.job_title || "Untitled role"}</h1>
-          <p className="text-muted-foreground">{detail.job.job_company}</p>
-          {nextStep?.label && (
-            <p data-testid="next-step" className="text-sm text-primary">
-              Next: {nextStep.label}
-            </p>
-          )}
-          {!detail.job.catalog_present && (
-            <p className="mt-1 text-xs text-muted-foreground/70">
-              This listing is no longer in the catalog — the snapshot above is what it read when you brought it.
-            </p>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <span
-            data-testid="status-label"
-            className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary"
-          >
-            {STATUS_LABEL[detail.status] ?? detail.status}
-          </span>
-          <StatusMenu applicationId={detail.id} onRecorded={load} />
-          <FollowUpField applicationId={detail.id} followUpOn={detail.follow_up_on ?? null} onRecorded={load} />
-          <VisaBadge
-            signal={visa.signal}
-            needsSponsorship={visa.needs_sponsorship}
-            detail={visa.detail}
-          />
-          {detail.interview_at && (
-            <span className="rounded-full bg-accent/20 px-3 py-1 text-sm font-medium text-accent-foreground">
-              Interview {formatDateTime(detail.interview_at)}
-            </span>
-          )}
-          {detail.status === "considering" &&
-            (!markConfirming ? (
-              <button
-                type="button"
-                data-testid="mark-applied"
-                onClick={() => setMarkConfirming(true)}
-                disabled={marking}
-                className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                Mark Applied
-              </button>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
-                <span>
-                  Record that you applied? This creates a receipt that can&apos;t be deleted.
-                </span>
-                <button
-                  type="button"
-                  data-testid="mark-applied-confirm"
-                  onClick={() => void markApplied()}
-                  disabled={marking}
-                  className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-                >
-                  {marking ? "Recording…" : "Confirm"}
-                </button>
-                <button
-                  type="button"
-                  data-testid="mark-applied-cancel"
-                  onClick={() => setMarkConfirming(false)}
-                  disabled={marking}
-                  className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            ))}
-          {detail.job.job_url && (
-            <a
-              href={detail.job.job_url}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
-            >
-              View ad
-            </a>
-          )}
-        </div>
+      {/* Full-width header (owner decision, 2026-09-25): back link, job title,
+          company only — every action and status control moved into the
+          sticky right column below. */}
+      <div>
+        <h1 className="font-heading text-2xl font-bold">{detail.job.job_title || "Untitled role"}</h1>
+        <p className="text-muted-foreground">{detail.job.job_company}</p>
+        {!detail.job.catalog_present && (
+          <p className="mt-1 text-xs text-muted-foreground/70">
+            This listing is no longer in the catalog — the snapshot above is what it read when you brought it.
+          </p>
+        )}
       </div>
 
       {/* At lg: two columns — LEFT (main) carries Fit/Documents/Sent/History,
-          RIGHT (side) carries Visa/People/Lessons (owner decision,
-          2026-09-25). Below lg both columns render `display: contents` so
-          their sections become direct items of the single-column grid below,
-          letting the numbered `order-*` classes below interleave them into
-          Fit, Visa, Documents, Sent, People, Lessons, History — the same
-          order the page used before this had two columns. `lg:order-none`
-          drops that override once the real two-column layout takes over. */}
+          RIGHT (side) carries the actions (Next line, status, "What
+          happened?", Mark Applied, View ad) plus Visa/People/Lessons, and
+          stays sticky under the navbar (owner decision, 2026-09-25) —
+          `lg:top-20` clears the 56px (h-14) sticky navbar with a gap, and
+          `lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto` lets it scroll on
+          its own if it's taller than the viewport instead of pushing off
+          screen. Below lg both columns render `display: contents` so their
+          children become direct items of the single-column grid below,
+          letting the numbered `order-*` classes interleave them into
+          Actions, Fit, Visa, Documents, Sent, People, Lessons, History — the
+          phone reading order the owner specified. `lg:order-none` drops that
+          override once the real two-column layout takes over. */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div data-testid="app-col-main" className="contents lg:flex lg:flex-col lg:gap-6">
-          <section data-testid="section-fit" className="order-1 lg:order-none">
+          <section data-testid="section-fit" className="order-2 lg:order-none">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fit</h2>
             <AlignmentPanel applicationId={detail.id} refreshKey={detail.updated_at} />
           </section>
 
-          <section data-testid="section-documents" className="order-3 lg:order-none">
+          <section data-testid="section-documents" className="order-4 lg:order-none">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Documents
             </h2>
@@ -215,7 +150,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           </section>
 
           {detail.receipts.length > 0 && (
-            <section data-testid="section-sent" className="order-4 lg:order-none">
+            <section data-testid="section-sent" className="order-5 lg:order-none">
               <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                 Sent
               </h2>
@@ -223,7 +158,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             </section>
           )}
 
-          <section data-testid="section-timeline" className="order-7 lg:order-none">
+          <section data-testid="section-timeline" className="order-8 lg:order-none">
             <button
               type="button"
               data-testid="history-toggle"
@@ -241,22 +176,97 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           </section>
         </div>
 
-        <div data-testid="app-col-side" className="contents lg:flex lg:flex-col lg:gap-6">
-          <section data-testid="section-visa" className="order-2 lg:order-none">
+        <div
+          data-testid="app-col-side"
+          className="contents lg:flex lg:flex-col lg:gap-6 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto"
+        >
+          <div data-testid="app-actions" className="order-1 flex flex-col items-start gap-3 lg:order-none">
+            {nextStep?.label && (
+              <p data-testid="next-step" className="text-sm text-primary">
+                Next: {nextStep.label}
+              </p>
+            )}
+            <span
+              data-testid="status-label"
+              className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary"
+            >
+              {STATUS_LABEL[detail.status] ?? detail.status}
+            </span>
+            <StatusMenu applicationId={detail.id} onRecorded={load} />
+            {detail.status === "considering" &&
+              (!markConfirming ? (
+                <button
+                  type="button"
+                  data-testid="mark-applied"
+                  onClick={() => setMarkConfirming(true)}
+                  disabled={marking}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  Mark Applied
+                </button>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
+                  <span>
+                    Record that you applied? This creates a receipt that can&apos;t be deleted.
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="mark-applied-confirm"
+                    onClick={() => void markApplied()}
+                    disabled={marking}
+                    className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    {marking ? "Recording…" : "Confirm"}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="mark-applied-cancel"
+                    onClick={() => setMarkConfirming(false)}
+                    disabled={marking}
+                    className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ))}
+            {detail.job.job_url && (
+              <a
+                href={detail.job.job_url}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+              >
+                View ad
+              </a>
+            )}
+            <FollowUpField applicationId={detail.id} followUpOn={detail.follow_up_on ?? null} onRecorded={load} />
+            <VisaBadge
+              signal={visa.signal}
+              needsSponsorship={visa.needs_sponsorship}
+              detail={visa.detail}
+            />
+            {detail.interview_at && (
+              <span className="rounded-full bg-accent/20 px-3 py-1 text-sm font-medium text-accent-foreground">
+                Interview {formatDateTime(detail.interview_at)}
+              </span>
+            )}
+          </div>
+
+          <section data-testid="section-visa" className="order-3 lg:order-none">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Visa / sponsorship
             </h2>
             <VisaSelect applicationId={detail.id} visa={visa} onSaved={load} />
           </section>
 
-          <section data-testid="section-people" className="order-5 lg:order-none">
+          <section data-testid="section-people" className="order-6 lg:order-none">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               People
             </h2>
             <Contacts applicationId={detail.id} contacts={detail.contacts} />
           </section>
 
-          <section data-testid="section-lessons" className="order-6 lg:order-none">
+          <section data-testid="section-lessons" className="order-7 lg:order-none">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Lessons
             </h2>

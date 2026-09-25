@@ -1351,9 +1351,9 @@ async def list_applications(
 
     order_sql = "follow_up_on ASC, id ASC" if due else "last_event_at DESC NULLS LAST, id DESC"
     cur = await db._db.execute(
-        f"SELECT id, job_id, job_title, job_company, job_url, status, last_event_at, "  # noqa: S608
-        f"visa_signal, visa_country, fit_recorded_at, follow_up_on FROM applications "
-        f"WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
+        f"SELECT id, job_id, job_title, job_company, job_url, job_location, status, last_event_at, "  # noqa: S608
+        f"visa_signal, visa_country, fit_recorded_at, fit_score, fit_verdict, follow_up_on "
+        f"FROM applications WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
         [*params, limit, offset],
     )
     rows = [dict(r) for r in await cur.fetchall()]
@@ -1392,19 +1392,38 @@ async def list_applications(
             if r["event_type"] == "lesson":
                 has_lesson_by_app[app_id] = True
 
+    # Owner decision, 2026-09-25 — the list row now shows a "Sent <date>" tag,
+    # which needs the LATEST receipt per application. One batched query for
+    # the whole page (never N+1), same shape as the interview_at query above;
+    # it also replaces the old per-row COUNT so the count and the date can
+    # never disagree (they come off the same row).
+    receipt_count_by_app: dict[int, int] = {}
+    last_receipt_at_by_app: dict[int, str] = {}
+    if app_ids:
+        placeholders = ",".join("?" for _ in app_ids)
+        r_cur = await db._db.execute(
+            f"SELECT application_id, COUNT(*), MAX(sent_at) FROM application_receipts "  # noqa: S608 — placeholders, not values
+            f"WHERE application_id IN ({placeholders}) GROUP BY application_id",
+            app_ids,
+        )
+        for row in await r_cur.fetchall():
+            receipt_count_by_app[row[0]] = int(row[1])
+            last_receipt_at_by_app[row[0]] = row[2]
+
     out = []
     for r in rows:
         app_id = r["id"]
         signal = r.get("visa_signal") or "unknown"
         country = r.get("visa_country") or ""
         artifact_counts = await _artifact_counts_by_kind(db, app_id)
-        receipts_count = await _count(db, "application_receipts", "application_id", app_id)
+        receipts_count = receipt_count_by_app.get(app_id, 0)
         follow_up_on = r.get("follow_up_on")
         follow_up_due = _follow_up_due(follow_up_on, r["status"], today_iso)
         out.append(
             {
                 "id": app_id, "job_id": r["job_id"], "job_title": r["job_title"] or "",
                 "job_company": r["job_company"] or "", "job_url": r.get("job_url") or "",
+                "job_location": r.get("job_location") or "",
                 "status": r["status"],
                 "last_event_at": r.get("last_event_at"),
                 "visa_signal": signal, "visa_country": country,
@@ -1412,6 +1431,10 @@ async def list_applications(
                 "events": await _count(db, "application_events", "application_id", app_id),
                 "artifacts": artifact_counts,
                 "receipts": receipts_count,
+                "last_receipt_at": last_receipt_at_by_app.get(app_id),
+                "interview_at": interview_at_by_app.get(app_id),
+                "fit_score": r.get("fit_score"),
+                "fit_verdict": r.get("fit_verdict") or "",
                 "follow_up_on": follow_up_on,
                 "follow_up_due": follow_up_due,
                 # 2026-09-24 — same state machine `get_application` feeds its
