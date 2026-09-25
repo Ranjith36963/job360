@@ -13,6 +13,7 @@ import { VersionHistoryDrawer } from "@/components/profile/VersionHistoryDrawer"
 import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportButton";
 import { ClearButton } from "@/components/profile/ClearButton";
 import { LessonsList } from "@/components/profile/LessonsList";
+import { PageContainer } from "@/components/layout/PageContainer";
 import {
   getProfile,
   uploadProfile,
@@ -299,7 +300,7 @@ export default function ProfilePage() {
         <div className="absolute top-[50%] -right-[10%] h-[400px] w-[400px] rounded-full bg-primary/[0.05] blur-[100px]" />
       </div>
 
-      <div className="relative mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:py-12">
+      <PageContainer className="relative py-8 lg:py-12">
         {/* ── Header ───────────────────────────────────── */}
         <div className="animate-fade-in-up stagger-1 mb-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -562,7 +563,7 @@ export default function ProfilePage() {
           </div>
         )}
 
-      </div>
+      </PageContainer>
 
       {/* ── Version History Drawer ────────────────────── */}
       <VersionHistoryDrawer

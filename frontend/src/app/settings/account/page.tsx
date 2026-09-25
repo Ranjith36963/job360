@@ -512,7 +512,7 @@ function VerifyEmailCard() {
 
 export default function AccountSettingsPage() {
   return (
-    <div className="mx-auto max-w-3xl space-y-8 py-12">
+    <div className="max-w-3xl space-y-8 py-12">
       <div>
         <h1 className="text-3xl font-semibold">Account settings</h1>
         <p className="mt-2 text-muted-foreground">

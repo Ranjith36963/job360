@@ -160,7 +160,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
       {visibleApplications && visibleApplications.length === 0 ? (
         <p className="text-sm text-muted-foreground">No applications with this status.</p>
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul className="grid gap-3 lg:grid-cols-2">
           {visibleApplications?.map((app) => (
             <li
               key={app.id}

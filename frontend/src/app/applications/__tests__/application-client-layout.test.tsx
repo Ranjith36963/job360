@@ -127,19 +127,38 @@ describe("ApplicationClient — six-question layout", () => {
     });
   });
 
-  it("orders sections fit -> documents -> sent -> people -> lessons -> timeline", async () => {
+  it("left column (main) orders fit -> documents -> sent -> timeline", async () => {
     render(<ApplicationClient applicationId={42} />);
     await screen.findByText("Staff Engineer");
 
+    const main = screen.getByTestId("app-col-main");
     const order = [
       "section-fit",
       "section-documents",
       "section-sent",
-      "section-people",
-      "section-lessons",
       "section-timeline",
     ].map((id) => screen.getByTestId(id));
 
+    for (const el of order) {
+      expect(main.contains(el)).toBe(true);
+    }
+    for (let i = 0; i < order.length - 1; i++) {
+      expect(isBefore(order[i], order[i + 1])).toBe(true);
+    }
+  });
+
+  it("right column (side) orders visa -> people -> lessons", async () => {
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+
+    const side = screen.getByTestId("app-col-side");
+    const order = ["section-visa", "section-people", "section-lessons"].map((id) =>
+      screen.getByTestId(id)
+    );
+
+    for (const el of order) {
+      expect(side.contains(el)).toBe(true);
+    }
     for (let i = 0; i < order.length - 1; i++) {
       expect(isBefore(order[i], order[i + 1])).toBe(true);
     }

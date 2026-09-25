@@ -20,6 +20,7 @@ import { StatusMenu } from "@/components/applications/StatusMenu";
 import { FollowUpField } from "@/components/applications/FollowUpField";
 import { STATUS_LABEL } from "@/lib/event-labels";
 import { formatDateTime } from "@/lib/format-date";
+import { PageContainer } from "@/components/layout/PageContainer";
 
 /** The application record: status, the durable job snapshot (spec R2 —
  * survives the catalog purging the live row), every artifact version, the
@@ -91,7 +92,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
     .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime());
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8">
+    <PageContainer className="flex flex-col gap-6 py-8">
       <Link href="/applications" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-4 w-4" /> All applications
       </Link>
@@ -179,82 +180,102 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
         </div>
       </div>
 
-      <section data-testid="section-fit">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fit</h2>
-        <AlignmentPanel applicationId={detail.id} refreshKey={detail.updated_at} />
-        <VisaSelect applicationId={detail.id} visa={visa} onSaved={load} />
-      </section>
+      {/* At lg: two columns — LEFT (main) carries Fit/Documents/Sent/History,
+          RIGHT (side) carries Visa/People/Lessons (owner decision,
+          2026-09-25). Below lg both columns render `display: contents` so
+          their sections become direct items of the single-column grid below,
+          letting the numbered `order-*` classes below interleave them into
+          Fit, Visa, Documents, Sent, People, Lessons, History — the same
+          order the page used before this had two columns. `lg:order-none`
+          drops that override once the real two-column layout takes over. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div data-testid="app-col-main" className="contents lg:flex lg:flex-col lg:gap-6">
+          <section data-testid="section-fit" className="order-1 lg:order-none">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fit</h2>
+            <AlignmentPanel applicationId={detail.id} refreshKey={detail.updated_at} />
+          </section>
 
-      <section data-testid="section-documents">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Documents
-        </h2>
-        <ArtifactVersions applicationId={detail.id} artifacts={detail.artifacts} receipts={detail.receipts} />
-        <div className="mt-4">
-          {!hasCvArtifact && (
-            <p className="mb-2 text-xs text-muted-foreground">
-              No CV for this job yet — your assistant writes it and saves it here.
-            </p>
-          )}
-          <TailorSection
-            jobId={detail.job_id}
-            applicationId={detail.id}
-            hasDocuments={detail.artifacts.length > 0}
-          />
-        </div>
-      </section>
-
-      {detail.receipts.length > 0 && (
-        <section data-testid="section-sent">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Sent
-          </h2>
-          <Receipts receipts={detail.receipts} />
-        </section>
-      )}
-
-      <section data-testid="section-people">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          People
-        </h2>
-        <Contacts applicationId={detail.id} contacts={detail.contacts} />
-      </section>
-
-      <section data-testid="section-lessons">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Lessons
-        </h2>
-        {lessonEvents.length > 0 && (
-          <ul className="mb-3 flex flex-col gap-2">
-            {lessonEvents.map((event) => (
-              <li key={event.id} data-testid="lesson-here" className="glass-card rounded-lg p-3 text-sm">
-                <p>{event.detail}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {formatDateTime(event.occurred_at)}
+          <section data-testid="section-documents" className="order-3 lg:order-none">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Documents
+            </h2>
+            <ArtifactVersions applicationId={detail.id} artifacts={detail.artifacts} receipts={detail.receipts} />
+            <div className="mt-4">
+              {!hasCvArtifact && (
+                <p className="mb-2 text-xs text-muted-foreground">
+                  No CV for this job yet — your assistant writes it and saves it here.
                 </p>
-              </li>
-            ))}
-          </ul>
-        )}
-        <LessonForm applicationId={detail.id} onRecorded={load} />
-      </section>
+              )}
+              <TailorSection
+                jobId={detail.job_id}
+                applicationId={detail.id}
+                hasDocuments={detail.artifacts.length > 0}
+              />
+            </div>
+          </section>
 
-      <section data-testid="section-timeline">
-        <button
-          type="button"
-          data-testid="history-toggle"
-          onClick={() => setHistoryOpen((open) => !open)}
-          className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
-        >
-          {historyOpen ? "Hide history" : `Show history (${detail.events.length})`}
-        </button>
-        {historyOpen && (
-          <>
-            <Timeline events={detail.events} />
-            <NoteForm applicationId={detail.id} onRecorded={load} />
-          </>
-        )}
-      </section>
-    </div>
+          {detail.receipts.length > 0 && (
+            <section data-testid="section-sent" className="order-4 lg:order-none">
+              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Sent
+              </h2>
+              <Receipts receipts={detail.receipts} />
+            </section>
+          )}
+
+          <section data-testid="section-timeline" className="order-7 lg:order-none">
+            <button
+              type="button"
+              data-testid="history-toggle"
+              onClick={() => setHistoryOpen((open) => !open)}
+              className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+            >
+              {historyOpen ? "Hide history" : `Show history (${detail.events.length})`}
+            </button>
+            {historyOpen && (
+              <>
+                <Timeline events={detail.events} />
+                <NoteForm applicationId={detail.id} onRecorded={load} />
+              </>
+            )}
+          </section>
+        </div>
+
+        <div data-testid="app-col-side" className="contents lg:flex lg:flex-col lg:gap-6">
+          <section data-testid="section-visa" className="order-2 lg:order-none">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Visa / sponsorship
+            </h2>
+            <VisaSelect applicationId={detail.id} visa={visa} onSaved={load} />
+          </section>
+
+          <section data-testid="section-people" className="order-5 lg:order-none">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              People
+            </h2>
+            <Contacts applicationId={detail.id} contacts={detail.contacts} />
+          </section>
+
+          <section data-testid="section-lessons" className="order-6 lg:order-none">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Lessons
+            </h2>
+            {lessonEvents.length > 0 && (
+              <ul className="mb-3 flex flex-col gap-2">
+                {lessonEvents.map((event) => (
+                  <li key={event.id} data-testid="lesson-here" className="glass-card rounded-lg p-3 text-sm">
+                    <p>{event.detail}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {formatDateTime(event.occurred_at)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <LessonForm applicationId={detail.id} onRecorded={load} />
+          </section>
+        </div>
+      </div>
+    </PageContainer>
   );
 }
