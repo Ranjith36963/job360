@@ -76,6 +76,10 @@ export interface PreferencesRequest {
   // country rules itself. Empty list = "don't care", never a penalty
   // (rule #29).
   work_authorization_countries?: string[];
+  // Standing instructions for the user's assistant, one short line each
+  // ("never apply to agencies"). The agent reads them first on get_profile.
+  // Empty = nothing to say (rule #29).
+  assistant_notes?: string[];
 }
 
 // ---- Skill tier / provenance — frontend structuring of profile fields ----

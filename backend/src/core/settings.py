@@ -480,6 +480,9 @@ PROFILE_EDITABLE_PATHS = (
     # Slice B2 (decision 28) — dated work history and projects, as lists of
     # records with a closed key set (services/profile/edits.py RECORD_SCHEMAS).
     "cv_data.cv_positions", "cv_data.cv_projects",
+    # Standing instructions for the assistant — one short line each
+    # (PROFILE_NOTE_MAX_CHARS), at most PROFILE_EDIT_MAX_LIST_ITEMS lines.
+    "preferences.assistant_notes",
 )
 # Env-added paths must ALSO be declared dataclass fields — an unknown one is a
 # startup error, not an accepted path.
@@ -500,6 +503,11 @@ PROFILE_EDIT_MAX_BULLET_CHARS = int(os.getenv("PROFILE_EDIT_MAX_BULLET_CHARS", "
 # (2000) bounds every other path, but one honest work history is longer than
 # that, so the record lists get their own ceiling.
 PROFILE_EDIT_MAX_RECORDS_CHARS = int(os.getenv("PROFILE_EDIT_MAX_RECORDS_CHARS", "60000"))
+# preferences.assistant_notes — the length of ONE note (a line, not an essay).
+PROFILE_NOTE_MAX_CHARS = int(os.getenv("PROFILE_NOTE_MAX_CHARS", "200"))
+# GET /profile/edits/history — how many rows of one field's history come back
+# (newest first). The export carries the full log.
+PROFILE_EDIT_HISTORY_MAX = int(os.getenv("PROFILE_EDIT_HISTORY_MAX", "50"))
 
 
 # Outbound HTTP defaults. Kept through slice 5 (#483) on purpose: the URL

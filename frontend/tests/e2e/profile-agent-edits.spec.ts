@@ -6,8 +6,9 @@ import { test, expect } from "@playwright/test";
  *
  * `GET /profile` returns `agent_edits`: the current overlay an agent has set
  * via `PATCH /profile`. The page renders the (already-merged) value in place
- * plus a small "Edited by <set_by> on <date>" mark next to it — ONLY for
- * paths that actually carry an active edit. Mocked with page.route, same
+ * plus a small "Changed by <name> · was <previous>" mark with a "Take back"
+ * button next to it — ONLY for paths that carry a live ASSISTANT edit
+ * (owner decision 2026-09-25; the human's own web saves never get a mark). Mocked with page.route, same
  * hermetic style as tests/e2e/profile-version-restore.spec.ts.
  */
 
@@ -17,12 +18,14 @@ const AGENT_EDITS = [
   {
     path: "cv_data.location",
     value: "London, UK",
+    previous_value: "Leeds",
     set_by: "agent:cli",
     set_at: "2026-09-01T10:00:00Z",
   },
   {
     path: "preferences.work_arrangement",
     value: "remote",
+    previous_value: "",
     set_by: "agent:cli",
     set_at: "2026-09-02T11:00:00Z",
   },
@@ -122,25 +125,89 @@ test.describe("Profile page — agent-edit provenance mark", () => {
 
     // cv_data.location carries an edit — its row shows the mark.
     const locationRow = page.locator("p", { hasText: "London, UK" });
-    await expect(locationRow).toContainText("Edited by agent:cli");
+    await expect(locationRow).toContainText("Changed by cli · was Leeds");
 
     // cv_data.name carries NO edit — its heading shows no mark, even though
     // it sits right next to the location row that does.
     const nameHeading = page.getByRole("heading", { name: "Test User" });
     await expect(nameHeading).toBeVisible();
-    await expect(nameHeading).not.toContainText("Edited by");
+    await expect(nameHeading).not.toContainText("Changed by");
 
     // preferences.work_arrangement carries an edit — its label shows the mark.
     const workArrangementLabel = page.locator("label", { hasText: "Work Arrangement" });
-    await expect(workArrangementLabel).toContainText("Edited by agent:cli");
+    await expect(workArrangementLabel).toContainText("Changed by cli · was empty");
 
     // preferences.target_job_titles carries NO edit — no mark on its label.
     const targetTitlesLabel = page.locator("label", { hasText: "Target Job Titles" });
     await expect(targetTitlesLabel).toBeVisible();
-    await expect(targetTitlesLabel).not.toContainText("Edited by");
+    await expect(targetTitlesLabel).not.toContainText("Changed by");
 
     // Exactly two marks on the whole page — one per edited path, no more.
     await expect(page.getByTestId("agent-edit-mark")).toHaveCount(2);
+  });
+
+  test("Take back sends the path and the mark goes; History lists both authors", async ({
+    page,
+    context,
+  }) => {
+    await context.addCookies([
+      { name: "job360_session", value: "smoke-test-token", domain: "localhost", path: "/" },
+    ]);
+    await page.route("**/api/auth/me**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_USER) })
+    );
+    await page.route("**/api/profile**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MOCK_PROFILE) })
+    );
+    // Registered AFTER the broad pattern: Playwright checks routes newest-first.
+    let takenBack: unknown = null;
+    await page.route("**/api/profile/edits/take-back", async (route) => {
+      takenBack = route.request().postDataJSON();
+      const after = {
+        ...MOCK_PROFILE,
+        preferences: { ...MOCK_PROFILE.preferences, work_arrangement: "" },
+        agent_edits: AGENT_EDITS.filter((e) => e.path !== "preferences.work_arrangement"),
+      };
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(after) });
+    });
+    await page.route("**/api/profile/edits/history**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          path: "preferences.work_arrangement",
+          rows: [
+            { value: "remote", set_by: "agent:cli", set_at: "2026-09-02T11:00:00Z" },
+            { value: "hybrid", set_by: "web", set_at: "2026-09-01T09:00:00Z" },
+          ],
+        }),
+      })
+    );
+
+    await page.goto("/profile");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Profile", exact: true })
+    ).toBeVisible({ timeout: 10_000 });
+
+    // The header counts the one preference the assistant set.
+    await expect(page.getByRole("link", { name: "1 preference set by your assistant" })).toBeVisible();
+
+    // History: one inline list, newest first, both authors.
+    await page.getByRole("button", { name: "History of Work Arrangement" }).click();
+    const rows = page.getByTestId("field-history-row");
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toContainText("cli");
+    await expect(rows.nth(0)).toContainText("remote");
+    await expect(rows.nth(1)).toContainText("You");
+    await expect(rows.nth(1)).toContainText("hybrid");
+
+    // Take back the work-arrangement change.
+    const workArrangementLabel = page.locator("label", { hasText: "Work Arrangement" });
+    await workArrangementLabel.getByRole("button", { name: "Take back cli's change" }).click();
+    await expect.poll(() => takenBack).toEqual({ path: "preferences.work_arrangement" });
+    await expect(workArrangementLabel).not.toContainText("Changed by");
+    await expect(page.getByTestId("agent-edit-mark")).toHaveCount(1);
+    await expect(page.getByText(/set by your assistant/)).toHaveCount(0);
   });
 
   test("cv_data.links renders as a list; only the https:// entry is a link", async ({

@@ -548,6 +548,11 @@ class UserPreferences:
     # comparison is made and no badge is shown. Job360 holds no country
     # rule; the only use is "is the job's country in this list".
     work_authorization_countries: list[str] = field(default_factory=list)
+    # Standing instructions for the user's assistant ("never apply to agencies",
+    # "I am on holiday until 3 Oct"). One short line each, written by the user
+    # on the web or by the agent through update_profile; the agent reads them
+    # first on every get_profile. Empty = nothing to say (rule #29).
+    assistant_notes: list[str] = field(default_factory=list)
 
     # Values the workplace scorer can actually match. A CLOSED set, because the
     # job side of the comparison (`JobEnrichment.workplace_type`) is an enum —

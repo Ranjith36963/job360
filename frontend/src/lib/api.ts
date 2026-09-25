@@ -626,11 +626,38 @@ export type ApplicationDetail = _Schemas["ApplicationDetailOut"];
 export type Contact = _Schemas["ContactOut"];
 export type AddContactResult = _Schemas["AddContactResponse"];
 
-/** {path, value, set_by, set_at} — one row of the agent-edit overlay (R11).
- *  `ProfileResponse.agent_edits` itself is an untyped dict (backend `dict[str,
- *  Any]`), so this borrows the shape from `export_history`'s equivalent typed
- *  row rather than declaring a duplicate. */
-export type AgentEdit = _Schemas["ProfileEditExportOut"];
+/** {path, value, set_by, set_at, previous_value} — one live ASSISTANT edit on
+ *  `ProfileResponse.agent_edits` (R11; "was X", 2026-09-25). */
+export type AgentEdit = _Schemas["AgentEditOut"];
+
+/** One row of one field's history, newest first — both the human's web saves
+ *  (`set_by: "web"`) and the assistant's edits. `value: null` is a clear. */
+export type ProfileEditHistoryRow = _Schemas["ProfileEditHistoryRow"];
+
+export async function getProfileEditHistory(path: string): Promise<ProfileEditHistoryRow[]> {
+  const res = await request<_Schemas["ProfileEditHistoryResponse"]>(
+    `/api/profile/edits/history${qs({ path })}`
+  );
+  return res.rows;
+}
+
+/** "Take back" an assistant's change: the field falls back to the CV / form
+ *  value. Returns the rebuilt profile. */
+/** "Keep" an assistant's change: the human accepts it as their own (it moves
+ *  into the base, the mark goes). Returns the rebuilt profile. */
+export async function keepProfileEdit(path: string): Promise<ProfileResponse> {
+  return request<ProfileResponse>("/api/profile/edits/keep", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function takeBackProfileEdit(path: string): Promise<ProfileResponse> {
+  return request<ProfileResponse>("/api/profile/edits/take-back", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
 
 export async function listApplications(
   params: {
