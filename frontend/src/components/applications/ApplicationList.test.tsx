@@ -174,6 +174,32 @@ describe("ApplicationList — title fallback", () => {
   });
 });
 
+describe("ApplicationList — long titles wrap instead of being cut to one line (owner report, 2026-09-25)", () => {
+  beforeEach(() => {
+    listApplications.mockReset();
+  });
+
+  it("renders a long title with line-clamp-2 and the full text in a title attribute, not truncate", async () => {
+    const longTitle = "AI Engineer (LLMs, Agents & Applied Machine Learning Platform)";
+    const longCompany = "Some Very Long Company Name Holdings International Limited";
+    listApplications.mockResolvedValue({
+      applications: [summary({ job_title: longTitle, job_company: longCompany })],
+      total: 1,
+    });
+    render(<ApplicationList />);
+
+    const titleEl = await screen.findByText(longTitle);
+    expect(titleEl).toHaveClass("line-clamp-2");
+    expect(titleEl).not.toHaveClass("truncate");
+    expect(titleEl).toHaveAttribute("title", longTitle);
+
+    const companyEl = screen.getByText(longCompany);
+    expect(companyEl).toHaveClass("line-clamp-2");
+    expect(companyEl).not.toHaveClass("truncate");
+    expect(companyEl).toHaveAttribute("title", longCompany);
+  });
+});
+
 describe("ApplicationList — status filter", () => {
   beforeEach(() => {
     listApplications.mockReset();

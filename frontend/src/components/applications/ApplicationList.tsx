@@ -179,10 +179,18 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
                   href={`/applications/${app.id}`}
                   className="flex flex-col gap-3 md:flex-row md:items-start md:gap-6"
                 >
-                  {/* 1. Title, company, status — most prominent, reads left on wide screens. */}
-                  <div className="min-w-0 md:w-64 md:shrink-0">
-                    <p className="truncate font-semibold">{titleFor(app)}</p>
-                    <p className="truncate text-sm text-muted-foreground">{app.job_company}</p>
+                  {/* 1. Title, company, status — most prominent, reads left on wide screens.
+                      Long titles/company names wrap to 2 lines instead of being cut to one
+                      with an ellipsis (owner report, 2026-09-25); the `title` attribute
+                      carries the full text for anyone who still wants the one-line version
+                      on hover. */}
+                  <div className="min-w-0 md:w-72 md:shrink-0 lg:w-80">
+                    <p className="line-clamp-2 font-semibold" title={titleFor(app)}>
+                      {titleFor(app)}
+                    </p>
+                    <p className="line-clamp-2 text-sm text-muted-foreground" title={app.job_company}>
+                      {app.job_company}
+                    </p>
                     <span className="mt-1.5 inline-block rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
                       {STATUS_LABEL[app.status] ?? app.status}
                     </span>
