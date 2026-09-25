@@ -14,6 +14,32 @@ function pointsOf(testId: string): number[][] {
   return attr.split(" ").map((pair) => pair.split(",").map(Number));
 }
 
+/** For every rendered axis, the radial distance (from the chart centre) of
+ * whichever line of its block — a wrapped name line, or the value line —
+ * sits CLOSEST to the centre. `dy` is cumulative in SVG, so each name
+ * tspan's real y is the running sum from the text's own `y`, the same way
+ * a browser lays it out. Used to prove no label block dips inside the
+ * outer ring, on any axis, at any label position (owner fix 2026-09-25). */
+function nearestRadialDistances(cx: number, cy: number): number[] {
+  const labelTexts = screen.getAllByTestId("fit-radar-axis");
+  const valueTexts = screen.getAllByTestId("fit-radar-axis-value");
+  return labelTexts.map((labelText, idx) => {
+    const x = Number(labelText.getAttribute("x"));
+    const fontSize = Number(labelText.getAttribute("font-size"));
+    let y = Number(labelText.getAttribute("y"));
+    const distances: number[] = [];
+    for (const tspan of Array.from(labelText.querySelectorAll("tspan"))) {
+      y += Number.parseFloat(tspan.getAttribute("dy") ?? "0") * fontSize;
+      distances.push(Math.hypot(x - cx, y - cy));
+    }
+    const valueText = valueTexts[idx];
+    distances.push(
+      Math.hypot(Number(valueText.getAttribute("x")) - cx, Number(valueText.getAttribute("y")) - cy)
+    );
+    return Math.min(...distances);
+  });
+}
+
 describe("FitRadar", () => {
   it("draws one label per axis and a shape per side, with the agent's numbers on them", () => {
     render(<FitRadar axes={AXES} size={200} />);
@@ -30,15 +56,40 @@ describe("FitRadar", () => {
     expect(you[0]).toEqual([100, 100]); // you 0 on axis 0 → the centre
     expect(you[2]).toEqual([100, 164]); // you 100 on axis 2 (straight down)
 
-    // The readable version of the same numbers, for screen readers and tests.
-    expect(screen.getAllByTestId("fit-radar-row").map((el) => el.textContent)).toEqual([
-      "LLM depth: the role asks 100 of 100, you bring 0 of 100",
-      "Production ML: the role asks 50 of 100, you bring 50 of 100",
-      "Leadership: the role asks 0 of 100, you bring 100 of 100",
-      "London base: the role asks 100 of 100, you bring 100 of 100",
+    const legend = document.querySelector("figcaption");
+    expect(legend?.textContent).toContain("The role asks");
+    expect(legend?.textContent).toContain("You bring");
+  });
+
+  it("shows a visible table with one row per axis and the plain numbers", () => {
+    render(<FitRadar axes={AXES} size={200} />);
+
+    const table = screen.getByTestId("fit-radar-table");
+    expect(table).toBeVisible();
+
+    const rows = screen.getAllByTestId("fit-radar-row");
+    expect(rows).toHaveLength(AXES.length);
+    // The name cell is a `<th scope="row">` (accessible row header), the two
+    // number cells are `<td>` — read both cell types in DOM order.
+    expect(rows.map((row) => Array.from(row.querySelectorAll("th, td")).map((cell) => cell.textContent))).toEqual([
+      ["LLM depth", "100", "0"],
+      ["Production ML", "50", "50"],
+      ["Leadership", "0", "100"],
+      ["London base", "100", "100"],
     ]);
-    expect(screen.getByText("The role asks")).toBeInTheDocument();
-    expect(screen.getByText("You bring")).toBeInTheDocument();
+
+    // Column headers name what the numbers mean.
+    expect(screen.getByRole("columnheader", { name: "Line" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "The role asks" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "You bring" })).toBeInTheDocument();
+  });
+
+  it("draws the value text at the same font size as the axis label (owner decision 2026-09-25)", () => {
+    render(<FitRadar axes={AXES} size={200} />);
+
+    const label = screen.getAllByTestId("fit-radar-axis")[0];
+    const value = screen.getAllByTestId("fit-radar-axis-value")[0];
+    expect(value.getAttribute("font-size")).toBe(label.getAttribute("font-size"));
   });
 
   it("draws a small 'asks N · you N' value line under each axis label", () => {
@@ -79,6 +130,133 @@ describe("FitRadar", () => {
     const viewBox = container.querySelector("svg")?.getAttribute("viewBox") ?? "";
     const firstNumber = Number(viewBox.split(" ")[0]);
     expect(firstNumber).toBeLessThan(-20);
+  });
+
+  it("stacks a wrapped top label upward so it clears the outer ring (owner fix 2026-09-25)", () => {
+    const size = 200;
+    const cy = size / 2; // 100
+    const r = size * 0.32; // 64 — outer ring
+    const ringTop = cy - r; // 36 — the outer ring's top vertex
+
+    const longName = "CS fundamentals (distributed, HPC)";
+    render(<FitRadar axes={[{ name: longName, role: 75, you: 40 }, AXES[1], AXES[2]]} size={size} />);
+
+    const topLabel = screen.getAllByTestId("fit-radar-axis").find((el) => el.textContent === longName);
+    expect(topLabel).toBeDefined();
+
+    const textY = Number(topLabel?.getAttribute("y"));
+    const fontSize = Number(topLabel?.getAttribute("font-size"));
+    const tspans = Array.from(topLabel?.querySelectorAll("tspan") ?? []);
+    expect(tspans).toHaveLength(2);
+
+    // `dy` is cumulative in SVG — walk the chain to find the last tspan's
+    // actual y, the same way the browser would place it.
+    let lastTspanY = textY;
+    for (const tspan of tspans) {
+      lastTspanY += Number.parseFloat(tspan.getAttribute("dy") ?? "0") * fontSize;
+    }
+    expect(lastTspanY).toBeLessThan(ringTop);
+
+    // The value line ("asks 75 · you 40") is the part of the block closest
+    // to the chart — it must clear the ring too, which is the bug the owner
+    // reported (it used to overlap the polygon's top vertex).
+    const topValue = screen.getAllByTestId("fit-radar-axis-value")[0];
+    const valueY = Number(topValue.getAttribute("y"));
+    expect(valueY).toBeLessThan(ringTop);
+
+    // And the name block sits above (smaller y than) the value line — the
+    // whole block grows upward, away from the chart.
+    expect(lastTspanY).toBeLessThan(valueY);
+  });
+
+  it("keeps a wrapped BOTTOM-middle label's first line clear of the outer ring (n=4)", () => {
+    // Reproduces the CI-reported bug: a 2-line name straight below centre
+    // (axis 2 of 4, angle 90deg -> textAnchor "middle") used to have its
+    // first line pulled UP toward the ring by the old centred dy chain.
+    const size = 200;
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = size * 0.32;
+
+    render(
+      <FitRadar
+        axes={[
+          { name: "LLM depth", role: 100, you: 0 },
+          { name: "RAG", role: 50, you: 50 },
+          { name: "Production Python & deployment", role: 85, you: 65 },
+          { name: "CS", role: 0, you: 100 },
+        ]}
+        size={size}
+      />
+    );
+
+    const bottomLabel = screen
+      .getAllByTestId("fit-radar-axis")
+      .find((el) => el.textContent === "Production Python & deployment");
+    expect(bottomLabel).toBeDefined();
+    expect(bottomLabel?.querySelectorAll("tspan")).toHaveLength(2);
+
+    const distances = nearestRadialDistances(cx, cy);
+    for (const d of distances) {
+      expect(d).toBeGreaterThanOrEqual(r + size * 0.05); // labelR's gap over the ring
+    }
+  });
+
+  it("keeps every label block clear of the outer ring on an odd axis count (n=5)", () => {
+    const size = 200;
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = size * 0.32;
+
+    render(
+      <FitRadar
+        axes={[
+          { name: "LLM apps & frontier APIs", role: 90, you: 80 }, // top, wraps
+          { name: "RAG & retrieval design", role: 85, you: 80 }, // top-side, wraps
+          { name: "NLP / CV modelling depth", role: 70, you: 65 }, // bottom-side, wraps
+          { name: "Production Python & deployment", role: 85, you: 65 }, // bottom-side, wraps
+          { name: "Client-facing delivery", role: 55, you: 35 }, // top-side
+        ]}
+        size={size}
+      />
+    );
+
+    const distances = nearestRadialDistances(cx, cy);
+    expect(distances).toHaveLength(5);
+    for (const d of distances) {
+      expect(d).toBeGreaterThanOrEqual(r + size * 0.05);
+    }
+  });
+
+  it("keeps every label block clear of the outer ring on the owner's real 6 axes (n=6)", () => {
+    // The exact axes from the owner's real app (app 53) — also used by the
+    // alignment e2e fixture. Includes top axes anchored start/end (bug 2 —
+    // their value line used to grow down into the ring) and a bottom-middle
+    // 2-line label (bug 1 — its first line used to grow up into the ring).
+    const size = 320; // AlignmentPanel's real render size (the FitRadar default)
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = size * 0.32;
+
+    render(
+      <FitRadar
+        axes={[
+          { name: "LLM apps & frontier APIs", role: 90, you: 80 },
+          { name: "RAG & retrieval design", role: 85, you: 80 },
+          { name: "NLP / CV modelling depth", role: 70, you: 65 },
+          { name: "Production Python & deployment", role: 85, you: 65 },
+          { name: "CS fundamentals (distributed, HPC)", role: 75, you: 40 },
+          { name: "Client-facing delivery", role: 55, you: 35 },
+        ]}
+        size={size}
+      />
+    );
+
+    const distances = nearestRadialDistances(cx, cy);
+    expect(distances).toHaveLength(6);
+    for (const d of distances) {
+      expect(d).toBeGreaterThanOrEqual(r + size * 0.05);
+    }
   });
 
   it("renders a short axis label as a single tspan", () => {
