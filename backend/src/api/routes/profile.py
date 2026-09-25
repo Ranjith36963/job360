@@ -16,19 +16,23 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.auth_deps import CurrentUser, require_user
+from src.api.auth_deps import CurrentUser, require_session_user, require_user
 from src.api.dependencies import save_upload_to_temp
 from src.api.models import (
+    AgentEditOut,
     CVDetail,
     GitHubResponse,
     JsonResumeResponse,
     LessonOut,
     LinkedInResponse,
+    ProfileEditHistoryResponse,
+    ProfileEditHistoryRow,
     ProfileEditOut,
     ProfileResponse,
     ProfileSummary,
     ProfileVersionsListResponse,
     ProfileVersionSummary,
+    TakeBackRequest,
 )
 from src.core import settings
 from src.core.settings import PROFILE_EXTRACT_MAX_PER_HOUR
@@ -77,7 +81,7 @@ logger = logging.getLogger("job360.api.profile")
 def _build_profile_response(
     profile: UserProfile,
     user_id: str,
-    agent_edits: list[ProfileEditOut],
+    agent_edits: list[AgentEditOut],
     lessons: list[LessonOut] | None = None,
 ) -> ProfileResponse:
     """Render ``profile`` as the API's ``ProfileResponse``.
@@ -305,6 +309,24 @@ def _countries_or_422(value: Any) -> list[str]:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
+_NOTES_PATH = "preferences.assistant_notes"
+
+# Preference fields the web preferences form does not own: written only
+# through the agent-edit overlay (update_profile / PATCH /api/profile). A web
+# preferences save ignores them in `_apply_preferences` and never records a
+# history row for them (owner decision 2026-09-25, daily-check offer).
+_OVERLAY_ONLY_PREFERENCES: frozenset[str] = frozenset({"daily_check"})
+
+
+def _notes_or_422(value: Any) -> list[str]:
+    """The notes list through the SAME validator ``update_profile`` uses, or
+    a 422 naming the limit — never a silent cut."""
+    try:
+        return cast(list[str], profile_edits.validate_edit(_NOTES_PATH, value if value is not None else []))
+    except profile_edits.ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
 def _recent_lessons(user_id: str) -> list[LessonOut]:
     """The last ``PROFILE_LESSONS_MAX`` lessons — one bounded read."""
     from src.services.applications.lessons import list_lessons  # noqa: PLC0415
@@ -325,10 +347,15 @@ def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
     route (one profile read + one overlay read) and then loaded the profile
     AGAIN plus the overlay AGAIN — four connections to answer one tool call.
     """
-    profile, overlay = load_profile_with_overlay(user_id)
+    profile, overlay = load_profile_with_overlay(user_id, with_previous=True)
     if profile is None:
         raise HTTPException(status_code=404, detail="No profile found")
-    rows = [ProfileEditOut(**row) for row in overlay]
+    # ONE history holds both sides (the human's web saves are rows too), but
+    # only an ASSISTANT's row is an "assistant changed this" — a field whose
+    # newest row is the human's own save carries no mark and is not listed.
+    rows = [
+        AgentEditOut(**row) for row in overlay if profile_edits.is_assistant_actor(str(row["set_by"]))
+    ]
     return profile, _build_profile_response(profile, user_id, rows, lessons=_recent_lessons(user_id))
 
 
@@ -466,6 +493,128 @@ async def update_profile(
     return UpdateProfileResponse(
         applied=[ProfileEditOut(**row) for row in applied], profile=rendered
     )
+
+
+# ── One field's history + "Take back" (owner decision, 2026-09-25) ──────────
+# History, Take back and Keep are WEB doors for the human, and they are
+# SESSION-ONLY (`require_session_user`): a personal token or OAuth grant is an
+# assistant, and an assistant must never "accept" (Keep) its own edit on the
+# user's behalf, nor use the un-rate-limited Take back as a free edit door.
+# No MCP tool either: an agent already reads the whole log with
+# export_history and clears a field with update_profile(null).
+
+
+def _editable_path_or_422(path: str) -> str:
+    """``path`` if it is one of the closed editable paths, else a 422 naming them."""
+    paths = profile_edits.editable_paths()
+    if path not in paths:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{path!r} is not an editable path. Editable paths: {', '.join(paths)}",
+        )
+    return path
+
+
+@router.get("/profile/edits/history", response_model=ProfileEditHistoryResponse)
+async def profile_edit_history(
+    path: str = Query(..., max_length=100),
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
+) -> ProfileEditHistoryResponse:
+    """Every change to ONE of the caller's profile fields, newest first.
+
+    Both sides in one list: the human's own web saves (``set_by: "web"``) and
+    the assistant's edits (``agent:…`` / ``token:…``); ``value: null`` is a
+    clear. At most ``PROFILE_EDIT_HISTORY_MAX`` rows — ``export_history``
+    carries the whole log. Scoped to the caller (rule #12): the query filters
+    by ``user.id``, so no parameter can reach another user's rows.
+    """
+    _editable_path_or_422(path)
+    rows = profile_edits.path_history(user.id, path, max(1, settings.PROFILE_EDIT_HISTORY_MAX))
+    return ProfileEditHistoryResponse(path=path, rows=[ProfileEditHistoryRow(**r) for r in rows])
+
+
+@router.post("/profile/edits/take-back", response_model=ProfileResponse)
+async def take_back_edit(
+    body: TakeBackRequest,
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
+) -> ProfileResponse:
+    """Take back the assistant's change to one field: it falls back to the
+    value from the CV / the web form (the base profile).
+
+    Append-only (M3): a new clearing row (``value = NULL``) authored by the
+    caller — ``web`` for a signed-in human; the assistant's row stays in the
+    history. NOT rate-limited, same as the section clear: the human undoing
+    an assistant must never spend the assistant's edit budget.
+
+    404 when the field's newest row is not a live assistant edit — there is
+    nothing to take back (and a caller can never name another user's field:
+    the lookup is scoped by ``user.id``).
+    """
+    path = _editable_path_or_422(body.path)
+    newest = profile_edits.path_history(user.id, path, 1)
+    if (
+        not newest
+        or newest[0]["value"] is None
+        or not profile_edits.is_assistant_actor(str(newest[0]["set_by"]))
+    ):
+        raise HTTPException(status_code=404, detail=f"No assistant change to take back on {path}")
+    profile_edits.record_edits(user.id, actor_for(user), [(path, None)], enforce_rate_limit=False)
+    get_audit_logger().info(
+        "profile_edit_taken_back",
+        extra={"event": "profile_edit_taken_back", "paths": [path], "actor": actor_for(user)},
+    )
+    return load_profile_response(user.id)[1]
+
+
+@router.post("/profile/edits/keep", response_model=ProfileResponse)
+async def keep_edit(
+    body: TakeBackRequest,
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 — a human web action (session only)
+) -> ProfileResponse:
+    """Keep the assistant's change to one field: the human accepts it as theirs.
+
+    Writes the assistant's CURRENT value into the BASE profile, then appends
+    a row with that same value authored by the caller (``web`` in a browser).
+    The newest row is now the human's, so the mark goes, and a later "Take
+    back" has nothing to undo (404) — the value is the human's own now, and
+    survives any later autosave or re-extraction of the overlay.
+
+    Append-only (M3): the assistant's row stays in the history. Not
+    rate-limited (the human's own action). No MCP tool: an assistant cannot
+    accept its own edit on the user's behalf. 404 when the field has no live
+    assistant edit; the lookup is scoped by ``user.id`` (rule #12).
+    """
+    path = _editable_path_or_422(body.path)
+    newest = profile_edits.path_history(user.id, path, 1)
+    if (
+        not newest
+        or newest[0]["value"] is None
+        or not profile_edits.is_assistant_actor(str(newest[0]["set_by"]))
+    ):
+        raise HTTPException(status_code=404, detail=f"No assistant change to keep on {path}")
+    value = copy.deepcopy(newest[0]["value"])
+    # VALIDATE BEFORE ANY WRITE. record_edits below re-validates, and a cap
+    # tightened since the assistant wrote this row would otherwise raise
+    # after the base was already saved — a 500 with half a Keep applied.
+    try:
+        profile_edits.validate_edit(path, value)
+    except profile_edits.ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    base = load_profile(user.id, with_overlay=False)
+    if base is None:  # pragma: no cover — an overlay row implies a profile row (R8)
+        raise HTTPException(status_code=404, detail="No profile found")
+    head, _, field_name = path.partition(".")
+    target: Any = base.cv_data if head == "cv_data" else base.preferences
+    setattr(target, field_name, copy.deepcopy(value))
+    save_profile(base, user.id, source_action="keep_edit")
+    profile_edits.record_edits(
+        user.id, actor_for(user), [(path, value)], enforce_rate_limit=False, store_as_given=True
+    )
+    get_audit_logger().info(
+        "profile_edit_kept",
+        extra={"event": "profile_edit_kept", "paths": [path], "actor": actor_for(user)},
+    )
+    return load_profile_response(user.id)[1]
 
 
 # ── Shared profile-input helpers — the upload pipeline in ONE place ──
@@ -697,8 +846,18 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         # the overlay wins on read, but the same "rebuilds from scratch"
         # pattern already bit needs_visa/work_authorization_countries twice
         # (PR #630), so it is carried forward here too rather than relying on
-        # the overlay alone.
+        # the overlay alone. A posted `daily_check` key is ignored on purpose,
+        # and `_record_web_preference_changes` skips it too
+        # (`_OVERLAY_ONLY_PREFERENCES`), so a web save never writes a history
+        # row that would wipe the assistant's remembered answer.
         daily_check=existing.daily_check,
+        # Standing instructions for the assistant. Same partial-save shape: an
+        # OMITTED key keeps the stored notes, an explicit [] clears them. Same
+        # validator as update_profile (length cap, count cap, control chars
+        # stripped) so the web and the agent can never store different shapes.
+        assistant_notes=_notes_or_422(
+            pref_dict.get("assistant_notes", existing.assistant_notes)
+        ),
     )
     # Scrub extraction pollution before it is stored. The frontend autosaves the
     # loaded preference chips straight back, so a profile whose additional_skills
@@ -735,26 +894,96 @@ def _clear_overlay_paths(user: CurrentUser, paths: list[str]) -> None:
     )
 
 
-def _retire_overlaid_preferences(
-    preferences_json: str, saved: UserProfile, user: CurrentUser
+def _effective_preferences(user_id: str) -> UserPreferences:
+    """What the page showed BEFORE a save: the merged (overlay-applied)
+    preferences, or a blank set for a user with no profile yet."""
+    merged = load_profile(user_id)
+    return merged.preferences if merged is not None else UserPreferences()
+
+
+def _keep_base_under_assistant_edits(
+    preferences_json: str,
+    profile: UserProfile,
+    base_prefs: UserPreferences,
+    before: UserPreferences,
+    user: CurrentUser,
+) -> set[str]:
+    """Never let an assistant's overlay value leak into the BASE on a web save.
+
+    The form autosaves EVERY field, filled from the MERGED profile — so a
+    field the assistant set is posted back with the assistant's value, as if
+    the human had typed it. Written into the base, it would quietly become
+    permanent: "Take back" falls back to the base, and would then "restore"
+    the assistant's value, losing what the human had before.
+
+    So for every path whose newest row is an ASSISTANT row and whose posted
+    value equals what the page showed (``before``, the merged value), put the
+    base's own value back on ``profile`` before it is saved. Only a value the
+    human genuinely changed overwrites the base (and gets a web history row).
+    Returns the paths kept, so the history step skips them.
+
+    "Unchanged" is judged on the POSTED RAW value as well as the stored one.
+    ``sanitize_preferences`` cleans a web save (it drops CV-duplicate skills)
+    but an assistant's write is never cleaned — so an untouched
+    ``additional_skills`` the assistant set to ["Python", "Rust"] comes back
+    from the cleaner as ["Rust"], which no longer equals the merged value.
+    Judged on the cleaned value alone, that untouched field read as a human
+    change and silently replaced the assistant's edit.
+    """
+    try:
+        submitted = json.loads(preferences_json)
+    except json.JSONDecodeError:  # pragma: no cover — _apply_preferences parsed it already
+        submitted = {}
+    if not isinstance(submitted, dict):  # pragma: no cover — same
+        submitted = {}
+    kept: set[str] = set()
+    for row in profile_edits.current_overlay(user.id):
+        path = str(row["path"])
+        head, _, field_name = path.partition(".")
+        if head != "preferences" or not profile_edits.is_assistant_actor(str(row["set_by"])):
+            continue
+        if not hasattr(profile.preferences, field_name):  # pragma: no cover — defensive
+            continue
+        shown = getattr(before, field_name, None)
+        posted_raw_unchanged = field_name in submitted and submitted[field_name] == shown
+        if posted_raw_unchanged or getattr(profile.preferences, field_name) == shown:
+            setattr(profile.preferences, field_name, copy.deepcopy(getattr(base_prefs, field_name)))
+            kept.add(path)
+    return kept
+
+
+def _record_web_preference_changes(
+    preferences_json: str,
+    before: UserPreferences,
+    saved: UserProfile,
+    user: CurrentUser,
+    skip: set[str] | frozenset[str] = frozenset(),
 ) -> None:
-    """After a preferences form save: clear the overlay for the fields the
-    human actually CHANGED, and only those.
+    """After a preferences form save: append one ``profile_edits`` row, with
+    the NEW value and ``set_by=web``, for every field the human CHANGED.
 
-    The flagged concern in the spec ("web edits vs overlay") is real in one
-    direction only. A form save that leaves a field alone must not disturb
-    the agent's edit of it — the form posts a partial document, and an
-    omitted key means "not touched", not "cleared" (rule #29). But a field
-    the human DID submit with a different value is an explicit correction:
-    the seeker looked at the value the agent set and typed something else.
-    Leaving the overlay in place there would show them their own change being
-    ignored, with no way from the web to take the agent's value back.
+    ONE HISTORY (owner decision, 2026-09-25). The assistant's changes were
+    rows and the human's were not, so "who set my salary, and when" had half
+    an answer. Now both sides live in the same append-only per-field log, and
+    ``GET /profile/edits/history`` reads it back.
 
-    So: for every overlay path ``preferences.X`` where ``X`` is a KEY IN THE
-    SUBMITTED JSON and the value that was actually stored differs from the
-    overlay's, append a clearing row. Comparison is against the SAVED
+    PRECEDENCE IS UNCHANGED: the newest row wins. A human save of a field is
+    now its newest row, so it wins over an older assistant value exactly as
+    the clearing row this replaces did — and the web row's value IS the value
+    just saved to the base, so the page shows the human's value either way.
+
+    "Changed" means: the key is IN THE SUBMITTED JSON (an omitted key is "not
+    touched", rule #29 — the form may post a partial document) AND the value
+    actually stored differs from what the page showed before the save
+    (``before``: the merged preferences). Comparison is against the SAVED
     preferences, not the raw JSON, so it accounts for the normalisers
     (``work_arrangement``/``experience_level``) and ``sanitize_preferences``.
+    A field the human re-submitted unchanged leaves an assistant's edit (and
+    its mark) standing.
+
+    A saved value the agent-edit validator would refuse (a web field longer
+    than the agent's caps) is recorded as a CLEAR instead: the human still
+    wins — the base already holds their value — and the save never 500s.
     """
     try:
         submitted = json.loads(preferences_json)
@@ -763,14 +992,25 @@ def _retire_overlaid_preferences(
     if not isinstance(submitted, dict):  # pragma: no cover — same
         return
 
-    to_clear: list[str] = []
-    for row in profile_edits.current_overlay(user.id):
-        head, _, field_name = str(row["path"]).partition(".")
-        if head != "preferences" or field_name not in submitted:
+    rows: list[tuple[str, Any]] = []
+    for path in profile_edits.editable_paths():
+        head, _, field_name = path.partition(".")
+        if head != "preferences" or field_name not in submitted or path in skip:
             continue
-        if getattr(saved.preferences, field_name, None) != row["value"]:
-            to_clear.append(row["path"])
-    _clear_overlay_paths(user, to_clear)
+        if field_name in _OVERLAY_ONLY_PREFERENCES:
+            continue
+        new_value = getattr(saved.preferences, field_name, None)
+        if new_value == getattr(before, field_name, None):
+            continue
+        try:
+            profile_edits.validate_edit(path, new_value)
+        except profile_edits.ProfileEditError:
+            new_value = None
+        rows.append((path, copy.deepcopy(new_value)))
+    if rows:
+        profile_edits.record_edits(
+            user.id, actor_for(user), rows, enforce_rate_limit=False, store_as_given=True
+        )
 
 
 async def _extract_save_trigger(
@@ -848,13 +1088,16 @@ async def upsert_preferences(
     """Set the caller's preferences form — one input, one dedicated route.
 
     Loads the BASE profile (``with_overlay=False``) and, after saving,
-    retires the overlay for any preference the human actually changed —
-    see :func:`_retire_overlaid_preferences`.
+    appends a ``set_by=web`` history row for every preference the human
+    actually changed — see :func:`_record_web_preference_changes`.
     """
+    before = _effective_preferences(user.id)
     profile = load_profile(user.id, with_overlay=False) or UserProfile()
+    base_prefs = copy.deepcopy(profile.preferences)
     _apply_preferences(preferences, profile)
+    kept = _keep_base_under_assistant_edits(preferences, profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
-    _retire_overlaid_preferences(preferences, profile, user)
+    _record_web_preference_changes(preferences, before, profile, user, skip=kept)
     return load_profile_response(user.id)[1]
 
 
@@ -872,15 +1115,19 @@ async def upsert_profile(
     Loads the BASE profile (``with_overlay=False``) for the same reason the
     dedicated routes do — it mutates and saves.
     """
+    before = _effective_preferences(user.id) if preferences is not None else None
     profile = load_profile(user.id, with_overlay=False) or UserProfile()
     if cv is not None:
         content = await cv.read(10 * 1024 * 1024 + 1)
         await _capture_cv_raw(content, cv.filename, profile)
-    if preferences is not None:
+    kept: set[str] = set()
+    if preferences is not None and before is not None:
+        base_prefs = copy.deepcopy(profile.preferences)
         _apply_preferences(preferences, profile)
+        kept = _keep_base_under_assistant_edits(preferences, profile, base_prefs, before, user)
     await _extract_save_trigger(profile, user.id)
-    if preferences is not None:
-        _retire_overlaid_preferences(preferences, profile, user)
+    if preferences is not None and before is not None:
+        _record_web_preference_changes(preferences, before, profile, user, skip=kept)
     return load_profile_response(user.id)[1]
 
 
@@ -1351,9 +1598,44 @@ async def restore_version(
     restored = restore_profile_version(user.id, version_id)
     if restored is None:
         raise HTTPException(status_code=404, detail="Version not found")
+    _resync_web_rows_to_base(user)
     # Re-read so the response is the MERGED profile the user will see on the
-    # page: a restore rewrites the base, it does not touch the overlay.
+    # page: a restore rewrites the base, it does not touch an ASSISTANT's edit.
     return load_profile_response(user.id)[1]
+
+
+def _resync_web_rows_to_base(user: CurrentUser) -> None:
+    """After a restore: a field whose newest row is the human's own web save
+    gets a new ``set_by=web`` row holding the RESTORED value.
+
+    A web save's row carries the value the human typed, and the newest row
+    wins — so without this, restoring an older version would be hidden behind
+    the human's own last save of that field, and the restore would look like
+    it did nothing. The restore IS the human's change, so it is recorded as
+    one (append-only; the older rows stay). Assistant edits are left alone,
+    exactly as before: a restore rewrites the base, not the assistant's work.
+    """
+    base = load_profile(user.id, with_overlay=False)
+    if base is None:  # pragma: no cover — the restore just wrote it
+        return
+    valid = set(profile_edits.editable_paths())
+    rows: list[tuple[str, Any]] = []
+    for row in profile_edits.current_overlay(user.id):
+        path = str(row["path"])
+        if path not in valid or profile_edits.is_assistant_actor(str(row["set_by"])):
+            continue
+        value = profile_edits.field_values(base, [path])[path]
+        if value == row["value"]:
+            continue
+        try:
+            profile_edits.validate_edit(path, value)
+        except profile_edits.ProfileEditError:
+            value = None
+        rows.append((path, copy.deepcopy(value)))
+    if rows:
+        profile_edits.record_edits(
+            user.id, actor_for(user), rows, enforce_rate_limit=False, store_as_given=True
+        )
 
 
 def _get_profile_version_for_user(version_id: int, user_id: str) -> dict[str, Any] | None:

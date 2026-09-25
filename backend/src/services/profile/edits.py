@@ -437,6 +437,51 @@ def _validate_records(path: str, value: Any) -> list[dict[str, Any]]:
     return records
 
 
+# The note lists — standing instructions to the assistant, one line each.
+# Kept as a set so a second note-shaped path is one entry here, not a new branch.
+NOTE_PATHS: frozenset[str] = frozenset({"preferences.assistant_notes"})
+
+
+def _validate_notes(path: str, value: Any) -> list[str]:
+    """A list of short one-line notes, capped per note and per list.
+
+    Each note has control/bidi characters stripped (same set as the record
+    lists) and is at most ``PROFILE_NOTE_MAX_CHARS`` long — a breach is a 422
+    naming the limit, never a silent cut. Blank notes are dropped; a repeated
+    note (case/space-insensitive) keeps its first spelling. At most
+    ``PROFILE_EDIT_MAX_LIST_ITEMS`` notes. An empty list is valid and means
+    "nothing to say" (rule #29).
+    """
+    if not isinstance(value, list):
+        raise ProfileEditError(422, f"{path} must be a list of strings, got {type(value).__name__}")
+    out: list[str] = []
+    seen: set[str] = set()
+    for i, item in enumerate(value):
+        if not isinstance(item, str):
+            raise ProfileEditError(
+                422, f"{path}[{i}] must be a string, got {type(item).__name__}"
+            )
+        text = _strip_control(item)
+        if len(text) > settings.PROFILE_NOTE_MAX_CHARS:
+            raise ProfileEditError(
+                422,
+                f"{path}[{i}] exceeds the {settings.PROFILE_NOTE_MAX_CHARS}-character limit "
+                "(PROFILE_NOTE_MAX_CHARS)",
+            )
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    if len(out) > settings.PROFILE_EDIT_MAX_LIST_ITEMS:
+        raise ProfileEditError(
+            422,
+            f"{path} exceeds the {settings.PROFILE_EDIT_MAX_LIST_ITEMS}-item limit "
+            "(PROFILE_EDIT_MAX_LIST_ITEMS)",
+        )
+    return out
+
+
 def validate_edit(path: str, value: Any) -> Any:
     """Normalise ``value`` for ``path``, or raise ``ProfileEditError(422, ...)``.
 
@@ -453,6 +498,11 @@ def validate_edit(path: str, value: Any) -> Any:
         return None
     if path in _CLOSED_SET_PATHS:
         return _validate_closed_set(path, value, _CLOSED_SET_PATHS[path])
+    if path in NOTE_PATHS:
+        # Bounded by shape alone: PROFILE_NOTE_MAX_CHARS x PROFILE_EDIT_MAX_LIST_ITEMS.
+        # The generic encoded cap (PROFILE_EDIT_MAX_CHARS) would quietly allow
+        # only a handful of notes, which is not what either setting says.
+        return _validate_notes(path, value)
     if path in RECORD_SCHEMAS:
         return _bound_encoded_size(
             path,
@@ -560,6 +610,41 @@ def current_overlay(user_id: str, conn: pgsync.Connection | None = None) -> list
     return out
 
 
+# The actor ``authorship.actor_for`` gives a signed-in human at the browser.
+# Rows by this author are the human's own changes: they are history, never an
+# "assistant changed this" mark.
+WEB_ACTOR = "web"
+
+
+def is_assistant_actor(set_by: str) -> bool:
+    """True for a row an assistant wrote (``agent:…`` / ``token:…``), False for the web."""
+    return bool(set_by) and set_by != WEB_ACTOR
+
+
+def path_history(user_id: str, path: str, limit: int) -> list[dict[str, Any]]:
+    """Every row for one of ``user_id``'s paths, NEWEST first, at most ``limit``.
+
+    ``{"value", "set_by", "set_at"}`` per row; ``value`` is ``None`` for a
+    clear. Scoped by ``user_id`` in the query itself (rule #12) — a caller
+    can only ever read its own history.
+    """
+    sql = (
+        "SELECT value, set_by, set_at FROM profile_edits "
+        "WHERE user_id = ? AND path = ? ORDER BY id DESC LIMIT ?"
+    )
+    try:
+        with pgsync.connect(str(DB_PATH)) as conn:
+            rows = conn.execute(sql, (user_id, path, limit)).fetchall()
+    except pgsync.OperationalError as exc:
+        if _is_missing_table(exc):
+            return []
+        raise
+    return [
+        {"value": None if value is None else json.loads(value), "set_by": set_by, "set_at": set_at}
+        for value, set_by, set_at in rows
+    ]
+
+
 def apply_overlay(
     profile: UserProfile, user_id: str, conn: pgsync.Connection | None = None
 ) -> UserProfile:
@@ -615,6 +700,7 @@ def record_edits(
     edits: list[tuple[str, Any]],
     *,
     enforce_rate_limit: bool = True,
+    store_as_given: bool = False,
 ) -> list[dict[str, Any]]:
     """Validate every edit, then insert them append-only in ONE transaction.
 
@@ -633,16 +719,25 @@ def record_edits(
     a typo in a path should not be able to spend its own edit budget on
     rejections.
 
-    ``enforce_rate_limit=False`` is for the WEB's own bookkeeping writes — the
-    clearing rows ``POST /profile/clear`` and the preferences form append to
-    retire an overlay path. Those are the human's clear, not an agent edit, so
-    they must not consume the agent's hourly budget.
+    ``enforce_rate_limit=False`` is for the WEB's own writes — the clearing
+    rows ``POST /profile/clear`` and "Take back" append, and the rows a
+    preferences save appends for each field the human changed. Those are the
+    human's own changes, not an agent edit, so they must not consume the
+    agent's hourly budget.
+
+    ``store_as_given=True`` still VALIDATES every value but stores it exactly
+    as passed, not in its normalised form. For the web's preference-save rows:
+    the value was just saved to the base, and the history row must hold that
+    same value — a normalised copy (stripped, de-duplicated) would shadow the
+    base with something the human did not type.
 
     Returns the applied rows in the same ``{"path", "value", "set_by",
     "set_at"}`` shape as :func:`current_overlay`.
     """
     # Validate everything up front — nothing below this line can 422.
     normalised: list[tuple[str, Any]] = [(path, validate_edit(path, value)) for path, value in edits]
+    if store_as_given:
+        normalised = [(path, value) for path, value in edits]
     if not normalised:
         return []
 

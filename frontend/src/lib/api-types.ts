@@ -1076,6 +1076,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/profile/edits/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Profile Edit History
+         * @description Every change to ONE of the caller's profile fields, newest first.
+         *
+         *     Both sides in one list: the human's own web saves (``set_by: "web"``) and
+         *     the assistant's edits (``agent:…`` / ``token:…``); ``value: null`` is a
+         *     clear. At most ``PROFILE_EDIT_HISTORY_MAX`` rows — ``export_history``
+         *     carries the whole log. Scoped to the caller (rule #12): the query filters
+         *     by ``user.id``, so no parameter can reach another user's rows.
+         */
+        get: operations["profile_edit_history_api_profile_edits_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/edits/keep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep Edit
+         * @description Keep the assistant's change to one field: the human accepts it as theirs.
+         *
+         *     Writes the assistant's CURRENT value into the BASE profile, then appends
+         *     a row with that same value authored by the caller (``web`` in a browser).
+         *     The newest row is now the human's, so the mark goes, and a later "Take
+         *     back" has nothing to undo (404) — the value is the human's own now, and
+         *     survives any later autosave or re-extraction of the overlay.
+         *
+         *     Append-only (M3): the assistant's row stays in the history. Not
+         *     rate-limited (the human's own action). No MCP tool: an assistant cannot
+         *     accept its own edit on the user's behalf. 404 when the field has no live
+         *     assistant edit; the lookup is scoped by ``user.id`` (rule #12).
+         */
+        post: operations["keep_edit_api_profile_edits_keep_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/profile/edits/take-back": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take Back Edit
+         * @description Take back the assistant's change to one field: it falls back to the
+         *     value from the CV / the web form (the base profile).
+         *
+         *     Append-only (M3): a new clearing row (``value = NULL``) authored by the
+         *     caller — ``web`` for a signed-in human; the assistant's row stays in the
+         *     history. NOT rate-limited, same as the section clear: the human undoing
+         *     an assistant must never spend the assistant's edit budget.
+         *
+         *     404 when the field's newest row is not a live assistant edit — there is
+         *     nothing to take back (and a caller can never name another user's field:
+         *     the lookup is scoped by ``user.id``).
+         */
+        post: operations["take_back_edit_api_profile_edits_take_back_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/profile/github": {
         parameters: {
             query?: never;
@@ -1188,8 +1275,8 @@ export interface paths {
          * @description Set the caller's preferences form — one input, one dedicated route.
          *
          *     Loads the BASE profile (``with_overlay=False``) and, after saving,
-         *     retires the overlay for any preference the human actually changed —
-         *     see :func:`_retire_overlaid_preferences`.
+         *     appends a ``set_by=web`` history row for every preference the human
+         *     actually changed — see :func:`_record_web_preference_changes`.
          */
         post: operations["upsert_preferences_api_profile_preferences_post"];
         delete?: never;
@@ -1603,6 +1690,28 @@ export interface components {
             contact: components["schemas"]["ContactOut"];
             /** Event Id */
             event_id: number | null;
+        };
+        /**
+         * AgentEditOut
+         * @description One live ASSISTANT edit on ``GET /profile``'s ``agent_edits``.
+         *
+         *     ``previous_value`` is the field's base value — what the CV / the user's
+         *     own saves hold under this edit, and so exactly what "Take back" restores
+         *     (the label never promises a value Take back would not produce).
+         *     ``None`` / ``""`` / ``[]`` all mean "it was empty" — the page words them
+         *     that way.
+         */
+        AgentEditOut: {
+            /** Path */
+            path: string;
+            /** Previous Value */
+            previous_value?: unknown;
+            /** Set At */
+            set_at: string;
+            /** Set By */
+            set_by: string;
+            /** Value */
+            value?: unknown;
         };
         /**
          * AlignmentOut
@@ -2351,6 +2460,11 @@ export interface components {
         ExportHistoryResponse: {
             /** Applications */
             applications: components["schemas"]["ExportApplicationOut"][];
+            /**
+             * Assistant Notes
+             * @default []
+             */
+            assistant_notes: string[];
             /** Bytes */
             bytes: number;
             /** Next Since */
@@ -2675,6 +2789,26 @@ export interface components {
             /** Value */
             value: unknown;
         };
+        /** ProfileEditHistoryResponse */
+        ProfileEditHistoryResponse: {
+            /** Path */
+            path: string;
+            /** Rows */
+            rows: components["schemas"]["ProfileEditHistoryRow"][];
+        };
+        /**
+         * ProfileEditHistoryRow
+         * @description One row of one field's history, newest first. ``value: null`` is a
+         *     clear (the field fell back to what the CV / the web form holds).
+         */
+        ProfileEditHistoryRow: {
+            /** Set At */
+            set_at: string;
+            /** Set By */
+            set_by: string;
+            /** Value */
+            value?: unknown;
+        };
         /** ProfileEditIn */
         ProfileEditIn: {
             /** Path */
@@ -2713,7 +2847,7 @@ export interface components {
              * Agent Edits
              * @default []
              */
-            agent_edits: components["schemas"]["ProfileEditOut"][];
+            agent_edits: components["schemas"]["AgentEditOut"][];
             /** Current Version Id */
             current_version_id?: number | null;
             cv_detail?: components["schemas"]["CVDetail"] | null;
@@ -3294,6 +3428,16 @@ export interface components {
             updated_at?: string | null;
             /** Version No */
             version_no: number;
+        };
+        /**
+         * TakeBackRequest
+         * @description ``POST /profile/edits/take-back`` and ``/keep`` — the path whose
+         *     assistant edit the human takes back or keeps. ``extra="forbid"``: no way
+         *     to name another user.
+         */
+        TakeBackRequest: {
+            /** Path */
+            path: string;
         };
         /** TimezoneRequest */
         TimezoneRequest: {
@@ -5137,6 +5281,115 @@ export interface operations {
         requestBody: {
             content: {
                 "multipart/form-data": components["schemas"]["Body_upload_cv_api_profile_cv_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    profile_edit_history_api_profile_edits_history_get: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileEditHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    keep_edit_api_profile_edits_keep_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TakeBackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    take_back_edit_api_profile_edits_take_back_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TakeBackRequest"];
             };
         };
         responses: {

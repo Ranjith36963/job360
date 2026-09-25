@@ -143,6 +143,8 @@ test.describe("Profile page", () => {
 
     // Version history button — the profile page labels it "History" (opens the
     // VersionHistoryDrawer). Match /history/i, not the stale /version history/i.
-    await expect(page.getByRole("button", { name: /history/i })).toBeVisible();
+    // Exact name: each preference field now has its own small "History of
+    // <field>" link, so /history/i alone would match all of them.
+    await expect(page.getByRole("button", { name: "History", exact: true })).toBeVisible();
   });
 });

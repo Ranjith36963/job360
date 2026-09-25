@@ -1582,6 +1582,22 @@ async def _list_profile_edits_for_export(
     ], truncated
 
 
+async def _current_assistant_notes(user_id: str) -> list[str]:
+    """The notes as the profile reads them now; ``[]`` with no profile (rule #29).
+
+    ``storage.load_profile`` is the one read door (it applies the overlay) and
+    it is synchronous, so it runs off the event loop.
+    """
+    import asyncio  # noqa: PLC0415 — stdlib, only this reader needs it
+
+    from src.services.profile.storage import load_profile  # noqa: PLC0415 — profile ↔ spine import cycle
+
+    profile = await asyncio.to_thread(load_profile, user_id)
+    if profile is None:
+        return []
+    return list(profile.preferences.assistant_notes or [])
+
+
 async def export_history(
     db: JobDatabase, user_id: str, *, since: Optional[str] = None, include_text: bool = False
 ) -> dict[str, Any]:
@@ -1639,10 +1655,16 @@ async def export_history(
     # the caller never receives on its own.
     profile_edits, edits_truncated = await _list_profile_edits_for_export(db, user_id)
     total_bytes += len(json.dumps(profile_edits, default=str).encode("utf-8"))
+    # The user's standing instructions to their assistant, as they read NOW
+    # (base + overlay, the same door every reader uses). Their full change
+    # history is already in `profile_edits` under `preferences.assistant_notes`.
+    assistant_notes = await _current_assistant_notes(user_id)
+    total_bytes += len(json.dumps(assistant_notes).encode("utf-8"))
 
     result: dict[str, Any] = {
         "applications": out_apps, "truncated": truncated, "bytes": total_bytes,
         "profile_edits": profile_edits, "profile_edits_truncated": edits_truncated,
+        "assistant_notes": assistant_notes,
     }
     if truncated:
         result["next_since"] = next_since

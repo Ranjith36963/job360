@@ -555,6 +555,11 @@ class UserPreferences:
     # comparison is made and no badge is shown. Job360 holds no country
     # rule; the only use is "is the job's country in this list".
     work_authorization_countries: list[str] = field(default_factory=list)
+    # Standing instructions for the user's assistant ("never apply to agencies",
+    # "I am on holiday until 3 Oct"). One short line each, written by the user
+    # on the web or by the agent through update_profile; the agent reads them
+    # first on every get_profile. Empty = nothing to say (rule #29).
+    assistant_notes: list[str] = field(default_factory=list)
 
     # Owner decision 2026-09-25 — "" (not asked yet, rule #29: empty is
     # silent), "scheduled" (user said yes and confirmed it in their app), or

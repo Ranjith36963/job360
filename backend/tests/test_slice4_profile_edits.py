@@ -157,10 +157,15 @@ async def test_clear_reveals_extraction_and_keeps_the_history(authenticated_asyn
 
 @pytest.mark.asyncio
 async def test_newest_edit_per_path_wins(authenticated_async_context, fixture_user_id):
+    # As an assistant (token): a web-session row is the human's own change and
+    # is never listed in `agent_edits` (one-history change, 2026-09-25).
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        await _patch(client, {"path": "cv_data.headline", "value": "Data Engineer"})
-        await _patch(client, {"path": "cv_data.headline", "value": "Senior Data Engineer"})
+        token = await _mint_token(client, name="claude-code")
+    async with _bearer_client(token) as agent:
+        await _patch(agent, {"path": "cv_data.headline", "value": "Data Engineer"})
+        await _patch(agent, {"path": "cv_data.headline", "value": "Senior Data Engineer"})
+    async with authenticated_async_context() as client:
         profile = (await client.get("/api/profile")).json()
         assert profile["cv_detail"]["headline"] == "Senior Data Engineer"
         assert len(profile["agent_edits"]) == 1

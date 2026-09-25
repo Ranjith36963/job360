@@ -344,7 +344,7 @@ def load_profile(user_id: str, *, with_overlay: bool = True) -> Optional[UserPro
 
 
 def load_profile_with_overlay(
-    user_id: str, *, with_overlay: bool = True
+    user_id: str, *, with_overlay: bool = True, with_previous: bool = False
 ) -> tuple[Optional[UserProfile], list[dict[str, Any]]]:
     """:func:`load_profile` plus the overlay rows it applied — ONE connection.
 
@@ -356,9 +356,28 @@ def load_profile_with_overlay(
 
     The overlay query rides the connection already open for the profile row —
     one extra indexed statement, no N+1, no second connect.
+
+    ``with_previous=True`` also stamps each overlay row with
+    ``previous_value``: the field's BASE value (read here, before the overlay
+    is applied). Used by ``GET /profile`` so the page can say "was …" next to
+    an assistant's change.
+
+    WHY THE BASE, NOT THE PREVIOUS HISTORY ROW. "Take back" appends a clear,
+    and a clear falls back to the base — so the base is exactly what Take
+    back will produce, and the label must always promise that value. An
+    older history row can differ from the base (an earlier assistant value,
+    or a web save that a version restore has since replaced); showing it
+    would make "was X" name a value Take back does not restore. In the
+    ordinary flow the two agree anyway: a web save writes the base AND its
+    history row.
     """
     _maybe_hydrate_legacy_json(user_id)
-    from src.services.profile.edits import apply_overlay_rows, current_overlay
+    from src.services.profile.edits import (
+        apply_overlay_rows,
+        current_overlay,
+        editable_paths,
+        field_values,
+    )
 
     with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
@@ -375,6 +394,18 @@ def load_profile_with_overlay(
         cv_data=CVData(**_filter_fields(cv_raw, CVData)),
         preferences=UserPreferences(**_filter_fields(pref_raw, UserPreferences)),
     )
+    if with_previous and overlay:
+        # The BASE values, taken before apply_overlay_rows writes over them.
+        # json round-trip = a deep copy, and the same JSON-able shape the
+        # overlay rows carry.
+        # Only paths still editable: a row recorded under a wider env config
+        # is skipped on read (apply_overlay_rows) and must not crash here.
+        valid = set(editable_paths())
+        base = json.loads(
+            json.dumps(field_values(profile, [r["path"] for r in overlay if r["path"] in valid]))
+        )
+        for r in overlay:
+            r["previous_value"] = base.get(r["path"])
     return apply_overlay_rows(profile, overlay), overlay
 
 
