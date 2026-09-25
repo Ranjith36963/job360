@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import Landing from "./Landing";
 import { ApplicationList } from "@/components/applications/ApplicationList";
+import { PageContainer } from "@/components/layout/PageContainer";
 
 // ---------------------------------------------------------------------------
 // R14 (docs/plans/2026-09-04-application-spine/spec.md) — the web home is
@@ -25,7 +26,7 @@ export default async function Home() {
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 sm:py-12">
+    <PageContainer className="flex flex-col gap-6 py-8 sm:py-12">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-bold sm:text-3xl">Your applications</h1>
@@ -41,6 +42,6 @@ export default async function Home() {
         </Link>
       </div>
       <ApplicationList />
-    </div>
+    </PageContainer>
   );
 }
