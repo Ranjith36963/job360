@@ -25,3 +25,14 @@ export function formatDateTime(value: string | number | Date): string {
     minute: "2-digit",
   });
 }
+
+/** "3 Oct" — day + short month, no year (the follow-up tag/label). A bare
+ * `follow_up_on` is a calendar date with no time of day (`YYYY-MM-DD`), so
+ * this always reads it in UTC — otherwise a viewer west of UTC would see
+ * `new Date("2026-10-03")` (parsed as UTC midnight) roll back to "2 Oct" once
+ * formatted in their own zone. Returns "" for an invalid date. */
+export function formatDayMonth(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
+}

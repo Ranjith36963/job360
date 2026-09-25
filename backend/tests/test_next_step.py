@@ -40,6 +40,12 @@ _AD = {
         (dict(status="rejected", has_fit=True, cv_versions=2, receipts=1, interview_at=None, has_lesson=False), "lesson"),
         (dict(status="rejected", has_fit=True, cv_versions=2, receipts=1, interview_at=None, has_lesson=True), "closed"),
         (dict(status="ghosted", has_fit=False, cv_versions=0, receipts=0, interview_at=None, has_lesson=False), "lesson"),
+        # Owner decision, 2026-09-25 — a due follow-up wins over every other
+        # code on an OPEN application, whatever stage it's otherwise at.
+        (dict(status="applied", has_fit=True, cv_versions=2, receipts=1, interview_at=None, has_lesson=False, follow_up_due=True), "follow_up"),
+        (dict(status="considering", has_fit=False, cv_versions=0, receipts=0, interview_at=None, has_lesson=False, follow_up_due=True), "follow_up"),
+        # …but never overrides a CLOSED status's own code — "closed" stays closed.
+        (dict(status="rejected", has_fit=True, cv_versions=2, receipts=1, interview_at=None, has_lesson=False, follow_up_due=True), "lesson"),
     ],
 )
 def test_every_state_maps_to_one_next_step(kwargs, code):

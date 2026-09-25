@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -28,7 +28,9 @@ import {
   changeEmail,
   deleteAccount,
   logout,
+  me,
   resendVerificationEmail,
+  setTimezone,
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 
@@ -339,6 +341,125 @@ function DeleteAccountCard() {
 }
 
 // ---------------------------------------------------------------------------
+// Time zone (owner decision, 2026-09-25)
+// ---------------------------------------------------------------------------
+//
+// `spine.user_today` computes "today" from this value for every "what's due"
+// read. Rule #29: an unwritten preference is silence, never a guess Job360
+// makes FOR the user — so the browser's own zone is only ever a PREFILL
+// shown before a Save, never written on its own.
+
+const DEFAULT_TIMEZONE = "UTC";
+
+function detectBrowserTimezone(): string | null {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return zone || null;
+  } catch {
+    return null;
+  }
+}
+
+function TimezoneCard() {
+  const [saved, setSaved] = useState<string | null>(null);
+  const [selected, setSelected] = useState(DEFAULT_TIMEZONE);
+  const [detected, setDetected] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    me().then((user) => {
+      if (cancelled || !user) return;
+      const current = user.timezone || DEFAULT_TIMEZONE;
+      setSaved(current);
+      if (current === DEFAULT_TIMEZONE) {
+        const browserZone = detectBrowserTimezone();
+        if (browserZone && browserZone !== DEFAULT_TIMEZONE) {
+          setSelected(browserZone);
+          setDetected(true);
+          return;
+        }
+      }
+      setSelected(current);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function onSave() {
+    const trimmed = selected.trim();
+    if (!trimmed) return;
+    setSaving(true);
+    setServerError(null);
+    setSuccess(null);
+    try {
+      const result = await setTimezone(trimmed);
+      setSaved(result.timezone);
+      setSelected(result.timezone);
+      setDetected(false);
+      setSuccess("Time zone saved.");
+    } catch (err) {
+      setServerError(apiErrorMessage(err, "Failed to save time zone."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const unchanged = saved !== null && selected.trim() === saved;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Time zone</CardTitle>
+        <CardDescription>
+          Used to work out &quot;today&quot; for follow-up dates and what&apos;s
+          due. An IANA name, e.g. &quot;Europe/London&quot; or &quot;America/New_York&quot;.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-end gap-2">
+          <div className="flex-1 space-y-1">
+            <Label htmlFor="timezone-input">Time zone</Label>
+            <Input
+              id="timezone-input"
+              data-testid="timezone-input"
+              value={selected}
+              autoComplete="off"
+              onChange={(e) => {
+                setSelected(e.target.value);
+                setDetected(false);
+              }}
+            />
+          </div>
+          <Button
+            type="button"
+            data-testid="timezone-save"
+            disabled={saving || unchanged || !selected.trim()}
+            onClick={() => void onSave()}
+          >
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </div>
+        {detected && (
+          <p className="text-xs text-muted-foreground" data-testid="timezone-detected">
+            Detected from your browser — press Save to use it.
+          </p>
+        )}
+        {serverError && <FieldError message={serverError} />}
+        {success && (
+          <p className="text-xs text-emerald-400" role="status">
+            {success}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -399,6 +520,7 @@ export default function AccountSettingsPage() {
         </p>
       </div>
       <VerifyEmailCard />
+      <TimezoneCard />
       <ChangePasswordCard />
       <ChangeEmailCard />
       <DeleteAccountCard />

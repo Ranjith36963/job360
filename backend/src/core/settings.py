@@ -367,6 +367,34 @@ APPLICATION_FIT_AXIS_NAME_MAX_CHARS = int(os.getenv("APPLICATION_FIT_AXIS_NAME_M
 # was hardcoded in authorship.py before.
 APPLICATION_ACTOR_NAME_MAX_CHARS = int(os.getenv("APPLICATION_ACTOR_NAME_MAX_CHARS", "60"))
 
+# ── Follow-up dates (owner decision, 2026-09-25) ────────────────────────────
+# Job360 stores a follow-up date and serves "what's due"; the user's OWN
+# agent (a scheduled ChatGPT/Claude task with its Gmail connector) does the
+# daily email check and writes back through record_event / list_applications.
+# Job360 reads no email, runs no worker, sends no push (VISION rule 4/5).
+#
+# Bounds are relative to the CALLER's own "today" (spine.user_today) — a
+# little past-dating is normal (catching up on a missed reply), a full year
+# ahead covers almost every real recruiter promise.
+APPLICATION_FOLLOW_UP_MAX_PAST_DAYS = int(os.getenv("APPLICATION_FOLLOW_UP_MAX_PAST_DAYS", "7"))
+APPLICATION_FOLLOW_UP_MAX_FUTURE_DAYS = int(os.getenv("APPLICATION_FOLLOW_UP_MAX_FUTURE_DAYS", "366"))
+# The `due` / `quiet_days` list filters exclude these — a closed application
+# needs no chasing. Matches next_step.py's own `_CLOSED` tuple exactly (the
+# real closed statuses in APPLICATION_STATUS_EVENT_TYPES; there is no
+# "offer accepted" status — `offer` stays open until the caller records what
+# happened next).
+APPLICATION_FOLLOW_UP_CLOSED_STATUSES = ("rejected", "withdrawn", "ghosted")
+# quiet_days (R "gone quiet" list filter) — a live cap, not a hardcoded 365,
+# so a breach is a 422 an agent can read rather than a silently clipped value.
+APPLICATION_QUIET_DAYS_MAX = int(os.getenv("APPLICATION_QUIET_DAYS_MAX", "365"))
+
+# ── Per-user timezone (users.timezone, migration 0012 — column existed but
+# nothing read or wrote it until this feature). Bounds the PUT body; the
+# actual "is this a real zone" check is ZoneInfo itself (services/applications
+# /spine.py::user_today, api/routes/auth.py's timezone route) — this cap only
+# keeps an absurdly long string away from that lookup.
+USER_TIMEZONE_MAX_CHARS = int(os.getenv("USER_TIMEZONE_MAX_CHARS", "64"))
+
 # R9 — whats_new.
 WHATS_NEW_DEFAULT_WINDOW_DAYS = int(os.getenv("WHATS_NEW_DEFAULT_WINDOW_DAYS", "7"))
 WHATS_NEW_MAX_EVENTS = int(os.getenv("WHATS_NEW_MAX_EVENTS", "200"))

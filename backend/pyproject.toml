@@ -41,6 +41,12 @@ dependencies = [
     "argon2-cffi>=23.1.0",          # password hashing (argon2id, OWASP-recommended)
     "itsdangerous>=2.2.0",          # signed session cookies
     "email-validator>=2.1.0",       # pydantic EmailStr (via pydantic[email])
+    # Follow-up dates (owner decision, 2026-09-25) — `spine.user_today` and the
+    # timezone-set route resolve IANA zone names through stdlib `zoneinfo`,
+    # which needs the tz database on the OS. Windows never ships one, and the
+    # prod image may not either — `tzdata` bundles it so ZoneInfo("...") works
+    # everywhere instead of raising ZoneInfoNotFoundError only in some envs.
+    "tzdata>=2024.1",
     # DECLARED HERE BY SLICE 5 (#483), and that is the point. `redis` was never
     # a direct dependency — it arrived transitively through `arq`, which this
     # slice deletes with the worker. Two things still import it lazily:

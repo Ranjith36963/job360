@@ -227,7 +227,7 @@ export async function getJsonResume(): Promise<JsonResumeResponse> {
 // Auth (Batch 2)
 // ---------------------------------------------------------------------------
 
-export type User = { id: string; email: string };
+export type User = { id: string; email: string; timezone?: string };
 
 // M2 — register no longer returns the user or a session (no account-enumeration:
 // a new-user response that differs from a duplicate would leak whether an email
@@ -262,6 +262,16 @@ export async function me(): Promise<User | null> {
   } catch {
     return null;
   }
+}
+
+/** Owner decision, 2026-09-25 — the ONE write door for the account's time
+ * zone (rule #29: only a real Save call ever writes it; a browser-detected
+ * prefill on the settings page never calls this on its own). */
+export async function setTimezone(timezone: string): Promise<{ timezone: string }> {
+  return request<{ timezone: string }>("/api/auth/me/timezone", {
+    method: "PUT",
+    body: JSON.stringify({ timezone }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -623,7 +633,15 @@ export type AddContactResult = _Schemas["AddContactResponse"];
 export type AgentEdit = _Schemas["ProfileEditExportOut"];
 
 export async function listApplications(
-  params: { status?: string; updated_since?: string; limit?: number; offset?: number } = {}
+  params: {
+    status?: string;
+    updated_since?: string;
+    limit?: number;
+    offset?: number;
+    // Owner decision, 2026-09-25 — "what's due" / "gone quiet".
+    due?: boolean;
+    quiet_days?: number;
+  } = {}
 ): Promise<_Schemas["ListApplicationsResponse"]> {
   const query = { limit: 20, ...params };
   return request(`/api/applications${qs(query as Record<string, unknown>)}`);
@@ -729,6 +747,9 @@ export async function recordApplicationEvent(
     payload?: Record<string, unknown>;
     occurred_at?: string;
     corrects_event_id?: number;
+    // Owner decision, 2026-09-25 — omit to leave the date alone, "" to
+    // clear it, "YYYY-MM-DD" to set it. Works on any event_type.
+    follow_up_on?: string;
   }
 ): Promise<_Schemas["RecordEventResponse"]> {
   return request(`/api/applications/${applicationId}/events`, {

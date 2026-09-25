@@ -464,6 +464,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/me/timezone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Timezone
+         * @description Owner decision, 2026-09-25 — the ONE write door for `users.timezone`
+         *     (browser-prefilled on the account settings page, but only ever SAVED
+         *     here, on an explicit press — rule #29). A name `ZoneInfo` cannot resolve
+         *     is refused with 422 naming the bad value; a valid one is stored and used
+         *     by `spine.user_today` for every "what's due today" read from then on.
+         */
+        put: operations["set_timezone_api_auth_me_timezone_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/password-reset/confirm": {
         parameters: {
             query?: never;
@@ -1665,6 +1689,10 @@ export interface components {
             /** Events */
             events: components["schemas"]["ApplicationEventOut"][];
             fit: components["schemas"]["ApplicationFitOut"] | null;
+            /** Follow Up Due */
+            follow_up_due: boolean;
+            /** Follow Up On */
+            follow_up_on: string | null;
             /** Id */
             id: number;
             /** Interview At */
@@ -1816,6 +1844,13 @@ export interface components {
             };
             /** Events */
             events: number;
+            /**
+             * Follow Up Due
+             * @default false
+             */
+            follow_up_due: boolean;
+            /** Follow Up On */
+            follow_up_on?: string | null;
             /** Id */
             id: number;
             /** Job Company */
@@ -2993,6 +3028,8 @@ export interface components {
             detail: string;
             /** Event Type */
             event_type: string;
+            /** Follow Up On */
+            follow_up_on?: string | null;
             /** Occurred At */
             occurred_at?: string | null;
             /** Payload */
@@ -3011,6 +3048,8 @@ export interface components {
             event_id: number;
             /** Event Type */
             event_type: string;
+            /** Follow Up On */
+            follow_up_on: string | null;
             /** Occurred At */
             occurred_at: string;
             /** Recorded At */
@@ -3256,6 +3295,16 @@ export interface components {
             /** Version No */
             version_no: number;
         };
+        /** TimezoneRequest */
+        TimezoneRequest: {
+            /** Timezone */
+            timezone: string;
+        };
+        /** TimezoneResponse */
+        TimezoneResponse: {
+            /** Timezone */
+            timezone: string;
+        };
         /** TokenCreated */
         TokenCreated: {
             /** Created At */
@@ -3315,6 +3364,11 @@ export interface components {
             email: string;
             /** Id */
             id: string;
+            /**
+             * Timezone
+             * @default UTC
+             */
+            timezone: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -3465,6 +3519,8 @@ export interface operations {
                 updated_since?: string | null;
                 limit?: number;
                 offset?: number;
+                due?: boolean;
+                quiet_days?: number | null;
             };
             header?: {
                 authorization?: string | null;
@@ -4209,6 +4265,43 @@ export interface operations {
                     "application/json": {
                         [key: string]: boolean;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_timezone_api_auth_me_timezone_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimezoneRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimezoneResponse"];
                 };
             };
             /** @description Validation Error */
