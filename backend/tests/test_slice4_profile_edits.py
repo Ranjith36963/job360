@@ -301,6 +301,33 @@ async def test_closed_set_preference_lists_allowed_values(authenticated_async_co
 
 
 @pytest.mark.asyncio
+async def test_daily_check_closed_set_allowed_values(authenticated_async_context, fixture_user_id):
+    """Owner decision 2026-09-25 — preferences.daily_check accepts only "",
+    "scheduled", "declined"; get_profile echoes back whatever was set."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        # not-asked-yet, the default, is never in the response until set —
+        # once set, GET /profile must echo it back under preferences.
+        bad = await _patch(client, {"path": "preferences.daily_check", "value": "maybe"})
+        assert bad.status_code == 422, bad.text
+        assert "scheduled" in bad.text and "declined" in bad.text
+
+        scheduled = await _patch(client, {"path": "preferences.daily_check", "value": "Scheduled"})
+        assert scheduled.status_code == 200, scheduled.text
+        assert scheduled.json()["profile"]["preferences"]["daily_check"] == "scheduled"
+        profile = (await client.get("/api/profile")).json()
+        assert profile["preferences"]["daily_check"] == "scheduled"
+
+        declined = await _patch(client, {"path": "preferences.daily_check", "value": "declined"})
+        assert declined.status_code == 200, declined.text
+        assert (await client.get("/api/profile")).json()["preferences"]["daily_check"] == "declined"
+
+        unset = await _patch(client, {"path": "preferences.daily_check", "value": ""})
+        assert unset.status_code == 200, "empty string is the explicit unset (rule #29)"
+        assert (await client.get("/api/profile")).json()["preferences"]["daily_check"] == ""
+
+
+@pytest.mark.asyncio
 async def test_lists_are_deduplicated_and_capped(authenticated_async_context, fixture_user_id, monkeypatch):
     from src.core import settings
 

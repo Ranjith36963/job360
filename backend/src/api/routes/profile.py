@@ -690,6 +690,15 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         work_authorization_countries=_countries_or_422(
             pref_dict.get("work_authorization_countries", existing.work_authorization_countries)
         ),
+        # Owner decision 2026-09-25 — the preferences form never sends this
+        # (it is written only by the connected assistant, through the
+        # agent-edit overlay). Not carrying it forward would reset the BASE
+        # object's copy on every routine web save — harmless on its own since
+        # the overlay wins on read, but the same "rebuilds from scratch"
+        # pattern already bit needs_visa/work_authorization_countries twice
+        # (PR #630), so it is carried forward here too rather than relying on
+        # the overlay alone.
+        daily_check=existing.daily_check,
     )
     # Scrub extraction pollution before it is stored. The frontend autosaves the
     # loaded preference chips straight back, so a profile whose additional_skills
@@ -1251,9 +1260,15 @@ async def clear_profile_section(
         # The guessed level is owned by the CV/LinkedIn history, not the form:
         # keep it here ("all" recomputes it from what remains, below).
         keep_handle = "" if section == "all" else prefs.github_username
+        # Owner decision 2026-09-25 — daily_check is not a job preference the
+        # "Clear preferences" button owns; it is the connected assistant's
+        # remembered answer to a one-time offer. Only a full "clear all"
+        # (starting the whole profile over) may reset it.
+        keep_daily_check = "" if section == "all" else prefs.daily_check
         prefs = UserPreferences(
             github_username=keep_handle,
             experience_level_inferred=prefs.experience_level_inferred,
+            daily_check=keep_daily_check,
         )
     if section == "all":
         # about_me-derived skills live on the CV object but are owned by the
@@ -1283,6 +1298,10 @@ async def clear_profile_section(
                 row["path"]
                 for row in profile_edits.current_overlay(user.id)
                 if str(row["path"]).startswith(cleared_prefixes)
+                # Same rule as the base-object rebuild above: a "preferences"
+                # clear must not touch the daily-check overlay row; only
+                # "all" may.
+                and not (section == "preferences" and row["path"] == "preferences.daily_check")
             ],
         )
 

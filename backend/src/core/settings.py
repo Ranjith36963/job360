@@ -477,6 +477,9 @@ PROFILE_EDITABLE_PATHS = (
     "preferences.experience_level", "preferences.about_me", "preferences.needs_visa",
     # Slice 7 — ISO alpha-2 codes where the candidate needs no sponsorship.
     "preferences.work_authorization_countries",
+    # Owner decision 2026-09-25 — "the daily check offer, remembered by
+    # Job360, not by any one assistant" (mcp_server.py INSTRUCTIONS).
+    "preferences.daily_check",
     # Slice B2 (decision 28) — dated work history and projects, as lists of
     # records with a closed key set (services/profile/edits.py RECORD_SCHEMAS).
     "cv_data.cv_positions", "cv_data.cv_projects",

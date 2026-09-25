@@ -80,6 +80,38 @@ async def test_p1_clear_all_clears_both_sections(authenticated_async_context, fi
         assert (await client.get("/api/profile")).json()["agent_edits"] == []
 
 
+@pytest.mark.asyncio
+async def test_clear_preferences_keeps_daily_check(authenticated_async_context, fixture_user_id):
+    """Owner decision 2026-09-25 — daily_check is not a job preference the
+    web "Clear preferences" button owns; it is the connected assistant's
+    remembered answer. Only "clear all" (starting the whole profile over)
+    may reset it."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (
+            await _patch(client, {"path": "preferences.daily_check", "value": "scheduled"})
+        ).status_code == 200
+        resp = await client.post("/api/profile/clear", data={"section": "preferences"})
+        assert resp.status_code == 200, resp.text
+        profile = (await client.get("/api/profile")).json()
+        assert profile["preferences"]["daily_check"] == "scheduled"
+        # other preferences ARE cleared, so this isn't a no-op clear
+        assert profile["preferences"]["target_job_titles"] == []
+
+
+@pytest.mark.asyncio
+async def test_clear_all_resets_daily_check(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (
+            await _patch(client, {"path": "preferences.daily_check", "value": "declined"})
+        ).status_code == 200
+        resp = await client.post("/api/profile/clear", data={"section": "all"})
+        assert resp.status_code == 200, resp.text
+        profile = (await client.get("/api/profile")).json()
+        assert profile["preferences"]["daily_check"] == ""
+
+
 # ── P2: extraction writers read the BASE, so the overlay never bakes in ──────
 
 
