@@ -37,6 +37,17 @@ function anchor(x: number, cx: number): "start" | "middle" | "end" {
   return "middle";
 }
 
+/** Which half of the chart a label's axis point falls in, vertically —
+ * decides which way its block (name lines + value line) has to grow to
+ * stay clear of the ring. This is independent of the label's horizontal
+ * `anchor` (start/middle/end): an axis near 1 or 5 o'clock is still "top"
+ * or "bottom" even though its text isn't centred over the axis. */
+function verticalPosition(y: number, cy: number): "top" | "bottom" | "middle" {
+  if (cy - y > 6) return "top";
+  if (y - cy > 6) return "bottom";
+  return "middle";
+}
+
 const MAX_LABEL_LINE_CHARS = 18;
 
 /** Rough advance width of one character, in `em`. Only used to size the
@@ -78,17 +89,17 @@ function tspanTexts(lines: string[]): string[] {
   return lines.length === 1 ? lines : [`${lines[0]} `, lines[1]];
 }
 
-/** Per-tspan `dy` in `em` (relative vertical offset) for a wrapped label,
- * given where it sits: top labels grow downward from their anchor (the
- * caller lifts that anchor so the block still ends up clear of the chart),
- * bottom labels stack upward so they don't run into the chart, and side
- * labels are simply centred on the axis point. */
-function lineDy(textAnchor: "start" | "middle" | "end", isTop: boolean, lineCount: number): number[] {
+/** Per-tspan `dy` in `em` (relative vertical offset) for a wrapped label, in
+ * its own natural reading order — name line 1, then (if wrapped) line 2.
+ * Top and bottom labels both grow straight down from their own text
+ * anchor (`[0, 1.2]`); the caller (below, where `textY`/`valueY` are
+ * computed) places that anchor so the block as a whole ends up clear of
+ * the ring in the right direction. Side labels (vertically centred on the
+ * axis point) keep the old centred wrap, since they never approach the
+ * ring vertically no matter which way they grow. */
+function lineDy(vPos: "top" | "bottom" | "middle", lineCount: number): number[] {
   if (lineCount === 1) return [0];
-  if (textAnchor === "middle") {
-    return isTop ? [0, 1.2] : [-1.2, 1.2];
-  }
-  return [-0.6, 1.2];
+  return vPos === "middle" ? [-0.6, 1.2] : [0, 1.2];
 }
 
 /**
@@ -145,17 +156,16 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
   const lineStep = fontSize * 1.2;
   const textHalfHeight = fontSize * 0.6; // rough half-height of a text row
   const maxLabelLines = Math.max(...wrappedLabels.map((lines) => lines.length));
-  // The TOP-MIDDLE label — the axis at 12 o'clock, the only one whose text
-  // sits directly over the polygon (owner fix 2026-09-25): its value line
-  // sits at labelR from centre — nearest the chart — and the (up to 2) name
-  // lines stack UPWARD above it, so nothing overlaps the polygon. Every
-  // other label (bottom, and the top ones anchored start/end) is unchanged:
-  // it grows downward from labelR by the value line's gap only, which stays
-  // clear of the ring because a start/end anchor also runs the text sideways,
-  // away from the chart. This is the tallest stack, so padY is derived from it.
-  const topReach = labelR + valueGap + (maxLabelLines - 1) * lineStep + textHalfHeight;
-  const bottomReach = labelR + valueGap + textHalfHeight;
-  const padY = Math.max(topReach - size / 2, bottomReach - size / 2, fontSize * 1.4 + valueFontSize * 1.6);
+  // EVERY top or bottom label (owner fix 2026-09-25, generalised after CI
+  // caught the first pass only covering the 12-o'clock axis — see
+  // `verticalPosition` and the per-axis `textY`/`valueY` below) grows AWAY
+  // from the ring along its own axis: the part of its block nearest the
+  // centre — the value line for a top label, the name's first line for a
+  // bottom one — sits pinned at labelR, and the rest of the (up to 2 name
+  // lines + 1 value line) block extends outward from there. Top and bottom
+  // are the same worst-case reach either way, so one number covers both.
+  const blockReach = labelR + valueGap + (maxLabelLines - 1) * lineStep + textHalfHeight;
+  const padY = Math.max(blockReach - size / 2, fontSize * 1.4 + valueFontSize * 1.6);
 
   return (
     <figure data-testid="fit-radar" className="mt-4">
@@ -223,27 +233,30 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
           const textAnchor = anchor(p.x, cx);
           const lines = wrappedLabels[i];
           const texts = tspanTexts(lines);
-          const isTop = p.y < cy;
-          const isTopMiddle = isTop && textAnchor === "middle";
-          const dys = lineDy(textAnchor, isTop, lines.length);
+          // Vertical placement is driven by where the axis point actually
+          // sits (top/bottom/middle of the chart), NOT by the horizontal
+          // anchor — an axis at 1 or 5 o'clock is still "top", and its label
+          // must grow away from the ring exactly like the 12-o'clock one
+          // (owner fix 2026-09-25, generalised after CI found the first pass
+          // only handled `textAnchor === "middle"`).
+          const vPos = verticalPosition(p.y, cy);
+          const isTop = vPos === "top";
+          const dys = lineDy(vPos, lines.length);
           // Where the LAST label line's baseline lands relative to the text
           // block's own anchor. `dy` is cumulative in SVG, so sum the whole
           // chain rather than assuming one of lineDy's cases — side-anchored
           // labels net +0.6em, not +1.2em.
           const lastLineExtra = dys.reduce((total, dy) => total + dy, 0) * fontSize;
-          // Only the TOP-MIDDLE label is restacked (owner fix 2026-09-25):
-          // it is the one sitting directly above the polygon's top vertex, so
-          // growing its value line downward ran it into the ring. For it the
-          // value line is the part closest to the chart, pinned at labelR from
-          // centre — the same spot the old single anchor used — and the name
-          // lines stack UPWARD, away from the chart, above it.
-          // Every other label keeps the original placement: the name block
-          // anchors at p.y and the value line sits `dy`+gap below its last
-          // line. That is safe even for the other TOP axes, because a start/
-          // end anchor runs their text sideways past the ring's widest point
-          // rather than over it — see the n=6 test below.
-          const textY = (isTopMiddle ? p.y - fontSize * 1.15 - lastLineExtra : p.y).toFixed(1);
-          const valueY = (isTopMiddle ? p.y : p.y + lastLineExtra + fontSize * 1.15).toFixed(1);
+          // The part of the block nearest the ring is pinned at labelR — the
+          // same point the old single-line anchor used — and the rest grows
+          // AWAY from the ring from there:
+          //  - top: the value line (last in reading order) sits at labelR;
+          //    the name line(s) stack UPWARD above it.
+          //  - bottom / middle: the name's first line sits at labelR (as it
+          //    always did); the value line sits below it, growing downward,
+          //    away from the ring.
+          const textY = (isTop ? p.y - fontSize * 1.15 - lastLineExtra : p.y).toFixed(1);
+          const valueY = (isTop ? p.y : p.y + lastLineExtra + fontSize * 1.15).toFixed(1);
           return (
             <g key={axis.name}>
               <text
