@@ -6,6 +6,7 @@ import { listApplications } from "@/lib/api";
 import type { ApplicationSummary } from "@/lib/api";
 import { STATUS_LABEL } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
+import { formatDayMonth } from "@/lib/format-date";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 
 
@@ -44,6 +45,9 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
   const [applications, setApplications] = useState<ApplicationSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  // Owner decision, 2026-09-25 — client-side, over the already-fetched page,
+  // the same way the status chips filter: no separate `due=true` round trip.
+  const [dueOnly, setDueOnly] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,11 +77,18 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
     return counts;
   }, [applications]);
 
+  const dueCount = useMemo(
+    () => (applications ?? []).filter((app) => app.follow_up_due).length,
+    [applications]
+  );
+
   const visibleApplications = useMemo(() => {
     if (!applications) return applications;
-    if (statusFilter === "all") return applications;
-    return applications.filter((app) => app.status === statusFilter);
-  }, [applications, statusFilter]);
+    let out = applications;
+    if (statusFilter !== "all") out = out.filter((app) => app.status === statusFilter);
+    if (dueOnly) out = out.filter((app) => app.follow_up_due);
+    return out;
+  }, [applications, statusFilter, dueOnly]);
 
   if (error) {
     return <p className="text-sm text-destructive">{error}</p>;
@@ -129,6 +140,21 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
             {STATUS_LABEL[status] ?? status} ({count})
           </button>
         ))}
+        {dueCount > 0 && (
+          <button
+            type="button"
+            data-testid="due-filter"
+            onClick={() => setDueOnly((v) => !v)}
+            aria-pressed={dueOnly}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              dueOnly
+                ? "bg-amber-500 text-amber-950"
+                : "bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
+            }`}
+          >
+            Due ({dueCount})
+          </button>
+        )}
       </div>
 
       {visibleApplications && visibleApplications.length === 0 ? (
@@ -153,6 +179,14 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
                 </p>
               </Link>
               <div className="flex shrink-0 items-center gap-3">
+                {app.follow_up_due && app.follow_up_on && (
+                  <span
+                    data-testid="row-follow-up"
+                    className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-600 dark:text-amber-400"
+                  >
+                    Follow up {formatDayMonth(app.follow_up_on)}
+                  </span>
+                )}
                 <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
                   {STATUS_LABEL[app.status] ?? app.status}
                 </span>

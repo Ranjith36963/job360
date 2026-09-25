@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AccountSettingsPage from "../page";
@@ -11,12 +11,22 @@ const mockChangePassword = vi.fn();
 const mockChangeEmail = vi.fn();
 const mockDeleteAccount = vi.fn();
 const mockLogout = vi.fn();
+// Default: no signed-in user data needed by these unrelated password/email/
+// delete tests — TimezoneCard's mount-time `me()` call just resolves to null.
+const mockMe = vi.fn().mockResolvedValue(null);
+const mockSetTimezone = vi.fn();
+const mockResendVerificationEmail = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   changePassword: (...args: unknown[]) => mockChangePassword(...args),
   changeEmail: (...args: unknown[]) => mockChangeEmail(...args),
   deleteAccount: (...args: unknown[]) => mockDeleteAccount(...args),
   logout: (...args: unknown[]) => mockLogout(...args),
+  // TimezoneCard / VerifyEmailCard also live on this page — stub them so
+  // mounting the whole page in these unrelated tests never throws.
+  me: (...args: unknown[]) => mockMe(...args),
+  setTimezone: (...args: unknown[]) => mockSetTimezone(...args),
+  resendVerificationEmail: (...args: unknown[]) => mockResendVerificationEmail(...args),
 }));
 
 /** Scope queries to the <form> containing a submit button with the given name. */
@@ -104,6 +114,70 @@ describe("ChangePasswordCard", () => {
 // ---------------------------------------------------------------------------
 // Change Email
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Time zone (owner decision, 2026-09-25)
+// ---------------------------------------------------------------------------
+
+describe("TimezoneCard", () => {
+  const originalDateTimeFormat = Intl.DateTimeFormat;
+
+  beforeEach(() => {
+    mockMe.mockReset();
+    mockSetTimezone.mockReset().mockImplementation((tz: string) =>
+      Promise.resolve({ timezone: tz })
+    );
+  });
+
+  afterEach(() => {
+    Intl.DateTimeFormat = originalDateTimeFormat;
+  });
+
+  function mockBrowserTimezone(zone: string) {
+    // @ts-expect-error -- test-only stub of a subset of Intl.DateTimeFormat
+    Intl.DateTimeFormat = () => ({ resolvedOptions: () => ({ timeZone: zone }) });
+  }
+
+  it("prefills the browser zone when the saved value is the untouched UTC default, but does not save it", async () => {
+    mockMe.mockResolvedValue({ id: "u1", email: "a@b.com", timezone: "UTC" });
+    mockBrowserTimezone("Europe/London");
+
+    render(<AccountSettingsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("timezone-input")).toHaveValue("Europe/London")
+    );
+    expect(screen.getByTestId("timezone-detected")).toBeInTheDocument();
+    expect(mockSetTimezone).not.toHaveBeenCalled();
+  });
+
+  it("shows the saved value untouched when it is not the default", async () => {
+    mockMe.mockResolvedValue({ id: "u1", email: "a@b.com", timezone: "America/New_York" });
+    mockBrowserTimezone("Europe/London");
+
+    render(<AccountSettingsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("timezone-input")).toHaveValue("America/New_York")
+    );
+    expect(screen.queryByTestId("timezone-detected")).toBeNull();
+  });
+
+  it("only calls the API when Save is pressed", async () => {
+    mockMe.mockResolvedValue({ id: "u1", email: "a@b.com", timezone: "UTC" });
+    mockBrowserTimezone("Europe/London");
+    const { user } = setup();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("timezone-input")).toHaveValue("Europe/London")
+    );
+    expect(mockSetTimezone).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId("timezone-save"));
+
+    await waitFor(() => expect(mockSetTimezone).toHaveBeenCalledWith("Europe/London"));
+  });
+});
 
 describe("ChangeEmailCard", () => {
   beforeEach(() => {

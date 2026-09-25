@@ -17,9 +17,11 @@ update of the slot is explicitly not history) and, once, a legacy
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Mapping, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core import settings
 from src.repositories import pg
@@ -244,6 +246,77 @@ def parse_scheduled_at(raw: Optional[str], event_type: str) -> str:
     )
 
 
+# ── Follow-up dates (owner decision, 2026-09-25) ────────────────────────────
+
+# A caller of `append_event` that never mentions `follow_up_on` at all must
+# leave the slot untouched — `None` is not usable for that because `None` is
+# also "clear" for the CALLER-FACING field (RecordEventRequest.follow_up_on).
+# This sentinel is the third state: "don't touch it", never seen outside
+# this module and the one route that reads it.
+FOLLOW_UP_UNSET: Any = object()
+
+_FOLLOW_UP_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def parse_follow_up_on(raw: str, today: date) -> Optional[str]:
+    """R — a follow-up date: ``""`` clears (returns ``None``, the column's
+    unset value), ``YYYY-MM-DD`` sets it (returns the same string, normalised
+    through ``date.fromisoformat`` so ``2026-2-3`` is refused, not silently
+    accepted). Bounded around the CALLER's own ``today`` (``user_today``) by
+    ``APPLICATION_FOLLOW_UP_MAX_PAST_DAYS`` / ``_MAX_FUTURE_DAYS`` — a little
+    past-dating is normal, an implausible date is not. 422 names the field and
+    the setting, same pattern as every other spine cap."""
+    if raw == "":
+        return None
+    if not _FOLLOW_UP_DATE_RE.match(raw):
+        raise SpineError(422, "follow_up_on must be YYYY-MM-DD, or '' to clear")
+    try:
+        parsed = date.fromisoformat(raw)
+    except ValueError:
+        raise SpineError(422, "follow_up_on must be YYYY-MM-DD, or '' to clear") from None
+    earliest = today - timedelta(days=settings.APPLICATION_FOLLOW_UP_MAX_PAST_DAYS)
+    latest = today + timedelta(days=settings.APPLICATION_FOLLOW_UP_MAX_FUTURE_DAYS)
+    if not (earliest <= parsed <= latest):
+        raise SpineError(
+            422,
+            f"follow_up_on must be within APPLICATION_FOLLOW_UP_MAX_PAST_DAYS "
+            f"({settings.APPLICATION_FOLLOW_UP_MAX_PAST_DAYS}) days before, or "
+            f"APPLICATION_FOLLOW_UP_MAX_FUTURE_DAYS "
+            f"({settings.APPLICATION_FOLLOW_UP_MAX_FUTURE_DAYS}) days after, today",
+        )
+    return parsed.isoformat()
+
+
+async def user_today(db: JobDatabase, user_id: str, *, now: Optional[datetime] = None) -> date:
+    """The caller's own "today", in ``users.timezone`` (migration 0012 —
+    default ``'UTC'``; the column has existed since then but nothing set or
+    read it before this feature). An unset or unrecognised zone name falls
+    back to UTC rather than 500ing — a bad string in that column must degrade,
+    never break every read that touches it. ``now`` exists only so a test can
+    pin the instant; real callers never pass it."""
+    cur = await db._db.execute("SELECT timezone FROM users WHERE id = ?", (user_id,))
+    row = await cur.fetchone()
+    raw_zone = (dict(row).get("timezone") if row else None) or "UTC"
+    when = now if now is not None else datetime.now(timezone.utc)
+    try:
+        zone: ZoneInfo = ZoneInfo(raw_zone)
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("UTC")
+    return when.astimezone(zone).date()
+
+
+def _follow_up_due(follow_up_on: Optional[str], status: str, today_iso: str) -> bool:
+    """Shared by ``list_applications`` and ``get_application_detail`` so the
+    web list and the detail page can never disagree: a date in the past or
+    today, on an OPEN application (never one of
+    ``APPLICATION_FOLLOW_UP_CLOSED_STATUSES``)."""
+    return (
+        follow_up_on is not None
+        and follow_up_on <= today_iso
+        and status not in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES
+    )
+
+
 def _event_source(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
     """R4 — build the ``source`` object a reader emits from the six raw
     columns; ``None`` when the event carries no source (the 0038/0041
@@ -385,9 +458,17 @@ async def append_event(
     corrects_event_id: Optional[int] = None,
     source: Optional[dict[str, Any]] = None,
     scheduled_at: str = "",
+    follow_up_on: Any = FOLLOW_UP_UNSET,
 ) -> dict[str, Any]:
     """R3/R4 — append one event, then recompute + write-through the status
     cache (and its legacy `stage` projection) in the SAME logical operation.
+
+    ``follow_up_on`` (owner decision, 2026-09-25): ``FOLLOW_UP_UNSET`` (the
+    default) leaves the ``applications.follow_up_on`` slot untouched; ``None``
+    clears it; an ISO date string (already validated by ``parse_follow_up_on``)
+    sets it. Either way it also lands in THIS event's payload under the same
+    key (overriding any caller-supplied ``payload["follow_up_on"]``), so the
+    date is history too, not just a slot (S7) — like ``fit_axes``/``visa``.
 
     No caller of this module ever computes `status` any other way — this is
     the ONE place `applications.status`/`stage`/`last_event_at` are written.
@@ -423,7 +504,10 @@ async def append_event(
             return await _duplicate_event_result(db, application_id, recorded_by, existing)
 
     now = datetime.now(timezone.utc).isoformat()
-    payload_json = json.dumps(payload or {})
+    event_payload = dict(payload or {})
+    if follow_up_on is not FOLLOW_UP_UNSET:
+        event_payload["follow_up_on"] = follow_up_on
+    payload_json = json.dumps(event_payload)
     source_kind = source["kind"] if source else ""
     source_message_id = source["message_id"] if source else ""
     source_sender = source["sender"] if source else ""
@@ -461,17 +545,20 @@ async def append_event(
 
     new_status = replay_status(await _events_for_replay(db, application_id))
     stage = stage_for_status(new_status)
+    set_cols = ["status = ?", "last_event_at = ?", "updated_at = ?"]
+    set_params: list[Any] = [new_status, now, now]
     if stage is not None:
-        await db._db.execute(
-            "UPDATE applications SET status = ?, last_event_at = ?, updated_at = ?, stage = ? WHERE id = ?",
-            (new_status, now, now, stage, application_id),
-        )
-    else:
-        # `considering` has no legacy stage — leave the column untouched (R4).
-        await db._db.execute(
-            "UPDATE applications SET status = ?, last_event_at = ?, updated_at = ? WHERE id = ?",
-            (new_status, now, now, application_id),
-        )
+        set_cols.append("stage = ?")
+        set_params.append(stage)
+    # `considering` has no legacy stage — leave the column untouched (R4).
+    if follow_up_on is not FOLLOW_UP_UNSET:
+        set_cols.append("follow_up_on = ?")
+        set_params.append(follow_up_on)
+    set_params.append(application_id)
+    await db._db.execute(
+        f"UPDATE applications SET {', '.join(set_cols)} WHERE id = ?",  # noqa: S608 — set_cols are constants
+        set_params,
+    )
     await db._db.commit()
     get_audit_logger().info(
         "application_event_recorded",
@@ -1040,6 +1127,12 @@ async def get_application_detail(
         if ev["scheduled_at"] and not ev["superseded"]:
             interview_at = ev["scheduled_at"]
 
+    # Owner decision 2026-09-25 — the follow-up date, in the CALLER's own
+    # timezone (users.timezone / user_today), never the server's UTC day.
+    follow_up_on = app_row.get("follow_up_on")
+    today_iso = (await user_today(db, user_id)).isoformat()
+    follow_up_due = _follow_up_due(follow_up_on, app_row["status"], today_iso)
+
     detail: dict[str, Any] = {
         "id": app_row["id"],
         "job_id": job_id,
@@ -1064,6 +1157,8 @@ async def get_application_detail(
         "interview_at": interview_at,
         "receipts": await _list_receipts_for_application(db, user_id, application_id),
         "contacts": await list_contacts(db, user_id, application_id),
+        "follow_up_on": follow_up_on,
+        "follow_up_due": follow_up_due,
     }
     # 2026-09-20 — the one line at the top: what to do next, read off the
     # stored state above (never a judgement of the job). The same value
@@ -1096,11 +1191,23 @@ async def list_applications(
     updated_since: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
+    due: bool = False,
+    quiet_days: Optional[int] = None,
 ) -> dict[str, Any]:
     """R11's ``GET /applications`` list: summaries only (snapshot fields,
     status, per-kind counts) — no event/artifact bodies. Newest
     ``last_event_at`` first; optionally filtered by ``status`` and/or
-    ``updated_since``."""
+    ``updated_since``.
+
+    ``due`` (owner decision, 2026-09-25) — only applications whose
+    ``follow_up_on`` has arrived (in the CALLER's own timezone,
+    ``user_today``) and whose status is not one of
+    ``APPLICATION_FOLLOW_UP_CLOSED_STATUSES``; ordered soonest-first instead
+    of newest-activity-first. ``quiet_days`` — only applications whose
+    ``last_event_at`` is older than N days (setting a follow-up counts as
+    activity, since it writes an event and updates the slot), same closed-
+    status exclusion. Both may be combined with ``status``/``updated_since``.
+    """
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
     where = ["user_id = ?"]
@@ -1111,6 +1218,21 @@ async def list_applications(
     if updated_since:
         where.append("updated_at >= ?")
         params.append(updated_since)
+
+    today = await user_today(db, user_id)
+    today_iso = today.isoformat()
+
+    if due or quiet_days is not None:
+        placeholders = ",".join("?" for _ in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES)
+        where.append(f"status NOT IN ({placeholders})")  # noqa: S608 — placeholders, not values
+        params.extend(settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES)
+    if due:
+        where.append("follow_up_on IS NOT NULL AND follow_up_on <= ?")
+        params.append(today_iso)
+    if quiet_days is not None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=quiet_days)).isoformat()
+        where.append("(last_event_at IS NULL OR last_event_at < ?)")
+        params.append(cutoff)
     where_sql = " AND ".join(where)
 
     cur = await db._db.execute(
@@ -1118,10 +1240,11 @@ async def list_applications(
     )
     total = int((await cur.fetchone())[0])
 
+    order_sql = "follow_up_on ASC, id ASC" if due else "last_event_at DESC NULLS LAST, id DESC"
     cur = await db._db.execute(
         f"SELECT id, job_id, job_title, job_company, job_url, status, last_event_at, "  # noqa: S608
-        f"visa_signal, visa_country, fit_recorded_at FROM applications "
-        f"WHERE {where_sql} ORDER BY last_event_at DESC NULLS LAST, id DESC LIMIT ? OFFSET ?",
+        f"visa_signal, visa_country, fit_recorded_at, follow_up_on FROM applications "
+        f"WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
         [*params, limit, offset],
     )
     rows = [dict(r) for r in await cur.fetchall()]
@@ -1167,6 +1290,8 @@ async def list_applications(
         country = r.get("visa_country") or ""
         artifact_counts = await _artifact_counts_by_kind(db, app_id)
         receipts_count = await _count(db, "application_receipts", "application_id", app_id)
+        follow_up_on = r.get("follow_up_on")
+        follow_up_due = _follow_up_due(follow_up_on, r["status"], today_iso)
         out.append(
             {
                 "id": app_id, "job_id": r["job_id"], "job_title": r["job_title"] or "",
@@ -1178,6 +1303,8 @@ async def list_applications(
                 "events": await _count(db, "application_events", "application_id", app_id),
                 "artifacts": artifact_counts,
                 "receipts": receipts_count,
+                "follow_up_on": follow_up_on,
+                "follow_up_due": follow_up_due,
                 # 2026-09-24 — same state machine `get_application` feeds its
                 # header with, over the same stored facts (S21: real values,
                 # not a schema-presence default).
@@ -1188,6 +1315,7 @@ async def list_applications(
                     receipts=receipts_count,
                     interview_at=interview_at_by_app.get(app_id),
                     has_lesson=has_lesson_by_app.get(app_id, False),
+                    follow_up_due=follow_up_due,
                 ),
             }
         )

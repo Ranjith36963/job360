@@ -8,7 +8,7 @@ the record sees the same next step the human does.
 
 ``code`` values: judge_fit, write_cv, apply, record_receipt, wait, respond,
 schedule, interview, record_outcome, await_outcome, decide, lesson, closed,
-none.
+follow_up, none.
 """
 from __future__ import annotations
 
@@ -39,13 +39,25 @@ def next_step(
     receipts: int,
     interview_at: Optional[str],
     has_lesson: bool,
+    follow_up_due: bool = False,
     now: datetime | None = None,
 ) -> dict[str, str]:
     """``{"code": …, "label": …}`` — ``code`` is a closed vocabulary an agent
     can branch on; ``label`` is the sentence the web shows. ``now`` defaults
-    to the real clock (UTC) and only exists so tests can pin it."""
+    to the real clock (UTC) and only exists so tests can pin it.
+
+    ``follow_up_due`` (owner decision, 2026-09-25) wins over every other code
+    on an OPEN application — a follow-up date that has arrived is always the
+    next thing to do, whatever stage the application is otherwise at. Never
+    fires for a closed status: the caller (``list_applications`` /
+    ``get_application_detail``) already excludes
+    ``APPLICATION_FOLLOW_UP_CLOSED_STATUSES`` from ``follow_up_due`` itself,
+    and the check here is a second, explicit guard against a closed status
+    ever showing "follow up" instead of its own "closed"/"lesson" code."""
     if now is None:
         now = datetime.now(timezone.utc)
+    if follow_up_due and status not in _CLOSED:
+        return {"code": "follow_up", "label": "Follow-up due — chase them or record what happened"}
     if status == "considering":
         if not has_fit:
             return {"code": "judge_fit", "label": "No fit judged yet — ask your agent to judge it"}
@@ -87,4 +99,5 @@ def next_step_for_detail(detail: Mapping[str, Any]) -> dict[str, str]:
         receipts=len(detail.get("receipts") or []),
         interview_at=detail.get("interview_at"),
         has_lesson=any(e.get("event_type") == "lesson" and not e.get("superseded") for e in events),
+        follow_up_due=bool(detail.get("follow_up_due")),
     )
