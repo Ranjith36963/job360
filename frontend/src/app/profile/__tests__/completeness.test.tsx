@@ -1,19 +1,14 @@
 /**
- * Profile header's one-line status — no double-counting a single answer.
+ * Profile header lines (owner decision, 2026-09-25).
  *
- * THE BUG (as originally measured against the old %/"Almost there" meter,
- * removed 2026-09-24 in favour of this one line naming what is missing).
- * calcCompleteness paid a typed preferred job title TWICE: once for the
- * "Has job titles" bucket (`prefTitles.length > 0`), and again for the "Has
- * preferences" bucket, which OR'd in that exact same check. One answer, two
- * buckets — "preferences" read as satisfied when nothing about work
- * arrangement, experience level or about_me had actually been set.
+ * Only a missing CV is "to finish". Preferences are optional and empty means
+ * "don't care" (rule #29) — counting them as missing nagged a seeker into
+ * inventing constraints. LinkedIn / GitHub appear on a quiet "You can also
+ * add" line. And when the assistant has set some preferences, one line says
+ * how many and links to the Preferences card.
  *
- * This test pins a profile shape with ONLY a CV and ONE typed job title —
- * nothing else filled in. The honest missing list is "skills, preferences,
- * LinkedIn, GitHub" (a CV and job titles are both covered). The bug would
- * have dropped "preferences" from that list too, because the same typed
- * title silently satisfied it.
+ * (History: this file used to pin the old six-bucket "To finish" list —
+ * CV, job titles, skills, preferences, LinkedIn, GitHub. That list is gone.)
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -24,49 +19,91 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
+const getProfile = vi.fn();
+
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api")>()),
-  getProfile: vi.fn().mockResolvedValue({
+  getProfile: () => getProfile(),
+  // LessonsList fetches on mount; keep it quiet.
+  listLessons: vi.fn().mockResolvedValue({ lessons: [], total: 0 }),
+}));
+
+function profile(over: {
+  cv_length?: number;
+  has_linkedin?: boolean;
+  has_github?: boolean;
+  agent_edits?: unknown[];
+}) {
+  return {
     summary: {
       is_complete: false,
-      job_titles: [], // no CV-extracted titles
+      job_titles: [],
       skills_count: 0,
-      cv_length: 100, // has a CV — not missing
-      has_linkedin: false,
-      has_github: false,
+      cv_length: over.cv_length ?? 100,
+      has_linkedin: over.has_linkedin ?? false,
+      has_github: over.has_github ?? false,
       education: [],
       experience_level: "",
     },
+    // Nothing typed at all — and that is NOT "missing" (rule #29).
     preferences: {
-      target_job_titles: ["Data Scientist"], // the ONE typed answer — job titles not missing
+      target_job_titles: [],
       additional_skills: [],
-      // Nothing here counts as a real preference: "any" and "" are both
-      // "not chosen" (rule #29), and about_me is blank.
-      work_arrangement: "any",
+      work_arrangement: "",
       experience_level: "",
       about_me: "",
     },
     cv_detail: null,
-    skill_tiers: null,
+    skill_tiers: {},
     skill_esco: {},
-  }),
-}));
+    agent_edits: over.agent_edits ?? [],
+  };
+}
 
-describe("ProfilePage header — does not double-count a typed job title", () => {
+describe("ProfilePage header", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    getProfile.mockReset();
   });
 
-  it("names skills, preferences, LinkedIn and GitHub as missing — not a CV or job titles", async () => {
+  it("with a CV and no preferences, the profile is ready — preferences are never 'to finish'", async () => {
+    getProfile.mockResolvedValue(profile({}));
     render(<ProfilePage />);
+    expect(await screen.findByText("Your profile is ready for your assistant")).toBeTruthy();
+    expect(screen.queryByText(/^To finish:/)).toBeNull();
+    expect(screen.queryByText(/add preferences/)).toBeNull();
+    // LinkedIn / GitHub sit on the quiet optional line instead.
+    expect(screen.getByText("You can also add: LinkedIn, GitHub")).toBeTruthy();
+  });
 
-    // If the double-count bug were still present, the typed job title would
-    // also satisfy "preferences" and it would be missing from this line.
+  it("names a missing CV as the only thing to finish", async () => {
+    getProfile.mockResolvedValue(profile({ cv_length: 0, has_linkedin: true, has_github: true }));
+    render(<ProfilePage />);
     const header = await screen.findByText(/^To finish:/);
-    expect(header).toHaveTextContent(
-      "To finish: add skills, add preferences, add LinkedIn, add GitHub"
+    expect(header.textContent).toBe("To finish: add a CV");
+    expect(screen.queryByText(/You can also add/)).toBeNull();
+  });
+
+  it("counts the preferences the assistant set and links to the card", async () => {
+    getProfile.mockResolvedValue(
+      profile({
+        agent_edits: [
+          { path: "preferences.salary_min", value: 50000, previous_value: null, set_by: "agent:Claude", set_at: "2026-09-25T10:00:00Z" },
+          { path: "preferences.preferred_locations", value: ["Leeds"], previous_value: [], set_by: "token:cli", set_at: "2026-09-25T10:00:00Z" },
+          // A CV edit is not a preference.
+          { path: "cv_data.location", value: "Leeds", previous_value: "London", set_by: "agent:Claude", set_at: "2026-09-25T10:00:00Z" },
+        ],
+      })
     );
-    expect(header).not.toHaveTextContent("add a CV");
-    expect(header).not.toHaveTextContent("add job titles");
+    render(<ProfilePage />);
+    const link = await screen.findByRole("link", { name: "2 preferences set by your assistant" });
+    expect(link.getAttribute("href")).toBe("#preferences");
+  });
+
+  it("shows no assistant line when the assistant set nothing", async () => {
+    getProfile.mockResolvedValue(profile({}));
+    render(<ProfilePage />);
+    await screen.findByText("Your profile is ready for your assistant");
+    expect(screen.queryByText(/set by your assistant/)).toBeNull();
   });
 });

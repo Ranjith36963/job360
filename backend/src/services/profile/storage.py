@@ -344,7 +344,7 @@ def load_profile(user_id: str, *, with_overlay: bool = True) -> Optional[UserPro
 
 
 def load_profile_with_overlay(
-    user_id: str, *, with_overlay: bool = True
+    user_id: str, *, with_overlay: bool = True, with_previous: bool = False
 ) -> tuple[Optional[UserProfile], list[dict[str, Any]]]:
     """:func:`load_profile` plus the overlay rows it applied — ONE connection.
 
@@ -356,10 +356,24 @@ def load_profile_with_overlay(
 
     The overlay query rides the connection already open for the profile row —
     one extra indexed statement, no N+1, no second connect.
+
+    ``with_previous=True`` also stamps each overlay row with
+    ``previous_value``: what the field held just BEFORE that newest row — the
+    previous ``profile_edits`` row for the path when it carries a value, else
+    the BASE profile's value (read here, before the overlay is applied). One
+    more statement on the same connection; used by ``GET /profile`` so the
+    page can say "was …" next to an assistant's change.
     """
     _maybe_hydrate_legacy_json(user_id)
-    from src.services.profile.edits import apply_overlay_rows, current_overlay
+    from src.services.profile.edits import (
+        apply_overlay_rows,
+        current_overlay,
+        editable_paths,
+        field_values,
+        previous_values,
+    )
 
+    previous: dict[str, tuple[bool, Any]] = {}
     with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
             "SELECT cv_data, preferences FROM user_profiles WHERE user_id = ?",
@@ -369,12 +383,27 @@ def load_profile_with_overlay(
         if row is None:
             return None, []
         overlay = current_overlay(user_id, conn) if with_overlay else []
+        if with_overlay and with_previous and overlay:
+            previous = previous_values(user_id, conn)
     cv_raw = json.loads(row[0]) if row[0] else {}
     pref_raw = json.loads(row[1]) if row[1] else {}
     profile = UserProfile(
         cv_data=CVData(**_filter_fields(cv_raw, CVData)),
         preferences=UserPreferences(**_filter_fields(pref_raw, UserPreferences)),
     )
+    if with_previous and overlay:
+        # The BASE values, taken before apply_overlay_rows writes over them.
+        # json round-trip = a deep copy, and the same JSON-able shape the
+        # overlay rows carry.
+        # Only paths still editable: a row recorded under a wider env config
+        # is skipped on read (apply_overlay_rows) and must not crash here.
+        valid = set(editable_paths())
+        base = json.loads(
+            json.dumps(field_values(profile, [r["path"] for r in overlay if r["path"] in valid]))
+        )
+        for r in overlay:
+            found, value = previous.get(r["path"], (False, None))
+            r["previous_value"] = value if found else base.get(r["path"])
     return apply_overlay_rows(profile, overlay), overlay
 
 

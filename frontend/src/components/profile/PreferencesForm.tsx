@@ -25,6 +25,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { ClearButton } from "@/components/profile/ClearButton";
 import { EditedMark } from "@/components/profile/EditedMark";
+import { FieldHistory } from "@/components/profile/FieldHistory";
 import { findAgentEdit, type AgentEdit } from "@/lib/agent-edits";
 import type { PreferencesRequest } from "@/lib/types";
 
@@ -34,6 +35,12 @@ interface PreferencesFormProps {
    *  Optional; each editable field looks up its own `preferences.<field>`
    *  path and renders nothing extra when there is no active edit for it. */
   agentEdits?: AgentEdit[];
+  /** "Take back" an assistant's change to one path (it falls back to the CV /
+   *  form value). Omitted = no Take back button on the marks. */
+  onTakeBack?: (path: string) => Promise<void>;
+  /** Show the small per-field "History" links. Off when there is no profile
+   *  yet — there is no history to show on a first visit. */
+  showFieldHistory?: boolean;
   /** Adjacent skills the extractor proposed. Shown as one-tap chips beside
    *  Additional Skills.
    *
@@ -69,6 +76,8 @@ interface TagInputProps {
   suggestionsHint?: string;
   /** Extra content after the label — e.g. an `EditedMark` (spec R11). */
   trailing?: React.ReactNode;
+  /** Extra content under the field — e.g. its `FieldHistory` link. */
+  footer?: React.ReactNode;
   /** `data-testid` on the field's outer wrapper, for tests/e2e to target a
    *  specific TagInput among several on this form. */
   testId?: string;
@@ -86,6 +95,7 @@ function TagInput({
   suggestionsLabel,
   suggestionsHint,
   trailing,
+  footer,
   testId,
 }: TagInputProps) {
   const [inputValue, setInputValue] = useState("");
@@ -212,6 +222,98 @@ function TagInput({
           </div>
         </div>
       )}
+      {footer}
+    </div>
+  );
+}
+
+// ── Assistant notes ────────────────────────────────────────
+// "Things your assistant should know" — standing instructions, one short line
+// each. The agent reads them first on every get_profile. Saved through the
+// normal debounced preferences save (no button of its own).
+
+// Mirrors the backend's PROFILE_NOTE_MAX_CHARS default. The server is the
+// real guard (a longer note is a 422 naming the limit); this only stops the
+// input from accepting what the server would refuse.
+const NOTE_MAX_CHARS = 200;
+
+function AssistantNotes({
+  notes,
+  onChange,
+  trailing,
+  footer,
+}: {
+  notes: string[];
+  onChange: (notes: string[]) => void;
+  trailing?: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const text = draft.trim();
+    if (!text) return;
+    if (!notes.some((n) => n.toLowerCase() === text.toLowerCase())) {
+      onChange([...notes, text]);
+    }
+    setDraft("");
+  };
+  return (
+    <div className="space-y-2" data-testid="assistant-notes">
+      <Label className="text-sm font-medium">
+        Things your assistant should know
+        {trailing}
+      </Label>
+      <p className="text-xs text-muted-foreground -mt-1">
+        One line each — e.g. &quot;Never apply to recruitment agencies&quot;. Your
+        assistant reads these first, every time.
+      </p>
+      {notes.length > 0 && (
+        <ul className="space-y-1.5">
+          {notes.map((note, i) => (
+            <li
+              key={`${note}-${i}`}
+              className="flex items-start justify-between gap-2 rounded-md border border-border/60 px-2.5 py-1.5 text-sm"
+            >
+              <span className="break-words">{note}</span>
+              <button
+                type="button"
+                aria-label={`Remove note: ${note}`}
+                onClick={() => onChange(notes.filter((_, j) => j !== i))}
+                className="shrink-0 rounded-sm p-0.5 opacity-60 transition-opacity hover:opacity-100"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <Input
+          value={draft}
+          maxLength={NOTE_MAX_CHARS}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+          placeholder="Add a line for your assistant"
+          aria-label="New note for your assistant"
+          className="flex-1"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          onClick={add}
+          disabled={!draft.trim()}
+          aria-label="Add note"
+          className="shrink-0"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      {footer}
     </div>
   );
 }
@@ -266,6 +368,7 @@ function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
     about_me: typeof raw.about_me === "string" ? raw.about_me : "",
     needs_visa: raw.needs_visa === true,
     work_authorization_countries: asArr(raw.work_authorization_countries),
+    assistant_notes: asArr(raw.assistant_notes),
   };
 }
 
@@ -286,6 +389,7 @@ function serializePrefs(p: PreferencesRequest): string {
     p.about_me,
     p.needs_visa,
     p.work_authorization_countries,
+    p.assistant_notes,
   ]);
 }
 
@@ -302,8 +406,32 @@ export function PreferencesForm({
   onClear,
   loading,
   agentEdits,
+  onTakeBack,
+  showFieldHistory = false,
 }: PreferencesFormProps) {
   const editOf = (field: string) => findAgentEdit(agentEdits, `preferences.${field}`);
+  // The "Changed by … · was …" mark (+ Take back) for one field.
+  const markOf = (field: string) => (
+    <EditedMark edit={editOf(field)} onTakeBack={onTakeBack} />
+  );
+  // The small per-field "History" link (one history: you + your assistant).
+  const historyOf = (label: string, ...fields: string[]) =>
+    !showFieldHistory ? null : (
+    <FieldHistory
+      label={label}
+      paths={fields.map((f) => `preferences.${f}`)}
+      pathLabels={
+        fields.length > 1
+          ? Object.fromEntries(
+              fields.map((f) => [
+                `preferences.${f}`,
+                f.endsWith("_min") ? "Min" : f.endsWith("_max") ? "Max" : f,
+              ])
+            )
+          : undefined
+      }
+    />
+  );
   const [targetTitles, setTargetTitles] = useState<string[]>([]);
   const [additionalSkills, setAdditionalSkills] = useState<string[]>([]);
   const [excludedSkills, setExcludedSkills] = useState<string[]>([]);
@@ -317,6 +445,7 @@ export function PreferencesForm({
   const [aboutMe, setAboutMe] = useState("");
   const [needsVisa, setNeedsVisa] = useState(false);
   const [workAuthorizationCountries, setWorkAuthorizationCountries] = useState<string[]>([]);
+  const [assistantNotes, setAssistantNotes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   // Distinct from `saving`: a failed auto-save used to fall back to the same
   // green "Changes save automatically" line as a successful one, so once the
@@ -357,6 +486,7 @@ export function PreferencesForm({
     setWorkAuthorizationCountries(p.work_authorization_countries ?? []);
     setNegativeKeywords(p.negative_keywords ?? []);
     setAboutMe(p.about_me ?? "");
+    setAssistantNotes(p.assistant_notes ?? []);
     baselineRef.current = serializePrefs(p);
   }, [preferences]);
 
@@ -382,6 +512,7 @@ export function PreferencesForm({
       about_me: aboutMe,
       needs_visa: needsVisa,
       work_authorization_countries: workAuthorizationCountries,
+      assistant_notes: assistantNotes,
     }),
     [
       targetTitles,
@@ -397,6 +528,7 @@ export function PreferencesForm({
       aboutMe,
       needsVisa,
       workAuthorizationCountries,
+      assistantNotes,
     ]
   );
 
@@ -430,13 +562,16 @@ export function PreferencesForm({
   }, [buildPrefs, onSave]);
 
   return (
-    <div className="glass-card rounded-xl p-6 animate-fade-in-up stagger-3">
+    <div
+      id="preferences"
+      className="glass-card rounded-xl p-6 animate-fade-in-up stagger-3 scroll-mt-24"
+    >
       <div className="flex items-center gap-3 mb-6">
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
           <Briefcase className="h-5 w-5 text-primary" />
         </div>
         <div>
-          <h3 className="font-heading text-base font-semibold">Preferences</h3>
+          <h3 className="font-heading text-base font-semibold">Your preferences</h3>
           <p className="text-xs text-muted-foreground">
             What you want — your assistant reads this when it judges a job
           </p>
@@ -473,7 +608,8 @@ export function PreferencesForm({
             onChange={setTargetTitles}
             placeholder="e.g. Data Scientist"
             description="Roles you're targeting"
-            trailing={<EditedMark edit={editOf("target_job_titles")} />}
+            trailing={markOf("target_job_titles")}
+            footer={historyOf("Target Job Titles", "target_job_titles")}
           />
         </div>
 
@@ -487,7 +623,8 @@ export function PreferencesForm({
           suggestions={suggestions}
           suggestionsLabel="Skills that often go with yours"
           suggestionsHint="Tap any you actually have. Nothing is added until you tap."
-          trailing={<EditedMark edit={editOf("additional_skills")} />}
+          trailing={markOf("additional_skills")}
+          footer={historyOf("Additional Skills", "additional_skills")}
         />
 
         {/* Excluded Skills input removed from UI (owner, 2026-08-08) — the
@@ -504,7 +641,8 @@ export function PreferencesForm({
           tags={preferredLocations}
           onChange={setPreferredLocations}
           placeholder="e.g. London, Manchester, Remote"
-          trailing={<EditedMark edit={editOf("preferred_locations")} />}
+          trailing={markOf("preferred_locations")}
+          footer={historyOf("Preferred Locations", "preferred_locations")}
         />
 
         {/* ── Industries ─────────────────────────── */}
@@ -515,7 +653,8 @@ export function PreferencesForm({
           onChange={setIndustries}
           placeholder="e.g. FinTech, Healthcare, AI"
           description="Context for your assistant — most jobs are not affected by this at all."
-          trailing={<EditedMark edit={editOf("industries")} />}
+          trailing={markOf("industries")}
+          footer={historyOf("Industries", "industries")}
         />
 
         <Separator />
@@ -525,7 +664,10 @@ export function PreferencesForm({
           <Label className="text-sm font-medium">
             <DollarSign className="h-3.5 w-3.5" />
             Salary Range
-            <EditedMark edit={editOf("salary_min") ?? editOf("salary_max")} />
+            <EditedMark
+              edit={editOf("salary_min") ?? editOf("salary_max")}
+              onTakeBack={onTakeBack}
+            />
           </Label>
           <div className="grid grid-cols-2 gap-3">
             <div className="relative">
@@ -553,6 +695,7 @@ export function PreferencesForm({
               />
             </div>
           </div>
+          {historyOf("Salary Range", "salary_min", "salary_max")}
         </div>
 
         {/* ── Work Arrangement & Experience Level ── */}
@@ -560,7 +703,7 @@ export function PreferencesForm({
           <div className="space-y-2">
             <Label className="text-sm font-medium">
               Work Arrangement
-              <EditedMark edit={editOf("work_arrangement")} />
+              {markOf("work_arrangement")}
             </Label>
             <Select
               value={workArrangement}
@@ -576,11 +719,12 @@ export function PreferencesForm({
                 <SelectItem value="onsite">Onsite</SelectItem>
               </SelectContent>
             </Select>
+            {historyOf("Work Arrangement", "work_arrangement")}
           </div>
           <div className="space-y-2">
             <Label className="text-sm font-medium">
               Experience Level
-              <EditedMark edit={editOf("experience_level")} />
+              {markOf("experience_level")}
             </Label>
             <Select
               value={experienceLevel}
@@ -601,6 +745,7 @@ export function PreferencesForm({
                 <SelectItem value="executive">Executive</SelectItem>
               </SelectContent>
             </Select>
+            {historyOf("Experience Level", "experience_level")}
           </div>
         </div>
 
@@ -618,8 +763,9 @@ export function PreferencesForm({
             onChange={(e) => setNeedsVisa(e.target.checked)}
           />
           I need visa sponsorship to work in the UK
-          <EditedMark edit={editOf("needs_visa")} />
+          {markOf("needs_visa")}
         </label>
+        <div className="-mt-4">{historyOf("Visa sponsorship", "needs_visa")}</div>
 
         {/* ── Work authorization countries (slice 7, #514) ──────────
             Fact 2 of the visa-signal comparison — compared against each
@@ -647,7 +793,8 @@ export function PreferencesForm({
           }}
           placeholder="e.g. GB, IN, DE"
           description="ISO codes, e.g. GB, IN, DE. Leave empty if you'd rather not compare."
-          trailing={<EditedMark edit={editOf("work_authorization_countries")} />}
+          trailing={markOf("work_authorization_countries")}
+          footer={historyOf("Countries where I need no visa sponsorship", "work_authorization_countries")}
         />
 
         <Separator />
@@ -665,14 +812,15 @@ export function PreferencesForm({
           placeholder="e.g. sales, recruiter"
           description="Titles or roles you don't want. Your assistant reads this when judging fit."
           variant="destructive"
-          trailing={<EditedMark edit={editOf("negative_keywords")} />}
+          trailing={markOf("negative_keywords")}
+          footer={historyOf("Words to avoid in job titles", "negative_keywords")}
         />
 
         {/* ── About Me ───────────────────────────── */}
         <div className="space-y-2">
           <Label className="text-sm font-medium">
             About Me
-            <EditedMark edit={editOf("about_me")} />
+            {markOf("about_me")}
           </Label>
           <p className="text-xs text-muted-foreground -mt-1">
             Brief professional summary — your assistant uses it as context
@@ -683,7 +831,21 @@ export function PreferencesForm({
             placeholder="e.g. Experienced data scientist with 5 years in NLP and computer vision, looking for senior roles in AI-first companies..."
             rows={4}
           />
+          {historyOf("About Me", "about_me")}
         </div>
+
+        <Separator />
+
+        {/* ── Things your assistant should know ────
+            Standing instructions (preferences.assistant_notes). The agent
+            reads them first on every get_profile; empty = nothing to say
+            (rule #29). */}
+        <AssistantNotes
+          notes={assistantNotes}
+          onChange={setAssistantNotes}
+          trailing={markOf("assistant_notes")}
+          footer={historyOf("Things your assistant should know", "assistant_notes")}
+        />
 
         {/* Excluded Companies removed entirely (not just the UI control) —
             a grep of backend/src turned up ZERO consumers of the

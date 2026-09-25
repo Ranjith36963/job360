@@ -19,10 +19,11 @@ import {
   uploadLinkedin,
   uploadGithub,
   clearProfileSection,
+  takeBackProfileEdit,
   type ClearSection,
 } from "@/lib/api";
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
-import type { AgentEdit } from "@/lib/agent-edits";
+import { countAssistantPreferenceEdits, type AgentEdit } from "@/lib/agent-edits";
 import type { CVDetail, ProfileResponse, PreferencesRequest } from "@/lib/types";
 
 /** Human names for the clear toasts — "cv" is not what a person calls it. */
@@ -97,58 +98,30 @@ function hasGithubShelf(
   });
 }
 
-// ── What's missing (owner decision, 2026-09-24) ─────────────
+// ── What's missing (owner decisions, 2026-09-24 and 2026-09-25) ─────────
 //
-// The header used to show a %/"Almost there" meter. A percentage answers
-// "how much" — it never told a seeker what to actually DO next. This reuses
-// the exact same six buckets the old meter scored (CV, job titles, skills,
-// preferences, LinkedIn, GitHub) but names the missing ones instead of
-// scoring them, so the header can read "To finish: add LinkedIn, add
-// preferences" — one line, one to-do list, no arithmetic to interpret.
+// The header names what is actually missing — one line, no percentage. Only
+// a CV counts as "to finish": preferences are optional and an empty one means
+// "don't care" (rule #29), so counting them as missing nagged a seeker into
+// inventing constraints. LinkedIn and GitHub are optional extras, named on a
+// quieter line ("You can also add: …") and never as unfinished work.
 
 function missingPieces(profile: ProfileResponse | null): string[] {
   const summary = profile?.summary;
-  const preferences = profile?.preferences;
-
-  // Has job titles — same OR as the old "Has job titles" bucket.
-  const prefTitles = Array.isArray(
-    (preferences as Record<string, unknown>)?.target_job_titles
-  )
-    ? ((preferences as Record<string, unknown>).target_job_titles as string[])
-    : [];
-
-  // Has skills — same OR as the old "Has skills" bucket.
-  const prefSkills = Array.isArray(
-    (preferences as Record<string, unknown>)?.additional_skills
-  )
-    ? ((preferences as Record<string, unknown>).additional_skills as string[])
-    : [];
-
-  // Has preferences (work arrangement, experience level, or about_me) — a
-  // typed job title does NOT also satisfy this (the double-count bug the old
-  // meter had): each bucket below measures a distinct thing.
-  const prefs = preferences as Record<string, unknown> | undefined;
-  const hasPrefs =
-    (prefs?.work_arrangement && prefs.work_arrangement !== "any") ||
-    (prefs?.experience_level && prefs.experience_level !== "") ||
-    (typeof prefs?.about_me === "string" && prefs.about_me.length > 0);
-
-  const missing: string[] = [];
-  if (!summary || summary.cv_length === 0) missing.push("a CV");
-  if (!summary || (summary.job_titles.length === 0 && prefTitles.length === 0)) {
-    missing.push("job titles");
-  }
-  if (!summary || (summary.skills_count === 0 && prefSkills.length === 0)) {
-    missing.push("skills");
-  }
-  if (!hasPrefs) missing.push("preferences");
-  if (!summary || !summary.has_linkedin) missing.push("LinkedIn");
-  if (!summary || !summary.has_github) missing.push("GitHub");
-  return missing;
+  return !summary || summary.cv_length === 0 ? ["a CV"] : [];
 }
 
-/** The one header line (owner decision, 2026-09-24): nothing missing reads
- * as ready; otherwise it names exactly what is missing, nothing vaguer. */
+/** Optional inputs not given yet — the quiet "You can also add" line. */
+function optionalExtras(profile: ProfileResponse | null): string[] {
+  const summary = profile?.summary;
+  if (!summary) return [];
+  const extras: string[] = [];
+  if (!summary.has_linkedin) extras.push("LinkedIn");
+  if (!summary.has_github) extras.push("GitHub");
+  return extras;
+}
+
+/** The one header line: a missing CV is the only thing "to finish". */
 function headerLine(profile: ProfileResponse | null): string {
   const missing = missingPieces(profile);
   if (missing.length === 0) return "Your profile is ready for your assistant";
@@ -276,13 +249,28 @@ export default function ProfilePage() {
     []
   );
 
-  const oneLineStatus = headerLine(profile);
+  // "Take back" an assistant's change: the backend appends a clearing row and
+  // answers with the rebuilt profile, so the page updates from it directly.
+  const handleTakeBack = useCallback(async (path: string) => {
+    setError(null);
+    try {
+      const data = await takeBackProfileEdit(path);
+      setProfile(data);
+      toast.success("Change taken back");
+    } catch (err: unknown) {
+      const msg = apiErrorMessage(err, "Failed to take back the change");
+      setError(msg);
+      toast.error(msg);
+    }
+  }, []);
 
-  // R11 — the current agent-edit overlay. The backend types this field as a
-  // bare `dict[str, Any]` (it has no dedicated Pydantic model of its own), so
-  // the generated type is untyped too; each row has the same {path, value,
-  // set_by, set_at} shape `export_history`'s typed equivalent uses.
-  const agentEdits = (profile?.agent_edits ?? []) as unknown as AgentEdit[];
+  const oneLineStatus = headerLine(profile);
+  const extras = optionalExtras(profile);
+
+  // R11 — the live ASSISTANT edits, each with what the field held before
+  // (`previous_value`). Typed by the generated `AgentEditOut`.
+  const agentEdits: AgentEdit[] = profile?.agent_edits ?? [];
+  const assistantPrefCount = countAssistantPreferenceEdits(agentEdits);
 
   return (
     <div className="relative">
@@ -313,6 +301,22 @@ export default function ProfilePage() {
                     inputs the old %/"Almost there" meter scored) instead of
                     a percentage nobody could act on. */}
                 <p className="text-sm text-muted-foreground">{oneLineStatus}</p>
+                {/* Optional inputs — a quiet line, never "to finish". */}
+                {extras.length > 0 && (
+                  <p className="text-xs text-muted-foreground/70">
+                    You can also add: {extras.join(", ")}
+                  </p>
+                )}
+                {assistantPrefCount > 0 && (
+                  <a
+                    href="#preferences"
+                    className="block text-xs text-primary underline-offset-2 hover:underline"
+                  >
+                    {assistantPrefCount === 1
+                      ? "1 preference set by your assistant"
+                      : `${assistantPrefCount} preferences set by your assistant`}
+                  </a>
+                )}
               </div>
             </div>
 
@@ -412,6 +416,8 @@ export default function ProfilePage() {
                 onClear={profile ? () => handleClear("preferences") : undefined}
                 loading={loadingProfile}
                 agentEdits={agentEdits}
+                onTakeBack={handleTakeBack}
+                showFieldHistory={Boolean(profile)}
               />
             </div>
 
@@ -435,6 +441,7 @@ export default function ProfilePage() {
                 githubTemporal={profile?.github_temporal}
                 githubDetail={profile?.github_detail}
                 agentEdits={agentEdits}
+                onTakeBack={handleTakeBack}
               />
             )}
 

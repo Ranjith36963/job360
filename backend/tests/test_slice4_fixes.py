@@ -42,6 +42,26 @@ async def _patch(client: AsyncClient, *edits: dict[str, Any]):
     return await client.patch("/api/profile", json={"edits": list(edits)})
 
 
+async def _agent_patch(client: AsyncClient, *edits: dict[str, Any]):
+    """PATCH as an ASSISTANT (a personal token), not the web session.
+
+    Since the one-history change (2026-09-25) a row written by the web
+    session is the human's own change and is never listed in
+    ``agent_edits`` — so a test about an assistant's edit must write it as one.
+    """
+    from httpx import ASGITransport
+
+    from src.api.main import app
+
+    minted = await client.post("/api/tokens", json={"name": "agent"})
+    assert minted.status_code == 201, minted.text
+    token = minted.json()["token"]
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        return await _patch(agent, *edits)
+
+
 async def _bring(client: AsyncClient, **over: Any) -> int:
     resp = await client.post("/api/jobs/bring", json={**_AD, **over})
     assert resp.status_code in (200, 201), resp.text
@@ -55,8 +75,8 @@ async def _bring(client: AsyncClient, **over: Any) -> int:
 async def test_p1_clear_section_appends_clearing_rows(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        assert (await _patch(client, {"path": "cv_data.location", "value": "Manchester"})).status_code == 200
-        assert (await _patch(client, {"path": "preferences.about_me", "value": "hire me"})).status_code == 200
+        assert (await _agent_patch(client, {"path": "cv_data.location", "value": "Manchester"})).status_code == 200
+        assert (await _agent_patch(client, {"path": "preferences.about_me", "value": "hire me"})).status_code == 200
         resp = await client.post("/api/profile/clear", data={"section": "cv"})
         assert resp.status_code == 200, resp.text
         # a FRESH read, not the clear response
@@ -132,7 +152,7 @@ async def test_p2_web_preferences_change_of_an_edited_field_wins(authenticated_a
     """The human's explicit change beats the agent's earlier edit; untouched overlay fields stay."""
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        await _patch(
+        await _agent_patch(
             client,
             {"path": "preferences.preferred_locations", "value": ["Manchester"]},
             {"path": "preferences.about_me", "value": "hire me"},

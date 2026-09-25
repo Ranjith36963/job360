@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class HealthResponse(BaseModel):
@@ -158,6 +158,41 @@ class ProfileEditOut(BaseModel):
     set_at: str
 
 
+class AgentEditOut(ProfileEditOut):
+    """One live ASSISTANT edit on ``GET /profile``'s ``agent_edits``.
+
+    ``previous_value`` is what the field held just before this edit: the
+    previous ``profile_edits`` row for the path when it carries a value, else
+    the base profile's value. ``None`` / ``""`` / ``[]`` all mean "it was
+    empty" — the page words them that way.
+    """
+
+    previous_value: Any = None
+
+
+class ProfileEditHistoryRow(BaseModel):
+    """One row of one field's history, newest first. ``value: null`` is a
+    clear (the field fell back to what the CV / the web form holds)."""
+
+    value: Any = None
+    set_by: str
+    set_at: str
+
+
+class ProfileEditHistoryResponse(BaseModel):
+    path: str
+    rows: list[ProfileEditHistoryRow]
+
+
+class TakeBackRequest(BaseModel):
+    """``POST /profile/edits/take-back`` — the path whose assistant edit the
+    human is taking back. ``extra="forbid"``: no way to name another user."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+
+
 class LessonOut(BaseModel):
     """One `lesson` event, read back across applications (slice 9, #516)."""
 
@@ -220,7 +255,12 @@ class ProfileResponse(BaseModel):
     # Provenance made visible: the web profile page renders each overlaid
     # field in place with an "Edited by <set_by> on <date>" mark instead of
     # keeping a second list to reconcile. Empty when no edit is active.
-    agent_edits: list[ProfileEditOut] = []
+    #
+    # ASSISTANT rows only (`agent:…` / `token:…`): a field whose newest row is
+    # the human's own web save is not an assistant edit, and never carries a
+    # mark. Each row also says what the field held before (`previous_value`),
+    # so the page can read "Changed by Claude · was £45k".
+    agent_edits: list[AgentEditOut] = []
     # Slice 9 (#516) — the last PROFILE_LESSONS_MAX "flag for next time"
     # lessons across every application, newest first, so the agent reading
     # the profile sees them BEFORE it tailors the next CV. The full list is

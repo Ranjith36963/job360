@@ -89,6 +89,36 @@
         "title": "AddContactResponse",
         "type": "object"
       },
+      "AgentEditOut": {
+        "description": "One live ASSISTANT edit on ``GET /profile``'s ``agent_edits``.\n\n``previous_value`` is what the field held just before this edit: the\nprevious ``profile_edits`` row for the path when it carries a value, else\nthe base profile's value. ``None`` / ``\"\"`` / ``[]`` all mean \"it was\nempty\" \u2014 the page words them that way.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "previous_value": {
+            "title": "Previous Value"
+          },
+          "set_at": {
+            "title": "Set At",
+            "type": "string"
+          },
+          "set_by": {
+            "title": "Set By",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "path",
+          "set_by",
+          "set_at"
+        ],
+        "title": "AgentEditOut",
+        "type": "object"
+      },
       "AlignmentOut": {
         "description": "``GET \u2026/alignment`` (2026-09-20) \u2014 the fit picture: the agent's stored\nverdict beside which of the candidate's own skills occur in the stored\nad text. Two stored facts drawn together; nothing computed about the\ncandidate (VISION rule 4).",
         "properties": {
@@ -1891,6 +1921,14 @@
             "title": "Applications",
             "type": "array"
           },
+          "assistant_notes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Assistant Notes",
+            "type": "array"
+          },
           "bytes": {
             "title": "Bytes",
             "type": "integer"
@@ -2627,6 +2665,49 @@
         "title": "ProfileEditExportOut",
         "type": "object"
       },
+      "ProfileEditHistoryResponse": {
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ProfileEditHistoryRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "path",
+          "rows"
+        ],
+        "title": "ProfileEditHistoryResponse",
+        "type": "object"
+      },
+      "ProfileEditHistoryRow": {
+        "description": "One row of one field's history, newest first. ``value: null`` is a\nclear (the field fell back to what the CV / the web form holds).",
+        "properties": {
+          "set_at": {
+            "title": "Set At",
+            "type": "string"
+          },
+          "set_by": {
+            "title": "Set By",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "set_by",
+          "set_at"
+        ],
+        "title": "ProfileEditHistoryRow",
+        "type": "object"
+      },
       "ProfileEditIn": {
         "additionalProperties": false,
         "properties": {
@@ -2676,7 +2757,7 @@
           "agent_edits": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/ProfileEditOut"
+              "$ref": "#/components/schemas/AgentEditOut"
             },
             "title": "Agent Edits",
             "type": "array"
@@ -4258,6 +4339,21 @@
           "made_by"
         ],
         "title": "TailoredDocOut",
+        "type": "object"
+      },
+      "TakeBackRequest": {
+        "additionalProperties": false,
+        "description": "``POST /profile/edits/take-back`` \u2014 the path whose assistant edit the\nhuman is taking back. ``extra=\"forbid\"``: no way to name another user.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "TakeBackRequest",
         "type": "object"
       },
       "TokenCreated": {
@@ -7778,6 +7874,158 @@
         ]
       }
     },
+    "/api/profile/edits/history": {
+      "get": {
+        "description": "Every change to ONE of the caller's profile fields, newest first.\n\nBoth sides in one list: the human's own web saves (``set_by: \"web\"``) and\nthe assistant's edits (``agent:\u2026`` / ``token:\u2026``); ``value: null`` is a\nclear. At most ``PROFILE_EDIT_HISTORY_MAX`` rows \u2014 ``export_history``\ncarries the whole log. Scoped to the caller (rule #12): the query filters\nby ``user.id``, so no parameter can reach another user's rows.",
+        "operationId": "profile_edit_history_api_profile_edits_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileEditHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Profile Edit History",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
+    "/api/profile/edits/take-back": {
+      "post": {
+        "description": "Take back the assistant's change to one field: it falls back to the\nvalue from the CV / the web form (the base profile).\n\nAppend-only (M3): a new clearing row (``value = NULL``) authored by the\ncaller \u2014 ``web`` for a signed-in human; the assistant's row stays in the\nhistory. NOT rate-limited, same as the section clear: the human undoing\nan assistant must never spend the assistant's edit budget.\n\n404 when the field's newest row is not a live assistant edit \u2014 there is\nnothing to take back (and a caller can never name another user's field:\nthe lookup is scoped by ``user.id``).",
+        "operationId": "take_back_edit_api_profile_edits_take_back_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeBackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Take Back Edit",
+        "tags": [
+          "profile"
+        ]
+      }
+    },
     "/api/profile/github": {
       "post": {
         "description": "Enrich the caller's profile with GitHub public data.\n\nAccepts a full profile URL or @handle, not just a bare username \u2014\n``normalize_github_username`` reduces it to the handle before lookup.\n\nFAILS LOUDLY (2026-08-08). This route used to return ``ok=True, merged=True``\nunconditionally, so a handle that reduced to nothing still produced a green\n\"GitHub profile enriched\" toast \u2014 and, once receipts shipped, a \"GitHub\nconnected\" row on the profile page \u2014 while zero repos were read. Measured on\na live profile: ``github_connected_at`` stamped, ``github_username`` empty,\n0 repos. A receipt that confirms something that did not happen is worse than\nno receipt at all.\n\nA handle that does not reduce to a valid GitHub username is a 400 with\nwording the person can act on. ``normalize_github_username`` accepts a bare\nhandle, an @handle, a profile URL, and a ``<user>.github.io`` Pages URL\n(whose subdomain IS the username \u2014 a CV lists that under \"Portfolio\", so it\nis exactly what people paste here).",
@@ -7998,7 +8246,7 @@
     },
     "/api/profile/preferences": {
       "post": {
-        "description": "Set the caller's preferences form \u2014 one input, one dedicated route.\n\nLoads the BASE profile (``with_overlay=False``) and, after saving,\nretires the overlay for any preference the human actually changed \u2014\nsee :func:`_retire_overlaid_preferences`.",
+        "description": "Set the caller's preferences form \u2014 one input, one dedicated route.\n\nLoads the BASE profile (``with_overlay=False``) and, after saving,\nappends a ``set_by=web`` history row for every preference the human\nactually changed \u2014 see :func:`_record_web_preference_changes`.",
         "operationId": "upsert_preferences_api_profile_preferences_post",
         "parameters": [
           {

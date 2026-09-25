@@ -576,6 +576,9 @@ class ExportHistoryResponse(BaseModel):
     # S3 — true when the edit history was cut at EXPORT_HISTORY_MAX_PROFILE_EDITS
     # (the newest N are kept, rendered oldest-first).
     profile_edits_truncated: bool = False
+    # The user's standing instructions to their assistant, as they read now.
+    # Empty = none (rule #29); their history is in `profile_edits`.
+    assistant_notes: list[str] = []
     next_since: Optional[str] = None
 
 

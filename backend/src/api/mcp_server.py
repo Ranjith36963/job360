@@ -284,6 +284,11 @@ def build_server(version: str = "") -> MCPServer:
     async def get_profile() -> dict[str, Any]:
         """The user's Job360 profile, and the raw text you are meant to read.
 
+        READ `assistant_notes` FIRST — they are the user's standing
+        instructions to you (e.g. "never apply to agencies"), one line each,
+        and they win over anything you would otherwise assume. Empty means the
+        user has none. They are also in `fields["preferences.assistant_notes"]`.
+
         Job360 extracts TEXT from the CV, the LinkedIn export and GitHub, and
         stores the structure it can prove (the skills listed under a Skills
         heading, the summary, the contact block). It does not read the document
@@ -317,7 +322,8 @@ def build_server(version: str = "") -> MCPServer:
         the positions you write; if no dated role gives a level it falls back to
         the level the CV itself states; empty when neither says anything; used
         only when the user chose none), which inputs the user has given, your own past edits
-        (`agent_edits`), and the newest `lessons` the user flagged for next
+        (`agent_edits` — assistant edits still live; a field the user has
+        since changed on the web drops out), and the newest `lessons` the user flagged for next
         time. `raw` keys are empty strings when that input was never given; if
         `raw.truncated` is true, a document was longer than the cap and you are
         seeing its opening — the full text is on the web profile page."""
@@ -364,6 +370,9 @@ def build_server(version: str = "") -> MCPServer:
             "has_linkedin": s.has_linkedin,
             "has_github": s.has_github,
             "top_skills": resp.skill_tiers.get("primary", [])[:15],
+            # The user's standing instructions to the agent — read first (the
+            # docstring says so). [] when there are none (rule #29).
+            "assistant_notes": list(profile.preferences.assistant_notes or []),
             "editable_paths": editable_paths,
             # Already read on the profile's own connection — the response
             # carries it, so this is not a third query.
@@ -724,8 +733,9 @@ def build_server(version: str = "") -> MCPServer:
     async def export_history(since: Optional[str] = None, include_text: bool = False) -> dict[str, Any]:
         """Export the user's whole application history: every application,
         its events, and artifact metadata (full text only when
-        include_text=true). Bounded and rate-limited — a truncated response
-        names next_since to page from."""
+        include_text=true), plus the user's standing `assistant_notes` and
+        every profile change (`profile_edits`, yours and the user's). Bounded
+        and rate-limited — a truncated response names next_since to page from."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.export_history(since, include_text, db, _user())
@@ -811,6 +821,13 @@ def build_server(version: str = "") -> MCPServer:
         `preferences.excluded_skills` (value = the current list from
         get_profile's `fields` plus the new names); rewriting `cv_data.skills`
         only reaches the CV's share and is capped per edit.
+
+        Standing instructions (`preferences.assistant_notes`) are a list of
+        short lines, and a write REPLACES the list: to add a note, send the
+        current `fields["preferences.assistant_notes"]` plus the new line; to
+        remove one, send the list without it. Each note is one line, at most
+        PROFILE_NOTE_MAX_CHARS characters (200 by default). Only add a note
+        the user asked you to remember.
 
         Work history and projects are lists of records, and a write REPLACES
         the whole list (send every role, not only the new one):
