@@ -452,3 +452,33 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: oklch(0.35 0.005 145);
 }
+
+/* ═══════════════════════════════════════════
+   SCROLL-QUIET — a scrollable column that stays
+   scrollable but hides its scrollbar until hover
+   (owner report, 2026-09-25: the sticky side column
+   on an application page showed a distracting
+   always-on scrollbar)
+   ═══════════════════════════════════════════ */
+
+.scroll-quiet {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.scroll-quiet:hover {
+  scrollbar-color: rgb(148 163 184 / 0.4) transparent;
+}
+
+.scroll-quiet::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scroll-quiet::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+.scroll-quiet:hover::-webkit-scrollbar-thumb {
+  background: rgb(148 163 184 / 0.4);
+}

@@ -164,6 +164,17 @@ describe("ApplicationClient — six-question layout", () => {
     }
   });
 
+  it("right column keeps the scrollbar quiet — thin, hidden until hover (owner report, 2026-09-25)", async () => {
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+
+    const side = screen.getByTestId("app-col-side");
+    expect(side).toHaveClass("scroll-quiet");
+    // Stays scrollable — scroll-quiet only hides the bar, it doesn't remove
+    // the sticky/overflow behaviour.
+    expect(side).toHaveClass("lg:overflow-y-auto");
+  });
+
   it("the actions column carries Next, status, the status menu, Mark Applied and View ad", async () => {
     render(<ApplicationClient applicationId={42} />);
     await screen.findByText("Staff Engineer");

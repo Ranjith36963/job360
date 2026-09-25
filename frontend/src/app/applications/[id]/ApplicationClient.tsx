@@ -178,7 +178,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
 
         <div
           data-testid="app-col-side"
-          className="contents lg:flex lg:flex-col lg:gap-6 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto"
+          className="scroll-quiet contents lg:flex lg:flex-col lg:gap-6 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto"
         >
           <div data-testid="app-actions" className="order-1 flex flex-col items-start gap-3 lg:order-none">
             {nextStep?.label && (
