@@ -1625,7 +1625,11 @@ async def export_history(
     db: JobDatabase, user_id: str, *, since: Optional[str] = None, include_text: bool = False
 ) -> dict[str, Any]:
     """R10/S8 — bounded on applications AND bytes; rate-limited per USER."""
-    from src.services.applications.contacts import list_contacts  # noqa: PLC0415 — see get_application_detail
+    # Lazy — see get_application_detail's identical import above.
+    from src.services.applications.contacts import (  # noqa: PLC0415
+        list_contacts,
+        list_unlinked_contacts,
+    )
 
     key = f"export_history:{user_id}"
     if not rate_limit.check_and_record(
@@ -1684,10 +1688,15 @@ async def export_history(
     assistant_notes = await _current_assistant_notes(user_id)
     total_bytes += len(json.dumps(assistant_notes).encode("utf-8"))
 
+    # Owner decision, 2026-09-25 — cold contacts (no application) have no
+    # home in `applications[].contacts`; this is where the export shows them.
+    unlinked_contacts = await list_unlinked_contacts(db, user_id)
+    total_bytes += len(json.dumps(unlinked_contacts, default=str).encode("utf-8"))
+
     result: dict[str, Any] = {
         "applications": out_apps, "truncated": truncated, "bytes": total_bytes,
         "profile_edits": profile_edits, "profile_edits_truncated": edits_truncated,
-        "assistant_notes": assistant_notes,
+        "assistant_notes": assistant_notes, "unlinked_contacts": unlinked_contacts,
     }
     if truncated:
         result["next_since"] = next_since

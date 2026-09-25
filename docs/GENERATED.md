@@ -15,10 +15,10 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0045** | `backend/migrations/` |
-| Migration files | **46** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 11 route modules (76 endpoints) | `backend/src/api/routes/` |
-| Test files | across 139 `test_*.py` files | `backend/tests/` |
+| Migration head | **0046** | `backend/migrations/` |
+| Migration files | **47** | `backend/migrations/*.up.sql` |
+| FastAPI surface | 11 route modules (80 endpoints) | `backend/src/api/routes/` |
+| Test files | across 140 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 24 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -48,6 +48,10 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `PUT` | `/api/applications/{application_id}/fit` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/receipt` | `applications.py` |
 | `PUT` | `/api/applications/{application_id}/visa` | `applications.py` |
+| `POST` | `/api/contacts` | `applications.py` |
+| `PATCH` | `/api/contacts/{contact_id}` | `applications.py` |
+| `POST` | `/api/contacts/{contact_id}/outreach` | `applications.py` |
+| `GET` | `/api/people` | `applications.py` |
 | `GET` | `/api/whats-new` | `applications.py` |
 | `POST` | `/api/auth/login` | `auth.py` |
 | `POST` | `/api/auth/logout` | `auth.py` |
@@ -110,5 +114,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**76 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**80 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->

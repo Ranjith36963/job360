@@ -65,7 +65,7 @@ Candidate (one profile per user, versioned; multiple named profiles = later)
 
 **Event types (fixed list, plus free-text detail):**
 `brought`, `fit_judged`, `artifact_saved`, `contact_added`, `outreach_sent`,
-`applied`, `replied`, `interview_requested`, `interview_scheduled`,
+`outreach_replied`, `applied`, `replied`, `interview_requested`, `interview_scheduled`,
 `interview_done`, `offer`, `rejected`, `withdrawn`, `ghosted`, `note`,
 `lesson` ("flag for next time"). Every event: `type`, `detail`, `occurred_at`,
 `recorded_by` (which token/agent/web), `recorded_at`. Nothing is deleted.

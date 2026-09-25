@@ -89,6 +89,63 @@
         "title": "AddContactResponse",
         "type": "object"
       },
+      "AddPersonRequest": {
+        "additionalProperties": false,
+        "description": "``POST /api/contacts`` \u2014 a job-less (cold) contact when\n``application_id`` is omitted, a linked one otherwise (owner decision,\n2026-09-25). Kept as a SEPARATE model from ``AddContactRequest`` (used by\nthe per-application route, where the id comes off the URL) so that route\nkeeps refusing an ``application_id`` in its body (S3 \u2014 the id there is\nnever caller-supplied).",
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "email": {
+            "default": "",
+            "title": "Email",
+            "type": "string"
+          },
+          "linkedin_url": {
+            "default": "",
+            "title": "Linkedin Url",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "role": {
+            "default": "",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AddPersonRequest",
+        "type": "object"
+      },
       "AgentEditOut": {
         "description": "One live ASSISTANT edit on ``GET /profile``'s ``agent_edits``.\n\n``previous_value`` is the field's base value \u2014 what the CV / the user's\nown saves hold under this edit, and so exactly what \"Take back\" restores\n(the label never promises a value Take back would not produce).\n``None`` / ``\"\"`` / ``[]`` all mean \"it was empty\" \u2014 the page words them\nthat way.",
         "properties": {
@@ -1619,20 +1676,61 @@
         "title": "ConsentRequestResponse",
         "type": "object"
       },
+      "ContactEditOut": {
+        "description": "One value a contact field has ever held \u2014 the base row's own value is\nentry 0, oldest first, so ``[-1]`` is always current.",
+        "properties": {
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "recorded_at",
+          "recorded_by"
+        ],
+        "title": "ContactEditOut",
+        "type": "object"
+      },
       "ContactOut": {
-        "description": "A contact row (``contacts.list_contacts`` / ``add_contact``'s return).\nSame shape everywhere a contact appears \u2014 detail, export, the add response.",
+        "description": "A contact row (``contacts.list_contacts`` / ``add_contact``'s return).\nSame shape everywhere a contact appears \u2014 detail, export, the add\nresponse. ``application_id`` is ``null`` for a cold (job-less) contact\n(owner decision, 2026-09-25). ``edit_history``/``outreach`` carry the\nappend-only overlays added the same day.",
         "properties": {
           "added_by": {
             "title": "Added By",
             "type": "string"
           },
           "application_id": {
-            "title": "Application Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
           },
           "created_at": {
             "title": "Created At",
             "type": "string"
+          },
+          "edit_history": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/ContactEditOut"
+              },
+              "type": "array"
+            },
+            "title": "Edit History",
+            "type": "object"
           },
           "email": {
             "title": "Email",
@@ -1654,6 +1752,9 @@
             "title": "Notes",
             "type": "string"
           },
+          "outreach": {
+            "$ref": "#/components/schemas/ContactOutreachOut"
+          },
           "role": {
             "title": "Role",
             "type": "string"
@@ -1668,9 +1769,74 @@
           "linkedin_url",
           "notes",
           "added_by",
-          "created_at"
+          "created_at",
+          "outreach"
         ],
         "title": "ContactOut",
+        "type": "object"
+      },
+      "ContactOutreachOut": {
+        "properties": {
+          "last_reply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutreachEntryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_sent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutreachEntryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message_count": {
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/OutreachEntryOut"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "boolean"
+          },
+          "replies": {
+            "items": {
+              "$ref": "#/components/schemas/OutreachEntryOut"
+            },
+            "title": "Replies",
+            "type": "array"
+          },
+          "sent": {
+            "items": {
+              "$ref": "#/components/schemas/OutreachEntryOut"
+            },
+            "title": "Sent",
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages",
+          "sent",
+          "replies",
+          "message_count",
+          "last_sent",
+          "replied",
+          "last_reply"
+        ],
+        "title": "ContactOutreachOut",
         "type": "object"
       },
       "CreateReceiptRequest": {
@@ -2520,6 +2686,36 @@
         "title": "ListApplicationsResponse",
         "type": "object"
       },
+      "ListPeopleResponse": {
+        "properties": {
+          "people": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PersonOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "People"
+          },
+          "person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonFullOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "ListPeopleResponse",
+        "type": "object"
+      },
       "LivezResponse": {
         "properties": {
           "status": {
@@ -2657,6 +2853,72 @@
         "title": "OAuthGrantOut",
         "type": "object"
       },
+      "OutreachEntryOut": {
+        "description": "One row of a contact's outreach ledger \u2014 a drafted message VERSION\n(``entry=\"message\"``, ``version_no`` set) or a ``sent``/``reply`` mark\n(``version_no`` null \u2014 unversioned, a person can be sent to or replied\nto many times).",
+        "properties": {
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "entry": {
+            "title": "Entry",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          },
+          "source_message_id": {
+            "title": "Source Message Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version No"
+          }
+        },
+        "required": [
+          "id",
+          "contact_id",
+          "entry",
+          "channel",
+          "text",
+          "version_no",
+          "occurred_at",
+          "recorded_at",
+          "recorded_by",
+          "source_message_id"
+        ],
+        "title": "OutreachEntryOut",
+        "type": "object"
+      },
       "PasswordChangeRequest": {
         "properties": {
           "current_password": {
@@ -2711,6 +2973,194 @@
           "email"
         ],
         "title": "PasswordResetRequest",
+        "type": "object"
+      },
+      "PersonFullOut": {
+        "description": "``list_people(contact_id=...)``'s shape \u2014 the one row's own full\nrecord (never merged with another row that happens to share an email).",
+        "properties": {
+          "added_by": {
+            "title": "Added By",
+            "type": "string"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "edit_history": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/ContactEditOut"
+              },
+              "type": "array"
+            },
+            "title": "Edit History",
+            "type": "object"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/PersonJobOut"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "linkedin_url": {
+            "title": "Linkedin Url",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "outreach": {
+            "$ref": "#/components/schemas/ContactOutreachOut"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "application_id",
+          "name",
+          "role",
+          "email",
+          "linkedin_url",
+          "notes",
+          "added_by",
+          "created_at",
+          "outreach",
+          "jobs"
+        ],
+        "title": "PersonFullOut",
+        "type": "object"
+      },
+      "PersonJobOut": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "job_title",
+          "job_company"
+        ],
+        "title": "PersonJobOut",
+        "type": "object"
+      },
+      "PersonOut": {
+        "description": "``list_people``'s no-``contact_id`` shape \u2014 one row per PERSON\n(grouped by lower(email) else linkedin_url), aggregated across every\nunderlying ``application_contacts`` row that shares that identity.",
+        "properties": {
+          "contact_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Contact Ids",
+            "type": "array"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/PersonJobOut"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "last_reply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutreachEntryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_sent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutreachEntryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "linkedin_url": {
+            "title": "Linkedin Url",
+            "type": "string"
+          },
+          "message_count": {
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "boolean"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contact_ids",
+          "name",
+          "role",
+          "email",
+          "linkedin_url",
+          "notes",
+          "jobs",
+          "message_count",
+          "last_sent",
+          "replied",
+          "last_reply"
+        ],
+        "title": "PersonOut",
         "type": "object"
       },
       "ProfileEditExportOut": {
@@ -3523,6 +3973,28 @@
       "RecordEventRequest": {
         "additionalProperties": false,
         "properties": {
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
           "corrects_event_id": {
             "anyOf": [
               {
@@ -3605,8 +4077,15 @@
             "type": "boolean"
           },
           "event_id": {
-            "title": "Event Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
           },
           "event_type": {
             "title": "Event Type",
@@ -3665,6 +4144,115 @@
         "title": "RecordEventResponse",
         "type": "object"
       },
+      "RecordOutreachRequest": {
+        "additionalProperties": false,
+        "description": "``POST /api/contacts/{contact_id}/outreach`` \u2014 the one shared door\n``save_artifact``/``record_event`` (with a ``contact_id``) also call\n(M5 parity).",
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "channel": {
+            "title": "Channel",
+            "type": "string"
+          },
+          "entry": {
+            "title": "Entry",
+            "type": "string"
+          },
+          "follow_up_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up On"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "default": "",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry",
+          "channel"
+        ],
+        "title": "RecordOutreachRequest",
+        "type": "object"
+      },
+      "RecordOutreachResponse": {
+        "properties": {
+          "already_existed": {
+            "title": "Already Existed",
+            "type": "boolean"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "follow_up_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up On"
+          },
+          "outreach": {
+            "$ref": "#/components/schemas/OutreachEntryOut"
+          }
+        },
+        "required": [
+          "outreach",
+          "already_existed",
+          "event_id",
+          "follow_up_on"
+        ],
+        "title": "RecordOutreachResponse",
+        "type": "object"
+      },
       "RegisterRequest": {
         "properties": {
           "email": {
@@ -3705,6 +4293,28 @@
       "SaveArtifactRequest": {
         "additionalProperties": false,
         "properties": {
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel"
+          },
+          "contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
           "kind": {
             "title": "Kind",
             "type": "string"
@@ -3749,13 +4359,31 @@
             "title": "Chars",
             "type": "integer"
           },
+          "contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
           },
           "event_id": {
-            "title": "Event Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
           },
           "kind": {
             "title": "Kind",
@@ -4582,6 +5210,69 @@
           "last_used_at"
         ],
         "title": "TokenSummary",
+        "type": "object"
+      },
+      "UpdateContactRequest": {
+        "additionalProperties": false,
+        "description": "``PATCH /api/contacts/{contact_id}`` \u2014 every field optional; only the\nones given are appended to ``contact_edits`` (owner decision, 2026-09-25:\ncontacts ARE editable, old values kept). No length caps declared here \u2014\nsame reasoning as ``AddContactRequest``: ``contacts.update_contact``\nchecks live ``settings`` values at call time.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "linkedin_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linkedin Url"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "title": "UpdateContactRequest",
         "type": "object"
       },
       "UpdateProfileRequest": {
@@ -7184,6 +7875,272 @@
         ]
       }
     },
+    "/api/contacts": {
+      "post": {
+        "description": "Owner decision, 2026-09-25 \u2014 a person with no job yet (cold\nnetworking), or a linked one when ``application_id`` is given. Same\nidempotency/cap/rate-limit rules as the per-application route, just\nscoped to the USER instead of an application when there is none.",
+        "operationId": "add_person_api_contacts_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddPersonRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddContactResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddContactResponse"
+                }
+              }
+            },
+            "description": "Contact created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Person",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/contacts/{contact_id}": {
+      "patch": {
+        "description": "Owner decision, 2026-09-25 \u2014 contacts ARE editable, old values kept:\nevery provided field appends a ``contact_edits`` row (S12 \u2014 the base row\nis never touched); the response is the CURRENT view (base + latest edit\nper field) plus the full history. A foreign/unknown id reads 404 (S2).",
+        "operationId": "update_contact_api_contacts__contact_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateContactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Contact",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/contacts/{contact_id}/outreach": {
+      "post": {
+        "description": "The one shared door for a contact's outreach ledger \u2014 a drafted\nmessage VERSION, or a ``sent``/``reply`` mark. ``save_artifact``\n(``kind=\"outreach\"`` + ``contact_id``) and ``record_event``\n(``outreach_sent``/``outreach_replied`` + ``contact_id``) both delegate to\nthe SAME service function this route calls (M5 parity) \u2014 this route is\nthe one door that works for a COLD contact too, since it carries no\n``application_id`` in its URL.",
+        "operationId": "record_outreach_api_contacts__contact_id__outreach_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordOutreachRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordOutreachResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordOutreachResponse"
+                }
+              }
+            },
+            "description": "Outreach recorded"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Outreach",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/health": {
       "get": {
         "operationId": "health_check_api_health_get",
@@ -7742,6 +8699,104 @@
         "summary": "Token",
         "tags": [
           "oauth"
+        ]
+      }
+    },
+    "/api/people": {
+      "get": {
+        "description": "No ``contact_id`` \u2014 every person the user has added, grouped by\nlower(email) else linkedin_url (the same recruiter on two jobs is one\nperson here). With ``contact_id`` \u2014 that ONE row's own full record\n(message versions, sent/reply marks, detail-edit history), never merged.",
+        "operationId": "list_people_api_people_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "contact_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Contact Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "email",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Email"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPeopleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List People",
+        "tags": [
+          "applications"
         ]
       }
     },

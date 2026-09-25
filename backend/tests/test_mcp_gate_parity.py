@@ -80,6 +80,9 @@ TOOL_ROUTES = {
     "add_contact": ("applications", "add_contact", {"application_id": 987654321, "name": "x"}),
     "stats": ("applications", "stats", {}),
     "update_profile": ("profile", "update_profile", {"edits": []}),
+    # Outreach tracking (owner decisions, 2026-09-25) — two more tools.
+    "list_people": ("applications", "list_people", {}),
+    "update_contact": ("applications", "update_contact", {"contact_id": 987654321, "name": "x"}),
 }
 
 

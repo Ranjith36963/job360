@@ -59,6 +59,17 @@ class SaveArtifactRequest(BaseModel):
     text: str
     label: str = Field("", max_length=100)
     model: Optional[str] = Field(None, max_length=200)
+    # Owner decision, 2026-09-25 — a message DRAFTED for a person. When given,
+    # `kind` must be "outreach" and the text becomes a numbered version in
+    # that contact's own outreach ledger (`contact_outreach`), not a new
+    # `application_artifacts` row — a version is not news, so it appends no
+    # timeline event (unlike every other artifact kind). The contact must be
+    # linked to THIS route's `application_id` (URL segment) — a cold contact's
+    # message goes through `POST /api/contacts/{contact_id}/outreach` instead,
+    # which the `save_artifact` MCP tool calls directly when it is given a
+    # `contact_id` but no `application_id`.
+    contact_id: Optional[int] = None
+    channel: Optional[str] = None
 
 
 class FitAxisIn(BaseModel):
@@ -129,6 +140,14 @@ class RecordEventRequest(BaseModel):
     # daily-check agent sets it on a plain `note` as often as on a status
     # event. `spine.parse_follow_up_on` does the real validation.
     follow_up_on: Optional[str] = None
+    # Owner decision, 2026-09-25 — a `contact_id` here means "record this as
+    # OUTREACH for that person too, in the same transaction": `event_type`
+    # must then be `outreach_sent`/`outreach_replied` and `channel` is
+    # required. The contact must be linked to THIS route's `application_id`
+    # (a cold contact reads as 422 — there is no job to scope this call by;
+    # use `POST /api/contacts/{contact_id}/outreach` for a cold contact).
+    contact_id: Optional[int] = None
+    channel: Optional[str] = None
 
     def clamp_detail(self) -> str:
         cap = settings.APPLICATION_EVENT_DETAIL_MAX_CHARS
@@ -380,12 +399,52 @@ class ApplicationReceiptExportOut(ApplicationReceiptOut):
     cover_letter_text: Optional[str] = None
 
 
-class ContactOut(BaseModel):
-    """A contact row (``contacts.list_contacts`` / ``add_contact``'s return).
-    Same shape everywhere a contact appears — detail, export, the add response."""
+class ContactEditOut(BaseModel):
+    """One value a contact field has ever held — the base row's own value is
+    entry 0, oldest first, so ``[-1]`` is always current."""
+
+    value: str
+    recorded_at: str
+    recorded_by: str
+
+
+class OutreachEntryOut(BaseModel):
+    """One row of a contact's outreach ledger — a drafted message VERSION
+    (``entry="message"``, ``version_no`` set) or a ``sent``/``reply`` mark
+    (``version_no`` null — unversioned, a person can be sent to or replied
+    to many times)."""
 
     id: int
-    application_id: int
+    contact_id: int
+    entry: str
+    channel: str
+    text: str
+    version_no: Optional[int]
+    occurred_at: str
+    recorded_at: str
+    recorded_by: str
+    source_message_id: str
+
+
+class ContactOutreachOut(BaseModel):
+    messages: list[OutreachEntryOut]
+    sent: list[OutreachEntryOut]
+    replies: list[OutreachEntryOut]
+    message_count: int
+    last_sent: Optional[OutreachEntryOut]
+    replied: bool
+    last_reply: Optional[OutreachEntryOut]
+
+
+class ContactOut(BaseModel):
+    """A contact row (``contacts.list_contacts`` / ``add_contact``'s return).
+    Same shape everywhere a contact appears — detail, export, the add
+    response. ``application_id`` is ``null`` for a cold (job-less) contact
+    (owner decision, 2026-09-25). ``edit_history``/``outreach`` carry the
+    append-only overlays added the same day."""
+
+    id: int
+    application_id: Optional[int]
     name: str
     role: str
     email: str
@@ -393,6 +452,8 @@ class ContactOut(BaseModel):
     notes: str
     added_by: str
     created_at: str
+    edit_history: dict[str, list[ContactEditOut]] = Field(default_factory=dict)
+    outreach: ContactOutreachOut
 
 
 class NextStepOut(BaseModel):
@@ -475,6 +536,11 @@ class ListApplicationsResponse(BaseModel):
 
 
 class SaveArtifactResponse(BaseModel):
+    # Owner decision, 2026-09-25 — a `contact_id` save writes no
+    # `application_artifacts` row at all (its identity lives in
+    # `contact_outreach` instead); `artifact_id` then carries that ledger
+    # row's own id and `event_id` is `null` (a message version is not news,
+    # so no timeline event exists to name).
     artifact_id: int
     kind: str
     version_no: int
@@ -483,7 +549,8 @@ class SaveArtifactResponse(BaseModel):
     model: Optional[str]
     profile_version: Optional[int]
     created_at: str
-    event_id: int
+    event_id: Optional[int]
+    contact_id: Optional[int] = None
 
 
 class SaveFitResponse(BaseModel):
@@ -495,7 +562,11 @@ class SaveFitResponse(BaseModel):
 
 
 class RecordEventResponse(BaseModel):
-    event_id: int
+    # `null` only for a `contact_id` call whose `source` was already recorded
+    # (the outreach ledger row existed — no NEW event was ever appended for
+    # it, so there is nothing to name). Every other call — including every
+    # call that predates `contact_id` — always gets a real id.
+    event_id: Optional[int]
     event_type: str
     occurred_at: str
     recorded_at: str
@@ -617,6 +688,97 @@ class AddContactResponse(BaseModel):
     contact: ContactOut
     already_existed: bool
     event_id: Optional[int]
+
+
+class AddPersonRequest(AddContactRequest):
+    """``POST /api/contacts`` — a job-less (cold) contact when
+    ``application_id`` is omitted, a linked one otherwise (owner decision,
+    2026-09-25). Kept as a SEPARATE model from ``AddContactRequest`` (used by
+    the per-application route, where the id comes off the URL) so that route
+    keeps refusing an ``application_id`` in its body (S3 — the id there is
+    never caller-supplied)."""
+
+    application_id: Optional[int] = None
+
+
+class UpdateContactRequest(BaseModel):
+    """``PATCH /api/contacts/{contact_id}`` — every field optional; only the
+    ones given are appended to ``contact_edits`` (owner decision, 2026-09-25:
+    contacts ARE editable, old values kept). No length caps declared here —
+    same reasoning as ``AddContactRequest``: ``contacts.update_contact``
+    checks live ``settings`` values at call time."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = None
+    role: Optional[str] = None
+    email: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class RecordOutreachRequest(BaseModel):
+    """``POST /api/contacts/{contact_id}/outreach`` — the one shared door
+    ``save_artifact``/``record_event`` (with a ``contact_id``) also call
+    (M5 parity)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entry: str
+    channel: str
+    text: str = ""
+    occurred_at: Optional[str] = None
+    source: Optional[EventSource] = None
+    # Owner decision, 2026-09-25 — only meaningful on entry="sent", and only
+    # for a contact linked to a job; `contacts.record_outreach` enforces both.
+    follow_up_on: Optional[str] = None
+    # A caller going through /applications/{id}/events can only ever touch a
+    # contact linked to THAT SAME application — set by the wrapper below,
+    # never by the request body itself.
+    application_id: Optional[int] = None
+
+
+class RecordOutreachResponse(BaseModel):
+    outreach: OutreachEntryOut
+    already_existed: bool
+    event_id: Optional[int]
+    follow_up_on: Optional[str]
+
+
+class PersonJobOut(BaseModel):
+    application_id: int
+    job_title: str
+    job_company: str
+
+
+class PersonOut(BaseModel):
+    """``list_people``'s no-``contact_id`` shape — one row per PERSON
+    (grouped by lower(email) else linkedin_url), aggregated across every
+    underlying ``application_contacts`` row that shares that identity."""
+
+    contact_ids: list[int]
+    name: str
+    role: str
+    email: str
+    linkedin_url: str
+    notes: str
+    jobs: list[PersonJobOut]
+    message_count: int
+    last_sent: Optional[OutreachEntryOut]
+    replied: bool
+    last_reply: Optional[OutreachEntryOut]
+
+
+class PersonFullOut(ContactOut):
+    """``list_people(contact_id=...)``'s shape — the one row's own full
+    record (never merged with another row that happens to share an email)."""
+
+    jobs: list[PersonJobOut]
+
+
+class ListPeopleResponse(BaseModel):
+    people: Optional[list[PersonOut]] = None
+    person: Optional[PersonFullOut] = None
 
 
 class StatsOverallOut(BaseModel):
@@ -942,6 +1104,108 @@ async def add_contact(
 
 
 @router.post(
+    "/contacts",
+    response_model=AddContactResponse,
+    responses={201: {"model": AddContactResponse, "description": "Contact created"}},
+)
+async def add_person(
+    body: AddPersonRequest,
+    response: Response,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Owner decision, 2026-09-25 — a person with no job yet (cold
+    networking), or a linked one when ``application_id`` is given. Same
+    idempotency/cap/rate-limit rules as the per-application route, just
+    scoped to the USER instead of an application when there is none."""
+    try:
+        result = await contacts_service.add_contact(
+            db, user.id, body.application_id, actor_for(user),
+            name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
+            notes=body.notes, occurred_at=body.occurred_at,
+        )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+    response.status_code = 200 if result["already_existed"] else 201
+    return result
+
+
+@router.patch("/contacts/{contact_id}", response_model=ContactOut)
+async def update_contact(
+    contact_id: int,
+    body: UpdateContactRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Owner decision, 2026-09-25 — contacts ARE editable, old values kept:
+    every provided field appends a ``contact_edits`` row (S12 — the base row
+    is never touched); the response is the CURRENT view (base + latest edit
+    per field) plus the full history. A foreign/unknown id reads 404 (S2)."""
+    try:
+        return await contacts_service.update_contact(
+            db, user.id, contact_id, actor_for(user),
+            name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
+            notes=body.notes,
+        )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+@router.post(
+    "/contacts/{contact_id}/outreach",
+    response_model=RecordOutreachResponse,
+    responses={201: {"model": RecordOutreachResponse, "description": "Outreach recorded"}},
+)
+async def record_outreach(
+    contact_id: int,
+    body: RecordOutreachRequest,
+    response: Response,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The one shared door for a contact's outreach ledger — a drafted
+    message VERSION, or a ``sent``/``reply`` mark. ``save_artifact``
+    (``kind="outreach"`` + ``contact_id``) and ``record_event``
+    (``outreach_sent``/``outreach_replied`` + ``contact_id``) both delegate to
+    the SAME service function this route calls (M5 parity) — this route is
+    the one door that works for a COLD contact too, since it carries no
+    ``application_id`` in its URL."""
+    try:
+        source = spine.validate_source(body.source.model_dump() if body.source else None)
+        result = await contacts_service.record_outreach(
+            db, user.id, contact_id, actor_for(user),
+            entry=body.entry, channel=body.channel, text=body.text, occurred_at=body.occurred_at,
+            source_message_id=source["message_id"] if source else "",
+            follow_up_on=body.follow_up_on, application_id_hint=body.application_id,
+        )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+    response.status_code = 200 if result["already_existed"] else 201
+    return result
+
+
+@router.get("/people", response_model=ListPeopleResponse)
+async def list_people(
+    contact_id: Optional[int] = Query(None),
+    email: Optional[str] = Query(None),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """No ``contact_id`` — every person the user has added, grouped by
+    lower(email) else linkedin_url (the same recruiter on two jobs is one
+    person here). With ``contact_id`` — that ONE row's own full record
+    (message versions, sent/reply marks, detail-edit history), never merged."""
+    try:
+        return await contacts_service.list_people(db, user.id, contact_id=contact_id, email=email)
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+@router.post(
     "/applications/{application_id}/artifacts", status_code=201, response_model=SaveArtifactResponse
 )
 async def save_artifact(
@@ -951,6 +1215,29 @@ async def save_artifact(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
+        if body.contact_id is not None:
+            # Owner decision, 2026-09-25 — a message DRAFTED for a person:
+            # writes a numbered version into that contact's own outreach
+            # ledger (contacts.record_outreach), never an application_artifacts
+            # row. The contact must be linked to THIS application (a cold
+            # contact's message goes through the MCP tool's other branch,
+            # which calls POST /api/contacts/{contact_id}/outreach directly).
+            if body.kind != "outreach":
+                raise SpineError(422, "kind must be 'outreach' when contact_id is given")
+            if not body.channel:
+                raise SpineError(422, "channel is required when contact_id is given")
+            result = await contacts_service.record_outreach(
+                db, user.id, body.contact_id, actor_for(user),
+                entry="message", channel=body.channel, text=body.text,
+                application_id_hint=application_id,
+            )
+            outreach = result["outreach"]
+            return {
+                "artifact_id": outreach["id"], "kind": "outreach", "version_no": outreach["version_no"] or 0,
+                "chars": len(outreach["text"]), "made_by": outreach["recorded_by"], "model": body.model,
+                "profile_version": None, "created_at": outreach["recorded_at"], "event_id": result["event_id"],
+                "contact_id": body.contact_id,
+            }
         return await spine.save_artifact(
             db, user_id=user.id, application_id=application_id, kind=body.kind, text=body.text,
             made_by=actor_for(user), label=body.label, model=body.model,
@@ -1024,11 +1311,42 @@ async def record_event(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
+        source = spine.validate_source(body.source.model_dump() if body.source else None)
+        if body.contact_id is not None:
+            # Owner decision, 2026-09-25 — record this as OUTREACH for a
+            # person too, in the same transaction as the job-timeline event.
+            # Only the two outreach event types are allowed here; a cold
+            # contact (no application_id of its own) can never match THIS
+            # route's application_id, so it reads as 422 — use
+            # POST /api/contacts/{contact_id}/outreach for a cold contact.
+            if body.event_type not in ("outreach_sent", "outreach_replied"):
+                raise SpineError(
+                    422, "event_type must be 'outreach_sent' or 'outreach_replied' when contact_id is given"
+                )
+            if not body.channel:
+                raise SpineError(422, "channel is required when contact_id is given")
+            entry = "sent" if body.event_type == "outreach_sent" else "reply"
+            result = await contacts_service.record_outreach(
+                db, user.id, body.contact_id, actor_for(user),
+                entry=entry, channel=body.channel, text=body.detail, occurred_at=body.occurred_at,
+                source_message_id=source["message_id"] if source else "",
+                follow_up_on=body.follow_up_on, application_id_hint=application_id,
+            )
+            app_row = await spine.get_owned_application(db, user.id, application_id)
+            if app_row is None:  # pragma: no cover — record_outreach already 422s a mismatch
+                raise SpineError(404, "application not found")
+            return {
+                "event_id": result["event_id"], "event_type": body.event_type,
+                "occurred_at": result["outreach"]["occurred_at"], "recorded_at": result["outreach"]["recorded_at"],
+                "recorded_by": result["outreach"]["recorded_by"], "status": app_row["status"],
+                "already_existed": result["already_existed"], "scheduled_at": None,
+                "follow_up_on": result["follow_up_on"],
+            }
+
         spine.validate_event_type(body.event_type)
         detail = body.clamp_detail()
         payload = spine.validate_payload(body.payload)
         occurred_at = spine.parse_occurred_at(body.occurred_at)
-        source = spine.validate_source(body.source.model_dump() if body.source else None)
         scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
         follow_up_on_arg: Any = spine.FOLLOW_UP_UNSET
         if body.follow_up_on is not None:
