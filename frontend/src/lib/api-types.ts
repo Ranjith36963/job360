@@ -1953,6 +1953,13 @@ export interface components {
             };
             /** Events */
             events: number;
+            /** Fit Score */
+            fit_score?: number | null;
+            /**
+             * Fit Verdict
+             * @default
+             */
+            fit_verdict: string;
             /**
              * Follow Up Due
              * @default false
@@ -1962,10 +1969,17 @@ export interface components {
             follow_up_on?: string | null;
             /** Id */
             id: number;
+            /** Interview At */
+            interview_at?: string | null;
             /** Job Company */
             job_company: string;
             /** Job Id */
             job_id: number;
+            /**
+             * Job Location
+             * @default
+             */
+            job_location: string;
             /** Job Title */
             job_title: string;
             /**
@@ -1975,6 +1989,8 @@ export interface components {
             job_url: string;
             /** Last Event At */
             last_event_at: string | null;
+            /** Last Receipt At */
+            last_receipt_at?: string | null;
             /** Needs Sponsorship */
             needs_sponsorship?: boolean | null;
             next_step: components["schemas"]["NextStepOut"];

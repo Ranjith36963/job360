@@ -285,9 +285,9 @@ function AssistantRecipesCard() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ul className="divide-y divide-border/40">
+        <ul className="grid gap-4 border-t border-border/40 lg:grid-cols-2 lg:gap-x-8">
           {ASSISTANT_RECIPES.map((a) => (
-            <li key={a.name} className="space-y-1 py-3">
+            <li key={a.name} className="space-y-1 border-b border-border/40 py-3">
               <p className="font-medium">{a.name}</p>
               <p className="text-xs text-muted-foreground">{a.plans}</p>
               <p className="text-xs text-muted-foreground">{a.steps}</p>
@@ -799,8 +799,8 @@ export default function ConnectAgentPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8 py-12">
-      <div>
+    <div className="space-y-8 py-12">
+      <div className="max-w-3xl">
         <h1 className="text-3xl font-semibold">Connect an agent</h1>
         <p className="mt-2 text-muted-foreground">
           Let Claude Code (or any MCP client) work your Job360 account: bring
@@ -809,25 +809,32 @@ export default function ConnectAgentPage() {
           revoke it any time.
         </p>
       </div>
-      <ConnectAppCard />
+      <div className="max-w-3xl">
+        <ConnectAppCard />
+      </div>
+      {/* A list of similar cards (one row per assistant) — free to use the
+          full page width in a 2-column grid at lg instead of staying pinned
+          to the narrow form width below. */}
       <AssistantRecipesCard />
-      <ExamplePromptsCard />
-      <DailyCheckCard
-        dailyCheck={dailyCheck}
-        loadFailed={dailyCheckLoadFailed}
-        onResetOffer={onResetDailyCheckOffer}
-        resetting={resettingDailyCheck}
-      />
-      <ConnectedAppsCard
-        grants={grants}
-        loading={grantsLoading}
-        onRevoke={onRevokeGrant}
-      />
-      {created && (
-        <NewTokenReveal created={created} onDismiss={() => setCreated(null)} />
-      )}
-      <CreateTokenCard onCreated={onCreated} />
-      <TokenList tokens={tokens} loading={loading} onRevoke={onRevoke} />
+      <div className="max-w-3xl space-y-8">
+        <ExamplePromptsCard />
+        <DailyCheckCard
+          dailyCheck={dailyCheck}
+          loadFailed={dailyCheckLoadFailed}
+          onResetOffer={onResetDailyCheckOffer}
+          resetting={resettingDailyCheck}
+        />
+        <ConnectedAppsCard
+          grants={grants}
+          loading={grantsLoading}
+          onRevoke={onRevokeGrant}
+        />
+        {created && (
+          <NewTokenReveal created={created} onDismiss={() => setCreated(null)} />
+        )}
+        <CreateTokenCard onCreated={onCreated} />
+        <TokenList tokens={tokens} loading={loading} onRevoke={onRevoke} />
+      </div>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { bringJob, fetchJobUrl, type FetchUrlResponse } from "@/lib/api";
 import { FETCH_URL_MESSAGES, type FetchUrlOutcome } from "@/lib/url-fetch-messages";
 import { toast } from "@/lib/toast";
+import { PageContainer } from "@/components/layout/PageContainer";
 
 // R11/C5 — build-time hide only; the backend's URL_FETCH_ENABLED (404 on the
 // route) is the control that actually stops the surface without a rebuild.
@@ -121,191 +122,193 @@ export default function BringJobPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
-      <div className="mb-6">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">Bring a job</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Paste a link and we&apos;ll try to fill the form, or paste the ad you found. We keep
-          it, every CV your agent writes for it, and a receipt of exactly what you sent.
-        </p>
-      </div>
-
-      {URL_FETCH_UI_ENABLED && (
-        <div className="mb-6 space-y-2 rounded-lg border border-border bg-muted/30 p-4">
-          <Label htmlFor="bring-fetch-url">Fetch a job from a link</Label>
-          <div className="flex gap-2">
-            <Input
-              id="bring-fetch-url"
-              type="url"
-              inputMode="url"
-              value={applyUrl}
-              onChange={(e) => setApplyUrl(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  // R12 — Enter fetches; it must NEVER submit the surrounding form.
-                  e.preventDefault();
-                  void fetchFromLink();
-                }
-              }}
-              placeholder="https://boards.greenhouse.io/acme/jobs/12345"
-              maxLength={2000}
-              disabled={fetchingUrl}
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              className="gap-2"
-              disabled={fetchingUrl || !applyUrl.trim()}
-              onClick={() => void fetchFromLink()}
-            >
-              {fetchingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-              Fetch
-            </Button>
-          </div>
-          {fetchOutcome && (
-            <p
-              data-testid="bring-fetch-outcome"
-              className={fetchOutcome === "ok" ? "text-sm text-muted-foreground" : "text-sm text-destructive"}
-            >
-              {fetchMessage}
-            </p>
-          )}
-        </div>
-      )}
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-        className="space-y-5"
-        aria-label="Bring a job"
-      >
-        <div className="grid gap-5 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="bring-title">Job title</Label>
-            <div className="flex items-center gap-2">
-              <Input
-                id="bring-title"
-                ref={titleInputRef}
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Senior Python Engineer"
-                maxLength={300}
-                required
-              />
-              {filledFields.includes("title") && (
-                <span
-                  data-testid="bring-filled-title"
-                  className="shrink-0 text-xs text-muted-foreground"
-                  title="Filled from the link — check it"
-                >
-                  filled
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="bring-company">Company</Label>
-            <div className="flex items-center gap-2">
-              <Input
-                id="bring-company"
-                value={company}
-                onChange={(e) => setCompany(e.target.value)}
-                placeholder="Acme Ltd"
-                maxLength={300}
-                required
-              />
-              {filledFields.includes("company") && (
-                <span
-                  data-testid="bring-filled-company"
-                  className="shrink-0 text-xs text-muted-foreground"
-                  title="Filled from the link — check it"
-                >
-                  filled
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="bring-location">Location (optional)</Label>
-            <div className="flex items-center gap-2">
-              <Input
-                id="bring-location"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="London, UK · Remote · Berlin"
-                maxLength={300}
-              />
-              {filledFields.includes("location") && (
-                <span
-                  data-testid="bring-filled-location"
-                  className="shrink-0 text-xs text-muted-foreground"
-                  title="Filled from the link — check it"
-                >
-                  filled
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="bring-url">Link to the ad (optional)</Label>
-            <Input
-              id="bring-url"
-              type="url"
-              inputMode="url"
-              value={applyUrl}
-              onChange={(e) => setApplyUrl(e.target.value)}
-              placeholder="https://…"
-              maxLength={2000}
-              pattern="https?://.*"
-              title="Must start with http:// or https://"
-            />
-          </div>
+    <PageContainer className="py-8">
+      <div className="max-w-3xl">
+        <div className="mb-6">
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">Bring a job</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Paste a link and we&apos;ll try to fill the form, or paste the ad you found. We keep
+            it, every CV your agent writes for it, and a receipt of exactly what you sent.
+          </p>
         </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Label htmlFor="bring-description">The ad, as written</Label>
-            {filledFields.includes("description") && (
-              <span
-                data-testid="bring-filled-description"
-                className="shrink-0 text-xs text-muted-foreground"
-                title="Filled from the link — check it"
+        {URL_FETCH_UI_ENABLED && (
+          <div className="mb-6 space-y-2 rounded-lg border border-border bg-muted/30 p-4">
+            <Label htmlFor="bring-fetch-url">Fetch a job from a link</Label>
+            <div className="flex gap-2">
+              <Input
+                id="bring-fetch-url"
+                type="url"
+                inputMode="url"
+                value={applyUrl}
+                onChange={(e) => setApplyUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    // R12 — Enter fetches; it must NEVER submit the surrounding form.
+                    e.preventDefault();
+                    void fetchFromLink();
+                  }
+                }}
+                placeholder="https://boards.greenhouse.io/acme/jobs/12345"
+                maxLength={2000}
+                disabled={fetchingUrl}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                className="gap-2"
+                disabled={fetchingUrl || !applyUrl.trim()}
+                onClick={() => void fetchFromLink()}
               >
-                filled
-              </span>
+                {fetchingUrl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                Fetch
+              </Button>
+            </div>
+            {fetchOutcome && (
+              <p
+                data-testid="bring-fetch-outcome"
+                className={fetchOutcome === "ok" ? "text-sm text-muted-foreground" : "text-sm text-destructive"}
+              >
+                {fetchMessage}
+              </p>
             )}
           </div>
-          <Textarea
-            id="bring-description"
-            ref={descriptionRef}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Paste the full job description here."
-            className="min-h-[16rem] font-mono text-sm"
-            maxLength={40000}
-            required
-          />
-          <p className="text-xs text-muted-foreground">
-            {description.length.toLocaleString()} / 40,000 characters
-          </p>
-        </div>
+        )}
 
-        <div className="flex items-center gap-3">
-          <Button type="submit" disabled={!canSubmit} className="gap-2">
-            {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ClipboardPaste className="h-4 w-4" />
-            )}
-            {submitting ? "Saving…" : "Bring this job"}
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            Nothing is sent anywhere. You apply; we keep the record.
-          </p>
-        </div>
-      </form>
-    </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+          className="space-y-5"
+          aria-label="Bring a job"
+        >
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="bring-title">Job title</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="bring-title"
+                  ref={titleInputRef}
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Senior Python Engineer"
+                  maxLength={300}
+                  required
+                />
+                {filledFields.includes("title") && (
+                  <span
+                    data-testid="bring-filled-title"
+                    className="shrink-0 text-xs text-muted-foreground"
+                    title="Filled from the link — check it"
+                  >
+                    filled
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bring-company">Company</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="bring-company"
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                  placeholder="Acme Ltd"
+                  maxLength={300}
+                  required
+                />
+                {filledFields.includes("company") && (
+                  <span
+                    data-testid="bring-filled-company"
+                    className="shrink-0 text-xs text-muted-foreground"
+                    title="Filled from the link — check it"
+                  >
+                    filled
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bring-location">Location (optional)</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="bring-location"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="London, UK · Remote · Berlin"
+                  maxLength={300}
+                />
+                {filledFields.includes("location") && (
+                  <span
+                    data-testid="bring-filled-location"
+                    className="shrink-0 text-xs text-muted-foreground"
+                    title="Filled from the link — check it"
+                  >
+                    filled
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bring-url">Link to the ad (optional)</Label>
+              <Input
+                id="bring-url"
+                type="url"
+                inputMode="url"
+                value={applyUrl}
+                onChange={(e) => setApplyUrl(e.target.value)}
+                placeholder="https://…"
+                maxLength={2000}
+                pattern="https?://.*"
+                title="Must start with http:// or https://"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="bring-description">The ad, as written</Label>
+              {filledFields.includes("description") && (
+                <span
+                  data-testid="bring-filled-description"
+                  className="shrink-0 text-xs text-muted-foreground"
+                  title="Filled from the link — check it"
+                >
+                  filled
+                </span>
+              )}
+            </div>
+            <Textarea
+              id="bring-description"
+              ref={descriptionRef}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Paste the full job description here."
+              className="min-h-[16rem] font-mono text-sm"
+              maxLength={40000}
+              required
+            />
+            <p className="text-xs text-muted-foreground">
+              {description.length.toLocaleString()} / 40,000 characters
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Button type="submit" disabled={!canSubmit} className="gap-2">
+              {submitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ClipboardPaste className="h-4 w-4" />
+              )}
+              {submitting ? "Saving…" : "Bring this job"}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Nothing is sent anywhere. You apply; we keep the record.
+            </p>
+          </div>
+        </form>
+      </div>
+    </PageContainer>
   );
 }

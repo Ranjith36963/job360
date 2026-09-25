@@ -71,12 +71,14 @@ export function VisaSelect({
 
   const summary = SIGNAL_SUMMARY[visa.signal] ?? visa.signal;
 
+  // Owner decision, 2026-09-25 — the caller (ApplicationClient's
+  // `section-visa`) already renders the "Visa / sponsorship" heading; this
+  // component used to render its own copy of the same text right below it,
+  // so the words appeared twice. This is the ONLY place VisaSelect is used,
+  // so dropping its own heading here is safe.
   if (!editing) {
     return (
-      <div className="mt-4">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Visa / sponsorship
-        </p>
+      <div>
         <div className="flex items-center justify-between gap-2">
           <p data-testid="visa-summary" className="text-sm text-muted-foreground">
             {summary}
@@ -97,10 +99,7 @@ export function VisaSelect({
   }
 
   return (
-    <div className="mt-4 flex flex-col gap-2">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        Visa / sponsorship
-      </p>
+    <div className="flex flex-col gap-2">
       <p className="text-xs text-muted-foreground">
         What the ad says about sponsorship. Job360 never guesses — leave it as
         &quot;Ad says nothing&quot; unless the ad says.

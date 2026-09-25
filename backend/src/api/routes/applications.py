@@ -438,15 +438,28 @@ class ApplicationSummaryOut(BaseModel):
     # 2026-09-24 — the list card's title fallback needs the ad link's host
     # when both job_title and job_company are empty.
     job_url: str = ""
+    # Owner decision, 2026-09-25 — the wide row's location + visa line.
+    job_location: str = ""
     status: str
     last_event_at: Optional[str]
     events: int
     artifacts: dict[str, int]
     receipts: int
+    # Owner decision, 2026-09-25 — the row's "Sent <date>" tag; the latest
+    # receipt, batched with the count above so they can never disagree.
+    last_receipt_at: Optional[str] = None
+    # Owner decision, 2026-09-25 — the row's interview badge, same value
+    # `next_step` already reads internally, now exposed directly.
+    interview_at: Optional[str] = None
     # Slice 7 — enough for the card's badge without a profile read.
     visa_signal: str = "unknown"
     visa_country: str = ""
     needs_sponsorship: Optional[bool] = None
+    # Owner decision, 2026-09-25 — the row's fit bar + one-line verdict.
+    # `None`/"" when no fit has been judged yet (rule #29 — stay silent,
+    # never default).
+    fit_score: Optional[int] = None
+    fit_verdict: str = ""
     # 2026-09-24 — the list card's "Next:" line; same state machine and same
     # fields `get_application`'s `next_step` reads, batched for the page.
     next_step: NextStepOut

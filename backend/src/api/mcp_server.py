@@ -622,7 +622,11 @@ def build_server(version: str = "") -> MCPServer:
         (e.g. "considering", "applied", "interview_scheduled"). Each row carries
         next_step ({code, label}) — the same next-thing-to-do state machine
         get_application's next_step uses, so you can branch on it without a
-        second read. `due=true` — only applications whose follow_up_on has
+        second read. Also carries job_location, fit_score/fit_verdict (null/""
+        when no fit has been judged), interview_at, and last_receipt_at — the
+        same facts get_application's detail read carries, so the list alone is
+        enough to answer "what needs attention" without opening every
+        application. `due=true` — only applications whose follow_up_on has
         arrived (soonest first); `quiet_days` — only applications with no
         activity in that many days. Both skip closed applications (rejected/
         withdrawn/ghosted). The daily-check routine ends its run with one call
