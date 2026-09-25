@@ -90,8 +90,6 @@ python -m pytest -q -p no:randomly
 
 Invariant: full suite passes, 0 failing. No test total is written down here —
 measure it with `python -m pytest --collect-only -q -p no:randomly | tail -1`.
-The `-p no:randomly` flag keeps the default order deterministic (pytest-randomly
-is installed but opt-in).
 
 ## Database migrations
 

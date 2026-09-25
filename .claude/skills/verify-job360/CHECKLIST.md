@@ -68,7 +68,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 
 ## H. Cross-cutting
 - [ ] 34. Every page renders with no console errors. Enumerate the pages from the code — every `page.tsx` under `frontend/src/app/` — never from a list written here.
-- [ ] 35. Theme toggle works; spot-click every primary button on every page (no dead buttons)
+- [ ] 35. Spot-click every primary button on every page (no dead buttons)
 
 ---
 
