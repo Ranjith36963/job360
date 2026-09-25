@@ -15,6 +15,13 @@ from typing import Any, Optional
 # and `preferred_workplace` once did.
 VALID_WORK_ARRANGEMENTS: frozenset[str] = frozenset({"remote", "hybrid", "onsite"})
 VALID_EXPERIENCE_LEVELS: frozenset[str] = frozenset({"entry", "mid", "senior", "lead", "executive"})
+# Owner decision 2026-09-25 — a connected assistant offers the daily job-hunt
+# check ONCE (mcp_server.py INSTRUCTIONS). The answer must be remembered by
+# JOB360, not by any one assistant's own memory, so every assistant the user
+# connects (ChatGPT, Claude, others) reads the same answer and never asks
+# again. Closed set shared by the agent-edit validator
+# (`services/profile/edits.py`) the same way the two sets above are.
+VALID_DAILY_CHECK_VALUES: frozenset[str] = frozenset({"scheduled", "declined"})
 
 
 @dataclass
@@ -553,6 +560,16 @@ class UserPreferences:
     # on the web or by the agent through update_profile; the agent reads them
     # first on every get_profile. Empty = nothing to say (rule #29).
     assistant_notes: list[str] = field(default_factory=list)
+
+    # Owner decision 2026-09-25 — "" (not asked yet, rule #29: empty is
+    # silent), "scheduled" (user said yes and confirmed it in their app), or
+    # "declined" (user said no). Written ONLY through the agent-edit overlay
+    # (`update_profile` / PATCH /api/profile) — never by the web preferences
+    # form, which does not know about it (see `_apply_preferences` and
+    # `clear_profile_section` in api/routes/profile.py, both of which must
+    # carry this value forward rather than reset it; a full "clear all" is
+    # the one case allowed to reset it, since the user is starting over).
+    daily_check: str = ""
 
     # Values the workplace scorer can actually match. A CLOSED set, because the
     # job side of the comparison (`JobEnrichment.workplace_type`) is an enum —

@@ -100,6 +100,19 @@ describe("ProfilePage header", () => {
     expect(link.getAttribute("href")).toBe("#preferences");
   });
 
+  it("does not count the daily-check answer — it has no field on the card", async () => {
+    getProfile.mockResolvedValue(
+      profile({
+        agent_edits: [
+          { path: "preferences.salary_min", value: 50000, previous_value: null, set_by: "agent:Claude", set_at: "2026-09-25T10:00:00Z" },
+          { path: "preferences.daily_check", value: "scheduled", previous_value: "", set_by: "agent:Claude", set_at: "2026-09-25T10:00:00Z" },
+        ],
+      })
+    );
+    render(<ProfilePage />);
+    expect(await screen.findByRole("link", { name: "1 preference set by your assistant" })).toBeTruthy();
+  });
+
   it("shows no assistant line when the assistant set nothing", async () => {
     getProfile.mockResolvedValue(profile({}));
     render(<ProfilePage />);
