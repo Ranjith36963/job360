@@ -477,7 +477,15 @@ async def update_profile(
         save_profile(UserProfile(), user.id, source_action="agent_edit")
 
     try:
-        applied = profile_edits.record_edits(user.id, actor, pairs)
+        # The hourly budget (PROFILE_EDIT_MAX_PER_HOUR) is the ASSISTANT's. A
+        # signed-in human at the browser (e.g. Settings → Connect's "Let my
+        # assistant offer again") never spends it — the same rule Take back,
+        # Keep and Clear follow (record_edits docstring). Bearer/OAuth callers,
+        # including every MCP update_profile call (/api/mcp is bearer-only),
+        # are never WEB_ACTOR and stay limited.
+        applied = profile_edits.record_edits(
+            user.id, actor, pairs, enforce_rate_limit=actor != profile_edits.WEB_ACTOR
+        )
     except profile_edits.ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

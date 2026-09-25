@@ -364,16 +364,28 @@ export function dailyCheckStatusLine(state: DailyCheckState): string {
   return "Your assistant will offer to set this up.";
 }
 
+/** Shown when the stored answer could not be read — never a guess. */
+export const DAILY_CHECK_LOAD_FAILED = "Couldn't load this — refresh to try again.";
+
 export function DailyCheckCard({
   dailyCheck,
+  loadFailed = false,
   onResetOffer,
   resetting,
 }: {
-  dailyCheck: DailyCheckState;
+  /** `null` until the profile read succeeds: no status line, no button. */
+  dailyCheck: DailyCheckState | null;
+  loadFailed?: boolean;
   onResetOffer: () => void;
   resetting: boolean;
 }) {
-  const canReset = dailyCheck === "scheduled" || dailyCheck === "declined";
+  const canReset =
+    !loadFailed && (dailyCheck === "scheduled" || dailyCheck === "declined");
+  const statusLine = loadFailed
+    ? DAILY_CHECK_LOAD_FAILED
+    : dailyCheck === null
+      ? null
+      : dailyCheckStatusLine(dailyCheck);
   return (
     <Card>
       <CardHeader>
@@ -385,9 +397,11 @@ export function DailyCheckCard({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm" data-testid="daily-check-status">
-          {dailyCheckStatusLine(dailyCheck)}
-        </p>
+        {statusLine !== null && (
+          <p className="text-sm" data-testid="daily-check-status">
+            {statusLine}
+          </p>
+        )}
         <textarea
           readOnly
           rows={6}
@@ -697,7 +711,10 @@ export default function ConnectAgentPage() {
   const [grants, setGrants] = useState<OAuthGrant[]>([]);
   const [grantsLoading, setGrantsLoading] = useState(true);
 
-  const [dailyCheck, setDailyCheck] = useState<DailyCheckState>("");
+  // null = not read yet. Never default to "" — that would claim "your
+  // assistant will offer" before (or without) knowing the stored answer.
+  const [dailyCheck, setDailyCheck] = useState<DailyCheckState | null>(null);
+  const [dailyCheckLoadFailed, setDailyCheckLoadFailed] = useState(false);
   const [resettingDailyCheck, setResettingDailyCheck] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -725,9 +742,12 @@ export default function ConnectAgentPage() {
       const profile = await getProfile();
       const value = profile.preferences?.daily_check;
       setDailyCheck(value === "scheduled" || value === "declined" ? value : "");
+      setDailyCheckLoadFailed(false);
     } catch {
-      // Silent: this line is a courtesy status, not the page's main content —
-      // a failed read just leaves the default "will offer" line showing.
+      // No toast: this is a courtesy status, not the page's main content. The
+      // card says in neutral words that it could not load — never the "will
+      // offer" line, which would be a guess.
+      setDailyCheckLoadFailed(true);
     }
   }, []);
 
@@ -794,6 +814,7 @@ export default function ConnectAgentPage() {
       <ExamplePromptsCard />
       <DailyCheckCard
         dailyCheck={dailyCheck}
+        loadFailed={dailyCheckLoadFailed}
         onResetOffer={onResetDailyCheckOffer}
         resetting={resettingDailyCheck}
       />

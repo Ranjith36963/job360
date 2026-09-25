@@ -349,15 +349,27 @@ async def test_p3_rejected_first_edit_creates_no_profile(authenticated_async_con
 
 @pytest.mark.asyncio
 async def test_p3_422s_do_not_consume_the_edit_budget(authenticated_async_context, fixture_user_id, monkeypatch):
+    from httpx import ASGITransport
+
+    from src.api.main import app
     from src.core import settings
 
     monkeypatch.setattr(settings, "PROFILE_EDIT_MAX_PER_HOUR", 1)
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        for _ in range(3):
-            assert (await _patch(client, {"path": "cv_data.nope", "value": "x"})).status_code == 422
-        assert (await _patch(client, {"path": "cv_data.name", "value": "Ada"})).status_code == 200
-        assert (await _patch(client, {"path": "cv_data.name", "value": "Bea"})).status_code == 429
+        # The budget is the assistant's: a web session's PATCH is exempt, so
+        # this is exercised through a personal token.
+        minted = await client.post("/api/tokens", json={"name": "agent"})
+        assert minted.status_code == 201, minted.text
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={"Authorization": f"Bearer {minted.json()['token']}"},
+        ) as agent:
+            for _ in range(3):
+                assert (await _patch(agent, {"path": "cv_data.nope", "value": "x"})).status_code == 422
+            assert (await _patch(agent, {"path": "cv_data.name", "value": "Ada"})).status_code == 200
+            assert (await _patch(agent, {"path": "cv_data.name", "value": "Bea"})).status_code == 429
 
 
 @pytest.mark.asyncio
