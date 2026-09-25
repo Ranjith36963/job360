@@ -457,3 +457,206 @@ async def test_mcp_record_event_and_list_applications_due_parity(authenticated_a
             row = next(a for a in listed["applications"] if a["id"] == application_id)
             assert row["follow_up_on"] == _today_iso()
             assert row["follow_up_due"] is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Coordinator review (2026-09-25) — 4 real bugs, tests written first
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Bug 1 (P1): MCP list_applications bypasses the Query ge/le bounds on
+# quiet_days — mcp_server.py calls the route FUNCTION directly, never through
+# FastAPI's request parsing, so Query(ge=1, le=...) never runs for that path.
+# quiet_days=0 silently flags everything; an absurd value underflows
+# `datetime.now() - timedelta(days=...)` past `datetime.min` (OverflowError,
+# not a readable error). Fix belongs in spine.list_applications itself, the
+# one place both HTTP and MCP funnel through.
+
+
+@pytest.mark.asyncio
+async def test_mcp_list_applications_rejects_quiet_days_zero(authenticated_async_context):
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        token_resp = await client.post("/api/tokens", json={"name": "agent"})
+        assert token_resp.status_code == 201, token_resp.text
+        token = token_resp.json()["token"]
+
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            result = await mcp.call_tool("list_applications", {"quiet_days": 0})
+            assert result.is_error, "quiet_days=0 bypasses Query(ge=1) via MCP — must still be rejected"
+
+
+@pytest.mark.asyncio
+async def test_mcp_list_applications_rejects_quiet_days_over_cap_without_crashing(authenticated_async_context):
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        token_resp = await client.post("/api/tokens", json={"name": "agent"})
+        assert token_resp.status_code == 201, token_resp.text
+        token = token_resp.json()["token"]
+
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            result = await mcp.call_tool("list_applications", {"quiet_days": 10_000_000})
+            assert result.is_error, "an absurd quiet_days must read as a normal error, never an OverflowError crash"
+            assert "APPLICATION_QUIET_DAYS_MAX" in result.content[0].text
+
+
+# ── Bug 2 (owner decision): news that moves the application's status clears
+# an OVERDUE follow-up automatically (never a future one), unless the caller
+# explicitly named a follow_up_on on the same call. Note/fit/artifact events
+# never touch it.
+
+
+@pytest.mark.asyncio
+async def test_overdue_follow_up_auto_clears_on_a_status_event(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        overdue = (datetime.now(timezone.utc).date() - timedelta(days=2)).isoformat()
+        await _record_event(client, app_id, "note", follow_up_on=overdue)
+
+        resp = await _record_event(client, app_id, "interview_requested")
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["follow_up_on"] is None
+
+        detail = (await _get_application(client, app_id)).json()
+        assert detail["follow_up_on"] is None
+        assert detail["follow_up_due"] is False
+        assert detail["next_step"]["code"] != "follow_up"
+
+        clearing_event = next(e for e in detail["events"] if e["event_type"] == "interview_requested")
+        assert clearing_event["payload"]["follow_up_on"] is None
+
+
+@pytest.mark.asyncio
+async def test_future_follow_up_is_not_touched_by_a_status_event(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        future = (datetime.now(timezone.utc).date() + timedelta(days=5)).isoformat()
+        await _record_event(client, app_id, "note", follow_up_on=future)
+
+        resp = await _record_event(client, app_id, "replied")
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["follow_up_on"] == future
+
+        detail = (await _get_application(client, app_id)).json()
+        assert detail["follow_up_on"] == future
+
+
+@pytest.mark.asyncio
+async def test_explicit_follow_up_on_wins_over_auto_clear(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        overdue = (datetime.now(timezone.utc).date() - timedelta(days=2)).isoformat()
+        await _record_event(client, app_id, "note", follow_up_on=overdue)
+
+        new_date = _today_iso()
+        resp = await _record_event(client, app_id, "interview_requested", follow_up_on=new_date)
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["follow_up_on"] == new_date
+
+        detail = (await _get_application(client, app_id)).json()
+        assert detail["follow_up_on"] == new_date
+
+
+@pytest.mark.asyncio
+async def test_a_note_event_never_auto_clears_an_overdue_follow_up(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        overdue = (datetime.now(timezone.utc).date() - timedelta(days=2)).isoformat()
+        await _record_event(client, app_id, "note", follow_up_on=overdue)
+
+        resp = await _record_event(client, app_id, "note", detail="unrelated")
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["follow_up_on"] == overdue
+
+        detail = (await _get_application(client, app_id)).json()
+        assert detail["follow_up_on"] == overdue
+
+
+# ── Bug 3 (P2): correcting the event that set a follow-up date must revert
+# the slot (same replay idea `replay_status` already uses for status), when
+# the correcting call itself doesn't name a follow_up_on.
+
+
+@pytest.mark.asyncio
+async def test_correcting_the_only_event_that_set_a_date_reverts_to_none(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        target = _today_iso()
+        set_resp = await _record_event(client, app_id, "note", detail="chase", follow_up_on=target)
+        assert set_resp.status_code == 201, set_resp.text
+        event_id = set_resp.json()["event_id"]
+
+        correct_resp = await _record_event(
+            client, app_id, "note", detail="oops, wrong date", corrects_event_id=event_id
+        )
+        assert correct_resp.status_code == 201, correct_resp.text
+        assert correct_resp.json()["follow_up_on"] is None
+
+        detail = (await _get_application(client, app_id)).json()
+        assert detail["follow_up_on"] is None
+
+
+@pytest.mark.asyncio
+async def test_correcting_the_latest_setter_reverts_to_the_previous_date(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        first = _today_iso()
+        second = (datetime.now(timezone.utc).date() + timedelta(days=3)).isoformat()
+        await _record_event(client, app_id, "note", detail="chase", follow_up_on=first)
+        second_resp = await _record_event(client, app_id, "note", detail="reschedule", follow_up_on=second)
+        assert second_resp.status_code == 201, second_resp.text
+        second_event_id = second_resp.json()["event_id"]
+
+        correct_resp = await _record_event(
+            client, app_id, "note", detail="undo reschedule", corrects_event_id=second_event_id
+        )
+        assert correct_resp.status_code == 201, correct_resp.text
+        assert correct_resp.json()["follow_up_on"] == first
+
+        detail = (await _get_application(client, app_id)).json()
+        assert detail["follow_up_on"] == first
+
+
+# ── Bug 4 (P2): the caller's own free-form `payload` must never be the
+# door for `follow_up_on` — it silently lands in history while the slot (and
+# `follow_up_due`) stay untouched, which reads as "Job360 dropped it".
+
+
+@pytest.mark.asyncio
+async def test_follow_up_on_inside_payload_is_rejected(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client))["application_id"]
+        resp = await _record_event(client, app_id, "note", payload={"follow_up_on": _today_iso()})
+        assert resp.status_code == 422, resp.text
+        assert "payload" in resp.json()["detail"]
+
+        detail = (await _get_application(client, app_id)).json()
+        assert detail["follow_up_on"] is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_follow_up_on_inside_payload_is_rejected(authenticated_async_context):
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        token_resp = await client.post("/api/tokens", json={"name": "agent"})
+        assert token_resp.status_code == 201, token_resp.text
+        token = token_resp.json()["token"]
+
+        bring_resp = await client.post("/api/jobs/bring", json=_AD)
+        application_id = bring_resp.json()["application_id"]
+
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            result = await mcp.call_tool(
+                "record_event",
+                {
+                    "application_id": application_id,
+                    "event_type": "note",
+                    "payload": {"follow_up_on": _today_iso()},
+                },
+            )
+            assert result.is_error

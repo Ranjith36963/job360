@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core import settings
 from src.repositories import pg
-from src.services.applications.status import replay_status, stage_for_status
+from src.services.applications.status import replay_status, stage_for_status, status_for_event
 from src.services.auth import rate_limit
 from src.utils.logger import get_audit_logger
 
@@ -68,11 +68,21 @@ def payload_bytes(payload: Mapping[str, Any]) -> int:
 
 def validate_payload(payload: Any) -> dict[str, Any]:
     """S5 — payload must be a JSON OBJECT (never a list/scalar), size-capped
-    on the SERIALISED form, because that is what the column costs."""
+    on the SERIALISED form, because that is what the column costs.
+
+    Bug fix (coordinator review, 2026-09-25) — ``follow_up_on`` is its OWN
+    top-level request field precisely so ``append_event`` can route it into
+    both the slot and the payload together (S7). A caller stuffing
+    ``payload={"follow_up_on": ...}`` instead would silently land a date in
+    history while the slot (and ``follow_up_due``) stayed untouched — the
+    date reads as recorded but Job360 never actually chases it. Refuse it
+    outright rather than silently drop or silently honour it."""
     if payload is None:
         return {}
     if not isinstance(payload, dict):
         raise SpineError(422, "payload must be a JSON object")
+    if "follow_up_on" in payload:
+        raise SpineError(422, "pass follow_up_on as its own field, not inside payload")
     size = payload_bytes(payload)
     if size > settings.APPLICATION_EVENT_PAYLOAD_MAX_BYTES:
         raise SpineError(
@@ -431,7 +441,7 @@ async def _duplicate_event_result(
             "recorded_by": recorded_by,
         },
     )
-    cur = await db._db.execute("SELECT status FROM applications WHERE id = ?", (application_id,))
+    cur = await db._db.execute("SELECT status, follow_up_on FROM applications WHERE id = ?", (application_id,))
     app_row = await cur.fetchone()
     return {
         "event_id": existing["id"],
@@ -442,7 +452,38 @@ async def _duplicate_event_result(
         "status": app_row["status"] if app_row else None,
         "already_existed": True,
         "scheduled_at": existing["scheduled_at"] or None,
+        # Bug fix (coordinator review, 2026-09-25) — a duplicate writes
+        # NOTHING, including the slot (R2), so the echo is whatever the slot
+        # already held, never the value this call asked for.
+        "follow_up_on": app_row["follow_up_on"] if app_row else None,
     }
+
+
+async def _replay_follow_up_on(db: JobDatabase, application_id: int) -> Optional[str]:
+    """Bug fix (coordinator review, 2026-09-25) — recompute the
+    ``follow_up_on`` SLOT the same way ``replay_status`` recomputes status:
+    read the WHOLE event log, skip anything a ``corrects_event_id`` has
+    superseded, and take ``payload["follow_up_on"]`` off the latest
+    non-superseded event that carries that key at all (ordered the same way
+    status replay orders — ``recorded_at``, then ``id``). ``None`` when no
+    surviving event ever named a date — there is nothing left in history to
+    revert to. Only called when a correcting call itself leaves
+    ``follow_up_on`` untouched (an explicit value on that call always wins)."""
+    cur = await db._db.execute(
+        "SELECT id, payload, corrects_event_id, recorded_at FROM application_events WHERE application_id = ?",
+        (application_id,),
+    )
+    rows = [dict(r) for r in await cur.fetchall()]
+    superseded_ids = {r["corrects_event_id"] for r in rows if r.get("corrects_event_id") is not None}
+    ordered = sorted(rows, key=lambda r: (r.get("recorded_at") or "", r.get("id") or 0))
+    value: Any = FOLLOW_UP_UNSET
+    for r in ordered:
+        if r["id"] in superseded_ids:
+            continue
+        row_payload = json.loads(r["payload"] or "{}")
+        if "follow_up_on" in row_payload:
+            value = row_payload["follow_up_on"]
+    return None if value is FOLLOW_UP_UNSET else value
 
 
 async def append_event(
@@ -467,8 +508,29 @@ async def append_event(
     default) leaves the ``applications.follow_up_on`` slot untouched; ``None``
     clears it; an ISO date string (already validated by ``parse_follow_up_on``)
     sets it. Either way it also lands in THIS event's payload under the same
-    key (overriding any caller-supplied ``payload["follow_up_on"]``), so the
-    date is history too, not just a slot (S7) — like ``fit_axes``/``visa``.
+    key (overriding any caller-supplied ``payload["follow_up_on"]`` — refused
+    outright by ``validate_payload``, see the coordinator-review fix there),
+    so the date is history too, not just a slot (S7) — like
+    ``fit_axes``/``visa``.
+
+    Two more owner/coordinator rules layer on top of "untouched", both ONLY
+    when this call's own ``follow_up_on`` is ``FOLLOW_UP_UNSET`` (an explicit
+    value always wins over either):
+
+    * A status-changing event (``status_for_event(event_type)`` is not
+      ``None`` — replied/interview_*/offer/rejected/withdrawn/ghosted/
+      brought) auto-clears an OVERDUE follow-up (due today or earlier) —
+      news just arrived, so there is nothing left to chase. A FUTURE date is
+      left alone. Never fires for a note/fit/artifact event, and never for a
+      ``corrects_event_id`` call (that case uses the rule below instead).
+    * A ``corrects_event_id`` call re-derives the slot from history
+      (``_replay_follow_up_on``) — the same "replay the log" idea
+      ``replay_status`` already uses — so correcting away the event that set
+      the currently active date reverts the slot, never just leaves it stuck.
+
+    The returned dict's ``follow_up_on`` is always the REAL final value —
+    set, auto-cleared, replay-derived, or simply unchanged — never a stale
+    pre-call snapshot; ``record_event``'s route/MCP tool return it as-is.
 
     No caller of this module ever computes `status` any other way — this is
     the ONE place `applications.status`/`stage`/`last_event_at` are written.
@@ -502,6 +564,28 @@ async def append_event(
         existing = await _event_by_source_message_id(db, application_id, source["message_id"])
         if existing is not None:
             return await _duplicate_event_result(db, application_id, recorded_by, existing)
+
+    # The slot's value BEFORE this event — needed to decide the auto-clear
+    # below, and to echo back an unchanged value at the end without a stale
+    # pre-call snapshot living in the caller (route/MCP tool).
+    cur = await db._db.execute("SELECT follow_up_on FROM applications WHERE id = ?", (application_id,))
+    _row = await cur.fetchone()
+    current_follow_up_on: Optional[str] = _row["follow_up_on"] if _row else None
+
+    # Owner decision (2026-09-25) — news that MOVES THE STATUS clears an
+    # OVERDUE follow-up automatically; a future one is left alone, and this
+    # never fires when the caller named a follow_up_on itself (that already
+    # took follow_up_on out of FOLLOW_UP_UNSET) or when correcting a past
+    # event (handled by the replay-derive rule below instead).
+    if (
+        follow_up_on is FOLLOW_UP_UNSET
+        and corrects_event_id is None
+        and current_follow_up_on
+        and status_for_event(event_type) is not None
+    ):
+        today_iso = (await user_today(db, user_id)).isoformat()
+        if current_follow_up_on <= today_iso:
+            follow_up_on = None
 
     now = datetime.now(timezone.utc).isoformat()
     event_payload = dict(payload or {})
@@ -545,6 +629,14 @@ async def append_event(
 
     new_status = replay_status(await _events_for_replay(db, application_id))
     stage = stage_for_status(new_status)
+
+    # Bug fix (coordinator review, 2026-09-25) — correcting the event that
+    # set (or last touched) follow_up_on must revert the slot too. Only after
+    # the INSERT, since the corrects_event_id link the correction just made
+    # is what marks the corrected event superseded for the replay.
+    if follow_up_on is FOLLOW_UP_UNSET and corrects_event_id is not None:
+        follow_up_on = await _replay_follow_up_on(db, application_id)
+
     set_cols = ["status = ?", "last_event_at = ?", "updated_at = ?"]
     set_params: list[Any] = [new_status, now, now]
     if stage is not None:
@@ -569,6 +661,9 @@ async def append_event(
             "recorded_by": recorded_by,
         },
     )
+    # The REAL final value — touched (explicit/auto-cleared/replay-derived)
+    # or, when nothing above changed anything, simply unchanged.
+    final_follow_up_on = follow_up_on if follow_up_on is not FOLLOW_UP_UNSET else current_follow_up_on
     return {
         "event_id": event_id,
         "event_type": event_type,
@@ -578,6 +673,7 @@ async def append_event(
         "status": new_status,
         "already_existed": False,
         "scheduled_at": scheduled_at or None,
+        "follow_up_on": final_follow_up_on,
     }
 
 
@@ -1210,6 +1306,19 @@ async def list_applications(
     """
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
+    # Bug fix (coordinator review, 2026-09-25) — Query(ge=1, le=...) on the
+    # HTTP route only runs for HTTP requests; the MCP tool calls this
+    # function directly, bypassing FastAPI's request parsing entirely. Without
+    # a check HERE, quiet_days=0 silently matched everything and an absurd
+    # value (e.g. 10_000_000) underflowed `datetime.now() - timedelta(...)`
+    # past `datetime.min` — a bare OverflowError, not a readable error, on
+    # whichever surface reached this line first.
+    if quiet_days is not None and not (1 <= quiet_days <= settings.APPLICATION_QUIET_DAYS_MAX):
+        raise SpineError(
+            422,
+            f"quiet_days must be between 1 and APPLICATION_QUIET_DAYS_MAX "
+            f"({settings.APPLICATION_QUIET_DAYS_MAX})",
+        )
     where = ["user_id = ?"]
     params: list[Any] = [user_id]
     if status:

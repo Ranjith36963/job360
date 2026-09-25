@@ -76,7 +76,9 @@ INSTRUCTIONS = (
     "record what you find with record_event (set `follow_up_on` when a "
     "recruiter promises news by a date), then call list_applications with "
     "due=true (what's due today) and again with quiet_days set (what's gone "
-    "quiet) to tell the user what needs attention."
+    "quiet) to tell the user what needs attention. Recording news clears an "
+    "overdue follow-up automatically; pass `follow_up_on` on the same call "
+    "to set a new one."
 )
 
 # The user behind the request being served. Set by the ASGI shim per request,
@@ -568,8 +570,10 @@ def build_server(version: str = "") -> MCPServer:
         record_event(interview_scheduled, scheduled_at=…); record_outcome → the
         interview date has passed, record how it went via record_event (
         interview_done, offer, or rejected); lesson → record_event(
-        event_type="lesson"). wait / interview / await_outcome / decide / closed
-        need nothing from you."""
+        event_type="lesson"); follow_up → a follow-up date has arrived — chase
+        them or record what happened (record_event again clears it once the
+        news moves the status). wait / interview / await_outcome / decide /
+        closed need nothing from you."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.get_application(application_id, with_artifact_text, db, _user())
@@ -707,6 +711,10 @@ def build_server(version: str = "") -> MCPServer:
         interview_scheduled. `follow_up_on` (YYYY-MM-DD) sets when to chase
         this application next — works on ANY event_type, so a plain `note` can
         carry it; omit it to leave the date alone, or send "" to clear it.
+        Recording news clears an overdue follow-up automatically (a
+        status-changing event — replied/interview_*/offer/rejected/withdrawn/
+        ghosted — clears a follow_up_on that has already arrived; a future one
+        is left alone, and passing `follow_up_on` yourself always wins).
         list_applications(due=true) is how the user (or your next daily-check
         run) finds what's arrived."""
         try:

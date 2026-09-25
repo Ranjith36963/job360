@@ -721,10 +721,14 @@ async def list_applications(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
-    return await spine.list_applications(
-        db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
-        due=due, quiet_days=quiet_days,
-    )
+    try:
+        return await spine.list_applications(
+            db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
+            due=due, quiet_days=quiet_days,
+        )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
 
 
 @router.get("/applications/job/{job_id}", response_model=JobResponse)
@@ -1014,23 +1018,18 @@ async def record_event(
         if body.follow_up_on is not None:
             today = await spine.user_today(db, user.id)
             follow_up_on_arg = spine.parse_follow_up_on(body.follow_up_on, today)
-        app_row = await spine.get_owned_application(db, user.id, application_id)
-        if app_row is None:
+        if await spine.get_owned_application(db, user.id, application_id) is None:
             raise SpineError(404, "application not found")
-        result = await spine.append_event(
+        # append_event always returns the REAL final follow_up_on — set,
+        # cleared, auto-cleared (an overdue date + a status event), replay-
+        # derived (a correction), or unchanged — so there is nothing left to
+        # patch here (coordinator review, 2026-09-25).
+        return await spine.append_event(
             db, user_id=user.id, application_id=application_id, event_type=body.event_type,
             detail=detail, payload=payload, occurred_at=occurred_at, recorded_by=actor_for(user),
             corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
             follow_up_on=follow_up_on_arg,
         )
-        # A duplicate source (R2) or an omitted `follow_up_on` writes nothing
-        # to the slot — echo the value that is ACTUALLY there, not the one
-        # this call asked for.
-        if result.get("already_existed") or follow_up_on_arg is spine.FOLLOW_UP_UNSET:
-            result = {**result, "follow_up_on": app_row.get("follow_up_on")}
-        else:
-            result = {**result, "follow_up_on": follow_up_on_arg}
-        return result
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
