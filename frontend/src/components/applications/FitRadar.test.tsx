@@ -43,7 +43,9 @@ describe("FitRadar", () => {
 
     const rows = screen.getAllByTestId("fit-radar-row");
     expect(rows).toHaveLength(AXES.length);
-    expect(rows.map((row) => Array.from(row.querySelectorAll("td")).map((td) => td.textContent))).toEqual([
+    // The name cell is a `<th scope="row">` (accessible row header), the two
+    // number cells are `<td>` — read both cell types in DOM order.
+    expect(rows.map((row) => Array.from(row.querySelectorAll("th, td")).map((cell) => cell.textContent))).toEqual([
       ["LLM depth", "100", "0"],
       ["Production ML", "50", "50"],
       ["Leadership", "0", "100"],

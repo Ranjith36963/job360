@@ -283,7 +283,9 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
         <tbody>
           {axes.map((axis) => (
             <tr key={axis.name} data-testid="fit-radar-row" className="border-b border-border/50 last:border-0">
-              <td className="py-1 pr-2">{axis.name}</td>
+              <th scope="row" className="py-1 pr-2 text-left font-normal">
+                {axis.name}
+              </th>
               <td className="px-1 py-1 text-right tabular-nums">{axis.role}</td>
               <td className="py-1 pl-1 text-right tabular-nums">{axis.you}</td>
             </tr>
