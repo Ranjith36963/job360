@@ -89,6 +89,40 @@ def _loop_guard_strict(monkeypatch):
 # fixture had nothing left to protect. The rule it served still stands for every
 # other outbound call, and ``aioresponses`` still enforces it.
 
+# The real email credentials a developer keeps in the repo-root ``.env``.
+# ``settings`` calls ``load_dotenv()`` on import, so without this every test
+# that registers a user (the shared ``authenticated_async_context`` does) sent
+# a REAL verification email through Resend — ``SMTP_PASSWORD`` starting
+# ``re_`` doubles as a Resend key in ``email_sender``. CI never saw it: it has
+# no email secrets.
+_EMAIL_ENV_KEYS = ("RESEND_API_KEY", "SMTP_PASSWORD", "SMTP_EMAIL", "SMTP_USER", "SMTP_HOST")
+
+
+@pytest.fixture(autouse=True)
+def _offline_email(monkeypatch):
+    """No test sends a real email: blank every email credential. A test that
+    needs one sets it itself (its own monkeypatch runs after this)."""
+    for key in _EMAIL_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_httpx_network(monkeypatch):
+    """Rule #4 for httpx. ``aioresponses`` only catches aiohttp, so an httpx
+    call (the email sender uses httpx) went to the real internet unnoticed.
+    In-process transports (``ASGITransport``, ``MockTransport``) are untouched;
+    only the real network transport refuses."""
+    import httpx
+
+    def _refuse(self, request, *args, **kwargs):
+        raise RuntimeError(f"test tried a real network call: {request.method} {request.url}")
+
+    async def _refuse_async(self, request, *args, **kwargs):
+        raise RuntimeError(f"test tried a real network call: {request.method} {request.url}")
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", _refuse)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", _refuse_async)
+
 
 @pytest.fixture(autouse=True)
 def _instant_asyncio_sleep(monkeypatch, request):
