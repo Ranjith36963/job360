@@ -7,7 +7,7 @@
 
 > **What is live on `main` today:** magic-link login, profile extraction (CV / LinkedIn / GitHub / preferences), `POST /api/jobs/bring`, the application spine (one Application object, typed events, versioned artifacts, append-only receipts), a CV tailor kept as the web fallback, and an MCP server at `/api/mcp`. Three Railway services: `backend`, `frontend`, `Postgres` (worker + Redis were deleted 2026-09-02, so nothing runs in the background — no notifications, no crons).
 >
-> **The sourcing era was deleted 2026-09-05** (slice 5, #483): the 40-source aggregator, the 0–100 scorer, the four-layer dedup, the search dashboard. **The per-user notification-channel system** (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) was deleted the same day. None of that code exists in this repo any more — git history is the record.
+> **The sourcing era was deleted 2026-09-05** (slice 5, #483): the 40-source aggregator, the 0–100 scorer, the four-layer dedup, the search dashboard. **The per-user notification-channel system** (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) went in the cleanup audit that followed (#503). None of that code exists in this repo any more — git history is the record.
 
 ### API docs (auto-generated)
 
@@ -107,6 +107,3 @@ Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL`, `FRON
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branch naming, commit style, and the PR flow.
 
-## History
-
-The sourcing era (job search, scoring, dedup, enrichment) and the per-user notification-channel system were both deleted 2026-09-05 (slice 5, #483). Neither is archived in-tree — git history is the record. Never rebuild either.

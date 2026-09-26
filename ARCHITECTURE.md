@@ -5,7 +5,7 @@
 >
 > This file describes the one path the app has: `api/routes/bring.py` (`POST /jobs/bring`, link or text) → `api/routes/receipts.py` (append-only `application_receipts`) → `api/routes/tailor.py` (reads, versions and renders the CV the agent wrote — no LLM of ours, decision 28) → `api/mcp_server.py` (the MCP tools at `/api/mcp` — count them with `grep -cF '@mcp.tool()' backend/src/api/mcp_server.py`; bearer `j360_…`, OAuth 2.1). The FastAPI app behind it is the route modules under `backend/src/api/routes/` (counts: [`docs/GENERATED.md`](docs/GENERATED.md)). Profile extraction (`services/profile/`) feeds it, and the application spine (`applications`, `application_events`, `application_artifacts`, `application_receipts`) records everything that happens to a brought job.
 >
-> **The sourcing-era pipeline was deleted 2026-09-05** (slice 5, #483): job search, keyword-driven scoring, four-layer dedup, LLM enrichment, embeddings, the search dashboard, and the 40 job-source classes that fed them. **The per-user notification-channel system (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) was deleted the same day.** None of that code exists in this repo any more, and nothing archives its history in-tree — git history is the record.
+> **The sourcing-era pipeline was deleted 2026-09-05** (slice 5, #483): job search, keyword-driven scoring, four-layer dedup, LLM enrichment, embeddings, the search dashboard, and the 40 job-source classes that fed them. **The per-user notification-channel system (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) went in the cleanup audit that followed (#503).** None of that code exists in this repo any more, and nothing archives its history in-tree — git history is the record.
 >
 > Three Railway services: `backend`, `frontend`, `Postgres`. The `worker` and `Redis` services were deleted 2026-09-02, and `src/workers/` was deleted with the sourcing era — nothing runs in the background (no notifications, no crons).
 
@@ -129,9 +129,10 @@ Profile extraction infers a candidate's seniority band from job titles
 
 ## Notification System
 
-Job360 is **pull, not push** (VISION.md decision 11) — `services.applications.spine.whats_new`
-is the whole of it. The Apprise dispatcher, the per-user channel CRUD, the digest queue and
-`notification_rules` were all deleted 2026-09-05 along with the sourcing era — do not rebuild them.
+Job360 is **pull, not push** (VISION.md decision 11): nothing delivers, the seeker asks.
+`services.applications.spine.whats_new` is what answers. The Apprise dispatcher, the per-user
+channel CRUD, the digest queue and `notification_rules` were deleted in the cleanup audit
+(#503) — do not rebuild them.
 
 ---
 

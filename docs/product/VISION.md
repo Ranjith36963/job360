@@ -78,9 +78,9 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 
 The tools are the `@mcp.tool()` functions in `backend/src/api/mcp_server.py`, each
 carrying its own description — read them there and never count them from here. Every
-one is a **store** door over the same per-user REST route the web uses (rule M5); if a
-proposed tool would think, fetch or decide, it is a **do** door and does not belong
-(product rule 5).
+one is a **store** door over the same per-user REST route the web uses (rule M5); a read
+returns what is already stored for that user. A tool that would think, fetch from outside or
+decide is a **do** door and does not belong (product rule 5).
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
 `api/routes/well_known.py`), with personal `j360_…` tokens as the CLI fallback.
@@ -174,7 +174,7 @@ consent-first; everything free; no auto-submit at volume; global from day one.
 The sourcing-era product docs this superseded (`docs/product/PRD.md`, the
 `docs/product/pillars/` manuals, every `docs/product/plans/PRICING_*` file)
 described a product this codebase no longer builds. They were deleted whole
-2026-09-05 (harness+docs cleanup) rather than archived — git history is the
+(#483, then the cleanup audit #503) rather than archived — git history is the
 record, not a guide for what to build next. The per-slice plan and spec files
 (`docs/plans/`) and the ADR folder (`docs/decisions/`) went the same way
 2026-09-12 — the shipped code, the hard rules and this file are what bind; git
