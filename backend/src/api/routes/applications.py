@@ -682,13 +682,21 @@ class ExportHistoryResponse(BaseModel):
     # Empty = none (rule #29); their history is in `profile_edits`.
     assistant_notes: list[str] = []
     next_since: Optional[str] = None
-    # Owner decision, 2026-09-25 — cold (job-less) contacts, FIRST PAGE ONLY
-    # (bug fix, coordinator review 2026-09-26: a `since` cursor means this is
-    # a follow-up call, so this is always `[]` there — resending them on
-    # every page would duplicate the same data forever). Bounded against the
-    # same byte budget as everything else in this export.
+    # Owner decision, 2026-09-25 — cold (job-less) contacts. Paged by their
+    # OWN cursor (`unlinked_after_id`/`unlinked_next_after_id`), independent
+    # of `since` (bug fix, coordinator review 2026-09-26: the old code
+    # inferred "first page" from `since` being empty, which silently dropped
+    # cold contacts on a caller's genuine first call if it happened to pass
+    # one, and could never page past a byte cutoff at all). Pass
+    # `include_unlinked=false` on a follow-up call once you already hold
+    # every cold contact. Bounded against the same byte budget as everything
+    # else in this export.
     unlinked_contacts: list[ContactOut] = []
     unlinked_contacts_truncated: bool = False
+    # Bug fix (coordinator review, 2026-09-26) — the cold-contact cursor,
+    # independent of `next_since` (applications). Present only when more
+    # cold contacts remain to be paged in.
+    unlinked_next_after_id: Optional[int] = None
 
 
 class AddContactResponse(BaseModel):
@@ -856,11 +864,16 @@ class StatsResponse(BaseModel):
 async def export_history(
     since: Optional[str] = Query(None),
     include_text: bool = Query(False),
+    include_unlinked: bool = Query(True),
+    unlinked_after_id: Optional[int] = Query(None),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
-        return await spine.export_history(db, user.id, since=since, include_text=include_text)
+        return await spine.export_history(
+            db, user.id, since=since, include_text=include_text,
+            include_unlinked=include_unlinked, unlinked_after_id=unlinked_after_id,
+        )
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover — _raise always raises
@@ -1330,6 +1343,14 @@ async def record_event(
             # contact (no application_id of its own) can never match THIS
             # route's application_id, so it reads as 422 — use
             # POST /api/contacts/{contact_id}/outreach for a cold contact.
+            # Bug fix (coordinator review, 2026-09-26) — RecordOutreachRequest
+            # (what this delegates to) has no slot for corrects_event_id/
+            # payload/scheduled_at; silently accepting and dropping them here
+            # would lose data the caller thinks was recorded. Refuse instead.
+            if body.corrects_event_id is not None or body.payload or body.scheduled_at:
+                raise SpineError(
+                    422, "corrects_event_id/payload/scheduled_at are not supported for outreach (contact_id)"
+                )
             if body.event_type not in ("outreach_sent", "outreach_replied"):
                 raise SpineError(
                     422, "event_type must be 'outreach_sent' or 'outreach_replied' when contact_id is given"

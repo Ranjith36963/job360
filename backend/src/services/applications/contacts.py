@@ -61,6 +61,23 @@ _WHITESPACE_RE = re.compile(r"\s")
 # constant here rather than pulling in src.api.auth_deps at runtime).
 _WEB_ACTOR = "web"
 
+_CRLF_RE = re.compile(r"[\r\n]+")
+
+
+def _strip_crlf(value: str) -> str:
+    """CodeQL py/log-injection (coordinator review, 2026-09-26) — collapse
+    embedded CR/LF to a single space. A name/role/email/linkedin_url
+    legitimately spans one line, so this costs nothing real; it also means
+    every value that reaches an audit log via these fields (``has_email``,
+    ``name_chars``, ``fields``, ``entry``, ``channel``, …) is provably free
+    of injected newlines at the SOURCE, not just at the handler
+    (``CRLFScrubFilter`` in ``utils/logger.py`` already scrubs every
+    logger's OUTPUT for this; this closes the same gap explicitly, in-line,
+    so a static scanner's dataflow sees the sanitizing step too — the same
+    idea ``spine.py``'s ``_has_control_chars``/``validate_source`` already
+    applies to an event's email-evidence fields)."""
+    return _CRLF_RE.sub(" ", value)
+
 
 def _looks_like_email(email: str) -> bool:
     """Same set as the old regex: no whitespace, one `@`, non-empty local part,
@@ -74,7 +91,7 @@ def _looks_like_email(email: str) -> bool:
 
 
 def _validate_name(raw: str) -> str:
-    name = (raw or "").strip()
+    name = _strip_crlf((raw or "").strip())
     if not name or len(name) > settings.CONTACT_NAME_MAX_CHARS:
         raise SpineError(
             422, f"name must be 1-{settings.CONTACT_NAME_MAX_CHARS} chars (CONTACT_NAME_MAX_CHARS) after trim"
@@ -83,14 +100,14 @@ def _validate_name(raw: str) -> str:
 
 
 def _validate_role(raw: str) -> str:
-    role = (raw or "").strip()
+    role = _strip_crlf((raw or "").strip())
     if len(role) > settings.CONTACT_ROLE_MAX_CHARS:
         raise SpineError(422, f"role exceeds CONTACT_ROLE_MAX_CHARS ({settings.CONTACT_ROLE_MAX_CHARS} chars)")
     return role
 
 
 def _validate_email(raw: str) -> str:
-    email = (raw or "").strip()
+    email = _strip_crlf((raw or "").strip())
     if not email:
         return ""
     if len(email) > settings.CONTACT_EMAIL_MAX_CHARS:
@@ -102,7 +119,7 @@ def _validate_email(raw: str) -> str:
 
 
 def _validate_linkedin_url(raw: str) -> str:
-    url = (raw or "").strip()
+    url = _strip_crlf((raw or "").strip())
     if not url:
         return ""
     if len(url) > settings.CONTACT_LINKEDIN_URL_MAX_CHARS:
@@ -175,11 +192,32 @@ async def _find_contact_by_current_email(
         f"    FROM contact_edits WHERE field = 'email' AND user_id = ?"
         f"  ) t WHERE rn = 1"
         f") le ON le.contact_id = ac.id "
-        f"WHERE {scope_sql} AND COALESCE(le.value, ac.email) = ?{exclude_sql}",
+        f"WHERE {scope_sql} AND COALESCE(le.value, ac.email) = ?{exclude_sql} "
+        f"ORDER BY ac.id ASC LIMIT 1",
         params,
     )
     row = await cur.fetchone()
     return dict(row) if row else None
+
+
+def _email_lock_key(user_id: str, application_id: Optional[int], email: str) -> str:
+    """Bug fix (coordinator review, 2026-09-26) — the key ``pg_advisory_xact_
+    lock(hashtext(...))`` locks on: check-then-write on the SAME (user, scope,
+    email) must serialize, so two concurrent callers claiming the same
+    address can never both win. Scope is the application id when linked, the
+    literal string ``"cold"`` when not — matching ``_find_contact_by_current_
+    email``'s own scoping exactly."""
+    scope = str(application_id) if application_id is not None else "cold"
+    return f"{user_id}:{scope}:{email.strip().lower()}"
+
+
+async def _lock_email_scope(db: JobDatabase, user_id: str, application_id: Optional[int], email: str) -> None:
+    """Acquire the advisory lock for this (user, scope, email) — MUST be the
+    first statement inside the transaction that will check-then-write, and
+    only ever called with a non-empty ``email`` (no identity, no lock)."""
+    await db._db.execute(
+        "SELECT pg_advisory_xact_lock(hashtext(?))", (_email_lock_key(user_id, application_id, email),)
+    )
 
 
 async def _count_contacts(db: JobDatabase, application_id: int) -> int:
@@ -231,10 +269,14 @@ async def _create_contact_with_deferred_email(
             (user_id, application_id, name, role, "", linkedin_url, notes, actor, now),
         )
         contact_id = int(cur.lastrowid or 0)
+        # Bug fix (coordinator review, 2026-09-26) — `is_initial=TRUE` marks
+        # this as the creation-time record of the REAL address, not a later
+        # correction, so `_full_contact_view` folds it into the base history
+        # entry instead of showing a spurious "was (empty)" first.
         await db._db.execute(
-            "INSERT INTO contact_edits (user_id, contact_id, field, value, recorded_at, recorded_by) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, contact_id, "email", email, now, actor),
+            "INSERT INTO contact_edits (user_id, contact_id, field, value, recorded_at, recorded_by, is_initial) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, contact_id, "email", email, now, actor, True),
         )
         if application_id is not None:
             event = await append_event(
@@ -313,7 +355,72 @@ async def add_contact(
         if app_row is None:
             raise SpineError(404, "application not found")
 
-    if clean_email:
+    if not clean_email:
+        # No email = no identity, so no possible collision and no lock is
+        # needed — every call is unconditionally a new row.
+        if application_id is not None:
+            count = await _count_contacts(db, application_id)
+            if count >= settings.CONTACTS_PER_APPLICATION_MAX:
+                raise SpineError(
+                    409,
+                    f"contact cap reached; CONTACTS_PER_APPLICATION_MAX is "
+                    f"{settings.CONTACTS_PER_APPLICATION_MAX}",
+                )
+        else:
+            count = await _count_unlinked_contacts(db, user_id)
+            if count >= settings.CONTACTS_UNLINKED_MAX:
+                raise SpineError(
+                    409, f"cold-contact cap reached; CONTACTS_UNLINKED_MAX is {settings.CONTACTS_UNLINKED_MAX}"
+                )
+        key = f"add_contact:{user_id}"
+        if not rate_limit.check_and_record(
+            key, max_in_window=settings.CONTACTS_MAX_PER_HOUR, window_seconds=3600
+        ):
+            raise SpineError(429, "contact rate limit exceeded; try again in an hour")
+
+        now = datetime.now(timezone.utc).isoformat()
+        event_id: Optional[int] = None
+        async with db._db.transaction():
+            cur = await db._db.execute(
+                "INSERT INTO application_contacts "
+                "(user_id, application_id, name, role, email, linkedin_url, notes, added_by, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (user_id, application_id, clean_name, clean_role, "", clean_linkedin, clean_notes, actor, now),
+            )
+            contact_id = int(cur.lastrowid or 0)
+            if application_id is not None:
+                event = await append_event(
+                    db, user_id=user_id, application_id=application_id, event_type="contact_added",
+                    detail=f"{clean_name} — {clean_role}", payload={"contact_id": contact_id},
+                    occurred_at=occurred, recorded_by=actor,
+                )
+                event_id = event["event_id"]
+        get_audit_logger().info(
+            "contact_added",
+            extra={
+                "event": "contact_added", "application_id": application_id, "contact_id": contact_id,
+                "has_email": False, "name_chars": len(clean_name),
+            },
+        )
+        base_row = {
+            "id": contact_id, "application_id": application_id, "name": clean_name, "role": clean_role,
+            "email": "", "linkedin_url": clean_linkedin, "notes": clean_notes,
+            "added_by": actor, "created_at": now,
+        }
+        view = await _full_contact_view(db, user_id, base_row)
+        return {"contact": view, "already_existed": False, "event_id": event_id}
+
+    # Bug fix (coordinator review, 2026-09-26) — clean_email is set, so an
+    # identity IS at stake: hold the advisory xact lock for (user, scope,
+    # email) across the ENTIRE check-then-write (pre-check, cap, rate limit,
+    # insert, event) so two concurrent callers claiming the same address can
+    # never both win. The lock releases automatically on commit OR rollback
+    # (a 409/429 raised inside this block still releases it).
+    now = datetime.now(timezone.utc).isoformat()
+    event_id = None
+    async with db._db.transaction():
+        await _lock_email_scope(db, user_id, application_id, clean_email)
+
         existing = await _find_contact_by_current_email(db, application_id, user_id, clean_email)
         if existing is not None:
             get_audit_logger().info(
@@ -326,80 +433,75 @@ async def add_contact(
             view = await _full_contact_view(db, user_id, existing)
             return {"contact": view, "already_existed": True, "event_id": None}
 
-    if application_id is not None:
-        count = await _count_contacts(db, application_id)
-        if count >= settings.CONTACTS_PER_APPLICATION_MAX:
-            raise SpineError(
-                409,
-                f"contact cap reached; CONTACTS_PER_APPLICATION_MAX is {settings.CONTACTS_PER_APPLICATION_MAX}",
-            )
-    else:
-        count = await _count_unlinked_contacts(db, user_id)
-        if count >= settings.CONTACTS_UNLINKED_MAX:
-            raise SpineError(
-                409, f"cold-contact cap reached; CONTACTS_UNLINKED_MAX is {settings.CONTACTS_UNLINKED_MAX}"
-            )
-
-    # NOTE: unlike the outreach cap below, this pre-existing limit (slice 4)
-    # is pinned by tests/test_slice4_contacts.py::test_add_contact_is_rate_
-    # limited_per_user to apply to a web session too — left as-is here.
-    key = f"add_contact:{user_id}"
-    if not rate_limit.check_and_record(key, max_in_window=settings.CONTACTS_MAX_PER_HOUR, window_seconds=3600):
-        raise SpineError(429, "contact rate limit exceeded; try again in an hour")
-
-    now = datetime.now(timezone.utc).isoformat()
-    event_id: Optional[int] = None
-    try:
-        async with db._db.transaction():
-            cur = await db._db.execute(
-                "INSERT INTO application_contacts "
-                "(user_id, application_id, name, role, email, linkedin_url, notes, added_by, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    user_id, application_id, clean_name, clean_role, clean_email,
-                    clean_linkedin, clean_notes, actor, now,
-                ),
-            )
-            contact_id = int(cur.lastrowid or 0)
-            if application_id is not None:
-                event = await append_event(
-                    db, user_id=user_id, application_id=application_id, event_type="contact_added",
-                    detail=f"{clean_name} — {clean_role}", payload={"contact_id": contact_id},
-                    occurred_at=occurred, recorded_by=actor,
+        if application_id is not None:
+            count = await _count_contacts(db, application_id)
+            if count >= settings.CONTACTS_PER_APPLICATION_MAX:
+                raise SpineError(
+                    409,
+                    f"contact cap reached; CONTACTS_PER_APPLICATION_MAX is "
+                    f"{settings.CONTACTS_PER_APPLICATION_MAX}",
                 )
-                event_id = event["event_id"]
-    except pg.IntegrityError:
-        # A race: the same email landed between the pre-check above and this
-        # insert (C4-style retry, same reasoning as save_artifact's version
-        # race — see spine.py). The transaction block already rolled the
-        # statement back, so the connection is usable again.
-        if clean_email:
+        else:
+            count = await _count_unlinked_contacts(db, user_id)
+            if count >= settings.CONTACTS_UNLINKED_MAX:
+                raise SpineError(
+                    409, f"cold-contact cap reached; CONTACTS_UNLINKED_MAX is {settings.CONTACTS_UNLINKED_MAX}"
+                )
+
+        # NOTE: unlike the outreach cap, this pre-existing limit (slice 4) is
+        # pinned by tests/test_slice4_contacts.py::test_add_contact_is_rate_
+        # limited_per_user to apply to a web session too — left as-is here.
+        key = f"add_contact:{user_id}"
+        if not rate_limit.check_and_record(
+            key, max_in_window=settings.CONTACTS_MAX_PER_HOUR, window_seconds=3600
+        ):
+            raise SpineError(429, "contact rate limit exceeded; try again in an hour")
+
+        try:
+            # A SAVEPOINT scope (nested inside the outer, lock-holding
+            # transaction) for just the risky INSERT: on IntegrityError only
+            # THIS nested scope rolls back — the outer transaction (and the
+            # lock it holds) stays open and queryable for the recovery below.
+            # Catching the error without this nested scope would leave the
+            # WHOLE outer transaction aborted at the Postgres level, breaking
+            # every statement after it (found in review).
+            async with db._db.transaction():
+                cur = await db._db.execute(
+                    "INSERT INTO application_contacts "
+                    "(user_id, application_id, name, role, email, linkedin_url, notes, added_by, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        user_id, application_id, clean_name, clean_role, clean_email,
+                        clean_linkedin, clean_notes, actor, now,
+                    ),
+                )
+                contact_id = int(cur.lastrowid or 0)
+                if application_id is not None:
+                    event = await append_event(
+                        db, user_id=user_id, application_id=application_id, event_type="contact_added",
+                        detail=f"{clean_name} — {clean_role}", payload={"contact_id": contact_id},
+                        occurred_at=occurred, recorded_by=actor,
+                    )
+                    event_id = event["event_id"]
+        except pg.IntegrityError:
+            # Under the lock, this can no longer be a same-key race — it can
+            # only be the stale-identity collision `_create_contact_with_
+            # deferred_email` exists for (a DIFFERENT contact's base row,
+            # left behind by an edit that moved its email elsewhere).
             existing = await _find_contact_by_current_email(db, application_id, user_id, clean_email)
             if existing is not None:
                 view = await _full_contact_view(db, user_id, existing)
                 return {"contact": view, "already_existed": True, "event_id": None}
-            # Bug fix (coordinator review, 2026-09-26) — the partial UNIQUE
-            # index is on the BASE row's raw email, which an edit never
-            # touches. A collision here with NO current owner (just checked
-            # above) means the raw slot is still held by a DIFFERENT contact
-            # whose CURRENT email has since moved elsewhere via an edit — the
-            # base row is stale, but append-only means it can never be
-            # updated to release the slot. Nobody owns `clean_email` right
-            # now, so this genuinely IS a new contact: insert it with an
-            # EMPTY base email (outside the partial index — 0046's index is
-            # `WHERE email <> ''`) and park the real address in the edit
-            # overlay instead, in the same transaction as its own
-            # `contact_added` event.
             return await _create_contact_with_deferred_email(
                 db, user_id, application_id, actor, name=clean_name, role=clean_role, email=clean_email,
                 linkedin_url=clean_linkedin, notes=clean_notes, occurred_at=occurred,
             )
-        raise
+
     get_audit_logger().info(
         "contact_added",
         extra={
             "event": "contact_added", "application_id": application_id, "contact_id": contact_id,
-            "has_email": bool(clean_email), "name_chars": len(clean_name),
+            "has_email": True, "name_chars": len(clean_name),
         },
     )
     base_row = {
@@ -450,9 +552,12 @@ async def list_contacts(
 
 async def _edit_history(db: JobDatabase, user_id: str, contact_id: int) -> dict[str, list[dict[str, Any]]]:
     """Every edit ever recorded for this contact, grouped by field, OLDEST
-    first — the shape a reader turns into "current = last, was = the rest"."""
+    first — the shape a reader turns into "current = last, was = the rest".
+    ``is_initial`` (bug fix, coordinator review 2026-09-26) marks the one
+    creation-time row ``_create_contact_with_deferred_email`` writes; the
+    caller (``_full_contact_view``) folds it into the base entry."""
     cur = await db._db.execute(
-        "SELECT field, value, recorded_at, recorded_by FROM contact_edits "
+        "SELECT field, value, recorded_at, recorded_by, is_initial FROM contact_edits "
         "WHERE user_id = ? AND contact_id = ? ORDER BY id ASC",
         (user_id, contact_id),
     )
@@ -460,7 +565,10 @@ async def _edit_history(db: JobDatabase, user_id: str, contact_id: int) -> dict[
     by_field: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         by_field.setdefault(r["field"], []).append(
-            {"value": r["value"], "recorded_at": r["recorded_at"], "recorded_by": r["recorded_by"]}
+            {
+                "value": r["value"], "recorded_at": r["recorded_at"], "recorded_by": r["recorded_by"],
+                "is_initial": bool(r.get("is_initial")),
+            }
         )
     return by_field
 
@@ -517,17 +625,7 @@ async def update_contact(
     if not given:
         raise SpineError(422, "at least one field must be given")
 
-    # Bug fix (coordinator review, 2026-09-26) — an edit that would collide
-    # with ANOTHER contact's current email (same scope: same application, or
-    # both cold for this user) is refused, not silently created as a second
-    # identity for the same address.
     new_email = given.get("email")
-    if new_email:
-        collision = await _find_contact_by_current_email(
-            db, contact.get("application_id"), user_id, new_email, exclude_contact_id=contact_id
-        )
-        if collision is not None:
-            raise SpineError(409, "another contact already has that email")
 
     existing_count = await _count_edits(db, contact_id)
     if existing_count + len(given) > settings.CONTACT_EDITS_PER_CONTACT_MAX:
@@ -539,6 +637,18 @@ async def update_contact(
 
     now = datetime.now(timezone.utc).isoformat()
     async with db._db.transaction():
+        # Bug fix (coordinator review, 2026-09-26) — the SAME advisory xact
+        # lock add_contact takes, held across the collision check AND the
+        # write: two concurrent edits claiming the same email (same scope)
+        # can never both win. Raising here (a 409) still releases the lock —
+        # it rolls the whole transaction back, so no edit rows land either.
+        if new_email:
+            await _lock_email_scope(db, user_id, contact.get("application_id"), new_email)
+            collision = await _find_contact_by_current_email(
+                db, contact.get("application_id"), user_id, new_email, exclude_contact_id=contact_id
+            )
+            if collision is not None:
+                raise SpineError(409, "another contact already has that email")
         for field, value in given.items():
             await db._db.execute(
                 "INSERT INTO contact_edits (user_id, contact_id, field, value, recorded_at, recorded_by) "
@@ -547,7 +657,13 @@ async def update_contact(
             )
     get_audit_logger().info(
         "contact_edited",
-        extra={"event": "contact_edited", "contact_id": contact_id, "fields": sorted(given)},
+        extra={
+            "event": "contact_edited", "contact_id": contact_id,
+            # CodeQL py/log-injection — field NAMES only (S4: never values),
+            # and stripped defensively even though every key here is one of
+            # settings.CONTACT_EDIT_FIELDS, not free text.
+            "fields": [_strip_crlf(f) for f in sorted(given)],
+        },
     )
     return await _full_contact_view(db, user_id, contact)
 
@@ -813,7 +929,11 @@ async def record_outreach(
     get_audit_logger().info(
         "outreach_recorded",
         extra={
-            "event": "outreach_recorded", "contact_id": contact_id, "entry": entry, "channel": channel,
+            "event": "outreach_recorded", "contact_id": contact_id,
+            # CodeQL py/log-injection — `entry`/`channel` are already closed-
+            # enum-validated above, but stripped again here defensively so
+            # the sanitizing step is visible at this call site too.
+            "entry": _strip_crlf(entry), "channel": _strip_crlf(channel),
             "chars": len(clean_text),
         },
     )
@@ -846,10 +966,27 @@ async def _full_contact_view(
         field_edits = edits.get(field, [])
         if field_edits:
             view[field] = field_edits[-1]["value"]
-        base_entry = {
-            "value": _serialize(base)[field], "recorded_at": base["created_at"], "recorded_by": base["added_by"],
-        }
-        history[field] = [base_entry, *field_edits]
+        # Bug fix (coordinator review, 2026-09-26) — the deferred-email
+        # creation-time edit (`is_initial=True`) IS the real starting value;
+        # fold it into the base entry instead of listing the base row's own
+        # (necessarily blank) value as a separate "was ''" history step.
+        if field_edits and field_edits[0]["is_initial"]:
+            initial = field_edits[0]
+            base_entry = {
+                "value": initial["value"], "recorded_at": initial["recorded_at"],
+                "recorded_by": initial["recorded_by"],
+            }
+            rest = field_edits[1:]
+        else:
+            base_entry = {
+                "value": _serialize(base)[field], "recorded_at": base["created_at"],
+                "recorded_by": base["added_by"],
+            }
+            rest = field_edits
+        history[field] = [
+            base_entry, *({"value": e["value"], "recorded_at": e["recorded_at"], "recorded_by": e["recorded_by"]}
+                           for e in rest)
+        ]
     view["edit_history"] = history
     rows = await _outreach_rows(db, contact_id)
     view["outreach"] = _outreach_view(rows, include_text=include_text)
@@ -1030,17 +1167,19 @@ async def list_people(
     return {"people": people, "truncated": truncated}
 
 
-async def list_unlinked_contacts(
-    db: JobDatabase, user_id: str, *, include_text: bool = True
+async def list_unlinked_contacts_page(
+    db: JobDatabase, user_id: str, *, after_id: int, limit: int
 ) -> list[dict[str, Any]]:
-    """``export_history``'s top-level ``unlinked_contacts`` — every cold
-    contact (no application), each with its full edit record; outreach text
-    honours ``include_text`` (bug fix, coordinator review 2026-09-26) the
-    same way artifacts/receipts already do."""
+    """``export_history``'s top-level ``unlinked_contacts`` — ONE PAGE of base
+    rows (bug fix, coordinator review 2026-09-26: the old ``list_unlinked_
+    contacts`` loaded every cold contact, with its full outreach ledger,
+    into memory before the caller ever got to apply a byte budget). ``after_
+    id`` is INCLUSIVE — a page cut short by the byte budget re-offers its
+    first un-included row next time by naming that row's own id."""
     cur = await db._db.execute(
         "SELECT id, application_id, name, role, email, linkedin_url, notes, added_by, created_at "
-        "FROM application_contacts WHERE user_id = ? AND application_id IS NULL ORDER BY id ASC",
-        (user_id,),
+        "FROM application_contacts WHERE user_id = ? AND application_id IS NULL AND id >= ? "
+        "ORDER BY id ASC LIMIT ?",
+        (user_id, after_id, limit),
     )
-    rows = [dict(r) for r in await cur.fetchall()]
-    return [await _full_contact_view(db, user_id, r, include_text=include_text) for r in rows]
+    return [dict(r) for r in await cur.fetchall()]

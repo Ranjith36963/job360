@@ -1622,13 +1622,29 @@ async def _current_assistant_notes(user_id: str) -> list[str]:
 
 
 async def export_history(
-    db: JobDatabase, user_id: str, *, since: Optional[str] = None, include_text: bool = False
+    db: JobDatabase,
+    user_id: str,
+    *,
+    since: Optional[str] = None,
+    include_text: bool = False,
+    include_unlinked: bool = True,
+    unlinked_after_id: Optional[int] = None,
 ) -> dict[str, Any]:
-    """R10/S8 — bounded on applications AND bytes; rate-limited per USER."""
+    """R10/S8 — bounded on applications AND bytes; rate-limited per USER.
+
+    ``include_unlinked``/``unlinked_after_id`` (bug fix, coordinator review
+    2026-09-26) page the cold (job-less) contacts INDEPENDENTLY of the
+    applications cursor (``since``) — the old code inferred "first page" from
+    ``since`` being empty, which silently returned no cold contacts at all on
+    a caller's very first call if it happened to pass one, and had no way to
+    ever page past a byte-budget cutoff. ``include_unlinked=False`` skips
+    them entirely (e.g. a caller paging applications who already has every
+    cold contact from an earlier call)."""
     # Lazy — see get_application_detail's identical import above.
     from src.services.applications.contacts import (  # noqa: PLC0415
+        _full_contact_view,
         list_contacts,
-        list_unlinked_contacts,
+        list_unlinked_contacts_page,
     )
 
     key = f"export_history:{user_id}"
@@ -1690,29 +1706,44 @@ async def export_history(
 
     # Owner decision, 2026-09-25 — cold contacts (no application) have no
     # home in `applications[].contacts`; this is where the export shows them.
-    # Bug fix (coordinator review, 2026-09-26): FIRST PAGE ONLY (a `since`
-    # cursor means this is a follow-up call — cold contacts already went out
-    # on page one, and re-sending them on every page duplicates the same
-    # data forever), honours `include_text`, and is bounded against the SAME
-    # byte budget as everything else in this export, with its own truncated
-    # flag rather than growing the response unboundedly.
+    # Bug fix (coordinator review, 2026-09-26) — paged by `unlinked_after_id`
+    # (own cursor, independent of `since`), fetched from Postgres a page at a
+    # time (never the whole table), and the byte-budget check applies to the
+    # FIRST row of the page too: an oversized contact is retried once with
+    # its own text stripped, and if it STILL doesn't fit it is left OUT with
+    # a cursor pointing back at it — the budget is never overshot.
     unlinked_contacts: list[dict[str, Any]] = []
-    unlinked_contacts_truncated = False
-    if not since:
-        for c in await list_unlinked_contacts(db, user_id, include_text=include_text):
-            size = len(json.dumps(c, default=str).encode("utf-8"))
-            if unlinked_contacts and total_bytes + size > settings.EXPORT_HISTORY_MAX_BYTES:
-                unlinked_contacts_truncated = True
-                break
-            unlinked_contacts.append(c)
+    unlinked_next_after_id: Optional[int] = None
+    if include_unlinked:
+        after_id = unlinked_after_id if unlinked_after_id is not None else 0
+        page_limit = settings.EXPORT_HISTORY_UNLINKED_PAGE_SIZE
+        fetched = await list_unlinked_contacts_page(db, user_id, after_id=after_id, limit=page_limit + 1)
+        more_beyond_page = len(fetched) > page_limit
+        candidates = fetched[:page_limit]
+        for row in candidates:
+            view = await _full_contact_view(db, user_id, row, include_text=include_text)
+            size = len(json.dumps(view, default=str).encode("utf-8"))
+            if total_bytes + size > settings.EXPORT_HISTORY_MAX_BYTES:
+                if include_text:
+                    view = await _full_contact_view(db, user_id, row, include_text=False)
+                    size = len(json.dumps(view, default=str).encode("utf-8"))
+                if total_bytes + size > settings.EXPORT_HISTORY_MAX_BYTES:
+                    unlinked_next_after_id = row["id"]
+                    break
+            unlinked_contacts.append(view)
             total_bytes += size
+        else:
+            if more_beyond_page:
+                unlinked_next_after_id = candidates[-1]["id"] + 1
 
     result: dict[str, Any] = {
         "applications": out_apps, "truncated": truncated, "bytes": total_bytes,
         "profile_edits": profile_edits, "profile_edits_truncated": edits_truncated,
         "assistant_notes": assistant_notes, "unlinked_contacts": unlinked_contacts,
-        "unlinked_contacts_truncated": unlinked_contacts_truncated,
+        "unlinked_contacts_truncated": unlinked_next_after_id is not None,
     }
+    if unlinked_next_after_id is not None:
+        result["unlinked_next_after_id"] = unlinked_next_after_id
     if truncated:
         result["next_since"] = next_since
     get_audit_logger().info(

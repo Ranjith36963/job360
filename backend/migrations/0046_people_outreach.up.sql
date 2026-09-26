@@ -35,7 +35,15 @@
 --    extended here to also cover contact_outreach/contact_edits), so
 --    `test_contacts_are_append_only` stays green — reads apply the newest
 --    edit per field on top of the base row, and history is every value with
---    who/when ("was X").
+--    who/when ("was X"). `is_initial` (bug fix, coordinator review
+--    2026-09-26): TRUE only for the one edit `_create_contact_with_deferred_
+--    email` writes at creation time (the base row's own email column had to
+--    stay '' to dodge a stale-identity collision on the partial unique
+--    index above) — `_full_contact_view` folds that row into the base
+--    history entry instead of listing it as a separate "was (empty)" edit,
+--    so the person's history reads as if the real address was there from
+--    the start. Added to this migration rather than a new one because 0046
+--    has not shipped yet (unreleased on this branch).
 --
 -- DDL ONLY. No existing row is read, copied or changed. Conventions copied
 -- from 0037/0038: TEXT ISO-8601 timestamps, IF NOT EXISTS, INTEGER PRIMARY
@@ -79,7 +87,8 @@ CREATE TABLE IF NOT EXISTS contact_edits (
     field TEXT NOT NULL,                     -- name | role | email | linkedin_url | notes
     value TEXT NOT NULL,                     -- the NEW value this edit set
     recorded_at TEXT NOT NULL,
-    recorded_by TEXT NOT NULL
+    recorded_by TEXT NOT NULL,
+    is_initial BOOLEAN NOT NULL DEFAULT FALSE  -- TRUE only for the deferred-email creation-time row
 );
 CREATE INDEX IF NOT EXISTS idx_contact_edits_user_contact_field
     ON contact_edits(user_id, contact_id, field, id DESC);

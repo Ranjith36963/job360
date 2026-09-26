@@ -409,6 +409,11 @@ EXPORT_HISTORY_MAX_PER_HOUR = int(os.getenv("EXPORT_HISTORY_MAX_PER_HOUR", "12")
 # like everything else it carries: the NEWEST N rows, rendered oldest-first,
 # with `profile_edits_truncated` saying when the tail was cut.
 EXPORT_HISTORY_MAX_PROFILE_EDITS = int(os.getenv("EXPORT_HISTORY_MAX_PROFILE_EDITS", "500"))
+# Bug fix (coordinator review, 2026-09-26) — unlinked (cold) contacts are
+# fetched from Postgres a PAGE at a time (never the whole table into memory
+# first), keyed by `id >= unlinked_after_id`; `unlinked_next_after_id` names
+# where the next page starts.
+EXPORT_HISTORY_UNLINKED_PAGE_SIZE = int(os.getenv("EXPORT_HISTORY_UNLINKED_PAGE_SIZE", "50"))
 
 # ── Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md) ─────────────────
 # S4 — every cap a parameter; a breach is a 422 naming the field and the

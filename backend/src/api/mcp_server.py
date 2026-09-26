@@ -828,6 +828,17 @@ def build_server(version: str = "") -> MCPServer:
         NEVER changes the job's status by itself — record `replied`
         separately only if the reply is about the application itself."""
         if contact_id is not None:
+            # Bug fix (coordinator review, 2026-09-26) — same refusal as the
+            # route: neither the cold outreach door nor the linked branch
+            # below has anywhere to put corrects_event_id/payload/
+            # scheduled_at, so silently dropping them would lose data the
+            # caller thinks was recorded.
+            if corrects_event_id is not None or payload or scheduled_at is not None:
+                raise _tool_error(
+                    HTTPException(
+                        422, "corrects_event_id/payload/scheduled_at are not supported for outreach (contact_id)"
+                    )
+                )
             if event_type not in ("outreach_sent", "outreach_replied"):
                 raise _tool_error(
                     HTTPException(
@@ -907,15 +918,28 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
-    async def export_history(since: Optional[str] = None, include_text: bool = False) -> dict[str, Any]:
+    async def export_history(
+        since: Optional[str] = None,
+        include_text: bool = False,
+        include_unlinked: bool = True,
+        unlinked_after_id: Optional[int] = None,
+    ) -> dict[str, Any]:
         """Export the user's whole application history: every application,
         its events, and artifact metadata (full text only when
         include_text=true), plus the user's standing `assistant_notes` and
         every profile change (`profile_edits`, yours and the user's). Bounded
-        and rate-limited — a truncated response names next_since to page from."""
+        and rate-limited — a truncated response names next_since to page from.
+
+        Cold (job-less) contacts page SEPARATELY via `unlinked_after_id` —
+        pass back `unlinked_next_after_id` from the previous response to
+        fetch the next batch; when it is absent you have them all. Pass
+        `include_unlinked=false` once you already hold them all and are only
+        paging applications."""
         try:
             async with _request_db() as db:
-                resp = await applications_route.export_history(since, include_text, db, _user())
+                resp = await applications_route.export_history(
+                    since, include_text, include_unlinked, unlinked_after_id, db, _user()
+                )
         except HTTPException as exc:
             _audit("export_history", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None

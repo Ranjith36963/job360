@@ -2214,6 +2214,17 @@
             "default": false,
             "title": "Unlinked Contacts Truncated",
             "type": "boolean"
+          },
+          "unlinked_next_after_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unlinked Next After Id"
           }
         },
         "required": [
@@ -5817,6 +5828,32 @@
               "default": false,
               "title": "Include Text",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_unlinked",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Unlinked",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unlinked_after_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Unlinked After Id"
             }
           },
           {

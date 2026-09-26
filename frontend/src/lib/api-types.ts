@@ -2672,6 +2672,8 @@ export interface components {
              * @default false
              */
             unlinked_contacts_truncated: boolean;
+            /** Unlinked Next After Id */
+            unlinked_next_after_id?: number | null;
         };
         /** FetchUrlRequest */
         FetchUrlRequest: {
@@ -4068,6 +4070,8 @@ export interface operations {
             query?: {
                 since?: string | null;
                 include_text?: boolean;
+                include_unlinked?: boolean;
+                unlinked_after_id?: number | null;
             };
             header?: {
                 authorization?: string | null;

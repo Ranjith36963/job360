@@ -752,10 +752,13 @@ async def test_bug6_unlinked_contacts_only_on_the_first_page(authenticated_async
         first_body = first.json()
         assert len(first_body["unlinked_contacts"]) == 1
 
-        # A `since` cursor is a follow-up call — unlinked_contacts must not
-        # repeat on every page.
+        # `include_unlinked=false` is how a caller who already has every cold
+        # contact skips them on a follow-up page — `since` alone no longer
+        # infers this (round-2 bug fix: the old since-based inference is
+        # gone, see test_bug1r2_unlinked_contacts_still_returned_when_since_
+        # is_set below for why).
         since = first_body["applications"][0]["updated_at"] if first_body["applications"] else "2099-01-01"
-        second = await client.get(f"/api/applications/export?since={since}")
+        second = await client.get(f"/api/applications/export?since={since}&include_unlinked=false")
         assert second.status_code == 200, second.text
         assert second.json()["unlinked_contacts"] == []
         assert app_id  # keep the linter/application reference honest
@@ -773,3 +776,236 @@ async def test_bug6_unlinked_contacts_truncate_over_budget(authenticated_async_c
         export = await client.get("/api/applications/export?include_text=true")
         assert export.status_code == 200, export.text
         assert export.json()["unlinked_contacts_truncated"] is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Coordinator re-review, 2026-09-26 — 4 more bugs found on e40e680
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ── Bug 1r2 [P2] — unlinked_contacts pagination was since-inferred/unbounded ─
+
+
+@pytest.mark.asyncio
+async def test_bug1r2_unlinked_contacts_still_returned_when_since_is_set(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        await _add_person(client, email="page-one-r2@x.example")
+        app_id = await _bring(client)
+
+        # The OLD code read a `since` cursor as "not the caller's first call"
+        # and silently skipped cold contacts entirely — even on a genuine
+        # first call that happened to pass one. `include_unlinked` is now
+        # independent of `since` (bug fix, coordinator review 2026-09-26).
+        export = await client.get("/api/applications/export?since=2000-01-01T00:00:00+00:00")
+        assert export.status_code == 200, export.text
+        body = export.json()
+        assert len(body["unlinked_contacts"]) == 1
+        assert body["unlinked_contacts"][0]["email"] == "page-one-r2@x.example"
+        assert app_id  # keep the linter/application reference honest
+
+
+@pytest.mark.asyncio
+async def test_bug1r2_unlinked_contacts_page_via_cursor_never_exceeds_budget(
+    authenticated_async_context, monkeypatch
+):
+    from src.core import settings
+
+    async with authenticated_async_context() as client:
+        # Same name, no notes on either — both contacts serialize to the
+        # SAME size (identical-length emails), so a budget that exactly fits
+        # the first can never accidentally admit the second in one page.
+        await _add_person(client, email="budget-a@x.example")
+        baseline = await client.get("/api/applications/export?include_text=true")
+        assert baseline.status_code == 200, baseline.text
+        with_one = baseline.json()["bytes"]
+
+        second = await _add_person(client, email="budget-b@x.example")
+        second_id = second.json()["contact"]["id"]
+
+        # A budget that fits exactly the FIRST contact but not both — proves
+        # the byte check now applies to the first row of a page too, and
+        # that the DEFERRED contact is never dropped, only paged (bug fix,
+        # coordinator review 2026-09-26: the old code loaded every cold
+        # contact into memory unconditionally and could never page past a
+        # byte cutoff at all).
+        monkeypatch.setattr(settings, "EXPORT_HISTORY_MAX_BYTES", with_one)
+        page1 = await client.get("/api/applications/export?include_text=true")
+        assert page1.status_code == 200, page1.text
+        body1 = page1.json()
+        assert body1["bytes"] <= with_one
+        assert [c["email"] for c in body1["unlinked_contacts"]] == ["budget-a@x.example"]
+        assert body1["unlinked_contacts_truncated"] is True
+        cursor = body1["unlinked_next_after_id"]
+        assert cursor == second_id
+
+        page2 = await client.get(f"/api/applications/export?include_text=true&unlinked_after_id={cursor}")
+        assert page2.status_code == 200, page2.text
+        body2 = page2.json()
+        assert body2["bytes"] <= with_one
+        assert [c["email"] for c in body2["unlinked_contacts"]] == ["budget-b@x.example"]
+        assert body2["unlinked_contacts_truncated"] is False
+
+
+# ── Bug 2r2 [P2] — current-email uniqueness was check-then-insert, no lock ──
+
+
+@pytest.mark.asyncio
+async def test_bug2r2_concurrent_add_contact_same_email_never_two_owners(authenticated_async_context):
+    import asyncio
+
+    async with authenticated_async_context() as client_a, authenticated_async_context() as client_b:
+        results = await asyncio.gather(
+            _add_person(client_a, email="race2-add@x.example", name="A"),
+            _add_person(client_b, email="race2-add@x.example", name="B"),
+        )
+        statuses = sorted(r.status_code for r in results)
+        assert statuses == [200, 201], [r.text for r in results]
+        winner = next(r for r in results if r.status_code == 201)
+        loser = next(r for r in results if r.status_code == 200)
+        assert loser.json()["already_existed"] is True
+        assert loser.json()["contact"]["id"] == winner.json()["contact"]["id"]
+
+        people = await client_a.get("/api/people?email=race2-add@x.example")
+        assert people.status_code == 200, people.text
+        assert len(people.json()["people"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_bug2r2_concurrent_update_contact_race_is_serialized_by_the_lock(
+    authenticated_async_context, monkeypatch
+):
+    """Reproduces the race the advisory lock exists to close: TWO contacts'
+    ``update_contact`` calls both target the SAME, previously-unowned email.
+    Unlike ``add_contact``, the overlay (``contact_edits``) carries NO unique
+    constraint at all — without the lock, both checks can see "no current
+    owner" and both writes land, giving the same email to two contacts with
+    no error at any point. The monkeypatch forces the second writer's own
+    lock-then-check to run only AFTER the first has committed and released
+    the lock — real concurrency without it is timing-dependent and would
+    make this test flaky in either direction."""
+    import asyncio
+
+    from src.services.applications import contacts as contacts_service
+
+    async with authenticated_async_context() as client:
+        b = await _add_person(client, email="race2-upd-b@x.example")
+        c = await _add_person(client, email="race2-upd-c@x.example")
+        b_id = b.json()["contact"]["id"]
+        c_id = c.json()["contact"]["id"]
+
+    real_lock = contacts_service._lock_email_scope
+    state: dict[str, Any] = {"fired": False}
+
+    async def racy_lock(db, user_id, application_id, email):
+        await real_lock(db, user_id, application_id, email)
+        if not state["fired"] and email == "race2-upd-shared@x.example":
+            state["fired"] = True
+            state["rival_task"] = asyncio.create_task(
+                state["rival_client"].patch(
+                    f"/api/contacts/{c_id}", json={"email": "race2-upd-shared@x.example"}
+                )
+            )
+            await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(contacts_service, "_lock_email_scope", racy_lock)
+
+    async with authenticated_async_context() as client, authenticated_async_context() as rival_client:
+        state["rival_client"] = rival_client
+        first_resp = await client.patch(
+            f"/api/contacts/{b_id}", json={"email": "race2-upd-shared@x.example"}
+        )
+        rival_resp = await state["rival_task"]
+
+    statuses = sorted([first_resp.status_code, rival_resp.status_code])
+    assert statuses == [200, 409], (first_resp.text, rival_resp.text)
+
+    async with authenticated_async_context() as verify_client:
+        people = await verify_client.get("/api/people?email=race2-upd-shared@x.example")
+        assert people.status_code == 200, people.text
+        assert len(people.json()["people"]) == 1
+
+
+# ── Bug 3r2 [P3] — outreach silently dropped corrects_event_id/payload/… ────
+
+
+@pytest.mark.asyncio
+async def test_bug3r2_route_rejects_corrects_fields_with_contact_id(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        added = await client.post(
+            f"/api/applications/{app_id}/contacts",
+            json={"name": "Priya Shah", "role": "Recruiter", "email": "priya-r2@x.example"},
+        )
+        contact_id = added.json()["contact"]["id"]
+
+        resp = await client.post(
+            f"/api/applications/{app_id}/events",
+            json={
+                "event_type": "outreach_sent", "contact_id": contact_id, "channel": "email",
+                "payload": {"x": 1},
+            },
+        )
+        assert resp.status_code == 422, resp.text
+        assert "not supported for outreach" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_bug3r2_mcp_record_event_rejects_corrects_fields_with_contact_id(authenticated_async_context):
+    pytest.importorskip("mcp")
+    from src.api.mcp_server import mcp_runtime
+
+    async with authenticated_async_context() as client:
+        added = await _add_person(client, email="cold-corrects-r2@x.example")
+        contact_id = added.json()["contact"]["id"]
+        token = await _mint_token(client)
+
+    async with mcp_runtime():
+        async with _mcp_client(token) as mcp:
+            result = await mcp.call_tool(
+                "record_event",
+                {
+                    "event_type": "outreach_sent", "contact_id": contact_id, "channel": "email",
+                    "payload": {"x": 1},
+                },
+            )
+            error_text = _mcp_error_text(result)
+            assert "422" in error_text
+            assert "not supported for outreach" in error_text
+
+
+# ── Bug 4r2 [P3] — deferred-email contact showed a spurious "(empty)" edit ──
+
+
+@pytest.mark.asyncio
+async def test_bug4r2_deferred_email_history_has_no_empty_entry(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        # Force the deferred-email recovery path: create a contact, edit its
+        # email AWAY (leaving the base row's raw email slot "stale" but still
+        # occupying 0046's partial unique index), then a SECOND contact
+        # claiming that now-abandoned address must go through
+        # _create_contact_with_deferred_email.
+        first = await _add_person(client, email="stale-r2@x.example")
+        first_id = first.json()["contact"]["id"]
+        moved = await client.patch(f"/api/contacts/{first_id}", json={"email": "moved-away-r2@x.example"})
+        assert moved.status_code == 200, moved.text
+
+        deferred = await _add_person(client, email="stale-r2@x.example", name="New Owner")
+        assert deferred.status_code == 201, deferred.text
+        contact = deferred.json()["contact"]
+        email_history = contact["edit_history"]["email"]
+        # Exactly one entry — the folded creation-time record of the REAL
+        # address — never a separate base-row "(empty)" entry (bug fix,
+        # coordinator review 2026-09-26).
+        assert len(email_history) == 1
+        assert email_history[0]["value"] == "stale-r2@x.example"
+
+        # A later, genuine edit still shows as history — folding the initial
+        # deferred-email row must not swallow subsequent real edits.
+        contact_id = contact["id"]
+        patched = await client.patch(f"/api/contacts/{contact_id}", json={"email": "final-r2@x.example"})
+        assert patched.status_code == 200, patched.text
+        history_after = patched.json()["edit_history"]["email"]
+        assert len(history_after) == 2
+        assert history_after[0]["value"] == "stale-r2@x.example"
+        assert history_after[1]["value"] == "final-r2@x.example"
+        assert patched.json()["email"] == "final-r2@x.example"
