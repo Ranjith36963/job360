@@ -732,6 +732,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Person
+         * @description Owner decision, 2026-09-25 — a person with no job yet (cold
+         *     networking), or a linked one when ``application_id`` is given. Same
+         *     idempotency/cap/rate-limit rules as the per-application route, just
+         *     scoped to the USER instead of an application when there is none.
+         */
+        post: operations["add_person_api_contacts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contacts/{contact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Contact
+         * @description Owner decision, 2026-09-25 — contacts ARE editable, old values kept:
+         *     every provided field appends a ``contact_edits`` row (S12 — the base row
+         *     is never touched); the response is the CURRENT view (base + latest edit
+         *     per field) plus the full history. A foreign/unknown id reads 404 (S2).
+         */
+        patch: operations["update_contact_api_contacts__contact_id__patch"];
+        trace?: never;
+    };
+    "/api/contacts/{contact_id}/outreach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Outreach
+         * @description The one shared door for a contact's outreach ledger — a drafted
+         *     message VERSION, or a ``sent``/``reply`` mark. ``save_artifact``
+         *     (``kind="outreach"`` + ``contact_id``) and ``record_event``
+         *     (``outreach_sent``/``outreach_replied`` + ``contact_id``) both delegate to
+         *     the SAME service function this route calls (M5 parity) — this route is
+         *     the one door that works for a COLD contact too, since it carries no
+         *     ``application_id`` in its URL.
+         */
+        post: operations["record_outreach_api_contacts__contact_id__outreach_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -954,6 +1026,29 @@ export interface paths {
         put?: never;
         /** Token */
         post: operations["token_api_oauth_token_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/people": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List People
+         * @description No ``contact_id`` — every person the user has added, grouped by
+         *     lower(email) else linkedin_url (the same recruiter on two jobs is one
+         *     person here). With ``contact_id`` — that ONE row's own full record
+         *     (message versions, sent/reply marks, detail-edit history), never merged.
+         */
+        get: operations["list_people_api_people_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1692,6 +1787,43 @@ export interface components {
             event_id: number | null;
         };
         /**
+         * AddPersonRequest
+         * @description ``POST /api/contacts`` — a job-less (cold) contact when
+         *     ``application_id`` is omitted, a linked one otherwise (owner decision,
+         *     2026-09-25). Kept as a SEPARATE model from ``AddContactRequest`` (used by
+         *     the per-application route, where the id comes off the URL) so that route
+         *     keeps refusing an ``application_id`` in its body (S3 — the id there is
+         *     never caller-supplied).
+         */
+        AddPersonRequest: {
+            /** Application Id */
+            application_id?: number | null;
+            /**
+             * Email
+             * @default
+             */
+            email: string;
+            /**
+             * Linkedin Url
+             * @default
+             */
+            linkedin_url: string;
+            /** Name */
+            name: string;
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
+            /** Occurred At */
+            occurred_at?: string | null;
+            /**
+             * Role
+             * @default
+             */
+            role: string;
+        };
+        /**
          * AgentEditOut
          * @description One live ASSISTANT edit on ``GET /profile``'s ``agent_edits``.
          *
@@ -2316,17 +2448,37 @@ export interface components {
             user_email: string;
         };
         /**
+         * ContactEditOut
+         * @description One value a contact field has ever held — the base row's own value is
+         *     entry 0, oldest first, so ``[-1]`` is always current.
+         */
+        ContactEditOut: {
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+            /** Value */
+            value: string;
+        };
+        /**
          * ContactOut
          * @description A contact row (``contacts.list_contacts`` / ``add_contact``'s return).
-         *     Same shape everywhere a contact appears — detail, export, the add response.
+         *     Same shape everywhere a contact appears — detail, export, the add
+         *     response. ``application_id`` is ``null`` for a cold (job-less) contact
+         *     (owner decision, 2026-09-25). ``edit_history``/``outreach`` carry the
+         *     append-only overlays added the same day.
          */
         ContactOut: {
             /** Added By */
             added_by: string;
             /** Application Id */
-            application_id: number;
+            application_id: number | null;
             /** Created At */
             created_at: string;
+            /** Edit History */
+            edit_history?: {
+                [key: string]: components["schemas"]["ContactEditOut"][];
+            };
             /** Email */
             email: string;
             /** Id */
@@ -2337,8 +2489,24 @@ export interface components {
             name: string;
             /** Notes */
             notes: string;
+            outreach: components["schemas"]["ContactOutreachOut"];
             /** Role */
             role: string;
+        };
+        /** ContactOutreachOut */
+        ContactOutreachOut: {
+            last_reply: components["schemas"]["OutreachEntryOut"] | null;
+            last_sent: components["schemas"]["OutreachEntryOut"] | null;
+            /** Message Count */
+            message_count: number;
+            /** Messages */
+            messages: components["schemas"]["OutreachEntryOut"][];
+            /** Replied */
+            replied: boolean;
+            /** Replies */
+            replies: components["schemas"]["OutreachEntryOut"][];
+            /** Sent */
+            sent: components["schemas"]["OutreachEntryOut"][];
         };
         /** CreateReceiptRequest */
         CreateReceiptRequest: {
@@ -2494,6 +2662,18 @@ export interface components {
             profile_edits_truncated: boolean;
             /** Truncated */
             truncated: boolean;
+            /**
+             * Unlinked Contacts
+             * @default []
+             */
+            unlinked_contacts: components["schemas"]["ContactOut"][];
+            /**
+             * Unlinked Contacts Truncated
+             * @default false
+             */
+            unlinked_contacts_truncated: boolean;
+            /** Unlinked Next After Id */
+            unlinked_next_after_id?: number | null;
         };
         /** FetchUrlRequest */
         FetchUrlRequest: {
@@ -2709,6 +2889,17 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** ListPeopleResponse */
+        ListPeopleResponse: {
+            /** People */
+            people?: components["schemas"]["PersonOut"][] | null;
+            person?: components["schemas"]["PersonFullOut"] | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
         /** LivezResponse */
         LivezResponse: {
             /** Status */
@@ -2767,6 +2958,35 @@ export interface components {
             /** Scope */
             scope: string;
         };
+        /**
+         * OutreachEntryOut
+         * @description One row of a contact's outreach ledger — a drafted message VERSION
+         *     (``entry="message"``, ``version_no`` set) or a ``sent``/``reply`` mark
+         *     (``version_no`` null — unversioned, a person can be sent to or replied
+         *     to many times).
+         */
+        OutreachEntryOut: {
+            /** Channel */
+            channel: string;
+            /** Contact Id */
+            contact_id: number;
+            /** Entry */
+            entry: string;
+            /** Id */
+            id: number;
+            /** Occurred At */
+            occurred_at: string;
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+            /** Source Message Id */
+            source_message_id: string;
+            /** Text */
+            text: string;
+            /** Version No */
+            version_no: number | null;
+        };
         /** PasswordChangeRequest */
         PasswordChangeRequest: {
             /** Current Password */
@@ -2788,6 +3008,75 @@ export interface components {
              * Format: email
              */
             email: string;
+        };
+        /**
+         * PersonFullOut
+         * @description ``list_people(contact_id=...)``'s shape — the one row's own full
+         *     record (never merged with another row that happens to share an email).
+         */
+        PersonFullOut: {
+            /** Added By */
+            added_by: string;
+            /** Application Id */
+            application_id: number | null;
+            /** Created At */
+            created_at: string;
+            /** Edit History */
+            edit_history?: {
+                [key: string]: components["schemas"]["ContactEditOut"][];
+            };
+            /** Email */
+            email: string;
+            /** Id */
+            id: number;
+            /** Jobs */
+            jobs: components["schemas"]["PersonJobOut"][];
+            /** Linkedin Url */
+            linkedin_url: string;
+            /** Name */
+            name: string;
+            /** Notes */
+            notes: string;
+            outreach: components["schemas"]["ContactOutreachOut"];
+            /** Role */
+            role: string;
+        };
+        /** PersonJobOut */
+        PersonJobOut: {
+            /** Application Id */
+            application_id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Title */
+            job_title: string;
+        };
+        /**
+         * PersonOut
+         * @description ``list_people``'s no-``contact_id`` shape — one row per PERSON
+         *     (grouped by lower(email) else linkedin_url), aggregated across every
+         *     underlying ``application_contacts`` row that shares that identity.
+         */
+        PersonOut: {
+            /** Contact Ids */
+            contact_ids: number[];
+            /** Email */
+            email: string;
+            /** Jobs */
+            jobs: components["schemas"]["PersonJobOut"][];
+            last_reply: components["schemas"]["OutreachEntryOut"] | null;
+            last_sent: components["schemas"]["OutreachEntryOut"] | null;
+            /** Linkedin Url */
+            linkedin_url: string;
+            /** Message Count */
+            message_count: number;
+            /** Name */
+            name: string;
+            /** Notes */
+            notes: string;
+            /** Replied */
+            replied: boolean;
+            /** Role */
+            role: string;
         };
         /**
          * ProfileEditExportOut
@@ -3169,6 +3458,10 @@ export interface components {
         };
         /** RecordEventRequest */
         RecordEventRequest: {
+            /** Channel */
+            channel?: string | null;
+            /** Contact Id */
+            contact_id?: number | null;
             /** Corrects Event Id */
             corrects_event_id?: number | null;
             /**
@@ -3195,7 +3488,7 @@ export interface components {
             /** Already Existed */
             already_existed: boolean;
             /** Event Id */
-            event_id: number;
+            event_id: number | null;
             /** Event Type */
             event_type: string;
             /** Follow Up On */
@@ -3210,6 +3503,40 @@ export interface components {
             scheduled_at: string | null;
             /** Status */
             status: string;
+        };
+        /**
+         * RecordOutreachRequest
+         * @description ``POST /api/contacts/{contact_id}/outreach`` — the one shared door
+         *     ``save_artifact``/``record_event`` (with a ``contact_id``) also call
+         *     (M5 parity).
+         */
+        RecordOutreachRequest: {
+            /** Application Id */
+            application_id?: number | null;
+            /** Channel */
+            channel: string;
+            /** Entry */
+            entry: string;
+            /** Follow Up On */
+            follow_up_on?: string | null;
+            /** Occurred At */
+            occurred_at?: string | null;
+            source?: components["schemas"]["EventSource"] | null;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+        };
+        /** RecordOutreachResponse */
+        RecordOutreachResponse: {
+            /** Already Existed */
+            already_existed: boolean;
+            /** Event Id */
+            event_id: number | null;
+            /** Follow Up On */
+            follow_up_on: string | null;
+            outreach: components["schemas"]["OutreachEntryOut"];
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -3236,6 +3563,10 @@ export interface components {
         };
         /** SaveArtifactRequest */
         SaveArtifactRequest: {
+            /** Channel */
+            channel?: string | null;
+            /** Contact Id */
+            contact_id?: number | null;
             /** Kind */
             kind: string;
             /**
@@ -3254,10 +3585,12 @@ export interface components {
             artifact_id: number;
             /** Chars */
             chars: number;
+            /** Contact Id */
+            contact_id?: number | null;
             /** Created At */
             created_at: string;
             /** Event Id */
-            event_id: number;
+            event_id: number | null;
             /** Kind */
             kind: string;
             /** Made By */
@@ -3498,6 +3831,26 @@ export interface components {
             /** Prefix */
             prefix: string;
         };
+        /**
+         * UpdateContactRequest
+         * @description ``PATCH /api/contacts/{contact_id}`` — every field optional; only the
+         *     ones given are appended to ``contact_edits`` (owner decision, 2026-09-25:
+         *     contacts ARE editable, old values kept). No length caps declared here —
+         *     same reasoning as ``AddContactRequest``: ``contacts.update_contact``
+         *     checks live ``settings`` values at call time.
+         */
+        UpdateContactRequest: {
+            /** Email */
+            email?: string | null;
+            /** Linkedin Url */
+            linkedin_url?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Role */
+            role?: string | null;
+        };
         /** UpdateProfileRequest */
         UpdateProfileRequest: {
             /** Edits */
@@ -3717,6 +4070,8 @@ export interface operations {
             query?: {
                 since?: string | null;
                 include_text?: boolean;
+                include_unlinked?: boolean;
+                unlinked_after_id?: number | null;
             };
             header?: {
                 authorization?: string | null;
@@ -4805,6 +5160,139 @@ export interface operations {
             };
         };
     };
+    add_person_api_contacts_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddPersonRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddContactResponse"];
+                };
+            };
+            /** @description Contact created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddContactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_contact_api_contacts__contact_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                contact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateContactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_outreach_api_contacts__contact_id__outreach_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                contact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordOutreachRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordOutreachResponse"];
+                };
+            };
+            /** @description Outreach recorded */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordOutreachResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     health_check_api_health_get: {
         parameters: {
             query?: never;
@@ -5135,6 +5623,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_people_api_people_get: {
+        parameters: {
+            query?: {
+                contact_id?: number | null;
+                email?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListPeopleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

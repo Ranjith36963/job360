@@ -849,3 +849,56 @@ export async function addContact(
     body: JSON.stringify(body),
   });
 }
+
+// ---- Outreach tracking (owner decisions, 2026-09-25) ----
+// A person can be linked to a job or to none (cold networking); Job360
+// remembers every message version, who/when/channel, sent, reply.
+
+export type OutreachEntry = _Schemas["OutreachEntryOut"];
+
+/** A person with no job yet — cold networking. Same idempotency rules as
+ *  `addContact`, scoped to the user instead of an application. */
+export async function addPerson(body: {
+  name: string;
+  application_id?: number;
+  role?: string;
+  email?: string;
+  linkedin_url?: string;
+  notes?: string;
+  occurred_at?: string;
+}): Promise<AddContactResult> {
+  return request(`/api/contacts`, { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Correct a contact's own details — the OLD value is kept, never lost
+ *  (the response's `edit_history` shows every value with who/when). */
+export async function updateContact(
+  contactId: number,
+  body: { name?: string; role?: string; email?: string; linkedin_url?: string; notes?: string }
+): Promise<Contact> {
+  return request(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+/** Draft/sent/reply for one person — the same door save_artifact/record_event
+ *  use internally for a linked contact; this is the ONLY door for a cold one. */
+export async function recordOutreach(
+  contactId: number,
+  body: {
+    entry: "message" | "sent" | "reply";
+    channel: "linkedin" | "email" | "other";
+    text?: string;
+    occurred_at?: string;
+    follow_up_on?: string;
+  }
+): Promise<_Schemas["RecordOutreachResponse"]> {
+  return request(`/api/contacts/${contactId}/outreach`, { method: "POST", body: JSON.stringify(body) });
+}
+
+export type Person = _Schemas["PersonOut"];
+export type PersonFull = _Schemas["PersonFullOut"];
+
+export async function listPeople(
+  params: { contact_id?: number; email?: string } = {}
+): Promise<_Schemas["ListPeopleResponse"]> {
+  return request(`/api/people${qs(params as Record<string, unknown>)}`);
+}

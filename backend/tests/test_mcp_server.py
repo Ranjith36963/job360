@@ -41,6 +41,10 @@ EXPECTED_TOOLS = {
     "add_contact",
     "stats",
     "update_profile",
+    # Outreach tracking (owner decisions, 2026-09-25) — two more tools,
+    # 17 -> 19 total.
+    "list_people",
+    "update_contact",
 }
 
 JOB = {
