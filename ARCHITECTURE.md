@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-09-19 by the daily truth check -->
+<!-- doc: LIVING | last-verified: 2026-09-26 by the daily truth check -->
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
@@ -129,11 +129,9 @@ Profile extraction infers a candidate's seniority band from job titles
 
 ## Notification System
 
-Job360 is **pull, not push** (VISION.md decision 11): the
-seeker reads `GET /whats-new` and the web home; there is no background delivery, no
-per-user notification channels, and no queue. The Apprise dispatcher, the per-user
-channel CRUD, the digest queue and `notification_rules` were all deleted 2026-09-05 along
-with the sourcing era — do not rebuild them.
+Job360 is **pull, not push** (VISION.md decision 11) — `services.applications.spine.whats_new`
+is the whole of it. The Apprise dispatcher, the per-user channel CRUD, the digest queue and
+`notification_rules` were all deleted 2026-09-05 along with the sourcing era — do not rebuild them.
 
 ---
 
