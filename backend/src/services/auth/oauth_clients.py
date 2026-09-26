@@ -45,6 +45,22 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 # format incl. bidi overrides (Cf), surrogate (Cs), private-use (Co), and
 # unassigned (Cn) — everything that isn't a printable/spacing character.
 _STRIPPED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn"})
+# RFC 7591 error codes. The /register route answers with these constants,
+# never with `str(exc)` — exception text must not reach the client.
+REDIRECT_URI_ERROR_CODE = "invalid_redirect_uri"
+CLIENT_METADATA_ERROR_CODE = "invalid_client_metadata"
+_LOG_VALUE_MAX_CHARS = 128
+
+
+def log_safe(value: object) -> str:
+    """A caller-supplied value made safe to put in a log line.
+
+    CR/LF become spaces (so a value can't forge a second log entry) and the
+    result is capped at 128 chars. The global ``CRLFScrubFilter`` already does
+    the CR/LF part at runtime; this keeps each call site visibly safe too.
+    """
+    text = str(value)[:_LOG_VALUE_MAX_CHARS]
+    return text.replace("\r", " ").replace("\n", " ")
 
 
 class RedirectURIError(ValueError):
@@ -103,23 +119,23 @@ def _validate_shape(uri: str) -> SplitResult:
     path segment (dot-segment traversal).
     """
     if len(uri) > 2048:
-        raise RedirectURIError("invalid_redirect_uri")
+        raise RedirectURIError(REDIRECT_URI_ERROR_CODE)
     if "\\" in uri:
-        raise RedirectURIError("invalid_redirect_uri")
+        raise RedirectURIError(REDIRECT_URI_ERROR_CODE)
     parts = urlsplit(uri)
     if not parts.scheme or not parts.hostname:
-        raise RedirectURIError("invalid_redirect_uri")
+        raise RedirectURIError(REDIRECT_URI_ERROR_CODE)
     if parts.fragment:
-        raise RedirectURIError("invalid_redirect_uri")
+        raise RedirectURIError(REDIRECT_URI_ERROR_CODE)
     if parts.username is not None or parts.password is not None:
-        raise RedirectURIError("invalid_redirect_uri")
+        raise RedirectURIError(REDIRECT_URI_ERROR_CODE)
     path = parts.path or ""
     if "//" in path:
-        raise RedirectURIError("invalid_redirect_uri")
+        raise RedirectURIError(REDIRECT_URI_ERROR_CODE)
     if "%2e" in path.lower():
-        raise RedirectURIError("invalid_redirect_uri")
+        raise RedirectURIError(REDIRECT_URI_ERROR_CODE)
     if any(seg in (".", "..") for seg in path.split("/")):
-        raise RedirectURIError("invalid_redirect_uri")
+        raise RedirectURIError(REDIRECT_URI_ERROR_CODE)
     return parts
 
 
@@ -132,13 +148,15 @@ def _parse_allowlist_entries() -> list[tuple[str, str, int, str]]:
     """
     entries: list[tuple[str, str, int, str]] = []
     raw = settings.OAUTH_REDIRECT_ALLOWLIST or ""
-    for item in raw.split(","):
+    for position, item in enumerate(raw.split(","), start=1):
         item = item.strip()
         if not item:
             continue
         parts = urlsplit(item)
         if not parts.scheme or not parts.hostname or not parts.path:
-            logger.warning("oauth: ignoring malformed/empty-path allow-list entry: %s", item)
+            # Log the entry's POSITION, never its text: an operator-typed URL
+            # can carry userinfo (`user:pass@host`), which must not hit logs.
+            logger.warning("oauth: ignoring malformed/empty-path allow-list entry #%d", position)
             continue
         entries.append((parts.scheme.lower(), parts.hostname.lower(), _effective_port(parts), parts.path))
     return entries
@@ -174,12 +192,12 @@ def check_redirect_uri(uri: str) -> None:
     host = (parts.hostname or "").lower()
     if _is_loopback_host(host) and scheme == "http":
         if not settings.OAUTH_ALLOW_LOOPBACK_REDIRECTS:
-            raise RedirectURIError("invalid_redirect_uri")
+            raise RedirectURIError(REDIRECT_URI_ERROR_CODE)
         return
     if scheme != "https":
-        raise RedirectURIError("invalid_redirect_uri")
+        raise RedirectURIError(REDIRECT_URI_ERROR_CODE)
     if not _redirect_matches_allowlist(uri):
-        raise RedirectURIError("invalid_redirect_uri")
+        raise RedirectURIError(REDIRECT_URI_ERROR_CODE)
 
 
 def normalize_redirect_uri(uri: str) -> str:
@@ -271,24 +289,24 @@ async def register(
     route maps to a 503.
     """
     if not redirect_uris or len(redirect_uris) > MAX_REDIRECT_URIS:
-        raise InvalidClientMetadataError("invalid_client_metadata")
+        raise InvalidClientMetadataError(CLIENT_METADATA_ERROR_CODE)
     for uri in redirect_uris:
         check_redirect_uri(uri)
     normalized = [normalize_redirect_uri(u) for u in redirect_uris]
 
     if token_endpoint_auth_method not in (None, "none"):
-        raise InvalidClientMetadataError("invalid_client_metadata")
+        raise InvalidClientMetadataError(CLIENT_METADATA_ERROR_CODE)
 
     effective_grant_types = grant_types if grant_types is not None else ["authorization_code", "refresh_token"]
     if not effective_grant_types or not set(effective_grant_types) <= _ALLOWED_GRANT_TYPES:
-        raise InvalidClientMetadataError("invalid_client_metadata")
+        raise InvalidClientMetadataError(CLIENT_METADATA_ERROR_CODE)
 
     effective_response_types = response_types if response_types is not None else ["code"]
     if not effective_response_types or not set(effective_response_types) <= _ALLOWED_RESPONSE_TYPES:
-        raise InvalidClientMetadataError("invalid_client_metadata")
+        raise InvalidClientMetadataError(CLIENT_METADATA_ERROR_CODE)
 
     if client_name is not None and len(client_name) > MAX_CLIENT_NAME_CHARS:
-        raise InvalidClientMetadataError("invalid_client_metadata")
+        raise InvalidClientMetadataError(CLIENT_METADATA_ERROR_CODE)
     name = sanitize_client_name(client_name)
 
     client_id = CLIENT_ID_PREFIX + secrets.token_urlsafe(24)
