@@ -684,7 +684,9 @@ async def revoke_grant_for_user(db_path: str, *, user_id: str, grant_id: int) ->
         changed = cur.rowcount
         await db.commit()
     if changed:
+        # grant_id comes from the URL path; int() pins it to a number so the
+        # audit line can never carry caller-supplied text.
         get_audit_logger().info(
-            "oauth_grant_revoked", extra={"event": "oauth_grant_revoked", "grant_id": grant_id, "by": "user"},
+            "oauth_grant_revoked", extra={"event": "oauth_grant_revoked", "grant_id": int(grant_id), "by": "user"},
         )
     return bool(changed)

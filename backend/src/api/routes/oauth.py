@@ -109,10 +109,18 @@ async def register_client(request: Request) -> Response:
             grant_types=payload.get("grant_types"),
             response_types=payload.get("response_types"),
         )
-    except oauth_clients.RedirectURIError as exc:
-        return _error_json(400, str(exc), "one or more redirect_uris failed validation", headers=_CORS_NO_STORE)
-    except oauth_clients.InvalidClientMetadataError as exc:
-        return _error_json(400, str(exc), "client metadata is invalid", headers=_CORS_NO_STORE)
+    # Fixed error codes only — exception text never goes back to the client.
+    except oauth_clients.RedirectURIError:
+        return _error_json(
+            400,
+            oauth_clients.REDIRECT_URI_ERROR_CODE,
+            "one or more redirect_uris failed validation",
+            headers=_CORS_NO_STORE,
+        )
+    except oauth_clients.InvalidClientMetadataError:
+        return _error_json(
+            400, oauth_clients.CLIENT_METADATA_ERROR_CODE, "client metadata is invalid", headers=_CORS_NO_STORE
+        )
     except oauth_clients.ClientCapacityError:
         return _error_json(503, "temporarily_unavailable", "registration is temporarily full", headers=_CORS_NO_STORE)
 
@@ -323,6 +331,9 @@ async def token(request: Request, background_tasks: BackgroundTasks) -> Response
     client_id = _form_str(form, "client_id") or ""
     ip = _client_ip(request)
 
+    # client_id is caller-supplied text: audit it only in log-safe form.
+    safe_client_id = oauth_clients.log_safe(client_id)
+
     try:
         result = await _dispatch_grant(grant_type=grant_type, client_id=client_id, form=form)
     except oauth_flow.TokenError as exc:
@@ -336,7 +347,7 @@ async def token(request: Request, background_tasks: BackgroundTasks) -> Response
             if locked:
                 get_audit_logger().info(
                     "oauth_token_refused",
-                    extra={"event": "oauth_token_refused", "client_id": client_id, "reason": "rate_limited"},
+                    extra={"event": "oauth_token_refused", "client_id": safe_client_id, "reason": "rate_limited"},
                 )
                 return _error_json(429, "invalid_request", "too many failed token requests", headers=_CORS_NO_STORE)
             auth_rate_limit.record_failure(fail_key)
@@ -344,7 +355,7 @@ async def token(request: Request, background_tasks: BackgroundTasks) -> Response
                 auth_rate_limit.record_failure(fail_key_client)
         get_audit_logger().info(
             "oauth_token_refused",
-            extra={"event": "oauth_token_refused", "client_id": client_id, "reason": exc.error},
+            extra={"event": "oauth_token_refused", "client_id": safe_client_id, "reason": exc.error},
         )
         return _error_json(exc.status_code, exc.error, exc.description, headers=_CORS_NO_STORE)
 
