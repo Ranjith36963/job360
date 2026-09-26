@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 from src.repositories import pg
 from src.repositories.db_retry import open_db
-from src.utils.logger import get_audit_logger
+from src.utils.logger import get_audit_logger, safe_log_value
 
 TOKEN_PREFIX = "j360_"  # noqa: S105 — a public display prefix, not a secret
 PREFIX_DISPLAY_CHARS = 12
@@ -155,8 +155,11 @@ async def revoke(db_path: str, *, user_id: str, token_id: int) -> bool:
         await db.commit()
     if changed:
         get_audit_logger().info(
+            # CodeQL py/log-injection — `user_id` is an internally-issued id,
+            # but sanitized defensively since it still originates on a
+            # request path.
             "api_token_revoke",
-            extra={"event": "api_token_revoke", "user_id": user_id, "token_id": token_id},
+            extra={"event": "api_token_revoke", "user_id": safe_log_value(user_id), "token_id": token_id},
         )
     return bool(changed)
 

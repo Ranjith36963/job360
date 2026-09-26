@@ -288,6 +288,24 @@ await browser.close();
 const failed = results.filter((r) => r.ok === false);
 const passed = results.filter((r) => r.ok === true);
 const skipped = results.filter((r) => r.ok === null);
+
+// CodeQL js/http-to-file-access — several fields below (a login failure's
+// reason, the backend's stated session owner, a corner's failure reason)
+// trace back to an HTTP response from FE/BE. This file is a local/CI test
+// artifact only (never re-parsed by anything security-sensitive), but bound
+// it anyway: strip control characters and cap length so a hostile or broken
+// response can't smuggle something unbounded or binary onto disk.
+const MAX_REPORT_STRING = 500;
+function safeReportString(value) {
+  if (typeof value !== "string") return value;
+  // Deliberately matching control chars (no-control-regex is not enabled in
+  // this project's eslint config, so no disable directive is needed here).
+  const stripped = value.replace(/[\x00-\x1f\x7f]+/g, " ");
+  return stripped.length > MAX_REPORT_STRING
+    ? `${stripped.slice(0, MAX_REPORT_STRING)}...(truncated)`
+    : stripped;
+}
+
 fs.writeFileSync(
   path.join(OUT, "report.json"),
   JSON.stringify(
@@ -298,10 +316,10 @@ fs.writeFileSync(
       authed: !!SESSION,
       // HOW the session was obtained, and WHO the backend says it belongs to —
       // never the cookie itself. `mode: "login"` is the no-expiry path.
-      sessionMode: AUTH.mode,
-      sessionOwner: AUTH.email,
-      warnings: AUTH.warnings,
-      results,
+      sessionMode: safeReportString(AUTH.mode),
+      sessionOwner: safeReportString(AUTH.email),
+      warnings: AUTH.warnings.map(safeReportString),
+      results: results.map((r) => ({ ...r, reason: safeReportString(r.reason) })),
     },
     null,
     2,

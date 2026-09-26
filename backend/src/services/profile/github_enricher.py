@@ -101,6 +101,7 @@ def normalize_github_username(raw: str) -> str:
 from src.core.settings import GITHUB_TOKEN
 from src.services.profile.dep_file_parser import MANIFEST_FILES, parse_manifest
 from src.services.profile.models import CVData
+from src.utils.logger import safe_log_value
 
 logger = logging.getLogger("job360.profile.github")
 
@@ -152,7 +153,9 @@ async def _get_json(session: aiohttp.ClientSession, url: str) -> Any:
                 # Expected for optional resources (a repo with no README, a
                 # user with no {u}/{u} profile repo). Not an error — debug only,
                 # so a missing README doesn't spam warnings for every repo.
-                logger.debug("GitHub API 404 for %s", url)
+                # CodeQL py/log-injection — `url` embeds caller-supplied
+                # segments (a username, a repo name from GitHub's own API).
+                logger.debug("GitHub API 404 for %s", safe_log_value(url))
                 return None
             if resp.status != 200:
                 logger.warning("GitHub API %s for %s", resp.status, url)
@@ -431,7 +434,10 @@ async def fetch_github_profile(
     # Accept a full profile URL or @handle, not just a bare username.
     username = normalize_github_username(username)
     if not _GITHUB_USERNAME_RE.match(username):
-        logger.warning("Invalid GitHub username format: %s", username)
+        # CodeQL py/log-injection — this branch fires PRECISELY because
+        # `username` failed validation, so it may contain anything,
+        # including CR/LF; sanitize before logging it.
+        logger.warning("Invalid GitHub username format: %s", safe_log_value(username))
         return empty
 
     own_session = session is None

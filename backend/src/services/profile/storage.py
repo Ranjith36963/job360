@@ -32,6 +32,7 @@ from src.core.tenancy import DEFAULT_TENANT_ID
 from src.repositories import pgsync
 from src.services.profile.models import CVData, UserPreferences, UserProfile
 from src.services.profile.snapshot import make_snapshot_id
+from src.utils.logger import safe_log_value
 
 logger = logging.getLogger("job360.profile.storage")
 
@@ -137,10 +138,13 @@ def save_profile(
     # Gap G — extraction summary: log how much was actually extracted, so a
     # sparse/empty profile is explainable from the logs (not just inferred).
     _cv = profile.cv_data
+    # CodeQL py/log-injection — `user_id`/`source_action` are internally
+    # issued/caller-supplied, but sanitized defensively since both
+    # originate on a request path.
     logger.info(
         "Profile saved for user %s (action=%s) — %d skills, %d titles",
-        user_id,
-        source_action,
+        safe_log_value(user_id),
+        safe_log_value(source_action),
         len(getattr(_cv, "skills", None) or []),
         len(getattr(_cv, "job_titles", None) or []),
     )

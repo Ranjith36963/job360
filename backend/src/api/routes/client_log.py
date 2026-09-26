@@ -65,17 +65,21 @@ async def client_log(
     # bounds it regardless.
     if level == "error":
         try:
-            from src.utils.logger import get_audit_logger
+            from src.utils.logger import get_audit_logger, safe_log_value
 
             get_audit_logger().error(
                 "client_error",
+                # CodeQL py/log-injection — `client_message`/`client_url` are
+                # free text the browser sends; length-capping alone doesn't
+                # strip control chars, so both go through the shared
+                # sanitizer (which also caps length).
                 extra={
                     "event": "client_error",
                     "status": "error",
                     "user_id": user.id if user else None,
                     "client_ip": ip,
-                    "client_message": (body.message or "")[:500],
-                    "client_url": (body.url or "")[:300],
+                    "client_message": safe_log_value(body.message or "", max_len=500),
+                    "client_url": safe_log_value(body.url or "", max_len=300),
                 },
             )
         except Exception:  # noqa: BLE001 — logging must never break the client

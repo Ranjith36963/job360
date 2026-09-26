@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from src.api.auth_deps import CurrentUser, require_user
 from src.api.dependencies import get_request_db
 from src.repositories.database import JobDatabase
-from src.utils.logger import get_audit_logger
+from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["receipts"])
 
@@ -170,8 +170,10 @@ async def create_receipt(
 
     get_audit_logger().info(
         "receipt_create",
+        # CodeQL py/log-injection — `user.id` is an internally-issued id, but
+        # sanitized defensively since it still originates on a request path.
         extra={
-            "event": "receipt_create", "job_id": job_id, "user_id": user.id,
+            "event": "receipt_create", "job_id": job_id, "user_id": safe_log_value(user.id),
             "receipt_id": receipt["id"], "has_cv": cv_text is not None,
             "has_cover_letter": cl_text is not None, "status": "ok",
         },
