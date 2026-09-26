@@ -18,7 +18,7 @@
 | Migration head | **0046** | `backend/migrations/` |
 | Migration files | **47** | `backend/migrations/*.up.sql` |
 | FastAPI surface | 11 route modules (80 endpoints) | `backend/src/api/routes/` |
-| Test files | across 140 `test_*.py` files | `backend/tests/` |
+| Test files | across 141 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 24 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
