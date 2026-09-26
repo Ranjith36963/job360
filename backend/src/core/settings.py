@@ -271,7 +271,7 @@ APPLICATION_STATUS_EVENT_TYPES = (
     "withdrawn", "ghosted",
 )
 APPLICATION_NOTE_EVENT_TYPES = (
-    "fit_judged", "artifact_saved", "contact_added", "outreach_sent", "note", "lesson",
+    "fit_judged", "artifact_saved", "contact_added", "outreach_sent", "outreach_replied", "note", "lesson",
 )
 # Env-added types are non-status only — a status type also needs an R4
 # mapping entry, which an env var cannot supply.
@@ -409,6 +409,11 @@ EXPORT_HISTORY_MAX_PER_HOUR = int(os.getenv("EXPORT_HISTORY_MAX_PER_HOUR", "12")
 # like everything else it carries: the NEWEST N rows, rendered oldest-first,
 # with `profile_edits_truncated` saying when the tail was cut.
 EXPORT_HISTORY_MAX_PROFILE_EDITS = int(os.getenv("EXPORT_HISTORY_MAX_PROFILE_EDITS", "500"))
+# Bug fix (coordinator review, 2026-09-26) — unlinked (cold) contacts are
+# fetched from Postgres a PAGE at a time (never the whole table into memory
+# first), keyed by `id >= unlinked_after_id`; `unlinked_next_after_id` names
+# where the next page starts.
+EXPORT_HISTORY_UNLINKED_PAGE_SIZE = int(os.getenv("EXPORT_HISTORY_UNLINKED_PAGE_SIZE", "50"))
 
 # ── Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md) ─────────────────
 # S4 — every cap a parameter; a breach is a 422 naming the field and the
@@ -422,6 +427,19 @@ CONTACT_LINKEDIN_URL_MAX_CHARS = int(os.getenv("CONTACT_LINKEDIN_URL_MAX_CHARS",
 CONTACT_NOTES_MAX_CHARS = int(os.getenv("CONTACT_NOTES_MAX_CHARS", "2000"))
 CONTACTS_PER_APPLICATION_MAX = int(os.getenv("CONTACTS_PER_APPLICATION_MAX", "50"))
 CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 — per USER
+
+# ── Outreach tracking (owner decisions, 2026-09-25) ─────────────────────────
+# People: a contact can be linked to a job or to none (cold networking). The
+# user's own assistant WRITES messages; the USER sends; Job360 never sends.
+OUTREACH_CHANNELS = ("linkedin", "email", "other")
+OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000"))
+OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
+OUTREACH_ENTRIES_PER_CONTACT_MAX = int(os.getenv("OUTREACH_ENTRIES_PER_CONTACT_MAX", "200"))
+CONTACTS_UNLINKED_MAX = int(os.getenv("CONTACTS_UNLINKED_MAX", "500"))
+CONTACT_EDITS_PER_CONTACT_MAX = int(os.getenv("CONTACT_EDITS_PER_CONTACT_MAX", "200"))
+OUTREACH_MAX_PER_HOUR = int(os.getenv("OUTREACH_MAX_PER_HOUR", "120"))  # S7 — per USER
+LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
+CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes")
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
 STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))

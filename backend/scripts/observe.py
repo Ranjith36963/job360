@@ -67,6 +67,11 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     # Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md).
     ("application_contacts", "user_id"),
     ("profile_edits", "user_id"),
+    # Outreach tracking (migration 0046) — CI's test_observe.py caught these
+    # missing (coordinator review, 2026-09-26): a per-user table nobody
+    # registers here is one this layer silently cannot see.
+    ("contact_outreach", "user_id"),
+    ("contact_edits", "user_id"),
 )
 
 # The SHARED catalog. These MUST NOT have a user_id — a user_id appearing here

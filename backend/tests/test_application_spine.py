@@ -441,7 +441,7 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
 
     vision_types = {
         "brought", "fit_judged", "artifact_saved", "contact_added", "outreach_sent",
-        "applied", "replied", "interview_requested", "interview_scheduled",
+        "outreach_replied", "applied", "replied", "interview_requested", "interview_scheduled",
         "interview_done", "offer", "rejected", "withdrawn", "ghosted", "note", "lesson",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)

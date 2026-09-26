@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { addContact } from "@/lib/api";
+import { addContact, updateContact } from "@/lib/api";
 import type { Contact } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api-error";
 import { Input } from "@/components/ui/input";
@@ -37,10 +37,181 @@ function LinkedinCell({ url }: { url: string }) {
   return <span className="break-all">{url}</span>;
 }
 
+const CHANNEL_LABEL: Record<string, string> = { linkedin: "LinkedIn", email: "email", other: "" };
+
+function channelLabel(channel: string): string {
+  return CHANNEL_LABEL[channel] ?? channel;
+}
+
+/** "Sent on 3 Oct via LinkedIn" / "Not sent yet". */
+function SentLine({ contact }: { contact: Contact }) {
+  const last = contact.outreach?.last_sent;
+  if (!last) return <p className="text-xs text-muted-foreground">Not sent yet.</p>;
+  const via = channelLabel(last.channel);
+  return (
+    <p className="text-xs text-muted-foreground">
+      Sent on {formatDate(last.occurred_at)}
+      {via && ` via ${via}`}
+    </p>
+  );
+}
+
+/** "Replied on 5 Oct" / "No reply yet". */
+function RepliedLine({ contact }: { contact: Contact }) {
+  const last = contact.outreach?.last_reply;
+  if (!last) return <p className="text-xs text-muted-foreground">No reply yet.</p>;
+  return <p className="text-xs text-muted-foreground">Replied on {formatDate(last.occurred_at)}.</p>;
+}
+
+/** The latest message text, with earlier versions folded away — plain text
+ * always, never HTML (a drafted message is untrusted free text). */
+function MessageVersions({ contact }: { contact: Contact }) {
+  const messages = contact.outreach?.messages ?? [];
+  if (messages.length === 0) return null;
+  const latest = messages[messages.length - 1];
+  const earlier = messages.slice(0, -1);
+  return (
+    <div className="mt-1 text-xs">
+      <p className="whitespace-pre-wrap text-foreground/90">{latest.text}</p>
+      {earlier.length > 0 && (
+        <details className="mt-1">
+          <summary className="cursor-pointer text-muted-foreground">
+            Earlier versions ({earlier.length})
+          </summary>
+          <ul className="mt-1 flex flex-col gap-1 border-l pl-2">
+            {[...earlier].reverse().map((m) => (
+              <li key={m.id} className="text-muted-foreground">
+                <span className="text-[11px]">{formatDate(m.occurred_at)}</span>
+                <p className="whitespace-pre-wrap">{m.text}</p>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+const EDITABLE_FIELDS = ["name", "role", "email", "notes"] as const;
+type EditableField = (typeof EDITABLE_FIELDS)[number];
+const FIELD_LABEL: Record<EditableField, string> = {
+  name: "Name", role: "Role", email: "Email", notes: "Notes",
+};
+
+/** The "Edit" control (email/role/notes/name) — a PATCH appends history;
+ * "was X" is folded so the common case (nothing edited yet) stays quiet. */
+function EditContact({
+  contact,
+  onSaved,
+}: {
+  contact: Contact;
+  onSaved: (updated: Contact) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    name: contact.name, role: contact.role, email: contact.email, notes: contact.notes,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setForm({ name: contact.name, role: contact.role, email: contact.email, notes: contact.notes });
+  }, [contact]);
+
+  const save = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      setError(null);
+      setSaving(true);
+      try {
+        const body: Record<string, string> = {};
+        for (const field of EDITABLE_FIELDS) {
+          if (form[field] !== contact[field]) body[field] = form[field];
+        }
+        if (Object.keys(body).length === 0) {
+          setOpen(false);
+          return;
+        }
+        const updated = await updateContact(contact.id, body);
+        onSaved(updated);
+        setOpen(false);
+      } catch (err) {
+        setError(apiErrorMessage(err, "Could not save this change."));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [contact, form, onSaved]
+  );
+
+  const history = contact.edit_history ?? {};
+  const hasHistory = EDITABLE_FIELDS.some((f) => (history[f]?.length ?? 0) > 1);
+
+  if (!open) {
+    return (
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-[11px] font-medium text-primary hover:underline"
+        >
+          Edit
+        </button>
+        {hasHistory && (
+          <details className="text-[11px] text-muted-foreground">
+            <summary className="cursor-pointer">History</summary>
+            <ul className="mt-1 flex flex-col gap-1 border-l pl-2">
+              {EDITABLE_FIELDS.flatMap((field) => {
+                const rows = history[field] ?? [];
+                if (rows.length <= 1) return [];
+                // Every value but the current one is "was X" — oldest first.
+                return rows.slice(0, -1).map((row, i) => (
+                  <li key={`${field}-${i}`}>
+                    {FIELD_LABEL[field]}: was &ldquo;{row.value || "(empty)"}&rdquo; ({formatDate(row.recorded_at)})
+                  </li>
+                ));
+              })}
+            </ul>
+          </details>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={save} className="mt-2 flex flex-col gap-2 rounded border border-border/60 p-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {EDITABLE_FIELDS.map((field) => (
+          <div key={field} className="flex flex-col gap-1">
+            <Label htmlFor={`edit-${field}-${contact.id}`} className="text-[11px]">
+              {FIELD_LABEL[field]}
+            </Label>
+            <Input
+              id={`edit-${field}-${contact.id}`}
+              value={form[field]}
+              onChange={(e) => setForm((prev) => ({ ...prev, [field]: e.target.value }))}
+            />
+          </div>
+        ))}
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 /** The People section on an application's detail page (spec R4): everyone the
  * agent (or the seeker) has attached to this application, plus a small form
- * to add one. Contacts are add-only (R2/S12) — there is no edit or delete
- * here, by design. */
+ * to add one, and a fold-out edit + outreach history per person (owner
+ * decisions, 2026-09-25). The base contact row is still add-only (R2/S12);
+ * an edit appends history instead of rewriting it. */
 export function Contacts({
   applicationId,
   contacts = NO_CONTACTS,
@@ -142,6 +313,17 @@ export function Contacts({
                 added by {contact.added_by} ·{" "}
                 {formatDate(contact.created_at)}
               </p>
+              <MessageVersions contact={contact} />
+              <div className="mt-1 flex flex-col gap-0.5">
+                <SentLine contact={contact} />
+                <RepliedLine contact={contact} />
+              </div>
+              <EditContact
+                contact={contact}
+                onSaved={(updated) =>
+                  setList((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+                }
+              />
             </li>
           ))}
         </ul>

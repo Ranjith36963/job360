@@ -432,7 +432,16 @@ def test_contacts_are_append_only():
             offenders.append(str(py))
         if re.search(r"(UPDATE|DELETE\s+FROM)\s+profile_edits", text, re.IGNORECASE):
             offenders.append(str(py))
-    assert offenders == [], f"application_contacts/profile_edits must be append-only: {offenders}"
+        # 0046 (2026-09-25) — the outreach ledger and the contact-edit overlay
+        # are append-only for the same reason: the current value/state is
+        # always the newest row, never a rewrite of an old one.
+        if re.search(r"(UPDATE|DELETE\s+FROM)\s+contact_outreach", text, re.IGNORECASE):
+            offenders.append(str(py))
+        if re.search(r"(UPDATE|DELETE\s+FROM)\s+contact_edits", text, re.IGNORECASE):
+            offenders.append(str(py))
+    assert offenders == [], (
+        f"application_contacts/profile_edits/contact_outreach/contact_edits must be append-only: {offenders}"
+    )
 
     from src.api.main import app
     from tests._routes import route_table
