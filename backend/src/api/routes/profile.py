@@ -68,7 +68,7 @@ from src.services.profile.storage import (
     save_profile,
 )
 from src.services.profile.two_pass import reset_cv_owned_fields, run_two_pass_extraction
-from src.utils.logger import get_audit_logger
+from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["profile"])
 
@@ -569,7 +569,14 @@ async def take_back_edit(
     profile_edits.record_edits(user.id, actor_for(user), [(path, None)], enforce_rate_limit=False)
     get_audit_logger().info(
         "profile_edit_taken_back",
-        extra={"event": "profile_edit_taken_back", "paths": [path], "actor": actor_for(user)},
+        # CodeQL py/log-injection — `path` is closed-enum validated above, and
+        # `actor_for` truncates a token/OAuth-client name but does not strip
+        # control chars, so both are run through the shared sanitizer here.
+        extra={
+            "event": "profile_edit_taken_back",
+            "paths": [safe_log_value(path)],
+            "actor": safe_log_value(actor_for(user)),
+        },
     )
     return load_profile_response(user.id)[1]
 
@@ -620,7 +627,12 @@ async def keep_edit(
     )
     get_audit_logger().info(
         "profile_edit_kept",
-        extra={"event": "profile_edit_kept", "paths": [path], "actor": actor_for(user)},
+        # CodeQL py/log-injection — same sanitizing as take_back above.
+        extra={
+            "event": "profile_edit_kept",
+            "paths": [safe_log_value(path)],
+            "actor": safe_log_value(actor_for(user)),
+        },
     )
     return load_profile_response(user.id)[1]
 
@@ -1561,7 +1573,10 @@ async def clear_profile_section(
         )
 
     logger.info(
-        "profile_cleared", extra={"event": "profile_cleared", "section": section}
+        # CodeQL py/log-injection — `section` is closed-enum validated above
+        # (`_CLEAR_SCOPES`), but sanitized here too so the barrier is visible
+        # at the sink, not just at the validator.
+        "profile_cleared", extra={"event": "profile_cleared", "section": safe_log_value(section)}
     )
     return load_profile_response(user.id)[1]
 

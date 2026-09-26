@@ -1,6 +1,7 @@
 import hashlib
 import json as json_mod
 import logging
+import re
 import sys
 import uuid
 from contextvars import ContextVar, Token
@@ -58,6 +59,43 @@ def _scrub(value: object) -> object:
     if "\r" not in value and "\n" not in value:
         return value
     return value.replace("\r", "\\r").replace("\n", "\\n")
+
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def safe_log_value(value: object, *, max_len: int = 500) -> str:
+    """Sanitize ANY value for safe inclusion in a log call (CodeQL py/log-injection).
+
+    Runtime is already safe end-to-end: ``CRLFScrubFilter`` below is attached
+    to every handler and scrubs CR/LF out of the final formatted record no
+    matter what reaches it. But CodeQL's static dataflow analysis can't see a
+    ``logging.Filter`` wired up at handler-setup time — it flags every call
+    site where a value that (transitively) came from a request reaches a
+    logger, one alert per site. Rather than trust the handler alone, this
+    closes the same gap explicitly AT THE SOURCE: call it on a value before
+    handing it to ``logger.info(...)``/``extra={...}``/an f-string destined
+    for a log line.
+
+    - Collapses runs of control characters (CR, LF, and other C0/DEL chars)
+      to a single space, so an attacker can't forge a second log line or
+      corrupt a structured (JSON) log record.
+    - Truncates to ``max_len`` characters so one oversized value can't blow
+      up a log line or a downstream log-ingestion pipeline. 500 is well
+      above every current per-field cap in this codebase (contact name/role
+      200, email 254, LinkedIn URL 300), so realistic valid input is never
+      touched — only pathological/attack input is capped.
+
+    Non-strings are stringified first (an int/bool/None is already log-safe,
+    but this makes the helper safe to sprinkle everywhere without a type
+    check at each call site). Prefer logging ids/lengths/booleans instead of
+    a raw value when the raw value isn't actually needed.
+    """
+    text = value if isinstance(value, str) else str(value)
+    text = _CONTROL_CHARS_RE.sub(" ", text)
+    if len(text) > max_len:
+        text = f"{text[:max_len]}...(truncated)"
+    return text
 
 
 class CRLFScrubFilter(logging.Filter):

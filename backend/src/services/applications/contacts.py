@@ -45,7 +45,7 @@ from src.services.applications.spine import (
     user_today,
 )
 from src.services.auth import rate_limit
-from src.utils.logger import get_audit_logger
+from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover — type-only, same reasoning as spine.py
     from src.repositories.database import JobDatabase
@@ -61,22 +61,17 @@ _WHITESPACE_RE = re.compile(r"\s")
 # constant here rather than pulling in src.api.auth_deps at runtime).
 _WEB_ACTOR = "web"
 
-_CRLF_RE = re.compile(r"[\r\n]+")
-
-
-def _strip_crlf(value: str) -> str:
-    """CodeQL py/log-injection (coordinator review, 2026-09-26) — collapse
-    embedded CR/LF to a single space. A name/role/email/linkedin_url
-    legitimately spans one line, so this costs nothing real; it also means
-    every value that reaches an audit log via these fields (``has_email``,
-    ``name_chars``, ``fields``, ``entry``, ``channel``, …) is provably free
-    of injected newlines at the SOURCE, not just at the handler
-    (``CRLFScrubFilter`` in ``utils/logger.py`` already scrubs every
-    logger's OUTPUT for this; this closes the same gap explicitly, in-line,
-    so a static scanner's dataflow sees the sanitizing step too — the same
-    idea ``spine.py``'s ``_has_control_chars``/``validate_source`` already
-    applies to an event's email-evidence fields)."""
-    return _CRLF_RE.sub(" ", value)
+# CodeQL py/log-injection (coordinator review, 2026-09-26; switched to the
+# SHARED helper 2026-09-26) — every value below that can reach an audit log
+# (directly, or via ``has_email``/``name_chars``/``fields``/``entry``/
+# ``channel``, …) is run through ``safe_log_value`` first, which collapses
+# embedded control characters (CR/LF included) to a single space and caps
+# length. A name/role/email/linkedin_url legitimately spans one line, so this
+# costs nothing real; it also means every value is provably free of injected
+# newlines at the SOURCE, not just at the handler (``CRLFScrubFilter`` in
+# ``utils/logger.py`` already scrubs every logger's OUTPUT for this — this
+# closes the same gap explicitly, in-line, so a static scanner's dataflow
+# sees the sanitizing step too).
 
 
 def _looks_like_email(email: str) -> bool:
@@ -91,7 +86,7 @@ def _looks_like_email(email: str) -> bool:
 
 
 def _validate_name(raw: str) -> str:
-    name = _strip_crlf((raw or "").strip())
+    name = safe_log_value((raw or "").strip())
     if not name or len(name) > settings.CONTACT_NAME_MAX_CHARS:
         raise SpineError(
             422, f"name must be 1-{settings.CONTACT_NAME_MAX_CHARS} chars (CONTACT_NAME_MAX_CHARS) after trim"
@@ -100,14 +95,14 @@ def _validate_name(raw: str) -> str:
 
 
 def _validate_role(raw: str) -> str:
-    role = _strip_crlf((raw or "").strip())
+    role = safe_log_value((raw or "").strip())
     if len(role) > settings.CONTACT_ROLE_MAX_CHARS:
         raise SpineError(422, f"role exceeds CONTACT_ROLE_MAX_CHARS ({settings.CONTACT_ROLE_MAX_CHARS} chars)")
     return role
 
 
 def _validate_email(raw: str) -> str:
-    email = _strip_crlf((raw or "").strip())
+    email = safe_log_value((raw or "").strip())
     if not email:
         return ""
     if len(email) > settings.CONTACT_EMAIL_MAX_CHARS:
@@ -119,7 +114,7 @@ def _validate_email(raw: str) -> str:
 
 
 def _validate_linkedin_url(raw: str) -> str:
-    url = _strip_crlf((raw or "").strip())
+    url = safe_log_value((raw or "").strip())
     if not url:
         return ""
     if len(url) > settings.CONTACT_LINKEDIN_URL_MAX_CHARS:
@@ -662,7 +657,7 @@ async def update_contact(
             # CodeQL py/log-injection — field NAMES only (S4: never values),
             # and stripped defensively even though every key here is one of
             # settings.CONTACT_EDIT_FIELDS, not free text.
-            "fields": [_strip_crlf(f) for f in sorted(given)],
+            "fields": [safe_log_value(f) for f in sorted(given)],
         },
     )
     return await _full_contact_view(db, user_id, contact)
@@ -933,7 +928,7 @@ async def record_outreach(
             # CodeQL py/log-injection — `entry`/`channel` are already closed-
             # enum-validated above, but stripped again here defensively so
             # the sanitizing step is visible at this call site too.
-            "entry": _strip_crlf(entry), "channel": _strip_crlf(channel),
+            "entry": safe_log_value(entry), "channel": safe_log_value(channel),
             "chars": len(clean_text),
         },
     )

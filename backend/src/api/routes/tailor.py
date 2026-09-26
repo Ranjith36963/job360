@@ -40,7 +40,7 @@ from src.services.tailoring.docx import render_docx
 from src.services.tailoring.patterns import derive_patterns
 from src.services.tailoring.pdf import render_pdf
 from src.services.tailoring.provenance import annotate_provenance
-from src.utils.logger import get_audit_logger, get_logger
+from src.utils.logger import get_audit_logger, get_logger, safe_log_value
 
 router = APIRouter(tags=["tailor"])
 
@@ -215,7 +215,11 @@ async def keep(
     row = await _latest(db, user.id, application_id, doc_kind)
     await _learn_universal(db, doc_kind, row.get("text") or "")
     get_audit_logger().info(
-        "tailor_keep", extra={"user_id": user.id, "job_id": job_id, "doc_kind": doc_kind}
+        # CodeQL py/log-injection — `doc_kind` is closed-enum validated by
+        # `_check_kind` above, but sanitized here too so the barrier is
+        # visible at the sink.
+        "tailor_keep",
+        extra={"user_id": user.id, "job_id": job_id, "doc_kind": safe_log_value(doc_kind)},
     )
     return _doc_out(doc_kind, row)
 

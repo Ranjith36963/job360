@@ -32,7 +32,7 @@ from src.services.auth import password_reset as auth_password_reset
 from src.services.auth import rate_limit as auth_rate_limit
 from src.services.auth import sessions as auth_sessions
 from src.services.auth.passwords import hash_password, verify_password
-from src.utils.logger import get_audit_logger, mask_email
+from src.utils.logger import get_audit_logger, mask_email, safe_log_value
 
 logger = logging.getLogger("job360.api.auth")
 
@@ -692,7 +692,11 @@ async def magic_link_request(
     """
     key = f"magic-link:{str(req.email).lower()}"
     if not auth_rate_limit.check_and_record(key, max_in_window=3, window_seconds=300):
-        logger.info("magic-link rate-limited email=%s", mask_email(req.email))
+        # CodeQL py/log-injection — `req.email` is masked for privacy, but
+        # sanitize before masking too (defense in depth against a control
+        # character reaching the masked local-part or being echoed by a
+        # loosely-validated address).
+        logger.info("magic-link rate-limited email=%s", mask_email(safe_log_value(str(req.email))))
         get_audit_logger().warning(
             "auth",
             extra={

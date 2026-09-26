@@ -149,6 +149,55 @@ def test_setup_audit_logger_is_idempotent(tmp_path):
             audit.removeHandler(h)
 
 
+# ---------------------------------------------------------------------------
+# CodeQL py/log-injection fix (2026-09-26) — safe_log_value
+# ---------------------------------------------------------------------------
+
+def test_safe_log_value_strips_crlf():
+    from src.utils.logger import safe_log_value
+    assert safe_log_value("line1\r\nline2") == "line1 line2"
+
+
+def test_safe_log_value_strips_other_control_chars():
+    from src.utils.logger import safe_log_value
+    # Tab, vertical tab, form feed, NUL and DEL are also C0/DEL control
+    # characters, not just CR/LF.
+    assert safe_log_value("a\tb\x0bc\x0cd\x00e\x7ff") == "a b c d e f"
+
+
+def test_safe_log_value_collapses_a_run_of_control_chars_to_one_space():
+    from src.utils.logger import safe_log_value
+    assert safe_log_value("a\r\n\r\n\r\nb") == "a b"
+
+
+def test_safe_log_value_truncates_long_values():
+    from src.utils.logger import safe_log_value
+    result = safe_log_value("x" * 1000, max_len=10)
+    assert result == "xxxxxxxxxx...(truncated)"
+    assert len(result) < 1000
+
+
+def test_safe_log_value_leaves_short_clean_strings_untouched():
+    from src.utils.logger import safe_log_value
+    assert safe_log_value("alice@example.com") == "alice@example.com"
+
+
+def test_safe_log_value_stringifies_non_strings():
+    from src.utils.logger import safe_log_value
+    assert safe_log_value(42) == "42"
+    assert safe_log_value(True) == "True"
+    assert safe_log_value(None) == "None"
+
+
+def test_safe_log_value_default_max_len_exceeds_every_current_field_cap():
+    # contact name/role=200, email=254, linkedin_url=300 (src/core/settings.py)
+    # — switching those validators to safe_log_value must not silently
+    # truncate a value BEFORE their own length check runs.
+    from src.utils.logger import safe_log_value
+    value = "a" * 300
+    assert safe_log_value(value) == value
+
+
 def test_audit_logger_writes_json_event(tmp_path):
     import src.utils.logger as log_mod
     audit = logging.getLogger("job360.audit")

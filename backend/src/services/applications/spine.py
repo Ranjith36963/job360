@@ -27,7 +27,7 @@ from src.core import settings
 from src.repositories import pg
 from src.services.applications.status import replay_status, stage_for_status, status_for_event
 from src.services.auth import rate_limit
-from src.utils.logger import get_audit_logger
+from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover — type-only; avoids a runtime import of
     # database.py (rule #16-adjacent: this module stays light at import time).
@@ -433,12 +433,17 @@ async def _duplicate_event_result(
     EXISTING event plus the application's current status."""
     get_audit_logger().info(
         "application_event_duplicate",
+        # CodeQL py/log-injection — `event_type` is closed-enum validated
+        # elsewhere, but `recorded_by` (authorship.actor_for) carries an
+        # attacker-supplied token/OAuth-client name that is only
+        # length-truncated at its source, not control-char-stripped, so both
+        # strings go through the shared sanitizer here.
         extra={
             "event": "application_event_duplicate",
             "application_id": application_id,
             "event_id": existing["id"],
-            "event_type": existing["event_type"],
-            "recorded_by": recorded_by,
+            "event_type": safe_log_value(existing["event_type"]),
+            "recorded_by": safe_log_value(recorded_by),
         },
     )
     cur = await db._db.execute("SELECT status, follow_up_on FROM applications WHERE id = ?", (application_id,))
@@ -654,11 +659,14 @@ async def append_event(
     await db._db.commit()
     get_audit_logger().info(
         "application_event_recorded",
+        # CodeQL py/log-injection — same reasoning as _duplicate_event_result
+        # above: `event_type` is closed-enum validated, `recorded_by` is only
+        # length-truncated at its source, so both go through the sanitizer.
         extra={
             "event": "application_event_recorded",
             "application_id": application_id,
-            "event_type": event_type,
-            "recorded_by": recorded_by,
+            "event_type": safe_log_value(event_type),
+            "recorded_by": safe_log_value(recorded_by),
         },
     )
     # The REAL final value — touched (explicit/auto-cleared/replay-derived)
@@ -804,8 +812,10 @@ async def save_artifact(
     )
     get_audit_logger().info(
         "artifact_saved",
+        # CodeQL py/log-injection — `kind` is a caller-supplied string;
+        # sanitized defensively even though callers pass a closed set today.
         extra={
-            "event": "artifact_saved", "artifact_id": artifact_id, "kind": kind,
+            "event": "artifact_saved", "artifact_id": artifact_id, "kind": safe_log_value(kind),
             "version_no": version_no, "chars": len(text),
         },
     )
