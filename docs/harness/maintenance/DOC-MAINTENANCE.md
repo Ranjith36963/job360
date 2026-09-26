@@ -7,7 +7,7 @@
 > while the codebase changes every day.
 
 > **Deletion authority.** `DELETION-POLICY.md` (a DRAFT, never wired) and
-> `loop1_safe_reenable.md` were retired 2026-09-05 — their still-true rules
+> `loop1_safe_reenable.md` were retired in the cleanup audit (#503) — their still-true rules
 > fold in here: (1) never auto-delete what has no durable copy elsewhere —
 > git history is the copy for merged work, a pushed tag/branch is the copy for
 > unmerged work; (2) ground truth (`CLAUDE.md`, `ARCHITECTURE.md`, `README`,
@@ -60,7 +60,7 @@ DRAFT ──► ACTIVE ──► IMPLEMENTED ──► ARCHIVED
 - A plan whose code has merged gets stamped at the top —
   `> **IMPLEMENTED** in PR #N (`<sha>`) — archived <date>` — and moved to an
   archive location under `docs/`. (`docs/_archive/` and `docs/archive/` were
-  both deleted 2026-09-05 — the next archived plan re-creates whichever
+  both deleted — #437 and #503 — so the next archived plan re-creates whichever
   location the framework's next revival picks.)
 
   It is never UPDATED (honesty): a stale number in a dated record is correct for
@@ -146,5 +146,4 @@ report, but never edits them — memory hygiene is the session's own job.
 - `docs/harness/maintenance/PARKED.md` — the "code is behind the doc" list: intentions
   found in docs that are not yet implemented, each with source doc + date.
 - Archived plans, when this framework is active again, live under `docs/`
-  with an `> **IMPLEMENTED**` stamp — there is no archive directory today
-  (`docs/_archive/` and `docs/archive/` were both deleted 2026-09-05).
+  with an `> **IMPLEMENTED**` stamp — there is no archive directory today.

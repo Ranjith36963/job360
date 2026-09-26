@@ -76,20 +76,11 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 
 ## The agent surface (MCP + same REST)
 
-| Tool | Does |
-|---|---|
-| `get_profile` / `update_profile` | structured candidate context; agent may fix or add fields |
-| `bring_job` | link or text → Application (status `considering`) |
-| `get_application` / `list_applications` | full object with events and artifact versions |
-| `save_artifact` | new version of cv / cover_letter / answers / outreach |
-| `save_fit` | agent's verdict + gaps on this application |
-| `add_contact` | recruiter / hiring manager on this application |
-| `record_event` | typed event, free-text detail |
-| `record_application` | the receipt — what was actually sent |
-| `whats_new` | everything since a timestamp (replaces push for now) |
-| `export_history` | applications + events + versions + outcomes as clean JSON |
-| `stats` | cheap counts: reply / interview rate per CV version, per role |
-| `get_tailored_documents` | the newest saved CV / cover letter — **we write neither** (decision 28); the agent writes them and saves them with `save_artifact`, the web renders DOCX / PDF from the saved text |
+The tools are the `@mcp.tool()` functions in `backend/src/api/mcp_server.py`, each
+carrying its own description — read them there and never count them from here. Every
+one is a **store** door over the same per-user REST route the web uses (rule M5); a read
+returns what is already stored for that user. A tool that would think, fetch from outside or
+decide is a **do** door and does not belong (product rule 5).
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
 `api/routes/well_known.py`), with personal `j360_…` tokens as the CLI fallback.
@@ -183,7 +174,7 @@ consent-first; everything free; no auto-submit at volume; global from day one.
 The sourcing-era product docs this superseded (`docs/product/PRD.md`, the
 `docs/product/pillars/` manuals, every `docs/product/plans/PRICING_*` file)
 described a product this codebase no longer builds. They were deleted whole
-2026-09-05 (harness+docs cleanup) rather than archived — git history is the
+(#483, then the cleanup audit #503) rather than archived — git history is the
 record, not a guide for what to build next. The per-slice plan and spec files
 (`docs/plans/`) and the ADR folder (`docs/decisions/`) went the same way
 2026-09-12 — the shipped code, the hard rules and this file are what bind; git

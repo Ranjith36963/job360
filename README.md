@@ -1,5 +1,5 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
+<!-- doc: LIVING | last-verified: 2026-09-26 by the daily truth check -->
 
 **Job360 is the memory and context layer for the seeker's own AI agent.** Job boards find jobs. Agents (Claude Code, ChatGPT, Grok, Gemini, a browser agent) think and act — judge fit, write the CV, find the recruiter, read the inbox, fill the form. Job360 remembers: the structured profile, every artifact version, every typed event with its author, and the receipt of what was sent.
 
@@ -7,7 +7,7 @@
 
 > **What is live on `main` today:** magic-link login, profile extraction (CV / LinkedIn / GitHub / preferences), `POST /api/jobs/bring`, the application spine (one Application object, typed events, versioned artifacts, append-only receipts), a CV tailor kept as the web fallback, and an MCP server at `/api/mcp`. Three Railway services: `backend`, `frontend`, `Postgres` (worker + Redis were deleted 2026-09-02, so nothing runs in the background — no notifications, no crons).
 >
-> **The sourcing era was deleted 2026-09-05** (slice 5, #483): the 40-source aggregator, the 0–100 scorer, the four-layer dedup, the search dashboard. **The per-user notification-channel system** (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) was deleted the same day. None of that code exists in this repo any more — git history is the record.
+> **The sourcing era was deleted 2026-09-05** (slice 5, #483): the 40-source aggregator, the 0–100 scorer, the four-layer dedup, the search dashboard. **The per-user notification-channel system** (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) went in the cleanup audit that followed (#503). None of that code exists in this repo any more — git history is the record.
 
 ### API docs (auto-generated)
 
@@ -36,7 +36,7 @@ Nothing here is scored, ranked or recommended. The candidate profile (CV + Linke
 
 ## Architecture
 
-Two deployables share one Postgres database. The backend is a FastAPI app whose product path is `POST /api/jobs/bring` (`api/routes/bring.py`) → the application spine (`services/applications/spine.py`, append-only events/artifacts/receipts) → tailoring as a web fallback (`api/routes/tailor.py`) → the MCP server (`api/mcp_server.py`), with `services/profile/` feeding profile data into all of it. `src/repositories/pg.py` is the single DB door — an aiosqlite-shaped async driver that rewrites legacy SQLite SQL to Postgres at runtime; every module imports it as `from src.repositories import pg as aiosqlite`. The frontend is a Next.js app that is a thin screen over the same routes.
+Two deployables share one Postgres database. The backend is a FastAPI app whose product path is `POST /api/jobs/bring` (`api/routes/bring.py`) → the application spine (`services/applications/spine.py`, append-only events/artifacts/receipts) → tailoring as a web fallback (`api/routes/tailor.py`) → the MCP server (`api/mcp_server.py`), with `services/profile/` feeding profile data into all of it. `src/repositories/pg.py` is the single DB door — an aiosqlite-shaped async driver that rewrites legacy SQLite SQL to Postgres at runtime. The frontend is a Next.js app that is a thin screen over the same routes.
 
 The directory tree lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md) — read that for the deep reference, not this file.
 
@@ -86,7 +86,7 @@ cd backend
 python -m pytest -q -p no:randomly
 ```
 
-The suite runs against a real Postgres (not SQLite) via the shims in `tests/conftest.py`, schema-per-test, with HTTP mocked by `aioresponses` — it must run offline. **Never quote a test count from a doc — measure it**: `python -m pytest --collect-only -q -p no:randomly | tail -1`. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the generated, code-verified counts.
+The suite runs against a real Postgres (not SQLite), one schema per test, with HTTP mocked by `aioresponses` — it must run offline. **Never quote a test count from a doc — measure it**: `python -m pytest --collect-only -q -p no:randomly | tail -1`. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the generated, code-verified counts.
 
 ```bash
 # Frontend
@@ -99,10 +99,6 @@ npm run test:e2e    # playwright
 
 Live on Railway at job360.uk since 2026-07-02. Three services: `backend`, `frontend`, `Postgres`. The `worker` and `Redis` services were deleted 2026-09-02 — nothing runs in the background, so there are no scheduled jobs and no async notification delivery; anything that sends mail does it synchronously from the API process, through Resend on the verified `job360.uk` domain.
 
-## Notifications
-
-Job360 is **pull, not push** (VISION.md decision 11): the seeker reads `GET /whats-new` and the web home. There is no background delivery, no per-user channels, and no digest queue — that system was deleted 2026-09-05 with the sourcing era.
-
 ## Configuration
 
 Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL`, `FRONTEND_ORIGIN`, `SITE_BASE_URL`, and `RESEND_API_KEY` (system email — magic-link login and password reset — needs it). `DATABASE_PUBLIC_URL` is for Railway database tooling only (`backend/scripts/observe.py`), not the app. Most other knobs are in `core/settings.py`, not all — see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
@@ -111,6 +107,3 @@ Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL`, `FRON
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branch naming, commit style, and the PR flow.
 
-## History
-
-The sourcing era (job search, scoring, dedup, enrichment) and the per-user notification-channel system were both deleted 2026-09-05 (slice 5, #483). Neither is archived in-tree — git history is the record. Never rebuild either.
