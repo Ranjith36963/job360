@@ -26,6 +26,7 @@ import { Separator } from "@/components/ui/separator";
 import { ClearButton } from "@/components/profile/ClearButton";
 import { EditedMark } from "@/components/profile/EditedMark";
 import { FieldHistory } from "@/components/profile/FieldHistory";
+import { CountryPicker } from "@/components/profile/CountryPicker";
 import { findAgentEdit, type AgentEdit } from "@/lib/agent-edits";
 import type { PreferencesRequest } from "@/lib/types";
 
@@ -399,6 +400,26 @@ function serializePrefs(p: PreferencesRequest): string {
 // enough to feel instant.
 const AUTOSAVE_DELAY_MS = 800;
 
+// Every editable `preferences.*` path on this form, with the human label used
+// both by the combined "See history" view (one row per change, labelled by
+// field) and nowhere else — replaces the ~12 separate per-field FieldHistory
+// instances that used to sit under every input (owner decision, 2026-09-27).
+const ALL_PREFERENCE_FIELDS: { field: string; label: string }[] = [
+  { field: "target_job_titles", label: "Target Job Titles" },
+  { field: "additional_skills", label: "Additional Skills" },
+  { field: "preferred_locations", label: "Preferred Locations" },
+  { field: "industries", label: "Industries" },
+  { field: "salary_min", label: "Salary Min" },
+  { field: "salary_max", label: "Salary Max" },
+  { field: "work_arrangement", label: "Work Arrangement" },
+  { field: "experience_level", label: "Experience Level" },
+  { field: "needs_visa", label: "Visa sponsorship" },
+  { field: "work_authorization_countries", label: "Countries where I can already work" },
+  { field: "negative_keywords", label: "Words to avoid in job titles" },
+  { field: "about_me", label: "About Me" },
+  { field: "assistant_notes", label: "Things your assistant should know" },
+];
+
 // ── Preferences Form ───────────────────────────────────────
 
 export function PreferencesForm({
@@ -416,24 +437,6 @@ export function PreferencesForm({
   // The "Changed by … · was …" mark (+ Take back) for one field.
   const markOf = (field: string) => (
     <EditedMark edit={editOf(field)} onTakeBack={onTakeBack} onKeep={onKeep} />
-  );
-  // The small per-field "History" link (one history: you + your assistant).
-  const historyOf = (label: string, ...fields: string[]) =>
-    !showFieldHistory ? null : (
-    <FieldHistory
-      label={label}
-      paths={fields.map((f) => `preferences.${f}`)}
-      pathLabels={
-        fields.length > 1
-          ? Object.fromEntries(
-              fields.map((f) => [
-                `preferences.${f}`,
-                f.endsWith("_min") ? "Min" : f.endsWith("_max") ? "Max" : f,
-              ])
-            )
-          : undefined
-      }
-    />
   );
   const [targetTitles, setTargetTitles] = useState<string[]>([]);
   const [additionalSkills, setAdditionalSkills] = useState<string[]>([]);
@@ -581,17 +584,31 @@ export function PreferencesForm({
         </div>
         {/* In the card header, not at the bottom: this form autosaves, so there
             is no "Save" row to sit beside, and the header is where a
-            card-scoped action belongs. */}
-        {onClear && (
-          <div className="ml-auto">
+            card-scoped action belongs. ONE combined history for the whole
+            section (owner decision, 2026-09-27) — replaces the ~12 per-field
+            "History" links that used to sit under every input; same
+            FieldHistory component, given every preference path at once, so
+            the merged list still separates what changed by field. */}
+        <div className="ml-auto flex items-center gap-3">
+          {showFieldHistory && (
+            <FieldHistory
+              label="Your preferences"
+              buttonLabel="See history"
+              paths={ALL_PREFERENCE_FIELDS.map((f) => `preferences.${f.field}`)}
+              pathLabels={Object.fromEntries(
+                ALL_PREFERENCE_FIELDS.map((f) => [`preferences.${f.field}`, f.label])
+              )}
+            />
+          )}
+          {onClear && (
             <ClearButton
               label="Clear"
               confirmLabel="Click again to clear"
               disabled={loading}
               onConfirm={onClear}
             />
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <div className="space-y-6">
@@ -612,7 +629,6 @@ export function PreferencesForm({
             placeholder="e.g. Data Scientist"
             description="Roles you're targeting"
             trailing={markOf("target_job_titles")}
-            footer={historyOf("Target Job Titles", "target_job_titles")}
           />
         </div>
 
@@ -627,7 +643,6 @@ export function PreferencesForm({
           suggestionsLabel="Skills that often go with yours"
           suggestionsHint="Tap any you actually have. Nothing is added until you tap."
           trailing={markOf("additional_skills")}
-          footer={historyOf("Additional Skills", "additional_skills")}
         />
 
         {/* Excluded Skills input removed from UI (owner, 2026-08-08) — the
@@ -645,7 +660,6 @@ export function PreferencesForm({
           onChange={setPreferredLocations}
           placeholder="e.g. London, Manchester, Remote"
           trailing={markOf("preferred_locations")}
-          footer={historyOf("Preferred Locations", "preferred_locations")}
         />
 
         {/* ── Industries ─────────────────────────── */}
@@ -657,7 +671,6 @@ export function PreferencesForm({
           placeholder="e.g. FinTech, Healthcare, AI"
           description="Context for your assistant — most jobs are not affected by this at all."
           trailing={markOf("industries")}
-          footer={historyOf("Industries", "industries")}
         />
 
         <Separator />
@@ -699,7 +712,6 @@ export function PreferencesForm({
               />
             </div>
           </div>
-          {historyOf("Salary Range", "salary_min", "salary_max")}
         </div>
 
         {/* ── Work Arrangement & Experience Level ── */}
@@ -723,7 +735,6 @@ export function PreferencesForm({
                 <SelectItem value="onsite">Onsite</SelectItem>
               </SelectContent>
             </Select>
-            {historyOf("Work Arrangement", "work_arrangement")}
           </div>
           <div className="space-y-2">
             <Label className="text-sm font-medium">
@@ -749,7 +760,6 @@ export function PreferencesForm({
                 <SelectItem value="executive">Executive</SelectItem>
               </SelectContent>
             </Select>
-            {historyOf("Experience Level", "experience_level")}
           </div>
         </div>
 
@@ -766,39 +776,26 @@ export function PreferencesForm({
             checked={needsVisa}
             onChange={(e) => setNeedsVisa(e.target.checked)}
           />
-          I need visa sponsorship to work in the UK
+          I need visa sponsorship
           {markOf("needs_visa")}
         </label>
-        <div className="-mt-4">{historyOf("Visa sponsorship", "needs_visa")}</div>
 
         {/* ── Work authorization countries (slice 7, #514) ──────────
             Fact 2 of the visa-signal comparison — compared against each
             job's visa_country, never a per-country rule Job360 knows
-            itself (see docs/plans/2026-09-11-visa-signal/spec.md). Empty
-            list = "don't care" (rule #29), never a penalty. */}
-        <TagInput
+            itself (docs/product/VISION.md decision 27: two facts + list
+            membership, no country rule of ours anywhere). Empty list =
+            "don't care" (rule #29), never a penalty. A searchable country
+            picker (owner-approved copy, 2026-09-27) replaces the old
+            free-typed ISO-code box; it still stores the same alpha-2 codes
+            the backend already validates — only the input UX changed. */}
+        <CountryPicker
           testId="work-authorization-countries"
-          label="Countries where I need no visa sponsorship"
+          label="Countries where I can already work (no visa needed)"
           tags={workAuthorizationCountries}
-          onChange={(tags) => {
-            if (tags.length > workAuthorizationCountries.length) {
-              // TagInput appends the newly typed value (or a tapped
-              // suggestion) as the last entry — validate/normalize it here
-              // rather than duplicating TagInput's own add-logic.
-              const added = tags[tags.length - 1].trim();
-              if (!/^[A-Za-z]{2}$/.test(added)) return; // not an ISO alpha-2 code — ignore
-              setWorkAuthorizationCountries([
-                ...tags.slice(0, -1),
-                added.toUpperCase(),
-              ]);
-              return;
-            }
-            setWorkAuthorizationCountries(tags);
-          }}
-          placeholder="e.g. GB, IN, DE"
-          description="ISO codes, e.g. GB, IN, DE. Leave empty if you'd rather not compare."
+          onChange={setWorkAuthorizationCountries}
+          description="Leave empty if you'd rather not compare."
           trailing={markOf("work_authorization_countries")}
-          footer={historyOf("Countries where I need no visa sponsorship", "work_authorization_countries")}
         />
 
         <Separator />
@@ -817,7 +814,6 @@ export function PreferencesForm({
           description="Titles or roles you don't want. Your assistant reads this when judging fit."
           variant="destructive"
           trailing={markOf("negative_keywords")}
-          footer={historyOf("Words to avoid in job titles", "negative_keywords")}
         />
 
         {/* ── About Me ───────────────────────────── */}
@@ -835,7 +831,6 @@ export function PreferencesForm({
             placeholder="e.g. Experienced data scientist with 5 years in NLP and computer vision, looking for senior roles in AI-first companies..."
             rows={4}
           />
-          {historyOf("About Me", "about_me")}
         </div>
 
         <Separator />
@@ -848,7 +843,6 @@ export function PreferencesForm({
           notes={assistantNotes}
           onChange={setAssistantNotes}
           trailing={markOf("assistant_notes")}
-          footer={historyOf("Things your assistant should know", "assistant_notes")}
         />
 
         {/* Excluded Companies removed entirely (not just the UI control) —

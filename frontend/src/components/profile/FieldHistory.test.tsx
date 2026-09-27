@@ -65,4 +65,16 @@ describe("FieldHistory", () => {
     fireEvent.click(screen.getByRole("button", { name: "History of Industries" }));
     expect(await screen.findByText("No changes yet.")).toBeTruthy();
   });
+
+  it("shows a custom button label for a combined, section-level history", () => {
+    render(
+      <FieldHistory
+        label="Your preferences"
+        buttonLabel="See history"
+        paths={["preferences.salary_min", "preferences.industries"]}
+      />
+    );
+    const button = screen.getByRole("button", { name: "History of Your preferences" });
+    expect(button).toHaveTextContent("See history");
+  });
 });

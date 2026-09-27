@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { ChevronDown } from "lucide-react";
 
 import {
   createToken,
@@ -29,12 +30,14 @@ import {
 import { formatDateTime } from "@/lib/format-date";
 
 // ---------------------------------------------------------------------------
-// Connect an agent — personal API tokens for the MCP server at /api/mcp.
+// Connect your assistant — the page that gets a user's own AI assistant
+// talking to Job360. Plain, three-step flow (owner-approved copy,
+// 2026-09-27): copy the address, add it in the assistant, say hello.
 //
-// The plain token is shown ONCE, right after minting. The backend stores only
-// a hash, so there is no "show again" — the user revokes and mints a new one.
-// Minting/revoking needs the browser session (cookie), never a token, so a
-// leaked token cannot grow itself more tokens.
+// Personal API tokens (for Claude Code and other MCP clients that take a
+// bearer token instead of doing a sign-in) live in a folded "For developers"
+// section further down — most people never need it, and it used to sit above
+// the fold ahead of the three steps a first-time visitor actually needs.
 // ---------------------------------------------------------------------------
 
 const MAX_NAME = 100;
@@ -148,161 +151,105 @@ function NewTokenReveal({
 }
 
 // ---------------------------------------------------------------------------
-// Connect Claude.ai / ChatGPT — these apps sign in through the OAuth consent
-// screen (/oauth/consent/[rid]), not a pasted token, so the only thing the
-// user needs from this page is the address to paste into the app's own
-// "add connector" flow. Agentic UX audit (2026-09-08) — this is the address
-// step; token minting below is for MCP clients that take a bearer token
-// (Claude Code) instead of doing OAuth.
+// Step 1 — the address every assistant connects to. Kept exactly as it was
+// computed before (mcpUrl(), the frontend's own origin) — never hardcoded.
 // ---------------------------------------------------------------------------
 
-function ConnectAppCard() {
+function AddressStepCard() {
   const url = mcpUrl();
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Connect Claude.ai or ChatGPT</CardTitle>
-        <CardDescription>
-          These apps connect with a sign-in, not a token. Paste this address
-          as a custom connector; when the app asks, sign in with your Job360
-          email.
-        </CardDescription>
+        <CardTitle>Step 1 — Copy this address</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-1">
-          <Label htmlFor="mcp-url">Address</Label>
-          <div className="flex gap-2">
-            <Input
-              id="mcp-url"
-              readOnly
-              value={url}
-              className="font-mono text-xs"
-              data-testid="mcp-url"
-              onFocus={(e) => e.currentTarget.select()}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => copyText(url, "Address")}
-            >
-              Copy
-            </Button>
-          </div>
+      <CardContent className="space-y-1">
+        <Label htmlFor="mcp-url">Address</Label>
+        <div className="flex gap-2">
+          <Input
+            id="mcp-url"
+            readOnly
+            value={url}
+            className="font-mono text-xs"
+            data-testid="mcp-url"
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => copyText(url, "Address")}
+          >
+            Copy
+          </Button>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Claude Code and other MCP clients that take a bearer token instead
-          of a sign-in — create a personal token below.
-        </p>
       </CardContent>
     </Card>
   );
 }
 
 // ---------------------------------------------------------------------------
-// One recipe per assistant. Verified against each vendor's own docs
-// (2026-09-20; the ChatGPT plan line re-checked 2026-09-21) — plan names and
-// menu paths only go here once we've checked them there; do not extend this
-// list from memory.
-//
-// ChatGPT's own docs disagree on Plus/Pro: OpenAI's help centre
-// (help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
-// says full MCP support "including modify/write actions" is rolling out only
-// to Business, Enterprise and Edu, with Plus/Pro limited to read/fetch; its
-// developer guide (developers.openai.com/api/docs/guides/developer-mode) says
-// developer mode gives full read/write MCP to Pro, Plus, Business, Enterprise
-// and Education alike. Until OpenAI reconciles that, the recipe below states
-// the cautious reading — Job360's two workflows both write.
-//
-// `ready` is a HAND-WRITTEN RESULT OF A DATED MANUAL CHECK, not a live
-// reading. On LAST_CHECKED each assistant's real OAuth callback was posted to
-// production's own /api/oauth/register and the server's answer (accepted vs.
-// "invalid_redirect_uri") written down here. Nothing on this page reads the
-// deployment's allow-list at runtime, so if the owner adds or removes a
-// callback afterwards these values go stale until someone re-runs the check
-// and edits them — which is why every line the user sees carries the date.
-// A "blocked" entry means the CALLBACK for that assistant was not in the
-// server's allow-list that day — nothing about the assistant itself.
+// Step 2 — one plain line per assistant (owner-approved copy, 2026-09-27).
+// Only Claude carries a "Tested: works" line — a hand-checked, dated result
+// (2026-09-19, docs/product/VISION.md), never a live reading. The other four
+// carry no testing claim at all: neither "works" nor "not tested" — we have
+// not run them end-to-end, and a guess here would be a claim we can't back.
 // ---------------------------------------------------------------------------
 
-/** The day the callbacks below were last posted to /api/oauth/register. */
-const LAST_CHECKED = "23 September 2026";
-
-type AssistantRecipe = {
+type AssistantStep = {
   name: string;
-  plans: string;
-  steps: string;
-  /** Result of the manual check on LAST_CHECKED — not a live status. */
-  ready: boolean;
+  /** Plan + how-to, combined into one plain line. */
+  line: string;
+  /** Only true for an assistant actually run end-to-end, hand-checked and
+   *  dated — see the comment above. Never set from a guess. */
+  tested?: boolean;
 };
 
-const ASSISTANT_RECIPES: AssistantRecipe[] = [
+const ASSISTANT_STEPS: AssistantStep[] = [
   {
     name: "Claude",
-    plans: "Every plan, including Free (Free gets one custom connector).",
-    steps:
-      "Settings → Connectors → Add custom connector → paste the address above → Connect. Sign-in happens automatically.",
-    ready: true,
+    line: "Settings → Connectors → Add custom connector → paste → Connect. Every plan, including Free.",
+    tested: true,
   },
   {
     name: "ChatGPT",
-    plans:
-      "Business, Enterprise or Edu — OpenAI documents full write support there. Plus and Pro may be read-only for this: OpenAI's help centre says so, though its developer guide claims full read/write for every paid plan. Until OpenAI settles that, don't rely on Plus/Pro to finish these workflows.",
-    steps:
-      "An admin or owner turns on Developer mode in Workspace settings, adds the address above as a custom app, then publishes it to the workspace.",
-    ready: true,
+    line: "Business, Enterprise or Edu (Plus and Pro may be read-only). An admin adds it as a custom app.",
   },
   {
     name: "Perplexity",
-    plans: "Pro, Max or Enterprise.",
-    steps:
-      "Settings → Connectors → Add custom remote connector → paste the address above → choose OAuth.",
-    ready: true,
+    line: "Pro or Max. Settings → Connectors → add → paste.",
   },
   {
     name: "Grok",
-    plans: "Paid accounts.",
-    steps: "Add an MCP connection with the address above.",
-    ready: true,
+    line: "Paid accounts. Add a connection with the address.",
   },
   {
     name: "Gemini",
-    plans: "Gemini Enterprise / Business editions only.",
-    steps:
-      "An admin adds the address above as a custom MCP server connection. The consumer Gemini app doesn't support this yet.",
-    ready: true,
+    line: "Business editions only. An admin adds it.",
   },
 ];
 
-function AssistantRecipesCard() {
+function AssistantStepsCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Connect your assistant</CardTitle>
+        <CardTitle>Step 2 — Add it in your assistant</CardTitle>
         <CardDescription>
-          Job360 has no AI of its own — your assistant is the intelligence,
-          Job360 is where it stores and remembers what it does for you. Same
-          address for every assistant, from the card above.
+          Same address for every assistant, from Step 1 above.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <ul className="grid gap-4 border-t border-border/40 lg:grid-cols-2 lg:gap-x-8">
-          {ASSISTANT_RECIPES.map((a) => (
+          {ASSISTANT_STEPS.map((a) => (
             <li key={a.name} className="space-y-1 border-b border-border/40 py-3">
               <p className="font-medium">{a.name}</p>
-              <p className="text-xs text-muted-foreground">{a.plans}</p>
-              <p className="text-xs text-muted-foreground">{a.steps}</p>
-              <p
-                className={
-                  a.ready
-                    ? "text-xs text-emerald-600 dark:text-emerald-400"
-                    : "text-xs text-amber-600 dark:text-amber-400"
-                }
-                data-testid={`assistant-status-${a.name.toLowerCase()}`}
-              >
-                {a.ready
-                  ? `Job360 accepted this assistant's sign-in address when we checked, on ${LAST_CHECKED}. We have not run a full connection from inside the assistant.`
-                  : `Job360 refused this assistant's sign-in address when we checked, on ${LAST_CHECKED} — ask the owner to allowlist its callback first.`}
-              </p>
+              <p className="text-xs text-muted-foreground">{a.line}</p>
+              {a.tested && (
+                <p
+                  className="text-xs text-emerald-600 dark:text-emerald-400"
+                  data-testid={`assistant-status-${a.name.toLowerCase()}`}
+                >
+                  ✅ Tested: works
+                </p>
+              )}
             </li>
           ))}
         </ul>
@@ -312,9 +259,9 @@ function AssistantRecipesCard() {
 }
 
 // ---------------------------------------------------------------------------
-// What to actually say, once connected — the two workflows the MCP tools
-// carry (docs/product/VISION.md decision 28): build the profile, apply to a
-// job. Plain prompts, no marketing.
+// Step 3 — say hello. What to actually say, once connected — the two
+// workflows the MCP tools carry (docs/product/VISION.md decision 28): build
+// the profile, apply to a job. Plain prompts, no marketing.
 // ---------------------------------------------------------------------------
 
 const EXAMPLE_PROMPTS: { label: string; prompt: string }[] = [
@@ -327,6 +274,49 @@ const EXAMPLE_PROMPTS: { label: string; prompt: string }[] = [
     prompt: "Write me a tailored CV for the job I just brought and save it.",
   },
 ];
+
+function SayHelloCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Step 3 — Say hello</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm">
+          &ldquo;Build my Job360 profile from my CV.&rdquo; Your assistant
+          will offer to set up a daily check of your email for job replies —
+          just say yes.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExamplePromptsCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>What to say to your assistant</CardTitle>
+        <CardDescription>
+          Once connected, just ask in plain words — the assistant picks the
+          right tools.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ul className="divide-y divide-border/40">
+          {EXAMPLE_PROMPTS.map((e) => (
+            <li key={e.label} className="space-y-1 py-3">
+              <p className="text-xs font-medium text-muted-foreground">
+                {e.label}
+              </p>
+              <p className="font-mono text-sm">&quot;{e.prompt}&quot;</p>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Daily check (owner decision, 2026-09-25) — Job360 reads no email, runs no
@@ -355,13 +345,24 @@ const DAILY_CHECK_PROMPT =
 export type DailyCheckState = "" | "scheduled" | "declined";
 
 /** Plain words for whatever a connected assistant already answered — never
- * shown as a guess, since an empty value is silence (rule #29), not "no". */
-export function dailyCheckStatusLine(state: DailyCheckState): string {
+ * shown as a guess, since an empty value is silence (rule #29), not "no".
+ *
+ * `connected` (an app or a personal token is actually connected) gates the
+ * not-asked-yet line: with nothing connected there is no assistant to make
+ * the offer, so saying "will offer" is a promise nothing can keep yet (walk
+ * finding, 2026-09-27). Both variants share the words "will offer" so a
+ * plain substring match still reads either one as "not asked yet". */
+export function dailyCheckStatusLine(
+  state: DailyCheckState,
+  connected: boolean
+): string {
   if (state === "scheduled") return "Set up with your assistant.";
   if (state === "declined") {
     return "You said no — your assistant won't ask again.";
   }
-  return "Your assistant will offer to set this up.";
+  return connected
+    ? "Your assistant will offer to set this up."
+    : "Connect your assistant first — it will offer this.";
 }
 
 /** Shown when the stored answer could not be read — never a guess. */
@@ -369,12 +370,16 @@ export const DAILY_CHECK_LOAD_FAILED = "Couldn't load this — refresh to try ag
 
 export function DailyCheckCard({
   dailyCheck,
+  connected,
   loadFailed = false,
   onResetOffer,
   resetting,
 }: {
   /** `null` until the profile read succeeds: no status line, no button. */
   dailyCheck: DailyCheckState | null;
+  /** True once an app or a personal token is connected — see
+   *  `dailyCheckStatusLine` above. */
+  connected: boolean;
   loadFailed?: boolean;
   onResetOffer: () => void;
   resetting: boolean;
@@ -385,7 +390,7 @@ export function DailyCheckCard({
     ? DAILY_CHECK_LOAD_FAILED
     : dailyCheck === null
       ? null
-      : dailyCheckStatusLine(dailyCheck);
+      : dailyCheckStatusLine(dailyCheck, connected);
   return (
     <Card>
       <CardHeader>
@@ -431,32 +436,6 @@ export function DailyCheckCard({
             </Button>
           )}
         </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ExamplePromptsCard() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>What to say to your assistant</CardTitle>
-        <CardDescription>
-          Once connected, just ask in plain words — the assistant picks the
-          right tools.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ul className="divide-y divide-border/40">
-          {EXAMPLE_PROMPTS.map((e) => (
-            <li key={e.label} className="space-y-1 py-3">
-              <p className="text-xs font-medium text-muted-foreground">
-                {e.label}
-              </p>
-              <p className="font-mono text-sm">&quot;{e.prompt}&quot;</p>
-            </li>
-          ))}
-        </ul>
       </CardContent>
     </Card>
   );
@@ -700,6 +679,57 @@ function TokenList({
 }
 
 // ---------------------------------------------------------------------------
+// For developers — personal tokens. Folded shut by default: most people
+// connect through Step 1-3 above and never need this. Same disclosure
+// pattern as the raw-CV-text toggle on /profile (CVUpload.tsx) — a plain
+// button + conditional render, not native <details>, so it behaves the same
+// in tests as everywhere else on this site.
+// ---------------------------------------------------------------------------
+
+function DeveloperTokensSection({
+  created,
+  tokens,
+  tokensLoading,
+  onCreated,
+  onDismissReveal,
+  onRevoke,
+}: {
+  created: TokenCreated | null;
+  tokens: TokenSummary[];
+  tokensLoading: boolean;
+  onCreated: (t: TokenCreated) => void;
+  onDismissReveal: () => void;
+  onRevoke: (t: TokenSummary) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl ring-1 ring-border/40">
+      <button
+        type="button"
+        data-testid="developer-tokens-toggle"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 p-4 text-left text-sm font-medium text-muted-foreground hover:text-foreground"
+      >
+        <ChevronDown
+          className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+        For developers (Claude Code, scripts) — personal tokens
+      </button>
+      {open && (
+        <div data-testid="developer-tokens-content" className="space-y-8 p-4 pt-0">
+          {created && (
+            <NewTokenReveal created={created} onDismiss={onDismissReveal} />
+          )}
+          <CreateTokenCard onCreated={onCreated} />
+          <TokenList tokens={tokens} loading={tokensLoading} onRevoke={onRevoke} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -716,6 +746,11 @@ export default function ConnectAgentPage() {
   const [dailyCheck, setDailyCheck] = useState<DailyCheckState | null>(null);
   const [dailyCheckLoadFailed, setDailyCheckLoadFailed] = useState(false);
   const [resettingDailyCheck, setResettingDailyCheck] = useState(false);
+
+  // At least one connected app OR one active personal token — the daily
+  // check needs a live assistant to make the offer, and neither list has
+  // loaded until this is known, so it starts (safely) false.
+  const connected = grants.length > 0 || tokens.length > 0;
 
   const refresh = useCallback(async () => {
     try {
@@ -801,25 +836,29 @@ export default function ConnectAgentPage() {
   return (
     <div className="space-y-8 py-12">
       <div className="max-w-3xl">
-        <h1 className="text-3xl font-semibold">Connect an agent</h1>
+        <h1 className="text-3xl font-semibold">Connect your assistant</h1>
         <p className="mt-2 text-muted-foreground">
-          Let Claude Code (or any MCP client) work your Job360 account: bring
-          a job link, read your profile, save the CV and cover letter it writes
-          for you, record that you applied. A personal token is the key; you can
-          revoke it any time.
+          Your AI assistant does the work; Job360 keeps the record. Connect
+          once and it can read your profile, save your CVs and track your
+          applications.
         </p>
       </div>
+
       <div className="max-w-3xl">
-        <ConnectAppCard />
+        <AddressStepCard />
       </div>
+
       {/* A list of similar cards (one row per assistant) — free to use the
           full page width in a 2-column grid at lg instead of staying pinned
-          to the narrow form width below. */}
-      <AssistantRecipesCard />
+          to the narrow form width above/below. */}
+      <AssistantStepsCard />
+
       <div className="max-w-3xl space-y-8">
+        <SayHelloCard />
         <ExamplePromptsCard />
         <DailyCheckCard
           dailyCheck={dailyCheck}
+          connected={connected}
           loadFailed={dailyCheckLoadFailed}
           onResetOffer={onResetDailyCheckOffer}
           resetting={resettingDailyCheck}
@@ -829,11 +868,14 @@ export default function ConnectAgentPage() {
           loading={grantsLoading}
           onRevoke={onRevokeGrant}
         />
-        {created && (
-          <NewTokenReveal created={created} onDismiss={() => setCreated(null)} />
-        )}
-        <CreateTokenCard onCreated={onCreated} />
-        <TokenList tokens={tokens} loading={loading} onRevoke={onRevoke} />
+        <DeveloperTokensSection
+          created={created}
+          tokens={tokens}
+          tokensLoading={loading}
+          onCreated={onCreated}
+          onDismissReveal={() => setCreated(null)}
+          onRevoke={onRevoke}
+        />
       </div>
     </div>
   );

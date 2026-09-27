@@ -1,8 +1,8 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Connect an agent — personal API tokens for the MCP server
- * (docs/plans/2026-09-03-mcp-server/spec.md).
+ * Connect your assistant — personal API tokens for the MCP server, folded
+ * under "For developers" (owner-approved copy, 2026-09-27).
  *
  * 1. Anonymous /settings/connect redirects to /login (middleware).
  * 2. Create a token → the plain token is shown ONCE with a ready-to-paste
@@ -37,7 +37,7 @@ const json = (body: unknown, status = 200) => ({
   body: JSON.stringify(body),
 });
 
-test.describe("Connect an agent", () => {
+test.describe("Connect your assistant", () => {
   test("anonymous /settings/connect redirects to /login", async ({ page }) => {
     await page.goto("/settings/connect");
     await expect(page).toHaveURL(/\/login/);
@@ -72,8 +72,11 @@ test.describe("Connect an agent", () => {
 
     await page.goto("/settings/connect");
     await expect(page).not.toHaveURL(/\/login/);
-    await expect(page.getByRole("heading", { name: "Connect an agent" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Connect your assistant" })).toBeVisible();
     await expect(page.getByTestId("mcp-url")).toHaveValue(/\/api\/mcp$/);
+
+    // Personal tokens live folded under "For developers" — open it first.
+    await page.getByTestId("developer-tokens-toggle").click();
     await expect(page.getByTestId("tokens-empty")).toBeVisible({ timeout: 10_000 });
 
     // --- 1. Create -------------------------------------------------------

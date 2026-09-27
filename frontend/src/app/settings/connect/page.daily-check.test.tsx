@@ -29,15 +29,17 @@ describe("ConnectAgentPage — daily check status", () => {
     await waitFor(() => expect(getProfile).toHaveBeenCalled());
     expect(screen.queryByTestId("daily-check-status")).not.toBeInTheDocument();
     expect(screen.queryByTestId("daily-check-reset")).not.toBeInTheDocument();
-    expect(screen.queryByText(/will offer/i)).not.toBeInTheDocument();
   });
 
-  it("shows a neutral line, never 'will offer', when the profile read fails", async () => {
+  it("shows a neutral line, never a 'will offer' guess, when the profile read fails", async () => {
     getProfile.mockRejectedValue(new Error("boom"));
     render(<ConnectAgentPage />);
     const status = await screen.findByTestId("daily-check-status");
     expect(status).toHaveTextContent(/couldn.t load this/i);
-    expect(screen.queryByText(/will offer/i)).not.toBeInTheDocument();
+    // Scoped to the status line itself — Step 3's own copy ("your assistant
+    // will offer to set up a daily check…") legitimately uses the same words
+    // elsewhere on the page and is not the guess this test guards against.
+    expect(status).not.toHaveTextContent(/will offer/i);
     expect(screen.queryByTestId("daily-check-reset")).not.toBeInTheDocument();
   });
 
