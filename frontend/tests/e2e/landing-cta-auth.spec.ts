@@ -116,7 +116,9 @@ test.describe("Landing CTA → profile journeys", () => {
     await expect(page.getByRole("heading", { name: /your applications/i })).toBeVisible({
       timeout: 20_000,
     });
-    await expect(page.getByRole("link", { name: /connect your assistant/i })).toHaveCount(0);
+    // The nav now carries "Connect your assistant" on every signed-in page, so
+    // assert the landing HERO is absent instead of the link text.
+    await expect(page.getByRole("heading", { name: /shared job-hunt record/i })).toHaveCount(0);
   });
 
   // ── Journey 2: returning user → sign in → /profile ────────────────────────
