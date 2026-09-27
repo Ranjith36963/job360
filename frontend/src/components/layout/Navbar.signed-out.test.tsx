@@ -34,12 +34,13 @@ vi.mock("@/components/layout/AuthProvider", () => ({
 }));
 
 // R14 (docs/plans/2026-09-04-application-spine) — Applications is the
-// spine-home nav item. Pipeline (and Receipts) LEFT the nav under R14 — both
-// URLs still work, just not linked from here (C3, application-spine review).
-// Dashboard was deleted outright in slice 5 (delete-sourcing-era); Channels
-// was deleted outright in the mission sweep (notifications are pull-not-push,
-// VISION:133).
-const APP_LINKS = ["Profile", "Applications"];
+// spine-home nav item. Pipeline LEFT the nav under R14 — the URL still works,
+// just not linked from here (C3, application-spine review). Receipts left
+// too, but a new-user walk (2026-09-27) found no other way to discover it,
+// so it is back. Dashboard was deleted outright in slice 5
+// (delete-sourcing-era); Channels was deleted outright in the mission sweep
+// (notifications are pull-not-push, VISION:133).
+const APP_LINKS = ["Profile", "Applications", "Receipts"];
 
 beforeEach(() => {
   mockPathname = "/";

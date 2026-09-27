@@ -13,7 +13,7 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
           <p className="text-sm text-muted-foreground">
-            Manage your account and connected agents
+            Manage your account and connected assistants
           </p>
         </div>
       </div>

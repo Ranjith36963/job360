@@ -208,8 +208,12 @@ function PasswordForm({ onUseMagic }: { onUseMagic: () => void }) {
 // ---------------------------------------------------------------------------
 
 function LoginForm() {
-  const [mode, setMode] = useState<"magic" | "password">("magic");
   const searchParams = useSearchParams();
+  // M2 — just set a password on /register, so /login?registered=1 must open
+  // straight on the password form: the magic-link default used to hide the
+  // "Almost there" message behind a toggle the user had no reason to click.
+  const justRegistered = searchParams.get("registered") === "1";
+  const [mode, setMode] = useState<"magic" | "password">(justRegistered ? "password" : "magic");
   // Set by the middleware when it fails CLOSED on a backend outage (fable/03
   // F4): the user was redirected here even though their session may be fine.
   // Explain that, so the bounce doesn't read as "you were logged out".

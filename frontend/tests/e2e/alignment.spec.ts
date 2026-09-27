@@ -185,7 +185,7 @@ test.describe("Applications list — no What's-new strip", () => {
               events: 1,
               artifacts: {},
               receipts: 0,
-              next_step: { code: "judge_fit", label: "No fit judged yet — ask your agent to judge it" },
+              next_step: { code: "judge_fit", label: "No fit judged yet — ask your assistant to judge it" },
             },
           ],
           total: 1,

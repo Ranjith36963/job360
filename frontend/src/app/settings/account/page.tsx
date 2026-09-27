@@ -416,7 +416,7 @@ function TimezoneCard() {
         <CardTitle>Time zone</CardTitle>
         <CardDescription>
           Used to work out &quot;today&quot; for follow-up dates and what&apos;s
-          due. An IANA name, e.g. &quot;Europe/London&quot; or &quot;America/New_York&quot;.
+          due, e.g. &quot;Europe/London&quot; or &quot;America/New_York&quot;.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -491,8 +491,9 @@ function VerifyEmailCard() {
       <CardHeader>
         <CardTitle>Verify your email</CardTitle>
         <CardDescription>
-          Some features (like connecting an agent) need a verified email. Resend the
-          verification link if you didn&apos;t get it.
+          Viewing, editing, and downloading the CV or cover letter your assistant
+          wrote need a verified email. Resend the verification link if you
+          didn&apos;t get it.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -516,7 +517,7 @@ export default function AccountSettingsPage() {
       <div>
         <h1 className="text-3xl font-semibold">Account settings</h1>
         <p className="mt-2 text-muted-foreground">
-          Manage your password, email address, and account lifecycle.
+          Manage your password, email address, and deleting your account.
         </p>
       </div>
       <VerifyEmailCard />

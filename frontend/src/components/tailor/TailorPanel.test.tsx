@@ -78,10 +78,12 @@ describe("TailorPanel", () => {
     expect(screen.getByDisplayValue("The CV my agent wrote")).toBeInTheDocument();
   });
 
-  it("names the version and who saved it", async () => {
+  it("names the version and who saved it in plain words, not the raw made_by value", async () => {
     render(<TailorPanel jobId={42} open onOpenChange={vi.fn()} />);
     await waitFor(() => {
-      expect(screen.getByText(/v1 · saved by agent:claude/i)).toBeInTheDocument();
+      // made_by "agent:claude" must never leak the word "agent" to the user.
+      expect(screen.getByText(/v1 · saved by claude/i)).toBeInTheDocument();
+      expect(screen.queryByText(/agent:claude/i)).toBeNull();
     });
   });
 

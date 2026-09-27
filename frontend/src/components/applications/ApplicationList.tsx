@@ -101,7 +101,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
   if (applications.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        Nothing yet. Bring a job from your agent, or the{" "}
+        Nothing yet. Bring a job from your assistant, or the{" "}
         <Link href="/bring" className="text-primary underline">
           Bring a job
         </Link>{" "}

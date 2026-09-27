@@ -187,3 +187,37 @@ describe("MagicLinkForm — next passthrough", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// ?registered=1 (M2) — opens on the password form, not magic-link (bug fix,
+// new-user walk 2026-09-27). The user just set a password on /register, so
+// hiding the password form (and its "Almost there" message) behind the
+// "Use password instead" toggle made the confirmation invisible.
+// ---------------------------------------------------------------------------
+
+describe("LoginPage — ?registered=1", () => {
+  beforeEach(() => {
+    mockGet.mockReset();
+  });
+
+  function mockParams(values: Record<string, string | null>) {
+    mockGet.mockImplementation((key: string) => values[key] ?? null);
+  }
+
+  it("opens on the password form and shows the confirmation message", () => {
+    mockParams({ registered: "1" });
+    renderPage();
+
+    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/almost there/i);
+    expect(screen.queryByRole("button", { name: /email me a sign-in link/i })).toBeNull();
+  });
+
+  it("still opens on the magic-link form when registered is absent", () => {
+    mockParams({});
+    renderPage();
+
+    expect(screen.getByRole("button", { name: /email me a sign-in link/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^password$/i)).toBeNull();
+  });
+});

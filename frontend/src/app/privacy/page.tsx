@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 };
 
 // A legal document states when it changed; never derive this at render time.
-const LAST_UPDATED = "24 September 2026";
+const LAST_UPDATED = "27 September 2026";
 
 const SUBPROCESSORS: {
   name: string;
@@ -96,10 +96,10 @@ export default function PrivacyPage() {
             </li>
             <li>
               <span className="text-foreground">Job and application data</span>{" "}
-              — every job you (or your connected AI agent) bring in by
+              — every job you (or your connected AI assistant) bring in by
               pasting the ad or a link, plus your applications: a timeline of
               events, every version of your tailored CV and cover letter, any
-              fit notes you or your agent recorded, contacts you add for a
+              fit notes you or your assistant recorded, contacts you add for a
               role (name, role, email, notes), and receipts of what you
               submitted.
             </li>
@@ -120,7 +120,7 @@ export default function PrivacyPage() {
               <span className="text-foreground">Contract</span> — storing the
               jobs and applications you bring, storing and rendering the
               tailored documents you or your connected AI assistant write,
-              serving your own connected AI agent&rsquo;s requests, and
+              serving your own connected AI assistant&rsquo;s requests, and
               operating your account.
             </li>
             <li>
@@ -208,7 +208,7 @@ export default function PrivacyPage() {
             </li>
             <li>
               Security tokens expire automatically and are not renewable:
-              magic sign-in links after 15 minutes, an AI agent&rsquo;s OAuth
+              magic sign-in links after 15 minutes, an AI assistant&rsquo;s OAuth
               access token after 1 hour (its refresh token after 30 days).
             </li>
             <li>
@@ -225,7 +225,7 @@ export default function PrivacyPage() {
           </h2>
           <p className="mt-2">
             All traffic is encrypted in transit (HTTPS/HSTS). Passwords are
-            argon2id-hashed — we cannot read them. Your AI agent&rsquo;s
+            argon2id-hashed — we cannot read them. Your AI assistant&rsquo;s
             connection tokens (personal API tokens and OAuth tokens) are
             stored only as a hash, never in plain text, so we cannot recover
             or read them either. Database backups are encrypted (AES-256)

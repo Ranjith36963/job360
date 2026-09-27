@@ -80,8 +80,10 @@ export function eventLabel(e: { event_type: string; payload?: unknown }): string
  * `"web"` (the seeker, in the browser), `"token:<name>"` (a personal-token
  * MCP client), `"agent:<client>"` (an OAuth-grant MCP client). Both token and
  * agent forms are an autonomous caller acting on the user's behalf, so both
- * render as "Agent" — the distinction is internal auth plumbing, not
- * something the seeker needs to see.
+ * render as "Assistant" — the distinction is internal auth plumbing, not
+ * something the seeker needs to see. The `who` value stays the internal word
+ * "agent" (not renamed — it is code, never shown), only the display string in
+ * `WhoChip` changed.
  */
 export function whoLabel(recordedBy: string): { who: "you" | "agent"; name: string } {
   if (recordedBy === "web") {

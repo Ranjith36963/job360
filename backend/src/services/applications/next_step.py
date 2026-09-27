@@ -60,7 +60,7 @@ def next_step(
         return {"code": "follow_up", "label": "Follow-up due — chase them or record what happened"}
     if status == "considering":
         if not has_fit:
-            return {"code": "judge_fit", "label": "No fit judged yet — ask your agent to judge it"}
+            return {"code": "judge_fit", "label": "No fit judged yet — ask your assistant to judge it"}
         if cv_versions == 0:
             return {"code": "write_cv", "label": "Fit judged — no CV for this job yet"}
         return {"code": "apply", "label": "CV ready — apply, then mark it applied"}

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 
 const TABS = [
   { href: "/settings/account", label: "Account" },
-  { href: "/settings/connect", label: "Connect an agent" },
+  { href: "/settings/connect", label: "Connect your assistant" },
 ] as const;
 
 export function SettingsNavTabs() {

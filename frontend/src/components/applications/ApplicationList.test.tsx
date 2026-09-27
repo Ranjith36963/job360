@@ -25,7 +25,7 @@ function summary(overrides: Partial<ApplicationSummary> = {}): ApplicationSummar
     visa_signal: "unknown",
     visa_country: "",
     needs_sponsorship: null,
-    next_step: { code: "judge_fit", label: "No fit judged yet — ask your agent to judge it" },
+    next_step: { code: "judge_fit", label: "No fit judged yet — ask your assistant to judge it" },
     follow_up_on: null,
     follow_up_due: false,
     ...overrides,

@@ -106,6 +106,16 @@ describe("Contacts", () => {
     expect(screen.getByText(/Role: was .Recruiter./)).toBeInTheDocument();
   });
 
+  it('shows "added by you" for a contact the seeker added (display mapping only)', () => {
+    render(<Contacts applicationId={42} contacts={[makeContact({ added_by: "web" })]} />);
+    expect(screen.getByText(/added by you/)).toBeInTheDocument();
+  });
+
+  it('shows the assistant\'s name for a contact an assistant added', () => {
+    render(<Contacts applicationId={42} contacts={[makeContact({ added_by: "agent:claude-code" })]} />);
+    expect(screen.getByText(/added by claude-code/)).toBeInTheDocument();
+  });
+
   it("editing a field calls updateContact and reflects the saved value", async () => {
     const contact = makeContact();
     updateContact.mockResolvedValue(

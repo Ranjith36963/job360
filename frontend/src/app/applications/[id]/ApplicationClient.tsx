@@ -193,7 +193,13 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
               {STATUS_LABEL[detail.status] ?? detail.status}
             </span>
             <StatusMenu applicationId={detail.id} onRecorded={load} />
-            {detail.status === "considering" &&
+            {/* Bug fix (new-user walk, 2026-09-27): this used to gate on
+                `status === "considering"`, so picking ANY option in the
+                status menu above (e.g. "Replied") made this button vanish
+                forever, with no way left to create a receipt. The real gate
+                is simpler and survives every status: show it whenever there
+                is no receipt yet. */}
+            {detail.receipts.length === 0 &&
               (!markConfirming ? (
                 <button
                   type="button"
