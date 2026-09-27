@@ -69,7 +69,9 @@ describe("ProfilePage header", () => {
   it("with a CV and no preferences, the profile is ready — preferences are never 'to finish'", async () => {
     getProfile.mockResolvedValue(profile({}));
     render(<ProfilePage />);
-    expect(await screen.findByText("Your profile is ready for your assistant")).toBeTruthy();
+    expect(
+      await screen.findByText("Your CV is saved. Your connected assistant fills in the rest.")
+    ).toBeTruthy();
     expect(screen.queryByText(/^To finish:/)).toBeNull();
     expect(screen.queryByText(/add preferences/)).toBeNull();
     // LinkedIn / GitHub sit on the quiet optional line instead.
@@ -116,7 +118,7 @@ describe("ProfilePage header", () => {
   it("shows no assistant line when the assistant set nothing", async () => {
     getProfile.mockResolvedValue(profile({}));
     render(<ProfilePage />);
-    await screen.findByText("Your profile is ready for your assistant");
+    await screen.findByText("Your CV is saved. Your connected assistant fills in the rest.");
     expect(screen.queryByText(/set by your assistant/)).toBeNull();
   });
 });

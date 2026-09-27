@@ -6,12 +6,17 @@ import { apiErrorMessage } from "@/lib/api-error";
 import { actorName, formatEditValue, formatEditedDate } from "@/lib/agent-edits";
 
 interface FieldHistoryProps {
-  /** One or more editable paths shown as one field (salary = min + max). */
+  /** One or more editable paths shown as one field (salary = min + max), or
+   *  a whole section's worth of paths for a combined "See history" view. */
   paths: string[];
-  /** Human name of the field, for the button's accessible name. */
+  /** Human name of the field (or section), for the button's accessible name. */
   label: string;
-  /** Per-path prefix when several paths share one list ("Min" / "Max"). */
+  /** Per-path prefix when several paths share one list ("Min" / "Max", or
+   *  every field's own name for a combined section history). */
   pathLabels?: Record<string, string>;
+  /** Visible button text. Defaults to "History" (one field); a combined,
+   *  section-level history reads better as "See history". */
+  buttonLabel?: string;
 }
 
 type Row = ProfileEditHistoryRow & { path: string };
@@ -24,7 +29,7 @@ type Row = ProfileEditHistoryRow & { path: string };
  *   Claude · 24 Sep 2026 · £50k
  *
  * Read-only. Fetched when opened, never on page load. */
-export function FieldHistory({ paths, label, pathLabels }: FieldHistoryProps) {
+export function FieldHistory({ paths, label, pathLabels, buttonLabel }: FieldHistoryProps) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +63,7 @@ export function FieldHistory({ paths, label, pathLabels }: FieldHistoryProps) {
         aria-label={`History of ${label}`}
         className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
       >
-        History
+        {buttonLabel ?? "History"}
       </button>
       {open && (
         <div data-testid="field-history" className="mt-1 rounded-md bg-muted/30 px-2 py-1.5">

@@ -123,10 +123,18 @@ function optionalExtras(profile: ProfileResponse | null): string[] {
   return extras;
 }
 
-/** The one header line: a missing CV is the only thing "to finish". */
+/** The one header line: a missing CV is the only thing "to finish".
+ *
+ * Owner-approved copy, 2026-09-27: with a CV on file this used to always say
+ * "Your profile is ready for your assistant" — true only once an assistant
+ * is actually connected. Checking live connection state here would mean this
+ * page also polling tokens/grants (the API /settings/connect already reads
+ * for that reason); the owner's own fallback for that cost is neutral
+ * wording that is true either way: the CV is saved regardless of connection,
+ * and an assistant, once connected, is what fills in the rest. */
 function headerLine(profile: ProfileResponse | null): string {
   const missing = missingPieces(profile);
-  if (missing.length === 0) return "Your profile is ready for your assistant";
+  if (missing.length === 0) return "Your CV is saved. Your connected assistant fills in the rest.";
   return `To finish: ${missing.map((piece) => `add ${piece}`).join(", ")}`;
 }
 

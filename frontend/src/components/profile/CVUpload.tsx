@@ -462,7 +462,13 @@ export function CVUpload({
         ) : (
           /* ── CV parsed: stats bar + full CV with highlights ── */
           <div className="space-y-4">
-            {/* Compact stats bar */}
+            {/* Compact stats bar. Rule #29: an empty shelf stays silent — a
+                "Roles: 0" / "Education: 0" badge used to print a real zero
+                next to two fields the extractor simply hasn't reached yet,
+                which reads as "you have none" rather than "not read yet".
+                With BOTH empty, one line says who fills them in instead of
+                two zero badges; with only one empty, that one badge is
+                dropped and the other keeps its real count. */}
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1.5">
                 <Wrench className="h-3.5 w-3.5 text-primary" />
@@ -471,20 +477,24 @@ export function CVUpload({
                   {profile.skills_count}
                 </Badge>
               </div>
-              <div className="flex items-center gap-1.5">
-                <Briefcase className="h-3.5 w-3.5 text-blue-400" />
-                <span className="text-xs text-muted-foreground">Roles:</span>
-                <Badge variant="secondary" className="font-mono text-xs">
-                  {profile.job_titles.length}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <GraduationCap className="h-3.5 w-3.5 text-amber-400" />
-                <span className="text-xs text-muted-foreground">Education:</span>
-                <Badge variant="secondary" className="font-mono text-xs">
-                  {profile.education.length}
-                </Badge>
-              </div>
+              {profile.job_titles.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <Briefcase className="h-3.5 w-3.5 text-blue-400" />
+                  <span className="text-xs text-muted-foreground">Roles:</span>
+                  <Badge variant="secondary" className="font-mono text-xs">
+                    {profile.job_titles.length}
+                  </Badge>
+                </div>
+              )}
+              {profile.education.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <GraduationCap className="h-3.5 w-3.5 text-amber-400" />
+                  <span className="text-xs text-muted-foreground">Education:</span>
+                  <Badge variant="secondary" className="font-mono text-xs">
+                    {profile.education.length}
+                  </Badge>
+                </div>
+              )}
               {cvDetail && cvDetail.certifications.length > 0 && (
                 <div className="flex items-center gap-1.5">
                   <Award className="h-3.5 w-3.5 text-purple-400" />
@@ -495,12 +505,42 @@ export function CVUpload({
                 </div>
               )}
             </div>
+            {profile.job_titles.length === 0 && profile.education.length === 0 && (
+              <p
+                className="text-xs text-muted-foreground"
+                data-testid="roles-history-empty"
+              >
+                Roles and history: your assistant fills these in once connected
+              </p>
+            )}
 
             {/* Receipt — the file we actually hold, and when it arrived. */}
             <UploadReceipt
               name={profile.cv_filename || "CV on file"}
               at={profile.cv_uploaded_at}
             />
+
+            {/* The skills read straight off the CV — the point of an upload
+                is finding out what came out of it, not just a count (owner
+                walk finding, 2026-09-27). Capped so a very long CV doesn't
+                turn this into its own wall of chips. */}
+            {cvDetail && cvDetail.skills.length > 0 && (
+              <div className="flex flex-wrap gap-1.5" data-testid="cv-skills-list">
+                {cvDetail.skills.slice(0, 30).map((skill) => (
+                  <span
+                    key={skill}
+                    className="inline-flex items-center rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-xs font-medium text-primary"
+                  >
+                    {skill}
+                  </span>
+                ))}
+                {cvDetail.skills.length > 30 && (
+                  <span className="self-center text-xs text-muted-foreground">
+                    and {cvDetail.skills.length - 30} more
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Full CV text with inline highlights.
                 THE single copy on the page (owner decision 2026-08-08): the
@@ -766,13 +806,14 @@ export function CVUpload({
           )}
         </div>
 
-        {/* Hint if neither enrichment */}
+        {/* Hint if neither enrichment. Job360 never scores or matches jobs
+            itself (rule 4) — the old copy claimed LinkedIn/GitHub improved
+            "semantic matching accuracy", which does not exist here. */}
         {profile && !profile.has_linkedin && !profile.has_github && (
           <div className="mt-4 flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/10 p-3">
             <AlertCircle className="h-4 w-4 text-primary shrink-0 mt-0.5" />
             <p className="text-xs text-muted-foreground">
-              Adding LinkedIn or GitHub data improves skill detection and
-              semantic matching accuracy.
+              Optional — your assistant can read these too.
             </p>
           </div>
         )}

@@ -72,9 +72,11 @@ describe("PreferencesForm — visa sponsorship", () => {
   });
 });
 
-// docs/plans/2026-09-11-visa-signal/spec.md — Fact 2, the candidate's
+// docs/product/VISION.md decision 27 — Fact 2, the candidate's
 // work-authorization countries (compared against a job's visa_country
-// server-side; Job360 never knows country rules itself, rule #29).
+// server-side; Job360 never knows country rules itself, rule #29). A
+// searchable country picker (owner-approved copy, 2026-09-27) replaced the
+// old free-typed ISO-code box — the wire value is still the alpha-2 code.
 describe("PreferencesForm — work authorization countries", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => {
@@ -82,21 +84,21 @@ describe("PreferencesForm — work authorization countries", () => {
     vi.clearAllMocks();
   });
 
-  it("uppercases a typed 2-letter code, ignores a non-ISO tag, and saves the list", async () => {
+  it("labels the field without naming the UK, and searches by country name to save the ISO code", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<PreferencesForm preferences={{}} onSave={onSave} loading={false} />);
 
     const field = screen.getByTestId("work-authorization-countries");
-    const input = within(field).getByPlaceholderText(/e\.g\. gb, in, de/i);
+    expect(
+      within(field).getByText("Countries where I can already work (no visa needed)")
+    ).toBeTruthy();
 
-    fireEvent.change(input, { target: { value: "gb" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-
+    const input = within(field).getByLabelText(/search countries/i);
     fireEvent.change(input, { target: { value: "United Kingdom" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.click(within(field).getByRole("option", { name: "United Kingdom" }));
 
-    expect(within(field).getByText("GB")).toBeTruthy();
-    expect(within(field).queryByText("United Kingdom")).toBeNull();
+    // Displayed as the country name, stored as the ISO code.
+    expect(within(field).getByText("United Kingdom")).toBeTruthy();
 
     await act(async () => {
       vi.advanceTimersByTime(900);

@@ -170,19 +170,26 @@ test.describe("Profile page — agent-edit provenance mark", () => {
       };
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(after) });
     });
-    await page.route("**/api/profile/edits/history**", (route) =>
-      route.fulfill({
+    // ONE combined history for the whole preferences section (owner
+    // decision, 2026-09-27) — FieldHistory fetches every preference path,
+    // so only `preferences.work_arrangement` returns real rows here; every
+    // other path answers empty, keeping the merged list to exactly these 2.
+    await page.route("**/api/profile/edits/history**", (route) => {
+      const url = new URL(route.request().url());
+      const path = url.searchParams.get("path");
+      const rows =
+        path === "preferences.work_arrangement"
+          ? [
+              { value: "remote", set_by: "agent:cli", set_at: "2026-09-02T11:00:00Z" },
+              { value: "hybrid", set_by: "web", set_at: "2026-09-01T09:00:00Z" },
+            ]
+          : [];
+      return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          path: "preferences.work_arrangement",
-          rows: [
-            { value: "remote", set_by: "agent:cli", set_at: "2026-09-02T11:00:00Z" },
-            { value: "hybrid", set_by: "web", set_at: "2026-09-01T09:00:00Z" },
-          ],
-        }),
-      })
-    );
+        body: JSON.stringify({ path, rows }),
+      });
+    });
 
     await page.goto("/profile");
     await expect(
@@ -192,8 +199,9 @@ test.describe("Profile page — agent-edit provenance mark", () => {
     // The header counts the one preference the assistant set.
     await expect(page.getByRole("link", { name: "1 preference set by your assistant" })).toBeVisible();
 
-    // History: one inline list, newest first, both authors.
-    await page.getByRole("button", { name: "History of Work Arrangement" }).click();
+    // History: one combined inline list for the whole section, newest first,
+    // both authors.
+    await page.getByRole("button", { name: "History of Your preferences" }).click();
     const rows = page.getByTestId("field-history-row");
     await expect(rows).toHaveCount(2);
     await expect(rows.nth(0)).toContainText("cli");

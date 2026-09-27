@@ -14,27 +14,45 @@ import {
 // ---------------------------------------------------------------------------
 
 describe("dailyCheckStatusLine", () => {
-  it("reads '' as the assistant will still offer", () => {
-    expect(dailyCheckStatusLine("")).toMatch(/will offer/i);
+  it("reads '' as the assistant will still offer, once something is connected", () => {
+    expect(dailyCheckStatusLine("", true)).toMatch(/will offer/i);
   });
 
-  it("reads 'scheduled' as already set up", () => {
-    expect(dailyCheckStatusLine("scheduled")).toMatch(/set up/i);
+  it("reads '' as needing a connection first, with nothing connected yet", () => {
+    expect(dailyCheckStatusLine("", false)).toMatch(/connect your assistant first/i);
+    // Both variants share "will offer" so a caller checking for the general
+    // "not asked yet" meaning doesn't have to branch on `connected` itself.
+    expect(dailyCheckStatusLine("", false)).toMatch(/will offer/i);
   });
 
-  it("reads 'declined' as the user said no", () => {
-    expect(dailyCheckStatusLine("declined")).toMatch(/said no/i);
+  it("reads 'scheduled' as already set up, regardless of connection state", () => {
+    expect(dailyCheckStatusLine("scheduled", true)).toMatch(/set up/i);
+    expect(dailyCheckStatusLine("scheduled", false)).toMatch(/set up/i);
+  });
+
+  it("reads 'declined' as the user said no, regardless of connection state", () => {
+    expect(dailyCheckStatusLine("declined", true)).toMatch(/said no/i);
+    expect(dailyCheckStatusLine("declined", false)).toMatch(/said no/i);
+  });
+
+  it("says nothing for '' while the connection state is unknown (loading or failed)", () => {
+    // Never tell an already-connected user to "connect first" just because
+    // the tokens/apps lists haven't loaded — or failed to (reviewer-bugs, #649).
+    expect(dailyCheckStatusLine("", null)).toBeNull();
+    expect(dailyCheckStatusLine("declined", null)).toMatch(/said no/i);
   });
 });
 
 function renderCard(
   dailyCheck: DailyCheckState,
   onResetOffer = vi.fn(),
-  resetting = false
+  resetting = false,
+  connected = true
 ) {
   render(
     <DailyCheckCard
       dailyCheck={dailyCheck}
+      connected={connected}
       onResetOffer={onResetOffer}
       resetting={resetting}
     />
@@ -43,10 +61,18 @@ function renderCard(
 }
 
 describe("DailyCheckCard", () => {
-  it("shows the not-asked-yet line and no reset button for ''", () => {
+  it("shows the not-asked-yet line and no reset button for '', once connected", () => {
     renderCard("");
     expect(screen.getByTestId("daily-check-status")).toHaveTextContent(
       /will offer to set this up/i
+    );
+    expect(screen.queryByTestId("daily-check-reset")).not.toBeInTheDocument();
+  });
+
+  it("shows a connect-first line and no reset button for '', with nothing connected", () => {
+    renderCard("", vi.fn(), false, false);
+    expect(screen.getByTestId("daily-check-status")).toHaveTextContent(
+      /connect your assistant first/i
     );
     expect(screen.queryByTestId("daily-check-reset")).not.toBeInTheDocument();
   });
