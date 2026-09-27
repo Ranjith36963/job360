@@ -50,18 +50,8 @@ no per-application charge, nothing that rewards volume.
 
 ## The object model
 
-```
-Candidate (one profile per user, versioned; multiple named profiles = later)
- └── Application            born at bring_job; status starts "considering"
-      ├── Job snapshot      title, company, location, URL, ad text as it read that day
-      ├── Fit verdict       written by the agent: fit, gaps, reasoning (stored, not computed by us)
-      ├── Artifacts[]       cv | cover_letter | answers | outreach — every version kept
-      │                     each: version_no, text, made_by (agent/model/human), profile_version, created_at
-      ├── Contacts[]        name, role, email, linkedin — found by the agent
-      ├── Receipt           frozen on "I applied": artifact versions sent, fields filled, answers,
-      │                     confirmation text/number, channel, sent_at — append-only
-      └── Events[]          the history; the current status is just the last status event
-```
+The shape is the schema, not a picture here: `services/applications/spine`,
+`services/applications/contacts` and `backend/migrations/`.
 
 **Event types (fixed list, plus free-text detail):**
 `brought`, `fit_judged`, `artifact_saved`, `contact_added`, `outreach_sent`,
@@ -70,26 +60,10 @@ Candidate (one profile per user, versioned; multiple named profiles = later)
 `lesson` ("flag for next time"). Every event: `type`, `detail`, `occurred_at`,
 `recorded_by` (which token/agent/web), `recorded_at`. Nothing is deleted.
 
-Today's `applications` (stage) + `application_receipts` (snapshot) +
-`application_stage_history` + `tailored_documents` (unversioned, DELETE+INSERT)
-fold into this. Receipts stay append-only (bring-a-job constraint 4).
-
 ## The agent surface (MCP + same REST)
 
-| Tool | Does |
-|---|---|
-| `get_profile` / `update_profile` | structured candidate context; agent may fix or add fields |
-| `bring_job` | link or text → Application (status `considering`) |
-| `get_application` / `list_applications` | full object with events and artifact versions |
-| `save_artifact` | new version of cv / cover_letter / answers / outreach |
-| `save_fit` | agent's verdict + gaps on this application |
-| `add_contact` | recruiter / hiring manager on this application |
-| `record_event` | typed event, free-text detail |
-| `record_application` | the receipt — what was actually sent |
-| `whats_new` | everything since a timestamp (replaces push for now) |
-| `export_history` | applications + events + versions + outcomes as clean JSON |
-| `stats` | cheap counts: reply / interview rate per CV version, per role |
-| `get_tailored_documents` | the newest saved CV / cover letter — **we write neither** (decision 28); the agent writes them and saves them with `save_artifact`, the web renders DOCX / PDF from the saved text |
+The tools are the `@mcp.tool()` functions in `api/mcp_server.py`; each carries
+its own description. Read them there — never a table here.
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
 `api/routes/well_known.py`), with personal `j360_…` tokens as the CLI fallback.

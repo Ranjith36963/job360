@@ -24,15 +24,9 @@ Once connected, the agent reads and writes the candidate's profile, brings a job
 
 ## What Job360 stores
 
-Bringing a job (a link or pasted text) births one **Application**, status `considering`. Everything else hangs off it:
+Bringing a job (a link or pasted text) births one **Application**, status `considering`: the ad as it read that day, every artifact version, the append-only typed event log, and the receipt frozen the moment "I applied" happens. People the agent found, and every outreach message version, are tracked alongside — attached to a job or to none. What each one holds is the schema: `services/applications/spine`, `services/applications/contacts` and `backend/migrations/`.
 
-- **Job snapshot** — title, company, location, URL, the ad text as it read that day
-- **Artifacts** — CV, cover letter, answers, outreach; every version kept, stamped with who/when and which profile version made it
-- **Events** — an append-only, typed history (`brought`, `fit_judged`, `artifact_saved`, `applied`, `replied`, `interview_scheduled`, `offer`, `rejected`, and more); the current status is just the last status event
-- **Contacts** — recruiter or hiring-manager details the agent found
-- **Receipt** — frozen the moment "I applied" happens: artifact versions sent, fields filled, confirmation text, channel, timestamp — never edited afterwards
-
-Nothing here is scored, ranked or recommended. The candidate profile (CV + LinkedIn + GitHub + preferences) is the one piece of context every application draws from; see [`docs/product/VISION.md`](./docs/product/VISION.md) for the full object model and the event-type list.
+Nothing here is scored, ranked or recommended. The candidate profile (CV + LinkedIn + GitHub + preferences) is the one piece of context every application draws from; see [`docs/product/VISION.md`](./docs/product/VISION.md) for the event-type list.
 
 ## Architecture
 
@@ -86,7 +80,7 @@ cd backend
 python -m pytest -q -p no:randomly
 ```
 
-The suite runs against a real Postgres (not SQLite) via the shims in `tests/conftest.py`, schema-per-test, with HTTP mocked by `aioresponses` — it must run offline. **Never quote a test count from a doc — measure it**: `python -m pytest --collect-only -q -p no:randomly | tail -1`. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the generated, code-verified counts.
+The suite runs against a real Postgres (not SQLite), schema-per-test (`repositories.pg.TEST_MODE`), with HTTP mocked by `aioresponses` — it must run offline. **Never quote a test count from a doc — measure it**: `python -m pytest --collect-only -q -p no:randomly | tail -1`. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the generated, code-verified counts.
 
 ```bash
 # Frontend
@@ -105,7 +99,7 @@ Job360 is **pull, not push** (VISION.md decision 11): the seeker reads `GET /wha
 
 ## Configuration
 
-Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL`, `FRONTEND_ORIGIN`, `SITE_BASE_URL`, and `RESEND_API_KEY` (system email — magic-link login and password reset — needs it). `DATABASE_PUBLIC_URL` is for Railway database tooling only (`backend/scripts/observe.py`), not the app. Most other knobs are in `core/settings.py`, not all — see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+Copy `.env.example` to `.env` at the repo root and fill in the keys it lists. The set prod refuses to boot without is `core.settings._REQUIRED_PROD_VARS`. `DATABASE_PUBLIC_URL` is for Railway database tooling only (`backend/scripts/observe.py`), not the app.
 
 ## Contributing
 
