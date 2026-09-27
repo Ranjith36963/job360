@@ -354,12 +354,15 @@ export type DailyCheckState = "" | "scheduled" | "declined";
  * plain substring match still reads either one as "not asked yet". */
 export function dailyCheckStatusLine(
   state: DailyCheckState,
-  connected: boolean
-): string {
+  connected: boolean | null
+): string | null {
   if (state === "scheduled") return "Set up with your assistant.";
   if (state === "declined") {
     return "You said no — your assistant won't ask again.";
   }
+  // null = the apps/tokens lists are still loading or failed to load: say
+  // nothing rather than tell a connected user to "connect first".
+  if (connected === null) return null;
   return connected
     ? "Your assistant will offer to set this up."
     : "Connect your assistant first — it will offer this.";
@@ -377,9 +380,10 @@ export function DailyCheckCard({
 }: {
   /** `null` until the profile read succeeds: no status line, no button. */
   dailyCheck: DailyCheckState | null;
-  /** True once an app or a personal token is connected — see
+  /** True once an app or a personal token is connected; null while that is
+   *  not yet known (still loading, or a list failed) — see
    *  `dailyCheckStatusLine` above. */
-  connected: boolean;
+  connected: boolean | null;
   loadFailed?: boolean;
   onResetOffer: () => void;
   resetting: boolean;
@@ -747,15 +751,26 @@ export default function ConnectAgentPage() {
   const [dailyCheckLoadFailed, setDailyCheckLoadFailed] = useState(false);
   const [resettingDailyCheck, setResettingDailyCheck] = useState(false);
 
+  const [tokensFailed, setTokensFailed] = useState(false);
+  const [grantsFailed, setGrantsFailed] = useState(false);
+
   // At least one connected app OR one active personal token — the daily
-  // check needs a live assistant to make the offer, and neither list has
-  // loaded until this is known, so it starts (safely) false.
-  const connected = grants.length > 0 || tokens.length > 0;
+  // check needs a live assistant to make the offer. Any item found is proof
+  // of "connected"; "not connected" needs BOTH lists loaded successfully and
+  // empty. Anything else (loading, or a list failed) is unknown = null.
+  const connected: boolean | null =
+    grants.length > 0 || tokens.length > 0
+      ? true
+      : loading || grantsLoading || tokensFailed || grantsFailed
+        ? null
+        : false;
 
   const refresh = useCallback(async () => {
     try {
       setTokens(await listTokens());
+      setTokensFailed(false);
     } catch (err) {
+      setTokensFailed(true);
       toast.error(apiErrorMessage(err, "Failed to load tokens."));
     } finally {
       setLoading(false);
@@ -765,7 +780,9 @@ export default function ConnectAgentPage() {
   const refreshGrants = useCallback(async () => {
     try {
       setGrants(await listGrants());
+      setGrantsFailed(false);
     } catch (err) {
+      setGrantsFailed(true);
       toast.error(apiErrorMessage(err, "Failed to load connected apps."));
     } finally {
       setGrantsLoading(false);

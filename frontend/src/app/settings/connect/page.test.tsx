@@ -34,6 +34,13 @@ describe("dailyCheckStatusLine", () => {
     expect(dailyCheckStatusLine("declined", true)).toMatch(/said no/i);
     expect(dailyCheckStatusLine("declined", false)).toMatch(/said no/i);
   });
+
+  it("says nothing for '' while the connection state is unknown (loading or failed)", () => {
+    // Never tell an already-connected user to "connect first" just because
+    // the tokens/apps lists haven't loaded — or failed to (reviewer-bugs, #649).
+    expect(dailyCheckStatusLine("", null)).toBeNull();
+    expect(dailyCheckStatusLine("declined", null)).toMatch(/said no/i);
+  });
 });
 
 function renderCard(
