@@ -150,8 +150,7 @@ evidence), severity, and the fix.
 These cost real time the first time. Reading them here saves the next run.
 
 - **Postgres must be up before anything boots.** The dev DB is a container on
-  host port 5433 (`docker-compose.dev.yml`); if it is down the API and the whole
-  test suite fail at startup/collection with
+  host port 5433 (`docker-compose.dev.yml`); if it is down you get
   `connection to server at "127.0.0.1", port 5433 failed`. Start the container first.
   (The two SQLite gotchas that used to live here — a stale `data/jobs.db` and an
   aiosqlite thread holding the file lock — are obsolete: SQLite is gone.)

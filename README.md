@@ -24,7 +24,7 @@ Once connected, the agent reads and writes the candidate's profile, brings a job
 
 ## What Job360 stores
 
-Bringing a job (a link or pasted text) births one **Application**, status `considering`: the ad as it read that day, every artifact version, the append-only typed event log, and the receipt frozen the moment "I applied" happens. People the agent found, and every outreach message version, are tracked alongside — attached to a job or to none. What each one holds is the schema: `services/applications/spine`, `services/applications/contacts` and `backend/migrations/`.
+Bringing a job (a link or pasted text) births one **Application**, status `considering`: the ad as it read that day, every artifact version, the append-only typed event log, and the receipt frozen the moment "I applied" happens. People the agent found, and every outreach message version, are tracked alongside — attached to a job or to none. What each one holds is the schema: `services/applications/spine.py`, `services/applications/contacts.py` and `backend/migrations/`.
 
 Nothing here is scored, ranked or recommended. The candidate profile (CV + LinkedIn + GitHub + preferences) is the one piece of context every application draws from; see [`docs/product/VISION.md`](./docs/product/VISION.md) for the event-type list.
 

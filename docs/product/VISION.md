@@ -50,8 +50,8 @@ no per-application charge, nothing that rewards volume.
 
 ## The object model
 
-The shape is the schema, not a picture here: `services/applications/spine`,
-`services/applications/contacts` and `backend/migrations/`.
+The shape is the schema, not a picture here: `services/applications/spine.py`,
+`services/applications/contacts.py` and `backend/migrations/`.
 
 **Event types (fixed list, plus free-text detail):**
 `brought`, `fit_judged`, `artifact_saved`, `contact_added`, `outreach_sent`,
