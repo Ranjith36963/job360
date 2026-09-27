@@ -69,7 +69,7 @@ function ReceiptsList() {
       <EmptyState
         icon={<FileCheck2 className="h-8 w-8" />}
         title="No receipts yet"
-        description='When you click "I applied" on a job, the ad and the CV you sent are frozen here.'
+        description='When you click "Mark Applied" on a job, the ad and the CV you sent are frozen here.'
         action={
           <Link href="/bring">
             <Button className="gap-2">

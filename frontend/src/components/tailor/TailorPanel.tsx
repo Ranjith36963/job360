@@ -39,6 +39,18 @@ const TABS: { key: TailorDocKind; label: string }[] = [
   { key: "cover_letter", label: "Cover Letter" },
 ];
 
+/** Plain words for `TailoredDocOut.made_by` (same convention as
+ * `ArtifactVersions.describeMadeBy`, owner decision 6, 2026-09-24): a bare
+ * "web:tailor" or "human" reads as "you"; "agent:<name>" reads as just the
+ * name, since "saved by <name>" already carries the meaning without the
+ * word "agent". */
+function savedByLabel(madeBy: string): string {
+  if (madeBy === "human" || madeBy === "web:tailor") return "you";
+  const idx = madeBy.indexOf(":");
+  if (idx >= 0) return madeBy.slice(idx + 1).trim() || "your assistant";
+  return madeBy;
+}
+
 interface TailorPanelProps {
   jobId: number;
   open: boolean;
@@ -202,7 +214,7 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
                     {docFor(bundle, t.key) && (
                       <Badge variant="secondary" className="text-xs">
                         v{docFor(bundle, t.key)?.version_no} · saved by{" "}
-                        {docFor(bundle, t.key)?.made_by}
+                        {savedByLabel(docFor(bundle, t.key)?.made_by ?? "")}
                       </Badge>
                     )}
                     {showProv[t.key] && prov[t.key] ? (

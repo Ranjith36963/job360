@@ -235,7 +235,10 @@ describe("ApplicationClient — Mark Applied asks first (decision 2)", () => {
     getApplication.mockReset();
     getAlignment.mockReset();
     recordApplicationReceipt.mockReset();
-    getApplication.mockResolvedValue({ ...detail(), status: "considering" });
+    // No receipt yet — the base `detail()` fixture has one, which would hide
+    // Mark Applied under the fixed condition (receipts.length === 0) before
+    // these tests even get to click it.
+    getApplication.mockResolvedValue({ ...detail(), status: "considering", receipts: [] });
     getAlignment.mockResolvedValue({
       fit: null,
       skills_in_ad: [],
@@ -280,6 +283,41 @@ describe("ApplicationClient — Mark Applied asks first (decision 2)", () => {
 
     expect(screen.queryByTestId("mark-applied-confirm")).toBeNull();
     expect(recordApplicationReceipt).not.toHaveBeenCalled();
+  });
+});
+
+describe("ApplicationClient — Mark Applied shows whenever there's no receipt (bug fix, new-user walk 2026-09-27)", () => {
+  // Regression: Mark Applied used to be gated on `status === "considering"`,
+  // so picking any "What happened?" option (e.g. "Replied") on a
+  // still-considering application made the button disappear forever, with
+  // no way left on the web to create a receipt. The real gate is whether a
+  // receipt already exists, which survives every status.
+  beforeEach(() => {
+    getApplication.mockReset();
+    getAlignment.mockReset();
+    getAlignment.mockResolvedValue({
+      fit: null,
+      skills_in_ad: [],
+      skills_not_in_ad: [],
+      skills_total: 0,
+      ad_chars: 0,
+    });
+  });
+
+  it("shows Mark Applied on a 'replied' application with no receipt yet", async () => {
+    getApplication.mockResolvedValue({ ...detail(), status: "replied", receipts: [] });
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+
+    expect(screen.getByTestId("mark-applied")).toBeInTheDocument();
+  });
+
+  it("hides Mark Applied on a 'replied' application that already has a receipt", async () => {
+    getApplication.mockResolvedValue({ ...detail(), status: "replied" }); // detail() already carries one receipt
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+
+    expect(screen.queryByTestId("mark-applied")).toBeNull();
   });
 });
 

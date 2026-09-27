@@ -6,7 +6,7 @@ export const metadata: Metadata = {
 };
 
 // A legal document states when it changed; never derive this at render time.
-const LAST_UPDATED = "24 September 2026";
+const LAST_UPDATED = "27 September 2026";
 
 export default function TermsPage() {
   return (
@@ -23,11 +23,11 @@ export default function TermsPage() {
           </h2>
           <p className="mt-2">
             Job360 (job360.uk) stores the jobs you (or your own connected AI
-            agent) bring in, and keeps a full history of your applications —
+            assistant) bring in, and keeps a full history of your applications —
             events, tailored documents, contacts, and receipts of what you
             sent. Job360 does not generate documents itself; it stores,
             versions, and renders the CVs and cover letters you or your
-            connected AI assistant write. Your own AI agent (for example
+            connected AI assistant write. Your own AI assistant (for example
             Claude or ChatGPT) can connect to your account and read or write
             this data on your behalf. By creating an account you agree to
             these terms and to our{" "}
@@ -82,12 +82,12 @@ export default function TermsPage() {
             4. Job listings
           </h2>
           <p className="mt-2">
-            Every job on Job360 is one you or your agent brought in yourself
+            Every job on Job360 is one you or your assistant brought in yourself
             — by pasting the ad, or a link we fetch on your behalf. We do not
             search, rank, deduplicate, or score jobs, and we cannot guarantee
             that any listing you bring is accurate, current, or still open.
             Any fit assessment attached to an application is one you or your
-            agent recorded yourselves — Job360 never judges or computes it.
+            assistant recorded yourselves — Job360 never judges or computes it.
           </p>
         </section>
 
@@ -128,7 +128,7 @@ export default function TermsPage() {
           <p className="mt-2">
             To the fullest extent permitted by law, Job360 is not liable for
             indirect or consequential losses — including missed job
-            opportunities, decisions made from a fit note you or your agent
+            opportunities, decisions made from a fit note you or your assistant
             recorded, or the outcome of any application. Nothing in these
             terms limits liability that
             cannot be limited under the law of England and Wales, including

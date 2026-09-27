@@ -43,6 +43,18 @@ function channelLabel(channel: string): string {
   return CHANNEL_LABEL[channel] ?? channel;
 }
 
+/** Display mapping only — the stored `added_by` actor string (backend
+ * `authorship.actor_for`: `"web"`, `"token:<name>"`, `"agent:<client>"`)
+ * never changes; this is just plain words for it. `"web"` -> "you" (the
+ * seeker added it in the browser); a token/agent actor -> its name, since
+ * that is more useful here than the generic word "assistant". */
+function addedByLabel(addedBy: string): string {
+  if (addedBy === "web") return "you";
+  const idx = addedBy.indexOf(":");
+  if (idx >= 0) return addedBy.slice(idx + 1).trim() || "your assistant";
+  return addedBy;
+}
+
 /** "Sent on 3 Oct via LinkedIn" / "Not sent yet". */
 function SentLine({ contact }: { contact: Contact }) {
   const last = contact.outreach?.last_sent;
@@ -310,7 +322,7 @@ export function Contacts({
                 <p className="mt-1 text-xs text-foreground/80">{contact.notes}</p>
               )}
               <p className="mt-1 text-[11px] text-muted-foreground/70">
-                added by {contact.added_by} ·{" "}
+                added by {addedByLabel(contact.added_by)} ·{" "}
                 {formatDate(contact.created_at)}
               </p>
               <MessageVersions contact={contact} />
