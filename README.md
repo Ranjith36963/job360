@@ -18,7 +18,7 @@ Once the backend is running (`cd backend && python main.py`), interactive API do
 Point any MCP-capable client (Claude Code, Claude, ChatGPT, Grok) at `https://job360.uk/api/mcp` (or `http://localhost:8000/api/mcp` in dev). Two ways to authenticate:
 
 - **OAuth 2.1** — the client discovers the authorization server from `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource` and runs the standard flow. This is how ChatGPT- and Grok-style connectors add Job360.
-- **Personal token** — sign in to the web app, go to **Settings → Connect an agent**, and mint a token (`j360_…`). It is shown once; the backend stores only a hash. Good for CLI clients and Claude Code.
+- **Personal token** — sign in to the web app, open `/settings/connect`, and mint a token (`j360_…`). It is shown once; the backend stores only a hash. Good for CLI clients and Claude Code.
 
 Once connected, the agent reads and writes the candidate's profile, brings a job, saves CV/cover-letter/answer versions, records typed events, and pulls `whats_new` — all through MCP tools backed by the same REST routes the web app uses. The agent still does the finding, judging and writing; Job360 only stores.
 
@@ -86,7 +86,7 @@ cd backend
 python -m pytest -q -p no:randomly
 ```
 
-The suite runs against a real Postgres (not SQLite) via the shims in `tests/conftest.py`, schema-per-test, with HTTP mocked by `aioresponses` — it must run offline. **Never quote a test count from a doc — measure it**: `python -m pytest --collect-only -q -p no:randomly | tail -1`. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the generated, code-verified counts.
+The suite runs against a real Postgres (not SQLite) via the shims in `tests/conftest.py`, schema-per-test, with HTTP mocked by `aioresponses` — it must run offline. **Never quote a test count from a doc — measure it**: `python -m pytest --collect-only -q -p no:randomly | tail -1`. See [`docs/GENERATED.md`](./docs/GENERATED.md) for the generated, code-verified counts.
 
 ```bash
 # Frontend

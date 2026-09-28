@@ -41,8 +41,7 @@ job360/
 │   │   │   ├── fetch/                # the URL-fetch web fallback (extract, fetcher, ssrf guard.py, outcomes)
 │   │   │   ├── tailoring/            # render + check a saved CV (no LLM since decision 28) — `ls` the folder for the module list
 │   │   │   └── profile/              # deterministic extraction + storage — `ls` the folder for the module list
-│   │   ├── repositories/             # (post-Phase-4 rename from storage/)
-│   │   │   └── database.py           # Postgres via psycopg3 (`pg.py` aiosqlite-shaped shim) + forward-compat migration schema
+│   │   ├── repositories/             # (post-Phase-4 rename from storage/) — `ls` it; `repositories.pg` is the single Postgres door, `repositories.database.JobDatabase` the legacy baseline that goes through it
 │   │   └── utils/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes

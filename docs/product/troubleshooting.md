@@ -1,6 +1,5 @@
 <!-- doc: LIVING | last-verified: 2026-09-11 by /sync -->
 # Job360 Troubleshooting
-<!-- doc: LIVING -->
 
 Common **developer-environment** issues and fixes (ports, locks, env-var gotchas, install hiccups). Each entry: **Symptom → Cause → Fix**.
 

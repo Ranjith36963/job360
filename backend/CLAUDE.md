@@ -56,7 +56,7 @@ python -m migrations.runner up                        # apply migrations (non-AP
 - `src/api/routes/bring.py`, `receipts.py`, `tailor.py`, `src/api/mcp_server.py` — the product path
 - `src/services/applications/spine.py` — the Application object + append-only event/artifact log · `src/services/profile/` — extraction
 - `src/cli.py` — Click CLI (`api`, `setup-profile`) · `src/api/` — FastAPI app + routes
-- `src/repositories/database.py` — Postgres via psycopg3 (aiosqlite-shaped shim) · `migrations/` — forward/reverse SQL pairs
+- `src/repositories/pg.py` — the single Postgres door (psycopg3 behind an aiosqlite-shaped API) · `migrations/` — forward/reverse SQL pairs
 - `scripts/` — backend Python helpers (run `python scripts/X.py`); see root `CONTRIBUTING.md`
 
 See root [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the deep technical reference.
