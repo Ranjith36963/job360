@@ -122,8 +122,7 @@ For per-user routes you need a session cookie — register via `POST /api/auth/r
 > **Full sweep = [`CHECKLIST.md`](CHECKLIST.md).** When the ask is "cover everything / every
 > feature, page, button" (or it's the nightly loop), the run is not done until every item in
 > `CHECKLIST.md` is exercised or explicitly marked GATED with a reason. The 5 steps below are
-> the spine; `CHECKLIST.md` is the complete ~35-checkpoint contract (all routes + pages +
-> buttons + the LinkedIn/GitHub gates). Report its PASS/FAIL/GATED table.
+> the spine. Report its PASS/FAIL/GATED table.
 
 Run **both** servers, then walk the real journey with the browser and watch the DB/logs in parallel.
 **The journey is the product path (`docs/product/VISION.md`): bring → tailor → receipt → MCP.**

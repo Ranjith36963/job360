@@ -1,9 +1,11 @@
 # Job360 — Full End-to-End Sweep Checklist (the loop's contract)
 <!-- doc: LIVING -->
 
-**Purpose:** the authoritative list a complete `/verify-job360` run must cover — every
-feature, page, button, and route, from landing on the site to closing it. A "full sweep"
-is not done until every item below is exercised (or explicitly marked gated, with the reason).
+**Purpose:** the itemised checkpoints a complete `/verify-job360` run must cover, from
+landing on the site to closing it. A "full sweep" is not done until every item below is
+exercised (or explicitly marked gated, with the reason) **and** every endpoint in the
+generated route table of [`docs/GENERATED.md`](../../../docs/GENERATED.md) — written from
+the routers, so it cannot omit a surface the way a list here can — is covered too.
 
 **How to use:** start the full stack (backend + frontend + the dev Postgres),
 register a fresh user, then walk the list top to bottom. Prove each with evidence
