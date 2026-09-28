@@ -235,6 +235,8 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
         if _xff:
             _ip = _xff
     throttle_key = f"login:{str(req.email).lower()}:{_ip}"
+    # Owner, 2026-09-28 — logs keep first letter + domain, never the full address.
+    log_email = safe_log_value(mask_email(str(req.email)))
     if auth_rate_limit.is_locked(
         throttle_key,
         max_failures=LOGIN_MAX_ATTEMPTS,
@@ -242,7 +244,7 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
     ):
         get_audit_logger().warning(
             "auth",
-            extra={"event": "login", "status": "locked", "email": mask_email(str(req.email)), **_client_meta(request)},
+            extra={"event": "login", "status": "locked", "email": log_email, **_client_meta(request)},
         )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -265,7 +267,7 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
         auth_rate_limit.record_failure(throttle_key)
         get_audit_logger().warning(
             "auth",
-            extra={"event": "login", "status": "fail", "email": mask_email(str(req.email)), **_client_meta(request)},
+            extra={"event": "login", "status": "fail", "email": log_email, **_client_meta(request)},
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -702,7 +704,7 @@ async def magic_link_request(
             extra={
                 "event": "magic_link_request",
                 "status": "rate_limited",
-                "email": mask_email(str(req.email)),
+                "email": safe_log_value(mask_email(str(req.email))),
                 **_client_meta(request),
             },
         )
@@ -718,7 +720,7 @@ async def magic_link_request(
         "auth",
         extra={
             "event": "magic_link_request", "status": "ok",
-            "email": mask_email(str(req.email)), **_client_meta(request),
+            "email": safe_log_value(mask_email(str(req.email))), **_client_meta(request),
         },
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
