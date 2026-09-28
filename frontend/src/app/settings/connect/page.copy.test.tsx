@@ -38,8 +38,12 @@ describe("ConnectAgentPage — owner-approved copy", () => {
     expect(
       await screen.findByRole("heading", { name: "Connect your assistant" })
     ).toBeInTheDocument();
+    // Owner-approved CATEGORY LINE (2026-09-28) — the ONLY positioning
+    // sentence in use.
     expect(
-      screen.getByText(/your ai assistant does the work; job360 keeps the record/i)
+      screen.getByText(
+        /the job tracker your ai assistant fills in for you.*every cv version, every reply, every receipt/i
+      )
     ).toBeInTheDocument();
   });
 

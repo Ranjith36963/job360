@@ -19,11 +19,18 @@ import {
 // recommends jobs (VISION rule 4); the pitch is the memory layer AFTER the
 // click, for the seeker's own AI agent — not a search or matching engine.
 // See docs/product/VISION.md.
-// Owner's positioning (2026-09-24): "Job360 is the shared job-hunt record for
-// your AI assistant: context, memory and every version, in one place any
-// assistant can read and write." Audience: people who already use an AI
+// Owner-approved CATEGORY LINE (2026-09-28) — the ONLY positioning sentence
+// in use; do not invent another. Same line as the MCP server's own
+// description/INSTRUCTIONS (backend/src/api/mcp_server.py) and the
+// <title>/meta description (layout.tsx) and the Connect page intro
+// (settings/connect/page.tsx). Audience: people who already use an AI
 // assistant. First action: connect it. The assistant judges and writes, the
 // user applies — Job360 never applies for anyone.
+const CATEGORY_LINE =
+  "The job tracker your AI assistant fills in for you — every CV version, every reply, every receipt.";
+// Split once, at the em dash, so the hero headline below renders from THIS
+// constant (no second hand-typed copy of the sentence to drift out of sync).
+const [CATEGORY_LINE_LEAD, CATEGORY_LINE_TAIL] = CATEGORY_LINE.split(" — ");
 const ASSISTANTS = "Claude, ChatGPT, Perplexity, Grok or Gemini";
 
 const FEATURES = [
@@ -148,20 +155,18 @@ export default function Landing() {
             <span className="font-medium">Works with {ASSISTANTS}</span>
           </div>
 
-          {/* Headline — each line staggers in, neon glow */}
+          {/* Headline — the owner-approved category line (CATEGORY_LINE
+              above), split at the em dash into two staggered lines for
+              layout only — never reworded. */}
           <h1
-            className="font-heading text-5xl font-bold tracking-tight sm:text-6xl lg:text-7xl"
+            className="font-heading text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl"
             style={{ textShadow: '0 0 80px oklch(0.89 0.29 128 / 0.15), 0 0 40px oklch(0.89 0.29 128 / 0.08)' }}
           >
             <span className="animate-fade-in-up stagger-2 block">
-              The shared job-hunt record
+              {CATEGORY_LINE_LEAD}
             </span>
             <span className="animate-fade-in-up stagger-3 block mt-1">
-              for your{" "}
-              <span className="bg-gradient-to-r from-primary via-lime-300 to-primary bg-clip-text text-transparent">
-                AI assistant
-              </span>
-              .
+              {` — ${CATEGORY_LINE_TAIL}`}
             </span>
           </h1>
 

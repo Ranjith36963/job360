@@ -41,9 +41,16 @@ describe("Landing page — no source-count copy (R14)", () => {
     expect(mentions).toHaveLength(0);
   });
 
-  it("still renders the hero headline", () => {
-    const { getByText } = render(<Landing />);
-    expect(getByText("The shared job-hunt record")).toBeInTheDocument();
+  it("still renders the hero headline — the owner-approved category line", () => {
+    // Owner-approved CATEGORY LINE (2026-09-28) — the ONLY positioning
+    // sentence in use. Checks rendered textContent (not getByText on a
+    // fragment) because the headline highlights "AI assistant" in its own
+    // nested span.
+    const { container } = render(<Landing />);
+    const text = (container.textContent ?? "").replace(/\s+/g, " ");
+    expect(text).toContain(
+      "The job tracker your AI assistant fills in for you — every CV version, every reply, every receipt."
+    );
   });
 
   // Owner, 2026-09-24 — the assistant judges and writes, the USER applies.

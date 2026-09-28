@@ -56,7 +56,17 @@ if TYPE_CHECKING:  # pragma: no cover — type-only; the SDK is lazy-imported at
 logger = get_logger(__name__)
 
 SERVER_NAME = "job360"
+# Owner-approved category line (2026-09-28) — the ONLY positioning sentence in
+# use; do not invent another. Shown to a connecting assistant as the server's
+# `description` (connector directories read this) and repeated as the first
+# line of INSTRUCTIONS, since INSTRUCTIONS is what most clients actually
+# surface to their model.
+CATEGORY_LINE = (
+    "The job tracker your AI assistant fills in for you — every CV version, "
+    "every reply, every receipt."
+)
 INSTRUCTIONS = (
+    CATEGORY_LINE + " "
     "Job360 is the memory of a job hunt AFTER the click: the user brings a job "
     "(they found it themselves — never search for jobs on their behalf), YOU judge "
     "whether it fits and Job360 STORES your verdict, your tailored CV and cover "
@@ -112,6 +122,15 @@ INSTRUCTIONS = (
     "not offer again. If preferences.daily_check is already \"scheduled\" or "
     "\"declined\" (this user answered before, possibly through a different "
     "assistant), never offer again."
+)
+
+# Owner decision, 2026-09-28 — INSTRUCTIONS is only read at connect time, so
+# an assistant connected BEFORE the daily-check offer shipped never sees it.
+# This is the same offer, carried on every `get_profile` result instead, so
+# it reaches a client whatever it connected. See `get_profile`'s docstring.
+ASSISTANT_HINT = (
+    "Offer the user a daily check: run list_applications(due=true) and "
+    "list_applications(quiet_days=7) each morning."
 )
 
 # The user behind the request being served. Set by the ASGI shim per request,
@@ -288,7 +307,7 @@ def build_server(version: str = "") -> MCPServer:
     from src.api.routes import tailor as tailor_route
     from src.services.applications import spine as applications_spine
 
-    mcp = MCPServer(SERVER_NAME, instructions=INSTRUCTIONS, version=version)
+    mcp = MCPServer(SERVER_NAME, description=CATEGORY_LINE, instructions=INSTRUCTIONS, version=version)
 
     def _validation_error(exc: ValidationError) -> Exception:
         problems = "; ".join(
@@ -366,7 +385,14 @@ def build_server(version: str = "") -> MCPServer:
         since changed on the web drops out), and the newest `lessons` the user flagged for next
         time. `raw` keys are empty strings when that input was never given; if
         `raw.truncated` is true, a document was longer than the cap and you are
-        seeing its opening — the full text is on the web profile page."""
+        seeing its opening — the full text is on the web profile page.
+
+        `assistant_hint` (owner decision, 2026-09-28) is a one-line reminder
+        of the daily-check offer above — INSTRUCTIONS only reaches an
+        assistant that connects AFTER it shipped, so this field carries the
+        same offer to every assistant that reads a profile, however old the
+        connection. Always present; read `fields["preferences.daily_check"]`
+        before acting on it, exactly as the offer-once rule above says."""
         # ONE profile read for the whole tool call. `load_profile_response` is
         # the same function `GET /profile` itself is (same 404, same rendering),
         # and it hands back BOTH the UserProfile object and the rendered
@@ -390,6 +416,10 @@ def build_server(version: str = "") -> MCPServer:
         # `{path: current value}` map over every editable path.
         editable_paths = list(profile_edits.editable_paths())
         return {
+            # Owner decision, 2026-09-28 — see ASSISTANT_HINT's own comment
+            # and this tool's docstring: reaches an assistant that connected
+            # before the daily-check offer shipped into INSTRUCTIONS.
+            "assistant_hint": ASSISTANT_HINT,
             "is_complete": s.is_complete,
             "job_titles": s.job_titles,
             # THE one skill list (skill_tiering.profile_skills) — the same
@@ -1181,6 +1211,42 @@ def _declare_tools_list_changed(result: HandlerResult) -> HandlerResult:
     return result
 
 
+class _CaptureFirstToolCall:
+    """Fire `first_tool_call` once per user, ever (owner decision, 2026-09-28).
+
+    Keyed on ``ctx.method == "tools/call"`` — the literal JSON-RPC method a
+    real tool invocation carries (``CallToolRequest.method``), never
+    ``tools/list`` or ``initialize``, so listing tools does not count as
+    using one. The DB claim (`analytics.mark_first_tool_call`) is a single
+    indexed `UPDATE ... RETURNING`, cheap enough to await inline; only the
+    PostHog network call it may trigger is deferred (see `analytics.py`), so
+    this middleware never adds network latency to a tool call, disabled or
+    not.
+
+    Installed unconditionally in `_build_handler` — unlike
+    `_AnnounceToolListChanged`, this has nothing to do with the
+    ``MCP_ANNOUNCE_TOOLS_CHANGED`` feature and must run whether or not that
+    one is on.
+    """
+
+    async def __call__(self, ctx: ServerRequestContext[Any, Any], call_next: CallNext) -> HandlerResult:
+        if ctx.method == "tools/call":
+            user = _current_user.get()
+            if user is not None:
+                await self._capture_once(user.id)
+        return await call_next(ctx)
+
+    async def _capture_once(self, user_id: str) -> None:
+        from src.services import analytics  # noqa: PLC0415
+
+        try:
+            async with _request_db() as db:
+                if await analytics.mark_first_tool_call(db._db, user_id):
+                    analytics.capture_event(user_id, "first_tool_call")
+        except Exception:  # noqa: BLE001 — analytics must never break a tool call
+            logger.debug("analytics_first_tool_call_failed", extra={"user_id": user_id})
+
+
 class _AnnounceToolListChanged:
     """Tell a client that cached an older tool list to fetch it again.
 
@@ -1286,6 +1352,9 @@ def _build_handler(
     from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 
     mcp = build_server(version=version)
+    # Unconditional — unlike _AnnounceToolListChanged, this has nothing to do
+    # with the announce feature and must run whether or not that one is on.
+    mcp.middleware.append(_CaptureFirstToolCall())
     if announce:
         mcp.middleware.append(_AnnounceToolListChanged())
     # Builds the session manager as a side effect; the Starlette app it returns

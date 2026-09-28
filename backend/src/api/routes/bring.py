@@ -44,9 +44,10 @@ from src.core import settings
 from src.core.settings import USER_BROUGHT_SOURCE
 from src.repositories.database import JobDatabase
 from src.services.fetch import outcomes
-from src.utils.logger import get_audit_logger
+from src.utils.logger import get_audit_logger, get_logger
 
 router = APIRouter(tags=["bring"])
+logger = get_logger(__name__)
 
 
 def job_row_to_response(row: dict[str, Any]) -> JobResponse:
@@ -227,6 +228,22 @@ async def bring_job(
             "existing": not inserted, "status": "ok",
         },
     )
+
+    # Owner decision, 2026-09-28 — `first_bring`, once per user, web or MCP:
+    # both surfaces call this one route function, so capturing here (never
+    # duplicated in mcp_server.py) covers both. Never blocks or fails the
+    # bring — see src/services/analytics.py. Guarded the same way
+    # _CaptureFirstToolCall._capture_once is: a drifted DB (missing column)
+    # or a connection blip here must never turn an already-successful bring
+    # into a 500.
+    from src.services import analytics  # noqa: PLC0415
+
+    try:
+        if await analytics.mark_first_bring(db._db, user.id):
+            analytics.capture_event(user.id, "first_bring", {"job_id": job_id})
+    except Exception:  # noqa: BLE001 — analytics must never break a bring
+        logger.debug("analytics_first_bring_failed", extra={"user_id": user.id})
+
     return BringJobResponse(
         job=job_row_to_response(dict(row)),
         existing=not inserted,

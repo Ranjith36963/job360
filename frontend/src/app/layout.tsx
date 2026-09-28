@@ -34,14 +34,18 @@ const jetbrainsMono = JetBrains_Mono({
 // C2 (application-spine review, VISION rule 4) — Job360 never sources or
 // ranks jobs; the meta/OpenGraph/Twitter copy used to advertise a source
 // count and a multi-factor score on every page. Mission copy instead.
-// Owner's positioning line (2026-09-24).
-const TITLE = "Job360 — The shared job-hunt record for your AI assistant";
+// Owner-approved CATEGORY LINE (2026-09-28) — the ONLY positioning sentence
+// in use; do not invent another. Same line as the landing headline
+// (Landing.tsx), the MCP server's own description/INSTRUCTIONS
+// (backend/src/api/mcp_server.py) and the Connect page intro
+// (settings/connect/page.tsx).
+const TITLE = "Job360 — the job tracker your AI assistant fills in for you";
 const TAGLINE =
-  "Context, memory and every version, in one place any assistant can read and write.";
+  "The job tracker your AI assistant fills in for you — every CV version, every reply, every receipt.";
 
 export const metadata: Metadata = {
   title: TITLE,
-  description: `The shared job-hunt record for your AI assistant. ${TAGLINE}`,
+  description: TAGLINE,
   openGraph: {
     title: TITLE,
     description: TAGLINE,
