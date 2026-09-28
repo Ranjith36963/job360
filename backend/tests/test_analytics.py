@@ -181,3 +181,31 @@ async def test_bring_job_captures_first_bring_once_across_two_brings(
             await asyncio.sleep(0)
 
     assert captured == [fixture_user_id], "first_bring must be claimed exactly once, on the FIRST bring"
+
+
+@pytest.mark.asyncio
+async def test_bring_job_survives_a_broken_analytics_claim(
+    authenticated_async_context, monkeypatch
+):
+    """A drifted DB (missing column) or a connection blip in the
+    `mark_first_bring` claim must never turn an already-successful bring
+    into a 500 — the route wraps the call exactly like
+    `_CaptureFirstToolCall._capture_once` does."""
+    from src.services import analytics
+
+    async def _broken_mark(conn, user_id):
+        raise RuntimeError("column \"first_bring_at\" does not exist")
+
+    monkeypatch.setattr(analytics, "mark_first_bring", _broken_mark)
+
+    ad = {
+        "title": "Platform Engineer",
+        "company": "Northwind",
+        "location": "Remote",
+        "apply_url": "https://northwind.example/careers/9",
+        "description": "Kubernetes, Go, Postgres.",
+    }
+    async with authenticated_async_context() as client:
+        resp = await client.post("/api/jobs/bring", json=ad)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["job"]["title"] == "Platform Engineer"
