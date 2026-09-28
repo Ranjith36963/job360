@@ -5,7 +5,7 @@
 landing on the site to closing it. A "full sweep" is not done until every item below is
 exercised (or explicitly marked gated, with the reason) **and** every endpoint in the
 generated route table of [`docs/GENERATED.md`](../../../docs/GENERATED.md) — written from
-the routers, so it cannot omit a surface the way a list here can — is covered too.
+the routers, so separately mounted apps still need their own item — is covered too.
 
 **How to use:** start the full stack (backend + frontend + the dev Postgres),
 register a fresh user, then walk the list top to bottom. Prove each with evidence
