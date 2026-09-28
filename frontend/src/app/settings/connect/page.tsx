@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ChevronDown } from "lucide-react";
+import posthog from "posthog-js";
 
 import {
   createToken,
@@ -176,7 +177,13 @@ function AddressStepCard() {
           <Button
             type="button"
             variant="outline"
-            onClick={() => copyText(url, "Address")}
+            onClick={() => {
+              // Funnel event (owner decision, 2026-09-28): the moment a user
+              // actually starts connecting an assistant, not just visits the
+              // page. No-op unless PostHog has loaded (consent given).
+              posthog.capture("connect_address_copied");
+              copyText(url, "Address");
+            }}
           >
             Copy
           </Button>
@@ -688,6 +695,12 @@ function TokenList({
 // pattern as the raw-CV-text toggle on /profile (CVUpload.tsx) — a plain
 // button + conditional render, not native <details>, so it behaves the same
 // in tests as everywhere else on this site.
+//
+// The "Tested: works" line inside this section is a hand-checked, dated
+// result (2026-09-28), never a live reading: a personal token was created,
+// `claude mcp add … --header 'Authorization: Bearer ${JOB360_TOKEN}'` was run
+// once, and a fresh `claude -p` session listed the user's applications with
+// list_applications.
 // ---------------------------------------------------------------------------
 
 function DeveloperTokensSection({
@@ -722,6 +735,12 @@ function DeveloperTokensSection({
       </button>
       {open && (
         <div data-testid="developer-tokens-content" className="space-y-8 p-4 pt-0">
+          <p
+            className="text-xs text-emerald-600 dark:text-emerald-400"
+            data-testid="developer-tokens-tested"
+          >
+            ✅ Tested: works — Claude Code, 28 September 2026
+          </p>
           {created && (
             <NewTokenReveal created={created} onDismiss={onDismissReveal} />
           )}
@@ -854,10 +873,15 @@ export default function ConnectAgentPage() {
     <div className="space-y-8 py-12">
       <div className="max-w-3xl">
         <h1 className="text-3xl font-semibold">Connect your assistant</h1>
+        {/* Owner-approved CATEGORY LINE (2026-09-28) — the ONLY positioning
+            sentence in use; do not invent another. Same line as the landing
+            headline (Landing.tsx), the <title>/meta description
+            (layout.tsx) and the MCP server's own description/INSTRUCTIONS
+            (backend/src/api/mcp_server.py). */}
         <p className="mt-2 text-muted-foreground">
-          Your AI assistant does the work; Job360 keeps the record. Connect
-          once and it can read your profile, save your CVs and track your
-          applications.
+          The job tracker your AI assistant fills in for you — every CV
+          version, every reply, every receipt. Connect once and it can read
+          your profile, save your CVs and track your applications.
         </p>
       </div>
 

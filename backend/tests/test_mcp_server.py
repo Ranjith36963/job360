@@ -162,6 +162,46 @@ def test_instructions_offer_the_daily_check_once_and_keep_the_guardrails():
     assert '"declined"' in text
 
 
+def test_category_line_is_the_server_description_and_leads_instructions():
+    """Owner-approved category line (2026-09-28) — the ONLY positioning
+    sentence, shown to a connecting assistant two ways: the server's own
+    `description` (connector directories read this) and the first line of
+    `INSTRUCTIONS` (what most clients actually surface to their model)."""
+    pytest.importorskip("mcp")
+    from src.api.mcp_server import CATEGORY_LINE, INSTRUCTIONS, build_server
+
+    assert CATEGORY_LINE == (
+        "The job tracker your AI assistant fills in for you — every CV version, "
+        "every reply, every receipt."
+    )
+    assert INSTRUCTIONS.startswith(CATEGORY_LINE)
+    assert build_server().description == CATEGORY_LINE
+
+
+@pytest.mark.asyncio
+async def test_get_profile_result_carries_the_assistant_hint(authenticated_async_context, fixture_user_id):
+    """Decision (2026-09-28): INSTRUCTIONS is only read at connect time, so an
+    assistant connected BEFORE the daily-check offer shipped never sees it.
+    `assistant_hint` on every `get_profile` RESULT reaches it regardless."""
+    pytest.importorskip("mcp")
+    from src.api import mcp_server
+    from src.services.profile.models import CVData, UserProfile
+    from src.services.profile.storage import save_profile
+
+    save_profile(UserProfile(cv_data=CVData(raw_text="Jane Doe")), fixture_user_id, source_action="cv_upload")
+    async with authenticated_async_context():
+        tool = mcp_server.build_server()._tool_manager.get_tool("get_profile")
+        assert tool is not None
+        mcp_server._current_user.set(mcp_server.CurrentUser(id=fixture_user_id, email="e2e@example.com"))
+        try:
+            result = await tool.fn()
+        finally:
+            mcp_server._current_user.set(None)
+    assert result["assistant_hint"] == mcp_server.ASSISTANT_HINT
+    assert "list_applications(due=true)" in result["assistant_hint"]
+    assert "list_applications(quiet_days=7)" in result["assistant_hint"]
+
+
 @pytest.mark.asyncio
 async def test_bring_then_read_then_record_then_list_round_trip(authenticated_async_context, fixture_user_id):
     from src.api.mcp_server import mcp_runtime

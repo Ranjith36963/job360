@@ -38,8 +38,12 @@ describe("ConnectAgentPage — owner-approved copy", () => {
     expect(
       await screen.findByRole("heading", { name: "Connect your assistant" })
     ).toBeInTheDocument();
+    // Owner-approved CATEGORY LINE (2026-09-28) — the ONLY positioning
+    // sentence in use.
     expect(
-      screen.getByText(/your ai assistant does the work; job360 keeps the record/i)
+      screen.getByText(
+        /the job tracker your ai assistant fills in for you.*every cv version, every reply, every receipt/i
+      )
     ).toBeInTheDocument();
   });
 
@@ -82,6 +86,9 @@ describe("ConnectAgentPage — owner-approved copy", () => {
     fireEvent.click(screen.getByTestId("developer-tokens-toggle"));
     expect(await screen.findByTestId("developer-tokens-content")).toBeInTheDocument();
     expect(within(screen.getByTestId("developer-tokens-content")).getByLabelText("Name")).toBeInTheDocument();
+    expect(screen.getByTestId("developer-tokens-tested")).toHaveTextContent(
+      /tested: works — claude code, 28 september 2026/i
+    );
   });
 
   it("keeps 'MCP'/'bearer token'/'OAuth' out of the visible copy outside the developer section", async () => {

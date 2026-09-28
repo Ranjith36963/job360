@@ -227,6 +227,16 @@ async def bring_job(
             "existing": not inserted, "status": "ok",
         },
     )
+
+    # Owner decision, 2026-09-28 — `first_bring`, once per user, web or MCP:
+    # both surfaces call this one route function, so capturing here (never
+    # duplicated in mcp_server.py) covers both. Never blocks or fails the
+    # bring — see src/services/analytics.py.
+    from src.services import analytics  # noqa: PLC0415
+
+    if await analytics.mark_first_bring(db._db, user.id):
+        analytics.capture_event(user.id, "first_bring", {"job_id": job_id})
+
     return BringJobResponse(
         job=job_row_to_response(dict(row)),
         existing=not inserted,

@@ -628,6 +628,22 @@ URL_FETCH_ALLOW_NETS = _env_list("URL_FETCH_ALLOW_NETS", ())
 # and stops one pathological block from starving the other rungs' budget.
 URL_FETCH_MAX_JSONLD_BYTES = int(os.getenv("URL_FETCH_MAX_JSONLD_BYTES", str(256 * 1024)))
 
+# Owner decision, 2026-09-28 — two funnel events only the backend can see
+# (`first_tool_call`, `first_bring`) fire through `src/services/analytics.py`.
+# The frontend's consent banner (fable/05 C3) stores its choice in the
+# BROWSER only — there is no per-user consent flag in the database for the
+# backend to read — so this is the owner's own opt-in for every user, off by
+# default, not a per-user consent check. Off, every `capture_event` call is a
+# no-op: nothing is sent, nothing is queued.
+ANALYTICS_BACKEND_ENABLED = _env_flag("ANALYTICS_BACKEND_ENABLED", False)
+# The SAME PostHog project the frontend posts to (its keys are
+# NEXT_PUBLIC_POSTHOG_KEY / NEXT_PUBLIC_POSTHOG_HOST, PostHogProviderWrapper.tsx)
+# — env var NAMES only, never hardcoded. Set these to the same values on the
+# backend service so both sides land in one project; an unset key keeps
+# capture_event() a no-op even with ANALYTICS_BACKEND_ENABLED on.
+POSTHOG_PROJECT_API_KEY = _secret("POSTHOG_PROJECT_API_KEY")
+POSTHOG_HOST = os.getenv("POSTHOG_HOST", "https://eu.i.posthog.com").strip().rstrip("/")
+
 
 def validate_required_env() -> None:
     """Raise ``RuntimeError`` if required env vars are missing in production.

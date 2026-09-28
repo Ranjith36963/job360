@@ -117,8 +117,9 @@ test.describe("Landing CTA → profile journeys", () => {
       timeout: 20_000,
     });
     // The nav now carries "Connect your assistant" on every signed-in page, so
-    // assert the landing HERO is absent instead of the link text.
-    await expect(page.getByRole("heading", { name: /shared job-hunt record/i })).toHaveCount(0);
+    // assert the landing HERO is absent instead of the link text. Owner-approved
+    // CATEGORY LINE (2026-09-28) is the current headline.
+    await expect(page.getByRole("heading", { name: /job tracker your ai assistant/i })).toHaveCount(0);
   });
 
   // ── Journey 2: returning user → sign in → /profile ────────────────────────
