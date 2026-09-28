@@ -82,6 +82,9 @@ describe("ConnectAgentPage — owner-approved copy", () => {
     fireEvent.click(screen.getByTestId("developer-tokens-toggle"));
     expect(await screen.findByTestId("developer-tokens-content")).toBeInTheDocument();
     expect(within(screen.getByTestId("developer-tokens-content")).getByLabelText("Name")).toBeInTheDocument();
+    expect(screen.getByTestId("developer-tokens-tested")).toHaveTextContent(
+      /tested: works — claude code, 28 september 2026/i
+    );
   });
 
   it("keeps 'MCP'/'bearer token'/'OAuth' out of the visible copy outside the developer section", async () => {
