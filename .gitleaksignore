@@ -28,3 +28,21 @@
 # Deliberately NOT an allowlist rule or a path exclusion: either would blind the
 # scanner to the next REAL key in this file. This waives one line of one commit.
 e495463b43859d3678d3807dbbdf59be208e449e:backend/tests/test_credentials_are_stripped.py:generic-api-key:101
+
+# THE THREE HISTORICAL FINDINGS BEHIND ISSUE #652 (triaged 2026-09-28).
+#
+# The weekly full-history scan (fetch-depth: 0) had failed every Monday since
+# 2026-08-10 on these same three fingerprints; push/PR scans only see new
+# commits, so they stayed green. None is a live credential:
+#
+# 1. accuracy-audit.yml set a 40-character placeholder as an env value. A real
+#    Fernet key is 44 characters, so it is not a valid key — any channel-crypto
+#    call would have failed on it. The workflow was deleted in slice 5 (#483).
+9b7b81a922c529fcd94642e019d6d4a8ff340b40:.github/workflows/accuracy-audit.yml:generic-api-key:50
+# 2. channels/crypto.py carried a dev/test fallback key for one day (removed in
+#    ab8155a, "fail-closed"); the whole module was deleted in #503, months
+#    before prod went live. Main no longer reads CHANNEL_ENCRYPTION_KEY at all.
+99ef59642739b97d5d035276590190877b443e84:backend/src/services/channels/crypto.py:generic-api-key:25
+# 3. False positive: a Python import line naming `LinkedInResponse, GitHubResponse`
+#    matched the linkedin-client-id rule. No id of any kind; file deleted (d364e9d).
+e0db04e8f28b908a7e3e96e704b35baaca96c5fa:docs/superpowers/plans/2026-04-07-fastapi-backend.md:linkedin-client-id:1076
