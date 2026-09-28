@@ -688,6 +688,12 @@ function TokenList({
 // pattern as the raw-CV-text toggle on /profile (CVUpload.tsx) — a plain
 // button + conditional render, not native <details>, so it behaves the same
 // in tests as everywhere else on this site.
+//
+// The "Tested: works" line inside this section is a hand-checked, dated
+// result (2026-09-28), never a live reading: a personal token was created,
+// `claude mcp add … --header 'Authorization: Bearer ${JOB360_TOKEN}'` was run
+// once, and a fresh `claude -p` session listed the user's applications with
+// list_applications.
 // ---------------------------------------------------------------------------
 
 function DeveloperTokensSection({
@@ -722,6 +728,12 @@ function DeveloperTokensSection({
       </button>
       {open && (
         <div data-testid="developer-tokens-content" className="space-y-8 p-4 pt-0">
+          <p
+            className="text-xs text-emerald-600 dark:text-emerald-400"
+            data-testid="developer-tokens-tested"
+          >
+            ✅ Tested: works — Claude Code, 28 September 2026
+          </p>
           {created && (
             <NewTokenReveal created={created} onDismiss={onDismissReveal} />
           )}
