@@ -36,8 +36,8 @@ e495463b43859d3678d3807dbbdf59be208e449e:backend/tests/test_credentials_are_stri
 # commits, so they stayed green. None is a live credential:
 #
 # 1. accuracy-audit.yml set a 40-character placeholder as an env value. A real
-#    Fernet key is 44 characters, so the app could never have run with it.
-#    The workflow was deleted in slice 5 (#483).
+#    Fernet key is 44 characters, so it is not a valid key — any channel-crypto
+#    call would have failed on it. The workflow was deleted in slice 5 (#483).
 9b7b81a922c529fcd94642e019d6d4a8ff340b40:.github/workflows/accuracy-audit.yml:generic-api-key:50
 # 2. channels/crypto.py carried a dev/test fallback key for one day (removed in
 #    ab8155a, "fail-closed"); the whole module was deleted in #503, months

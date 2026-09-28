@@ -12,6 +12,15 @@ useDefault = true
 [allowlist]
 description = "Known false positives audited and dispositioned"
 
+# The ignore file itself. By construction it holds only fingerprints
+# (<commit>:<path>:<rule-id>:<line>) and reasons, never a credential — but a
+# fingerprint line that names the `linkedin-client-id` rule next to a
+# 40-hex commit sha matches that very rule (PR #653), so the scanner would
+# flag its own waiver list forever. Nothing else is excluded by path.
+paths = [
+  '''(^|/)\.gitleaksignore$''',
+]
+
 regexes = [
   # 80,000 Hours uses a public Algolia search-only key.
   # Algolia issues two key types: admin (secret) and search (public, embedded
