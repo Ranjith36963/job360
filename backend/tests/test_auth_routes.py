@@ -157,8 +157,16 @@ def test_failed_login_logs_only_a_masked_email(client, caplog):
     import logging
 
     client.post("/api/auth/register", json={"email": "victim@example.com", "password": "s3cretpassword"})
-    with caplog.at_level(logging.INFO):
-        r = client.post("/api/auth/login", json={"email": "victim@example.com", "password": "wrongpassword"})
+    # The audit logger is propagate=False once configured anywhere in the run,
+    # so attach caplog to it directly (same as test_observability) — otherwise
+    # this test's result would depend on collection order.
+    audit_logger = logging.getLogger("job360.audit")
+    audit_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.INFO, logger="job360.audit"):
+            r = client.post("/api/auth/login", json={"email": "victim@example.com", "password": "wrongpassword"})
+    finally:
+        audit_logger.removeHandler(caplog.handler)
     assert r.status_code == 401
     logged = [getattr(rec, "email", None) for rec in caplog.records if getattr(rec, "event", None) == "login"]
     assert logged, "the failed login must still be logged"
