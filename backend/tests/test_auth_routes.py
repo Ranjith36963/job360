@@ -151,6 +151,21 @@ def test_login_wrong_password_rejected(client):
     assert r.status_code == 401
 
 
+def test_failed_login_logs_only_a_masked_email(client, caplog):
+    """Owner, 2026-09-28 — the server log keeps enough to spot an attack on
+    one account (first letter + domain) but never the full address."""
+    import logging
+
+    client.post("/api/auth/register", json={"email": "victim@example.com", "password": "s3cretpassword"})
+    with caplog.at_level(logging.INFO):
+        r = client.post("/api/auth/login", json={"email": "victim@example.com", "password": "wrongpassword"})
+    assert r.status_code == 401
+    logged = [getattr(rec, "email", None) for rec in caplog.records if getattr(rec, "event", None) == "login"]
+    assert logged, "the failed login must still be logged"
+    assert "victim@example.com" not in logged
+    assert all(e and e.startswith("v***@example.com") for e in logged)
+
+
 def test_login_happy_path_sets_cookie(client):
     client.post(
         "/api/auth/register",

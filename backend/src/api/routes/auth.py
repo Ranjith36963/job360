@@ -242,7 +242,7 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
     ):
         get_audit_logger().warning(
             "auth",
-            extra={"event": "login", "status": "locked", "email": req.email, **_client_meta(request)},
+            extra={"event": "login", "status": "locked", "email": mask_email(str(req.email)), **_client_meta(request)},
         )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -265,7 +265,7 @@ async def login(req: LoginRequest, response: Response, request: Request) -> User
         auth_rate_limit.record_failure(throttle_key)
         get_audit_logger().warning(
             "auth",
-            extra={"event": "login", "status": "fail", "email": req.email, **_client_meta(request)},
+            extra={"event": "login", "status": "fail", "email": mask_email(str(req.email)), **_client_meta(request)},
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -702,7 +702,7 @@ async def magic_link_request(
             extra={
                 "event": "magic_link_request",
                 "status": "rate_limited",
-                "email": req.email,
+                "email": mask_email(str(req.email)),
                 **_client_meta(request),
             },
         )
@@ -716,7 +716,10 @@ async def magic_link_request(
     )
     get_audit_logger().info(
         "auth",
-        extra={"event": "magic_link_request", "status": "ok", "email": req.email, **_client_meta(request)},
+        extra={
+            "event": "magic_link_request", "status": "ok",
+            "email": mask_email(str(req.email)), **_client_meta(request),
+        },
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
