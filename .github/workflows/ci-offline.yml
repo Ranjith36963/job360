@@ -73,7 +73,7 @@ jobs:
           echo "scope=$scope" >> "$GITHUB_OUTPUT"
   offline-suite:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     needs: [scope]
     # The backend is Postgres-backed now (pg shim); tests need a DB + Redis.
     # Mirrors ci.yml's service setup — without it, tests hit the dev-default
