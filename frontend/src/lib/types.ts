@@ -15,7 +15,6 @@ type Schemas = components["schemas"];
 
 export type BringJobRequest = Schemas["BringJobRequest"];
 export type BringJobResponse = Schemas["BringJobResponse"];
-export type CreateReceiptRequest = Schemas["CreateReceiptRequest"];
 export type CVDetail = Schemas["CVDetail"];
 export type HealthResponse = Schemas["HealthResponse"];
 export type JsonResumeResponse = Schemas["JsonResumeResponse"];

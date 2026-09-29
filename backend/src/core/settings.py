@@ -30,10 +30,7 @@ DATABASE_URL = os.getenv(
 from src.repositories import pg as _pg  # noqa: E402
 
 _pg.configure(DATABASE_URL)
-EXPORTS_DIR = DATA_DIR / "exports"
-REPORTS_DIR = DATA_DIR / "reports"
 LOGS_DIR = DATA_DIR / "logs"
-METRICS_DIR = DATA_DIR / "metrics"
 
 
 def _secret(name: str) -> str:
@@ -534,8 +531,6 @@ PROFILE_EDIT_HISTORY_MAX = int(os.getenv("PROFILE_EDIT_HISTORY_MAX", "50"))
 # Outbound HTTP defaults. Kept through slice 5 (#483) on purpose: the URL
 # fetcher (#496) is the outbound caller now, and it needs a timeout and an
 # honest identifying agent string.
-REQUEST_TIMEOUT = 30
-USER_AGENT = "Job360/1.0 (+https://job360.uk)"
 
 # Sentry error tracking (Phase 3). Empty string → Sentry is disabled (no-op
 # at init time). Populate in production via the SENTRY_DSN env var.

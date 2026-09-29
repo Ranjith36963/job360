@@ -112,12 +112,6 @@ present; the scope decision and the files that made it are in the run summary.
 Per-service install and run instructions: [`backend/README.md`](backend/README.md),
 [`frontend/README.md`](frontend/README.md).
 
-The root `setup.sh` / `setup.bat` are **stale** — both finish by telling you to run
-`python -m src.cli run`, a verb deleted in slice 5 (#483) (`src.cli` registers only
-`api` and `setup-profile`), and both advertise the sourcing-era `REED_API_KEY` /
-`ADZUNA_*` / `JSEARCH_API_KEY`. `setup.sh` adds a `bash cron_setup.sh` step for a
-file that is not in the repo.
-
 ## Where scripts live
 
 Two `scripts/` directories exist by design:
@@ -126,7 +120,7 @@ Two `scripts/` directories exist by design:
   `backend/src/`. Most of it is the CI/harness guard estate (`doc_sync_check.py`,
   `doc_sync_mutation_test.py`, `merge_cage.py`, `ruleset_gate.py`, …), which
   `.github/workflows/` runs directly; the Makefile shells out to
-  `migration_roundtrip.sh`, and `agent-gate.sh` is the commit gate. Add new
+  and `agent-gate.sh` is the commit gate. Add new
   cross-service tooling here, in **either** language. (Measure it, never quote
   it: `ls scripts/*.py | wc -l` / `ls scripts/*.sh | wc -l`.)
 - **`backend/scripts/`** — backend-only Python helpers, run via

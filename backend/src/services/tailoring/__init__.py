@@ -7,7 +7,6 @@ browser cannot do for itself:
 
   - ``docx.py`` / ``pdf.py``  — ATS-friendly rendering of saved text
   - ``provenance.py``        — which lines are grounded in the user's own CV
-  - ``integrity.py``         — proper nouns that match nothing in the source
   - ``patterns.py``          — structure only (no content), the §7 privacy line
 
 ``generator.py`` and ``prompts.py`` were deleted with the tailor's LLM.
