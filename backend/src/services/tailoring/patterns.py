@@ -14,7 +14,6 @@ input.
 from __future__ import annotations
 
 import re
-from collections import Counter
 from typing import Any
 
 _BULLET_RE = re.compile(r"^\s*[-•*•]\s+")
@@ -58,26 +57,3 @@ def derive_patterns(text: str, doc_kind: str) -> dict[str, Any]:
         "avg_words_per_line": round(word_count / len(lines), 1) if lines else 0.0,
     }
 
-
-def summarize_patterns(rows: list[dict[str, Any]], doc_kind: str) -> str:
-    """Aggregate stored pattern dicts into a short prompt-guidance string.
-
-    Used mostly for cold-start (a user with no history of their own). Returns "" when
-    there's nothing learned yet, so the prompt simply omits the section.
-    """
-    rows = [r for r in rows if r.get("doc_kind") == doc_kind]
-    if not rows:
-        return ""
-
-    def _mode(key: str) -> str:
-        c = Counter(str(r.get(key, "")) for r in rows if r.get(key) not in (None, ""))
-        return c.most_common(1)[0][0] if c else ""
-
-    avg_bullet = sum(float(r.get("bullet_ratio", 0)) for r in rows) / len(rows)
-    what = "CV" if doc_kind == "cv" else "cover letter"
-    bullet_hint = "bullet-heavy" if avg_bullet >= 0.3 else "prose-led"
-    return (
-        f"Across {len(rows)} kept {what}s: typical length {_mode('word_band')} words, "
-        f"{_mode('section_count_band')} sections, {bullet_hint}, "
-        f"{_mode('style')} tone. Aim for a similar shape."
-    )

@@ -495,16 +495,6 @@ class JobDatabase:
         row = await cursor.fetchone()
         return self._tailored_row_to_dict(row) if row else None
 
-    async def get_tailored_docs(self, user_id: str, job_id: int) -> list[dict[str, Any]]:
-        cursor = await self._db.execute(
-            """SELECT user_id, job_id, doc_kind, ai_draft, polished, status, model,
-                      profile_version, created_at, updated_at, kept_at, flagged_terms
-               FROM tailored_documents
-               WHERE user_id = ? AND job_id = ? ORDER BY doc_kind""",
-            (user_id, job_id),
-        )
-        return [self._tailored_row_to_dict(r) for r in await cursor.fetchall()]
-
     async def save_tailored_polished(
         self, user_id: str, job_id: int, doc_kind: str, polished: str
     ) -> dict[str, Any] | None:
@@ -516,49 +506,6 @@ class JobDatabase:
         )
         await self._db.commit()
         return await self.get_tailored_doc(user_id, job_id, doc_kind)
-
-    async def keep_tailored_doc(self, user_id: str, job_id: int, doc_kind: str) -> dict[str, Any] | None:
-        """Mark KEPT (finalized/downloaded/used) — the only status we learn from (§5)."""
-        now = datetime.now(timezone.utc).isoformat()
-        await self._db.execute(
-            """UPDATE tailored_documents SET status = 'kept', kept_at = ?, updated_at = ?
-               WHERE user_id = ? AND job_id = ? AND doc_kind = ?""",
-            (now, now, user_id, job_id, doc_kind),
-        )
-        await self._db.commit()
-        return await self.get_tailored_doc(user_id, job_id, doc_kind)
-
-    async def count_tailored_usage_month(self, user_id: str) -> int:
-        """Generations this calendar month — the quota gate counter (guardrail #1)."""
-        start = datetime.now(timezone.utc).replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        ).isoformat()
-        cursor = await self._db.execute(
-            "SELECT COUNT(*) FROM tailored_usage WHERE user_id = ? AND created_at >= ?",
-            (user_id, start),
-        )
-        row = await cursor.fetchone()
-        return int(row[0]) if row and row[0] is not None else 0
-
-    async def record_tailored_usage(self, user_id: str, job_id: int) -> None:
-        now = datetime.now(timezone.utc).isoformat()
-        await self._db.execute(
-            "INSERT INTO tailored_usage (user_id, job_id, created_at) VALUES (?, ?, ?)",
-            (user_id, job_id, now),
-        )
-        await self._db.commit()
-
-    async def get_user_kept_docs(self, user_id: str, doc_kind: str, limit: int = 3) -> list[str]:
-        """Layer 2 (per-user, §6): the user's recent KEPT polished docs of this kind —
-        few-shot 'write like me' examples. Only KEPT docs (§5 learn-from-kept-only)."""
-        cursor = await self._db.execute(
-            """SELECT polished FROM tailored_documents
-               WHERE user_id = ? AND doc_kind = ? AND status = 'kept'
-                 AND polished IS NOT NULL AND polished != ''
-               ORDER BY kept_at DESC LIMIT ?""",
-            (user_id, doc_kind, limit),
-        )
-        return [r[0] for r in await cursor.fetchall() if r[0]]
 
     async def record_tailoring_pattern(self, doc_kind: str, features_json: str) -> None:
         """Layer 1 (universal, §6): store a privacy-scrubbed pattern — NO user_id/content."""

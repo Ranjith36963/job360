@@ -15,7 +15,7 @@ function barColor(score: number): string {
 
 /**
  * The fit picture — STORED, never computed by Job360 (VISION rule 4). Shows
- * the agent's saved fit verdict (same data `FitPanel` shows) alongside which
+ * the agent's saved fit verdict alongside which
  * of the user's own profile skills occur in the ad text. Job360 draws what
  * it stores; it does not judge.
  */

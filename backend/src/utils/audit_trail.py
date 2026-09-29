@@ -46,7 +46,6 @@ _STD_RECORD_ATTRS = frozenset(vars(logging.makeLogRecord({})).keys()) | {
 
 # extras promoted to real columns; the remainder (minus the PII denylist) goes
 # into the JSON ``detail`` column.
-_COLUMN_EXTRAS = ("event", "status", "user_id", "client_ip", "user_agent")
 _DETAIL_DENYLIST = frozenset({"email"})
 
 _queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=10_000)

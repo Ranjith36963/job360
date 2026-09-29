@@ -7,7 +7,6 @@ import type { components } from "./api-types";
 import type {
   BringJobRequest,
   BringJobResponse,
-  CreateReceiptRequest,
   HealthResponse,
   JsonResumeResponse,
   PreferencesRequest,
@@ -359,10 +358,6 @@ export async function confirmEmailVerification(token: string): Promise<void> {
   });
 }
 
-export async function getEmailVerified(): Promise<{ email_verified: boolean }> {
-  return await request<{ email_verified: boolean }>("/api/auth/me/email-verified");
-}
-
 // ---- Step-3: Account management ----
 
 export async function changePassword(
@@ -441,15 +436,6 @@ export async function saveTailored(
   });
 }
 
-export async function keepTailored(
-  jobId: number,
-  kind: TailorDocKind
-): Promise<TailoredDocOut> {
-  return request<TailoredDocOut>(`/api/tailor/${jobId}/${kind}/keep`, {
-    method: "POST",
-  });
-}
-
 export type TailorFormat = "pdf" | "docx";
 
 /** Relative path for the download endpoint (GET also marks the doc kept). */
@@ -524,19 +510,6 @@ export async function fetchJobUrl(url: string): Promise<FetchUrlResponse> {
   return request<FetchUrlResponse>("/api/jobs/fetch-url", {
     method: "POST",
     body: JSON.stringify({ url }),
-  });
-}
-
-/** "I applied": freeze the job + the CV/cover letter as sent. Append-only. */
-export async function createReceipt(
-  jobId: number,
-  // Both fields have backend defaults; the generated type marks them required.
-  body: Partial<CreateReceiptRequest> = {}
-): Promise<Receipt> {
-  return request<Receipt>(`/api/receipts/${jobId}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
   });
 }
 
@@ -633,7 +606,6 @@ export type ApplicationEvent = _Schemas["ApplicationEventOut"];
 export type ApplicationArtifact = _Schemas["ApplicationArtifactOut"];
 export type ApplicationArtifactRow = _Schemas["ApplicationArtifactRowOut"];
 export type ApplicationReceiptEntry = _Schemas["ApplicationReceiptOut"];
-export type ApplicationJobSnapshot = _Schemas["ApplicationJobOut"];
 export type ApplicationFit = _Schemas["ApplicationFitOut"];
 export type ApplicationDetail = _Schemas["ApplicationDetailOut"];
 
@@ -747,26 +719,6 @@ export async function getArtifactDiff(
   return request(`/api/applications/${applicationId}/artifacts/${artifactId}/diff${query}`);
 }
 
-export async function saveApplicationArtifact(
-  applicationId: number,
-  body: { kind: string; text: string; label?: string; model?: string }
-): Promise<_Schemas["SaveArtifactResponse"]> {
-  return request(`/api/applications/${applicationId}/artifacts`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-export async function saveApplicationFit(
-  applicationId: number,
-  body: { score?: number; verdict?: string; gaps?: string[]; reasoning?: string }
-): Promise<_Schemas["SaveFitResponse"]> {
-  return request(`/api/applications/${applicationId}/fit`, {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
-}
-
 // ---- Visa / sponsorship signal (slice 7, #514) ----
 // docs/plans/2026-09-11-visa-signal/spec.md — the human door at the browser
 // (PUT /applications/{id}/visa); an agent uses save_fit / bring_job instead.
@@ -820,15 +772,6 @@ export async function recordApplicationReceipt(
 }
 
 export type WhatsNewResponse = _Schemas["WhatsNewResponse"];
-export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
-export type WhatsNewApplication = _Schemas["WhatsNewApplicationOut"];
-
-export async function getWhatsNew(
-  params: { since?: string; after_id?: number; limit?: number } = {}
-): Promise<WhatsNewResponse> {
-  return request(`/api/whats-new${qs(params as Record<string, unknown>)}`);
-}
-
 /** Add a person to an application (spec R1/R2). 201 for a new row, 200
  * (`already_existed: true`) for the same non-empty email seen again on this
  * application — the caller reads the status from the response body, not the
@@ -854,22 +797,6 @@ export async function addContact(
 // A person can be linked to a job or to none (cold networking); Job360
 // remembers every message version, who/when/channel, sent, reply.
 
-export type OutreachEntry = _Schemas["OutreachEntryOut"];
-
-/** A person with no job yet — cold networking. Same idempotency rules as
- *  `addContact`, scoped to the user instead of an application. */
-export async function addPerson(body: {
-  name: string;
-  application_id?: number;
-  role?: string;
-  email?: string;
-  linkedin_url?: string;
-  notes?: string;
-  occurred_at?: string;
-}): Promise<AddContactResult> {
-  return request(`/api/contacts`, { method: "POST", body: JSON.stringify(body) });
-}
-
 /** Correct a contact's own details — the OLD value is kept, never lost
  *  (the response's `edit_history` shows every value with who/when). */
 export async function updateContact(
@@ -877,28 +804,4 @@ export async function updateContact(
   body: { name?: string; role?: string; email?: string; linkedin_url?: string; notes?: string }
 ): Promise<Contact> {
   return request(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify(body) });
-}
-
-/** Draft/sent/reply for one person — the same door save_artifact/record_event
- *  use internally for a linked contact; this is the ONLY door for a cold one. */
-export async function recordOutreach(
-  contactId: number,
-  body: {
-    entry: "message" | "sent" | "reply";
-    channel: "linkedin" | "email" | "other";
-    text?: string;
-    occurred_at?: string;
-    follow_up_on?: string;
-  }
-): Promise<_Schemas["RecordOutreachResponse"]> {
-  return request(`/api/contacts/${contactId}/outreach`, { method: "POST", body: JSON.stringify(body) });
-}
-
-export type Person = _Schemas["PersonOut"];
-export type PersonFull = _Schemas["PersonFullOut"];
-
-export async function listPeople(
-  params: { contact_id?: number; email?: string } = {}
-): Promise<_Schemas["ListPeopleResponse"]> {
-  return request(`/api/people${qs(params as Record<string, unknown>)}`);
 }

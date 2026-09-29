@@ -41,11 +41,3 @@ def hash_token(raw: str) -> str:
     """
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-
-def constant_time_equals(a: str, b: str) -> bool:
-    """``secrets.compare_digest`` wrapper for symmetry with ``verify_password``.
-
-    Used when comparing two hashes (both already SHA256'd). Constant-time so
-    timing side channels can't peek at the prefix.
-    """
-    return secrets.compare_digest(a, b)
