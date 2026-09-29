@@ -46,7 +46,7 @@ not fired (needs external service or sample data) · `GATED` = needs infra not p
 - [ ] 18. Profile save bumps the version — `GET /profile/versions` count grows; no other side effect (nothing is re-scored any more)
 
 ## D. Bring a job (the product path)
-- [ ] 19. Bring a job → `POST /api/jobs/bring` (title, company, description) 201; response carries `application_id` + `status`, a `jobs` row AND an `applications` row land
+- [ ] 19. Bring a job → `POST /api/jobs/bring` — the whole contract (status code, `application_id`, `status`, the `jobs` row, the `applications` row) is `backend/tests/test_bring_a_job.py::test_bring_stores_the_ad_and_births_the_application`
 - [ ] 20. Same ad twice → second `POST /api/jobs/bring` returns `existing: true` and the SAME `job_id` (dedup on `normalized_key()`)
 - [ ] 21. Bring page UI — `/bring` form submits and lands on `/applications/{id}`
 - [ ] 22. Applications list → `GET /api/applications` (user cookie) returns ONLY the caller's applications

@@ -17,8 +17,6 @@ The countable facts — migration head, route and endpoint counts, test-file cou
 
 ## Directory Structure
 
-> **Post-Phase-4 layout** (commit `a814ae8`, 2026-03-XX): `config/` → `core/`, `filters/` + `notifications/` + `profile/` → `services/{...}`, `storage/` → `repositories/`. The old paths in earlier docs no longer exist.
-
 ```
 job360/
 ├── backend/

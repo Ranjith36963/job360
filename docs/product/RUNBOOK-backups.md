@@ -6,13 +6,10 @@
 > **Read this BEFORE you need it** — an untested restore is not a backup.
 
 ## What the backup is (so restore makes sense)
-The nightly `db-backup` workflow does, in order:
-1. `pg_dump --no-owner --no-privileges "$DATABASE_URL" > dump.sql` (plain SQL).
-2. **Verifies** it by restoring into a throwaway Postgres. Only two gates are enforced: `users >= 1` and `count(_schema_migrations) >= 20`. **`jobs` is printed, never asserted** — an empty `jobs` table alone does NOT fail the job, though an otherwise-empty restore still trips the two gates above.
-3. `gzip` → `gpg --symmetric --cipher-algo AES256 --passphrase $BACKUP_PASSPHRASE` → `job360-<TIMESTAMP>.sql.gz.gpg`.
-4. `aws s3 cp` the encrypted file to `s3://$R2_BUCKET/` (Cloudflare R2, S3-compatible), keeping the newest ~30.
 
-So a stored object is: **gzip-compressed plain-SQL dump, AES256-encrypted**. R2 only ever holds ciphertext. It contains user PII (emails, CVs) — handle the decrypted file carefully and delete it when done.
+A stored object is a **plain-SQL `pg_dump` (`--no-owner --no-privileges`), gzipped, then AES256-encrypted with gpg**: `job360-<TIMESTAMP>.sql.gz.gpg` in Cloudflare R2. R2 only ever holds ciphertext. It contains user PII (emails, CVs) — handle the decrypted file carefully and delete it when done.
+
+What the nightly job asserts about the restored dump before it encrypts and uploads is the step bodies of `.github/workflows/db-backup.yml`. Read them there.
 
 ## What you need to restore
 All are GitHub repo secrets (Settings → Secrets → Actions) — copy their values locally:
