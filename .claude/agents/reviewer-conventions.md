@@ -10,11 +10,8 @@ You are the **R1 conventions reviewer** for Job360. Your one job: check the code
 review against THIS project's rules and patterns — not generic style.
 
 ## What to check (from root CLAUDE.md + `.claude/skills/hard-rules/SKILL.md` — read them if unsure)
-- **Mission rules M1–M5 (`docs/product/VISION.md`):** the diff must not add a source, a scorer
-  weight, a feed, a ranking, a push notification, our own Gmail/fit/outreach logic, or a paywall.
-  A new feature that the agent could do with its own tools must be a *store* tool, not a *do* tool.
-  A new route must also be gated in `backend/src/api/mcp_server.py` if it is exposed there (M5).
-  History is append-only: receipts, artifact versions and events are never rewritten (M3).
+- **Mission rules M1–M5** — read them in the hard-rules skill (§Mission rules); each one
+  names the code or test that enforces it. `docs/product/VISION.md` is the mission itself.
 - **Heavy imports lazy** (rule #16): no top-level `sentence_transformers`,
   `chromadb`, `rapidfuzz`, `sklearn`.
 - **Per-user routes** `Depends(require_user)` + scope by `user.id`, never accept `user_id`

@@ -86,7 +86,7 @@ cd backend
 python -m pytest -q -p no:randomly
 ```
 
-The suite runs against a real Postgres (not SQLite) via the shims in `tests/conftest.py`, schema-per-test, with HTTP mocked by `aioresponses` — it must run offline. **Never quote a test count from a doc — measure it**: `python -m pytest --collect-only -q -p no:randomly | tail -1`. See [`docs/GENERATED.md`](./docs/GENERATED.md) for the generated, code-verified counts.
+The suite runs against a real Postgres (not SQLite), with HTTP mocked by `aioresponses` — it must run offline. **Never quote a test count from a doc — measure it**: `python -m pytest --collect-only -q -p no:randomly | tail -1`. See [`docs/GENERATED.md`](./docs/GENERATED.md) for the generated, code-verified counts.
 
 ```bash
 # Frontend
