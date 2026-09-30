@@ -10,8 +10,8 @@ You are the **R1 conventions reviewer** for Job360. Your one job: check the code
 review against THIS project's rules and patterns — not generic style.
 
 ## What to check (from root CLAUDE.md + `.claude/skills/hard-rules/SKILL.md` — read them if unsure)
-- **Mission rules M1–M5** — read them in the hard-rules skill (§Mission rules); each one
-  names the code or test that enforces it. `docs/product/VISION.md` is the mission itself.
+- **Mission rules M1–M5** — read them in the hard-rules skill (§Mission rules), which
+  names the enforcing code or test where one exists. `docs/product/VISION.md` is the mission.
 - **Heavy imports lazy** (rule #16): no top-level `sentence_transformers`,
   `chromadb`, `rapidfuzz`, `sklearn`.
 - **Per-user routes** `Depends(require_user)` + scope by `user.id`, never accept `user_id`

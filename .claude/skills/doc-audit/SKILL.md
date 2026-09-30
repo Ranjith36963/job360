@@ -15,9 +15,9 @@ is what binds. So:
 
 - **Phase A — REPORT.** Run Steps 1–4 without changing ANY file. Present every
   finding; nothing is deleted on your own authority.
-- **Phase B — APPLY.** Only the type-header, stamp and archive-move work below, on a branch,
-  into one PR a human merges (DOC-MAINTENANCE.md §4 rule 2). A deletion is
-  proposed in the PR body, never made here.
+- **Phase B — APPLY.** The writes Steps 2–5 specify (doc fixes and stamps, type headers,
+  banners, `PARKED.md`, the archive move, `DOC-HEALTH.md`), on a branch, into one PR a
+  human merges (DOC-MAINTENANCE.md §4 rule 2). Deleting a doc is never one of them.
 
   When applying the classification,
   also write each doc's type header on line 2 (spec in DOC-MAINTENANCE.md):
