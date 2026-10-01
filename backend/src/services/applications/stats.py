@@ -197,6 +197,9 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
             ) AS cv_profile_version
         FROM applications a
         LEFT JOIN application_events e ON e.application_id = a.id AND e.user_id = a.user_id
+            -- A corrects_event_id note retracts its target (status.py drops it
+            -- too) — a retracted apply/interview must never be counted.
+            AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id)
         WHERE {where_sql}
         GROUP BY a.id, a.job_title, a.user_id
         ORDER BY a.id DESC
