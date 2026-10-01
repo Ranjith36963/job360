@@ -76,20 +76,13 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 
 ## The agent surface (MCP + same REST)
 
-| Tool | Does |
-|---|---|
-| `get_profile` / `update_profile` | structured candidate context; agent may fix or add fields |
-| `bring_job` | link or text → Application (status `considering`) |
-| `get_application` / `list_applications` | full object with events and artifact versions |
-| `save_artifact` | new version of cv / cover_letter / answers / outreach |
-| `save_fit` | agent's verdict + gaps on this application |
-| `add_contact` | recruiter / hiring manager on this application |
-| `record_event` | typed event, free-text detail |
-| `record_application` | the receipt — what was actually sent |
-| `whats_new` | everything since a timestamp (replaces push for now) |
-| `export_history` | applications + events + versions + outcomes as clean JSON |
-| `stats` | cheap counts: reply / interview rate per CV version, per role |
-| `get_tailored_documents` | the newest saved CV / cover letter — **we write neither** (decision 28); the agent writes them and saves them with `save_artifact`, the web renders DOCX / PDF from the saved text |
+The tools are the `@mcp.tool()` functions in `backend/src/api/mcp_server.py` —
+read the list and each tool's own description there; a slice adds tools, so a
+table here goes stale the moment one does. Every tool is a **store** door, not
+a **do** door (rule 5): Job360 writes nothing an agent could write itself —
+`get_tailored_documents` returns the newest CV / cover letter the agent saved
+with `save_artifact`, and the web renders DOCX / PDF from that saved text; we
+write neither (decision 28).
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
 `api/routes/well_known.py`), with personal `j360_…` tokens as the CLI fallback.
