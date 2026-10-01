@@ -191,6 +191,25 @@ async def test_a_corrected_or_duplicate_event_still_counts_once(authenticated_as
         assert overall["applied"] == 1 and overall["offer"] == 1
 
 
+@pytest.mark.asyncio
+async def test_an_event_superseded_by_a_correction_is_not_counted(authenticated_async_context):
+    """A `corrects_event_id` note retracts its target — status already drops it,
+    so stats must too, or the counts claim an apply/interview the user unsaid."""
+    async with authenticated_async_context() as client:
+        a = await _bring(client, _AD)
+        ids = {}
+        for event_type in ("applied", "interview_requested"):
+            resp = await client.post(f"/api/applications/{a}/events", json={"event_type": event_type})
+            assert resp.status_code == 201, resp.text
+            ids[event_type] = int(resp.json()["event_id"])
+        for target in ids.values():
+            await _event(client, a, "note", corrects_event_id=target, detail="not real")
+        overall = (await _stats(client)).json()["overall"]
+        assert overall["brought"] == 1
+        assert overall["applied"] == 0 and overall["interview"] == 0
+        assert overall["interview_rate"] is None
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # R6 — grouping by CV label and by role
 # ═══════════════════════════════════════════════════════════════════════════
