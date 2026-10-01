@@ -97,11 +97,11 @@ If the suite was green before your change and is red after, your change is the
 regression — fix it, do not merge around it.
 
 **CI runs only the steps your diff needs.** Which scope (`docs` / `frontend` /
-`full`) a path earns, and which frontend paths are deploy-shaped enough to force
-`full`, is `scripts/ci_scope.kind_of` — read it there rather than guessing from a
-list, and never assume your file took the fast lane. Job names never change, so
-the required checks are always present; the scope decision and the files that
-made it are in the run summary.
+`full`) one path earns is `scripts/ci_scope.kind_of`; how a whole changeset
+resolves — most restrictive wins, unknown is not safe — is `ci_scope.classify`.
+Read them there rather than guessing from a list, and never assume your file took
+the fast lane. Job names never change, so the required checks are always present;
+the scope decision and the files that made it are in the run summary.
 
 ## Local setup
 
