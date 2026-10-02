@@ -17,15 +17,23 @@ if [ -n "${GITHUB_ACTIONS:-}${CI:-}" ]; then exit 0; fi
 # down is nobody's job at the moment it is learned.
 #
 # WHAT: at the end of a substantial session, asks the model ONE question — did you
-# learn anything that contradicts CLAUDE.md? — and tells it to APPEND a <=5-line
-# proposal to docs/harness/maintenance/claude-md-proposals.md. Nothing else.
+# learn anything that contradicts CLAUDE.md? — and tells it to FILE the proposal as a
+# GitHub ISSUE (label `claude-md-drift`). If `gh` is missing or fails it falls back to
+# APPENDING a <=5-line entry to the gitignored local inbox. Nothing else.
+#
+# WHO READS IT: `.github/workflows/claude-md-apply.yml` (weekly + manual) collects the
+# open `claude-md-drift` issues authored by the owner, has a capped Sonnet agent VERIFY
+# each claim against the repo, and opens ONE PR touching CLAUDE.md only. CLAUDE.md is in
+# the human-only merge lane, so the owner merges it. The local inbox is the fallback
+# only; nothing reads it automatically.
 #
 # WHY APPEND-ONLY, NEVER AN EDIT: ~6 Claude Code sessions and up to 14 worktrees run
 # in parallel on this repo, and cross-session file clobbering has already happened
 # three times (see memory: feedback-one-session-per-branch, and the
 # fix/restore-clobbered-by-pr44 cleanup). Concurrent APPENDS to a scratch file are
-# conflict-free; concurrent EDITS to CLAUDE.md are not. One designated session
-# applies the accumulated proposals to CLAUDE.md in batch, via PR.
+# conflict-free; concurrent EDITS to CLAUDE.md are not. Issues are the same idea with
+# shared state: filing one never touches a file. The weekly workflow applies the
+# accepted proposals to CLAUDE.md in batch, via PR.
 # ==> THIS SCRIPT MUST NEVER WRITE TO CLAUDE.md, AND MUST NEVER TELL THE MODEL TO.
 #
 # CONTRACT (verified against the shipped binary, not from memory —
@@ -94,9 +102,9 @@ marker="$state_dir/$session"
 [ -e "$marker" ] && exit 0
 find "$state_dir" -type f -mtime +7 -delete 2>/dev/null || true
 
-# Per-session, GITIGNORED inbox. Concurrent sessions never touch the same file and
-# no worktree is ever dirtied. A designated session collates the inbox into $LEDGER
-# and applies the accepted entries to CLAUDE.md in one PR.
+# FALLBACK ONLY (when `gh` is unavailable or fails). Per-session, GITIGNORED inbox:
+# concurrent sessions never touch the same file and no worktree is ever dirtied.
+# The primary path is a GitHub issue; see REASON below.
 INBOX="docs/maintenance/inbox/claude-md-$session.md"
 mkdir -p "$root/docs/maintenance/inbox" 2>/dev/null || exit 0
 
@@ -127,14 +135,27 @@ MISSING from CLAUDE.md? Only hard, checkable drift counts:
 IF NO -> do NOTHING. Write no file, run no command, and do not mention this check in
 your reply. Silence is the correct and expected outcome most of the time.
 
-IF YES -> APPEND (never overwrite, never reorder) one entry of AT MOST 5 LINES to
-$INBOX , exactly in this shape:
+IF YES -> file ONE proposal as a GitHub ISSUE (shared state, no file conflicts).
+Write the body to a temp file first (for example /tmp/claude-md-drift-$session.md),
+AT MOST 5 LINES, exactly this shape:
 
 ### $today — <short topic>
 - CLAIM: \"<the wrong line, quoted from CLAUDE.md>\"
 - ACTUALLY: <what is true>
 - EVIDENCE: <file:line, or the command you ran + its result>
 - REPLACE WITH: \"<the exact replacement line for CLAUDE.md>\"
+
+Then, in order:
+  1. gh label create claude-md-drift --color 0E8A16 --description \"Proposed CLAUDE.md correction\" 2>/dev/null || true
+  2. DEDUPE: gh issue list --label claude-md-drift --state open --search \"<topic> in:title\"
+     If an open issue already covers the same drift, add your body to it instead:
+       gh issue comment <number> --body-file <tmpfile>
+     and stop.
+  3. Otherwise: gh issue create --title \"CLAUDE.md drift: <short topic>\" --label claude-md-drift --body-file <tmpfile>
+  4. FALLBACK — only if gh is not installed, not logged in, or step 3 failed: APPEND
+     (never overwrite, never reorder) the SAME entry to
+       $INBOX
+     and say nothing more about it.
 
 Only propose drift you actually VERIFIED this session with a file read or a command.
 Skip anything you merely suspect — an unverified proposal is worse than no proposal.
@@ -143,12 +164,13 @@ session most.
 
 HARD RULE — DO NOT EDIT CLAUDE.md. Not one character. About 6 sessions and up to 14
 worktrees run in parallel on this repo and have already clobbered each other three
-times. Appends are conflict-free; edits are not. A designated session applies these
-proposals to CLAUDE.md in batch via PR. Your job here ends at the append.
+times. Issues are conflict-free; edits are not. A weekly workflow verifies each
+proposal and applies the good ones to CLAUDE.md via PR. Your job here ends at filing
+the issue (or the fallback append).
 
 Then stop. This check will not fire again in this session."
 
-SYSMSG="CLAUDE.md drift check (once per session) — proposals go to $INBOX, CLAUDE.md is never edited by the hook."
+SYSMSG="CLAUDE.md drift check (once per session) — proposals are filed as GitHub issues (label claude-md-drift); fallback inbox: $INBOX. CLAUDE.md is never edited by the hook."
 
 if command -v jq >/dev/null 2>&1; then
   jq -n --arg r "$REASON" --arg m "$SYSMSG" \
