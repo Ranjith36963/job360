@@ -362,6 +362,18 @@ REGISTRY: dict[str, Guard] = {
         no_negative="its drill already spends ~300 bash -n spawns a pass; a negative doubles the slowest "
                       "drill here, so it waits for a cheaper one",
     ),
+    "scripts/check_job_result_routing.py": Guard(
+        status="drilled",
+        # FC-001 (docs/harness/FAILURE_CATALOG.md): a `case`/`if-elif` over a
+        # `needs.<job>.result` with no catch-all lets cancelled/skipped fall
+        # through to a green no-op. Drill: one bad case, one bad if-chain, one
+        # clean file. Also verified against the real buggy PR #679 commit c40c58b
+        # (2 findings, exit 1) and the fixed 18e890c (exit 0).
+        drill=[sys.executable, "scripts/check_job_result_routing.py", "--drill"],
+        # NEGATIVE CONTROL: blinds the case check, so the drill must FAIL.
+        # Verified exit 1 on the commit that added this line.
+        negative=[sys.executable, "scripts/check_job_result_routing.py", "--drill", "--break-checker", "CASE"],
+    ),
     "scripts/ci_scope.py": Guard(
         status="drilled",
         # Decides `docs` / `frontend` / `full` for a PR so ci.yml and

@@ -64,7 +64,28 @@ print(json.dumps({'systemMessage': '[quality-gate] GAVE UP after ' + sys.argv[1]
 fi
 
 FILES="$(printf '%s\n' "$CHANGED" | awk '{print $NF}' | head -15 | tr '\n' ' ')"
+
+# DIAGNOSE BEFORE PRESCRIBING (failure class FC-003, docs/harness/FAILURE_CATALOG.md).
+# An UNTRACKED file nobody has touched for STRAY_HOURS is not "your unproven code":
+# it is a stray left by an earlier run (2026-10-02: a 5-day-old TEMPORARY e2e spec
+# blocked every stop of a session that never touched frontend/). Prescribing
+# `git add -A` for it is the wrong medicine — it ships the stray inside an
+# unrelated PR. So name strays separately and give them their own cure.
+STRAY_HOURS="${JOB360_QUALITY_GATE_STRAY_HOURS:-12}"
+NOW="$(date +%s)"
+STRAYS=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  m="$(stat -c %Y -- "$f" 2>/dev/null)" || continue
+  age=$(( (NOW - m) / 3600 ))
+  [ "$age" -ge "$STRAY_HOURS" ] && STRAYS="${STRAYS}${f} (untouched ${age}h); "
+done < <(git ls-files --others --exclude-standard -- backend frontend 2>/dev/null)
+
 STEPS=""
+if [ -n "$STRAYS" ]; then
+  STEPS="${STEPS}
+- STRAY FILES FIRST [FC-003]: ${STRAYS}- untracked and untouched for ${STRAY_HOURS}h+, so almost certainly NOT this session's work. Read each one, then move it OUT of the tree (e.g. into \$CLAUDE_JOB_DIR/tmp) or delete it if it says it is temporary. Do NOT \`git add\` it into your PR. Then re-check what is left."
+fi
 if [ "$GATE_OK" != 1 ]; then
   STEPS="${STEPS}
 - TESTS: run \`git add -A -- backend frontend\`, THEN (as a separate command) \`bash scripts/agent-gate.sh\`, and fix every failure until it prints PASS. Run them as two calls: a chained \`&&\` needs a human approval, these two exact commands do not."
