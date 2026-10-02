@@ -381,9 +381,11 @@ jobs:
 
           for names, _breaks in missing:
               print("::error::required secret missing: " + " or ".join(names))
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write(f"missing={len(missing)}\n")
+          Path("missing-count.txt").write_text(str(len(missing)), encoding="utf-8")
           PY
+          # Written from shell, not Python, so scripts/chain_check.py can see
+          # the producer of this wire (it reads `echo ... >> $GITHUB_OUTPUT`).
+          echo "missing=$(cat missing-count.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Raise it, and hand it to triage
         if: always() && steps.check.outputs.missing != ''
