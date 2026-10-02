@@ -1431,6 +1431,9 @@ jobs:
                 mode=verify-failed
                 # The verify job refused to upload because its output looked like a secret.
                 if [ "$VERIFY_SECRET" = "true" ]; then mode=secret-blocked; fi ;;
+              # cancelled (a timeout-minutes hit or a manual cancel) or skipped.
+              # Never fall through to `none`: the attempt is already spent.
+              *) mode=incomplete ;;
             esac
           elif [ "$FIX_RESULT" = "success" ]; then
             mode=park
@@ -1438,6 +1441,9 @@ jobs:
             mode=fix-failed
             # The fix job refused to upload because its output looked like a secret.
             if [ "$FIX_SECRET" = "true" ]; then mode=secret-blocked; fi
+          else
+            # fix was cancelled / timed out / skipped. Same rule: say so loudly.
+            mode=incomplete
           fi
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "ship job mode: $mode" >> "$GITHUB_STEP_SUMMARY"
@@ -1552,11 +1558,13 @@ jobs:
 
       # ── FAIL LOUDLY. Every real failure says so on the issue. ──────────────
       - name: Report that the fix could not finish
-        if: steps.route.outputs.mode == 'fix-failed' || steps.route.outputs.mode == 'verify-failed' || steps.route.outputs.mode == 'secret-blocked'
+        if: steps.route.outputs.mode == 'fix-failed' || steps.route.outputs.mode == 'verify-failed' || steps.route.outputs.mode == 'secret-blocked' || steps.route.outputs.mode == 'incomplete'
         env:
           GH_TOKEN: ${{ github.token }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           MODE: ${{ steps.route.outputs.mode }}
+          FIX_RESULT: ${{ needs.fix.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
         run: |
           set -euo pipefail
           viol="$RUNNER_TEMP/fixres/cage-violations.txt"
@@ -1576,6 +1584,11 @@ jobs:
               echo
               echo "The fix needed files a machine may not decide (the cage refused them, nothing was pushed):"
               head -c 2000 "$viol" | tr -cd '[:print:]\n' | tr '\140' "'" | sed 's/^/- /'
+            fi
+            if [ "$MODE" = "incomplete" ]; then
+              echo
+              # Runner-set job results only (success/failure/cancelled/skipped) - no agent text.
+              echo "A job did not finish (fix: \`$FIX_RESULT\`, verify: \`$VERIFY_RESULT\`) - usually a timeout or a cancelled run. Nothing was pushed."
             fi
             if [ "$MODE" = "verify-failed" ]; then
               echo

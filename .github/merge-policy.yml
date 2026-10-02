@@ -114,6 +114,7 @@ version: 1
 #   ci        every required check on the PR is green         (GitHub check runs)
 #   review    CodeRabbit left no unresolved blocking thread   (GitHub review API)
 #   security  gitleaks + pip-audit + npm audit + CodeQL green (security.yml)
+#             + reviewer-security (review-security.yml, no P0/P1), 2026-10-02
 #   verify    THE APP WAS ACTUALLY RUN AND WATCHED            (verify-live.yml)
 #   drill     every guard in the harness was proven able to fail
 #             (scripts/drill_registry.py — a guard that cannot go red is decoration)

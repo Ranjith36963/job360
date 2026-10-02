@@ -1159,8 +1159,12 @@ def judge_check_runs(runs: list[dict], total_count: int, base_ref: str = MAIN_BR
 
 TAG_CHECKS: dict[str, tuple[str, ...]] = {
     "ci": ("Backend (Python 3.12)", "Frontend (Node 20)", "offline-suite", "frontend-e2e"),
+    # `reviewer-security` (.github/workflows/review-security.yml, 2026-10-02):
+    # the Claude security reviewer. Fails on any P0/P1 finding. Without it here
+    # a PR whose security review went red could still be machine-merged.
     "security": ("gitleaks (secret scan)", "bandit (python static analysis)",
-                 "pip-audit (backend deps)", "npm audit (frontend deps)", "CodeQL"),
+                 "pip-audit (backend deps)", "npm audit (frontend deps)", "CodeQL",
+                 "reviewer-security"),
     "verify": ("verify / backend", "verify / frontend"),
     "drill": ("Chain wires (harness)",),
     # The `reviewer-bugs` check (.github/workflows/review-bugs.yml) — the R3
