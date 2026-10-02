@@ -67,7 +67,7 @@ FILES="$(printf '%s\n' "$CHANGED" | awk '{print $NF}' | head -15 | tr '\n' ' ')"
 STEPS=""
 if [ "$GATE_OK" != 1 ]; then
   STEPS="${STEPS}
-- TESTS: run \`git add -A -- backend frontend && bash scripts/agent-gate.sh\` and fix every failure until it prints PASS."
+- TESTS: run \`git add -A -- backend frontend\`, THEN (as a separate command) \`bash scripts/agent-gate.sh\`, and fix every failure until it prints PASS. Run them as two calls: a chained \`&&\` needs a human approval, these two exact commands do not."
 fi
 if [ "$REVIEW_OK" != 1 ]; then
   STEPS="${STEPS}

@@ -271,11 +271,34 @@ export async function logout(): Promise<void> {
   await request<void>("/api/auth/logout", { method: "POST" });
 }
 
+/**
+ * `me()` could not tell whether the session is valid (429, 5xx, network error,
+ * abort). NOT the same as "signed out" — callers must keep their last known
+ * state and retry, never treat this as a logout.
+ */
+export class AuthUnknownError extends Error {
+  readonly status: number | null;
+  /** Seconds the server asked us to wait (429 Retry-After), else null. */
+  readonly retryAfter: number | null;
+
+  constructor(cause: unknown) {
+    super("Could not verify the session");
+    this.name = "AuthUnknownError";
+    this.status = cause instanceof ApiError ? cause.status : null;
+    this.retryAfter = cause instanceof ApiError ? cause.retryAfter : null;
+    this.cause = cause;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
+/** The signed-in user, or `null` ONLY on a definite 401. Any other failure
+ * throws AuthUnknownError (transient — do not log the user out). */
 export async function me(): Promise<User | null> {
   try {
     return await request<User>("/api/auth/me");
-  } catch {
-    return null;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return null;
+    throw new AuthUnknownError(err);
   }
 }
 

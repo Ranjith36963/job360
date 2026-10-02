@@ -240,14 +240,14 @@ jobs:
       - name: "Step 3 — Sentry: any NEW unresolved issue since the merge?"
         id: sentry
         env:
-          SENTRY_API_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_API_TOKEN: ${{ secrets.SENTRY_API_TOKEN || secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_WINDOW_HOURS: "1"
         run: |
           set +e
           if [ -z "$SENTRY_API_TOKEN" ]; then
             echo "watched=false" >> "$GITHUB_OUTPUT"
             echo "tripped=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::SENTRY_AUTH_TOKEN is not set. Sentry is an UNWATCHED dimension of this run — a new production error would NOT trip a rollback. Add the secret to close this gap."
+            echo "::warning::SENTRY_API_TOKEN is not set. Sentry is an UNWATCHED dimension of this run — a new production error would NOT trip a rollback. Add the secret to close this gap."
             exit 0
           fi
           python scripts/sentry_poll.py > sentry.md
@@ -466,7 +466,7 @@ jobs:
             echo
             echo "### NOT watched — say it loud, never a silent skip"
             if [ "${{ steps.sentry.outputs.watched }}" != "true" ]; then
-              echo "- **Sentry is UNWATCHED this run.** SENTRY_AUTH_TOKEN is missing or the poller itself failed. A new production error right now would NOT trip a rollback."
+              echo "- **Sentry is UNWATCHED this run.** SENTRY_API_TOKEN is missing or the poller itself failed. A new production error right now would NOT trip a rollback."
             fi
             echo "- **\`sentry_error_rate_multiple\` (${{ needs.policy.outputs.sentry_error_rate_multiple }}x)** is read from the policy but this workflow does not yet compute a live hourly error-rate baseline to compare against — only the new-unresolved-issue signal is wired to a trip. Treat this threshold as DECLARED in the policy, not YET ENFORCED here."
             echo
