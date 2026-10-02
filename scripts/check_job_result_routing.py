@@ -51,6 +51,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 
 _RESULT_EXPR = re.compile(r"^\$\{\{\s*needs\.[A-Za-z0-9_-]+\.result\s*\}\}$")
 _KEYWORD = re.compile(r"^(if|elif|else|fi)\b")
+_INLINE_RESULT = re.compile(r"""^\s*(?:local\s+|export\s+)?([A-Za-z_][A-Za-z0-9_]*)=["']?\$\{\{\s*needs\.[A-Za-z0-9_-]+\.result\s*\}\}["']?\s*$""")
 
 # Checks a negative control may switch off (--break-checker).
 CHECKS = ("CASE", "IF")
@@ -67,13 +68,21 @@ def _check_case(lines: list[str], var: str) -> list[int]:
     """Return 1-based line numbers of `case "$VAR"` blocks with no `*)` arm."""
     bad: list[int] = []
     opener = re.compile(r'^case\s+"?\$\{?' + re.escape(var) + r'\}?"?\s+in\b')
+    default_arm = re.compile(r"(^|[;\s(])\(?\*\s*\)")
     for i, raw in enumerate(lines):
-        if not opener.match(raw.strip()):
+        s0 = raw.strip()
+        if not opener.match(s0):
+            continue
+        if re.search(r"\besac\b", s0):  # one-line case: decide on this line alone
+            if not default_arm.search(s0):
+                bad.append(i + 1)
             continue
         depth, has_default = 0, False
         for line in lines[i + 1:]:
             s = line.strip()
             if re.match(r"^case\b", s):
+                if re.search(r"\besac\b", s):
+                    continue  # a nested ONE-LINE case opens and closes itself
                 depth += 1
             if re.match(r"^esac\b", s):
                 if depth == 0:
@@ -89,13 +98,20 @@ def _check_case(lines: list[str], var: str) -> list[int]:
 def _check_if(lines: list[str], var: str) -> list[int]:
     """Return line numbers of if/elif chains routing on VAR (2+ values) with no else."""
     bad: list[int] = []
-    cmp_ = re.compile(r'"\$\{?' + re.escape(var) + r'\}?"\s*!?==?\s*"?([A-Za-z_]+)"?')
+    v = r'"?\$\{?' + re.escape(var) + r'\}?"?'
+    # Either side, quoted or not: `"$R" = x`, `[[ $R == x ]]`, `[ x = "$R" ]`.
+    left = re.compile(v + r'\s*!?==?\s*["\']?([A-Za-z_]+)')
+    right = re.compile(r'["\']?([A-Za-z_]+)["\']?\s*!?==?\s*' + v)
+
+    def cmp_(text: str) -> set[str]:
+        return set(left.findall(text)) | set(right.findall(text))
+
     for i, raw in enumerate(lines):
         s = raw.strip()
         if not s.startswith("if ") or re.search(r"\bfi\s*$", s):
             continue  # not a chain opener, or a one-line if
-        values = set(cmp_.findall(s))
-        depth, has_else = 0, False
+        values = cmp_(s)
+        depth, has_else, saw_elif = 0, False, False
         for line in lines[i + 1:]:
             t = line.strip()
             m = _KEYWORD.match(t)
@@ -109,10 +125,13 @@ def _check_if(lines: list[str], var: str) -> list[int]:
                     break
                 depth -= 1
             elif depth == 0 and kw == "elif":
-                values |= set(cmp_.findall(t))
+                saw_elif = True
+                values |= cmp_(t)
             elif depth == 0 and kw == "else":
                 has_else = True
-        if len(values) >= 2 and not has_else:
+        # A router has an elif. `if [ $R = failure ] || [ $R = cancelled ]` with no
+        # else is a deliberate single check (and the very fix FC-001 asks for).
+        if saw_elif and len(values) >= 2 and not has_else:
             bad.append(i + 1)
     return bad
 
@@ -134,10 +153,12 @@ def check(root: Path, broken: str = "") -> list[str]:
             for step in job.get("steps") or []:
                 if not isinstance(step, dict) or not isinstance(step.get("run"), str):
                     continue
-                names = job_vars + _result_vars(step.get("env"))
+                lines = step["run"].splitlines()
+                # Also results written straight into the script: r='${{ needs.x.result }}'
+                inline = [m.group(1) for m in (_INLINE_RESULT.match(ln) for ln in lines) if m]
+                names = job_vars + _result_vars(step.get("env")) + inline
                 if not names:
                     continue
-                lines = step["run"].splitlines()
                 label = step.get("name") or step.get("id") or "?"
                 for var in names:
                     if broken != "CASE":
@@ -189,6 +210,38 @@ jobs:
           fi
 """
 
+# Review of #709: the unquoted [[ ]] form, a reversed comparison, and a result
+# written straight into the script were all invisible to the first version.
+_DRILL_BAD_DBRACKET = """\
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          R: ${{ needs.verify.result }}
+        run: |
+          if [[ $R == success ]]; then mode=ship
+          elif [[ success != $R ]] && [ failure = "$R" ]; then mode=failed
+          fi
+"""
+
+_DRILL_BAD_INLINE = """\
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        run: |
+          r='${{ needs.x.result }}'
+          case "$r" in
+            success) echo ok ;;
+            failure) echo bad ;;
+          esac
+"""
+
 _DRILL_GOOD = """\
 on: workflow_dispatch
 jobs:
@@ -212,12 +265,28 @@ jobs:
             mode=incomplete
           fi
           if [ "$FIX_RESULT" = "failure" ]; then echo one-line-is-fine; fi
+          if [ "$FIX_RESULT" = failure ] || [ "$FIX_RESULT" = cancelled ]; then
+            echo a-deliberate-single-check-not-a-router
+          fi
+          case "$VERIFY_RESULT" in success) a=1 ;; *) a=2 ;; esac
+          case "$VERIFY_RESULT" in
+            success)
+              case "$X" in *) y=1 ;; esac
+              ;;
+            *) z=1 ;;
+          esac
 """
 
 
 def drill(broken: str = "") -> int:
     """Each defect must go RED, the clean file must stay GREEN. 0 = drill passed."""
-    cases = [("bad-case", _DRILL_BAD_CASE, True), ("bad-if", _DRILL_BAD_IF, True), ("good", _DRILL_GOOD, False)]
+    cases = [
+        ("bad-case", _DRILL_BAD_CASE, True),
+        ("bad-if", _DRILL_BAD_IF, True),
+        ("bad-dbracket", _DRILL_BAD_DBRACKET, True),
+        ("bad-inline", _DRILL_BAD_INLINE, True),
+        ("good", _DRILL_GOOD, False),
+    ]
     failed = 0
     for name, text, must_fail in cases:
         with tempfile.TemporaryDirectory() as tmp:

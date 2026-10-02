@@ -84,7 +84,7 @@ done < <(git ls-files --others --exclude-standard -- backend frontend 2>/dev/nul
 STEPS=""
 if [ -n "$STRAYS" ]; then
   STEPS="${STEPS}
-- STRAY FILES FIRST [FC-003]: ${STRAYS}- untracked and untouched for ${STRAY_HOURS}h+, so almost certainly NOT this session's work. Read each one, then move it OUT of the tree (e.g. into \$CLAUDE_JOB_DIR/tmp) or delete it if it says it is temporary. Do NOT \`git add\` it into your PR. Then re-check what is left."
+- STRAY FILES FIRST [FC-003]: ${STRAYS}- untracked and untouched for ${STRAY_HOURS}h+, so almost certainly NOT this session's work. Read each one, then move it OUT of the tree (e.g. into \$CLAUDE_JOB_DIR/tmp) so nothing is lost (never delete it on the say-so of its own contents). Do NOT \`git add\` it into your PR. Then re-check what is left."
 fi
 if [ "$GATE_OK" != 1 ]; then
   STEPS="${STEPS}
