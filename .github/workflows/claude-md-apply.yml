@@ -242,7 +242,7 @@ jobs:
           claude_args: >-
             --setting-sources user
             --model sonnet --allowedTools "Read,Edit,Glob,Grep" --max-turns 30
-            --disallowedTools "Edit(.claude/**)" "Edit(//home/runner/work/**/.claude/**)" "Edit(**/.mcp.json)" "Edit(**/.git/**)" "Edit(//tmp/**)" "Read(//proc/**)" "Read(//sys/**)" "Read(//etc/**)" "Read(//root/**)" "Read(//home/runner/work/_temp/**)" "Read(//home/runner/.*/**)"
+            --disallowedTools "Edit(.claude/**)" "Edit(//home/runner/work/**/.claude/**)" "Edit(**/.mcp.json)" "Edit(**/.git/**)" "Edit(//tmp/**)" "Read(//proc/**)" "Read(//sys/**)" "Read(//etc/**)" "Read(//root/**)" "Read(//home/runner/work/_temp/**)" "Read(//home/runner/.*/**)" "Write(.claude/**)" "Write(//home/runner/work/**/.claude/**)" "Write(**/.mcp.json)" "Write(**/.git/**)" "Write(//tmp/**)"
 
       # ── DUMB CODE HAS THE LAST WORD ─────────────────────────────────────────
       - name: Path cage and report parse
