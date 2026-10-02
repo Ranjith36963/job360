@@ -9,8 +9,13 @@
       "id": "bug",
       "label": "BUG",
       "why": "find the root cause before changing code",
-      "pattern": "\\b(bugs?|errors?|broken|crash(es|ed|ing)?|fail(s|ed|ing|ure)?|exceptions?|traceback|stack ?trace|regression|not working|(does|is)n'?t work(ing)?|wrong (result|output|number)|500|flaky)\\b",
-      "skills": ["superpowers:systematic-debugging", "debug", "engineering:debug"],
+      "pattern": "\\b(bugs?|errors?|broken|crash(es|ed|ing)?|fail(s|ed|ing|ure)?|exceptions?|traceback|stack ?trace|regression|not working|(does|is)n'?t work(ing)?|wrong (result|output|number)|500|flaky|gives? up|gave up|keeps? (happening|failing)|(is|went|turned|stays?) red|red (check|build|ci|run))\\b",
+      "skills": [
+        "diagnose",
+        "superpowers:systematic-debugging",
+        "debug",
+        "engineering:debug"
+      ],
       "law": "gate"
     },
     {
@@ -18,7 +23,9 @@
       "label": "PRODUCT QUALITY",
       "why": "think first with parallel lenses before fixing",
       "pattern": "\\b(results? (are|look) (bad|wrong)|feels? (wrong|off)|users? (won'?t|will not|don'?t) like|bad experience|horrible|not good enough|quality)\\b",
-      "skills": ["intel-review"],
+      "skills": [
+        "intel-review"
+      ],
       "law": "advise"
     },
     {
@@ -26,7 +33,10 @@
       "label": "SECURITY",
       "why": "load the invariants; review the diff for vulnerabilities",
       "pattern": "\\b(security|secure|vulnerab\\w*|exploit|cve|auth\\w*|oauth|tokens?|secrets?|passwords?|csrf|xss|ssrf|injection|permissions?|cors|rate.?limit\\w*)\\b",
-      "skills": ["hard-rules", "security-review"],
+      "skills": [
+        "hard-rules",
+        "security-review"
+      ],
       "law": "advise"
     },
     {
@@ -34,7 +44,11 @@
       "label": "DESIGN / UI",
       "why": "critique against usability, hierarchy and accessibility before restyling",
       "pattern": "\\b(design|ui|ux|layout|css|tailwind|styl(e|es|ing)|colou?rs?|fonts?|landing|screens?|components?|responsive|mobile|dark mode|accessib\\w*|a11y|ugly|elegant|classy|looks? (bad|off|good))\\b",
-      "skills": ["design:design-critique", "design:accessibility-review", "design:ux-copy"],
+      "skills": [
+        "design:design-critique",
+        "design:accessibility-review",
+        "design:ux-copy"
+      ],
       "law": "advise"
     },
     {
@@ -42,7 +56,12 @@
       "label": "NEW FEATURE",
       "why": "explore intent and write the plan before code; split work by model",
       "pattern": "\\b(build|implement|new feature|add (a|an|the|support)|create (a|an)|integrate|endpoint)\\b",
-      "skills": ["superpowers:brainstorming", "superpowers:writing-plans", "implement", "model-delegation"],
+      "skills": [
+        "superpowers:brainstorming",
+        "superpowers:writing-plans",
+        "implement",
+        "model-delegation"
+      ],
       "law": "advise"
     },
     {
@@ -50,7 +69,11 @@
       "label": "PLAN / ARCHITECTURE",
       "why": "decide the design and its trade-offs before touching files",
       "pattern": "\\b(plan|architecture|refactor|redesign|system design|data model|schema change)\\b",
-      "skills": ["superpowers:writing-plans", "engineering:architecture", "engineering:system-design"],
+      "skills": [
+        "superpowers:writing-plans",
+        "engineering:architecture",
+        "engineering:system-design"
+      ],
       "law": "advise"
     },
     {
@@ -58,7 +81,10 @@
       "label": "TESTS",
       "why": "write the failing test first; pick the right test level",
       "pattern": "\\b(tests?|testing|pytest|playwright|e2e|coverage|tdd)\\b",
-      "skills": ["superpowers:test-driven-development", "engineering:testing-strategy"],
+      "skills": [
+        "superpowers:test-driven-development",
+        "engineering:testing-strategy"
+      ],
       "law": "advise"
     },
     {
@@ -66,7 +92,11 @@
       "label": "REVIEW",
       "why": "review the diff with a dedicated reviewer, not by eye",
       "pattern": "\\b(review|code review|audit|pull request|pr #?\\d+)\\b",
-      "skills": ["code-review", "coderabbit:code-review", "superpowers:requesting-code-review"],
+      "skills": [
+        "code-review",
+        "coderabbit:code-review",
+        "superpowers:requesting-code-review"
+      ],
       "law": "advise"
     },
     {
@@ -74,7 +104,11 @@
       "label": "LIVE PRODUCTION",
       "why": "diagnose against prod first (Sentry, Railway logs, DB), then verify like a user",
       "pattern": "\\b(prod|production|sentry|railway|incident|outage|is (it )?down|live site|users? (see|report|reported))\\b",
-      "skills": ["engineering:incident-response", "verify-job360"],
+      "skills": [
+        "diagnose",
+        "engineering:incident-response",
+        "verify-job360"
+      ],
       "law": "advise"
     },
     {
@@ -82,7 +116,11 @@
       "label": "SHIP / MERGE",
       "why": "finish the branch the safe way; check the deploy after merge",
       "pattern": "\\b(merge|ship|release|deploy|open (a )?pr|finish (the )?branch)\\b",
-      "skills": ["superpowers:finishing-a-development-branch", "engineering:deploy-checklist", "commit"],
+      "skills": [
+        "superpowers:finishing-a-development-branch",
+        "engineering:deploy-checklist",
+        "commit"
+      ],
       "law": "advise"
     },
     {
@@ -90,7 +128,9 @@
       "label": "UNDERSTAND",
       "why": "answer from instruments (file:line, live query), never from memory",
       "pattern": "\\b(how does|how do(es)? (it|this)|explain|walk me through|what is|why (does|is|did)|where is|understand)\\b",
-      "skills": ["promise"],
+      "skills": [
+        "promise"
+      ],
       "law": "advise"
     },
     {
@@ -98,7 +138,11 @@
       "label": "DOCS",
       "why": "keep docs and code in sync with the doc tooling",
       "pattern": "\\b(docs?|documentation|readme|claude\\.md|changelog|runbook)\\b",
-      "skills": ["sync", "doc-audit", "engineering:documentation"],
+      "skills": [
+        "sync",
+        "doc-audit",
+        "engineering:documentation"
+      ],
       "law": "advise"
     },
     {
@@ -106,7 +150,10 @@
       "label": "RESEARCH",
       "why": "multi-source research with citations, not memory",
       "pattern": "\\b(research|search (the )?(web|online)|look (it )?up|latest|compare|alternatives?|which is (the )?best)\\b",
-      "skills": ["deep-research", "agent-reach"],
+      "skills": [
+        "deep-research",
+        "agent-reach"
+      ],
       "law": "advise"
     },
     {
@@ -114,7 +161,9 @@
       "label": "CLAUDE API",
       "why": "model ids, pricing and SDK change — read the reference first",
       "pattern": "\\b(claude api|anthropic|sdk|model ids?|prompt caching|tool use|managed agents)\\b",
-      "skills": ["claude-api"],
+      "skills": [
+        "claude-api"
+      ],
       "law": "advise"
     },
     {
@@ -122,7 +171,10 @@
       "label": "AGENTS / DELEGATION",
       "why": "pick the model per sub-task; fan out independent work",
       "pattern": "\\b(agents?|subagents?|swarm|in parallel|delegate|workflow)\\b",
-      "skills": ["model-delegation", "superpowers:dispatching-parallel-agents"],
+      "skills": [
+        "model-delegation",
+        "superpowers:dispatching-parallel-agents"
+      ],
       "law": "advise"
     },
     {
@@ -130,7 +182,11 @@
       "label": "HARNESS / CONFIG",
       "why": "hooks and settings have exact contracts — use the config skills",
       "pattern": "\\b(hooks?|harness|settings\\.json|status ?line|keybindings?|plugins?|skills?)\\b",
-      "skills": ["update-config", "plugin-authoring", "superpowers:writing-skills"],
+      "skills": [
+        "update-config",
+        "plugin-authoring",
+        "superpowers:writing-skills"
+      ],
       "law": "advise"
     },
     {
@@ -138,7 +194,10 @@
       "label": "DATA / SQL",
       "why": "write correct, efficient SQL against the real schema",
       "pattern": "\\b(sql|quer(y|ies)|postgres|database|db|tables?|index(es)?)\\b",
-      "skills": ["data:sql-queries", "hard-rules"],
+      "skills": [
+        "data:sql-queries",
+        "hard-rules"
+      ],
       "law": "advise"
     }
   ],
@@ -160,15 +219,22 @@
         "backend/src/services/auth/**",
         "backend/src/services/profile/**"
       ],
-      "skills_all": ["hard-rules"],
+      "skills_all": [
+        "hard-rules"
+      ],
       "law": "gate"
     },
     {
       "id": "frontend-ui",
       "label": "FRONTEND UI",
       "why": "UI changes are judged by users — critique and check accessibility",
-      "globs": ["frontend/src/**/*.tsx", "frontend/src/**/*.css"],
-      "skills_all": ["design:design-critique"],
+      "globs": [
+        "frontend/src/**/*.tsx",
+        "frontend/src/**/*.css"
+      ],
+      "skills_all": [
+        "design:design-critique"
+      ],
       "law": "advise"
     }
   ]

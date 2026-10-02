@@ -109,6 +109,15 @@ def test_bug_gate_denies_until_debug_skill(run) -> None:
     assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": PLAIN}})) == "allow"
 
 
+def test_bug_gate_satisfied_by_project_diagnose_skill(run) -> None:
+    """The owner's own root-cause skill (.claude/skills/diagnose, #710) leads the BUG law."""
+    ctx = context(run("prompt", {"prompt": "the fixer gives up: exit code 1 in run 123"}))
+    assert ctx.index("diagnose") < ctx.index("systematic-debugging")
+    assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": PLAIN}})) == "deny"
+    run("post", {"tool_name": "Skill", "tool_input": {"skill": "diagnose"}})
+    assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": PLAIN}})) == "allow"
+
+
 def test_bug_gate_satisfied_by_reproduction(run) -> None:
     run("prompt", {"prompt": "broken: HTTP 500 on /jobs/bring"})
     assert decision(run("pre", {"tool_name": "Write", "tool_input": {"file_path": PLAIN}})) == "deny"
