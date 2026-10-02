@@ -11,7 +11,12 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import posthog from "posthog-js";
-import { me, logout as apiLogout, onEmailNotVerified } from "@/lib/api";
+import {
+  me,
+  logout as apiLogout,
+  onEmailNotVerified,
+  AuthUnknownError,
+} from "@/lib/api";
 import type { User } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -29,6 +34,17 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
+
+// Delay before retry N (0-based) after an UNKNOWN auth result. 429 honours
+// Retry-After and never goes below 5s. Jitter avoids synchronized retries.
+function retryDelayMs(attempt: number, err: AuthUnknownError): number {
+  const jitter = Math.random() * 500;
+  if (err.status === 429) {
+    const ra = err.retryAfter != null ? err.retryAfter * 1000 : 0;
+    return Math.max(ra, 5000) + jitter;
+  }
+  return (attempt === 0 ? 1000 : 3000) + jitter;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -48,11 +64,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathnameRef = useRef(pathname);
   pathnameRef.current = pathname;
 
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const refresh = useCallback(async () => {
+    // One refresh chain at a time: focus events during a retry wait are skipped.
     if (fetchingRef.current) return;
     fetchingRef.current = true;
+    let resolved = false;
     try {
-      const data = await me();
+      let data: User | null = null;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          data = await me();
+          break;
+        } catch (err) {
+          // Unknown (429/5xx/network): NOT a logout. Keep the previous user,
+          // lastUserIdRef and the query cache untouched.
+          if (!(err instanceof AuthUnknownError)) throw err;
+          if (attempt >= 2 || !mountedRef.current) return;
+          await new Promise((r) => setTimeout(r, retryDelayMs(attempt, err)));
+          if (!mountedRef.current) return;
+        }
+      }
+      resolved = true;
       const nextId = data?.id ?? null;
       const prevId = lastUserIdRef.current;
       lastUserIdRef.current = nextId;
@@ -84,7 +124,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } finally {
       fetchingRef.current = false;
-      setLoading(false);
+      // Unresolved (gave up on a transient error): stay `loading` if there is
+      // no previous user, so the UI never flashes "Log in" at a signed-in user.
+      if (resolved || lastUserIdRef.current) setLoading(false);
     }
   }, [queryClient]);
 
