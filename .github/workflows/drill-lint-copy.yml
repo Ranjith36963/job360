@@ -1,0 +1,11 @@
+name: drill-lint-copy
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Bad expression
+        run: echo ${{ }}
