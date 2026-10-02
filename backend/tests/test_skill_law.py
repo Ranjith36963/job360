@@ -144,6 +144,28 @@ def test_short_waiver_reason_is_refused(run) -> None:
     assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": PLAIN}})) == "deny"
 
 
+HEREDOC_FIX = "cat > backend/src/api/routes/bring.py <<'EOF'\nguessed fix\nEOF"
+
+
+def test_bug_gate_covers_bash_writes_outside_the_zone(run) -> None:
+    """reviewer-bugs P1 on #712: a heredoc into a NON-zone source file dodged the BUG gate."""
+    run("prompt", {"prompt": "it crashes with a 500, Traceback ValueError in bring.py"})
+    assert decision(run("pre", {"tool_name": "Bash", "tool_input": {"command": HEREDOC_FIX}})) == "deny"
+    run("post", {"tool_name": "Skill", "tool_input": {"skill": "diagnose"}})
+    assert decision(run("pre", {"tool_name": "Bash", "tool_input": {"command": HEREDOC_FIX}})) == "allow"
+
+
+@pytest.mark.parametrize("cmd", [
+    "python -m pytest backend/tests/test_bring.py -q > out.txt",  # a repro IS the evidence
+    "echo note > /tmp/scratch.txt",                 # write outside repo source
+    "grep -rn ValueError backend/src | head -20",   # read-only
+])
+def test_bug_gate_never_blocks_evidence_or_scratch(run, cmd: str) -> None:
+    """NEGATIVE controls: the BUG gate must not block the diagnosis it demands."""
+    run("prompt", {"prompt": "it crashes with a 500, Traceback ValueError in bring.py"})
+    assert decision(run("pre", {"tool_name": "Bash", "tool_input": {"command": cmd}})) == "allow"
+
+
 def test_intent_gate_never_blocks_workers(run) -> None:
     """Workers never saw the prompt — a bug gate must not kill a parallel fan-out."""
     run("prompt", {"prompt": "crash: Traceback ValueError"})
@@ -206,8 +228,12 @@ def test_slash_command_counts_as_skill_use(run) -> None:
 
 
 def test_ledger_never_stores_raw_commands(run, tmp_path: Path) -> None:
-    run("post", {"tool_name": "Bash", "tool_input": {"command": "curl -H 'Authorization: Bearer j360_SECRET' x"}})
-    assert "j360_SECRET" not in (tmp_path / "s1.jsonl").read_text(encoding="utf-8")
+    """Commands can carry credentials; the ledger keeps only 'was it a repro'. The marker is
+    deliberately NOT credential-shaped (gitleaks rightly flagged a fake auth header here)."""
+    marker = "NOT-A-REAL-SECRET-only-a-ledger-privacy-marker"
+    run("post", {"tool_name": "Bash", "tool_input": {"command": f"python -m pytest -k x --note={marker}"}})
+    text = (tmp_path / "s1.jsonl").read_text(encoding="utf-8")
+    assert marker not in text and '"repro": true' in text
 
 
 def test_kill_switch_env_disables() -> None:

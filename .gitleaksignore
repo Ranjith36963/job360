@@ -46,3 +46,13 @@ e495463b43859d3678d3807dbbdf59be208e449e:backend/tests/test_credentials_are_stri
 # 3. False positive: a Python import line naming `LinkedInResponse, GitHubResponse`
 #    matched the linkedin-client-id rule. No id of any kind; file deleted (d364e9d).
 e0db04e8f28b908a7e3e96e704b35baaca96c5fa:docs/superpowers/plans/2026-04-07-fastapi-backend.md:linkedin-client-id:1076
+
+# A PRIVACY TEST THAT NEVER HELD A CREDENTIAL (PR #712, Skill Law).
+#
+# `backend/tests/test_skill_law.py::test_ledger_never_stores_raw_commands` proves the
+# skill-law ledger never stores raw Bash commands. Its first version fed a fake
+# `curl -H 'Authorization: Bearer ...'` command — exactly the shape `curl-auth-header`
+# exists to catch, so the scanner was right to stop on it. The test now uses an
+# unmistakably fake, non-credential-shaped marker. This waives only the old line in
+# the branch's first commit; the PR squash-merges, so `main` never receives it.
+cf144d0771600300159a4489bb51abc0ad0f06cc:backend/tests/test_skill_law.py:curl-auth-header:200

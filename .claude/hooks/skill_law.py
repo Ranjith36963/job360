@@ -60,6 +60,8 @@ REPRO_CMD = re.compile(
     re.IGNORECASE,
 )
 # A Bash command that WRITES files (used to stop Edit-tool bypasses into gated paths).
+# A Bash command that names repo SOURCE (where a write is a code change, not a log).
+SOURCE_PATH = re.compile(r"(^|[\s'\"=:/\\])(backend|frontend|scripts|\.github|\.claude|docs)[/\\]", re.IGNORECASE)
 WAIVE_CMD = re.compile(r"skill_law\.py[\"']?\s+waive\s+(.+)$", re.IGNORECASE | re.DOTALL)
 BASH_WRITE = re.compile(
     r"(\bsed\s+-i|(^|[^0-9>&])>{1,2}\s*[\w./\"']|\btee\b|\bgit\s+apply\b|\bpatch\b|\bcp\b|\bmv\b"
@@ -322,18 +324,26 @@ def on_pre(inp: dict[str, Any], reg: dict[str, Any]) -> None:
     sid, tool = inp.get("session_id", ""), str(inp.get("tool_name", ""))
     tin = inp.get("tool_input") or {}
     agent = agent_of(inp)
+    paths = target_paths(tool, tin, reg)
     if tool == "Bash":
-        w = WAIVE_CMD.search(str(tin.get("command", "")))
+        cmd = str(tin.get("command", ""))
+        w = WAIVE_CMD.search(cmd)
         if w:
             reason = w.group(1).strip().strip("\"'")
             if len(reason) >= 8:
                 append(sid, {"k": "waive", "reason": reason[:300], "agent": agent})
             return
-    paths = target_paths(tool, tin, reg)
-    if tool == "Bash" and not paths:
-        return
+        # A reproduction IS the evidence the BUG gate asks for — never gate it (even
+        # `pytest ... > log.txt` writes a file). Non-writes and writes that touch no
+        # repo source (temp files, logs) are free. Any other Bash write into source is
+        # held to the same laws as Edit/Write (reviewer-bugs P1 on #712: a heredoc into
+        # a non-zone file used to dodge the BUG gate entirely).
+        if REPRO_CMD.search(cmd) or not BASH_WRITE.search(cmd):
+            return
+        if not paths and not SOURCE_PATH.search(cmd):
+            return
     events = read_ledger(sid)
-    owed = owed_laws(reg, events, agent, paths) if (paths or tool in EDIT_TOOLS) else []
+    owed = owed_laws(reg, events, agent, paths)
     if owed:
         append(sid, {"k": "deny", "agent": agent, "tool": tool, "paths": [norm_path(p) for p in paths], "owed": owed})
         emit({"hookSpecificOutput": {
