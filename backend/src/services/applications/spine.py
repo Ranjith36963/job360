@@ -315,6 +315,11 @@ async def user_today(db: JobDatabase, user_id: str, *, now: Optional[datetime] =
     return when.astimezone(zone).date()
 
 
+def is_overdue(due_iso: str, today_iso: str) -> bool:
+    """True when the follow-up date has arrived (today or earlier)."""
+    return due_iso > today_iso
+
+
 def _follow_up_due(follow_up_on: Optional[str], status: str, today_iso: str) -> bool:
     """Shared by ``list_applications`` and ``get_application_detail`` so the
     web list and the detail page can never disagree: a date in the past or
@@ -322,7 +327,7 @@ def _follow_up_due(follow_up_on: Optional[str], status: str, today_iso: str) -> 
     ``APPLICATION_FOLLOW_UP_CLOSED_STATUSES``)."""
     return (
         follow_up_on is not None
-        and follow_up_on <= today_iso
+        and is_overdue(follow_up_on, today_iso)
         and status not in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES
     )
 
