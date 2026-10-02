@@ -882,6 +882,7 @@ jobs:
       contents: read
     outputs:
       failbefore: ${{ steps.failbefore.outputs.result }}
+      secret: ${{ steps.scan.outputs.blocked }}
 
     services:
       postgres:
@@ -1083,8 +1084,87 @@ jobs:
           fi
           exit 0
 
-      - name: Upload the verification failure text
+      - name: Secret-scan the verification text before it is uploaded (fail closed)
+        id: scan
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/vout"
+          # FAIL CLOSED: the upload step only runs when this says `blocked=false`.
+          # Artifacts on a public repo are downloadable by anyone.
+          if [ ! -d "$out" ]; then
+            echo "blocked=false" >> "$GITHUB_OUTPUT"; echo "nothing to upload" >> "$GITHUB_STEP_SUMMARY"; exit 0
+          fi
+          cat > "$RUNNER_TEMP/secret-scan.sh" <<'SCANNER'
+          #!/usr/bin/env bash
+          # secret-scan.sh FILE...
+          # exit 0 = clean, 1 = secret-shaped content found, 2 = scan could not run.
+          # NEVER prints matched text - only which file matched.
+          set -u
+          umask 077
+          pat=$(mktemp)
+          trap 'rm -f "$pat"' EXIT
+          # (1) the literal values of the secrets this job holds, plus their base64
+          # forms. Read from the environment, written to a 0600 temp file, never
+          # echoed. Empty / blank / very short values are skipped (an empty pattern
+          # would match every line).
+          for v in "${CLAUDE_CODE_OAUTH_TOKEN:-}" "${GH_TOKEN:-}"; do
+            [ -n "$v" ] || continue
+            { printf '%s\n' "$v"
+              printf '%s' "$v" | base64 -w0; echo
+              printf 'x-access-token:%s' "$v" | base64 -w0; echo
+            } | sed '/^[[:space:]]*$/d' | awk 'length($0) >= 8' >> "$pat"
+          done
+          scanned=0; hit=0; err=0
+          for f in "$@"; do
+            [ -f "$f" ] || continue
+            scanned=$((scanned + 1))
+            if [ -s "$pat" ]; then
+              grep -aqF -f "$pat" -- "$f"; r=$?
+              if [ "$r" -eq 0 ]; then echo "  a secret value is present in: $f"; hit=1; fi
+              if [ "$r" -gt 1 ]; then echo "  scan error on: $f"; err=1; fi
+            fi
+            # (2) token shapes
+            grep -aqE -e 'ghs_[A-Za-z0-9]{20,}' -e 'gh[pousr]_[A-Za-z0-9]{20,}' \
+              -e 'github_pat_[A-Za-z0-9_]{20,}' -e 'sk-ant-[A-Za-z0-9_-]{20,}' \
+              -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' -- "$f"; r=$?
+            if [ "$r" -eq 0 ]; then echo "  a secret-shaped token is present in: $f"; hit=1; fi
+            if [ "$r" -gt 1 ]; then echo "  scan error on: $f"; err=1; fi
+          done
+          [ "$scanned" -gt 0 ] || { echo "  nothing was scanned"; exit 2; }
+          [ "$hit" -eq 0 ] || exit 1
+          [ "$err" -eq 0 ] || exit 2
+          exit 0
+          SCANNER
+          chmod +x "$RUNNER_TEMP/secret-scan.sh"
+          mapfile -t FILES < <(find "$out" ! -type d)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "blocked=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # A symlink would be followed by the upload action: never allowed here.
+          if [ -n "$(find "$out" -type l)" ]; then
+            rm -rf "$out"; mkdir -p "$out"
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+            echo "::error::a symlink in the verification failure text - refusing to upload"
+            exit 1
+          fi
+          "$RUNNER_TEMP/secret-scan.sh" "${FILES[@]}"
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            # Upload NOTHING. The ship job reports a generic reason.
+            rm -rf "$out"; mkdir -p "$out"
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+            echo "::error::secret-shaped content in the verification failure text - refusing to upload (scan exit $rc)"
+            exit 1
+          fi
+          echo "blocked=false" >> "$GITHUB_OUTPUT"
+          echo "secret scan of the verification failure text: clean (${#FILES[@]} files)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the verification failure text
+        if: always() && steps.scan.outputs.blocked == 'false'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: verify-result
@@ -1340,13 +1420,17 @@ jobs:
           FIX_SHIP: ${{ needs.fix.outputs.ship }}
           FIX_SECRET: ${{ needs.fix.outputs.secret }}
           VERIFY_RESULT: ${{ needs.verify.result }}
+          VERIFY_SECRET: ${{ needs.verify.outputs.secret }}
         run: |
           set -euo pipefail
           mode=none
           if [ "$FIX_RESULT" = "success" ] && [ "$FIX_SHIP" = "true" ]; then
             case "$VERIFY_RESULT" in
               success) mode=ship ;;
-              failure) mode=verify-failed ;;
+              failure)
+                mode=verify-failed
+                # The verify job refused to upload because its output looked like a secret.
+                if [ "$VERIFY_SECRET" = "true" ]; then mode=secret-blocked; fi ;;
             esac
           elif [ "$FIX_RESULT" = "success" ]; then
             mode=park
