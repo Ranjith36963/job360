@@ -224,6 +224,7 @@ jobs:
       # The ceiling is spent the moment real work starts, not when it ends: a
       # run that dies half way has still cost tokens and still counts.
       - name: Spend the one attempt (label fix:attempted)
+        id: spend
         if: steps.token.outputs.have == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -238,11 +239,12 @@ jobs:
       # A gate step that CRASHED (gh outage, bad JSON) never reached its own
       # `fail()`; that is still a loud failure, not a silent one.
       - name: Report a gate crash
-        if: failure() && steps.gate.outcome == 'failure' && steps.gate.outputs.refused != 'true'
+        # Also the label step: a gh outage there leaves a red run nobody is told about.
+        if: failure() && steps.gate.outputs.refused != 'true' && (steps.gate.outcome == 'failure' || steps.spend.outcome == 'failure')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "$ISSUE" --body "**Issue fix crashed in its own gate** before doing any work (run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})). No attempt was spent." || true
+          gh issue comment "$ISSUE" --body "**Issue fix crashed in its own gate** before doing any work (run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})). No fix was attempted; if \`fix:attempted\` is on this issue, remove it to allow a try." || true
           echo "::error::issue-fix gate crashed for #$ISSUE"
 
   # ═══ JOB 2: fix — the ONLY job that runs the writing agent ═════════════════
@@ -634,7 +636,8 @@ jobs:
           g() { git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"; }
           # No conflict marker may survive (exact git shapes; a 100-char `====`
           # rule in a report is not one - pr-repair.yml:533).
-          if g grep -lE '^(<{7} |\|{7} |={7}$|>{7} )' >/dev/null 2>&1; then
+          # --untracked: the agent's NEW files (its preferred shape for a test) too.
+          if g grep --untracked -lE '^(<{7} |\|{7} |={7}$|>{7} )' >/dev/null 2>&1; then
             echo "::error::conflict markers present - refusing to ship"
             exit 1
           fi
@@ -1087,9 +1090,10 @@ jobs:
       - name: Secret-scan the verification text before it is uploaded (fail closed)
         id: scan
         if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        # NO secrets here. Agent-written tests ran earlier in this job and could
+        # have planted PATH / BASH_ENV via GITHUB_ENV / GITHUB_PATH; a token in
+        # this env would be theirs. This job never held one, so the literal-value
+        # pass has nothing to match - the token-shape patterns still run.
         run: |
           set -uo pipefail
           out="$RUNNER_TEMP/vout"
@@ -1550,10 +1554,18 @@ jobs:
             echo "::error::secret-shaped content in the fix — refusing to push"
             gh issue comment "$ISSUE" --body "**Issue fix refused:** the agent output contained secret-shaped content, so it was not posted. Nothing was pushed. The one attempt is spent." \
               || echo "::warning::could not comment on #$ISSUE"
+            gh issue edit "$ISSUE" --add-label "triage:needs-human" --remove-label "triage:auto-fixable" \
+              || echo "::warning::could not relabel #$ISSUE"
             exit 1
           fi
-          gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/park-comment.md"
-          gh issue edit "$ISSUE" --add-label "triage:needs-human" --remove-label "triage:auto-fixable"
+          # Relabel FIRST and never let a comment failure skip it: a stuck
+          # auto-fixable + fix:attempted issue is refused by the gate forever.
+          park_ok=1
+          gh issue edit "$ISSUE" --add-label "triage:needs-human" --remove-label "triage:auto-fixable" \
+            || { echo "::error::could not relabel #$ISSUE"; park_ok=0; }
+          gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/park-comment.md" \
+            || { echo "::error::could not comment on #$ISSUE"; park_ok=0; }
+          [ "$park_ok" -eq 1 ] || exit 1
           echo "parked #$ISSUE for a human" >> "$GITHUB_STEP_SUMMARY"
 
       # ── FAIL LOUDLY. Every real failure says so on the issue. ──────────────
@@ -1915,13 +1927,27 @@ jobs:
           # `action_required` (pr-repair.yml:674). Approve them so the fix PR
           # actually PROVES itself instead of stalling with one lonely check.
           sleep 30
-          for id in $(gh run list --branch "$BRANCH" --limit 10 \
+          unapproved=0
+          if ! ids=$(gh run list --branch "$BRANCH" --limit 10 \
                         --json databaseId,conclusion \
-                        --jq '.[]|select(.conclusion=="action_required")|.databaseId'); do
-            gh api -X POST "repos/$GH_REPO/actions/runs/$id/approve" >/dev/null 2>&1 \
-              && echo "approved parked run $id" >> "$GITHUB_STEP_SUMMARY" \
-              || echo "::warning::could not approve run $id - approve it in the UI or CI will not report on this PR"
+                        --jq '.[]|select(.conclusion=="action_required")|.databaseId'); then
+            echo "::warning::could not list parked CI runs for $BRANCH"
+            unapproved=1
+            ids=""
+          fi
+          for id in $ids; do
+            if gh api -X POST "repos/$GH_REPO/actions/runs/$id/approve" >/dev/null 2>&1; then
+              echo "approved parked run $id" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::could not approve run $id"
+              unapproved=1
+            fi
           done
+          # A step warning notifies nobody: say it on the PR itself.
+          if [ "$unapproved" -ne 0 ]; then
+            gh pr comment "$pr" --body "**CI may not have started on this PR**: issue-fix could not approve its parked runs. Approve them under the Actions tab (\`action_required\`) so the checks report here." \
+              || echo "::warning::could not comment on PR #$pr"
+          fi
 
       # The checker's words come from the `check` job's artifact: untrusted text.
       # It was already part of the scan above; posted with --body-file only.
