@@ -70,9 +70,17 @@ REDIRECT_TARGET = re.compile(r"(?:^|[^0-9>&])>{1,2}\s*([^\s;&|]+)")
 SOURCE_PATH = re.compile(r"(^|[\s'\"=:/\\])(backend|frontend|scripts|\.github|\.claude|docs)[/\\]", re.IGNORECASE)
 WAIVE_CMD = re.compile(r"skill_law\.py[\"']?\s+waive\s+(.+)$", re.IGNORECASE | re.DOTALL)
 BASH_WRITE = re.compile(
-    r"(\bsed\s+-i|(^|[^0-9>&])>{1,2}\s*[\w./\"']|\btee\b|\bgit\s+apply\b|\bpatch\b|\bcp\b|\bmv\b"
-    r"|<<\s*['\"]?\w+|\s(?:-o|-O|--output)(?:\s|=))"
+    r"(\bsed\s+-i|(^|[^0-9>&])>{1,2}\s*[\w./\"']|\btee\b|\bgit\s+(apply|checkout|restore)\b|\bpatch\b"
+    r"|\bcp\b|\bmv\b|\brm(dir)?\b|\bunlink\b|\btruncate\b|\bln\b|<<\s*['\"]?\w+|\s(?:-o|-O|--output)(?:\s|=))"
 )
+# The backstop: Bash write commands are an UNBOUNDED set (rm, python -c, truncate, …), so the
+# parser above is only the cheap first line. While a law is owed, PreToolUse snapshots the
+# FINITE set of guarded files (mtime+size, no git) and PostToolUse compares: any guarded file
+# created/changed/deleted is a violation, whatever command did it (reviewer-bugs P1 #3, #712).
+SOURCE_ROOTS = ("backend", "frontend", "scripts", ".github", ".claude", "docs")
+PRUNE_DIRS = {"node_modules", ".next", "__pycache__", ".git", "dist", "build", ".venv", "venv", "data",
+              "worktrees", "test-results", "playwright-report", "coverage", ".pytest_cache",
+              ".ruff_cache", ".mypy_cache"}
 
 
 # ── tiny utils ────────────────────────────────────────────────────────────────
@@ -164,9 +172,10 @@ def read_ledger(session_id: str) -> list[dict[str, Any]]:
 def prune_old() -> None:
     """Delete ledgers older than LEDGER_TTL_DAYS (runs at SessionStart)."""
     cutoff = now() - LEDGER_TTL_DAYS * 86400
-    for f in STATE_DIR.glob("*.jsonl"):
+    stale_snap = now() - 86400            # a snapshot whose PostToolUse never came (call denied)
+    for f in [*STATE_DIR.glob("*.jsonl"), *STATE_DIR.glob("snap_*.json")]:
         try:
-            if f.stat().st_mtime < cutoff:
+            if f.stat().st_mtime < (stale_snap if f.name.startswith("snap_") else cutoff):
                 f.unlink()
         except OSError:
             continue
@@ -299,6 +308,107 @@ def bash_writes(cmd: str, reg: dict[str, Any]) -> tuple[list[str], bool]:
     return zone, source or bool(zone)
 
 
+# ── filesystem backstop ─────────────────────────────────────────────────────
+def repo_root_of(cwd: str) -> Path | None:
+    """The git work tree containing `cwd` (a worktree has a .git FILE, a checkout a dir)."""
+    try:
+        here = Path(cwd).resolve() if cwd else None
+    except OSError:
+        return None
+    for d in ((here, *here.parents) if here else ()):
+        if (d / ".git").exists():
+            return d
+    return None
+
+
+def glob_roots(globs: list[str]) -> list[str]:
+    """'backend/migrations/**' -> 'backend/migrations'; a plain file stays itself."""
+    roots = []
+    for g in globs:
+        parts = []
+        for seg in g.split("/"):
+            if any(ch in seg for ch in "*?["):
+                break
+            parts.append(seg)
+        roots.append("/".join(parts) or ".")
+    return sorted(set(roots))
+
+
+def walk_files(root: Path, rels: list[str]) -> dict[str, list[int]]:
+    """{repo-relative path: [mtime_ns, size]} for every file under `rels` (pruned dirs skipped)."""
+    out: dict[str, list[int]] = {}
+    for rel in rels:
+        base = root / rel
+        if base.is_file():
+            st = base.stat()
+            out[rel] = [st.st_mtime_ns, st.st_size]
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d not in PRUNE_DIRS]
+            for fn in filenames:
+                fp = Path(dirpath) / fn
+                try:
+                    st = fp.stat()
+                except OSError:
+                    continue
+                out[fp.relative_to(root).as_posix()] = [st.st_mtime_ns, st.st_size]
+    return out
+
+
+def snap_path(sid: str, tool_use_id: str, agent: str) -> Path:
+    """Where a Bash call's pre-snapshot waits for its PostToolUse twin."""
+    key = re.sub(r"[^\w.-]", "_", f"{sid}_{tool_use_id or agent}")
+    return STATE_DIR / f"snap_{key}.json"
+
+
+def owed_zone_globs(reg: dict[str, Any], events: list[dict[str, Any]], agent: str) -> list[str]:
+    """Globs of gated path laws whose skills THIS agent has not loaded yet."""
+    globs: list[str] = []
+    for law in reg.get("paths", []):
+        if law.get("law") == "gate" and any(not used_since(events, [s], 0, agent) for s in law.get("skills_all", [])):
+            globs += law.get("globs", [])
+    return globs
+
+
+def take_snapshot(inp: dict[str, Any], reg: dict[str, Any], events: list[dict[str, Any]], agent: str) -> None:
+    """Before a Bash call: remember the guarded files whose law is still owed."""
+    root = repo_root_of(str(inp.get("cwd") or ""))
+    if not root:
+        return
+    zone = owed_zone_globs(reg, events, agent)
+    intent = agent == "main" and bool(owed_laws(reg, events, agent, []))
+    if not zone and not intent:
+        return
+    rels = glob_roots(zone) + (list(SOURCE_ROOTS) if intent else [])
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    snap = {"root": str(root), "rels": rels, "zone": zone, "intent": intent, "files": walk_files(root, rels)}
+    snap_path(inp.get("session_id", ""), str(inp.get("tool_use_id", "")), agent).write_text(json.dumps(snap), encoding="utf-8")
+
+
+def check_snapshot(inp: dict[str, Any], agent: str, was_repro: bool) -> list[str]:
+    """After a Bash call: what guarded files did it change while their law was owed?"""
+    sp = snap_path(inp.get("session_id", ""), str(inp.get("tool_use_id", "")), agent)
+    try:
+        snap = json.loads(sp.read_text(encoding="utf-8"))
+        sp.unlink()
+    except (OSError, json.JSONDecodeError):
+        return []
+    before = snap["files"]
+    after = walk_files(Path(snap["root"]), snap["rels"])
+    changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+    if not changed:
+        return []
+    out = []
+    rx = [glob_to_regex(g) for g in snap.get("zone", [])]
+    zone_hits = [c for c in changed if any(r.search(c) for r in rx)]
+    if zone_hits:
+        out.append(f"HARD-RULES ZONE changed by Bash before `hard-rules` was loaded: {', '.join(zone_hits[:5])}")
+    src_hits = [c for c in changed if c.split("/", 1)[0] in SOURCE_ROOTS]
+    if snap.get("intent") and not was_repro and src_hits:
+        out.append(f"BUG law: source changed by Bash before any diagnosis or reproduction: {', '.join(src_hits[:5])}")
+    return out
+
+
 # ── event handlers ───────────────────────────────────────────────────────────
 def emit(obj: dict[str, Any]) -> None:
     """Hook output: one JSON object on stdout. ASCII-escaped on purpose: Windows Python's
@@ -362,6 +472,7 @@ def on_pre(inp: dict[str, Any], reg: dict[str, Any]) -> None:
         # segment, so a repro (`pytest … > out.txt`) is never gated — it IS the evidence —
         # while `sed -i <source> && curl x` is (P1 #2). Temp/log writes stay free.
         if not bash_writes(cmd, reg)[1]:
+            take_snapshot(inp, reg, read_ledger(sid), agent)
             return
     events = read_ledger(sid)
     owed = owed_laws(reg, events, agent, paths)
@@ -393,6 +504,12 @@ def on_post(inp: dict[str, Any], _reg: dict[str, Any]) -> None:
         segs = SEGMENT_SPLIT.split(str(tin.get("command", "")))
         m = next((x for x in (REPRO_START.match(seg) for seg in segs) if x), None)
         append(sid, {"k": "bash", "repro": bool(m), "what": m.group(1).lower()[:20] if m else "", "agent": agent})
+        violations = check_snapshot(inp, agent, bool(m))
+        if violations:
+            append(sid, {"k": "violation", "agent": agent, "what": violations})
+            emit({"decision": "block", "reason": "SKILL LAW VIOLATION — " + " ‖ ".join(violations) +
+                  ". Restore those files unless the change was intended (git diff / git checkout -- <file>), "
+                  "load the owed skill, then redo the change."})
 
 
 def waive(reason: str) -> int:

@@ -192,6 +192,79 @@ def test_repro_keyword_in_a_comment_is_not_evidence(run) -> None:
     assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": PLAIN}})) == "deny"
 
 
+@pytest.mark.parametrize("cmd", [
+    "rm backend/migrations/0099_x.up.sql",
+    "truncate -s 0 backend/src/api/mcp_server.py",
+    "git checkout -- backend/src/services/applications/spine.py",
+])
+def test_deletes_and_restores_in_zone_are_writes(run, cmd: str) -> None:
+    """reviewer-bugs P1 #3 on #712: `rm` into the zone was not seen as a write."""
+    assert decision(run("pre", {"tool_name": "Bash", "tool_input": {"command": cmd}})) == "deny"
+
+
+# ── backstop: filesystem truth for writes the parser cannot know ─────────────
+@pytest.fixture()
+def tree(tmp_path: Path) -> Path:
+    """A throwaway git work tree with one hard-rules-zone file and one plain source file."""
+    root = tmp_path / "repo"
+    (root / ".git").mkdir(parents=True)
+    (root / "backend" / "migrations").mkdir(parents=True)
+    (root / "backend" / "src").mkdir(parents=True)
+    (root / "backend" / "migrations" / "0001_x.up.sql").write_text("select 1;\n", encoding="utf-8")
+    (root / "backend" / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+    return root
+
+
+def bash(run, root: Path, cmd: str, tid: str, mutate=None, agent: str | None = None) -> dict:
+    """One Bash call: PreToolUse, the command's effect on disk, then PostToolUse."""
+    base = {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(root), "tool_use_id": tid}
+    if agent:
+        base["agent_id"] = agent
+    pre = run("pre", base)
+    if decision(pre) == "deny":
+        return pre
+    if mutate:
+        mutate()
+    return run("post", base)
+
+
+UNKNOWN_DELETE = "python -c \"import os; os.remove('backend/migrations/0001_x.up.sql')\""
+
+
+def test_backstop_catches_an_unparsed_zone_delete(run, tree: Path) -> None:
+    zone_file = tree / "backend" / "migrations" / "0001_x.up.sql"
+    resp = bash(run, tree, UNKNOWN_DELETE, "t1", mutate=zone_file.unlink)
+    assert resp.get("decision") == "block" and "HARD-RULES ZONE" in resp["reason"]
+    assert "backend/migrations/0001_x.up.sql" in resp["reason"]
+
+
+def test_backstop_silent_once_hard_rules_loaded(run, tree: Path) -> None:
+    """NEGATIVE control: same delete, law satisfied -> no snapshot, no block."""
+    run("post", {"tool_name": "Skill", "tool_input": {"skill": "hard-rules"}})
+    zone_file = tree / "backend" / "migrations" / "0001_x.up.sql"
+    assert bash(run, tree, UNKNOWN_DELETE, "t2", mutate=zone_file.unlink) == {}
+
+
+def test_backstop_silent_when_nothing_guarded_changed(run, tree: Path) -> None:
+    """NEGATIVE control: a command that touches no guarded file passes untouched."""
+    assert bash(run, tree, "python -c \"print(42)\"", "t3") == {}
+
+
+def test_backstop_catches_source_write_under_bug_gate(run, tree: Path) -> None:
+    run("post", {"tool_name": "Skill", "tool_input": {"skill": "hard-rules"}})   # zone satisfied
+    run("prompt", {"prompt": "it crashes: Traceback ValueError in app.py"})
+    src = tree / "backend" / "src" / "app.py"
+    resp = bash(run, tree, "python fixer.py", "t4", mutate=lambda: src.write_text("x = 2  # guessed\n", encoding="utf-8"))
+    assert resp.get("decision") == "block" and "BUG law" in resp["reason"]
+
+
+def test_backstop_lets_a_repro_touch_nothing_and_pass(run, tree: Path) -> None:
+    """NEGATIVE control: a reproduction under an armed bug gate is evidence, never a violation."""
+    run("post", {"tool_name": "Skill", "tool_input": {"skill": "hard-rules"}})
+    run("prompt", {"prompt": "it crashes: Traceback ValueError in app.py"})
+    assert bash(run, tree, "python -m pytest backend -q", "t5") == {}
+
+
 def test_intent_gate_never_blocks_workers(run) -> None:
     """Workers never saw the prompt — a bug gate must not kill a parallel fan-out."""
     run("prompt", {"prompt": "crash: Traceback ValueError"})
