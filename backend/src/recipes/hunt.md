@@ -1,4 +1,5 @@
 # 360-hunt — find jobs that fit, and record them
+<!-- doc: REFERENCE — a /run 360 recipe the connected assistant reads; served by routes/recipes.py -->
 
 Job360 never searches, ranks or recommends jobs. YOU search, with your own
 tools (a job search connector, company career pages, the web, links the user

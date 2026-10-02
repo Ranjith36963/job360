@@ -1,4 +1,5 @@
 # 360-apply — tailor, apply with the user, record it
+<!-- doc: REFERENCE — a /run 360 recipe the connected assistant reads; served by routes/recipes.py -->
 
 Use this for one application the user chose. The user confirms every submit.
 
