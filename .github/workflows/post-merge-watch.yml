@@ -60,6 +60,7 @@ permissions:
   contents: read
   issues: write
   actions: write # to wake triage.yml on a real trip, same handoff every loop here uses
+  pull-requests: read # the "merged and live (PR #N)" line looks up the PR behind the merge commit
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────
