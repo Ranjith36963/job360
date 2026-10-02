@@ -277,11 +277,23 @@ jobs:
           # of the queue, on purpose, and must not be picked up here.
           keep=""
           for pr in $prs; do
-            meta=$(gh pr view "$pr" --json state,isDraft,headRepositoryOwner,labels 2>/dev/null || echo '')
+            meta=$(gh pr view "$pr" --json state,isDraft,headRepositoryOwner,labels,headRefName 2>/dev/null || echo '')
             [ -n "$meta" ] || continue
             [ "$(echo "$meta" | jq -r .state)" = "OPEN" ] || continue
             [ "$(echo "$meta" | jq -r .isDraft)" = "false" ] || continue
             [ "$(echo "$meta" | jq -r '[.labels[].name]|any(.=="wip:parked")')" = "false" ] || continue
+            # `human-merge` (issue-fix.yml): code a machine wrote from an ISSUE. This
+            # repo is public and detector issues carry scraped, attacker-influenced
+            # text (a Sentry message can echo user input), so that code is never
+            # machine-merged, whatever its lane says. A human presses merge.
+            [ "$(echo "$meta" | jq -r '[.labels[].name]|any(.=="human-merge")')" = "false" ] || continue
+            # BELT AND BRACES for the label: issue-fix.yml opens its PR as a draft,
+            # labels it, then marks it ready, but the BRANCH NAME is something no
+            # label race or label removal can change. A `fix/issue-N` branch is
+            # issue-fix.yml's, so it is never machine-merged either.
+            case "$(echo "$meta" | jq -r '.headRefName // ""')" in
+              fix/issue-*) continue ;;
+            esac
             [ "$(echo "$meta" | jq -r .headRepositoryOwner.login)" = "${GH_REPO%%/*}" ] || continue
             keep="$keep $pr"
           done
