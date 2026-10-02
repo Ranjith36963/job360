@@ -15,7 +15,8 @@
 # FAILS OPEN on any internal error. Kill switch: touch .claude/QUALITY-GATE-OFF
 set -uo pipefail
 trap 'exit 0' ERR
-[ -n "${GITHUB_ACTIONS:-}${CI:-}" ] && exit 0
+_truthy() { case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in ""|0|false|no|off) return 1 ;; *) return 0 ;; esac; }
+if _truthy "${GITHUB_ACTIONS:-}" || _truthy "${CI:-}"; then exit 0; fi
 
 MAX_BLOCKS="${JOB360_QUALITY_GATE_MAX_BLOCKS:-3}"
 
@@ -47,7 +48,12 @@ mkdir -p "$STATE" 2>/dev/null || exit 0
 COUNT_FILE="$STATE/${FP}.count"
 N="$(cat "$COUNT_FILE" 2>/dev/null || echo 0)"
 N=$((N + 1))
-printf '%s' "$N" > "$COUNT_FILE" 2>/dev/null || true
+# If the counter cannot be saved, MAX_BLOCKS could never be reached — the gate would
+# block forever. Let the turn end and say why instead.
+if ! { printf '%s' "$N" > "$COUNT_FILE"; } 2>/dev/null; then
+  echo '{"systemMessage": "[quality-gate] could not save its attempt counter; NOT blocking. This code is NOT proven."}'
+  exit 0
+fi
 
 if [ "$N" -gt "$MAX_BLOCKS" ]; then
   python -c "

@@ -32,7 +32,14 @@ case "$REL" in
     cd "$ROOT/backend" || exit 0
     F="${REL#backend/}"
     python -m ruff check --fix --quiet "$F" >/dev/null 2>&1
-    OUT="$(python -m ruff check --output-format concise "$F" 2>/dev/null)" || true
+    RC=0
+    OUT="$(python -m ruff check --output-format concise "$F" 2>&1)" || RC=$?
+    # ruff: 0 clean, 1 findings, 2+ ruff itself failed. A failure must not look
+    # like "clean" — say so (exit 1 = shown, never blocks), still fail open.
+    if [ "$RC" -ge 2 ] || { [ "$RC" -ne 0 ] && [ -z "$OUT" ]; }; then
+      echo "[post-edit-lint] ruff could not lint $REL (exit $RC) — lint SKIPPED, not passed: $(printf '%s' "$OUT" | head -3)" >&2
+      exit 1
+    fi
     ;;
   # frontend: NOT here. eslint on ONE file measured 96 s on this machine (2026-10-02)
   # — far too slow per edit. Frontend lint + type-check + unit tests run once at the
