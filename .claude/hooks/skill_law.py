@@ -53,19 +53,25 @@ BUG_EVIDENCE = re.compile(
     r"|test_\w+|::\w+|\bassert(ion)?\b|\bexit (code )?[1-9]\d*|\.(py|tsx?|jsx?|sql):\d+|sentry|stack ?trace)",
     re.IGNORECASE,
 )
-# A Bash command that REPRODUCES or observes a defect counts as debugging evidence.
-REPRO_CMD = re.compile(
-    r"(\bpytest\b|python -m pytest|\bnpm (run )?(test|test:unit|test:e2e)\b|\bnpx playwright\b|\bcurl\b"
-    r"|railway logs|\bgh run view\b|sentry)",
+# Bash is judged per SEGMENT (split on && || ; | and newlines): one substring search over
+# the whole command let `sed -i <zone> && curl x` pass as "a repro" (reviewer-bugs P1 #2, #712).
+SEGMENT_SPLIT = re.compile(r"&&|\|\||;|\||\n")
+# A segment whose PROGRAM reproduces or observes a defect — debugging evidence.
+REPRO_START = re.compile(
+    r"^\s*(?:\w+=\S*\s+)*(python3?\s+-m\s+pytest|pytest|npm\s+(?:run\s+)?(?:test|test:unit|test:e2e)"
+    r"|npx\s+playwright|curl|railway\s+logs|gh\s+run\s+view)\b",
     re.IGNORECASE,
 )
-# A Bash command that WRITES files (used to stop Edit-tool bypasses into gated paths).
+# curl/wget flags that write a file (then a "repro" program is also a writer).
+OUTPUT_FLAG = re.compile(r"\s(?:-o|-O|--output(?:-dir)?)(?:\s|=)")
+# What a redirect writes to (the only thing a repro segment may write).
+REDIRECT_TARGET = re.compile(r"(?:^|[^0-9>&])>{1,2}\s*([^\s;&|]+)")
 # A Bash command that names repo SOURCE (where a write is a code change, not a log).
 SOURCE_PATH = re.compile(r"(^|[\s'\"=:/\\])(backend|frontend|scripts|\.github|\.claude|docs)[/\\]", re.IGNORECASE)
 WAIVE_CMD = re.compile(r"skill_law\.py[\"']?\s+waive\s+(.+)$", re.IGNORECASE | re.DOTALL)
 BASH_WRITE = re.compile(
     r"(\bsed\s+-i|(^|[^0-9>&])>{1,2}\s*[\w./\"']|\btee\b|\bgit\s+apply\b|\bpatch\b|\bcp\b|\bmv\b"
-    r"|<<\s*['\"]?\w+)"
+    r"|<<\s*['\"]?\w+|\s(?:-o|-O|--output)(?:\s|=))"
 )
 
 
@@ -262,17 +268,35 @@ def target_paths(tool: str, tin: dict[str, Any], reg: dict[str, Any]) -> list[st
         p = tin.get("file_path") or tin.get("notebook_path") or ""
         return [p] if p else []
     if tool == "Bash":
-        cmd = str(tin.get("command", ""))
-        if not BASH_WRITE.search(cmd):
-            return []
-        found = []
-        for tok in re.findall(r"[\w./\\-]+", cmd):
+        return bash_writes(str(tin.get("command", "")), reg)[0]
+    return []
+
+
+def bash_writes(cmd: str, reg: dict[str, Any]) -> tuple[list[str], bool]:
+    """(gated-zone paths written, writes-any-repo-source) judged segment by segment.
+
+    A segment that writes nothing is free. A repro segment (pytest/npm test/curl … as its
+    PROGRAM, no -o/--output) may only write through redirects, so only its redirect
+    targets are judged — `pytest backend/tests/x.py > out.txt` writes out.txt, not source.
+    Every other writing segment is judged on its whole text.
+    """
+    zone: list[str] = []
+    source = False
+    for seg in SEGMENT_SPLIT.split(cmd):
+        if not BASH_WRITE.search(seg):
+            continue
+        if REPRO_START.match(seg) and not OUTPUT_FLAG.search(seg):
+            text = " ".join(REDIRECT_TARGET.findall(seg))
+        else:
+            text = seg
+        for tok in re.findall(r"[\w./\\-]+", text):
             t = norm_path(tok)
             for law in reg.get("paths", []):
                 if law.get("law") == "gate" and any(glob_to_regex(g).search(t) for g in law.get("globs", [])):
-                    found.append(t)
-        return found
-    return []
+                    zone.append(t)
+        if SOURCE_PATH.search(text):
+            source = True
+    return zone, source or bool(zone)
 
 
 # ── event handlers ───────────────────────────────────────────────────────────
@@ -333,14 +357,11 @@ def on_pre(inp: dict[str, Any], reg: dict[str, Any]) -> None:
             if len(reason) >= 8:
                 append(sid, {"k": "waive", "reason": reason[:300], "agent": agent})
             return
-        # A reproduction IS the evidence the BUG gate asks for — never gate it (even
-        # `pytest ... > log.txt` writes a file). Non-writes and writes that touch no
-        # repo source (temp files, logs) are free. Any other Bash write into source is
-        # held to the same laws as Edit/Write (reviewer-bugs P1 on #712: a heredoc into
-        # a non-zone file used to dodge the BUG gate entirely).
-        if REPRO_CMD.search(cmd) or not BASH_WRITE.search(cmd):
-            return
-        if not paths and not SOURCE_PATH.search(cmd):
+        # Any Bash write into repo source meets the same laws as Edit/Write (reviewer-bugs
+        # P1 on #712: a heredoc into a non-zone file dodged the BUG gate). Judged per
+        # segment, so a repro (`pytest … > out.txt`) is never gated — it IS the evidence —
+        # while `sed -i <source> && curl x` is (P1 #2). Temp/log writes stay free.
+        if not bash_writes(cmd, reg)[1]:
             return
     events = read_ledger(sid)
     owed = owed_laws(reg, events, agent, paths)
@@ -369,7 +390,8 @@ def on_post(inp: dict[str, Any], _reg: dict[str, Any]) -> None:
     elif tool in EDIT_TOOLS:
         append(sid, {"k": "edit", "path": norm_path(str(tin.get("file_path") or tin.get("notebook_path") or "")), "agent": agent})
     elif tool == "Bash":
-        m = REPRO_CMD.search(str(tin.get("command", "")))
+        segs = SEGMENT_SPLIT.split(str(tin.get("command", "")))
+        m = next((x for x in (REPRO_START.match(seg) for seg in segs) if x), None)
         append(sid, {"k": "bash", "repro": bool(m), "what": m.group(1).lower()[:20] if m else "", "agent": agent})
 
 

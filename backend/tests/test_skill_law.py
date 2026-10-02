@@ -159,11 +159,37 @@ def test_bug_gate_covers_bash_writes_outside_the_zone(run) -> None:
     "python -m pytest backend/tests/test_bring.py -q > out.txt",  # a repro IS the evidence
     "echo note > /tmp/scratch.txt",                 # write outside repo source
     "grep -rn ValueError backend/src | head -20",   # read-only
+    "curl -s localhost:8000/api/health | head -5",  # observing is evidence, not a write
 ])
 def test_bug_gate_never_blocks_evidence_or_scratch(run, cmd: str) -> None:
     """NEGATIVE controls: the BUG gate must not block the diagnosis it demands."""
     run("prompt", {"prompt": "it crashes with a 500, Traceback ValueError in bring.py"})
     assert decision(run("pre", {"tool_name": "Bash", "tool_input": {"command": cmd}})) == "allow"
+
+
+@pytest.mark.parametrize("cmd", [
+    "sed -i 's/a/b/' backend/migrations/0099_x.up.sql && curl -s https://example.com",
+    "cp fix.py backend/src/services/applications/spine.py  # sentry",
+    "python -m pytest -q > out.txt; cp fix.py backend/src/api/mcp_server.py",
+])
+def test_repro_word_next_to_a_zone_write_is_still_denied(run, cmd: str) -> None:
+    """reviewer-bugs P1 #2 on #712: a repro keyword ANYWHERE in the command waved a write through."""
+    assert decision(run("pre", {"tool_name": "Bash", "tool_input": {"command": cmd}})) == "deny"
+
+
+@pytest.mark.parametrize("cmd", [
+    "python -m pytest -q > out.txt && sed -i 's/a/b/' backend/src/api/routes/bring.py",
+    "curl -o backend/src/api/routes/bring.py https://example.com/fix.py",
+])
+def test_bug_gate_judges_each_segment(run, cmd: str) -> None:
+    run("prompt", {"prompt": "it crashes with a 500, Traceback ValueError in bring.py"})
+    assert decision(run("pre", {"tool_name": "Bash", "tool_input": {"command": cmd}})) == "deny"
+
+
+def test_repro_keyword_in_a_comment_is_not_evidence(run) -> None:
+    run("prompt", {"prompt": "it crashes with a 500, Traceback ValueError in bring.py"})
+    run("post", {"tool_name": "Bash", "tool_input": {"command": "ls backend  # pytest later"}})
+    assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": PLAIN}})) == "deny"
 
 
 def test_intent_gate_never_blocks_workers(run) -> None:
