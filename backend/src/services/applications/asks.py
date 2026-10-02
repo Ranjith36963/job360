@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
 from src.services.applications.spine import SpineError, append_event, get_owned_application
-from src.utils.logger import get_audit_logger
+from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
@@ -183,8 +183,21 @@ async def answer_ask(
                 payload={"ask_id": ask_id, "answer": clean_a},
                 occurred_at=now, recorded_by=answered_by,
             )
+    # ``ask_id`` is the ``/asks/{ask_id}/…`` path parameter, so CodeQL's
+    # py/log-injection traces it request -> logger and flags this call and the
+    # ``ask_withdrawn`` one below (alerts 271/272). Runtime was already safe
+    # twice over -- the route and the MCP tool both declare ``ask_id: int``, so
+    # a segment carrying CR/LF is a 422 before this runs, and
+    # ``CRLFScrubFilter`` is attached to every handler -- but CodeQL cannot see
+    # a ``logging.Filter`` wired at handler-setup time, so the value is
+    # sanitized AT THE SOURCE with the existing helper (rule #7: no second
+    # sanitizer). ``ask_created`` above is deliberately NOT wrapped: there
+    # ``ask_id`` is ``cur.lastrowid``, ours and never request data -- the
+    # asymmetry is the point, not an oversight. ``safe_log_value`` returns a
+    # str, so the audit ``ask_id`` lands in ``audit_log.detail`` as a JSON
+    # string rather than a number; nothing reads that field (grepped).
     get_audit_logger().info(
-        "ask_answered", extra={"event": "ask_answered", "user_id": user_id, "ask_id": ask_id}
+        "ask_answered", extra={"event": "ask_answered", "user_id": user_id, "ask_id": safe_log_value(ask_id)}
     )
     ask = await _get_ask(db, user_id, ask_id)
     assert ask is not None
@@ -216,8 +229,9 @@ async def withdraw_ask(db: JobDatabase, user_id: str, ask_id: int, withdrawn_by:
                 detail=existing["question"][: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],
                 payload={"ask_id": ask_id}, occurred_at=now, recorded_by=withdrawn_by,
             )
+    # Same path-parameter taint as ``ask_answered`` above -- see the note there.
     get_audit_logger().info(
-        "ask_withdrawn", extra={"event": "ask_withdrawn", "user_id": user_id, "ask_id": ask_id}
+        "ask_withdrawn", extra={"event": "ask_withdrawn", "user_id": user_id, "ask_id": safe_log_value(ask_id)}
     )
     ask = await _get_ask(db, user_id, ask_id)
     assert ask is not None
