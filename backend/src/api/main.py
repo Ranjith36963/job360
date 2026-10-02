@@ -34,6 +34,7 @@ from src.api.routes import (
     bring,
     client_log,
     health,
+    history,
     oauth,
     profile,
     receipts,
@@ -208,6 +209,7 @@ app.include_router(profile.router, prefix="/api")
 app.include_router(bring.router, prefix="/api")
 app.include_router(receipts.router, prefix="/api")
 app.include_router(applications.router, prefix="/api")
+app.include_router(history.router, prefix="/api")
 # /run 360 recipes — the playbooks a connected assistant follows (owner plan 2026-10-01)
 app.include_router(recipes.router, prefix="/api")
 # Batch 2 — auth
