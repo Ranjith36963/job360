@@ -1,0 +1,175 @@
+{
+  "$comment": "SKILL LAW — the one registry that decides which skill must be used when. Read by .claude/hooks/skill_law.py (UserPromptSubmit routes, PreToolUse gates, PostToolUse ledger, SessionStart cheat sheet). Edit THIS file to change the law; the hook has no hardcoded routes. law: 'gate' = edits are DENIED until one listed skill ran after the prompt; 'advise' = injected as a forced decision, never blocks. Owner waiver: put the skip word in the prompt.",
+  "version": 1,
+  "enabled": true,
+  "skip_word": "skip-law",
+  "max_intents_per_prompt": 4,
+  "intents": [
+    {
+      "id": "bug",
+      "label": "BUG",
+      "why": "find the root cause before changing code",
+      "pattern": "\\b(bugs?|errors?|broken|crash(es|ed|ing)?|fail(s|ed|ing|ure)?|exceptions?|traceback|stack ?trace|regression|not working|(does|is)n'?t work(ing)?|wrong (result|output|number)|500|flaky)\\b",
+      "skills": ["superpowers:systematic-debugging", "debug", "engineering:debug"],
+      "law": "gate"
+    },
+    {
+      "id": "quality",
+      "label": "PRODUCT QUALITY",
+      "why": "think first with parallel lenses before fixing",
+      "pattern": "\\b(results? (are|look) (bad|wrong)|feels? (wrong|off)|users? (won'?t|will not|don'?t) like|bad experience|horrible|not good enough|quality)\\b",
+      "skills": ["intel-review"],
+      "law": "advise"
+    },
+    {
+      "id": "security",
+      "label": "SECURITY",
+      "why": "load the invariants; review the diff for vulnerabilities",
+      "pattern": "\\b(security|secure|vulnerab\\w*|exploit|cve|auth\\w*|oauth|tokens?|secrets?|passwords?|csrf|xss|ssrf|injection|permissions?|cors|rate.?limit\\w*)\\b",
+      "skills": ["hard-rules", "security-review"],
+      "law": "advise"
+    },
+    {
+      "id": "design",
+      "label": "DESIGN / UI",
+      "why": "critique against usability, hierarchy and accessibility before restyling",
+      "pattern": "\\b(design|ui|ux|layout|css|tailwind|styl(e|es|ing)|colou?rs?|fonts?|landing|screens?|components?|responsive|mobile|dark mode|accessib\\w*|a11y|ugly|elegant|classy|looks? (bad|off|good))\\b",
+      "skills": ["design:design-critique", "design:accessibility-review", "design:ux-copy"],
+      "law": "advise"
+    },
+    {
+      "id": "feature",
+      "label": "NEW FEATURE",
+      "why": "explore intent and write the plan before code; split work by model",
+      "pattern": "\\b(build|implement|new feature|add (a|an|the|support)|create (a|an)|integrate|endpoint)\\b",
+      "skills": ["superpowers:brainstorming", "superpowers:writing-plans", "implement", "model-delegation"],
+      "law": "advise"
+    },
+    {
+      "id": "plan",
+      "label": "PLAN / ARCHITECTURE",
+      "why": "decide the design and its trade-offs before touching files",
+      "pattern": "\\b(plan|architecture|refactor|redesign|system design|data model|schema change)\\b",
+      "skills": ["superpowers:writing-plans", "engineering:architecture", "engineering:system-design"],
+      "law": "advise"
+    },
+    {
+      "id": "test",
+      "label": "TESTS",
+      "why": "write the failing test first; pick the right test level",
+      "pattern": "\\b(tests?|testing|pytest|playwright|e2e|coverage|tdd)\\b",
+      "skills": ["superpowers:test-driven-development", "engineering:testing-strategy"],
+      "law": "advise"
+    },
+    {
+      "id": "review",
+      "label": "REVIEW",
+      "why": "review the diff with a dedicated reviewer, not by eye",
+      "pattern": "\\b(review|code review|audit|pull request|pr #?\\d+)\\b",
+      "skills": ["code-review", "coderabbit:code-review", "superpowers:requesting-code-review"],
+      "law": "advise"
+    },
+    {
+      "id": "prod",
+      "label": "LIVE PRODUCTION",
+      "why": "diagnose against prod first (Sentry, Railway logs, DB), then verify like a user",
+      "pattern": "\\b(prod|production|sentry|railway|incident|outage|is (it )?down|live site|users? (see|report|reported))\\b",
+      "skills": ["engineering:incident-response", "verify-job360"],
+      "law": "advise"
+    },
+    {
+      "id": "ship",
+      "label": "SHIP / MERGE",
+      "why": "finish the branch the safe way; check the deploy after merge",
+      "pattern": "\\b(merge|ship|release|deploy|open (a )?pr|finish (the )?branch)\\b",
+      "skills": ["superpowers:finishing-a-development-branch", "engineering:deploy-checklist", "commit"],
+      "law": "advise"
+    },
+    {
+      "id": "understand",
+      "label": "UNDERSTAND",
+      "why": "answer from instruments (file:line, live query), never from memory",
+      "pattern": "\\b(how does|how do(es)? (it|this)|explain|walk me through|what is|why (does|is|did)|where is|understand)\\b",
+      "skills": ["promise"],
+      "law": "advise"
+    },
+    {
+      "id": "docs",
+      "label": "DOCS",
+      "why": "keep docs and code in sync with the doc tooling",
+      "pattern": "\\b(docs?|documentation|readme|claude\\.md|changelog|runbook)\\b",
+      "skills": ["sync", "doc-audit", "engineering:documentation"],
+      "law": "advise"
+    },
+    {
+      "id": "research",
+      "label": "RESEARCH",
+      "why": "multi-source research with citations, not memory",
+      "pattern": "\\b(research|search (the )?(web|online)|look (it )?up|latest|compare|alternatives?|which is (the )?best)\\b",
+      "skills": ["deep-research", "agent-reach"],
+      "law": "advise"
+    },
+    {
+      "id": "claude-api",
+      "label": "CLAUDE API",
+      "why": "model ids, pricing and SDK change — read the reference first",
+      "pattern": "\\b(claude api|anthropic|sdk|model ids?|prompt caching|tool use|managed agents)\\b",
+      "skills": ["claude-api"],
+      "law": "advise"
+    },
+    {
+      "id": "agents",
+      "label": "AGENTS / DELEGATION",
+      "why": "pick the model per sub-task; fan out independent work",
+      "pattern": "\\b(agents?|subagents?|swarm|in parallel|delegate|workflow)\\b",
+      "skills": ["model-delegation", "superpowers:dispatching-parallel-agents"],
+      "law": "advise"
+    },
+    {
+      "id": "harness",
+      "label": "HARNESS / CONFIG",
+      "why": "hooks and settings have exact contracts — use the config skills",
+      "pattern": "\\b(hooks?|harness|settings\\.json|status ?line|keybindings?|plugins?|skills?)\\b",
+      "skills": ["update-config", "plugin-authoring", "superpowers:writing-skills"],
+      "law": "advise"
+    },
+    {
+      "id": "data",
+      "label": "DATA / SQL",
+      "why": "write correct, efficient SQL against the real schema",
+      "pattern": "\\b(sql|quer(y|ies)|postgres|database|db|tables?|index(es)?)\\b",
+      "skills": ["data:sql-queries", "hard-rules"],
+      "law": "advise"
+    }
+  ],
+  "paths": [
+    {
+      "id": "hard-rules-zone",
+      "label": "HARD-RULES ZONE",
+      "why": "schema, spine, MCP, DB door, auth and profile extraction carry invariants that break prod (CLAUDE.md: read them before editing)",
+      "globs": [
+        "backend/migrations/**",
+        "backend/src/services/applications/**",
+        "backend/src/api/mcp_server.py",
+        "backend/src/repositories/pg.py",
+        "backend/src/models.py",
+        "backend/src/api/auth_deps.py",
+        "backend/src/api/routes/auth.py",
+        "backend/src/api/routes/oauth.py",
+        "backend/src/api/routes/tokens.py",
+        "backend/src/services/auth/**",
+        "backend/src/services/profile/**"
+      ],
+      "skills_all": ["hard-rules"],
+      "law": "gate"
+    },
+    {
+      "id": "frontend-ui",
+      "label": "FRONTEND UI",
+      "why": "UI changes are judged by users — critique and check accessibility",
+      "globs": ["frontend/src/**/*.tsx", "frontend/src/**/*.css"],
+      "skills_all": ["design:design-critique"],
+      "law": "advise"
+    }
+  ]
+}

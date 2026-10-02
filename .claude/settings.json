@@ -65,6 +65,18 @@
       "mcp__claude_ai_Supabase__*"
     ]
   },
+  "enabledPlugins": {
+    "sales@synced": false,
+    "small-business@synced": false,
+    "human-resources@synced": false,
+    "legal@synced": false,
+    "finance@synced": false,
+    "marketing@synced": false,
+    "customer-support@synced": false,
+    "enterprise-search@synced": false,
+    "productivity@synced": false,
+    "cowork-plugin-management@synced": false
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -81,6 +93,23 @@
             "command": "bash .claude/hooks/branch-owner-guard.sh",
             "timeout": 15,
             "shell": "bash"
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/skill_law.py\" pre",
+            "timeout": 10,
+            "shell": "bash"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/skill_law.py\" pre",
+            "timeout": 10,
+            "shell": "bash"
           }
         ]
       }
@@ -95,6 +124,17 @@
             "timeout": 60,
             "shell": "bash",
             "statusMessage": "linting the edited file..."
+          }
+        ]
+      },
+      {
+        "matcher": "Skill|Bash|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/skill_law.py\" post",
+            "timeout": 10,
+            "shell": "bash"
           }
         ]
       }
@@ -127,6 +167,24 @@
             "type": "command",
             "command": "bash .claude/hooks/worktree-reaper.sh",
             "timeout": 15,
+            "shell": "bash"
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/skill_law.py\" session",
+            "timeout": 10,
+            "shell": "bash"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/skill_law.py\" prompt",
+            "timeout": 10,
             "shell": "bash"
           }
         ]
