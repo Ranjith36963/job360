@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core import settings
+from src.core.paging import page_window
 from src.repositories import pg
 from src.services.applications.status import replay_status, stage_for_status, status_for_event
 from src.services.auth import rate_limit
@@ -1366,7 +1367,7 @@ async def list_applications(
         f"FROM applications WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
         [*params, limit, offset],
     )
-    rows = [dict(r) for r in await cur.fetchall()]
+    rows = page_window([dict(r) for r in await cur.fetchall()], 1, limit)
 
     # Slice 7 — fact 2 once per request, so every card can carry its badge.
     from src.services.applications import visa as visa_service  # noqa: PLC0415
