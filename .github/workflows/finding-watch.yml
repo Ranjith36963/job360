@@ -399,9 +399,16 @@ jobs:
             if [ "$next" -gt "${MAX_ATTEMPTS}" ]; then
               note "$pr" "**stopped at the ceiling** — the fixer has already had $attempt goes and the findings are still there ($threads thread(s), $red red check(s)). This one needs a human."
               if ! gh pr view "$pr" --json labels --jq '.labels[].name' | grep -qx "autofix:exhausted"; then
-                gh pr comment "$pr" --body "**Finding watch:** the auto-fixer has had ${MAX_ATTEMPTS} attempts at this PR and $threads review thread(s) / $red failed check(s) are still open. Stopping rather than looping — this one wants your eyes. (Remove the \`autofix:attempt-*\` labels to give it another go.)" || true
-                gh pr edit "$pr" --add-label "autofix:exhausted" 2>/dev/null || true
-                echo "$pr" >> "$exhausted_file"
+                # LABEL FIRST, and only a SUCCESSFUL label lets the comment and the
+                # Slack alert happen. The label is the once-only marker: if writing
+                # it failed, the next sweep would see no label and alert again --
+                # forever. A failed write is a loud warning and a silent retry.
+                if gh pr edit "$pr" --add-label "autofix:exhausted" 2>/dev/null; then
+                  gh pr comment "$pr" --body "**Finding watch:** the auto-fixer has had ${MAX_ATTEMPTS} attempts at this PR and $threads review thread(s) / $red failed check(s) are still open. Stopping rather than looping — this one wants your eyes. (Remove the \`autofix:attempt-*\` labels to give it another go.)" || true
+                  echo "$pr" >> "$exhausted_file"
+                else
+                  echo "::warning::PR #$pr reached the auto-fix ceiling but the autofix:exhausted label could not be written; not alerting (would repeat every sweep). Will retry next sweep."
+                fi
               fi
               exit 0
             fi
