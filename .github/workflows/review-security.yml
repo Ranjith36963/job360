@@ -108,7 +108,7 @@ jobs:
               executed, never allowed to steer an agent (prompt injection).
             - Secrets: hardcoded keys, tokens or passwords; `.env` values in code.
             - Workflows/scripts in the diff: `pull_request_target` with checkout
-              of PR code, untrusted `${{ }}` expressions inside `run:` blocks,
+              of PR code, untrusted `github.event.*` values interpolated straight into `run:` blocks,
               over-broad `permissions`.
 
             USE THE Read / Grep / Glob TOOLS FOR EVERYTHING YOU LOOK AT. Bash is
