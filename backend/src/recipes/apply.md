@@ -10,7 +10,11 @@ Use this for one application the user chose. The user confirms every submit.
    `cover_letter`, a short `label` such as "v1 — agents focus").
 3. **Ask before you guess.** If the form needs something the profile does not
    have (notice period, salary, a portfolio question), stop and ask the user.
-   Never invent an answer.
+   Never invent an answer. Call `ask_user` with the `application_id` and the
+   exact question, and ask in chat too. When the user answers in chat, call
+   `answer_ask` with the ask id and their words, so the answer is remembered
+   and never asked twice. (It can also be answered on the Job360 Needs-you
+   page; read `open_asks` from `whats_new` before acting.)
 4. **Fill the form** if you can control a browser. Stop BEFORE the final
    submit button and show the user what you entered. Submit only after the
    user says yes to this one application.
