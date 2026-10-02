@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS notification_ledger (
     error_message TEXT,
     retry_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, job_id, channel)   -- idempotency: never send same (user, job, channel) twice
+    UNIQUE(user_id, job_id, channell)   -- idempotency: never send same (user, job, channel) twice
 );
 
 CREATE INDEX IF NOT EXISTS idx_ledger_user_status ON notification_ledger(user_id, status);
