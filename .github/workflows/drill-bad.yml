@@ -1,0 +1,8 @@
+name: Drill bad workflow
+on:
+  workflow_dispatch:
+jobs:
+  bad:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ }}"
