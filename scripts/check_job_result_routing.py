@@ -120,10 +120,19 @@ def _check_if(lines: list[str], var: str) -> list[int]:
 
     for i, raw in enumerate(lines):
         s = raw.strip()
+        # `[ "$R" = success ] && mode=ship` -- a branch with no `if` at all.
+        # (`|| ...` after it is its catch-all, so only a bare `&&` counts.)
+        if re.match(r"^(\[\[?|test\b)", s) and "&&" in s and "||" not in s and pos(s.split("&&")[0]):
+            lone.append((i + 1, pos(s.split("&&")[0])))
+            continue
         if s.startswith("if ") and re.search(r"\bfi\s*$", s):
-            if not re.search(r"\b(elif|else)\b", s) and pos(s):
+            has_elif = bool(re.search(r"\belif\b", s))
+            has_else1 = bool(re.search(r"\belse\b", s))
+            if has_elif and not has_else1 and len(cmp_(s)) >= 2:
+                bad.append(i + 1)  # a one-line elif router (review of #709, round 3)
+            elif not has_elif and not has_else1 and pos(s):
                 lone.append((i + 1, pos(s)))
-            continue  # a one-line if is never an elif chain
+            continue
         if not s.startswith("if "):
             continue
         values = cmp_(s)
@@ -284,6 +293,36 @@ jobs:
           if [ "$VERIFY_RESULT" = "failure" ]; then mode=verify-failed; fi
 """
 
+# Review of #709 (3rd round): the whole elif router on one line.
+_DRILL_BAD_ONELINE_ELIF = """\
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+        run: |
+          if [ "$VERIFY_RESULT" = "success" ]; then mode=ship; elif [ "$VERIFY_RESULT" = "failure" ]; then mode=verify-failed; fi
+"""
+
+# Swept proactively with round 3: the same router as `test && action` lines.
+_DRILL_BAD_ANDAND = """\
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          R: ${{ needs.verify.result }}
+        run: |
+          mode=none
+          [ "$R" = success ] && mode=ship
+          [[ $R == failure ]] && mode=failed
+"""
+
 _DRILL_GOOD = """\
 on: workflow_dispatch
 jobs:
@@ -307,6 +346,7 @@ jobs:
             mode=incomplete
           fi
           if [ "$FIX_RESULT" = "failure" ]; then echo one-line-is-fine; fi
+          if [ "$FIX_RESULT" = success ]; then a=1; elif [ "$FIX_RESULT" = failure ]; then a=2; else a=3; fi
           if [ "$FIX_RESULT" = failure ] || [ "$FIX_RESULT" = cancelled ]; then
             echo a-deliberate-single-check-not-a-router
           fi
@@ -328,6 +368,8 @@ def drill(broken: str = "") -> int:
         ("bad-dbracket", _DRILL_BAD_DBRACKET, True),
         ("bad-inline", _DRILL_BAD_INLINE, True),
         ("bad-sequential", _DRILL_BAD_SEQUENTIAL, True),
+        ("bad-oneline-elif", _DRILL_BAD_ONELINE_ELIF, True),
+        ("bad-andand", _DRILL_BAD_ANDAND, True),
         ("good", _DRILL_GOOD, False),
     ]
     failed = 0
