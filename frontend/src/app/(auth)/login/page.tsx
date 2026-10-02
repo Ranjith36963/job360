@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { login, requestMagicLink } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
-import { safeNext, safeNextOrUndefined } from "@/lib/safe-next";
+import { resolvePostLoginPath, safeNextOrUndefined } from "@/lib/safe-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -135,7 +135,7 @@ function PasswordForm({ onUseMagic }: { onUseMagic: () => void }) {
     setServerError(null);
     try {
       await login(data.email, data.password);
-      router.push(safeNext(next));
+      router.push(resolvePostLoginPath(next));
     } catch (err) {
       setServerError(friendlyAuthError(err, "Login failed. Please try again."));
     }

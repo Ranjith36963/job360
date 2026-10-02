@@ -79,6 +79,45 @@ describe("MagicLinkPage — scanner safety (no consume without a click)", () => 
   });
 });
 
+describe("MagicLinkPage — j360_next consent return cookie", () => {
+  const setCookie = (v: string) => {
+    document.cookie = `j360_next=${encodeURIComponent(v)}; Path=/`;
+  };
+  const tokenOnly = (k: string) => (k === "token" ? "good-token" : null);
+
+  beforeEach(() => {
+    document.cookie = "j360_next=; Path=/; Max-Age=0";
+    consumeMagicLinkMock.mockResolvedValue(undefined);
+  });
+
+  it("no next + consent cookie -> replaces to the consent path and clears the cookie", async () => {
+    mockGet.mockImplementation(tokenOnly);
+    setCookie("/oauth/consent/abc");
+    render(<MagicLinkPage />);
+    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/oauth/consent/abc"));
+    expect(document.cookie).not.toContain("j360_next=");
+  });
+
+  it.each(["//evil.com", "/applications"])("ignores cookie %j", async (v) => {
+    mockGet.mockImplementation(tokenOnly);
+    setCookie(v);
+    render(<MagicLinkPage />);
+    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/applications"));
+  });
+
+  it("explicit next beats the cookie", async () => {
+    mockGet.mockImplementation((k) =>
+      k === "token" ? "good-token" : k === "next" ? "/oauth/consent/from-link" : null
+    );
+    setCookie("/oauth/consent/abc");
+    render(<MagicLinkPage />);
+    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith("/oauth/consent/from-link"));
+  });
+});
+
 describe("MagicLinkPage — H11 friendly error rendering", () => {
   it("never renders the raw 'API error NNN:' prefix for a mapped status (429)", async () => {
     mockGet.mockReturnValue("bad-token");

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+import { RETURN_COOKIE, RETURN_COOKIE_MAX_AGE, isConsentPath } from "@/lib/safe-next";
+
 // Job360 never sources or ranks jobs (VISION rule 4) — there is no shared
 // catalog left to expose, so every one of these paths is one user's data.
 const PROTECTED_PATHS = [
@@ -16,6 +18,21 @@ const PROTECTED_PATHS = [
 // Backend origin used to VERIFY the session (same value the /api proxy forwards to).
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN || "http://localhost:8000";
 
+// Remember an OAuth consent URL across a login that lost its ?next (see safe-next.ts).
+function rememberConsentReturn(res: NextResponse, pathname: string): void {
+  if (!isConsentPath(pathname)) return;
+  const isProd =
+    (process.env.APP_ENV ?? "").toLowerCase() === "production" ||
+    !!process.env.RAILWAY_ENVIRONMENT ||
+    process.env.NODE_ENV === "production";
+  res.cookies.set(RETURN_COOKIE, pathname, {
+    path: "/",
+    maxAge: RETURN_COOKIE_MAX_AGE,
+    sameSite: "lax",
+    secure: isProd,
+  });
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -29,6 +46,7 @@ export async function middleware(request: NextRequest) {
     loginUrl.searchParams.set("next", pathname);
     const res = NextResponse.redirect(loginUrl, { status: 307 });
     res.cookies.delete("job360_session");
+    rememberConsentReturn(res, pathname);
     return res;
   };
 
@@ -78,7 +96,9 @@ export async function middleware(request: NextRequest) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
     loginUrl.searchParams.set("error", "service_unavailable");
-    return NextResponse.redirect(loginUrl, { status: 307 });
+    const res = NextResponse.redirect(loginUrl, { status: 307 });
+    rememberConsentReturn(res, pathname);
+    return res;
   }
 
   return NextResponse.next();

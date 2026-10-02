@@ -19,7 +19,7 @@ import Link from "next/link";
 
 import { consumeMagicLink } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/api-error";
-import { safeNext } from "@/lib/safe-next";
+import { resolvePostLoginPath } from "@/lib/safe-next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -30,7 +30,8 @@ function MagicBody() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
   // Where to land after sign-in — e.g. back on an OAuth consent page (spec
-  // R9). safeNext() falls back to /applications for anything external/malformed.
+  // R9). resolvePostLoginPath() keeps an explicit safe next, else falls back to the
+  // j360_next consent cookie, else /applications.
   const next = searchParams.get("next");
   const [state, setState] = useState<State>(token ? "confirm" : "error");
   const [error, setError] = useState<string | null>(
@@ -41,7 +42,7 @@ function MagicBody() {
     setState("submitting");
     try {
       await consumeMagicLink(token);
-      router.replace(safeNext(next));
+      router.replace(resolvePostLoginPath(next));
     } catch (err) {
       setState("error");
       setError(

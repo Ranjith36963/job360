@@ -148,3 +148,40 @@ describe("middleware — E2E bypass fails closed in production (F2)", () => {
     expect(res.status).toBe(307);
   });
 });
+
+describe("middleware — j360_next consent return cookie", () => {
+  beforeEach(() => {
+    vi.stubEnv("E2E_TEST_MODE", "");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("sets j360_next when bouncing an unauthenticated /oauth/consent/ request", async () => {
+    const res = await middleware(new NextRequest("http://localhost:3000/oauth/consent/abc"));
+    expect(res.status).toBe(307);
+    const c = res.cookies.get("j360_next");
+    expect(c?.value).toBe("/oauth/consent/abc");
+    expect(c?.maxAge).toBe(1800);
+    expect(c?.path).toBe("/");
+    expect(c?.sameSite).toBe("lax");
+    expect(c?.httpOnly).toBeFalsy();
+  });
+
+  it("does NOT set j360_next when bouncing /applications", async () => {
+    const res = await middleware(new NextRequest("http://localhost:3000/applications"));
+    expect(res.status).toBe(307);
+    expect(res.cookies.get("j360_next")).toBeUndefined();
+  });
+
+  it("sets j360_next on a 401 bounce for a consent path", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 401 })));
+    const res = await middleware(
+      new NextRequest("http://localhost:3000/oauth/consent/xyz", {
+        headers: { cookie: "job360_session=stale" },
+      })
+    );
+    expect(res.cookies.get("j360_next")?.value).toBe("/oauth/consent/xyz");
+  });
+});
