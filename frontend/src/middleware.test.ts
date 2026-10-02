@@ -63,6 +63,21 @@ describe("middleware — backend outage (F4)", () => {
     expect(res.headers.get("set-cookie") ?? "").toMatch(/job360_session=;/);
   });
 
+  it.each([429, 500, 503])(
+    "a %i from /api/auth/me does NOT bounce to login or delete the cookie",
+    async (status) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(new Response(null, { status }))
+      );
+      const res = await middleware(protectedRequest());
+      // Same service-unavailable path as an outage: cookie kept, marker set.
+      const location = new URL(res.headers.get("location")!);
+      expect(location.searchParams.get("error")).toBe("service_unavailable");
+      expect(res.headers.get("set-cookie") ?? "").not.toMatch(/job360_session=;/);
+    }
+  );
+
   it("lets a verified session through", async () => {
     vi.stubGlobal(
       "fetch",
