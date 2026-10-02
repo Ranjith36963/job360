@@ -173,7 +173,7 @@ jobs:
             --model sonnet
             --setting-sources user
             --allowedTools "Read,Glob,Grep,Bash(cat > /tmp/finding-*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments:*),Bash(gh pr comment ${{ github.event.pull_request.number }}:*)"
-            --disallowedTools "Edit(.claude/**)" "Edit(//home/runner/work/**/.claude/**)" "Edit(**/.mcp.json)" "Edit(**/CLAUDE.md)" "Edit(**/.git/**)" "Read(//proc/**)" "Read(//sys/**)" "Read(//etc/**)" "Read(//root/**)" "Read(//home/runner/work/_temp/**)" "Read(//home/runner/.*/**)"
+            --disallowedTools "Edit(.claude/**)" "Edit(//home/runner/work/**/.claude/**)" "Edit(**/.mcp.json)" "Edit(**/CLAUDE.md)" "Edit(**/.git/**)" "Read(//proc/**)" "Read(//sys/**)" "Read(//etc/**)" "Read(//root/**)" "Read(//home/runner/work/_temp/**)" "Read(//home/runner/.*/**)" "Write(.claude/**)" "Write(//home/runner/work/**/.claude/**)" "Write(**/.mcp.json)" "Write(**/CLAUDE.md)" "Write(**/.git/**)"
             --max-turns 40
 
       - name: Fail the check on any P0/P1 finding

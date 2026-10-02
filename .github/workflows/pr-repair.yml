@@ -457,7 +457,7 @@ jobs:
             --model claude-opus-5
             --setting-sources user
             --allowedTools Read,Glob,Grep,Write
-            --disallowedTools "Edit(.claude/**)" "Edit(//home/runner/work/**/.claude/**)" "Edit(**/.mcp.json)" "Edit(**/CLAUDE.md)" "Edit(**/.git/**)" "Read(//proc/**)" "Read(//sys/**)" "Read(//etc/**)" "Read(//root/**)" "Read(//home/runner/work/_temp/**)" "Read(//home/runner/.*/**)" "Edit(//tmp/**)"
+            --disallowedTools "Edit(.claude/**)" "Edit(//home/runner/work/**/.claude/**)" "Edit(**/.mcp.json)" "Edit(**/CLAUDE.md)" "Edit(**/.git/**)" "Read(//proc/**)" "Read(//sys/**)" "Read(//etc/**)" "Read(//root/**)" "Read(//home/runner/work/_temp/**)" "Read(//home/runner/.*/**)" "Edit(//tmp/**)" "Write(.claude/**)" "Write(//home/runner/work/**/.claude/**)" "Write(**/.mcp.json)" "Write(**/CLAUDE.md)" "Write(**/.git/**)" "Write(//tmp/**)"
             --max-turns 40
 
       - name: Claude repairs the branch (edit-only — no git, no gh)
@@ -517,7 +517,7 @@ jobs:
             --model claude-opus-5
             --setting-sources user
             --allowedTools Edit,Write,Read,Glob,Grep
-            --disallowedTools "Edit(.claude/**)" "Edit(//home/runner/work/**/.claude/**)" "Edit(**/.mcp.json)" "Edit(**/CLAUDE.md)" "Edit(**/.git/**)" "Read(//proc/**)" "Read(//sys/**)" "Read(//etc/**)" "Read(//root/**)" "Read(//home/runner/work/_temp/**)" "Read(//home/runner/.*/**)" "Edit(//tmp/**)"
+            --disallowedTools "Edit(.claude/**)" "Edit(//home/runner/work/**/.claude/**)" "Edit(**/.mcp.json)" "Edit(**/CLAUDE.md)" "Edit(**/.git/**)" "Read(//proc/**)" "Read(//sys/**)" "Read(//etc/**)" "Read(//root/**)" "Read(//home/runner/work/_temp/**)" "Read(//home/runner/.*/**)" "Edit(//tmp/**)" "Write(.claude/**)" "Write(//home/runner/work/**/.claude/**)" "Write(**/.mcp.json)" "Write(**/CLAUDE.md)" "Write(**/.git/**)" "Write(//tmp/**)"
             --max-turns 40
 
       # ── G4: the cage, checked by dumb code after the model ─────────────────
@@ -860,7 +860,7 @@ jobs:
             --model claude-opus-5
             --setting-sources user
             --allowedTools Read,Glob,Grep,Write
-            --disallowedTools "Edit(.claude/**)" "Edit(//home/runner/work/**/.claude/**)" "Edit(**/.mcp.json)" "Edit(**/CLAUDE.md)" "Edit(**/.git/**)" "Read(//proc/**)" "Read(//sys/**)" "Read(//etc/**)" "Read(//root/**)" "Read(//home/runner/work/_temp/**)" "Read(//home/runner/.*/**)" "Edit(//tmp/**)"
+            --disallowedTools "Edit(.claude/**)" "Edit(//home/runner/work/**/.claude/**)" "Edit(**/.mcp.json)" "Edit(**/CLAUDE.md)" "Edit(**/.git/**)" "Read(//proc/**)" "Read(//sys/**)" "Read(//etc/**)" "Read(//root/**)" "Read(//home/runner/work/_temp/**)" "Read(//home/runner/.*/**)" "Edit(//tmp/**)" "Write(.claude/**)" "Write(//home/runner/work/**/.claude/**)" "Write(**/.mcp.json)" "Write(**/CLAUDE.md)" "Write(**/.git/**)" "Write(//tmp/**)"
             --max-turns 40
 
       - name: Post the checker verdict
