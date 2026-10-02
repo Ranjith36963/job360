@@ -60,6 +60,7 @@ permissions:
   contents: read
   issues: write
   actions: write # to wake triage.yml on a real trip, same handoff every loop here uses
+  pull-requests: read # the "merged and live (PR #N)" line looks up the PR behind the merge commit
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────
@@ -502,6 +503,22 @@ jobs:
           subject=$(git log -1 --pretty=%s)
           echo "text=$subject" >> "$GITHUB_OUTPUT"
 
+      # The PR this commit came from, so "merged and live" carries a link the
+      # owner can open. Derived from the merge commit (GitHub knows which PR
+      # introduced a sha); a lookup that fails or finds nothing falls back to the
+      # commit URL rather than going silent. Three non-blank lines on purpose,
+      # for the same rule-B reason as the step above.
+      - name: The pull request that introduced that commit
+        id: prlink
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          pr=$(gh api "repos/$GH_REPO/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty' 2>/dev/null || true)
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+          echo "link=$GITHUB_SERVER_URL/$GH_REPO/$([ -n "$pr" ] && echo "pull/$pr" || echo "commit/$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+
       # Only on a LIVE run (a rehearsal announcing a merge would be a lie), only
       # when `decide` really reached a verdict, and only when that verdict was
       # clean. A trip has its own critical message to production-incidents above;
@@ -513,11 +530,11 @@ jobs:
         with:
           channel: log-github-ci
           severity: info
-          title: "merged and live: ${{ steps.subject.outputs.text }}"
+          title: "merged and live${{ steps.prlink.outputs.number && format(' (PR #{0})', steps.prlink.outputs.number) || '' }}: ${{ steps.subject.outputs.text }}"
           body: |
-            Commit `${{ github.sha }}` is on main, deployed, and survived the post-merge watch
-            window with nothing crossing a trip threshold.
-
+            What happened: commit `${{ github.sha }}` is on main, deployed, and nothing broke during the post-merge watch.
+            What to do: nothing, this is for your information only.
+            Link: ${{ steps.prlink.outputs.link }}
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 

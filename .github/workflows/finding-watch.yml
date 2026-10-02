@@ -141,6 +141,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # The Slack action below is a LOCAL composite action, so the job needs the
+      # repo on disk. It is checked out at the DEFAULT BRANCH, never the PR's
+      # ref: this workflow also runs on `pull_request` events, and the action
+      # holds SLACK_BOT_TOKEN, so it must be the trusted copy of the action.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch || 'main' }}
+          persist-credentials: false
+
       - name: Which PRs am I looking at
         id: scope
         env:
@@ -174,6 +183,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Count the findings, and wake the fixer where there are any
+        id: sweep
         if: steps.scope.outputs.prs != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -185,6 +195,12 @@ jobs:
           name="${GH_REPO##*/}"
 
           echo "### Finding watch" >> "$GITHUB_STEP_SUMMARY"
+
+          # PRs that crossed INTO "exhausted" during THIS sweep (the label is
+          # the once-only marker). The Slack step below reads them; a composite
+          # action cannot be called from inside this loop.
+          exhausted_file="${RUNNER_TEMP:-/tmp}/finding-watch-exhausted.txt"
+          : > "$exhausted_file"
 
           # One line per PR, always. `note` is called on every exit path below.
           note() { echo "- **#$1** — $2" >> "$GITHUB_STEP_SUMMARY"; }
@@ -383,8 +399,16 @@ jobs:
             if [ "$next" -gt "${MAX_ATTEMPTS}" ]; then
               note "$pr" "**stopped at the ceiling** — the fixer has already had $attempt goes and the findings are still there ($threads thread(s), $red red check(s)). This one needs a human."
               if ! gh pr view "$pr" --json labels --jq '.labels[].name' | grep -qx "autofix:exhausted"; then
-                gh pr comment "$pr" --body "**Finding watch:** the auto-fixer has had ${MAX_ATTEMPTS} attempts at this PR and $threads review thread(s) / $red failed check(s) are still open. Stopping rather than looping — this one wants your eyes. (Remove the \`autofix:attempt-*\` labels to give it another go.)" || true
-                gh pr edit "$pr" --add-label "autofix:exhausted" 2>/dev/null || true
+                # LABEL FIRST, and only a SUCCESSFUL label lets the comment and the
+                # Slack alert happen. The label is the once-only marker: if writing
+                # it failed, the next sweep would see no label and alert again --
+                # forever. A failed write is a loud warning and a silent retry.
+                if gh pr edit "$pr" --add-label "autofix:exhausted" 2>/dev/null; then
+                  gh pr comment "$pr" --body "**Finding watch:** the auto-fixer has had ${MAX_ATTEMPTS} attempts at this PR and $threads review thread(s) / $red failed check(s) are still open. Stopping rather than looping — this one wants your eyes. (Remove the \`autofix:attempt-*\` labels to give it another go.)" || true
+                  echo "$pr" >> "$exhausted_file"
+                else
+                  echo "::warning::PR #$pr reached the auto-fix ceiling but the autofix:exhausted label could not be written; not alerting (would repeat every sweep). Will retry next sweep."
+                fi
               fi
               exit 0
             fi
@@ -419,3 +443,54 @@ jobs:
             fi
            ) || note "$pr" "the sweep hit an error while looking at this one (see the log) - every other PR was still checked"
           done
+
+          # Hand the newly-exhausted PRs to the Slack step (numbers only — they
+          # come from `gh pr list`/event payloads and were matched ^[0-9]+$).
+          if [ -s "$exhausted_file" ]; then
+            nums=$(sort -un "$exhausted_file" | paste -sd, -)
+            count=$(sort -un "$exhausted_file" | wc -l | tr -d ' ')
+            links=$(sort -un "$exhausted_file" | while read -r n; do echo "https://github.com/$GH_REPO/pull/$n"; done | paste -sd' ' -)
+            if [ "$count" = "1" ]; then
+              slack_title="PR #$nums: auto-fix gave up after ${MAX_ATTEMPTS} tries — needs you"
+            else
+              slack_title="PRs #${nums//,/, #}: auto-fix gave up after ${MAX_ATTEMPTS} tries — needs you"
+            fi
+            {
+              echo "exhausted=yes"
+              echo "slack_title=$slack_title"
+              echo "links=$links"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      # The fixer hit its attempt ceiling: a human has to look. Fires ONLY on the
+      # transition into exhausted — the sweep above adds the `autofix:exhausted`
+      # label the first time and never lists the PR again, so this is once per
+      # PR, not once per 30-minute sweep.
+      - name: Slack — the auto-fixer gave up
+        if: always() && steps.sweep.outputs.exhausted == 'yes'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: ${{ steps.sweep.outputs.slack_title }}
+          body: |
+            What happened: the auto-fixer tried ${{ env.MAX_ATTEMPTS }} times and the review comments or failed checks are still there.
+            What to do: read the PR and fix it yourself, or close it. To give the fixer another go, remove the autofix:attempt labels.
+            Link: ${{ steps.sweep.outputs.links }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # Rule B (scripts/check_alert_paths.py): the alert above keys off an output
+      # the sweep only writes if it reaches its last lines. If the sweep dies
+      # half way, say THAT — to the muted log, because this runs every 30 minutes.
+      - name: Slack — the finding sweep itself broke
+        if: always() && steps.sweep.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: log-github-ci
+          severity: warn
+          title: "Finding watch: the sweep itself failed"
+          body: |
+            What happened: the 30-minute sweep that wakes the PR fixer stopped with an error, so a PR that gave up may not have been announced.
+            What to do: open the run and read the red step. Nothing else needed if the next sweep is green.
+            Link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
