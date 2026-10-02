@@ -33,6 +33,7 @@ from src.api.routes import (
     auth,
     bring,
     client_log,
+    drill,
     health,
     oauth,
     profile,
@@ -202,6 +203,7 @@ app.add_middleware(AccessLogMiddleware)
 app.add_middleware(RequestIdMiddleware)
 
 app.include_router(health.router, prefix="/api")
+app.include_router(drill.router, prefix="/api")
 app.include_router(client_log.router, prefix="/api")  # frontend → server log bridge (D)
 app.include_router(profile.router, prefix="/api")
 # Career-ops pivot (plan §8, slice one) — bring-a-job + application receipts
