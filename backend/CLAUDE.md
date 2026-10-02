@@ -12,11 +12,10 @@
 
 The Job360 backend: Python 3.10+ (`mcp` needs it; CI and prod run 3.12), FastAPI, Postgres via psycopg3 (`pg.py` — an aiosqlite-shaped shim). No worker, no Redis-backed queue: the worker + Redis services were deleted 2026-09-02 and the ARQ code went with slice 5.
 **Product path:** `src/api/routes/bring.py` → `src/services/applications/spine.py` (one Application, append-only events/artifacts/receipts) → `tailor.py` (web fallback) → `src/api/mcp_server.py`; `src/services/profile/` feeds it. The sourcing era (`src/sources/`, `src/main.py`, scorer, dedup, enrichment, embeddings) was **deleted 2026-09-05** (slice 5, #483). Never rebuild it.
-Entry points: `main.py` (uvicorn) and `python -m src.cli`. Runtime data (gitignored)
-lives in `data/` (`exports/`, `reports/`, `logs/`, and the legacy `user_profile.json` that
-`storage.py` migrates once then deletes). There is **no `data/jobs.db`** — the store is
-Postgres; `DB_PATH` is only a connection selector (`core.settings.DB_PATH`,
-consumed by `repositories.pg.connect`).
+Entry points: `main.py` (uvicorn) and `python -m src.cli`. Runtime data (gitignored) lives
+in `core.settings.DATA_DIR` / `LOGS_DIR`. There is **no `data/jobs.db`** — the store is
+Postgres; `DB_PATH` is only a connection selector (`core.settings.DB_PATH`, consumed by
+`repositories.pg.connect`).
 
 ## Owner rule #29 — empty user fields stay SILENT
 
