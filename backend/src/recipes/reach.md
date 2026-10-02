@@ -1,4 +1,5 @@
 # 360-reach — reach a person at the company
+<!-- doc: REFERENCE — a /run 360 recipe the connected assistant reads; served by routes/recipes.py -->
 
 1. **Find the right person** for this application (recruiter, hiring manager,
    someone on the team) — start with the company's own site and the job ad.

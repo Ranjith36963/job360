@@ -1,4 +1,5 @@
 # /run 360 — set up the job hunt
+<!-- doc: REFERENCE — a /run 360 recipe the connected assistant reads; served by routes/recipes.py -->
 
 You are setting up this user's job hunt. Job360 is the record; you do the work.
 Go step by step, and say in one plain line what you are doing at each step.
