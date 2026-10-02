@@ -662,6 +662,27 @@ export async function listApplications(
   return request(`/api/applications${qs(query as Record<string, unknown>)}`);
 }
 
+// ---- Needs you (asks the assistant could not answer without the user) ----
+export type Ask = _Schemas["AskOut"];
+export type AskStatus = "open" | "answered" | "all";
+
+export async function listAsks(
+  status: AskStatus = "open"
+): Promise<_Schemas["ListAsksResponse"]> {
+  return request(`/api/asks${qs({ status })}`);
+}
+
+export async function answerAsk(id: number, answer: string): Promise<Ask> {
+  return request<Ask>(`/api/asks/${id}/answer`, {
+    method: "POST",
+    body: JSON.stringify({ answer }),
+  });
+}
+
+export async function withdrawAsk(id: number): Promise<Ask> {
+  return request<Ask>(`/api/asks/${id}/withdraw`, { method: "POST" });
+}
+
 // ---- Lessons (slice 9, docs/plans/2026-09-11-lessons/spec.md) ----
 // "Flag for next time": written through recordApplicationEvent(event_type
 // "lesson"); read back here for the profile's Lessons list. The agent gets
