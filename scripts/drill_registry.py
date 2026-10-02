@@ -364,10 +364,11 @@ REGISTRY: dict[str, Guard] = {
     ),
     "scripts/check_job_result_routing.py": Guard(
         status="drilled",
-        # FC-001 (docs/harness/FAILURE_CATALOG.md): a `case`/`if-elif` over a
+        # FC-001 (docs/harness/FAILURE_CATALOG.md): a branch over a
         # `needs.<job>.result` with no catch-all lets cancelled/skipped fall
-        # through to a green no-op. Drill: one bad case, one bad if-chain, one
-        # clean file. Also verified against the real buggy PR #679 commit c40c58b
+        # through to a green no-op. Drill: runs the fixture corpus
+        # scripts/fixtures/job_result_routing/ (bad_* must flag, good_* must
+        # pass, owed_* reported) -- every reviewed shape lives there. Also verified against the real buggy PR #679 commit c40c58b
         # (2 findings, exit 1) and the fixed 18e890c (exit 0).
         drill=[sys.executable, "scripts/check_job_result_routing.py", "--drill"],
         # NEGATIVE CONTROL: blinds the case check, so the drill must FAIL.

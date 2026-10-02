@@ -16,24 +16,43 @@ that hits its own `timeout-minutes` is `cancelled`, not `failure`. PR #679 shipp
 
 so a timed-out verify left `mode=none`, every later step was gated on another mode,
 and the job ended GREEN having done nothing — no PR, no comment, no relabel, with the
-one fix attempt already spent. The bug reviewer re-found it on four consecutive
-commits before it was fixed. A careful read misses it because the YAML is valid and
-the happy paths are all correct; only the value nobody wrote down is wrong.
+one fix attempt already spent.
 
-WHAT IT CHECKS
---------------
-For every step whose `env:` maps a variable to `${{ needs.<job>.result }}`:
-  1. every `case "$VAR" in ... esac` over that variable has a `*)` arm;
-  2. every `if/elif` chain that compares that variable against TWO OR MORE
-     distinct values has an `else` (one single `if [ "$X" = failure ]` is a
-     deliberate check, not a router, and is left alone).
+HOW IT READS SHELL (FC-005 — learned the hard way)
+--------------------------------------------------
+The first versions read physical LINES. Shell puts many statements on one line, and
+an adversarial run found 15 of 21 real bugs missed and 7 of 12 correct scripts
+flagged. So the script is first turned into STATEMENTS the way bash sees them:
+`${{ needs.X.result }}` written straight into the script becomes a variable, `\\`
+continuations are joined, heredoc bodies are skipped, quotes / escapes / comments
+are honoured, and a leading `then` / `do` / `else` is peeled off. Every check runs
+on those statements.
+
+WHAT IT CHECKS, for every variable that carries a result (step/job `env:`,
+`${{ needs.X.result }}` in the script, and anything assigned from those)
+  1. CASE   `case "$VAR"` needs a `*)` arm (or arms for all four values).
+  2. ELIF   an if/elif chain routing on 2+ values needs an `else` -- unless a
+            condition is purely `!=` (that IS a catch-all), or every branch
+            exits/returns (the code after `fi` is then the catch-all).
+  3. LONE   separate else-less `if`s or `[ .. ] && x=..` lines that SET the same
+            variable for `success` and another value, in a step with no complete
+            router over that result. (`echo`-only status lines are not routing.)
+
+NOT COVERED (documented, see fixtures/owed_*): a `case` inside `$( )`, `else if`
+nesting, and non-bash steps (`actions/github-script` JavaScript).
+
+THE FIXTURES ARE THE SPEC
+-------------------------
+scripts/fixtures/job_result_routing/: every `bad_*` must be flagged, every `good_*`
+must pass, `owed_*` are known gaps (reported, not failed). Every shape any reviewer
+ever found lives there forever. New finding -> new fixture FIRST, then the fix.
 
 USAGE
   python scripts/check_job_result_routing.py            # check .github/workflows
   python scripts/check_job_result_routing.py --root DIR # check another directory
-  python scripts/check_job_result_routing.py --drill    # prove it can go RED
-  python scripts/check_job_result_routing.py --drill --break-checker CASE
-      # negative control: blinds check 1, so the drill MUST exit non-zero
+  python scripts/check_job_result_routing.py --drill    # run the fixtures
+  python scripts/check_job_result_routing.py --drill --break-checker CASE|IF
+      # negative control: blinds one check, so the drill MUST exit non-zero
 """
 
 from __future__ import annotations
@@ -48,10 +67,15 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
+FIXTURES = ROOT / "scripts" / "fixtures" / "job_result_routing"
 
-_RESULT_EXPR = re.compile(r"^\$\{\{\s*needs\.[A-Za-z0-9_-]+\.result\s*\}\}$")
-_KEYWORD = re.compile(r"^(if|elif|else|fi)\b")
-_INLINE_RESULT = re.compile(r"""^\s*(?:local\s+|export\s+)?([A-Za-z_][A-Za-z0-9_]*)=["']?\$\{\{\s*needs\.[A-Za-z0-9_-]+\.result\s*\}\}["']?\s*$""")
+_NEEDS = r"needs(?:\.([A-Za-z0-9_-]+)|\[\s*['\"]([A-Za-z0-9_-]+)['\"]\s*\])\.result"
+_RESULT_EXPR = re.compile(r"^\$\{\{\s*" + _NEEDS + r"\s*\}\}$")
+_RESULT_INTERP = re.compile(r"\$\{\{\s*" + _NEEDS + r"\s*\}\}")
+_HEREDOC = re.compile(r"(?<!<)<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+_ASSIGN = re.compile(r"^(?:(?:local|export|readonly|declare(?:\s+-\w+)*)\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+_EXITS = re.compile(r"^(exit|return)\b")
+ALL_RESULTS = {"success", "failure", "cancelled", "skipped"}
 
 # Checks a negative control may switch off (--break-checker).
 CHECKS = ("CASE", "IF")
@@ -64,108 +88,229 @@ def _result_vars(env: object) -> list[str]:
     return [k for k, v in env.items() if isinstance(v, str) and _RESULT_EXPR.match(v.strip())]
 
 
-def _check_case(lines: list[str], var: str) -> list[int]:
-    """Return 1-based line numbers of `case "$VAR"` blocks with no `*)` arm."""
-    bad: list[int] = []
-    opener = re.compile(r'^case\s+"?\$\{?' + re.escape(var) + r'\}?"?\s+in\b')
-    default_arm = re.compile(r"(^|[;\s(])\(?\*\s*\)")
-    for i, raw in enumerate(lines):
-        s0 = raw.strip()
-        if not opener.match(s0):
+def _interp_name(m: re.Match[str]) -> str:
+    """The made-up shell variable standing in for a `${{ needs.X.result }}`."""
+    return "__needs_" + re.sub(r"\W", "_", m.group(1) or m.group(2))
+
+
+def _statements(text: str) -> tuple[list[tuple[int, str]], list[str]]:
+    """Turn a `run:` block into (statements with 1-based line numbers, interp vars)."""
+    interp: list[str] = []
+
+    def sub(m: re.Match[str]) -> str:
+        name = _interp_name(m)
+        interp.append(name)
+        return "${" + name + "}"
+
+    raw = _RESULT_INTERP.sub(sub, text).splitlines()
+    # Join `\` continuations, keeping the first line's number.
+    lines: list[tuple[int, str]] = []
+    buf, start = "", 0
+    for n, line in enumerate(raw, 1):
+        if not buf:
+            start = n
+        if line.endswith("\\") and not line.endswith("\\\\"):
+            buf += line[:-1] + " "
             continue
-        if re.search(r"\besac\b", s0):  # one-line case: decide on this line alone
-            if not default_arm.search(s0):
-                bad.append(i + 1)
-            continue
-        depth, has_default = 0, False
-        for line in lines[i + 1:]:
-            s = line.strip()
-            if re.match(r"^case\b", s):
-                if re.search(r"\besac\b", s):
-                    continue  # a nested ONE-LINE case opens and closes itself
-                depth += 1
-            if re.match(r"^esac\b", s):
-                if depth == 0:
+        lines.append((start, buf + line))
+        buf = ""
+    if buf:
+        lines.append((start, buf))
+
+    out: list[tuple[int, str]] = []
+    heredoc_end = ""
+    for n, line in lines:
+        if heredoc_end:
+            if line.strip() == heredoc_end:
+                heredoc_end = ""
+            continue  # a heredoc BODY is data, never shell
+        pieces, cur, quote, i = [], "", "", 0
+        while i < len(line):
+            ch = line[i]
+            if quote == "'":
+                cur += ch
+                if ch == "'":
+                    quote = ""
+            elif ch == "\\" and i + 1 < len(line):
+                cur += ch + line[i + 1]
+                i += 1
+            elif quote == '"':
+                cur += ch
+                if ch == '"':
+                    quote = ""
+            elif ch in "'\"":
+                quote = ch
+                cur += ch
+            elif ch == "#" and (not cur or cur[-1].isspace()):
+                break
+            elif ch == ";":
+                pieces.append(cur)
+                cur = ""
+            else:
+                cur += ch
+            i += 1
+        pieces.append(cur)
+        for piece in pieces:
+            t = piece.strip()
+            while True:  # peel `then` / `do` (dropped) and `else` (its own statement)
+                m = re.match(r"^(then|do|else)(\s+|$)", t)
+                if not m:
                     break
-                depth -= 1
-            if depth == 0 and re.match(r"^\*\s*\)", s):
-                has_default = True
-        if not has_default:
-            bad.append(i + 1)
-    return bad
+                if m.group(1) == "else":
+                    out.append((n, "else"))
+                t = t[m.end():].strip()
+            if t:
+                out.append((n, t))
+        hd = _HEREDOC.search(line)
+        if hd:
+            heredoc_end = hd.group(2)
+    return out, interp
 
 
-def _check_if(lines: list[str], var: str) -> list[int]:
-    """Return line numbers of if/elif chains routing on VAR (2+ values) with no else."""
-    bad: list[int] = []
-    v = r'"?\$\{?' + re.escape(var) + r'\}?"?'
-    # Either side, quoted or not: `"$R" = x`, `[[ $R == x ]]`, `[ x = "$R" ]`.
-    left = re.compile(v + r'\s*!?==?\s*["\']?([A-Za-z_]+)')
-    right = re.compile(r'["\']?([A-Za-z_]+)["\']?\s*!?==?\s*' + v)
-
-    # Positive equality only (`=`/`==`, never `!=`): what a branch ROUTES on.
-    left_pos = re.compile(v + r'\s*==?\s*["\']?([A-Za-z_]+)')
-    right_pos = re.compile(r'([A-Za-z_]+)["\']?\s*==?\s*' + v)
-
-    def cmp_(text: str) -> set[str]:
-        return set(left.findall(text)) | set(right.findall(text))
-
-    def pos(text: str) -> set[str]:
-        return set(left_pos.findall(text)) | set(right_pos.findall(text))
-
-    # SEQUENTIAL ROUTER (review of #709): the same bug spelled as separate
-    # `if [ $R = success ] ... fi` / `if [ $R = failure ] ... fi` blocks, none
-    # with an else. Collected here, judged after the loop.
-    lone: list[tuple[int, set[str]]] = []
-
-    for i, raw in enumerate(lines):
-        s = raw.strip()
-        # `[ "$R" = success ] && mode=ship` -- a branch with no `if` at all.
-        # (`|| ...` after it is its catch-all, so only a bare `&&` counts.)
-        if re.match(r"^(\[\[?|test\b)", s) and "&&" in s and "||" not in s and pos(s.split("&&")[0]):
-            lone.append((i + 1, pos(s.split("&&")[0])))
-            continue
-        if s.startswith("if ") and re.search(r"\bfi\s*$", s):
-            has_elif = bool(re.search(r"\belif\b", s))
-            has_else1 = bool(re.search(r"\belse\b", s))
-            if has_elif and not has_else1 and len(cmp_(s)) >= 2:
-                bad.append(i + 1)  # a one-line elif router (review of #709, round 3)
-            elif not has_elif and not has_else1 and pos(s):
-                lone.append((i + 1, pos(s)))
-            continue
-        if not s.startswith("if "):
-            continue
-        values = cmp_(s)
-        depth, has_else, saw_elif = 0, False, False
-        for line in lines[i + 1:]:
-            t = line.strip()
-            m = _KEYWORD.match(t)
+def _aliases(stmts: list[tuple[int, str]], names: list[str]) -> list[str]:
+    """Add every variable assigned straight from a result variable (r="$R")."""
+    found = list(dict.fromkeys(names))
+    changed = True
+    while changed:
+        changed = False
+        for _, s in stmts:
+            m = _ASSIGN.match(s)
             if not m:
                 continue
-            kw = m.group(1)
-            if kw == "if" and not re.search(r"\bfi\s*$", t):
+            val = m.group(2).strip().strip("'\"")
+            src = re.fullmatch(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", val)
+            if src and src.group(1) in found and m.group(1) not in found:
+                found.append(m.group(1))
+                changed = True
+    return found
+
+
+class _Var:
+    """The comparisons one result variable takes part in."""
+
+    def __init__(self, var: str) -> None:
+        v = r'"?\$\{?' + re.escape(var) + r'\}?"?'
+        w = r'["\']?([A-Za-z_]+)["\']?'
+        self.pos = [re.compile(v + r"\s*==?\s*" + w), re.compile(w + r"\s*==?\s*" + v)]
+        self.neg = [re.compile(v + r"\s*!=\s*" + w), re.compile(w + r"\s*!=\s*" + v)]
+        self.case = re.compile(r"^case\s+" + v + r"\s+in\b(.*)$")
+
+    def positives(self, text: str) -> set[str]:
+        return {x for p in self.pos for x in p.findall(text)}
+
+    def negatives(self, text: str) -> set[str]:
+        return {x for p in self.neg for x in p.findall(text)}
+
+
+def _arm_patterns(text: str) -> list[str] | None:
+    """`success|failure) body` -> ['success', 'failure']; None if not an arm."""
+    m = re.match(r"^\(?\s*([^()]*?)\s*\)", text)
+    if not m or "=" in m.group(1) or "$(" in text[: m.end()]:
+        return None
+    return [p.strip() for p in m.group(1).split("|")]
+
+
+def _check_case(stmts: list[tuple[int, str]], var: str) -> tuple[list[int], bool]:
+    """(lines of `case "$VAR"` with no catch-all, whether a complete case exists)."""
+    bad, complete_seen, cv = [], False, _Var(var)
+    for i, (n, s0) in enumerate(stmts):
+        m = cv.case.match(s0)
+        if not m:
+            continue
+        arms: list[list[str]] = []
+        first = _arm_patterns(m.group(1).strip())
+        if first:
+            arms.append(first)
+        depth = 0
+        for _, s in stmts[i + 1:]:
+            if re.match(r"^case\s", s):
                 depth += 1
-            elif kw == "fi":
+            elif re.match(r"^esac\b", s):
                 if depth == 0:
                     break
                 depth -= 1
-            elif depth == 0 and kw == "elif":
-                saw_elif = True
-                values |= cmp_(t)
-            elif depth == 0 and kw == "else":
-                has_else = True
-        # A router has an elif. `if [ $R = failure ] || [ $R = cancelled ]` with no
-        # else is a deliberate single check (and the very fix FC-001 asks for).
-        if saw_elif and len(values) >= 2 and not has_else:
-            bad.append(i + 1)
-        elif not saw_elif and not has_else and pos(s):
-            lone.append((i + 1, pos(s)))
-    # Separate else-less ifs that between them route `success` AND another value
-    # are a router with no catch-all: cancelled/skipped match none of them.
-    # (A notifier on `failure || cancelled` alone never routes success: left alone.)
-    covered = set().union(*(vals for _, vals in lone)) if lone else set()
-    if len(lone) >= 2 and "success" in covered and len(covered) >= 2:
-        bad.append(lone[0][0])
+            elif depth == 0:
+                pats = _arm_patterns(s)
+                if pats:
+                    arms.append(pats)
+        flat = [p for a in arms for p in a]
+        literal = {p.strip("'\"") for p in flat}
+        if "*" in flat or ALL_RESULTS <= literal:
+            complete_seen = True
+        else:
+            bad.append(n)
+    return bad, complete_seen
+
+
+def _chain(stmts: list[tuple[int, str]], i: int) -> tuple[list[str], list[list[str]], bool, int]:
+    """Walk an if-chain at stmts[i]: (conditions, branch bodies, has_else, end index)."""
+    conds, bodies, has_else, depth = [stmts[i][1][2:].strip()], [[]], False, 0
+    j = i + 1
+    while j < len(stmts):
+        t = stmts[j][1]
+        if re.match(r"^if\s", t):
+            depth += 1
+        elif re.match(r"^fi\b", t):
+            if depth == 0:
+                break
+            depth -= 1
+        elif depth == 0 and re.match(r"^elif\s", t):
+            conds.append(t[4:].strip())
+            bodies.append([])
+            j += 1
+            continue
+        elif depth == 0 and t == "else":
+            has_else = True
+            bodies.append([])
+            j += 1
+            continue
+        bodies[-1].append(t)
+        j += 1
+    return conds, bodies, has_else, j
+
+
+def _check_if(stmts: list[tuple[int, str]], var: str, case_complete: bool) -> list[tuple[int, str]]:
+    """Return (line, message) for unrouted if/elif chains and lone branches over VAR."""
+    cv, bad = _Var(var), []
+    routed = case_complete
+    lone: list[tuple[int, set[str], set[str]]] = []  # (line, values, assigned names)
+
+    for i, (n, s) in enumerate(stmts):
+        if re.match(r"^(\[\[?|test)\s", s) and "&&" in s:
+            t = re.sub(r"\|\|\s*(true|:)\s*$", "", s).strip()  # `|| true` is not routing
+            if "||" in t:
+                continue  # `... && a || b`: b is its catch-all
+            parts = [p.strip() for p in t.split("&&")]
+            vals = set().union(*(cv.positives(p) for p in parts[:-1]))
+            a = _ASSIGN.match(parts[-1])
+            if vals and a:
+                lone.append((n, vals, {a.group(1)}))
+            continue
+        if not re.match(r"^if\s", s):
+            continue
+        conds, bodies, has_else, _ = _chain(stmts, i)
+        if not any(cv.positives(c) or cv.negatives(c) for c in conds):
+            continue  # this chain is not about VAR
+        pure_neg = any(cv.negatives(c) and not cv.positives(c) for c in conds)
+        values = set().union(*(cv.positives(c) for c in conds))
+        if has_else or pure_neg:
+            routed = True
+            continue
+        if len(conds) >= 2:  # an if/elif router
+            all_exit = all(b and _EXITS.match(b[-1]) for b in bodies)
+            if len(values) >= 2 and not all_exit:
+                bad.append((n, f"if/elif chain over ${var} has no `else`"))
+            continue
+        assigned = {m.group(1) for b in bodies for m in [_ASSIGN.match(x) for x in b] if m}
+        if values and assigned:
+            lone.append((n, values, assigned))
+
+    if not routed:
+        for name in sorted({a for _, _, names in lone for a in names}):
+            hits = [(ln, vals) for ln, vals, names in lone if name in names]
+            covered = set().union(*(vals for _, vals in hits))
+            if len(hits) >= 2 and "success" in covered and len(covered) >= 2:
+                bad.append((hits[0][0], f"separate branches set ${name} for {sorted(covered)} with no catch-all"))
     return bad
 
 
@@ -186,202 +331,49 @@ def check(root: Path, broken: str = "") -> list[str]:
             for step in job.get("steps") or []:
                 if not isinstance(step, dict) or not isinstance(step.get("run"), str):
                     continue
-                lines = step["run"].splitlines()
-                # Also results written straight into the script: r='${{ needs.x.result }}'
-                inline = [m.group(1) for m in (_INLINE_RESULT.match(ln) for ln in lines) if m]
-                names = job_vars + _result_vars(step.get("env")) + inline
-                if not names:
-                    continue
+                stmts, interp = _statements(step["run"])
+                names = _aliases(stmts, job_vars + _result_vars(step.get("env")) + interp)
                 label = step.get("name") or step.get("id") or "?"
+                where = f"{wf.name}: job `{job_id}` step `{label}`"
                 for var in names:
+                    case_bad, complete = _check_case(stmts, var)
                     if broken != "CASE":
-                        for ln in _check_case(lines, var):
-                            problems.append(
-                                f"{wf.name}: job `{job_id}` step `{label}` run-line {ln}: "
-                                f'`case "${var}"` has no `*)` arm -- cancelled/skipped fall through silently'
-                            )
+                        for ln in case_bad:
+                            problems.append(f'{where} run-line {ln}: `case "${var}"` has no `*)` arm '
+                                            "-- cancelled/skipped fall through silently")
                     if broken != "IF":
-                        for ln in _check_if(lines, var):
-                            problems.append(
-                                f"{wf.name}: job `{job_id}` step `{label}` run-line {ln}: "
-                                f"if/elif chain over ${var} has no `else` -- cancelled/skipped fall through silently"
-                            )
+                        for ln, msg in _check_if(stmts, var, complete):
+                            problems.append(f"{where} run-line {ln}: {msg} -- cancelled/skipped fall through silently")
     return problems
 
 
-_DRILL_BAD_CASE = """\
-on: workflow_dispatch
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    steps:
-      - name: route
-        env:
-          VERIFY_RESULT: ${{ needs.verify.result }}
-        run: |
-          mode=none
-          case "$VERIFY_RESULT" in
-            success) mode=ship ;;
-            failure) mode=verify-failed ;;
-          esac
-"""
-
-_DRILL_BAD_IF = """\
-on: workflow_dispatch
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    env:
-      FIX_RESULT: ${{ needs.fix.result }}
-    steps:
-      - name: route
-        run: |
-          if [ "$FIX_RESULT" = "success" ] && [ "$X" = "true" ]; then
-            mode=ship
-          elif [ "$FIX_RESULT" = "failure" ]; then
-            mode=fix-failed
-          fi
-"""
-
-# Review of #709: the unquoted [[ ]] form, a reversed comparison, and a result
-# written straight into the script were all invisible to the first version.
-_DRILL_BAD_DBRACKET = """\
-on: workflow_dispatch
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    steps:
-      - name: route
-        env:
-          R: ${{ needs.verify.result }}
-        run: |
-          if [[ $R == success ]]; then mode=ship
-          elif [[ success != $R ]] && [ failure = "$R" ]; then mode=failed
-          fi
-"""
-
-_DRILL_BAD_INLINE = """\
-on: workflow_dispatch
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    steps:
-      - name: route
-        run: |
-          r='${{ needs.x.result }}'
-          case "$r" in
-            success) echo ok ;;
-            failure) echo bad ;;
-          esac
-"""
-
-# Review of #709 (2nd round): the same router as separate if-blocks.
-_DRILL_BAD_SEQUENTIAL = """\
-on: workflow_dispatch
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    steps:
-      - name: route
-        env:
-          VERIFY_RESULT: ${{ needs.verify.result }}
-        run: |
-          mode=none
-          if [ "$VERIFY_RESULT" = "success" ]; then
-            mode=ship
-          fi
-          if [ "$VERIFY_RESULT" = "failure" ]; then mode=verify-failed; fi
-"""
-
-# Review of #709 (3rd round): the whole elif router on one line.
-_DRILL_BAD_ONELINE_ELIF = """\
-on: workflow_dispatch
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    steps:
-      - name: route
-        env:
-          VERIFY_RESULT: ${{ needs.verify.result }}
-        run: |
-          if [ "$VERIFY_RESULT" = "success" ]; then mode=ship; elif [ "$VERIFY_RESULT" = "failure" ]; then mode=verify-failed; fi
-"""
-
-# Swept proactively with round 3: the same router as `test && action` lines.
-_DRILL_BAD_ANDAND = """\
-on: workflow_dispatch
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    steps:
-      - name: route
-        env:
-          R: ${{ needs.verify.result }}
-        run: |
-          mode=none
-          [ "$R" = success ] && mode=ship
-          [[ $R == failure ]] && mode=failed
-"""
-
-_DRILL_GOOD = """\
-on: workflow_dispatch
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    steps:
-      - name: route
-        env:
-          VERIFY_RESULT: ${{ needs.verify.result }}
-          FIX_RESULT: ${{ needs.fix.result }}
-        run: |
-          case "$VERIFY_RESULT" in
-            success) mode=ship ;;
-            *) mode=incomplete ;;
-          esac
-          if [ "$FIX_RESULT" = "success" ]; then
-            mode=park
-          elif [ "$FIX_RESULT" = "failure" ]; then
-            mode=fix-failed
-          else
-            mode=incomplete
-          fi
-          if [ "$FIX_RESULT" = "failure" ]; then echo one-line-is-fine; fi
-          if [ "$FIX_RESULT" = success ]; then a=1; elif [ "$FIX_RESULT" = failure ]; then a=2; else a=3; fi
-          if [ "$FIX_RESULT" = failure ] || [ "$FIX_RESULT" = cancelled ]; then
-            echo a-deliberate-single-check-not-a-router
-          fi
-          case "$VERIFY_RESULT" in success) a=1 ;; *) a=2 ;; esac
-          case "$VERIFY_RESULT" in
-            success)
-              case "$X" in *) y=1 ;; esac
-              ;;
-            *) z=1 ;;
-          esac
-"""
-
-
 def drill(broken: str = "") -> int:
-    """Each defect must go RED, the clean file must stay GREEN. 0 = drill passed."""
-    cases = [
-        ("bad-case", _DRILL_BAD_CASE, True),
-        ("bad-if", _DRILL_BAD_IF, True),
-        ("bad-dbracket", _DRILL_BAD_DBRACKET, True),
-        ("bad-inline", _DRILL_BAD_INLINE, True),
-        ("bad-sequential", _DRILL_BAD_SEQUENTIAL, True),
-        ("bad-oneline-elif", _DRILL_BAD_ONELINE_ELIF, True),
-        ("bad-andand", _DRILL_BAD_ANDAND, True),
-        ("good", _DRILL_GOOD, False),
-    ]
-    failed = 0
-    for name, text, must_fail in cases:
+    """Run every fixture: bad_* flagged, good_* clean, owed_* reported. 0 = pass."""
+    files = sorted(FIXTURES.glob("*.yml"))
+    if not files:
+        print(f"DRILL FAIL: no fixtures in {FIXTURES}")
+        return 1
+    wrong, owed_caught = 0, []
+    for f in files:
+        kind = f.name.split("_", 1)[0]
+        # check() reads a directory: a temp one holding just this file (never the repo).
         with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, "w.yml").write_text(text, encoding="utf-8")
+            Path(tmp, "w.yml").write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
             got = check(Path(tmp), broken)
-        ok = bool(got) == must_fail
-        print(f"  drill {name}: {'ok' if ok else 'WRONG'} ({len(got)} finding(s), expected {'some' if must_fail else 'none'})")
-        failed += not ok
-    print("DRILL PASS" if not failed else f"DRILL FAIL ({failed} case(s) wrong)")
-    return 1 if failed else 0
+        if kind == "owed":
+            if got:
+                owed_caught.append(f.name)
+            continue
+        ok = bool(got) == (kind == "bad")
+        if not ok:
+            wrong += 1
+            print(f"  WRONG {f.name}: {len(got)} finding(s), expected {'some' if kind == 'bad' else 'none'}")
+    n_owed = sum(1 for f in files if f.name.startswith("owed_"))
+    print(f"  {len(files) - n_owed} fixtures judged, {n_owed} owed (known gaps)")
+    for name in owed_caught:
+        print(f"  NOTE {name} is now caught -- rename it bad_*")
+    print("DRILL PASS" if not wrong else f"DRILL FAIL ({wrong} fixture(s) wrong)")
+    return 1 if wrong else 0
 
 
 def main() -> int:

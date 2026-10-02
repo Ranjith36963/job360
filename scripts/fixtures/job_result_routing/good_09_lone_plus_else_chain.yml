@@ -1,0 +1,12 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          R: ${{ needs.verify.result }}
+        run: |
+          [ "$R" = cancelled ] && echo "::warning::verify timed out"
+          if [ "$R" = success ]; then mode=ship; else mode=incomplete; fi
+          [ "$R" = success ] && echo shipped
