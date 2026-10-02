@@ -42,7 +42,7 @@ def normalize_country(value: Optional[str]) -> str:
         return ""
     if not _ALPHA2.match(code):
         raise ValueError(f"country must be an ISO alpha-2 code like 'GB' or 'IN'; got {value!r}")
-    return code.upper()
+    return code.lower()
 
 
 def normalize_country_codes(value: Any) -> list[str]:
