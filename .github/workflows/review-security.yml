@@ -216,6 +216,14 @@ jobs:
             echo "::error::reviewer-security found $p0 P0 and $p1 P1 finding(s) — see the PR review threads."
             exit 1
           fi
+          # NO VERDICT = NO PASS. An agent that finished "successfully" but posted
+          # neither a finding nor the no-issues comment on this head proved
+          # nothing; passing it would be a green check with zero evidence.
+          if [ "$((p0 + p1 + p2 + nobugs))" -eq 0 ]; then
+            echo "::error::reviewer-security posted NO verdict on head $HEAD_SHA (no finding, no 'no security issues found' comment). No evidence = FAIL; rerun the check."
+            echo "### reviewer-security: FAILED — no verdict posted on head $HEAD_SHA" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           echo "reviewer-security: no P0/P1 findings ($p2 P2)."
 
       - name: Say so if reviewer-security is not configured
