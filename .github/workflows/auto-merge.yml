@@ -282,6 +282,11 @@ jobs:
             [ "$(echo "$meta" | jq -r .state)" = "OPEN" ] || continue
             [ "$(echo "$meta" | jq -r .isDraft)" = "false" ] || continue
             [ "$(echo "$meta" | jq -r '[.labels[].name]|any(.=="wip:parked")')" = "false" ] || continue
+            # `human-merge` (issue-fix.yml): code a machine wrote from an ISSUE. This
+            # repo is public and detector issues carry scraped, attacker-influenced
+            # text (a Sentry message can echo user input), so that code is never
+            # machine-merged, whatever its lane says. A human presses merge.
+            [ "$(echo "$meta" | jq -r '[.labels[].name]|any(.=="human-merge")')" = "false" ] || continue
             [ "$(echo "$meta" | jq -r .headRepositoryOwner.login)" = "${GH_REPO%%/*}" ] || continue
             keep="$keep $pr"
           done
