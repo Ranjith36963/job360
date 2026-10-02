@@ -246,6 +246,12 @@ jobs:
           HAS_SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD != '' }}
           SECRETS_FORCE_RED: ${{ inputs.drill && '1' || '' }}
         run: |
+          # CRASH SAFETY NET: if the Python below dies, the run must still raise
+          # the alarm. Pre-write a "crash" verdict and body; Python overwrites
+          # both on success. The output is echoed whatever happened.
+          echo "crash" > missing-count.txt
+          echo "The secrets presence check CRASHED in run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID - presence of required secrets is UNKNOWN until it is fixed." > body.md
+          set +e
           python3 - <<'PY'
           import os
           import re
@@ -385,7 +391,9 @@ jobs:
           PY
           # Written from shell, not Python, so scripts/chain_check.py can see
           # the producer of this wire (it reads `echo ... >> $GITHUB_OUTPUT`).
+          rc=$?
           echo "missing=$(cat missing-count.txt)" >> "$GITHUB_OUTPUT"
+          [ "$rc" -eq 0 ] || { echo "::error::secrets check crashed (exit $rc) - alarm raised anyway"; exit "$rc"; }
 
       - name: Raise it, and hand it to triage
         if: always() && steps.check.outputs.missing != ''
