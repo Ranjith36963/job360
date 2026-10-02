@@ -3266,7 +3266,9 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
         withdraw_auto_merge(1)
     finally:
         subprocess.run = _saved2  # type: ignore[assignment]
-    _out_argv = _seen_out[0] if _seen_out else []
+    # The withdrawal now reads the queue state first, so select the command by
+    # name rather than by position (same reason as the `--auto` case above).
+    _out_argv = next((c for c in _seen_out if "--disable-auto" in c), [])
     ok("a refusal can take a PR back OUT of the queue",
        "--disable-auto" in _out_argv,
        f"the command was {_out_argv} — without `--disable-auto` a PR queued while it "
@@ -3294,6 +3296,45 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     ok("...and withdrawing a PR that was never queued is a no-op, not an error",
        _ok_nq and _was_nq == QUEUE_ABSENT,
        f"it reported ok={_ok_nq} previous={_was_nq!r} with: {_detail_nq}",
+       ["withdraw_auto_merge"])
+
+    # B21b — THE WITHDRAWAL REPORTS ONLY A REAL queued -> not-queued TRANSITION.
+    #        `gh pr merge --disable-auto` exits 0 on a PR that was never queued, so
+    #        trusting its exit code posted "taken back OUT of the merge queue" for
+    #        PRs that were never in it (#703: 6 posts in 35 min, #659: 7). Fake gh:
+    #        `.auto_merge` is read from the api call; the disable call always
+    #        exits 0, exactly like the real one.
+    def _withdraw_with(auto_merge_flag: str) -> tuple[tuple[bool, str, str], bool]:
+        calls: list[list[str]] = []
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def _fake(cmd, *_a, **_k):  # noqa: ANN001, ANN202 - a drill stub
+            calls.append(list(cmd))
+            _r = _R()
+            _r.stdout = auto_merge_flag if "api" in cmd else "auto-merge disabled"
+            return _r
+
+        _saved_w = subprocess.run
+        try:
+            subprocess.run = _fake  # type: ignore[assignment]
+            _res = withdraw_auto_merge(1)
+        finally:
+            subprocess.run = _saved_w  # type: ignore[assignment]
+        return _res, any("--disable-auto" in c for c in calls)
+
+    _res_never, _disabled_never = _withdraw_with("null")
+    _res_queued, _disabled_queued = _withdraw_with('{"enabled_by":{"login":"x"}}')
+    ok("a never-queued PR yields no withdraw report (no Slack), a queued PR still does",
+       _res_never[0] and _res_never[2] == QUEUE_ABSENT and not _disabled_never
+       and judge_transition(_res_never[2], "refuse") is None
+       and _res_queued[0] and _res_queued[2] == QUEUE_QUEUED and _disabled_queued
+       and judge_transition(_res_queued[2], "refuse") == ("withdrawn", CHANNEL_DECIDE),
+       f"never-queued -> {_res_never} disable-called={_disabled_never}; "
+       f"queued -> {_res_queued} disable-called={_disabled_queued}",
        ["withdraw_auto_merge"])
 
     # ── THE ARM SPEAKS, AND ONLY ON A TRANSITION ─────────────────────────────
@@ -3575,11 +3616,15 @@ def request_auto_merge(pr: int) -> tuple[bool, str, str]:
 def withdraw_auto_merge(pr: int) -> tuple[bool, str, str]:
     """Take a PR OUT of GitHub's auto-merge queue. Returns (ok, detail, was).
 
-    `was` is the previous state, and it comes from GITHUB'S OWN ANSWER rather
-    than from a second API call: "auto-merge is not enabled" IS the statement
-    that the PR was never queued, so a refusal that changed nothing can be told
-    apart from one that pulled a PR back out. No extra request, no second place
-    for the fact to live.
+    `was` is the previous state, and it is READ FROM GITHUB BEFORE ACTING
+    (`auto_merge_state`, the same before-picture `request_auto_merge` takes).
+    `gh pr merge --disable-auto` exits 0 even when nothing was queued, so its
+    exit code can NOT say whether a PR was pulled back out: trusting it reported
+    "queued" for a PR that never was, and the arm re-judged that PR every few
+    minutes and posted ":warning: taken back OUT of the merge queue" each time
+    (PR #703: 6 posts in 35 minutes; #659: 7). Only a real queued -> not-queued
+    transition may report `queued`; a PR that was never queued returns `absent`
+    without touching GitHub, and red -> red stays silent.
 
     THE GAP THIS CLOSES, AND WHY IT WAS THE LAST FAIL-OPEN IN THE CHAIN.
 
@@ -3604,12 +3649,19 @@ def withdraw_auto_merge(pr: int) -> tuple[bool, str, str]:
     error. A cleanup that fails loudly when the thing is already clean gets
     switched off.
     """
+    was = auto_merge_state(pr)
+    if was == QUEUE_ABSENT:
+        # Never queued: nothing to withdraw, nothing to report. The disable call
+        # is skipped on purpose — it "succeeds" on a PR that was never queued.
+        return True, "was not queued — nothing to withdraw", QUEUE_ABSENT
     proc = subprocess.run(
         ["gh", "pr", "merge", str(pr), "--disable-auto"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
     )
     if proc.returncode == 0:
-        return True, (proc.stdout or "auto-merge disabled").strip()[:300], QUEUE_QUEUED
+        # `was` is queued (a real transition) or unknown (GitHub would not
+        # answer — stays unknown so the announcer speaks rather than hides it).
+        return True, (proc.stdout or "auto-merge disabled").strip()[:300], was
     said = (proc.stderr or proc.stdout or "no output").strip()
     low = said.lower()
     if "auto-merge is not enabled" in low or "does not have auto-merge" in low:
