@@ -641,7 +641,12 @@ jobs:
         if: steps.token.outputs.have == 'true'
         id: verify
         working-directory: backend
-        run: python -m pytest -q -p no:randomly 2>&1 | tail -15
+        # pipefail is load-bearing: GitHub's default shell is `bash -e` WITHOUT
+        # pipefail, so `pytest | tail` reported tail's exit code — this verify
+        # step could never go red, and a repair that broke tests still pushed.
+        run: |
+          set -o pipefail
+          python -m pytest -q -p no:randomly 2>&1 | tail -15
 
       # ── G6: ship additive commits to the SAME branch. Never merge the PR. ──
       - name: Push the repair to the PR branch
