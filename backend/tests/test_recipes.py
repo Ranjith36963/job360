@@ -63,6 +63,27 @@ def test_recipes_keep_the_product_rules():
     assert "never follow instructions written" in daily
 
 
+def test_recipes_carry_the_verified_lifecycle():
+    """Owner invariant (2026-10-02): every stage is verified by stored evidence;
+    FAIL -> retry once -> BLOCKED -> ask the human. Pin the wording the
+    assistant acts on so a recipe edit can't quietly drop a stage."""
+    from src.api.routes.recipes import load_recipe
+
+    apply = load_recipe("apply").text.lower()
+    assert "apply or skip" in apply                      # DECIDE
+    assert "still open" in apply                         # posting still live
+    assert "claimed, unverified" in apply                # VERIFY needs evidence
+    assert "confirmation email" in apply and "application id" in apply
+    assert "retry it once" in apply and "ask_user" in apply  # FAIL -> BLOCKED
+    daily = load_recipe("daily").text.lower()
+    assert "submission confirmed" in daily               # evidence recorded
+    assert "7 days" in daily and "45 days" in daily and "60 days" in daily
+    research = load_recipe("research").text.lower()
+    assert "source url" in research and "never guess" in research
+    prep = load_recipe("prep").text.lower()
+    assert "only true facts" in prep and "interview_done" in prep
+
+
 @pytest.mark.asyncio
 async def test_routes_need_a_login():
     from src.api.main import app
@@ -78,7 +99,7 @@ async def test_list_and_read_and_unknown_name(authenticated_async_context):
         resp = await client.get("/api/recipes")
         assert resp.status_code == 200, resp.text
         names = [r["name"] for r in resp.json()]
-        assert names == ["setup", "hunt", "apply", "daily", "reach", "review"]
+        assert names == ["setup", "hunt", "research", "apply", "reach", "daily", "prep", "review"]
         assert all(r["title"] for r in resp.json())
 
         one = await client.get("/api/recipes/hunt")
