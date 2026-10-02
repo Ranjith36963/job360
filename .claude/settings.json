@@ -81,9 +81,29 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/post-edit-lint.sh",
+            "timeout": 60,
+            "shell": "bash",
+            "statusMessage": "linting the edited file..."
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/stop-quality-gate.sh",
+            "timeout": 30,
+            "shell": "bash"
+          },
           {
             "type": "command",
             "command": "bash .claude/hooks/claude-md-proposal.sh",

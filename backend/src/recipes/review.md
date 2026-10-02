@@ -1,4 +1,5 @@
 # 360-review — the weekly look back
+<!-- doc: REFERENCE — a /run 360 recipe the connected assistant reads; served by routes/recipes.py -->
 
 1. **Read the numbers:** `stats` (counts by CV version and by role) and
    `export_history` for the full record.

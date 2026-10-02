@@ -1,4 +1,5 @@
 # 360-daily — the morning check (run on a schedule)
+<!-- doc: REFERENCE — a /run 360 recipe the connected assistant reads; served by routes/recipes.py -->
 
 1. **Read Gmail** (your own connector) for replies about the user's
    applications since your last run.

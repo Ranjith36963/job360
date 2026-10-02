@@ -135,6 +135,8 @@ INSTRUCTIONS = (
 # This is the same offer, carried on every `get_profile` result instead, so
 # it reaches a client whatever it connected. See `get_profile`'s docstring.
 ASSISTANT_HINT = (
+    "Before a job-hunt task, call get_recipe() and follow the matching recipe "
+    "(\"run 360\" = get_recipe(\"setup\")). "
     "Offer the user a daily check: run list_applications(due=true) and "
     "list_applications(quiet_days=7) each morning."
 )
