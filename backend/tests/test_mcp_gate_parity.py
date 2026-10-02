@@ -83,6 +83,8 @@ TOOL_ROUTES = {
     # Outreach tracking (owner decisions, 2026-09-25) — two more tools.
     "list_people": ("applications", "list_people", {}),
     "update_contact": ("applications", "update_contact", {"contact_id": 987654321, "name": "x"}),
+    # /run 360 recipes (owner plan 2026-10-01) — require_user, no email gate.
+    "get_recipe": ("recipes", "get_recipe", {"name": "setup"}),
 }
 
 

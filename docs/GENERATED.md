@@ -17,8 +17,8 @@
 | --- | --- | --- |
 | Migration head | **0047** | `backend/migrations/` |
 | Migration files | **48** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 11 route modules (80 endpoints) | `backend/src/api/routes/` |
-| Test files | across 140 `test_*.py` files | `backend/tests/` |
+| FastAPI surface | 12 route modules (82 endpoints) | `backend/src/api/routes/` |
+| Test files | across 141 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 24 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -102,6 +102,8 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/api/receipts` | `receipts.py` |
 | `POST` | `/api/receipts/{job_id}` | `receipts.py` |
 | `GET` | `/api/receipts/{receipt_id}` | `receipts.py` |
+| `GET` | `/api/recipes` | `recipes.py` |
+| `GET` | `/api/recipes/{name}` | `recipes.py` |
 | `GET` | `/api/tailor/{job_id}` | `tailor.py` |
 | `PATCH` | `/api/tailor/{job_id}/{doc_kind}` | `tailor.py` |
 | `POST` | `/api/tailor/{job_id}/{doc_kind}/download` | `tailor.py` |
@@ -114,5 +116,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**80 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**82 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->
