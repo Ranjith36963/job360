@@ -547,7 +547,10 @@ async def test_bug1_mcp_save_artifact_cold_wrong_kind_is_422(authenticated_async
 
 
 @pytest.mark.asyncio
-async def test_bug1_mcp_tools_list_is_still_19(authenticated_async_context):
+async def test_bug1_mcp_tools_list_has_no_extra_tools(authenticated_async_context):
+    # The outreach fix added no tool. The exact set lives in
+    # tests/test_mcp_server.py::EXPECTED_TOOLS; this count moves with it
+    # (19 -> 20: `get_recipe`, /run 360 recipes, 2026-10-02).
     pytest.importorskip("mcp")
     from src.api.mcp_server import mcp_runtime
 
@@ -556,7 +559,7 @@ async def test_bug1_mcp_tools_list_is_still_19(authenticated_async_context):
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             listed = await mcp.list_tools()
-            assert len(listed.tools) == 19
+            assert len(listed.tools) == 20
 
 
 # ── Bug 2 [P1] — list_people / add_contact ignored contact edits ───────────
