@@ -103,13 +103,29 @@ def _check_if(lines: list[str], var: str) -> list[int]:
     left = re.compile(v + r'\s*!?==?\s*["\']?([A-Za-z_]+)')
     right = re.compile(r'["\']?([A-Za-z_]+)["\']?\s*!?==?\s*' + v)
 
+    # Positive equality only (`=`/`==`, never `!=`): what a branch ROUTES on.
+    left_pos = re.compile(v + r'\s*==?\s*["\']?([A-Za-z_]+)')
+    right_pos = re.compile(r'([A-Za-z_]+)["\']?\s*==?\s*' + v)
+
     def cmp_(text: str) -> set[str]:
         return set(left.findall(text)) | set(right.findall(text))
 
+    def pos(text: str) -> set[str]:
+        return set(left_pos.findall(text)) | set(right_pos.findall(text))
+
+    # SEQUENTIAL ROUTER (review of #709): the same bug spelled as separate
+    # `if [ $R = success ] ... fi` / `if [ $R = failure ] ... fi` blocks, none
+    # with an else. Collected here, judged after the loop.
+    lone: list[tuple[int, set[str]]] = []
+
     for i, raw in enumerate(lines):
         s = raw.strip()
-        if not s.startswith("if ") or re.search(r"\bfi\s*$", s):
-            continue  # not a chain opener, or a one-line if
+        if s.startswith("if ") and re.search(r"\bfi\s*$", s):
+            if not re.search(r"\b(elif|else)\b", s) and pos(s):
+                lone.append((i + 1, pos(s)))
+            continue  # a one-line if is never an elif chain
+        if not s.startswith("if "):
+            continue
         values = cmp_(s)
         depth, has_else, saw_elif = 0, False, False
         for line in lines[i + 1:]:
@@ -133,6 +149,14 @@ def _check_if(lines: list[str], var: str) -> list[int]:
         # else is a deliberate single check (and the very fix FC-001 asks for).
         if saw_elif and len(values) >= 2 and not has_else:
             bad.append(i + 1)
+        elif not saw_elif and not has_else and pos(s):
+            lone.append((i + 1, pos(s)))
+    # Separate else-less ifs that between them route `success` AND another value
+    # are a router with no catch-all: cancelled/skipped match none of them.
+    # (A notifier on `failure || cancelled` alone never routes success: left alone.)
+    covered = set().union(*(vals for _, vals in lone)) if lone else set()
+    if len(lone) >= 2 and "success" in covered and len(covered) >= 2:
+        bad.append(lone[0][0])
     return bad
 
 
@@ -242,6 +266,24 @@ jobs:
           esac
 """
 
+# Review of #709 (2nd round): the same router as separate if-blocks.
+_DRILL_BAD_SEQUENTIAL = """\
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+        run: |
+          mode=none
+          if [ "$VERIFY_RESULT" = "success" ]; then
+            mode=ship
+          fi
+          if [ "$VERIFY_RESULT" = "failure" ]; then mode=verify-failed; fi
+"""
+
 _DRILL_GOOD = """\
 on: workflow_dispatch
 jobs:
@@ -285,6 +327,7 @@ def drill(broken: str = "") -> int:
         ("bad-if", _DRILL_BAD_IF, True),
         ("bad-dbracket", _DRILL_BAD_DBRACKET, True),
         ("bad-inline", _DRILL_BAD_INLINE, True),
+        ("bad-sequential", _DRILL_BAD_SEQUENTIAL, True),
         ("good", _DRILL_GOOD, False),
     ]
     failed = 0
