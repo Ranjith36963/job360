@@ -51,6 +51,9 @@ def test_recipes_keep_the_product_rules():
 
     hunt = load_recipe("hunt").text.lower()
     assert "job360 never searches" in hunt
+    # First live test (2026-10-02): the assistant picked a London on-site role
+    # because the user lives in the UK, though UK was not in their list.
+    assert "a place that is not on that\n   list is out" in hunt
     apply = load_recipe("apply").text.lower()
     assert "before the final" in apply and "user says yes" in apply
     assert "never invent" in apply

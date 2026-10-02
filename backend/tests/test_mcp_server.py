@@ -203,6 +203,10 @@ async def test_get_profile_result_carries_the_assistant_hint(authenticated_async
     assert result["assistant_hint"] == mcp_server.ASSISTANT_HINT
     assert "list_applications(due=true)" in result["assistant_hint"]
     assert "list_applications(quiet_days=7)" in result["assistant_hint"]
+    # First live /run 360 test (2026-10-02): claude.ai, connected before the
+    # recipes shipped, never called get_recipe — INSTRUCTIONS are read once at
+    # connect. The per-result hint is the door that reaches it.
+    assert 'get_recipe("setup")' in result["assistant_hint"]
 
 
 @pytest.mark.asyncio
