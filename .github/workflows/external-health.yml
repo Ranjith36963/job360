@@ -202,3 +202,221 @@ jobs:
               fi
             done
           fi
+
+  secrets:
+    name: Which repository secrets exist? (names only, never values)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+
+      # PRESENCE ONLY. Every line below is a `!= ''` comparison, so the runner
+      # only ever sees "true" or "false" — the secret VALUE never enters this
+      # job's environment, logs, summary or issue body. Nobody should have to run
+      # `gh secret list` to learn what is set: RAILWAY_TOKEN decides whether the
+      # auto-rollback can act at all, and SENTRY_AUTH_TOKEN sat empty for weeks
+      # with nothing reporting it. When a workflow starts using a new secret,
+      # add it here AND to the REQUIREMENTS table in the step; a name found in
+      # the workflows but missing from the table is flagged UNCLASSIFIED.
+      - name: Check which secrets exist (presence only)
+        id: check
+        env:
+          HAS_BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE != '' }}
+          HAS_CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          HAS_CODERABBIT_TRIGGER_TOKEN: ${{ secrets.CODERABBIT_TRIGGER_TOKEN != '' }}
+          HAS_MERGE_TOKEN: ${{ secrets.MERGE_TOKEN != '' }}
+          HAS_OWNER_ALERT_EMAIL: ${{ secrets.OWNER_ALERT_EMAIL != '' }}
+          HAS_PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL != '' }}
+          HAS_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID != '' }}
+          HAS_R2_BUCKET: ${{ secrets.R2_BUCKET != '' }}
+          HAS_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT != '' }}
+          HAS_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY != '' }}
+          HAS_RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN != '' }}
+          HAS_RESEND_API_KEY: ${{ secrets.RESEND_API_KEY != '' }}
+          HAS_SENTRY_API_TOKEN: ${{ secrets.SENTRY_API_TOKEN != '' }}
+          HAS_SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+          HAS_SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN != '' }}
+          HAS_SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD != '' }}
+          HAS_SMOKE_SESSION: ${{ secrets.SMOKE_SESSION != '' }}
+          HAS_SMTP_EMAIL: ${{ secrets.SMTP_EMAIL != '' }}
+          HAS_SMTP_FROM: ${{ secrets.SMTP_FROM != '' }}
+          HAS_SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD != '' }}
+          SECRETS_FORCE_RED: ${{ inputs.drill && '1' || '' }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          # (names, level, one-line reason, what breaks when ALL names are absent)
+          # A group of several names is an alias/fallback set: satisfied if ANY
+          # one of them is present.
+          REQUIREMENTS = [
+              (["CLAUDE_CODE_OAUTH_TOKEN"], "REQUIRED",
+               "review-bugs fails loud without it; triage and PR repair cannot run",
+               "the reviewer-bugs merge gate goes red, and the triage / PR-repair loops cannot run"),
+              (["RAILWAY_TOKEN"], "REQUIRED",
+               "auto-rollback REFUSES without it (post-merge-watch, synthetic-live)",
+               "a bad deploy is NOT rolled back automatically; the rollback step refuses"),
+              (["SLACK_BOT_TOKEN"], "REQUIRED",
+               "every alert reaches Slack through it; slack-drill fails without it",
+               "the harness is mute on Slack: alerts are raised on GitHub only"),
+              (["SENTRY_API_TOKEN"], "REQUIRED",
+               "scripts/sentry_poll.py reads ONLY this name; it fails loud without it",
+               "nobody reads Sentry: the poller cannot run and post-merge-watch cannot see new errors"),
+              (["SENTRY_AUTH_TOKEN"], "OPTIONAL",
+               "legacy name; post-merge-watch falls back to it only if SENTRY_API_TOKEN is unset",
+               "nothing on its own; it never satisfies the poller"),
+              (["RESEND_API_KEY", "SMTP_PASSWORD"], "REQUIRED",
+               "login is passwordless email; SMTP_PASSWORD is the documented Resend fallback",
+               "no login email can be sent, so NOBODY can log in; the owner email alert is also mute"),
+              (["SMOKE_PASSWORD", "SMOKE_SESSION"], "REQUIRED",
+               "the scheduled synthetic walk demands an authed session (SMOKE_REQUIRE_AUTHED)",
+               "the scheduled live walk of production goes red, or the authed corners go unwalked"),
+              (["PROD_DATABASE_URL"], "REQUIRED",
+               "db-backup dumps production with it",
+               "the nightly database backup cannot dump production"),
+              (["BACKUP_PASSPHRASE"], "REQUIRED",
+               "db-backup encrypts the dump with it",
+               "the nightly database backup cannot encrypt, so it fails"),
+              (["R2_ACCESS_KEY_ID"], "REQUIRED",
+               "db-backup uploads to R2 with it",
+               "the nightly backup cannot upload to R2"),
+              (["R2_SECRET_ACCESS_KEY"], "REQUIRED",
+               "db-backup uploads to R2 with it",
+               "the nightly backup cannot upload to R2"),
+              (["R2_ENDPOINT"], "REQUIRED",
+               "db-backup needs the R2 endpoint",
+               "the nightly backup cannot upload to R2"),
+              (["R2_BUCKET"], "REQUIRED",
+               "db-backup needs the bucket name",
+               "the nightly backup cannot upload to R2"),
+              (["MERGE_TOKEN"], "OPTIONAL",
+               "falls back to GITHUB_TOKEN and warns loudly each run",
+               "a queued merge starts no workflow on main"),
+              (["CODERABBIT_TRIGGER_TOKEN"], "OPTIONAL",
+               "pr-advisor skips quietly; reviews are triggered by hand",
+               "CodeRabbit is not auto-triggered"),
+              (["OWNER_ALERT_EMAIL"], "OPTIONAL",
+               "the alert action never fails the caller; it warns",
+               "the owner gets no direct email when triage cannot be woken"),
+              (["SMTP_EMAIL"], "OPTIONAL",
+               "only an input to the provider probe",
+               "the email probe has less to go on"),
+              (["SMTP_FROM"], "OPTIONAL",
+               "only an input to the provider probe",
+               "the email probe has less to go on"),
+          ]
+
+          def present(name):
+              return os.environ.get("HAS_" + name, "false") == "true"
+
+          wf_dir = Path(".github/workflows")
+          texts = {p.name: p.read_text(encoding="utf-8") for p in sorted(wf_dir.glob("*.yml"))}
+          found = {}  # name -> set of workflow files using it
+          for text in texts.values():
+              for m in re.finditer(r"secrets\.([A-Z0-9_]+)", text):
+                  if m.group(1) != "GITHUB_TOKEN":
+                      found.setdefault(m.group(1), set())
+          for name in found:
+              for fname, text in texts.items():
+                  # This file lists every secret as a presence check; only a use
+                  # that is NOT a bare `!= ''` comparison counts as this file using it.
+                  tail = r"(?!\s*!=\s*'')" if fname == "external-health.yml" else ""
+                  if re.search(r"secrets\." + name + r"\b" + tail, text):
+                      found[name].add(fname)
+
+          known = {n for names, *_ in REQUIREMENTS for n in names}
+          unclassified = sorted(set(found) - known)
+
+          rows = []
+          missing = []  # (names, breaks)
+          for names, level, reason, breaks in REQUIREMENTS:
+              group_ok = any(present(n) for n in names)
+              for n in names:
+                  if present(n):
+                      status = "yes"
+                  elif group_ok:
+                      status = "no (alias ok)"
+                  else:
+                      status = "NO"
+                  used = ", ".join(sorted(found.get(n, []))) or "(none found)"
+                  rows.append((n, status, level, used, reason))
+              if level == "REQUIRED" and not group_ok:
+                  missing.append((names, breaks))
+
+          if os.environ.get("SECRETS_FORCE_RED") == "1":
+              missing.append((["DRILL_FAKE_SECRET"],
+                              "nothing real: this is a forced red to prove the escalation path"))
+
+          out = ["## Repository secrets: presence only (values are never read)", "",
+                 "| secret | present | tier | used by | why |", "|---|---|---|---|---|"]
+          for n, status, level, used, reason in rows:
+              out.append(f"| `{n}` | {status} | {level} | {used} | {reason} |")
+          if unclassified:
+              out += ["", "UNCLASSIFIED (used by a workflow but not in this table, add it): "
+                      + ", ".join(f"`{n}`" for n in unclassified)]
+              for n in unclassified:
+                  print(f"::warning::secret {n} is used by a workflow but is not classified in external-health.yml")
+          out += ["", f"Required secrets missing: {len(missing)}"]
+          text = "\n".join(out) + "\n"
+          print(text)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write(text)
+
+          run_url = "{}/{}/actions/runs/{}".format(
+              os.environ.get("GITHUB_SERVER_URL", ""),
+              os.environ.get("GITHUB_REPOSITORY", ""),
+              os.environ.get("GITHUB_RUN_ID", ""))
+          body = ["These REQUIRED repository secrets are missing (names only, no values were read):", ""]
+          for names, breaks in missing:
+              label = " or ".join(f"`{n}`" for n in names)
+              body.append(f"- {label}: without it, {breaks}.")
+          body += ["", "Set each one with `gh secret set NAME` (or Settings, Secrets and variables, Actions).",
+                   "", f"- Run: {run_url}"]
+          Path("body.md").write_text("\n".join(body) + "\n", encoding="utf-8")
+
+          for names, _breaks in missing:
+              print("::error::required secret missing: " + " or ".join(names))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"missing={len(missing)}\n")
+          PY
+
+      - name: Raise it, and hand it to triage
+        if: always() && steps.check.outputs.missing != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.drill }}" = "true" ]; then
+            title="DRILL: required secrets check test - not a real problem"
+          else
+            title="KEYS: required secrets missing"
+          fi
+          num=$(gh issue list --state open --json number,title \
+                  --jq ".[] | select(.title==\"$title\") | .number" | head -1)
+          if [ "${{ steps.check.outputs.missing }}" != "0" ]; then
+            if [ -z "$num" ]; then
+              new=$(gh issue create --title "$title" --body-file body.md --label harness)
+              n="${new##*/}"
+              gh workflow run triage.yml -f issue="$n" \
+                || echo "::warning::issue #$n raised but triage could not be woken"
+            else
+              gh issue comment "$num" --body-file body.md
+            fi
+          elif [ -n "$num" ]; then
+            gh issue close "$num" \
+              --comment "Every REQUIRED secret is present as of run ${{ github.run_id }}. (auto-close)"
+          fi
+
+      # Red AFTER the alarm is raised, so a missing secret is both an issue and a
+      # failed run. `always()` because the step above must never decide this.
+      - name: Fail the run if a required secret is missing
+        if: always() && steps.check.outputs.missing != '' && steps.check.outputs.missing != '0'
+        run: |
+          echo "::error::${{ steps.check.outputs.missing }} required secret group(s) missing - see the job summary."
+          exit 1
