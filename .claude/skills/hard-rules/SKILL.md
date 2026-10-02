@@ -44,7 +44,7 @@ An index of the 14 hard rules, one line each. Where a test guards a rule, the te
 26. **Account-mgmt routes (password/email/delete) MUST verify the current password BEFORE the mutation, then `response.delete_cookie("job360_session")`** (forces re-login).
 
 ### Heavy imports
-16. **Never import `sentence_transformers`, `chromadb`, `rapidfuzz` or `sklearn` at module top level** — top-level costs 150 ms – 2 s per pytest collection. Not even "just for typing". Guard: `backend/tests/test_heavy_imports_stay_lazy.py`.
+16. **Never import `sentence_transformers`, `chromadb`, `rapidfuzz` or `sklearn` at module top level** — top-level costs 150 ms – 2 s per pytest collection. Not even "just for typing". Guard, over `backend/src/` only: `backend/tests/test_heavy_imports_stay_lazy.py`.
 
 ### Extraction must be data-driven
 28. **STRICT — ZERO hardcoded skill/keyword lists in profile extraction (`src/services/profile/`).** *(Owner rule, non-negotiable.)* **Banned:** any `*_SKILL_TERMS` / `*_TO_SKILL` / skill-keyword dict or denylist — hand-typed maps overfit one CV. **ESCO is inert scaffolding, never built or shipped** — never cite it as running. Its two gates are `core.settings.ESCO_SKILL_NORMALISATION_ENABLED` (the live flag — read the comment above the constant, which records why `SEMANTIC_ENABLED` is the dead old name and is deliberately not read as a fallback) and `services.profile.skill_normalizer.is_available()`.
