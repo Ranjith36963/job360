@@ -43,10 +43,13 @@ on:
         required: true
         type: string
 
+# `actions: write` is deliberately NOT here. The `triage` job runs a model over
+# issue text that a stranger may have shaped; a token that can dispatch workflows
+# does not belong next to it. The dispatch lives in its own small job
+# (`dispatch-fix`, below) that runs no model and alone holds `actions: write`.
 permissions:
   contents: read
   issues: write
-  actions: write # to hand an auto-fixable issue to issue-fix.yml
 
 concurrency:
   group: triage-${{ github.event.issue.number || inputs.issue }}
@@ -79,6 +82,12 @@ jobs:
       contains(github.event.issue.labels.*.name, 'harness')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # What the dispatch job needs, and nothing else. `label` is only written by
+    # the route step AFTER it has applied a label chosen from a fixed whitelist
+    # (never model text), and `num` is re-validated as digits by the reader.
+    outputs:
+      num: ${{ steps.issue.outputs.num }}
+      label: ${{ steps.route.outputs.label }}
     steps:
       - name: Check triage token present
         id: token
@@ -90,7 +99,9 @@ jobs:
       # One number, whichever door we came in through.
       - name: Resolve which issue we are triaging
         id: issue
-        run: echo "num=${{ github.event.issue.number || inputs.issue }}" >> "$GITHUB_OUTPUT"
+        env:
+          NUM: ${{ github.event.issue.number || inputs.issue }}
+        run: echo "num=$NUM" >> "$GITHUB_OUTPUT"
 
       # Fetch the issue text into a FILE rather than interpolating it into the
       # prompt. Two reasons: a dispatch has no issue payload to interpolate, and
@@ -244,13 +255,11 @@ jobs:
           } > comment.md
           gh issue comment "$num" --body-file comment.md
           gh issue edit "$num" --add-label "$label"
-          # Stage 4: an auto-fixable verdict wakes the fixer. Same pattern as
-          # external-health.yml waking this workflow - a label applied with the
-          # automatic token starts nothing, `workflow_dispatch` is the way in.
-          if [ "$label" = "triage:auto-fixable" ]; then
-            gh workflow run issue-fix.yml -f issue="$num" \
-              || echo "::warning::issue #$num labelled auto-fixable but issue-fix could not be woken"
-          fi
+          # Stage 4: an auto-fixable verdict wakes the fixer, but NOT from here:
+          # this job runs the model and holds no `actions: write`. The
+          # `dispatch-fix` job below reads `num` and `label` from this job's
+          # outputs and does the `workflow_dispatch` (a label applied with the
+          # automatic token starts nothing, `workflow_dispatch` is the way in).
           echo "label=$label" >> "$GITHUB_OUTPUT"
           echo "triaged #$num as $label" >> "$GITHUB_STEP_SUMMARY"
 
@@ -302,3 +311,40 @@ jobs:
           body: ${{ steps.compose.outputs.body }}
           resend_api_key: ${{ secrets.RESEND_API_KEY }}
           to_email: ${{ secrets.OWNER_ALERT_EMAIL }}
+
+  # ── STAGE 4 DISPATCH, in its own job so `actions: write` never shares a job
+  # with the model. No checkout, no model, no issue text: it reads two outputs
+  # and runs one `gh workflow run`. `always()` so a failure in the owner-email
+  # step at the end of `triage` cannot silently strand an issue that is already
+  # labelled `triage:auto-fixable`; the label output only exists once the route
+  # step has applied that label, so this cannot fire on a half-finished triage.
+  dispatch-fix:
+    name: Wake issue-fix for an auto-fixable issue
+    needs: triage
+    if: always() && needs.triage.outputs.label == 'triage:auto-fixable'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch issue-fix.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NUM: ${{ needs.triage.outputs.num }}
+          LABEL: ${{ needs.triage.outputs.label }}
+        run: |
+          set -euo pipefail
+          # Defence in depth: the value came from a job output, so re-prove it is
+          # a plain issue number (digits, no leading zero) before it reaches a command.
+          if ! [[ "$NUM" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::refusing to dispatch: not an issue number"
+            exit 1
+          fi
+          [ "$LABEL" = "triage:auto-fixable" ] || { echo "::error::unexpected label '$LABEL'"; exit 1; }
+          # Same pattern as external-health.yml waking triage.
+          if ! gh workflow run issue-fix.yml -f issue="$NUM"; then
+            echo "::error::issue #$NUM is labelled auto-fixable but issue-fix could not be woken"
+            exit 1
+          fi
+          echo "dispatched issue-fix.yml for #$NUM" >> "$GITHUB_STEP_SUMMARY"
