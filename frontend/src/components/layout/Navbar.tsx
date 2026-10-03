@@ -3,47 +3,35 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import {
-  User,
-  Menu,
-  Activity,
-  ClipboardPaste,
-  FolderClock,
-  Receipt,
-  Settings,
-  Plug,
-  LogOut,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Menu, Settings, LogOut } from "lucide-react";
+import { Logo } from "@/components/brand/Logo";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/components/layout/AuthProvider";
+import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import {
+  NAV_LINKS,
+  isNavActive,
+  isProtectedPath,
+  isSettingsActive,
+} from "@/components/layout/nav-links";
+import { cn } from "@/lib/utils";
 
-// R14 (docs/plans/2026-09-04-application-spine) removed /receipts from the
-// nav — the URL kept working, but a new-user walk (2026-09-27) found no way
-// to discover it at all, so it is back as a first-class link. Slice 5
-// (delete-sourcing-era) removed the Dashboard link and the route it pointed
-// at, and the mission sweep removed Channels/notifications outright
-// (VISION:133 — notifications are pull-not-push) — Job360 never sources or
-// ranks jobs (VISION rule 4), so there is no catalog left to browse either.
-//
-// Agentic UX audit (2026-09-08) — the whole product depends on the user
-// connecting their own assistant, but /settings/connect was reachable only
-// via the gear icon. It is a first-class destination now, not a settings tab.
-const NAV_LINKS = [
-  { href: "/profile", label: "Profile", icon: User },
-  { href: "/bring", label: "Bring a job", icon: ClipboardPaste },
-  { href: "/applications", label: "Applications", icon: FolderClock },
-  { href: "/receipts", label: "Receipts", icon: Receipt },
-  { href: "/settings/connect", label: "Connect your assistant", icon: Plug },
-] as const;
-
+/**
+ * The top bar.
+ *
+ * - Signed out: logo, Log in, Get started, theme toggle (md and up); a drawer
+ *   with the same on a phone.
+ * - Signed in: only on narrow screens (< md), where the sidebar is gone — logo
+ *   plus a drawer holding the nav links, Settings, account and theme toggle.
+ *   From md up the Sidebar (Sidebar.tsx) takes over and this bar hides.
+ */
 export function Navbar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, loading, logout } = useAuth();
 
   // NAV_LINKS all point at routes src/middleware.ts guards. Rendering them to a
-  // signed-out visitor offered four controls that only ever bounced to /login,
+  // signed-out visitor offered controls that only ever bounced to /login,
   // while the header carried no way to actually sign in — on the landing page,
   // which is the first thing a new visitor sees.
   //
@@ -52,73 +40,40 @@ export function Navbar() {
   // the session resolves. While unknown, the header shows the logo only.
   const signedIn = Boolean(user);
   const signedOut = !loading && !user;
+  // The sidebar owns desktop whenever we are (or are about to be) signed in.
+  const sidebarOnDesktop = signedIn || (loading && isProtectedPath(pathname));
+  const settingsActive = isSettingsActive(pathname);
 
-  // /settings/connect is now its own NAV_LINKS entry (see above), so the gear
-  // must not also light up for it — otherwise two nav controls look active
-  // at once on that page.
-  const settingsActive =
-    pathname.startsWith("/settings") && !pathname.startsWith("/settings/connect");
+  const drawerLink = (active: boolean) =>
+    cn(
+      "flex min-h-11 items-center gap-3 rounded-[7px] px-3 py-2.5 text-sm font-medium transition-colors",
+      active
+        ? "bg-card text-foreground ring-1 ring-border"
+        : "text-muted-foreground hover:bg-card/60 hover:text-foreground"
+    );
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border/30 bg-background/60 backdrop-blur-md">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 group">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/30 group-hover:ring-primary/50 transition-all">
-            <Activity className="h-4 w-4 text-primary" aria-hidden="true" />
-          </div>
-          <span className="font-heading text-lg font-semibold tracking-tight">
-            Job<span className="text-primary">360</span>
-          </span>
+    <header
+      className={cn(
+        "sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur-md",
+        sidebarOnDesktop && "md:hidden"
+      )}
+    >
+      <div className="flex h-14 items-center justify-between px-4 sm:px-6 lg:px-10">
+        <Link href="/" aria-label="job360" className="flex items-center">
+          <Logo />
         </Link>
 
-        {/* Desktop Nav */}
-        <nav className="hidden md:flex items-center gap-1" aria-label="Main navigation">
-          {signedIn &&
-            NAV_LINKS.map(({ href, label, icon: Icon }) => {
-            const isActive = pathname === href || pathname.startsWith(href + "/");
-            return (
-              <Link
-                key={href}
-                href={href}
-                aria-current={isActive ? "page" : undefined}
-                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                  isActive
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                }`}
-              >
-                <Icon className="h-4 w-4" aria-hidden="true" />
-                {label}
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Right side — Auth + Theme. */}
-        <div className="hidden md:flex items-center gap-2">
-          {signedIn && (
-            <Link
-              href="/settings"
-              aria-current={settingsActive ? "page" : undefined}
-              aria-label="Settings"
-              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-                settingsActive
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-              }`}
-            >
-              <Settings className="h-4 w-4" aria-hidden="true" />
-            </Link>
-          )}
+        {/* Desktop, signed out */}
+        <div className="hidden items-center gap-2 md:flex">
           {signedOut && (
-            <div className="flex items-center gap-2">
+            <>
               {/* Not shown on /login and /register themselves — the page it would
                   send you to is the page you are already on. */}
               {!pathname.startsWith("/login") && (
                 <Link
                   href="/login"
-                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   Log in
                 </Link>
@@ -133,123 +88,99 @@ export function Navbar() {
                   Get started
                 </Link>
               )}
-            </div>
-          )}
-          {user && (
-            <div className="flex items-center gap-2 pl-2 border-l border-border/40">
-              {/* Hidden until `lg`. The desktop bar turns on at `md` (768px),
-                  but its contents do not fit there: logo + three nav links +
-                  the settings gear + a 140px email + logout measured too wide
-                  against a 768px viewport, so BOTH /profile and /dashboard
-                  scrolled sideways at tablet width. The email is the only
-                  part that is purely informational, so it is what yields;
-                  logout stays reachable at every size. */}
-              <span className="hidden max-w-[140px] truncate text-xs text-muted-foreground lg:inline">
-                {user.email}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => void logout()}
-                aria-label="Log out"
-                className="h-9 w-9 text-muted-foreground hover:text-foreground hover:bg-muted/50"
-              >
-                <LogOut className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </div>
+              <ThemeToggle className="ml-1" />
+            </>
           )}
         </div>
 
-        {/* Mobile hamburger — hidden while the session is still resolving, for
-            the same reason the desktop bar shows only the logo then: the drawer
-            has nothing to put in it yet, and opening it would show an empty
-            sheet. */}
+        {/* Drawer — hidden while the session is still resolving, because it
+            would have nothing to put in it. */}
         {!loading && (
-        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetTrigger
-            className="md:hidden inline-flex items-center justify-center h-9 w-9 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-            aria-label="Open navigation menu"
-            aria-expanded={mobileOpen}
-          >
-            <Menu className="h-5 w-5" aria-hidden="true" />
-            <span className="sr-only">Menu</span>
-          </SheetTrigger>
-          <SheetContent side="right" className="w-64 bg-background border-border">
-            <SheetTitle className="font-heading text-lg font-semibold mb-6">
-              Job<span className="text-primary">360</span>
-            </SheetTitle>
-            <nav className="flex flex-col gap-1" aria-label="Mobile navigation">
-              {signedIn &&
-                NAV_LINKS.map(({ href, label, icon: Icon }) => {
-                const isActive = pathname === href;
-                return (
+          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+            <SheetTrigger
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+              aria-label="Open navigation menu"
+              aria-expanded={mobileOpen}
+            >
+              <Menu className="h-5 w-5" aria-hidden="true" />
+              <span className="sr-only">Menu</span>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-72 border-border bg-sidebar p-4">
+              <SheetTitle className="mb-4 px-3">
+                <Logo />
+              </SheetTitle>
+              <nav className="flex flex-col gap-1" aria-label="Mobile navigation">
+                {signedIn &&
+                  NAV_LINKS.map(({ href, label, icon: Icon }) => {
+                    const active = isNavActive(pathname, href);
+                    return (
+                      <Link
+                        key={href}
+                        href={href}
+                        onClick={() => setMobileOpen(false)}
+                        aria-current={active ? "page" : undefined}
+                        className={drawerLink(active)}
+                      >
+                        <Icon className="h-4 w-4" aria-hidden="true" />
+                        {label}
+                      </Link>
+                    );
+                  })}
+                {signedIn && (
                   <Link
-                    key={href}
-                    href={href}
+                    href="/settings"
                     onClick={() => setMobileOpen(false)}
-                    aria-current={isActive ? "page" : undefined}
-                    className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                      isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                    }`}
+                    aria-current={settingsActive ? "page" : undefined}
+                    className={drawerLink(settingsActive)}
                   >
-                    <Icon className="h-4 w-4" aria-hidden="true" />
-                    {label}
+                    <Settings className="h-4 w-4" aria-hidden="true" />
+                    Settings
                   </Link>
-                );
-              })}
-              {signedIn && (
-                <Link
-                  href="/settings"
-                  onClick={() => setMobileOpen(false)}
-                  aria-current={settingsActive ? "page" : undefined}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                    settingsActive
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  }`}
-                >
-                  <Settings className="h-4 w-4" aria-hidden="true" />
-                  Settings
-                </Link>
-              )}
-              {/* Without this the signed-out drawer opened completely empty. */}
-              {signedOut && (
-                <>
-                  <Link
-                    href="/register"
-                    onClick={() => setMobileOpen(false)}
-                    className="flex items-center gap-3 rounded-lg bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition-colors"
-                  >
-                    Get started
-                  </Link>
-                  <Link
-                    href="/login"
-                    onClick={() => setMobileOpen(false)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-                  >
-                    Log in
-                  </Link>
-                </>
-              )}
-            </nav>
+                )}
+                {/* Without this the signed-out drawer opened completely empty. */}
+                {signedOut && (
+                  <>
+                    <Link
+                      href="/register"
+                      onClick={() => setMobileOpen(false)}
+                      className="flex min-h-11 items-center gap-3 rounded-[7px] bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition-colors"
+                    >
+                      Get started
+                    </Link>
+                    <Link
+                      href="/login"
+                      onClick={() => setMobileOpen(false)}
+                      className={drawerLink(false)}
+                    >
+                      Log in
+                    </Link>
+                  </>
+                )}
+              </nav>
 
-            {/* Mobile: user email + logout + theme toggle */}
-            {user && (
-              <div className="mt-6 pt-4 border-t border-border/40 flex flex-col gap-2">
-                <p className="px-3 text-xs text-muted-foreground truncate">{user.email}</p>
-                <button
-                  onClick={() => { setMobileOpen(false); void logout(); }}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-                >
-                  <LogOut className="h-4 w-4" aria-hidden="true" />
-                  Log out
-                </button>
+              <div className="mt-auto flex flex-col gap-2 border-t border-border pt-4">
+                {user && (
+                  <>
+                    <p className="truncate px-3 text-xs text-muted-foreground">{user.email}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileOpen(false);
+                        void logout();
+                      }}
+                      className={cn(drawerLink(false), "w-full text-left")}
+                    >
+                      <LogOut className="h-4 w-4" aria-hidden="true" />
+                      Log out
+                    </button>
+                  </>
+                )}
+                <div className="px-3">
+                  <ThemeToggle />
+                </div>
               </div>
-            )}
-          </SheetContent>
-        </Sheet>
+            </SheetContent>
+          </Sheet>
         )}
       </div>
     </header>

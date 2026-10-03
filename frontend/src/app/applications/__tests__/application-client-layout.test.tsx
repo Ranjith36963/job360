@@ -175,6 +175,15 @@ describe("ApplicationClient — six-question layout", () => {
     expect(side).toHaveClass("lg:overflow-y-auto");
   });
 
+  it("sticks near the top of the viewport — the desktop shell has no top bar to clear (redesign slice 1)", async () => {
+    render(<ApplicationClient applicationId={42} />);
+    await screen.findByText("Staff Engineer");
+
+    const side = screen.getByTestId("app-col-side");
+    expect(side).toHaveClass("lg:sticky", "lg:top-6");
+    expect(side).not.toHaveClass("lg:top-20");
+  });
+
   it("the actions column carries Next, status, the status menu, Mark Applied and View ad", async () => {
     render(<ApplicationClient applicationId={42} />);
     await screen.findByText("Staff Engineer");

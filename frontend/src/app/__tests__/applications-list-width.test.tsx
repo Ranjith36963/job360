@@ -29,8 +29,8 @@ vi.mock("@/lib/api", () => ({
  * is exactly the bug this test guards against. */
 const NARROWER_MAX_W_RE = /\bmax-w-(3xs|2xs|xs|sm|md|lg|xl|2xl|3xl|4xl|5xl|6xl)\b/;
 
-describe("Applications list — shares the navbar's max width (owner decision, 2026-09-25)", () => {
-  it("/applications wraps its heading + list in PageContainer's max-w-7xl, not a narrower column", async () => {
+describe("Applications list — fills the area beside the sidebar (owner decision 2026-09-25, updated by redesign slice 1)", () => {
+  it("/applications wraps its heading + list in PageContainer (full width), not a narrow column", async () => {
     render(<ApplicationsPage />);
     const heading = await screen.findByText("Your applications");
 
@@ -45,8 +45,11 @@ describe("Applications list — shares the navbar's max width (owner decision, 2
     }
     const allClasses = classes.join(" ");
 
-    expect(allClasses).toMatch(/\bmax-w-7xl\b/);
-    expect(allClasses).not.toMatch(NARROWER_MAX_W_RE);
+    // PageContainer is now full width (`w-full px-6 lg:px-10`) — no boxed
+    // max-w-7xl either. Any max-width on the way up is the old bug again.
+    expect(allClasses).toMatch(/\bw-full\b/);
+    expect(allClasses).toMatch(/\blg:px-10\b/);
+    expect(allClasses).not.toMatch(/\bmax-w-/);
   });
 
   it("src/app/page.tsx (the signed-in home) uses PageContainer, not its own hardcoded max-width", () => {

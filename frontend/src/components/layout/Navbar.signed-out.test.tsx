@@ -16,7 +16,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { Navbar } from "./Navbar";
 
 let mockPathname = "/";
@@ -79,15 +79,31 @@ describe("Navbar — signed out", () => {
 });
 
 describe("Navbar — signed in", () => {
-  it("shows the app links and hides the marketing CTAs", () => {
+  // Redesign slice 1: from md up the sidebar owns the app links and the top
+  // bar hides itself; below md the top bar stays and its drawer holds them.
+  it("is a phone-only bar: hidden from md up, with a drawer trigger and no marketing CTAs", () => {
     mockAuth.user = { email: "someone@example.com" };
     render(<Navbar />);
 
-    for (const label of APP_LINKS) {
-      expect(screen.getAllByRole("link", { name: label }).length).toBeGreaterThan(0);
-    }
+    expect(screen.getByRole("banner")).toHaveClass("md:hidden");
+    expect(screen.getByRole("button", { name: /open navigation menu/i })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /get started/i })).toBeNull();
-    expect(screen.getAllByText("someone@example.com").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: /log in/i })).toBeNull();
+  });
+
+  it("the drawer holds the app links, Settings, the account and the theme toggle", () => {
+    mockAuth.user = { email: "someone@example.com" };
+    render(<Navbar />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open navigation menu/i }));
+
+    for (const label of APP_LINKS) {
+      expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByText("someone@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Log out" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Theme" })).toBeInTheDocument();
   });
 });
 
@@ -99,5 +115,13 @@ describe("Navbar — session still loading", () => {
     expect(screen.queryByRole("link", { name: "Dashboard" })).toBeNull();
     expect(screen.queryByRole("link", { name: /get started/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /log in/i })).toBeNull();
+  });
+
+  it("on a guarded route it already yields to the sidebar on desktop (no jump when the user arrives)", () => {
+    mockAuth.loading = true;
+    mockPathname = "/applications";
+    render(<Navbar />);
+
+    expect(screen.getByRole("banner")).toHaveClass("md:hidden");
   });
 });
