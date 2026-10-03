@@ -8,9 +8,9 @@ import { FitRadar } from "./FitRadar";
  * "verdict" language (nothing here computes a score; it only paints one
  * that's already stored). */
 function barColor(score: number): string {
-  if (score >= 70) return "bg-emerald-500";
-  if (score >= 40) return "bg-amber-500";
-  return "bg-red-500";
+  if (score >= 70) return "bg-success";
+  if (score >= 40) return "bg-warning";
+  return "bg-danger";
 }
 
 /**
@@ -137,7 +137,7 @@ export function AlignmentPanel({
                 {skills_in_ad.map((skill) => (
                   <li
                     key={skill}
-                    className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs text-emerald-600 dark:text-emerald-400"
+                    className="rounded-full bg-success/10 px-2.5 py-0.5 text-xs text-success"
                   >
                     {skill}
                   </li>

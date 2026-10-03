@@ -29,7 +29,7 @@ export default async function Home() {
     <PageContainer className="flex flex-col gap-6 py-8 sm:py-12">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-heading text-2xl font-bold sm:text-3xl">Your applications</h1>
+          <h1 className="font-heading text-2xl font-medium sm:text-3xl">Your applications</h1>
           <p className="text-muted-foreground">
             Every job you&apos;ve brought, its status, and its whole history.
           </p>

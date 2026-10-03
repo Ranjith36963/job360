@@ -14,7 +14,7 @@ describe("VisaBadge", () => {
     const badge = screen.getByTestId("visa-badge");
     expect(badge).toHaveTextContent("Sponsors visas");
     expect(badge).toHaveAttribute("data-visa", "sponsors");
-    expect(badge.className).toContain("bg-emerald-500/15");
+    expect(badge.className).toContain("bg-success/15");
   });
 
   it('renders a red "No sponsorship" pill when needsSponsorship is true', () => {
@@ -22,7 +22,7 @@ describe("VisaBadge", () => {
     const badge = screen.getByTestId("visa-badge");
     expect(badge).toHaveTextContent("No sponsorship");
     expect(badge).toHaveAttribute("data-visa", "no_sponsorship");
-    expect(badge.className).toContain("bg-red-500/15");
+    expect(badge.className).toContain("bg-danger/15");
   });
 
   it('renders a red "No sponsorship" pill when needsSponsorship is null (unknown comparison)', () => {
@@ -30,7 +30,7 @@ describe("VisaBadge", () => {
     const badge = screen.getByTestId("visa-badge");
     expect(badge).toHaveTextContent("No sponsorship");
     expect(badge).toHaveAttribute("data-visa", "no_sponsorship");
-    expect(badge.className).toContain("bg-red-500/15");
+    expect(badge.className).toContain("bg-danger/15");
   });
 
   it('renders a muted "not needed for you" pill when needsSponsorship is false', () => {

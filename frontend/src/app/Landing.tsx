@@ -107,37 +107,6 @@ const STATS = [
 export default function Landing() {
   return (
     <div className="relative">
-      {/* ── Hero ambient glow — dramatic multi-layer aurora ── */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 overflow-hidden"
-      >
-        {/* Primary top beam — strong, animated */}
-        <div
-          className="absolute -top-[20%] left-1/2 h-[900px] w-[1200px] -translate-x-1/2 rounded-full bg-primary/[0.15] blur-[140px]"
-          style={{ animation: 'aurora-drift 8s ease-in-out infinite' }}
-        />
-        {/* Secondary top-right accent */}
-        <div
-          className="absolute -top-[10%] right-[5%] h-[500px] w-[500px] rounded-full bg-primary/[0.08] blur-[100px]"
-          style={{ animation: 'aurora-drift 12s ease-in-out infinite reverse' }}
-        />
-        {/* Left side beam */}
-        <div className="absolute top-[20%] -left-[15%] h-[600px] w-[400px] rounded-full bg-primary/[0.10] blur-[100px]" />
-        {/* Right side beam */}
-        <div className="absolute top-[40%] -right-[10%] h-[500px] w-[400px] rounded-full bg-primary/[0.06] blur-[80px]" />
-        {/* Bottom center glow */}
-        <div className="absolute -bottom-[15%] left-1/2 -translate-x-1/2 h-[400px] w-[800px] rounded-full bg-primary/[0.08] blur-[120px]" />
-        {/* Horizontal scan line effect */}
-        <div
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, oklch(0.89 0.29 128 / 0.15) 2px, transparent 4px)',
-            backgroundSize: '100% 4px',
-          }}
-        />
-      </div>
-
       {/* ═══════════════════════════════════════════════════
           HERO SECTION
           ═══════════════════════════════════════════════════ */}
@@ -150,7 +119,7 @@ export default function Landing() {
       <section className="relative flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-start px-4 pt-8 sm:justify-center sm:px-6 sm:pt-16">
         <div className="mx-auto max-w-4xl text-center">
           {/* Pill badge */}
-          <div className="animate-fade-in-up stagger-1 mb-8 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/[0.06] px-4 py-1.5 text-sm text-primary">
+          <div className="animate-fade-in-up stagger-1 mb-8 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/[0.06] px-4 py-1.5 text-sm text-brand">
             <Sparkles className="h-3.5 w-3.5" />
             <span className="font-medium">Works with {ASSISTANTS}</span>
           </div>
@@ -159,8 +128,7 @@ export default function Landing() {
               above), split at the em dash into two staggered lines for
               layout only — never reworded. */}
           <h1
-            className="font-heading text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl"
-            style={{ textShadow: '0 0 80px oklch(0.89 0.29 128 / 0.15), 0 0 40px oklch(0.89 0.29 128 / 0.08)' }}
+            className="font-heading text-4xl font-medium tracking-tight sm:text-5xl lg:text-6xl"
           >
             <span className="animate-fade-in-up stagger-2 block">
               {CATEGORY_LINE_LEAD}
@@ -175,7 +143,7 @@ export default function Landing() {
             Context, memory and every version, in one place any assistant can
             read and write. Your assistant judges fit and writes the CV. You
             apply. Job
-            <span className="bg-gradient-to-r from-primary via-lime-300 to-primary bg-clip-text text-transparent font-semibold">
+            <span className="font-semibold text-brand">
               360
             </span>{" "}
             keeps the record.
@@ -188,7 +156,7 @@ export default function Landing() {
           <div className="animate-fade-in-up stagger-6 mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
             <Link
               href="/settings/connect"
-              className="group inline-flex h-12 items-center gap-2 rounded-xl bg-primary px-8 text-sm font-semibold text-primary-foreground shadow-[0_0_30px_oklch(0.89_0.29_128/0.4)] transition-all hover:shadow-[0_0_50px_oklch(0.89_0.29_128/0.6)] hover:brightness-110 hover:scale-105"
+              className="group inline-flex h-12 items-center gap-2 rounded-xl bg-primary px-8 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             >
               <Plug className="h-4 w-4" />
               Connect your assistant
@@ -196,7 +164,7 @@ export default function Landing() {
             </Link>
             <Link
               href="/profile"
-              className="inline-flex h-12 items-center gap-2 rounded-xl border border-border/60 bg-transparent px-8 text-sm font-semibold text-foreground transition-colors hover:border-primary/60 hover:text-primary"
+              className="inline-flex h-12 items-center gap-2 rounded-xl border border-border/60 bg-transparent px-8 text-sm font-semibold text-foreground transition-colors hover:border-primary/60 hover:text-brand"
             >
               <Upload className="h-4 w-4" />
               Upload your CV
@@ -224,7 +192,7 @@ export default function Landing() {
                   className={`animate-fade-in-up stagger-${i + 1} flex flex-col items-center gap-3 rounded-xl px-4 py-6 text-center transition-colors hover:bg-primary/[0.04]`}
                 >
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-                    <Icon className="h-5 w-5 text-primary" />
+                    <Icon className="h-5 w-5 text-brand" />
                   </div>
                   <div>
                     <p className="font-mono text-2xl font-bold tracking-tight text-foreground">
@@ -251,10 +219,10 @@ export default function Landing() {
         <div className="mx-auto max-w-7xl">
           {/* Section header */}
           <div className="animate-fade-in-up stagger-1 mx-auto max-w-2xl text-center mb-12 lg:mb-16">
-            <p className="text-sm font-semibold uppercase tracking-widest text-primary">
+            <p className="text-sm font-semibold uppercase tracking-widest text-brand">
               What Job360 keeps
             </p>
-            <h2 className="font-heading mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+            <h2 className="font-heading mt-3 text-3xl font-medium tracking-tight sm:text-4xl">
               Context, memory and every version
             </h2>
             <p className="mt-4 text-muted-foreground text-lg">
@@ -273,9 +241,9 @@ export default function Landing() {
                   className={`animate-fade-in-up stagger-${stagger} glass-card group rounded-xl p-6`}
                 >
                   <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20 transition-all group-hover:bg-primary/15 group-hover:ring-primary/40">
-                    <Icon className="h-5 w-5 text-primary" />
+                    <Icon className="h-5 w-5 text-brand" />
                   </div>
-                  <h3 className="font-heading text-lg font-semibold tracking-tight">
+                  <h3 className="font-heading text-lg font-medium tracking-tight">
                     {title}
                   </h3>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -294,10 +262,10 @@ export default function Landing() {
       <section className="relative px-4 py-16 sm:px-6 lg:py-24">
         <div className="mx-auto max-w-5xl">
           <div className="animate-fade-in-up stagger-1 mx-auto max-w-2xl text-center mb-12">
-            <p className="text-sm font-semibold uppercase tracking-widest text-primary">
+            <p className="text-sm font-semibold uppercase tracking-widest text-brand">
               How it works
             </p>
-            <h2 className="font-heading mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+            <h2 className="font-heading mt-3 text-3xl font-medium tracking-tight sm:text-4xl">
               Three steps to your next role
             </h2>
           </div>
@@ -338,14 +306,14 @@ export default function Landing() {
                 )}
                 <div className="glass-card rounded-xl p-6 h-full flex flex-col">
                   <div className="mb-4 flex items-center gap-3">
-                    <span className="font-mono text-3xl font-bold text-primary/30">
+                    <span className="font-mono text-3xl font-bold text-brand/30">
                       {step}
                     </span>
                     <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-                      <Icon className="h-5 w-5 text-primary" />
+                      <Icon className="h-5 w-5 text-brand" />
                     </div>
                   </div>
-                  <h3 className="font-heading text-lg font-semibold">
+                  <h3 className="font-heading text-lg font-medium">
                     {title}
                   </h3>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground flex-1">
@@ -363,18 +331,10 @@ export default function Landing() {
           ═══════════════════════════════════════════════════ */}
       <section className="relative px-4 py-20 sm:px-6 lg:py-28">
         <div className="mx-auto max-w-3xl text-center">
-          {/* Ambient glow behind CTA */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 flex items-center justify-center"
-          >
-            <div className="h-[500px] w-[800px] rounded-full bg-primary/[0.12] blur-[120px]" />
-          </div>
-
           <div className="relative">
-            <h2 className="animate-fade-in-up stagger-1 font-heading text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
+            <h2 className="animate-fade-in-up stagger-1 font-heading text-3xl font-medium tracking-tight sm:text-4xl lg:text-5xl">
               Give your{" "}
-              <span className="bg-gradient-to-r from-primary via-lime-300 to-primary bg-clip-text text-transparent">
+              <span className="text-brand">
                 assistant
               </span>{" "}
               the full story
@@ -386,7 +346,7 @@ export default function Landing() {
             <div className="animate-fade-in-up stagger-3 mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
               <Link
                 href="/settings/connect"
-                className="group inline-flex h-14 items-center gap-3 rounded-xl bg-primary px-10 text-base font-semibold text-primary-foreground shadow-[0_0_30px_oklch(0.89_0.29_128/0.4)] transition-all hover:shadow-[0_0_50px_oklch(0.89_0.29_128/0.6)] hover:brightness-110 hover:scale-105"
+                className="group inline-flex h-14 items-center gap-3 rounded-xl bg-primary px-10 text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90"
               >
                 <Plug className="h-5 w-5" />
                 Connect your assistant
@@ -394,7 +354,7 @@ export default function Landing() {
               </Link>
               <Link
                 href="/profile"
-                className="inline-flex h-14 items-center gap-3 rounded-xl border border-border/60 bg-transparent px-10 text-base font-semibold text-foreground transition-colors hover:border-primary/60 hover:text-primary"
+                className="inline-flex h-14 items-center gap-3 rounded-xl border border-border/60 bg-transparent px-10 text-base font-semibold text-foreground transition-colors hover:border-primary/60 hover:text-brand"
               >
                 <Upload className="h-5 w-5" />
                 Upload your CV

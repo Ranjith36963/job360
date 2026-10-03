@@ -67,7 +67,7 @@ export default function ReceiptDetailPage() {
   if (error) {
     return (
       <div className="mx-auto flex max-w-3xl flex-col items-center gap-4 px-4 py-24 text-center">
-        <h2 className="font-heading text-xl font-semibold">{error}</h2>
+        <h2 className="font-heading text-xl font-medium">{error}</h2>
         <Link href="/receipts">
           <Button variant="outline" size="sm" className="gap-2">
             <ArrowLeft className="h-4 w-4" />
@@ -92,14 +92,14 @@ export default function ReceiptDetailPage() {
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <Link
         href="/receipts"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary"
+        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-brand"
       >
         <ArrowLeft className="h-4 w-4" />
         All receipts
       </Link>
 
       <header className="mb-6">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight" data-testid="receipt-title">
+        <h1 className="font-heading text-2xl font-medium tracking-tight" data-testid="receipt-title">
           {receipt.job_title}
         </h1>
         <p className="text-muted-foreground">
@@ -120,7 +120,7 @@ export default function ReceiptDetailPage() {
               href={safeUrl(receipt.job_apply_url)}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-primary hover:underline"
+              className="inline-flex items-center gap-1 text-brand hover:underline"
             >
               The ad <ExternalLink className="h-3 w-3" />
             </a>
@@ -155,7 +155,7 @@ function Section({
   return (
     <section className="glass-card mb-6 rounded-2xl p-6" data-testid={testId}>
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="font-heading text-sm font-semibold uppercase tracking-wider text-primary/80">
+        <h2 className="font-heading text-sm font-medium uppercase tracking-wider text-brand/80">
           {title}
         </h2>
         {origin && (

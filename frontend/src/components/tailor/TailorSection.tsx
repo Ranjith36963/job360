@@ -26,8 +26,8 @@ export function TailorSection({ jobId, applicationId, hasDocuments = false }: Ta
   return (
     <div className="glass-card rounded-2xl p-6 space-y-4">
       <div className="space-y-1.5">
-        <h2 className="flex items-center gap-2 font-heading text-base font-semibold">
-          <Bot className="h-4 w-4 text-primary" aria-hidden="true" />
+        <h2 className="flex items-center gap-2 font-heading text-base font-medium">
+          <Bot className="h-4 w-4 text-brand" aria-hidden="true" />
           Ask your assistant
         </h2>
         <p className="text-sm text-muted-foreground">

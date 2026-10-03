@@ -47,7 +47,7 @@ export function LessonForm({
         type="button"
         data-testid="lesson-add-toggle"
         onClick={() => setOpen(true)}
-        className="mt-3 text-sm font-medium text-primary hover:underline"
+        className="mt-3 text-sm font-medium text-brand hover:underline"
       >
         + Add a lesson
       </button>

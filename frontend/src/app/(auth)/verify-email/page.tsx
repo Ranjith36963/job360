@@ -78,7 +78,7 @@ function VerifyBody() {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-red-400">{error}</p>
+      <p className="text-sm text-danger">{error}</p>
       <Button render={<Link href="/applications" />} className="w-full" variant="secondary">
         Back to my applications
       </Button>

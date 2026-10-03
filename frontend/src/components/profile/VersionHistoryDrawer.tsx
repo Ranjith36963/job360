@@ -103,7 +103,7 @@ export function VersionHistoryDrawer({
       <SheetContent side="right" className="w-80 sm:w-96 p-0 flex flex-col">
         <SheetHeader className="p-4 pb-3 border-b border-border">
           <div className="flex items-center gap-2">
-            <History className="h-4 w-4 text-primary" />
+            <History className="h-4 w-4 text-brand" />
             <SheetTitle>Version History</SheetTitle>
           </div>
           <SheetDescription>
@@ -168,7 +168,7 @@ export function VersionHistoryDrawer({
                       </p>
                     )}
                     {idx === 0 && (
-                      <span className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                      <span className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-brand">
                         Current
                       </span>
                     )}

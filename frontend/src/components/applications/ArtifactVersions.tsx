@@ -167,7 +167,7 @@ export function ArtifactVersions({
                       {applied && (
                         <span
                           data-testid="artifact-applied-badge"
-                          className="ml-2 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300"
+                          className="ml-2 rounded-full bg-success/15 px-2 py-0.5 text-xs font-semibold text-success"
                         >
                           Applied
                         </span>

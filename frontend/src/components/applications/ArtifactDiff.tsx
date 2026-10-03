@@ -56,9 +56,9 @@ function Pane({
             data-diff={line.op}
             className={
               line.op === "add"
-                ? "whitespace-pre-wrap rounded-sm bg-emerald-500/15 px-1"
+                ? "whitespace-pre-wrap rounded-sm bg-success/15 px-1"
                 : line.op === "del"
-                  ? "whitespace-pre-wrap rounded-sm bg-red-500/15 px-1 line-through decoration-red-500/40"
+                  ? "whitespace-pre-wrap rounded-sm bg-danger/15 px-1 line-through decoration-danger/40"
                   : "whitespace-pre-wrap px-1"
             }
           >

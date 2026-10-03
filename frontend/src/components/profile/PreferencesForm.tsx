@@ -197,7 +197,7 @@ function TagInput({
       {openSuggestions.length > 0 && (
         <div className="pt-1">
           {suggestionsLabel && (
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-primary">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-brand">
               {suggestionsLabel}
             </p>
           )}
@@ -216,7 +216,7 @@ function TagInput({
                 // this control must stay clearly distinct from one.
                 aria-label={`Add ${s} to ${label}`}
                 onClick={() => appendTag(s)}
-                className="inline-flex items-center gap-1 rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-primary/90 transition-colors hover:border-primary/70 hover:bg-primary/10"
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-brand/90 transition-colors hover:border-primary/70 hover:bg-primary/10"
               >
                 <Plus className="h-3 w-3" />
                 {s}
@@ -574,10 +574,10 @@ export function PreferencesForm({
     >
       <div className="flex items-center gap-3 mb-6">
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-          <Briefcase className="h-5 w-5 text-primary" />
+          <Briefcase className="h-5 w-5 text-brand" />
         </div>
         <div>
-          <h3 className="font-heading text-base font-semibold">Your preferences</h3>
+          <h3 className="font-heading text-base font-medium">Your preferences</h3>
           <p className="text-xs text-muted-foreground">
             What you want — your assistant reads this when it judges a job
           </p>
@@ -875,7 +875,7 @@ export function PreferencesForm({
               </>
             ) : (
               <>
-                <Check className="h-3.5 w-3.5 text-score-high" />
+                <Check className="h-3.5 w-3.5 text-success" />
                 <span>Changes save automatically</span>
               </>
             )}

@@ -3,13 +3,13 @@ import type { ApplicationFit } from "@/lib/api";
 type FitAxis = ApplicationFit["axes"][number];
 
 /** Colours for the two shapes — the role in blue, the seeker in green.
- * Plain values (not theme tokens) so the chart reads the same in both
- * themes and in a screenshot. */
-const ROLE_STROKE = "#38bdf8"; // sky-400
-const ROLE_FILL = "rgba(56, 189, 248, 0.18)";
-const YOU_STROKE = "#34d399"; // emerald-400
-const YOU_FILL = "rgba(52, 211, 153, 0.28)";
-const GRID = "rgba(148, 163, 184, 0.35)"; // slate-400
+ * They come from the theme's CSS variables, so the chart reads correctly in
+ * both light and dark mode. */
+const ROLE_STROKE = "var(--info)";
+const ROLE_FILL = "color-mix(in oklab, var(--info) 18%, transparent)";
+const YOU_STROKE = "var(--success)";
+const YOU_FILL = "color-mix(in oklab, var(--success) 28%, transparent)";
+const GRID = "var(--chart-line)";
 
 const RINGS = [25, 50, 75, 100];
 

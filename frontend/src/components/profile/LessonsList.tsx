@@ -35,8 +35,8 @@ export function LessonsList() {
 
   return (
     <div className="animate-fade-in-up glass-card rounded-xl p-6">
-      <h2 className="font-heading text-base font-semibold mb-4 flex items-center gap-2">
-        <BookOpen className="h-4 w-4 text-primary" />
+      <h2 className="font-heading text-base font-medium mb-4 flex items-center gap-2">
+        <BookOpen className="h-4 w-4 text-brand" />
         Lessons
       </h2>
 

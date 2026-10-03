@@ -94,11 +94,11 @@ export default function ForgotPasswordPage() {
                   {...register("email")}
                 />
                 {errors.email && (
-                  <p id="email-error" className="text-sm text-red-400">{errors.email.message}</p>
+                  <p id="email-error" className="text-sm text-danger">{errors.email.message}</p>
                 )}
               </div>
               {serverError && (
-                <p role="alert" className="text-sm text-red-400">
+                <p role="alert" className="text-sm text-danger">
                   {serverError}
                 </p>
               )}

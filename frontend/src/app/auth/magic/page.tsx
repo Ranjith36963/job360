@@ -72,7 +72,7 @@ function MagicBody() {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-red-400">{error}</p>
+      <p className="text-sm text-danger">{error}</p>
       <Button render={<Link href="/login" />} className="w-full" variant="secondary">
         Back to login
       </Button>

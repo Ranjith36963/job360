@@ -175,7 +175,7 @@ function SectionLabel({
 }) {
   return (
     <div className="flex items-center gap-2 mb-2">
-      <Icon className="h-3.5 w-3.5 text-primary" />
+      <Icon className="h-3.5 w-3.5 text-brand" />
       <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {text}
       </span>
@@ -358,8 +358,8 @@ export function CVViewer({
     <div className="space-y-6 animate-fade-in-up stagger-2">
       {/* ── Extracted sections ────────────────────────── */}
       <div className="glass-card rounded-xl p-6">
-        <h3 className="font-heading text-base font-semibold mb-4 flex items-center gap-2">
-          <FileText className="h-4 w-4 text-primary" />
+        <h3 className="font-heading text-base font-medium mb-4 flex items-center gap-2">
+          <FileText className="h-4 w-4 text-brand" />
           What we extracted from your profile
         </h3>
 
@@ -367,7 +367,7 @@ export function CVViewer({
         {(cv.name || cv.headline || cv.location) && (
           <div className="mb-5 pb-4 border-b border-border/40">
             {cv.name && (
-              <h4 className="font-heading text-lg font-semibold text-foreground">
+              <h4 className="font-heading text-lg font-medium text-foreground">
                 {cv.name}
                 <EditedMark edit={editOf("name")} onTakeBack={onTakeBack} onKeep={onKeep} />
               </h4>
@@ -392,7 +392,7 @@ export function CVViewer({
         {cv.summary_text && (
           <div className="mb-5">
             <div className="flex items-center gap-2 mb-2">
-              <User className="h-3.5 w-3.5 text-primary" />
+              <User className="h-3.5 w-3.5 text-brand" />
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Professional Summary
               </span>
@@ -413,7 +413,7 @@ export function CVViewer({
         {cv.job_titles.length > 0 && (
           <div className="mb-5">
             <div className="flex items-center gap-2 mb-2">
-              <Briefcase className="h-3.5 w-3.5 text-primary" />
+              <Briefcase className="h-3.5 w-3.5 text-brand" />
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Experience Found
               </span>
@@ -423,7 +423,7 @@ export function CVViewer({
               {cv.job_titles.map((title) => (
                 <span
                   key={title}
-                  className="inline-flex items-center rounded-md bg-primary/10 border border-primary/20 px-2.5 py-1 text-xs font-medium text-primary"
+                  className="inline-flex items-center rounded-md bg-primary/10 border border-primary/20 px-2.5 py-1 text-xs font-medium text-brand"
                 >
                   <Building className="mr-1.5 h-3 w-3" />
                   {title}
@@ -486,7 +486,7 @@ export function CVViewer({
         {cv.education.length > 0 && (
           <div className="mb-5">
             <div className="flex items-center gap-2 mb-2">
-              <GraduationCap className="h-3.5 w-3.5 text-primary" />
+              <GraduationCap className="h-3.5 w-3.5 text-brand" />
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Education
               </span>
@@ -506,7 +506,7 @@ export function CVViewer({
         {cv.certifications.length > 0 && (
           <div className="mb-5">
             <div className="flex items-center gap-2 mb-2">
-              <Award className="h-3.5 w-3.5 text-primary" />
+              <Award className="h-3.5 w-3.5 text-brand" />
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Certifications
               </span>
@@ -623,7 +623,7 @@ export function CVViewer({
               {(cv.links ?? []).map((link, i) => (
                 <li key={i} className="break-all leading-relaxed">
                   {link.startsWith("https://") ? (
-                    <a href={link} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                    <a href={link} target="_blank" rel="noreferrer" className="text-brand hover:underline">
                       {link}
                     </a>
                   ) : (
@@ -654,7 +654,7 @@ export function CVViewer({
             className="flex w-full items-center gap-2 text-left"
           >
             <Link2 className="h-4 w-4 text-[#0A66C2]" />
-            <h3 className="font-heading text-base font-semibold flex-1">
+            <h3 className="font-heading text-base font-medium flex-1">
               LinkedIn detail
             </h3>
             <span className="text-xs font-medium text-muted-foreground">
@@ -905,7 +905,7 @@ export function CVViewer({
                   return (
                     <li
                       key={i}
-                      className="rounded-full bg-sky-500/10 px-2.5 py-0.5 text-xs font-medium text-sky-400"
+                      className="rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info"
                     >
                       {name}
                       {score ? ` · ${score}` : ""}
@@ -947,7 +947,7 @@ export function CVViewer({
                   return (
                     <li
                       key={i}
-                      className="rounded-full bg-sky-500/10 text-sky-400 px-2.5 py-0.5 text-xs font-medium"
+                      className="rounded-full bg-info/10 text-info px-2.5 py-0.5 text-xs font-medium"
                     >
                       {lang}
                       {prof ? ` · ${prof}` : ""}
@@ -1054,8 +1054,8 @@ export function CVViewer({
             aria-expanded={githubDetailOpen}
             className="flex w-full items-center gap-2 text-left"
           >
-            <GitBranch className="h-4 w-4 text-[#8B5CF6]" />
-            <h3 className="font-heading text-base font-semibold flex-1">
+            <GitBranch className="h-4 w-4 text-foreground" />
+            <h3 className="font-heading text-base font-medium flex-1">
               GitHub detail
             </h3>
             <span className="text-xs font-medium text-muted-foreground">
@@ -1096,7 +1096,7 @@ export function CVViewer({
                   return (
                     <li
                       key={lang}
-                      className="rounded-full bg-violet-500/10 text-violet-400 px-2.5 py-0.5 text-xs font-medium"
+                      className="rounded-full bg-foreground/10 text-muted-foreground px-2.5 py-0.5 text-xs font-medium"
                     >
                       {lang} {pct > 0 ? `· ${pct}%` : ""}
                     </li>
@@ -1145,7 +1145,7 @@ export function CVViewer({
                         {repo.name}
                       </span>
                       {repo.language && (
-                        <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-400">
+                        <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                           {repo.language}
                         </span>
                       )}
@@ -1160,7 +1160,7 @@ export function CVViewer({
                         </span>
                       )}
                       {repo.archived && (
-                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-500">
+                        <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
                           archived
                         </span>
                       )}
@@ -1215,7 +1215,7 @@ export function CVViewer({
                 {ghFrameworks.map((f) => (
                   <li
                     key={f}
-                    className="rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-400"
+                    className="rounded-full bg-foreground/10 px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
                   >
                     {f}
                   </li>

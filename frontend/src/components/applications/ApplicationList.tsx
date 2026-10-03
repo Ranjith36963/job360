@@ -102,7 +102,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
     return (
       <p className="text-sm text-muted-foreground">
         Nothing yet. Bring a job from your assistant, or the{" "}
-        <Link href="/bring" className="text-primary underline">
+        <Link href="/bring" className="text-brand underline">
           Bring a job
         </Link>{" "}
         page, to start your record.
@@ -120,7 +120,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
           className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
             statusFilter === "all"
               ? "bg-primary text-primary-foreground"
-              : "bg-primary/10 text-primary hover:bg-primary/20"
+              : "bg-primary/10 text-brand hover:bg-primary/20"
           }`}
         >
           All ({applications.length})
@@ -134,7 +134,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
             className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
               statusFilter === status
                 ? "bg-primary text-primary-foreground"
-                : "bg-primary/10 text-primary hover:bg-primary/20"
+                : "bg-primary/10 text-brand hover:bg-primary/20"
             }`}
           >
             {STATUS_LABEL[status] ?? status} ({count})
@@ -148,8 +148,8 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
             aria-pressed={dueOnly}
             className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
               dueOnly
-                ? "bg-amber-500 text-amber-950"
-                : "bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
+                ? "bg-warning text-warning"
+                : "bg-warning/10 text-warning hover:bg-warning/20"
             }`}
           >
             Due ({dueCount})
@@ -191,7 +191,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
                     <p className="line-clamp-2 text-sm text-muted-foreground" title={app.job_company}>
                       {app.job_company}
                     </p>
-                    <span className="mt-1.5 inline-block rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                    <span className="mt-1.5 inline-block rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-brand">
                       {STATUS_LABEL[app.status] ?? app.status}
                     </span>
                   </div>
@@ -202,7 +202,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
                     {(app.next_step?.label || app.interview_at || (app.follow_up_due && app.follow_up_on)) && (
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                         {app.next_step?.label && (
-                          <span data-testid="row-next-step" className="truncate text-primary">
+                          <span data-testid="row-next-step" className="truncate text-brand">
                             Next: {app.next_step.label}
                           </span>
                         )}
@@ -217,7 +217,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
                         {app.follow_up_due && app.follow_up_on && (
                           <span
                             data-testid="row-follow-up"
-                            className="rounded-full bg-amber-500/15 px-3 py-1 font-medium text-amber-600 dark:text-amber-400"
+                            className="rounded-full bg-warning/15 px-3 py-1 font-medium text-warning"
                           >
                             Follow up {formatDayMonth(app.follow_up_on)}
                           </span>
