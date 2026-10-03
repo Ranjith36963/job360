@@ -318,7 +318,7 @@ def mask_email(email: Optional[str]) -> str:
         return "***"
     if not local:
         return f"***@{domain}"
-    return f"{local[-1]}***@{domain}"
+    return f"{local[0]}***@{domain}"
 
 
 def mask_ip(ip: Optional[str]) -> str:
