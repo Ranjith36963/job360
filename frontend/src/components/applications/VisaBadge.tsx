@@ -34,7 +34,7 @@ export function VisaBadge({
   let dataVisa: string;
 
   if (signal === "sponsors") {
-    pillClass = "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
+    pillClass = "bg-success/15 text-success";
     label = "Sponsors visas";
     dataVisa = "sponsors";
   } else if (needsSponsorship === false) {
@@ -43,7 +43,7 @@ export function VisaBadge({
     dataVisa = "no_sponsorship_covered";
   } else {
     // needsSponsorship is true or null (unknown comparison) — still a red flag.
-    pillClass = "bg-red-500/15 text-red-700 dark:text-red-300";
+    pillClass = "bg-danger/15 text-danger";
     label = "No sponsorship";
     dataVisa = "no_sponsorship";
   }

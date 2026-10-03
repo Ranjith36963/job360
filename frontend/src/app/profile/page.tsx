@@ -314,11 +314,11 @@ export default function ProfilePage() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
-                <User className="h-5 w-5 text-primary" />
+                <User className="h-5 w-5 text-brand" />
               </div>
               <div>
-                <h1 className="font-heading text-2xl font-bold tracking-tight sm:text-3xl">
-                  <span className="text-gradient-lime">Profile</span>
+                <h1 className="font-heading text-2xl font-medium tracking-tight sm:text-3xl">
+                  Profile
                 </h1>
                 {/* Owner decision, 2026-09-24: ONE line, naming what is
                     actually missing (reusing the same six completeness
@@ -334,7 +334,7 @@ export default function ProfilePage() {
                 {assistantPrefCount > 0 && (
                   <a
                     href="#preferences"
-                    className="block text-xs text-primary underline-offset-2 hover:underline"
+                    className="block text-xs text-brand underline-offset-2 hover:underline"
                   >
                     {assistantPrefCount === 1
                       ? "1 preference set by your assistant"
@@ -482,22 +482,22 @@ export default function ProfilePage() {
                 {
                   key: "cv",
                   label: "From your CV",
-                  chip: "bg-score-high/10 text-score-high",
+                  chip: "bg-success/10 text-success",
                 },
                 {
                   key: "linkedin",
                   label: "From LinkedIn",
-                  chip: "bg-sky-500/10 text-sky-400",
+                  chip: "bg-info/10 text-info",
                 },
                 {
                   key: "github",
                   label: "From GitHub",
-                  chip: "bg-violet-500/10 text-violet-400",
+                  chip: "bg-foreground/10 text-muted-foreground",
                 },
                 {
                   key: "preferences",
                   label: "Added by you",
-                  chip: "bg-yellow-500/10 text-yellow-500",
+                  chip: "bg-warning/10 text-warning",
                 },
               ];
               // THE one skill count, from the backend (skill_tiering.
@@ -532,7 +532,7 @@ export default function ProfilePage() {
               if (alreadyShownByCVViewer) return null;
               return (
                 <div className="animate-fade-in-up glass-card rounded-xl p-6">
-                  <h2 className="font-heading text-base font-semibold mb-1 text-foreground">
+                  <h2 className="font-heading text-base font-medium mb-1 text-foreground">
                     Your Skills{" "}
                     <span className="text-muted-foreground">({total})</span>
                   </h2>

@@ -101,7 +101,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           company only — every action and status control moved into the
           sticky right column below. */}
       <div>
-        <h1 className="font-heading text-2xl font-bold">{detail.job.job_title || "Untitled role"}</h1>
+        <h1 className="font-heading text-2xl font-medium">{detail.job.job_title || "Untitled role"}</h1>
         <p className="text-muted-foreground">{detail.job.job_company}</p>
         {!detail.job.catalog_present && (
           <p className="mt-1 text-xs text-muted-foreground/70">
@@ -113,9 +113,9 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
       {/* At lg: two columns — LEFT (main) carries Fit/Documents/Sent/History,
           RIGHT (side) carries the actions (Next line, status, "What
           happened?", Mark Applied, View ad) plus Visa/People/Lessons, and
-          stays sticky under the navbar (owner decision, 2026-09-25) —
-          `lg:top-20` clears the 56px (h-14) sticky navbar with a gap, and
-          `lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto` lets it scroll on
+          stays sticky (owner decision, 2026-09-25) —
+          `lg:top-6` leaves a small gap (the desktop shell has a sidebar, no top bar), and
+          `lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto` lets it scroll on
           its own if it's taller than the viewport instead of pushing off
           screen. Below lg both columns render `display: contents` so their
           children become direct items of the single-column grid below,
@@ -178,17 +178,17 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
 
         <div
           data-testid="app-col-side"
-          className="scroll-quiet contents lg:flex lg:flex-col lg:gap-6 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto"
+          className="scroll-quiet contents lg:flex lg:flex-col lg:gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:self-start lg:overflow-y-auto"
         >
           <div data-testid="app-actions" className="order-1 flex flex-col items-start gap-3 lg:order-none">
             {nextStep?.label && (
-              <p data-testid="next-step" className="text-sm text-primary">
+              <p data-testid="next-step" className="text-sm text-brand">
                 Next: {nextStep.label}
               </p>
             )}
             <span
               data-testid="status-label"
-              className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary"
+              className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-brand"
             >
               {STATUS_LABEL[detail.status] ?? detail.status}
             </span>

@@ -81,7 +81,7 @@ function RegisterForm() {
           {...register("email")}
         />
         {errors.email && (
-          <p id="email-error" className="text-sm text-red-400">{errors.email.message}</p>
+          <p id="email-error" className="text-sm text-danger">{errors.email.message}</p>
         )}
       </div>
       <div className="space-y-2">
@@ -95,14 +95,14 @@ function RegisterForm() {
           {...register("password")}
         />
         {errors.password && (
-          <p id="password-error" className="text-sm text-red-400">{errors.password.message}</p>
+          <p id="password-error" className="text-sm text-danger">{errors.password.message}</p>
         )}
         <p className="text-xs text-muted-foreground">
           Minimum 8 characters. We hash with argon2id — never store plaintext.
         </p>
       </div>
       {serverError && (
-        <p role="alert" className="text-sm text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {serverError}
         </p>
       )}

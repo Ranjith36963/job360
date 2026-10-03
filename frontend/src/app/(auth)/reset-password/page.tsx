@@ -98,7 +98,7 @@ function ResetForm() {
           {...register("password")}
         />
         {errors.password && (
-          <p id="password-error" className="text-sm text-red-400">{errors.password.message}</p>
+          <p id="password-error" className="text-sm text-danger">{errors.password.message}</p>
         )}
       </div>
       <div className="space-y-2">
@@ -112,11 +112,11 @@ function ResetForm() {
           {...register("confirm")}
         />
         {errors.confirm && (
-          <p id="confirm-error" className="text-sm text-red-400">{errors.confirm.message}</p>
+          <p id="confirm-error" className="text-sm text-danger">{errors.confirm.message}</p>
         )}
       </div>
       {serverError && (
-        <p role="alert" className="text-sm text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {serverError}
         </p>
       )}

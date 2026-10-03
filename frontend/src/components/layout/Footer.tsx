@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Activity, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
+import { Logo } from "@/components/brand/Logo";
 
 // Legal link slots — content (privacy policy, terms) populated in Batch 4 launch readiness
 const LEGAL_LINKS: { label: string; href: string }[] = [
@@ -10,16 +11,14 @@ const LEGAL_LINKS: { label: string; href: string }[] = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-border/30 bg-background/40 backdrop-blur-sm">
-      <div className="mx-auto flex flex-col sm:flex-row h-auto sm:h-14 max-w-7xl items-center justify-between gap-2 px-4 sm:px-6 py-3 sm:py-0">
+    <footer className="border-t border-border">
+      <div className="mx-auto flex h-auto flex-col items-center justify-between gap-2 px-6 py-3 sm:h-14 sm:flex-row sm:py-0 lg:px-10">
         <Link
           href="/"
-          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="job360"
+          className="flex items-center text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
-          <Activity className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-          <span className="font-heading">
-            Job<span className="text-primary">360</span>
-          </span>
+          <Logo size={18} className="[&_[data-testid=logo-wordmark]]:text-sm" />
         </Link>
 
         {/* Legal link slots — placeholder content until Batch 4 */}
@@ -28,7 +27,7 @@ export function Footer() {
             <Link
               key={label}
               href={href}
-              className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
             >
               {label}
             </Link>
@@ -37,7 +36,7 @@ export function Footer() {
             href="https://github.com/Ranjith36963/job360"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors flex items-center gap-1"
+            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
             aria-label="Job360 on GitHub"
           >
             <ExternalLink className="h-3 w-3" aria-hidden="true" />
@@ -45,7 +44,7 @@ export function Footer() {
           </a>
         </nav>
 
-        <p className="text-xs text-muted-foreground/60">
+        <p className="text-xs text-muted-foreground">
           {/* C2 (application-spine review) — VISION rule 4: Job360 never
               sources or ranks jobs. This footer advertised a source count on
               every page; replaced with the mission line. */}

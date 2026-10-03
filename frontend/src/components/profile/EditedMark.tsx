@@ -49,14 +49,14 @@ export function EditedMark({
     };
 
   const buttonClass =
-    "rounded-full border border-primary/30 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50";
+    "rounded-full border border-primary/30 px-2 py-0.5 text-[10px] font-medium text-brand transition-colors hover:bg-primary/10 disabled:opacity-50";
 
   return (
     <span className="ml-2 inline-flex flex-wrap items-center gap-1.5">
       <span
         data-testid="agent-edit-mark"
         title={`Changed by ${edit.set_by} on ${formatEditedDate(edit.set_at)}`}
-        className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"
+        className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-brand"
       >
         Changed by {who} · was {was}
       </span>

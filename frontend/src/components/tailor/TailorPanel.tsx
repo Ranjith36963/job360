@@ -221,11 +221,11 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
                       <div className="space-y-2">
                         <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                           <span className="inline-flex items-center gap-1.5">
-                            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" aria-hidden="true" />
+                            <span className="h-2.5 w-2.5 rounded-full bg-success" aria-hidden="true" />
                             Your facts (from your CV)
                           </span>
                           <span className="inline-flex items-center gap-1.5">
-                            <span className="h-2.5 w-2.5 rounded-full bg-amber-500" aria-hidden="true" />
+                            <span className="h-2.5 w-2.5 rounded-full bg-warning" aria-hidden="true" />
                             Added on top — verify before you send
                           </span>
                         </div>
@@ -235,8 +235,8 @@ export function TailorPanel({ jobId, open, onOpenChange, initialKind = "cv" }: T
                               key={i}
                               className={
                                 seg.grounded
-                                  ? "text-emerald-300"
-                                  : "rounded bg-amber-500/10 px-1 text-amber-200"
+                                  ? "text-success"
+                                  : "rounded bg-warning/10 px-1 text-warning"
                               }
                             >
                               {seg.text || " "}

@@ -80,7 +80,7 @@ export function VersionDiffDrawer({
       <SheetContent side="right" className="flex w-full flex-col p-0 sm:w-[520px]">
         <SheetHeader className="border-b border-border p-4 pb-3">
           <div className="flex items-center gap-2">
-            <GitCompare className="h-4 w-4 text-primary" />
+            <GitCompare className="h-4 w-4 text-brand" />
             <SheetTitle>Compare Versions</SheetTitle>
           </div>
           <SheetDescription className="text-xs">
@@ -143,7 +143,7 @@ export function VersionDiffDrawer({
                         </p>
                       </div>
                       <div className="space-y-1 bg-primary/5 p-3">
-                        <p className="text-[10px] font-medium uppercase tracking-wide text-primary">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-brand">
                           After
                         </p>
                         <p className="break-words whitespace-pre-wrap text-foreground">

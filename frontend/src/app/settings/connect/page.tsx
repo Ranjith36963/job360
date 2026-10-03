@@ -91,7 +91,7 @@ function NewTokenReveal({
 }) {
   const cmd = connectCommand(created.token);
   return (
-    <Card className="border-emerald-700/40" data-testid="token-reveal">
+    <Card className="border-success/40" data-testid="token-reveal">
       <CardHeader>
         <CardTitle>Your new token: {created.name}</CardTitle>
         <CardDescription>
@@ -251,7 +251,7 @@ function AssistantStepsCard() {
               <p className="text-xs text-muted-foreground">{a.line}</p>
               {a.tested && (
                 <p
-                  className="text-xs text-emerald-600 dark:text-emerald-400"
+                  className="text-xs text-success"
                   data-testid={`assistant-status-${a.name.toLowerCase()}`}
                 >
                   ✅ Tested: works
@@ -618,7 +618,7 @@ function CreateTokenCard({
           </Button>
         </form>
         {error && (
-          <p className="mt-2 text-xs text-red-400" role="alert">
+          <p className="mt-2 text-xs text-danger" role="alert">
             {error}
           </p>
         )}
@@ -736,7 +736,7 @@ function DeveloperTokensSection({
       {open && (
         <div data-testid="developer-tokens-content" className="space-y-8 p-4 pt-0">
           <p
-            className="text-xs text-emerald-600 dark:text-emerald-400"
+            className="text-xs text-success"
             data-testid="developer-tokens-tested"
           >
             ✅ Tested: works — Claude Code, 28 September 2026

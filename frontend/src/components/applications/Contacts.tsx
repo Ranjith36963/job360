@@ -28,7 +28,7 @@ function LinkedinCell({ url }: { url: string }) {
         href={url}
         target="_blank"
         rel="noreferrer"
-        className="text-primary hover:underline"
+        className="text-brand hover:underline"
       >
         LinkedIn
       </a>
@@ -165,7 +165,7 @@ function EditContact({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="text-[11px] font-medium text-primary hover:underline"
+          className="text-[11px] font-medium text-brand hover:underline"
         >
           Edit
         </button>
@@ -311,7 +311,7 @@ export function Contacts({
               {(contact.email || contact.linkedin_url) && (
                 <div className="mt-1 flex flex-wrap gap-3 text-xs">
                   {contact.email && (
-                    <a href={`mailto:${contact.email}`} className="text-primary hover:underline">
+                    <a href={`mailto:${contact.email}`} className="text-brand hover:underline">
                       {contact.email}
                     </a>
                   )}
@@ -346,7 +346,7 @@ export function Contacts({
           type="button"
           data-testid="contacts-add-toggle"
           onClick={() => setFormOpen(true)}
-          className="self-start text-sm font-medium text-primary hover:underline"
+          className="self-start text-sm font-medium text-brand hover:underline"
         >
           + Add person
         </button>

@@ -116,7 +116,7 @@ export function CountryPicker({
               role="option"
               aria-selected={false}
               onClick={() => addCountry(c.code)}
-              className="inline-flex items-center gap-1 rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-primary/90 transition-colors hover:border-primary/70 hover:bg-primary/10"
+              className="inline-flex items-center gap-1 rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-brand/90 transition-colors hover:border-primary/70 hover:bg-primary/10"
             >
               {c.name}
             </button>

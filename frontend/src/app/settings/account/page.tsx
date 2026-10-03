@@ -65,7 +65,7 @@ type DeleteConfirmValues = { confirmText: string; currentPassword: string };
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return (
-    <p className="text-xs text-red-400 mt-1" role="alert">
+    <p className="text-xs text-danger mt-1" role="alert">
       {message}
     </p>
   );
@@ -144,8 +144,8 @@ function ChangePasswordCard() {
             />
             <FieldError message={errors.confirmPassword?.message} />
           </div>
-          {serverError && <p className="text-sm text-red-400" role="alert">{serverError}</p>}
-          {success && <p className="text-sm text-emerald-400" role="status">{success}</p>}
+          {serverError && <p className="text-sm text-danger" role="alert">{serverError}</p>}
+          {success && <p className="text-sm text-success" role="status">{success}</p>}
           <Button type="submit" disabled={isSubmitting}>
             {isSubmitting ? "Updating..." : "Update password"}
           </Button>
@@ -215,7 +215,7 @@ function ChangeEmailCard() {
             />
             <FieldError message={errors.newEmail?.message} />
           </div>
-          {serverError && <p className="text-sm text-red-400" role="alert">{serverError}</p>}
+          {serverError && <p className="text-sm text-danger" role="alert">{serverError}</p>}
           <Button type="submit" disabled={isSubmitting}>
             {isSubmitting ? "Updating..." : "Update email"}
           </Button>
@@ -259,9 +259,9 @@ function DeleteAccountCard() {
 
   return (
     <>
-      <Card className="border-red-900/40">
+      <Card className="border-danger/40">
         <CardHeader>
-          <CardTitle className="text-red-400">Danger zone</CardTitle>
+          <CardTitle className="text-danger">Danger zone</CardTitle>
           <CardDescription>
             This action is permanent and cannot be undone. All your data will be
             deleted.
@@ -314,7 +314,7 @@ function DeleteAccountCard() {
                 />
                 <FieldError message={errors.confirmText?.message} />
               </div>
-              {serverError && <p className="text-sm text-red-400 mt-1" role="alert">{serverError}</p>}
+              {serverError && <p className="text-sm text-danger mt-1" role="alert">{serverError}</p>}
             </div>
             <DialogFooter className="mt-4">
               <Button
@@ -450,7 +450,7 @@ function TimezoneCard() {
         )}
         {serverError && <FieldError message={serverError} />}
         {success && (
-          <p className="text-xs text-emerald-400" role="status">
+          <p className="text-xs text-success" role="status">
             {success}
           </p>
         )}
@@ -501,7 +501,7 @@ function VerifyEmailCard() {
           {sending ? "Sending..." : "Resend verification email"}
         </Button>
         {success && (
-          <p className="mt-3 text-xs text-green-400" role="status">
+          <p className="mt-3 text-xs text-success" role="status">
             {success}
           </p>
         )}

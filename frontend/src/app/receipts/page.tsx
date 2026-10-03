@@ -123,7 +123,7 @@ export default function ReceiptsPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
       <div className="mb-6">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">Receipts</h1>
+        <h1 className="font-heading text-2xl font-medium tracking-tight">Receipts</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Every application, exactly as you sent it. These never change.
         </p>

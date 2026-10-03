@@ -19,7 +19,7 @@ export default function ContactPage() {
           <p className="mt-2">
             <a
               href="mailto:ranjithmaligaguruprakash@gmail.com"
-              className="text-primary hover:underline"
+              className="text-brand hover:underline"
             >
               ranjithmaligaguruprakash@gmail.com
             </a>
@@ -30,7 +30,7 @@ export default function ContactPage() {
           <p className="mt-2">
             <a
               href="https://github.com/Ranjith36963/job360"
-              className="text-primary hover:underline"
+              className="text-brand hover:underline"
               target="_blank"
               rel="noopener noreferrer"
             >
