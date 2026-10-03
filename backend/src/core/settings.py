@@ -496,6 +496,9 @@ PROFILE_EDITABLE_PATHS = (
     # Owner decision 2026-09-25 — "the daily check offer, remembered by
     # Job360, not by any one assistant" (mcp_server.py INSTRUCTIONS).
     "preferences.daily_check",
+    # Owner decision 2026-10-03 — how often that check runs (3h/6h/12h/24h);
+    # daily_check also holds the inbox mode auto/ask/paused. Both stored by Job360.
+    "preferences.check_every",
     # Slice B2 (decision 28) — dated work history and projects, as lists of
     # records with a closed key set (services/profile/edits.py RECORD_SCHEMAS).
     "cv_data.cv_positions", "cv_data.cv_projects",

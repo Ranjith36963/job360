@@ -1,10 +1,19 @@
-# 360-daily — the morning check (run on a schedule, every morning)
+# 360-daily — the inbox check (run on the user's schedule: preferences.check_every, default once a day)
 <!-- doc: REFERENCE — a /run 360 recipe the connected assistant reads; served by routes/recipes.py -->
 
+0. **Check the mode.** Call `get_profile` first and read
+   `preferences.daily_check`. `paused`, `declined` or empty (not decided
+   yet): stop now — read no email, record nothing, do not ask. `ask`: ask the user in chat "Can I
+   check your Gmail now?" and stop unless they say yes. `auto` (or the
+   older `scheduled`): go on. If your task is hourly and
+   `preferences.check_every` is `3h`, `6h` or `12h`, and this is not one of
+   the run hours (00, 03, 06, 09, 12, 15, 18, 21 for 3h; 00, 06, 12, 18 for
+   6h; 08, 20 for 12h, in the user's timezone), stop now as well.
 1. **Know what is open.** `list_applications` — every application that is not
    rejected, withdrawn or ghosted, with its company, title and contacts. Use
    it to map each email to the right application.
-2. **Read Gmail** (your own connector) since your last run for: replies from
+2. **Read Gmail** (your own connector) since your last run — on the very
+   first auto run, since each application was added to Job360 — for: replies from
    employers, application confirmation emails, and replies from people you
    reached out to.
 3. **Record what you find** with `record_event` — replied, interview

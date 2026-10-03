@@ -28,7 +28,7 @@ describe("ConnectAgentPage — daily check (owner decision, 2026-09-25)", () => 
 
   it("renders the daily-check prompt naming record_event, list_applications and due=true", async () => {
     render(<ConnectAgentPage />);
-    await screen.findByText(/daily check \(scheduled task\)/i);
+    await screen.findByText(/inbox check \(scheduled task\)/i);
 
     const prompt = screen.getByTestId("daily-check-prompt") as HTMLTextAreaElement;
     expect(prompt.value).toContain("record_event");
@@ -40,7 +40,7 @@ describe("ConnectAgentPage — daily check (owner decision, 2026-09-25)", () => 
 
   it("has a copy button for the prompt", async () => {
     render(<ConnectAgentPage />);
-    await screen.findByText(/daily check \(scheduled task\)/i);
+    await screen.findByText(/inbox check \(scheduled task\)/i);
     expect(screen.getByRole("button", { name: /copy prompt/i })).toBeInTheDocument();
   });
 });

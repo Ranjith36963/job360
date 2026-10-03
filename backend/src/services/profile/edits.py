@@ -34,6 +34,7 @@ from src.core.settings import DB_PATH
 from src.repositories import pgsync
 from src.services.auth import rate_limit
 from src.services.profile.models import (
+    VALID_CHECK_EVERY_VALUES,
     VALID_DAILY_CHECK_VALUES,
     VALID_EXPERIENCE_LEVELS,
     VALID_WORK_ARRANGEMENTS,
@@ -66,6 +67,7 @@ _CLOSED_SET_PATHS: dict[str, frozenset[str]] = {
     "preferences.work_arrangement": VALID_WORK_ARRANGEMENTS,
     "preferences.experience_level": VALID_EXPERIENCE_LEVELS,
     "preferences.daily_check": VALID_DAILY_CHECK_VALUES,
+    "preferences.check_every": VALID_CHECK_EVERY_VALUES,
 }
 
 _editable_paths_cache: tuple[str, ...] | None = None

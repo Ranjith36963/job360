@@ -35,7 +35,10 @@ export function findAgentEdit(
 /** `preferences.*` paths that have no field on the preferences card — the
  * daily-check answer lives on Settings → Connect (owner decision
  * 2026-09-25), so it must not inflate a count that links to the card. */
-const NOT_ON_PREFERENCES_CARD = new Set(["preferences.daily_check"]);
+const NOT_ON_PREFERENCES_CARD = new Set([
+  "preferences.daily_check",
+  "preferences.check_every",
+]);
 
 /** How many `preferences.*` fields on the card an assistant currently has set. */
 export function countAssistantPreferenceEdits(edits: AgentEdit[] | undefined): number {
