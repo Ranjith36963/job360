@@ -148,7 +148,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
             aria-pressed={dueOnly}
             className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
               dueOnly
-                ? "bg-warning text-warning"
+                ? "bg-warning text-background"
                 : "bg-warning/10 text-warning hover:bg-warning/20"
             }`}
           >
