@@ -34,6 +34,42 @@ name: Post-merge watch (the eyes after the merge)
 # ACTING half — the real `deploymentRollback` mutation, a real GitHub issue,
 # a real Slack ping — stays a rehearsal. `push` to `main` always runs LIVE:
 # that is the actual post-merge trigger this workflow exists for.
+#
+# ───────────────────────────────────────────────────────────────────────────
+# DEPLOY NOISE vs A REGRESSION (FC-008, docs/harness/FAILURE_CATALOG.md)
+#
+# On 2026-10-03 this workflow rolled production back THREE times (#722, #724,
+# #725; trip run 37131014974) on the same 3 Sentry issues: `ClientDisconnect` on
+# /api/mcp and two `event loop blocked for 3.13s`, each 2 events, 0 users, first
+# seen 15:01Z. They are what the OLD container logs while Railway swaps it out.
+# Two causes stacked: (1) Step 1 waited for ANY readyz 200, which the old container
+# answers, so the watch began on old code and sampled across the swap; (2) Step 3
+# treated ANY new unresolved issue in a 1h wall-clock window as a trip, so the same
+# 3 issues re-tripped every run until they aged out.
+#
+# THE KNOBS (every one an env var on the steps below; a manual dispatch can set the
+# first four; a push uses the defaults here):
+#   SENTRY_MIN_EVENTS             5   ignore a new issue with fewer events AND ...
+#   SENTRY_MIN_USERS              1   ... fewer users. >= 1 user ALWAYS trips.
+#   SENTRY_NOISE_TITLES  ClientDisconnect,event loop blocked
+#                                     title substrings (case-insensitive) treated as
+#                                     deploy shutdown/startup noise ...
+#   SENTRY_NOISE_ESCALATE_EVENTS 20   ... ONLY below this many events: a flood trips.
+#   SETTLE_MINUTES                5   quiet time after THIS commit's deploy reports
+#                                     SUCCESS before the watch window starts.
+#   DEPLOY_WAIT_MINUTES          10   longest wait for that SUCCESS (job budget: 6 min
+#                                     readyz + 10 + 5 settle + 15 watch < 40 min).
+#   DEPLOY_BUILD_MINUTES          4   estimate used when a queued run finds the deploy
+#                                     already SUCCESS (Railway gives no SUCCESS time).
+# The trip rule itself is the pure `decide()` in scripts/sentry_poll.py. Ignored
+# issues are LISTED in the step output, never hidden. Anything unreadable fails
+# toward the alarm. These are not read from merge-policy.yml on purpose: that file
+# is cage-protected (owner lane) and `sentry_new_issues: 1` there keeps its meaning,
+# "first seen since the merge", as the CANDIDATE set this filter then judges.
+#
+# STILL INFERRED (not proven): that the 15:01 swap was the 62f9a919 deploy replacing
+# 41504c58 (deploy list: 62f9a919 created 14:57:52, ~3 min build); Sentry's raw
+# `count` type; and the 5 / 20 defaults, which are judgment, not measurement.
 # ═══════════════════════════════════════════════════════════════════════════
 
 on:
@@ -47,6 +83,22 @@ on:
           without calling Railway's rollback mutation or raising a real alarm.
         type: boolean
         default: true
+      sentry_min_events:
+        description: "Ignore a new Sentry issue below this many events (and 0 users). Default 5."
+        type: string
+        default: "5"
+      sentry_noise_titles:
+        description: "Comma list of deploy-noise title substrings. Default: ClientDisconnect,event loop blocked"
+        type: string
+        default: "ClientDisconnect,event loop blocked"
+      sentry_noise_escalate_events:
+        description: "A noise-titled issue still trips at this many events. Default 20."
+        type: string
+        default: "20"
+      settle_minutes:
+        description: "Quiet minutes after this commit's deploy is SUCCESS before watching. Default 5."
+        type: string
+        default: "5"
 
 concurrency:
   group: post-merge-watch-${{ github.ref }}
@@ -140,7 +192,9 @@ jobs:
     name: Watch prod after the merge
     needs: policy
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # 50, was 40: Step 1b adds up to 10 min (deploy wait) + 5 min (settle) ahead of
+    # the 15 min watch and the up-to-6 min readyz wait. See the header.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -181,6 +235,45 @@ jobs:
           echo "live=$live" >> "$GITHUB_OUTPUT"
           if [ "$live" = "false" ]; then
             echo "::error::readyz never returned 200 within ~6 minutes of the merge landing."
+          fi
+
+      # ── STEP 1b — wait for THIS commit's deploy, then let the swap settle ─
+      # Step 1 above is satisfied by the OLD container (all 3 runs on 2026-10-03
+      # logged `[0 s] GET .../api/readyz -> 200`), so on its own it proves nothing
+      # about the new deploy and the watch window below started on old code.
+      # scripts/deploy_settle.py asks Railway which deployment carries
+      # $GITHUB_SHA, waits for SUCCESS, then waits SETTLE_MINUTES more so the
+      # shutdown noise of the swap is over BEFORE anything is probed or sampled.
+      # It can only WAIT and REPORT, never trip: if Railway cannot be asked it
+      # says so (`deploy_state`), the workflow falls back to a plain sleep, and the
+      # readyz probe + Sentry rules stay the only trip paths.
+      - name: "Step 1b — wait for this commit's deploy to be SUCCESS, then settle"
+        id: settle
+        if: steps.wait.outputs.live == 'true'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          DEPLOY_SERVICE: backend
+          DEPLOY_WAIT_MINUTES: "10"
+          DEPLOY_BUILD_MINUTES: "4"
+          SETTLE_MINUTES: ${{ inputs.settle_minutes || '5' }}
+        run: |
+          set +e
+          if [ -n "$RAILWAY_TOKEN" ]; then
+            npm i -g @railway/cli --silent 2>&1 | tail -3
+            python scripts/deploy_settle.py --sha "$GITHUB_SHA" > settle.out
+            code=$?
+            cat settle.out >> "$GITHUB_OUTPUT"
+          else
+            code=1
+          fi
+          if [ "$code" -ne 0 ] || ! grep -q '^deploy_state=live$' settle.out 2>/dev/null; then
+            # Not verified. Never silent: say it, then settle blind so the swap
+            # noise window still passes before the watch starts.
+            echo "::warning::could not confirm this commit's deploy is SUCCESS (RAILWAY_TOKEN missing, Railway unreachable, or deploy not live in time) - settling for ${SETTLE_MINUTES} min blind."
+            if ! grep -q '^deploy_state=' settle.out 2>/dev/null; then
+              echo "deploy_state=unverifiable" >> "$GITHUB_OUTPUT"
+            fi
+            sleep $((SETTLE_MINUTES * 60))
           fi
 
       # ── STEP 2 — watch for watch_minutes, every poll_seconds ─────────────
@@ -243,8 +336,22 @@ jobs:
         env:
           SENTRY_API_TOKEN: ${{ secrets.SENTRY_API_TOKEN || secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_WINDOW_HOURS: "1"
+          # FC-008 knobs - see the header. `inputs.*` is empty on a push, so the
+          # `||` default IS the live value.
+          SENTRY_MIN_EVENTS: ${{ inputs.sentry_min_events || '5' }}
+          SENTRY_MIN_USERS: "1"
+          SENTRY_NOISE_TITLES: ${{ inputs.sentry_noise_titles || 'ClientDisconnect,event loop blocked' }}
+          SENTRY_NOISE_ESCALATE_EVENTS: ${{ inputs.sentry_noise_escalate_events || '20' }}
+          DEPLOY_CREATED_AT: ${{ steps.settle.outputs.deploy_created_at }}
         run: |
           set +e
+          # Issues first seen BEFORE this deploy cannot be its fault (run 3 of the
+          # incident tripped on 15:01 issues for a 15:42 deploy). Prefer the
+          # deploy's own createdAt; else the commit's time, which is earlier, so the
+          # fallback only ever widens the net.
+          SENTRY_SINCE="${DEPLOY_CREATED_AT:-$(git log -1 --format=%cI)}"
+          export SENTRY_SINCE
+          echo "Sentry filter: since=$SENTRY_SINCE min_events=$SENTRY_MIN_EVENTS min_users=$SENTRY_MIN_USERS noise=[$SENTRY_NOISE_TITLES] escalate_at=$SENTRY_NOISE_ESCALATE_EVENTS"
           if [ -z "$SENTRY_API_TOKEN" ]; then
             echo "watched=false" >> "$GITHUB_OUTPUT"
             echo "tripped=false" >> "$GITHUB_OUTPUT"
@@ -257,7 +364,7 @@ jobs:
           if [ "$code" -eq 1 ]; then
             echo "watched=true" >> "$GITHUB_OUTPUT"
             echo "tripped=true" >> "$GITHUB_OUTPUT"
-            echo "reason=new unresolved Sentry issue(s) first seen since the merge" >> "$GITHUB_OUTPUT"
+            echo "reason=new unresolved Sentry issue(s) first seen since the merge that cleared the noise filter (events/users/flood rule in sentry_poll.py)" >> "$GITHUB_OUTPUT"
           elif [ "$code" -eq 0 ]; then
             echo "watched=true" >> "$GITHUB_OUTPUT"
             echo "tripped=false" >> "$GITHUB_OUTPUT"
@@ -461,8 +568,9 @@ jobs:
             echo "### Watched"
             echo "- \`readyz\` (${{ needs.policy.outputs.readyz_url }}) — every ${{ needs.policy.outputs.poll_seconds }}s for ${{ needs.policy.outputs.watch_minutes }} min; trips at ${{ needs.policy.outputs.readyz_non_200 }} consecutive non-200"
             echo "- \`frontend\` (${{ needs.policy.outputs.frontend_url }}) — same cadence; trips at ${{ needs.policy.outputs.frontend_non_200 }} consecutive non-200"
+            echo "- deploy identity — \`${{ steps.settle.outputs.deploy_state || 'not reached' }}\` (live = Railway reported THIS commit's deploy SUCCESS, then ${{ inputs.settle_minutes || '5' }} min settle; anything else = the settle was blind)"
             if [ "${{ steps.sentry.outputs.watched }}" = "true" ]; then
-              echo "- Sentry — new unresolved issues since the merge (trip threshold: ${{ needs.policy.outputs.sentry_new_issues }})"
+              echo "- Sentry — new unresolved issues since the deploy that cleared the noise filter (min events ${{ inputs.sentry_min_events || '5' }} or any user; known deploy noise ignored below ${{ inputs.sentry_noise_escalate_events || '20' }} events; ignored issues are listed in Step 3's output, not hidden)"
             fi
             echo
             echo "### NOT watched — say it loud, never a silent skip"
