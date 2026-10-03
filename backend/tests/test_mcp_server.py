@@ -47,6 +47,9 @@ EXPECTED_TOOLS = {
     "update_contact",
     # /run 360 recipes (owner plan 2026-10-01) — one more tool, 19 -> 20.
     "get_recipe",
+    # "Needs you" (owner plan 2026-10-01) - two more tools, 20 -> 22.
+    "ask_user",
+    "answer_ask",
 }
 
 JOB = {

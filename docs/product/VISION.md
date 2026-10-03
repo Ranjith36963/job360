@@ -67,7 +67,8 @@ Candidate (one profile per user, versioned; multiple named profiles = later)
 `brought`, `fit_judged`, `artifact_saved`, `contact_added`, `outreach_sent`,
 `outreach_replied`, `applied`, `replied`, `interview_requested`, `interview_scheduled`,
 `interview_done`, `offer`, `rejected`, `withdrawn`, `ghosted`, `note`,
-`lesson` ("flag for next time"). Every event: `type`, `detail`, `occurred_at`,
+`lesson` ("flag for next time"), `asked` / `answered` / `ask_withdrawn` (the
+"Needs you" queue — note-family, never move the status). Every event: `type`, `detail`, `occurred_at`,
 `recorded_by` (which token/agent/web), `recorded_at`. Nothing is deleted.
 
 Today's `applications` (stage) + `application_receipts` (snapshot) +

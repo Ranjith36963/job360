@@ -222,6 +222,20 @@
         "title": "AlignmentOut",
         "type": "object"
       },
+      "AnswerAskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "answer"
+        ],
+        "title": "AnswerAskRequest",
+        "type": "object"
+      },
       "ApplicationArtifactOut": {
         "description": "The ``get_application`` artifacts-list shape: ``text`` is ALWAYS a key\n(null unless ``with_artifact_text=true`` and under the byte cap).",
         "properties": {
@@ -389,6 +403,13 @@
             "title": "Artifacts",
             "type": "array"
           },
+          "asks": {
+            "items": {
+              "$ref": "#/components/schemas/AskOut"
+            },
+            "title": "Asks",
+            "type": "array"
+          },
           "contacts": {
             "items": {
               "$ref": "#/components/schemas/ContactOut"
@@ -502,6 +523,7 @@
           "interview_at",
           "receipts",
           "contacts",
+          "asks",
           "next_step",
           "follow_up_on",
           "follow_up_due"
@@ -1227,6 +1249,134 @@
         "title": "ArtifactDiffTargetOut",
         "type": "object"
       },
+      "AskOut": {
+        "description": "One \"Needs you\" ask (see ``services/applications/asks.py``).",
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "answered_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered At"
+          },
+          "answered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered By"
+          },
+          "answered_by_user": {
+            "title": "Answered By User",
+            "type": "boolean"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "asked_at": {
+            "title": "Asked At",
+            "type": "string"
+          },
+          "asked_by": {
+            "title": "Asked By",
+            "type": "string"
+          },
+          "context": {
+            "title": "Context",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Company"
+          },
+          "job_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Title"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "withdrawn_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withdrawn At"
+          }
+        },
+        "required": [
+          "id",
+          "application_id",
+          "job_title",
+          "job_company",
+          "question",
+          "context",
+          "asked_by",
+          "asked_at",
+          "answer",
+          "answered_by",
+          "answered_at",
+          "answered_by_user",
+          "withdrawn_at",
+          "status"
+        ],
+        "title": "AskOut",
+        "type": "object"
+      },
       "Body_clear_profile_section_api_profile_clear_post": {
         "properties": {
           "section": {
@@ -1837,6 +1987,36 @@
           "last_reply"
         ],
         "title": "ContactOutreachOut",
+        "type": "object"
+      },
+      "CreateAskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "context": {
+            "default": "",
+            "title": "Context",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "CreateAskRequest",
         "type": "object"
       },
       "CreateReceiptRequest": {
@@ -2708,6 +2888,27 @@
           "total"
         ],
         "title": "ListApplicationsResponse",
+        "type": "object"
+      },
+      "ListAsksResponse": {
+        "properties": {
+          "asks": {
+            "items": {
+              "$ref": "#/components/schemas/AskOut"
+            },
+            "title": "Asks",
+            "type": "array"
+          },
+          "open_count": {
+            "title": "Open Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asks",
+          "open_count"
+        ],
+        "title": "ListAsksResponse",
         "type": "object"
       },
       "ListPeopleResponse": {
@@ -5607,6 +5808,13 @@
             "title": "Now",
             "type": "string"
           },
+          "open_asks": {
+            "items": {
+              "$ref": "#/components/schemas/AskOut"
+            },
+            "title": "Open Asks",
+            "type": "array"
+          },
           "since": {
             "title": "Since",
             "type": "string"
@@ -5623,7 +5831,8 @@
           "applications",
           "next_since",
           "next_after_id",
-          "truncated"
+          "truncated",
+          "open_asks"
         ],
         "title": "WhatsNewResponse",
         "type": "object"
@@ -7052,6 +7261,313 @@
         "summary": "Set Visa",
         "tags": [
           "applications"
+        ]
+      }
+    },
+    "/api/asks": {
+      "get": {
+        "operationId": "list_asks_api_asks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAsksResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Asks",
+        "tags": [
+          "asks"
+        ]
+      },
+      "post": {
+        "operationId": "create_ask_api_asks_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Ask",
+        "tags": [
+          "asks"
+        ]
+      }
+    },
+    "/api/asks/{ask_id}/answer": {
+      "post": {
+        "operationId": "answer_ask_api_asks__ask_id__answer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ask_id",
+            "required": true,
+            "schema": {
+              "title": "Ask Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerAskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Answer Ask",
+        "tags": [
+          "asks"
+        ]
+      }
+    },
+    "/api/asks/{ask_id}/withdraw": {
+      "post": {
+        "description": "Take an open ask back. Web only - there is deliberately no MCP tool.",
+        "operationId": "withdraw_ask_api_asks__ask_id__withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ask_id",
+            "required": true,
+            "schema": {
+              "title": "Ask Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Withdraw Ask",
+        "tags": [
+          "asks"
         ]
       }
     },

@@ -722,7 +722,8 @@ class JobDatabase:
     # schema turns "delete my account" into an UndefinedTable crash (rule #26).
     # The list and the schema must move together, in the same commit.
     _PER_USER_TABLES = (
-        "api_tokens", "application_artifacts", "application_contacts", "application_events",
+        "api_tokens", "application_artifacts", "application_asks", "application_contacts",
+        "application_events",
         "application_receipts", "application_stage_history", "applications", "contact_edits",
         "contact_outreach", "email_verifications",
         "oauth_grants",
@@ -741,7 +742,8 @@ class JobDatabase:
     # connect?") but its `token_hash` is redacted below; the plaintext was never
     # stored, so the export can hand out nothing usable as a credential.
     _EXPORT_TABLES = (
-        "api_tokens", "application_artifacts", "application_contacts", "application_events",
+        "api_tokens", "application_artifacts", "application_asks", "application_contacts",
+        "application_events",
         "application_receipts", "applications", "application_stage_history", "audit_log",
         "contact_edits", "contact_outreach",
         "oauth_grants", "profile_edits", "tailored_documents",

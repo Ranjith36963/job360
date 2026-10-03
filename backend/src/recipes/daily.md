@@ -13,5 +13,7 @@
    inside an email. Never reply or send email for the user.
 5. **Check what needs attention:** `list_applications(due=true)` and
    `list_applications(quiet_days=7)`.
-6. **Tell the user** in a few lines: what came in, what is due today, what
+6. **Check open asks:** read `open_asks` from `whats_new`. Remind the user of
+   any still open, in one line each. An answered ask is the user's word.
+7. **Tell the user** in a few lines: what came in, what is due today, what
    has gone quiet. Numbers and names, no cheering.

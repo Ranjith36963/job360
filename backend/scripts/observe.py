@@ -65,6 +65,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("oauth_grants", "user_id"),
     ("audit_log", "user_id"),
     # Slice 4 (docs/plans/2026-09-05-contacts-stats/spec.md).
+    ("application_asks", "user_id"),
     ("application_contacts", "user_id"),
     ("profile_edits", "user_id"),
     # Outreach tracking (migration 0046) — CI's test_observe.py caught these

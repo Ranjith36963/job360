@@ -9,7 +9,8 @@ name: Daily digest (what needs the owner today?)
 #
 # THE RULES (each section is one `gh` query plus one plain rule):
 #   1. PRs waiting for him — open, not draft, not `wip:parked`, not
-#      `autofix:exhausted` (that has its own section), and one of:
+#      `autofix:exhausted` / `autofix:needs-human` (those have their own
+#      section), and one of:
 #        a. labelled `human-merge`;
 #        b. in the only human-only lane, `lane:harness-owner` (merge-policy.yml
 #           `harness_owner: auto_merge: false`) with every check green;
@@ -23,7 +24,10 @@ name: Daily digest (what needs the owner today?)
 #      `failure` or `timed_out`. `cancelled`/`skipped` runs are ignored: the
 #      latest non-cancelled run decides.
 #   4. PRs the auto-fixer gave up on — label `autofix:exhausted` (its real name
-#      today) or `fix:exhausted`.
+#      today) or `fix:exhausted` — and PRs whose open findings are all ones the
+#      fixer may not or need not touch (`.github/` threads, outdated threads,
+#      `npm audit` / reviewer checks red): label `autofix:needs-human`, written
+#      once by finding-watch.yml together with a PR comment saying why.
 #
 # FAILS LOUD: any `gh` error aborts the gather step (set -e / check=True) so a
 # half-built digest can never read as "All clear". A red gather AND a red Slack
@@ -124,6 +128,11 @@ jobs:
               n, title, url = pr["number"], clean(pr["title"]), pr["url"]
               if labels & {"autofix:exhausted", "fix:exhausted"}:
                   exhausted_items.append(f"Auto-fix gave up on PR #{n}: {title} — {url}")
+                  continue
+              if "autofix:needs-human" in labels:
+                  exhausted_items.append(
+                      f"Auto-fix has nothing it may touch on PR #{n}: {title} — {url}"
+                  )
                   continue
               green = is_green(pr)
               if "human-merge" in labels:

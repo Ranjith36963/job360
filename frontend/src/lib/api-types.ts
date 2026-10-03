@@ -343,6 +343,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Asks */
+        get: operations["list_asks_api_asks_get"];
+        put?: never;
+        /** Create Ask */
+        post: operations["create_ask_api_asks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asks/{ask_id}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Answer Ask */
+        post: operations["answer_ask_api_asks__ask_id__answer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asks/{ask_id}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw Ask
+         * @description Take an open ask back. Web only - there is deliberately no MCP tool.
+         */
+        post: operations["withdraw_ask_api_asks__ask_id__withdraw_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -1904,6 +1959,11 @@ export interface components {
             /** Skills Total */
             skills_total: number;
         };
+        /** AnswerAskRequest */
+        AnswerAskRequest: {
+            /** Answer */
+            answer: string;
+        };
         /**
          * ApplicationArtifactOut
          * @description The ``get_application`` artifacts-list shape: ``text`` is ALWAYS a key
@@ -1964,6 +2024,8 @@ export interface components {
         ApplicationDetailOut: {
             /** Artifacts */
             artifacts: components["schemas"]["ApplicationArtifactOut"][];
+            /** Asks */
+            asks: components["schemas"]["AskOut"][];
             /** Contacts */
             contacts: components["schemas"]["ContactOut"][];
             /** Created At */
@@ -2259,6 +2321,40 @@ export interface components {
             /** Version No */
             version_no: number;
         };
+        /**
+         * AskOut
+         * @description One "Needs you" ask (see ``services/applications/asks.py``).
+         */
+        AskOut: {
+            /** Answer */
+            answer: string | null;
+            /** Answered At */
+            answered_at: string | null;
+            /** Answered By */
+            answered_by: string | null;
+            /** Answered By User */
+            answered_by_user: boolean;
+            /** Application Id */
+            application_id: number | null;
+            /** Asked At */
+            asked_at: string;
+            /** Asked By */
+            asked_by: string;
+            /** Context */
+            context: string;
+            /** Id */
+            id: number;
+            /** Job Company */
+            job_company: string | null;
+            /** Job Title */
+            job_title: string | null;
+            /** Question */
+            question: string;
+            /** Status */
+            status: string;
+            /** Withdrawn At */
+            withdrawn_at: string | null;
+        };
         /** Body_clear_profile_section_api_profile_clear_post */
         Body_clear_profile_section_api_profile_clear_post: {
             /** Section */
@@ -2548,6 +2644,18 @@ export interface components {
             replies: components["schemas"]["OutreachEntryOut"][];
             /** Sent */
             sent: components["schemas"]["OutreachEntryOut"][];
+        };
+        /** CreateAskRequest */
+        CreateAskRequest: {
+            /** Application Id */
+            application_id?: number | null;
+            /**
+             * Context
+             * @default
+             */
+            context: string;
+            /** Question */
+            question: string;
         };
         /** CreateReceiptRequest */
         CreateReceiptRequest: {
@@ -2929,6 +3037,13 @@ export interface components {
             applications: components["schemas"]["ApplicationSummaryOut"][];
             /** Total */
             total: number;
+        };
+        /** ListAsksResponse */
+        ListAsksResponse: {
+            /** Asks */
+            asks: components["schemas"]["AskOut"][];
+            /** Open Count */
+            open_count: number;
         };
         /** ListPeopleResponse */
         ListPeopleResponse: {
@@ -4008,6 +4123,8 @@ export interface components {
             next_since: string;
             /** Now */
             now: string;
+            /** Open Asks */
+            open_asks: components["schemas"]["AskOut"][];
             /** Since */
             since: string;
             /** Truncated */
@@ -4643,6 +4760,152 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SetVisaResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_asks_api_asks_get: {
+        parameters: {
+            query?: {
+                status?: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListAsksResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_ask_api_asks_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAskRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    answer_ask_api_asks__ask_id__answer_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                ask_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswerAskRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    withdraw_ask_api_asks__ask_id__withdraw_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                ask_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskOut"];
                 };
             };
             /** @description Validation Error */
