@@ -25,9 +25,9 @@ describe("dailyCheckStatusLine", () => {
     expect(dailyCheckStatusLine("", false)).toMatch(/will offer/i);
   });
 
-  it("reads 'scheduled' as already set up, regardless of connection state", () => {
-    expect(dailyCheckStatusLine("scheduled", true)).toMatch(/set up/i);
-    expect(dailyCheckStatusLine("scheduled", false)).toMatch(/set up/i);
+  it("reads the legacy scheduled value as auto, regardless of connection state", () => {
+    expect(dailyCheckStatusLine("scheduled", true)).toMatch(/open applications/i);
+    expect(dailyCheckStatusLine("scheduled", false)).toMatch(/open applications/i);
   });
 
   it("reads 'declined' as the user said no, regardless of connection state", () => {
@@ -80,7 +80,7 @@ describe("DailyCheckCard", () => {
   it("shows the scheduled line and a reset button for 'scheduled'", () => {
     renderCard("scheduled");
     expect(screen.getByTestId("daily-check-status")).toHaveTextContent(
-      /set up with your assistant/i
+      /open applications/i
     );
     expect(screen.getByTestId("daily-check-reset")).toBeInTheDocument();
   });

@@ -22,6 +22,10 @@ Go step by step, and say in one plain line what you are doing at each step.
    and browser control if you have it. Job360 does not connect to these —
    you do.
 6. **Offer the daily check** exactly as your server instructions describe
-   (read `preferences.daily_check` first; offer once).
+   (read `preferences.daily_check` first; offer once: "Can I read your
+   Gmail for your job applications? Auto / Ask me first / Not now", and how
+   often — every 3, 6, 12 hours or once a day. Save them in
+   `preferences.daily_check` (auto / ask / paused) and
+   `preferences.check_every`).
 7. **Finish** with three lines: what you changed, what is still missing, and
    the next command (`360-hunt`).

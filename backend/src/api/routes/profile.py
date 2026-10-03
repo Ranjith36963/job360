@@ -315,7 +315,7 @@ _NOTES_PATH = "preferences.assistant_notes"
 # through the agent-edit overlay (update_profile / PATCH /api/profile). A web
 # preferences save ignores them in `_apply_preferences` and never records a
 # history row for them (owner decision 2026-09-25, daily-check offer).
-_OVERLAY_ONLY_PREFERENCES: frozenset[str] = frozenset({"daily_check"})
+_OVERLAY_ONLY_PREFERENCES: frozenset[str] = frozenset({"daily_check", "check_every"})
 
 
 def _notes_or_422(value: Any) -> list[str]:
@@ -871,6 +871,8 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         # (`_OVERLAY_ONLY_PREFERENCES`), so a web save never writes a history
         # row that would wipe the assistant's remembered answer.
         daily_check=existing.daily_check,
+        # Owner decision 2026-10-03 — same overlay-only rule as daily_check.
+        check_every=existing.check_every,
         # Standing instructions for the assistant. Same partial-save shape: an
         # OMITTED key keeps the stored notes, an explicit [] clears them. Same
         # validator as update_profile (length cap, count cap, control chars
@@ -1532,10 +1534,12 @@ async def clear_profile_section(
         # remembered answer to a one-time offer. Only a full "clear all"
         # (starting the whole profile over) may reset it.
         keep_daily_check = "" if section == "all" else prefs.daily_check
+        keep_check_every = "" if section == "all" else prefs.check_every
         prefs = UserPreferences(
             github_username=keep_handle,
             experience_level_inferred=prefs.experience_level_inferred,
             daily_check=keep_daily_check,
+            check_every=keep_check_every,
         )
     if section == "all":
         # about_me-derived skills live on the CV object but are owned by the
@@ -1566,9 +1570,12 @@ async def clear_profile_section(
                 for row in profile_edits.current_overlay(user.id)
                 if str(row["path"]).startswith(cleared_prefixes)
                 # Same rule as the base-object rebuild above: a "preferences"
-                # clear must not touch the daily-check overlay row; only
-                # "all" may.
-                and not (section == "preferences" and row["path"] == "preferences.daily_check")
+                # clear must not touch the daily-check / check-every overlay
+                # rows; only "all" may.
+                and not (
+                    section == "preferences"
+                    and row["path"] in ("preferences.daily_check", "preferences.check_every")
+                )
             ],
         )
 

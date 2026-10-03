@@ -333,7 +333,10 @@ function ExamplePromptsCard() {
 // ---------------------------------------------------------------------------
 
 const DAILY_CHECK_PROMPT =
-  "Once a day: check my Gmail for new replies about jobs I applied to. For each " +
+  "On each run: first call Job360 get_profile and read preferences.daily_check. " +
+  "If it is paused, declined or empty, stop and record nothing. If it is ask, only ask " +
+  "me in chat 'Can I check your Gmail now?' and read only after I say yes. " +
+  "Check my Gmail for new replies about jobs I applied to. For each " +
   "one, find the application with Job360 list_applications and record it with " +
   "record_event (replied, interview_requested with scheduled_at when a time is " +
   "given, offer, rejected), always passing source (message id, sender, subject, " +
@@ -348,8 +351,46 @@ const DAILY_CHECK_PROMPT =
   "in plain words what's due today and what's gone quiet.";
 
 /** Values `preferences.daily_check` can hold (backend `VALID_DAILY_CHECK_VALUES`
- *  plus the "" not-asked-yet default — owner decision 2026-09-25). */
-export type DailyCheckState = "" | "scheduled" | "declined";
+ *  plus the "" not-asked-yet default — owner decision 2026-09-25). 2026-10-03:
+ *  it is the INBOX MODE — "auto" / "ask" / "paused"; the legacy "scheduled"
+ *  means auto and "declined" means off. */
+export type DailyCheckState =
+  | ""
+  | "auto"
+  | "ask"
+  | "paused"
+  | "scheduled"
+  | "declined";
+
+/** What the user can pick in the mode control. */
+export type InboxMode = "auto" | "ask" | "paused";
+
+/** Which mode option a stored value displays as (none for ""). */
+function modeOf(state: DailyCheckState | null): InboxMode | null {
+  if (state === "auto" || state === "scheduled") return "auto";
+  if (state === "ask") return "ask";
+  if (state === "paused" || state === "declined") return "paused";
+  return null;
+}
+
+const MODE_OPTIONS: { value: InboxMode; label: string }[] = [
+  { value: "auto", label: "Auto" },
+  { value: "ask", label: "Ask me first" },
+  { value: "paused", label: "Off" },
+];
+
+/** Values `preferences.check_every` can hold (backend
+ *  `VALID_CHECK_EVERY_VALUES`; "" = not set = once a day — 2026-10-03). */
+export type CheckEveryState = "" | "3h" | "6h" | "12h" | "24h";
+
+type EveryValue = "3h" | "6h" | "12h" | "24h";
+
+const CHECK_EVERY_OPTIONS: { value: EveryValue; label: string }[] = [
+  { value: "3h", label: "Every 3 hours" },
+  { value: "6h", label: "Every 6 hours" },
+  { value: "12h", label: "Every 12 hours" },
+  { value: "24h", label: "Once a day" },
+];
 
 /** Plain words for whatever a connected assistant already answered — never
  * shown as a guess, since an empty value is silence (rule #29), not "no".
@@ -363,7 +404,11 @@ export function dailyCheckStatusLine(
   state: DailyCheckState,
   connected: boolean | null
 ): string | null {
-  if (state === "scheduled") return "Set up with your assistant.";
+  if (state === "auto" || state === "scheduled") {
+    return "Your assistant reads Gmail for your open applications and records what happened.";
+  }
+  if (state === "ask") return "Your assistant asks you before each Gmail check.";
+  if (state === "paused") return "Off — your assistant reads nothing.";
   if (state === "declined") {
     return "You said no — your assistant won't ask again.";
   }
@@ -384,6 +429,10 @@ export function DailyCheckCard({
   loadFailed = false,
   onResetOffer,
   resetting,
+  checkEvery = null,
+  onModeChange = () => {},
+  onCheckEveryChange = () => {},
+  modeSaving = false,
 }: {
   /** `null` until the profile read succeeds: no status line, no button. */
   dailyCheck: DailyCheckState | null;
@@ -394,9 +443,19 @@ export function DailyCheckCard({
   loadFailed?: boolean;
   onResetOffer: () => void;
   resetting: boolean;
+  /** `null` until the profile read succeeds: no frequency select. */
+  checkEvery?: CheckEveryState | null;
+  /** Inbox mode picker (auto / ask first / off). */
+  onModeChange?: (mode: InboxMode) => void;
+  onCheckEveryChange?: (value: EveryValue) => void;
+  modeSaving?: boolean;
 }) {
-  const canReset =
-    !loadFailed && (dailyCheck === "scheduled" || dailyCheck === "declined");
+  const canReset = !loadFailed && dailyCheck !== null && dailyCheck !== "";
+  // Owner decision 2026-10-03 — the controls only make sense once an
+  // assistant is connected; null (still loading) shows neither.
+  const showControls =
+    connected === true && !loadFailed && dailyCheck !== null;
+  const selectedMode = modeOf(dailyCheck);
   const statusLine = loadFailed
     ? DAILY_CHECK_LOAD_FAILED
     : dailyCheck === null
@@ -405,11 +464,12 @@ export function DailyCheckCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Daily check (scheduled task)</CardTitle>
+        <CardTitle>Inbox check (scheduled task)</CardTitle>
         <CardDescription>
           Paste this into a ChatGPT or Claude scheduled task with Gmail
           connected — it reads your inbox and records what it finds, on your
-          own agent, once a day. Job360 never reads your email itself.
+          own agent, as often as you choose below. Job360 never reads your
+          email itself.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -443,10 +503,57 @@ export function DailyCheckCard({
               onClick={onResetOffer}
               data-testid="daily-check-reset"
             >
-              {resetting ? "Resetting…" : "Let my assistant offer again"}
+              {resetting ? "Resetting…" : "Let my assistant ask again"}
             </Button>
           )}
         </div>
+        {showControls && (
+          <div
+            role="radiogroup"
+            aria-label="Inbox mode"
+            className="flex flex-wrap items-center gap-2"
+            data-testid="inbox-mode"
+          >
+            {MODE_OPTIONS.map((o) => (
+              <Button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={selectedMode === o.value}
+                size="sm"
+                variant={selectedMode === o.value ? "default" : "outline"}
+                disabled={modeSaving}
+                onClick={() => onModeChange(o.value)}
+                data-testid={`inbox-mode-${o.value}`}
+              >
+                {o.label}
+              </Button>
+            ))}
+          </div>
+        )}
+        {showControls && checkEvery !== null && (
+          <div className="flex items-center gap-2">
+            <label htmlFor="inbox-check-every" className="text-sm">
+              How often
+            </label>
+            <select
+              id="inbox-check-every"
+              data-testid="inbox-check-every"
+              value={checkEvery === "" ? "24h" : checkEvery}
+              disabled={modeSaving}
+              onChange={(e) =>
+                onCheckEveryChange(e.target.value as EveryValue)
+              }
+              className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+            >
+              {CHECK_EVERY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -769,6 +876,9 @@ export default function ConnectAgentPage() {
   const [dailyCheck, setDailyCheck] = useState<DailyCheckState | null>(null);
   const [dailyCheckLoadFailed, setDailyCheckLoadFailed] = useState(false);
   const [resettingDailyCheck, setResettingDailyCheck] = useState(false);
+  const [savingMode, setSavingMode] = useState(false);
+  // null until the profile read succeeds, like dailyCheck above.
+  const [checkEvery, setCheckEvery] = useState<CheckEveryState | null>(null);
 
   const [tokensFailed, setTokensFailed] = useState(false);
   const [grantsFailed, setGrantsFailed] = useState(false);
@@ -812,7 +922,21 @@ export default function ConnectAgentPage() {
     try {
       const profile = await getProfile();
       const value = profile.preferences?.daily_check;
-      setDailyCheck(value === "scheduled" || value === "declined" ? value : "");
+      setDailyCheck(
+        value === "auto" ||
+          value === "ask" ||
+          value === "paused" ||
+          value === "scheduled" ||
+          value === "declined"
+          ? value
+          : ""
+      );
+      const every = profile.preferences?.check_every;
+      setCheckEvery(
+        every === "3h" || every === "6h" || every === "12h" || every === "24h"
+          ? every
+          : ""
+      );
       setDailyCheckLoadFailed(false);
     } catch {
       // No toast: this is a courtesy status, not the page's main content. The
@@ -835,11 +959,41 @@ export default function ConnectAgentPage() {
       // above only ever READS what get_profile last returned.
       await updateProfileFields([{ path: "preferences.daily_check", value: "" }]);
       setDailyCheck("");
-      toast.success("Your assistant will offer the daily check again.");
+      toast.success("Your assistant will ask you again.");
     } catch (err) {
       toast.error(apiErrorMessage(err, "Failed to reset the daily check offer."));
     } finally {
       setResettingDailyCheck(false);
+    }
+  }
+
+  async function onModeChange(mode: InboxMode) {
+    setSavingMode(true);
+    try {
+      await updateProfileFields([{ path: "preferences.daily_check", value: mode }]);
+      setDailyCheck(mode);
+      toast.success("Saved — your assistant uses this from its next run.");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Failed to change the inbox mode."));
+    } finally {
+      setSavingMode(false);
+    }
+  }
+
+  async function onCheckEveryChange(value: EveryValue) {
+    // One save at a time (the select and the mode buttons share
+    // `savingMode`), so a late failure can never roll back a newer value.
+    const previous = checkEvery;
+    setCheckEvery(value);
+    setSavingMode(true);
+    try {
+      await updateProfileFields([{ path: "preferences.check_every", value }]);
+      toast.success("Saved — your assistant uses this from its next run.");
+    } catch (err) {
+      setCheckEvery(previous);
+      toast.error(apiErrorMessage(err, "Failed to save how often."));
+    } finally {
+      setSavingMode(false);
     }
   }
 
@@ -903,6 +1057,10 @@ export default function ConnectAgentPage() {
           loadFailed={dailyCheckLoadFailed}
           onResetOffer={onResetDailyCheckOffer}
           resetting={resettingDailyCheck}
+          checkEvery={checkEvery}
+          onModeChange={onModeChange}
+          onCheckEveryChange={onCheckEveryChange}
+          modeSaving={savingMode}
         />
         <ConnectedAppsCard
           grants={grants}

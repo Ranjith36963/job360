@@ -21,7 +21,18 @@ VALID_EXPERIENCE_LEVELS: frozenset[str] = frozenset({"entry", "mid", "senior", "
 # connects (ChatGPT, Claude, others) reads the same answer and never asks
 # again. Closed set shared by the agent-edit validator
 # (`services/profile/edits.py`) the same way the two sets above are.
-VALID_DAILY_CHECK_VALUES: frozenset[str] = frozenset({"scheduled", "declined"})
+# Owner decision 2026-10-03 — `daily_check` is the INBOX MODE the user picked
+# at connect: "auto" (assistant reads Gmail for open applications and records
+# what happened), "ask" (it only asks in chat before each check), "paused"
+# (every run stops at once, reads and records nothing). Legacy values from the
+# first offer stay valid: "scheduled" means exactly "auto"; "declined" means
+# off (never read, never offer again). "" = not asked yet.
+VALID_DAILY_CHECK_VALUES: frozenset[str] = frozenset(
+    {"auto", "ask", "paused", "scheduled", "declined"}
+)
+# Owner decision 2026-10-03 — how often the assistant's inbox check runs.
+# "" = not set = once a day (24h; rule #29: empty is silent).
+VALID_CHECK_EVERY_VALUES: frozenset[str] = frozenset({"3h", "6h", "12h", "24h"})
 
 
 @dataclass
@@ -563,13 +574,18 @@ class UserPreferences:
 
     # Owner decision 2026-09-25 — "" (not asked yet, rule #29: empty is
     # silent), "scheduled" (user said yes and confirmed it in their app), or
-    # "declined" (user said no). Written ONLY through the agent-edit overlay
+    # "declined" (user said no); 2026-10-03 added "auto" / "ask" / "paused"
+    # (the inbox mode — see VALID_DAILY_CHECK_VALUES). Written ONLY through the agent-edit overlay
     # (`update_profile` / PATCH /api/profile) — never by the web preferences
     # form, which does not know about it (see `_apply_preferences` and
     # `clear_profile_section` in api/routes/profile.py, both of which must
     # carry this value forward rather than reset it; a full "clear all" is
     # the one case allowed to reset it, since the user is starting over).
     daily_check: str = ""
+    # Owner decision 2026-10-03 — how often the inbox check runs: "3h", "6h",
+    # "12h" or "24h"; "" = not set = once a day. Same write/carry-forward rules as
+    # `daily_check` (overlay only; kept on a "preferences" clear).
+    check_every: str = ""
 
     # Values the workplace scorer can actually match. A CLOSED set, because the
     # job side of the comparison (`JobEnrichment.workplace_type`) is an enum —

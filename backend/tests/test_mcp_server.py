@@ -166,6 +166,17 @@ def test_instructions_offer_the_daily_check_once_and_keep_the_guardrails():
     assert "update_profile" in text
     assert '"scheduled"' in text
     assert '"declined"' in text
+    # Owner, 2026-10-03 - kill switch + frequency live in Job360 too.
+    assert '"paused"' in text
+    assert "check_every" in text
+    assert "kill switch" in text
+    assert '"auto"' in text and '"ask"' in text
+    assert "can i check your gmail now?" in text
+    # A mode picked on the website (no task yet) still gets a task offered.
+    assert "picked it on the job360 website" in text
+    # An empty mode (reset on the website) stops a run too — no reading
+    # without a fresh yes.
+    assert '"" (not decided yet), stop right away' in text
 
 
 def test_category_line_is_the_server_description_and_leads_instructions():
