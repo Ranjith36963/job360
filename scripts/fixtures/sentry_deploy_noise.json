@@ -1,0 +1,14 @@
+{
+  "_note": "The 3 issues post-merge-watch.yml read as a regression on 2026-10-03 (run 37131014974, issues #722/#724/#725). Copied from that run's `sentry.md` table: shortId, title, 2 events, 0 users, first seen 15:01Z, culprit, permalink. `count` is a string because Sentry sends it as one (inferred, not in the table). The seconds of firstSeen are NOT recorded and are filled in as :00.",
+  "issues": [
+    {"shortId": "PYTHON-FASTAPI-W", "title": "ClientDisconnect", "count": "2", "userCount": 0,
+     "firstSeen": "2026-10-03T15:01:00Z", "culprit": "http://10.225.110.239:8080/api/mcp",
+     "permalink": "https://job360.sentry.io/issues/151120416/"},
+    {"shortId": "PYTHON-FASTAPI-V", "title": "event loop blocked for 3.13s", "count": "2", "userCount": 0,
+     "firstSeen": "2026-10-03T15:01:00Z", "culprit": "",
+     "permalink": "https://job360.sentry.io/issues/151120415/"},
+    {"shortId": "PYTHON-FASTAPI-T", "title": "event loop blocked for 3.13s (watchdog sampler overshot by 3.13s)",
+     "count": "2", "userCount": 0, "firstSeen": "2026-10-03T15:01:00Z", "culprit": "",
+     "permalink": "https://job360.sentry.io/issues/151120411/"}
+  ]
+}

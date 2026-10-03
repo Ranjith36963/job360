@@ -518,9 +518,26 @@ REGISTRY: dict[str, Guard] = {
         since="2026-08-16",
     ),
     "scripts/sentry_poll.py": Guard(
-        status="owed",
-        reason="reads the live Sentry API; needs a recorded issue payload",
-        since="2026-08-16",
+        status="drilled",
+        # WAS `owed` since 2026-08-16 ("needs a recorded issue payload"). FC-008
+        # (2026-10-03): the trip rule is now the pure `decide()`, and the drill feeds
+        # it the 3 REAL noise issues that rolled prod back three times (they must NOT
+        # trip) plus controls that MUST (user-facing error, noise flood, unreadable
+        # counts). The live-API half stays undrilled on purpose: same urllib GET as
+        # before, and a recorded response would rot.
+        drill=[sys.executable, "scripts/sentry_poll.py", "--drill"],
+        # NEGATIVE CONTROL: swaps the rule for "ignore everything"; the must-trip
+        # controls then fail, so this must exit non-zero.
+        negative=[sys.executable, "scripts/sentry_poll.py", "--drill", "--blind"],
+    ),
+    "scripts/deploy_settle.py": Guard(
+        status="drilled",
+        # FC-008: waits for the deployment that carries THIS sha (not "any readyz
+        # 200", which the OLD container satisfies) and then lets the swap settle.
+        # The drill covers the pure assess()/settle_remaining(); the Railway call
+        # is rollback_gear.list_deployments, already drilled there.
+        drill=[sys.executable, "scripts/deploy_settle.py", "--drill"],
+        negative=[sys.executable, "scripts/deploy_settle.py", "--drill", "--blind"],
     ),
     # ── THE GUARD THIS PR WIRES UP (harness simplification slice 5, W1) ─────
     # A guard and its declaration land together, always -- same rule as the
