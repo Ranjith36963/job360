@@ -19,9 +19,11 @@ name: Triage loop (diagnose every new issue)
 # auto-authorise with an `agent:fix` label — was removed as unwired harness
 # scaffolding. Triage still classifies a fresh issue (auto-fixable /
 # needs-human / flake), posts its reasoning, and applies exactly one
-# `triage:*` label. It never applies `agent:fix` and never starts a repair
-# loop itself; `pr-repair.yml` (the write-capable agent that survives) is
-# still a human `workflow_dispatch` click. This repo is PUBLIC — anyone can
+# `triage:*` label. It never applies `agent:fix`. SINCE 2026-10-02 (stage 4):
+# a `triage:auto-fixable` verdict dispatches `issue-fix.yml`, which writes a fix
+# inside a path cage and opens a PR labelled `human-merge` -- auto-merge.yml
+# never merges that label, so a human still presses merge on machine-written
+# code that came from issue text. This repo is PUBLIC — anyone can
 # open an issue — and our own detectors paste log output into issue bodies,
 # which can contain scraped, attacker-influenced text, so a human staying in
 # the loop for anything that writes code is the point, not a gap to close.
@@ -41,6 +43,10 @@ on:
         required: true
         type: string
 
+# `actions: write` is deliberately NOT here. The `triage` job runs a model over
+# issue text that a stranger may have shaped; a token that can dispatch workflows
+# does not belong next to it. The dispatch lives in its own small job
+# (`dispatch-fix`, below) that runs no model and alone holds `actions: write`.
 permissions:
   contents: read
   issues: write
@@ -76,18 +82,28 @@ jobs:
       contains(github.event.issue.labels.*.name, 'harness')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # What the dispatch job needs, and nothing else. `label` is only written by
+    # the route step AFTER it has applied a label chosen from a fixed whitelist
+    # (never model text), and `num` is re-validated as digits by the reader.
+    outputs:
+      num: ${{ steps.issue.outputs.num }}
+      label: ${{ steps.route.outputs.label }}
     steps:
       - name: Check triage token present
         id: token
         run: echo "have=${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
 
+      # ALWAYS checked out (it used to wait for the token). The Slack step at the
+      # bottom is a local composite action, so it needs the repo on disk even on
+      # the run where triage had no token and says so.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: steps.token.outputs.have == 'true'
 
       # One number, whichever door we came in through.
       - name: Resolve which issue we are triaging
         id: issue
-        run: echo "num=${{ github.event.issue.number || inputs.issue }}" >> "$GITHUB_OUTPUT"
+        env:
+          NUM: ${{ github.event.issue.number || inputs.issue }}
+        run: echo "num=$NUM" >> "$GITHUB_OUTPUT"
 
       # Fetch the issue text into a FILE rather than interpolating it into the
       # prompt. Two reasons: a dispatch has no issue payload to interpolate, and
@@ -215,8 +231,8 @@ jobs:
 
       # ── ROUTE stage (dumb code): the model's verdict is a WORD, not an action.
       # Bash maps that word onto a whitelisted label. Diagnose-and-comment
-      # only (2026-09-05) — this step never applies `agent:fix` and never
-      # dispatches a write-capable agent; `pr-repair.yml` stays a human click.
+      # only (2026-09-05) — this step never applies `agent:fix`. Since
+      # 2026-10-02 an auto-fixable verdict dispatches issue-fix.yml (below).
       - name: Post the diagnosis and apply ONE routing label
         if: steps.token.outputs.have == 'true'
         id: route
@@ -241,15 +257,20 @@ jobs:
             echo
             echo "---"
             if [ "$label" = "triage:auto-fixable" ]; then
-              echo "**Routing: \`$label\`.** Triage diagnoses and comments only — it never starts a"
-              echo "write-capable agent itself. If you agree with this diagnosis, fix it by hand or"
-              echo "dispatch \`pr-repair.yml\` yourself (\`workflow_dispatch\`)."
+              echo "**Routing: \`$label\`.** \`issue-fix.yml\` will now try to write a fix and open a"
+              echo "PR labelled \`human-merge\` (never auto-merged). If it cannot, it says so here and"
+              echo "relabels this issue \`triage:needs-human\`."
             else
               echo "**Routing: \`$label\`** — not handed to any repair loop."
             fi
           } > comment.md
           gh issue comment "$num" --body-file comment.md
           gh issue edit "$num" --add-label "$label"
+          # Stage 4: an auto-fixable verdict wakes the fixer, but NOT from here:
+          # this job runs the model and holds no `actions: write`. The
+          # `dispatch-fix` job below reads `num` and `label` from this job's
+          # outputs and does the `workflow_dispatch` (a label applied with the
+          # automatic token starts nothing, `workflow_dispatch` is the way in).
           echo "label=$label" >> "$GITHUB_OUTPUT"
           echo "triaged #$num as $label" >> "$GITHUB_STEP_SUMMARY"
 
@@ -261,43 +282,145 @@ jobs:
           gh issue comment "${{ steps.issue.outputs.num }}" \
             --body "Triage loop is installed but CLAUDE_CODE_OAUTH_TOKEN is not set, so this issue was not diagnosed."
 
-      # ── THE LAST MILE (issue #145) ────────────────────────────────────────
+      # ── THE LAST MILE (issue #145) — SLACK, NOT EMAIL (decision 2026-10-02) ──
       # Everything above speaks only on GitHub. This is where the chain finally
-      # reaches a human who is not looking at GitHub.
+      # reaches a human who is not looking at GitHub. Slack is the ONE place the
+      # owner is told; the old email step is gone.
+      #
+      # This one step is how a missing secret (external-health), a failed
+      # backup (db-backup) and a Dependabot PR that needs a human (dependabot-auto)
+      # reach the owner: each of those loops opens an issue or PR and dispatches
+      # triage, and triage speaks here.
       #
       # `always()` is the whole point: the alert must fire when triage FAILED
-      # just as much as when it succeeded. A harness that only emails you about
-      # problems it understood is useless for the problems that matter most —
-      # and tonight's four breaks were all cases where a stage failed outright.
-      - name: Compose the alert
+      # just as much as when it succeeded. A harness that only speaks about
+      # problems it understood is useless for the problems that matter most.
+      #
+      # WHERE EACH VERDICT GOES (the owner's question: "what do I have to DO?"):
+      #   triage:needs-human   needs-your-decision   he must act
+      #   (no label: triage    needs-your-decision   nothing diagnosed it
+      #    failed / no token)
+      #   triage:auto-fixable  log-github-ci         FYI — issue-fix.yml takes it
+      #   triage:flake         log-github-ci         FYI
+      #
+      # The issue TITLE is attacker-influenced text (this repo is public) and the
+      # diagnosis is model output: both travel through `env:` and a step output,
+      # never a template expression inside `run:`, and each is flattened to ONE line first so
+      # it cannot forge another output.
+      - name: Compose the Slack message
         if: always()
         id: compose
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NUM: ${{ steps.issue.outputs.num }}
+          LABEL: ${{ steps.route.outputs.label }}
         run: |
           set -uo pipefail
-          num="${{ steps.issue.outputs.num }}"
-          d="EOF_${{ github.run_id }}"    # run-scoped delimiter: model output cannot close it
+          issue_title=$(gh issue view "$NUM" --json title --jq .title 2>/dev/null | tr -d '\r\n' | cut -c1-150 || true)
+          diag=""
+          if [ -s triage.md ]; then
+            diag=$(awk '/^## What failed/{f=1;next} /^## /{f=0} f && NF {print; exit}' triage.md | tr -d '\r\n' | cut -c1-240 || true)
+          fi
+          case "$LABEL" in
+            triage:auto-fixable)
+              channel="log-github-ci"; severity="info"
+              title="Issue #$NUM will be auto-fixed"
+              todo="nothing yet. The fixer opens a PR on its own; you will be told when it is ready to merge." ;;
+            triage:flake)
+              channel="log-github-ci"; severity="info"
+              title="Issue #$NUM looks like a flake"
+              todo="nothing now. If it comes back, it needs a real fix." ;;
+            triage:needs-human)
+              channel="needs-your-decision"; severity="warn"
+              title="Issue #$NUM needs you"
+              todo="read the diagnosis on the issue, then fix it or close it." ;;
+            *)
+              channel="needs-your-decision"; severity="warn"
+              title="Issue #$NUM needs you (nothing diagnosed it)"
+              todo="the triage helper did not produce a diagnosis. Open the issue and look yourself." ;;
+          esac
+          what="${issue_title:-issue #$NUM}"
+          [ -n "$diag" ] && what="$what — $diag"
+          [ -z "$diag" ] && [ -n "$LABEL" ] && what="$what (no diagnosis line found)"
+          d="EOF_${GITHUB_RUN_ID}"    # run-scoped delimiter
           {
+            echo "channel=$channel"
+            echo "severity=$severity"
+            echo "title=$title"
             echo "body<<$d"
-            if [ -s triage.md ]; then
-              echo "Triage diagnosed issue #$num and routed it as: ${{ steps.route.outputs.label }}"
-              echo
-              cat triage.md
-            else
-              echo "Issue #$num was raised, but TRIAGE DID NOT PRODUCE A DIAGNOSIS."
-              echo "Something in the triage loop itself failed — go and look."
-            fi
-            echo
-            echo "-- "
-            echo "Issue: ${{ github.server_url }}/${{ github.repository }}/issues/$num"
-            echo "Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "What happened: $what"
+            echo "What to do: $todo"
+            echo "Link: $GITHUB_SERVER_URL/$GH_REPO/issues/$NUM"
             echo "$d"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Email the owner
-        if: always()
-        uses: ./.github/actions/alert
+      - name: Slack — tell the owner about this issue
+        if: always() && steps.compose.outputs.channel != ''
+        uses: ./.github/actions/slack
         with:
-          subject: "[job360 harness] #${{ steps.issue.outputs.num }} ${{ steps.route.outputs.label || 'TRIAGE FAILED' }}"
+          channel: ${{ steps.compose.outputs.channel }}
+          severity: ${{ steps.compose.outputs.severity }}
+          title: ${{ steps.compose.outputs.title }}
           body: ${{ steps.compose.outputs.body }}
-          resend_api_key: ${{ secrets.RESEND_API_KEY }}
-          to_email: ${{ secrets.OWNER_ALERT_EMAIL }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # Rule B (scripts/check_alert_paths.py): the message above keys off outputs
+      # the compose step only writes if it gets to its last lines. If it dies
+      # half way, the owner would hear nothing about this issue — so say THAT.
+      - name: Slack — triage could not compose its message
+        if: always() && steps.compose.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "Issue #${{ steps.issue.outputs.num }} needs you (triage could not report)"
+          body: |
+            What happened: triage ran on this issue but could not build its own message.
+            What to do: open the issue and read it; the diagnosis comment may still be there.
+            Link: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.issue.outputs.num }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+  # ── STAGE 4 DISPATCH, in its own job so `actions: write` never shares a job
+  # with the model. No checkout, no model, no issue text: it reads two outputs
+  # and runs one `gh workflow run`. `always()` so a failure in the owner Slack
+  # steps at the end of `triage` cannot silently strand an issue that is already
+  # labelled `triage:auto-fixable`; the label output only exists once the route
+  # step has applied that label, so this cannot fire on a half-finished triage.
+  dispatch-fix:
+    name: Wake issue-fix for an auto-fixable issue
+    needs: triage
+    if: always() && needs.triage.outputs.label == 'triage:auto-fixable'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      issues: write # on a failed dispatch: say so on the issue and hand it to a human
+    steps:
+      - name: Dispatch issue-fix.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NUM: ${{ needs.triage.outputs.num }}
+          LABEL: ${{ needs.triage.outputs.label }}
+        run: |
+          set -euo pipefail
+          # Defence in depth: the value came from a job output, so re-prove it is
+          # a plain issue number (digits, no leading zero) before it reaches a command.
+          if ! [[ "$NUM" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::refusing to dispatch: not an issue number"
+            exit 1
+          fi
+          [ "$LABEL" = "triage:auto-fixable" ] || { echo "::error::unexpected label '$LABEL'"; exit 1; }
+          # Same pattern as external-health.yml waking triage.
+          if ! gh workflow run issue-fix.yml -f issue="$NUM"; then
+            echo "::error::issue #$NUM is labelled auto-fixable but issue-fix could not be woken"
+            # A red run alone notifies nobody. Leave a trace on the issue and route
+            # it to a human so it is never stuck as auto-fixable with no fixer.
+            gh issue comment "$NUM" --body "**Issue fix could not be started** (dispatching \`issue-fix.yml\` failed). Routing changed from \`triage:auto-fixable\` to \`triage:needs-human\`. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              || echo "::warning::could not comment on #$NUM"
+            gh issue edit "$NUM" --add-label "triage:needs-human" --remove-label "triage:auto-fixable" \
+              || echo "::warning::could not relabel #$NUM"
+            exit 1
+          fi
+          echo "dispatched issue-fix.yml for #$NUM" >> "$GITHUB_STEP_SUMMARY"

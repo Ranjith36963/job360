@@ -112,24 +112,41 @@ jobs:
               --comment "All watchers reporting again as of run ${{ github.run_id }}. (auto-close)"
           fi
 
-      # FALLBACK last mile: normally triage sends the email, because its alert
-      # carries the diagnosis. But if the handoff failed, triage never runs and
-      # never alerts — so the alarm would be silent. That is precisely the 403
-      # bug found on 2026-07-27, which stayed invisible because the failing call
-      # was the last thing the job did. Email directly in that case.
-      - name: Email the owner directly (only if triage could not be woken)
+      # FALLBACK last mile: normally triage posts the Slack message, because
+      # its alert carries the diagnosis. But if the handoff failed, triage
+      # never runs and never alerts — so the alarm would be silent. That is
+      # precisely the 403 bug found on 2026-07-27, which stayed invisible
+      # because the failing call was the last thing the job did. Slack is the
+      # one place the owner is told (decision 2026-10-02: no email), so the
+      # fallback speaks there too.
+      - name: Slack — triage could not be woken
         if: always() && steps.wraise.outputs.woken == 'no'
-        uses: ./.github/actions/alert
+        uses: ./.github/actions/slack
         with:
-          subject: "[job360 harness] #${{ steps.wraise.outputs.raised }} raised - TRIAGE COULD NOT BE WOKEN"
+          channel: needs-your-decision
+          severity: warn
+          title: "Watchdog issue #${{ steps.wraise.outputs.raised }} needs you"
           body: |
-            The watchdog raised issue #${{ steps.wraise.outputs.raised }}, but the handoff to
-            the triage loop FAILED, so nothing has diagnosed it. Go and look.
+            What happened: a scheduled workflow stopped running, and the helper that normally explains it could not be started.
+            What to do: open the issue and check which workflow stopped. Re-enable it under Actions if GitHub switched it off.
+            Link: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.wraise.outputs.raised }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
-            Issue: ${{ github.server_url }}/${{ github.repository }}/issues/${{ steps.wraise.outputs.raised }}
-            Run:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          resend_api_key: ${{ secrets.RESEND_API_KEY }}
-          to_email: ${{ secrets.OWNER_ALERT_EMAIL }}
+      # Rule B (scripts/check_alert_paths.py): the step above keys off outputs
+      # the tracking-issue step only writes if it reaches that line. If it dies
+      # half way (a gh 403), say THAT instead of going silent.
+      - name: Slack — the watchdog could not open its tracking issue
+        if: always() && steps.wraise.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "Watchdog could not open its tracking issue"
+          body: |
+            What happened: the watchdog ran but failed while opening or updating its issue, so a stopped workflow may be unreported.
+            What to do: open the run, read the red step, and check Actions for any workflow that stopped.
+            Link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
       # ── RED WATCHERS REACH SLACK — ANNOUNCE THE TRANSITION, NOT THE STATE ──
       # scripts/slack_transition.py reads the marker issue `Loop RED:
@@ -160,18 +177,50 @@ jobs:
           title="Loop RED: watchdog-red"
           num=$(gh issue list --state open --json number,title \
                   --jq ".[] | select(.title==\"$title\") | .number" | head -1)
-          if [ "$kind" = "opened" ] && [ -z "$num" ]; then
+          # The marker body records WHICH watchers are red (`Red watchers:
+          # a,b`). Red->red is silent only while that SET is unchanged: one
+          # marker issue stays open for weeks, and a NEW watcher going red
+          # underneath it used to post nothing (run 37017018120 saw
+          # external-health.yml red while #667 was open for security.yml).
+          cur=$(jq -r '.red_list | sort | join(",")' watchdog.json)
+          write_marker() {
+            local list="$1" n
+            n=$(printf '%s' "$list" | tr ',' '\n' | grep -c . || true)
             {
-              echo "$RED_COUNT watcher(s) are running but RED: $RED_LIST"
+              echo "$n watcher(s) are running but RED: ${list//,/, }"
+              echo
+              echo "Red watchers: $list"
               echo
               echo "This is the marker issue for the Slack transition rule — it closes itself when all watchers are green again."
               echo "Details: the watchdog run summary. Each red watcher also has its own \`Loop RED:\` issue."
               echo
               echo "- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             } > marker.md
+          }
+          if [ "$kind" = "opened" ] && [ -z "$num" ]; then
+            write_marker "$cur"
             gh issue create --title "$title" --body-file marker.md --label harness
           elif [ "$kind" = "recovered" ] && [ -n "$num" ]; then
             gh issue close "$num" --comment "All watchers green again as of run ${{ github.run_id }}. (auto-close)"
+          elif [ "$kind" = "still_failing" ] && [ -n "$num" ]; then
+            body=$(gh issue view "$num" --json body --jq .body)
+            recorded=$(printf '%s\n' "$body" | sed -n 's/^Red watchers: //p' | head -1)
+            if [ -z "$recorded" ]; then
+              # Marker written before the set was recorded: use its first line.
+              recorded=$(printf '%s\n' "$body" | sed -n 's/^[0-9]* watcher(s) are running but RED: //p' | head -1 | sed 's/, /,/g')
+            fi
+            rec_sorted=$(printf '%s' "$recorded" | tr ',' '\n' | grep . | sort -u || true)
+            cur_sorted=$(printf '%s' "$cur" | tr ',' '\n' | grep . | sort -u || true)
+            new=$(comm -13 <(printf '%s\n' "$rec_sorted") <(printf '%s\n' "$cur_sorted") | grep . | paste -sd, - || true)
+            if [ "$rec_sorted" != "$cur_sorted" ]; then
+              write_marker "$cur"
+              gh issue edit "$num" --body-file marker.md
+            fi
+            if [ -n "$new" ]; then
+              echo "send=true" >> "$GITHUB_OUTPUT"
+              echo "kind=grew" >> "$GITHUB_OUTPUT"
+              echo "new_list=${new//,/, }" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Slack — watchers are RED
@@ -186,6 +235,21 @@ jobs:
             A watcher that is red for a missing secret stays red until the secret exists — that is yours to set, not code.
 
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # THE SET GREW: marker already open, but a watcher that was not in it is
+      # red now. That is news (green->red for THAT watcher), not repetition.
+      - name: Slack — another watcher went red
+        if: always() && steps.transition.outputs.kind == 'grew'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "Another watcher went red: ${{ steps.transition.outputs.new_list }}"
+          body: |
+            What happened: a checker that was passing has started failing. All red now: ${{ steps.watch.outputs.red_list }}.
+            What to do: open the run and read the streak for the new one. If it says a secret is missing, add the secret.
+            Link: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
 
       # Recovery is NOT an incident — it is news. It goes to the muted log

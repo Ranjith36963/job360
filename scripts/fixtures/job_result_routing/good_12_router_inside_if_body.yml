@@ -1,0 +1,17 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          R: ${{ needs.verify.result }}
+          F: ${{ needs.fix.result }}
+        run: |
+          if [ "$F" = success ]; then
+            if [ "$R" = success ]; then mode=ship; else mode=incomplete; fi
+          elif [ "$F" = failure ]; then
+            mode=fix-failed
+          else
+            mode=incomplete
+          fi

@@ -1,0 +1,239 @@
+name: Daily digest (what needs the owner today?)
+
+# ONE Slack message every morning that answers "what needs me today?" in plain
+# English. If nothing does, ONE short line. The owner reads five Slack channels
+# and a pile of GitHub notifications; this is the single place that adds them up.
+#
+# READ-ONLY: it only lists PRs, issues and runs. It merges nothing, labels
+# nothing, opens nothing. Free: no LLM, no secrets except the Slack token.
+#
+# THE RULES (each section is one `gh` query plus one plain rule):
+#   1. PRs waiting for him — open, not draft, not `wip:parked`, not
+#      `autofix:exhausted` / `autofix:needs-human` (those have their own
+#      section), and one of:
+#        a. labelled `human-merge`;
+#        b. in the only human-only lane, `lane:harness-owner` (merge-policy.yml
+#           `harness_owner: auto_merge: false`) with every check green;
+#        c. every check green but NOT auto-mergeable: no lane label yet, or the
+#           autopilot says `automerge:blocked`. A green PR in an auto lane is
+#           the machine's job, not his.
+#   2. Issues — open + `triage:needs-human`, or the title starts with `KEYS:`,
+#      `WATCHDOG`, `SENTRY:` or `Loop RED`.
+#   3. Workflows — the MOST RECENT finished run on main (push or schedule; a
+#      hand-dispatched drill is red on purpose, so it does not count) was
+#      `failure` or `timed_out`. `cancelled`/`skipped` runs are ignored: the
+#      latest non-cancelled run decides.
+#   4. PRs the auto-fixer gave up on — label `autofix:exhausted` (its real name
+#      today) or `fix:exhausted` — and PRs whose open findings are all ones the
+#      fixer may not or need not touch (`.github/` threads, outdated threads,
+#      `npm audit` / reviewer checks red): label `autofix:needs-human`, written
+#      once by finding-watch.yml together with a PR comment saying why.
+#
+# FAILS LOUD: any `gh` error aborts the gather step (set -e / check=True) so a
+# half-built digest can never read as "All clear". A red gather AND a red Slack
+# step both turn the run red.
+#
+# Untrusted text (PR/issue titles) never enters a `run:` through `${{ }}`: the
+# Python below reads it from `gh` output and strips Slack markup itself.
+on:
+  schedule:
+    - cron: "45 7 * * *" # 07:45 UTC daily — after external-health (07:10) and absence (07:30), so their issues are already open
+  workflow_dispatch: {} # the drill entrance — every loop must be fireable on purpose
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  actions: read
+
+concurrency:
+  group: daily-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    name: Build and send the morning digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Gather what needs the owner
+        id: gather
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          CAP = 5  # items shown per group; the rest become "+N more"
+          AUTO_LANES = {"lane:harness", "lane:product", "lane:product-owner"}
+          OWNER_LANE = "lane:harness-owner"
+          GREEN = {"SUCCESS", "SKIPPED", "NEUTRAL"}
+
+
+          def gh(*args: str) -> list:
+              """Run gh and parse its JSON. Any failure raises -> red run."""
+              out = subprocess.run(
+                  ["gh", *args], check=True, capture_output=True, text=True, encoding="utf-8"
+              ).stdout
+              return json.loads(out or "[]")
+
+
+          def clean(text: str, limit: int = 90) -> str:
+              """Make untrusted text safe for a Slack message."""
+              text = re.sub(r"[\x00-\x1f\x7f]+", " ", text or "")  # newlines, control chars
+              text = re.sub(r"[`*~]", "", text)  # Slack bold/strike/code markup
+              text = (
+                  text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+              )  # the three characters Slack treats as markup (links, @channel)
+              text = " ".join(text.split())
+              return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+          def is_green(pr: dict) -> bool:
+              rollup = pr.get("statusCheckRollup") or []
+              if not rollup:
+                  return False  # no checks yet is not "green"
+              for c in rollup:
+                  if c.get("__typename") == "StatusContext":
+                      if c.get("state") != "SUCCESS":
+                          return False
+                  elif c.get("status") != "COMPLETED" or c.get("conclusion") not in GREEN:
+                      return False
+              return True
+
+
+          prs = gh(
+              "pr", "list", "--state", "open", "--limit", "100",
+              "--json", "number,title,url,isDraft,labels,statusCheckRollup",
+          )
+          issues = gh(
+              "issue", "list", "--state", "open", "--limit", "100",
+              "--json", "number,title,url,labels",
+          )
+
+          # 1 + 4 -- pull requests
+          merge_items: list[str] = []
+          exhausted_items: list[str] = []
+          for pr in sorted(prs, key=lambda p: p["number"]):
+              labels = {l["name"] for l in pr["labels"]}
+              if pr["isDraft"] or "wip:parked" in labels:
+                  continue
+              n, title, url = pr["number"], clean(pr["title"]), pr["url"]
+              if labels & {"autofix:exhausted", "fix:exhausted"}:
+                  exhausted_items.append(f"Auto-fix gave up on PR #{n}: {title} — {url}")
+                  continue
+              if "autofix:needs-human" in labels:
+                  exhausted_items.append(
+                      f"Auto-fix has nothing it may touch on PR #{n}: {title} — {url}"
+                  )
+                  continue
+              green = is_green(pr)
+              if "human-merge" in labels:
+                  verb = "Merge" if green else "Look at (checks not green)"
+                  merge_items.append(f"{verb} PR #{n}: {title} — {url}")
+              elif green and (
+                  OWNER_LANE in labels
+                  or "automerge:blocked" in labels
+                  or not (labels & AUTO_LANES)
+              ):
+                  merge_items.append(f"Merge PR #{n}: {title} — {url}")
+
+          # 2 -- issues
+          issue_items: list[str] = []
+          for it in sorted(issues, key=lambda i: i["number"]):
+              labels = {l["name"] for l in it["labels"]}
+              raw = it["title"] or ""
+              if "triage:needs-human" in labels or raw.startswith(
+                  ("KEYS:", "WATCHDOG", "SENTRY:", "Loop RED")
+              ):
+                  issue_items.append(
+                      f"Issue #{it['number']} needs a decision: {clean(raw)} — {it['url']}"
+                  )
+
+          # 3 -- workflows whose latest finished run on main failed
+          run_items: list[str] = []
+          for wf in gh("workflow", "list", "--limit", "100", "--json", "id,name,path,state"):
+              if wf["state"] != "active":
+                  continue
+              runs = gh(
+                  "run", "list", "--workflow", str(wf["id"]), "--branch", "main",
+                  "--limit", "10",
+                  "--json", "conclusion,event,url,createdAt,status",
+              )
+              for r in runs:  # newest first
+                  if r["status"] != "completed" or r["event"] not in ("schedule", "push"):
+                      continue
+                  if r["conclusion"] in ("cancelled", "skipped", ""):
+                      continue
+                  if r["conclusion"] in ("failure", "timed_out"):
+                      name = os.path.basename(wf["path"]).removesuffix(".yml")
+                      day = r["createdAt"][:10]
+                      run_items.append(f"{clean(name)} failed on {day} — {r['url']}")
+                  break  # newest countable run decides
+
+          groups = [merge_items, issue_items, run_items, exhausted_items]
+          total = sum(len(g) for g in groups)
+          lines: list[str] = []
+          for g in groups:
+              lines += [f"• {x}" for x in g[:CAP]]
+              if len(g) > CAP:
+                  lines.append(f"• +{len(g) - CAP} more")
+
+          if total == 0:
+              title, body, severity = "All clear — nothing needs you today.", "", "info"
+          else:
+              noun = "thing needs" if total == 1 else "things need"
+              title = f"Good morning — {total} {noun} you:"
+              body, severity = "\n".join(lines), "warn"
+
+          print(title)
+          print(body)
+          out_dir = os.environ["RUNNER_TEMP"]
+          for name, value in (("title", title), ("body", body), ("severity", severity), ("total", str(total))):
+              with open(os.path.join(out_dir, f"digest_{name}.txt"), "w", encoding="utf-8") as fh:
+                  fh.write(value)
+          PY
+          # Hand the result to the next step. The body holds untrusted titles, so
+          # it travels as a multi-line output with a random delimiter and reaches
+          # Slack as an action input (an env var inside the action), never a run: line.
+          d="EOF_$(openssl rand -hex 8)"
+          echo "total=$(cat "$RUNNER_TEMP/digest_total.txt")" >> "$GITHUB_OUTPUT"
+          echo "severity=$(cat "$RUNNER_TEMP/digest_severity.txt")" >> "$GITHUB_OUTPUT"
+          echo "title=$(cat "$RUNNER_TEMP/digest_title.txt")" >> "$GITHUB_OUTPUT"
+          {
+            echo "body<<$d"
+            cat "$RUNNER_TEMP/digest_body.txt"
+            echo
+            echo "$d"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Slack — the morning digest
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: ${{ steps.gather.outputs.severity }}
+          title: ${{ steps.gather.outputs.title }}
+          body: ${{ steps.gather.outputs.body }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+
+      # FALLBACK LAST MILE (scripts/check_alert_paths.py rule B). If the gather
+      # crashed, the step above is skipped and the owner would get NO digest and
+      # read the silence as "all clear". Say that the digest itself broke.
+      - name: Slack — the digest itself broke
+        if: always() && steps.gather.outcome == 'failure'
+        uses: ./.github/actions/slack
+        with:
+          channel: needs-your-decision
+          severity: warn
+          title: "daily digest: could not be built — do NOT read today's silence as all clear"
+          body: |
+            A gh query failed while building the morning digest.
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
