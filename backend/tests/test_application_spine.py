@@ -443,6 +443,7 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         "brought", "fit_judged", "artifact_saved", "contact_added", "outreach_sent",
         "outreach_replied", "applied", "replied", "interview_requested", "interview_scheduled",
         "interview_done", "offer", "rejected", "withdrawn", "ghosted", "note", "lesson",
+        "asked", "answered", "ask_withdrawn",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)
     assert code_types == vision_types

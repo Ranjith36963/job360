@@ -85,6 +85,9 @@ TOOL_ROUTES = {
     "update_contact": ("applications", "update_contact", {"contact_id": 987654321, "name": "x"}),
     # /run 360 recipes (owner plan 2026-10-01) — require_user, no email gate.
     "get_recipe": ("recipes", "get_recipe", {"name": "setup"}),
+    # "Needs you" (owner plan 2026-10-01) - require_user, no email gate.
+    "ask_user": ("asks", "create_ask", {"question": "x"}),
+    "answer_ask": ("asks", "answer_ask", {"ask_id": 987654321, "answer": "x"}),
 }
 
 

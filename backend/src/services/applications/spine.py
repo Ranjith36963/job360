@@ -1201,6 +1201,7 @@ async def get_application_detail(
     # get_owned_application, parse_occurred_at) — a top-level import here
     # would be circular. Slice 4 (docs/plans/2026-09-05-contacts-stats/
     # spec.md R3).
+    from src.services.applications.asks import list_asks  # noqa: PLC0415
     from src.services.applications.contacts import list_contacts  # noqa: PLC0415
 
     app_row = await get_owned_application(db, user_id, application_id)
@@ -1263,6 +1264,10 @@ async def get_application_detail(
         "interview_at": interview_at,
         "receipts": await _list_receipts_for_application(db, user_id, application_id),
         "contacts": await list_contacts(db, user_id, application_id),
+        # "Needs you" - every ask about this job, open first (never filtered).
+        "asks": await list_asks(
+            db, user_id, "all", application_id=application_id, limit=settings.ASKS_MAX_OPEN_PER_USER
+        ),
         "follow_up_on": follow_up_on,
         "follow_up_due": follow_up_due,
     }
@@ -1547,9 +1552,16 @@ async def whats_new(
     next_since = rows[-1]["recorded_at"] if rows else since_val
     next_after_id = rows[-1]["id"] if rows else after_id
 
+    # "Needs you" - open asks are ALWAYS carried, whatever `since` says: an
+    # unanswered question does not expire because the cursor moved past it.
+    from src.services.applications.asks import list_asks  # noqa: PLC0415
+
+    open_asks = await list_asks(db, user_id, "open", limit=settings.ASKS_WHATS_NEW_MAX)
+
     return {
         "now": now, "since": since_val, "events": events, "applications": applications,
         "next_since": next_since, "next_after_id": next_after_id, "truncated": truncated,
+        "open_asks": open_asks,
     }
 
 

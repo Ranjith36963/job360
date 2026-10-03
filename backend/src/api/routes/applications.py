@@ -466,6 +466,27 @@ class NextStepOut(BaseModel):
     label: str
 
 
+class AskOut(BaseModel):
+    """One "Needs you" ask (see ``services/applications/asks.py``)."""
+
+    id: int
+    application_id: Optional[int]
+    job_title: Optional[str]
+    job_company: Optional[str]
+    question: str
+    context: str
+    asked_by: str
+    asked_at: str
+    answer: Optional[str]
+    answered_by: Optional[str]
+    answered_at: Optional[str]
+    # True = the user answered on Job360; False = the assistant recorded
+    # the user's chat answer.
+    answered_by_user: bool
+    withdrawn_at: Optional[str]
+    status: str
+
+
 class ApplicationDetailOut(BaseModel):
     id: int
     job_id: int
@@ -481,6 +502,8 @@ class ApplicationDetailOut(BaseModel):
     interview_at: Optional[str]
     receipts: list[ApplicationReceiptOut]
     contacts: list[ContactOut]
+    # "Needs you" - every ask about this job, open first.
+    asks: list[AskOut]
     # 2026-09-20 — what to do next, read off the stored state (a state machine
     # over the record, never a judgement of the job). `code` is the closed
     # vocabulary an agent branches on; `label` is the sentence the web shows.
@@ -626,6 +649,8 @@ class WhatsNewResponse(BaseModel):
     next_since: str
     next_after_id: Optional[int]
     truncated: bool
+    # Always the user's open asks, whatever `since` says.
+    open_asks: list[AskOut]
 
 
 class ExportArtifactOut(BaseModel):

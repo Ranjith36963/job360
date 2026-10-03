@@ -1,0 +1,14 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          R: ${{ needs.verify.result }}
+        run: |
+          echo "pipe <<EOF into it"  # cat <<END
+          case "$R" in
+            success) mode=ship ;;
+            failure) mode=failed ;;
+          esac
