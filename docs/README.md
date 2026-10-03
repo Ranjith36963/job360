@@ -65,7 +65,7 @@ in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
 | [`harness/maintenance/DOC-MAINTENANCE.md`](harness/maintenance/DOC-MAINTENANCE.md) | The framework: doc taxonomy, the tripwire/fixer/auditor tiers, deletion authority. Read this before archiving or deleting any doc. |
 | [`harness/FAILURE_CATALOG.md`](harness/FAILURE_CATALOG.md) | Every bug class we have hit: symptom, root cause, and the machine guard (antidote) that catches the whole class. Add an entry every time something breaks. |
 | [`harness/maintenance/PARKED.md`](harness/maintenance/PARKED.md) | The "code is behind the doc" list — intentions found in docs that are not yet implemented. |
-| [`harness/maintenance/claude-md-proposals.md`](harness/maintenance/claude-md-proposals.md) | Append-only inbox of `CLAUDE.md` drift found mid-session, collated into a PR by a designated session. |
+| [`harness/maintenance/claude-md-proposals.md`](harness/maintenance/claude-md-proposals.md) | The opt-in switch for `.claude/hooks/claude-md-proposal.sh`; proposals themselves are `claude-md-drift` issues, applied by `.github/workflows/claude-md-apply.yml`. |
 
 ---
 

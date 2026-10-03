@@ -28,7 +28,7 @@ job360/
 │   │   ├── cli.py                    # Click CLI: api, setup-profile
 │   │   ├── models.py                 # Job dataclass + normalized_key() — DB UNIQUE constraint, still used by a brought ad
 │   │   ├── api/                      # FastAPI: lifespan, CORS, dependencies, route modules (counts: repo facts above)
-│   │   │   └── routes/               # health, applications, profile, auth, tailor, client_log, tokens, bring, receipts, oauth, well_known (root-mounted)
+│   │   │   └── routes/               # `ls` it for the module list; the route table is docs/GENERATED.md
 │   │   ├── core/                     # (post-Phase-4 rename from config/)
 │   │   │   ├── settings.py           # Env vars, rate limits, the ESCO flag
 │   │   │   ├── observability.py      # Sentry init
