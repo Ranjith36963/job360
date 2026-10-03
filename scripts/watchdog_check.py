@@ -284,6 +284,7 @@ def recent_runs(workflow: str, branch: str | None = None) -> list[dict] | str:
 # stale entry is harmless; no entry keeps the old verdict (never ran = STOPPED).
 SCHEDULE_SINCE: dict[str, str] = {
     "claude-md-apply.yml": "2026-10-02T11:47:10+00:00",  # #682
+    "daily-digest.yml": "2026-10-02T20:35:53+00:00",  # #708
 }
 
 
@@ -334,6 +335,10 @@ def _drill() -> int:
     check("unrecorded schedule start gives no grace", workflow_age_h("x.yml", now), None)
     v = assess([], now, 216, "x.yml", "weekly", born_h=workflow_age_h("x.yml", now))
     check("...so never ran with no record IS stopped", v.stopped, True)
+    # Every EXPECTED entry added with a new cron must carry its start; the two
+    # added together on 2026-10-02 must both be recorded (reviewer-bugs #720).
+    check("both 2026-10-02 crons record their start",
+          {"claude-md-apply.yml", "daily-digest.yml"} <= set(SCHEDULE_SINCE), True)
     since = datetime.fromisoformat(SCHEDULE_SINCE["claude-md-apply.yml"])
     check("recorded start is measured from that start",
           round(workflow_age_h("claude-md-apply.yml", since) or 0, 3), 0.0)
