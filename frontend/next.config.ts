@@ -1,5 +1,5 @@
 import type { NextConfig } from "next";
-import { withSentryConfig } from "@sentry/nextjs";
+import { withSentryConfig } from "@sentry/nextjs/config";
 import { SECURITY_HEADERS } from "./src/lib/security-headers";
 
 // Backend origin the `/api/*` proxy forwards to. Set BACKEND_ORIGIN in the

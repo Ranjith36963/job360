@@ -4,6 +4,7 @@ import {
   FolderClock,
   Receipt,
   Plug,
+  MessageCircleQuestion,
   type LucideIcon,
 } from "lucide-react";
 
@@ -22,6 +23,7 @@ export const NAV_LINKS: readonly { href: string; label: string; icon: LucideIcon
   { href: "/profile", label: "Profile", icon: User },
   { href: "/bring", label: "Bring a job", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },
+  { href: "/needs-you", label: "Needs you", icon: MessageCircleQuestion },
   { href: "/receipts", label: "Receipts", icon: Receipt },
   { href: "/settings/connect", label: "Connect your assistant", icon: Plug },
 ];
@@ -34,6 +36,7 @@ const PROTECTED_PREFIXES = [
   "/bring",
   "/receipts",
   "/applications",
+  "/needs-you",
   "/settings",
   "/admin",
   "/oauth",

@@ -7,6 +7,7 @@ import { Logo } from "@/components/brand/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { useAuth } from "@/components/layout/AuthProvider";
 import { NAV_LINKS, isNavActive, isSettingsActive } from "@/components/layout/nav-links";
+import { NeedsYouBadge, useOpenAsks } from "@/components/layout/useOpenAsks";
 import { cn } from "@/lib/utils";
 
 /** One row of the sidebar. Active = a raised card with a hairline ring. */
@@ -31,6 +32,7 @@ export function Sidebar({ className }: { className?: string }) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const settingsActive = isSettingsActive(pathname);
+  const openAsks = useOpenAsks(Boolean(user), pathname);
 
   return (
     <aside
@@ -57,6 +59,7 @@ export function Sidebar({ className }: { className?: string }) {
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                 {label}
+                {href === "/needs-you" && <NeedsYouBadge count={openAsks} />}
               </Link>
             );
           })}

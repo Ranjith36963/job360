@@ -4777,6 +4777,8 @@ export interface operations {
         parameters: {
             query?: {
                 status?: string;
+                limit?: number;
+                offset?: number;
             };
             header?: {
                 authorization?: string | null;

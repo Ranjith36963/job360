@@ -14,6 +14,7 @@ import {
   isProtectedPath,
   isSettingsActive,
 } from "@/components/layout/nav-links";
+import { NeedsYouBadge, useOpenAsks } from "@/components/layout/useOpenAsks";
 import { cn } from "@/lib/utils";
 
 /**
@@ -43,6 +44,7 @@ export function Navbar() {
   // The sidebar owns desktop whenever we are (or are about to be) signed in.
   const sidebarOnDesktop = signedIn || (loading && isProtectedPath(pathname));
   const settingsActive = isSettingsActive(pathname);
+  const openAsks = useOpenAsks(signedIn, pathname);
 
   const drawerLink = (active: boolean) =>
     cn(
@@ -123,6 +125,7 @@ export function Navbar() {
                       >
                         <Icon className="h-4 w-4" aria-hidden="true" />
                         {label}
+                        {href === "/needs-you" && <NeedsYouBadge count={openAsks} />}
                       </Link>
                     );
                   })}

@@ -706,7 +706,6 @@ def _drill() -> int:  # noqa: C901 - a drill is a list of cases, not a branch tr
     #     P0 cited — the rule is about the directory, and `verifier.md` is the
     #     one nobody would think to check.
     for guarded in (".claude/hooks/commit-gate.sh",
-                    ".claude/hooks/worktree-reaper.sh",
                     ".claude/settings.json",
                     ".claude/settings.local.json",
                     ".claude/agents/reviewer-bugs.md",

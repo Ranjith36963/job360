@@ -26,6 +26,21 @@ beforeEach(() => {
   mockAuth.loading = false;
 });
 
+describe("nav-links — stays in step with the middleware", () => {
+  it("isProtectedPath agrees with PROTECTED_PATHS in src/middleware.ts", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { isProtectedPath } = await import("@/components/layout/nav-links");
+    const src = readFileSync(join(process.cwd(), "src/middleware.ts"), "utf-8");
+    const block = src.slice(src.indexOf("PROTECTED_PATHS = ["), src.indexOf("];"));
+    const paths = [...block.matchAll(/"(\/[a-z-]*)"/g)].map((m) => m[1]);
+    expect(paths).toContain("/needs-you");
+    for (const p of paths) expect(isProtectedPath(p)).toBe(true);
+    expect(isProtectedPath("/")).toBe(false);
+    expect(isProtectedPath("/login")).toBe(false);
+  });
+});
+
 describe("AppShell", () => {
   it("signed in: a sidebar with the existing links, Settings, account and theme toggle", () => {
     mockAuth.user = { email: "someone@example.com" };
@@ -37,8 +52,22 @@ describe("AppShell", () => {
     );
 
     const side = screen.getByTestId("app-sidebar");
-    const labels = ["Profile", "Bring a job", "Applications", "Receipts", "Connect your assistant"];
-    const hrefs = ["/profile", "/bring", "/applications", "/receipts", "/settings/connect"];
+    const labels = [
+      "Profile",
+      "Bring a job",
+      "Applications",
+      "Needs you",
+      "Receipts",
+      "Connect your assistant",
+    ];
+    const hrefs = [
+      "/profile",
+      "/bring",
+      "/applications",
+      "/needs-you",
+      "/receipts",
+      "/settings/connect",
+    ];
     labels.forEach((label, i) => {
       expect(within(side).getByRole("link", { name: label })).toHaveAttribute("href", hrefs[i]);
     });

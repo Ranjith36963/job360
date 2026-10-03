@@ -345,6 +345,29 @@ async def test_asks_routes_need_a_login():
 
 
 @pytest.mark.asyncio
+async def test_answered_history_pages_with_offset_and_is_never_capped(authenticated_async_context):
+    """#705 review: the web list returned at most 50 rows with no way back, so
+    answer #51 was unreachable. ``limit``/``offset`` page the history instead."""
+    async with authenticated_async_context() as client:
+        ids = []
+        for i in range(3):
+            made = await _ask(client, question=f"Question {i}?")
+            assert made.status_code == 201, made.text
+            ids.append(made.json()["id"])
+            done = await client.post(f"/api/asks/{ids[-1]}/answer", json={"answer": "yes"})
+            assert done.status_code == 200, done.text
+
+        first = (await client.get("/api/asks?status=answered&limit=2")).json()["asks"]
+        rest = (await client.get("/api/asks?status=answered&limit=2&offset=2")).json()["asks"]
+        assert len(first) == 2 and len(rest) == 1
+        assert sorted(a["id"] for a in first + rest) == sorted(ids)  # every answer reachable, none twice
+
+        assert (await client.get("/api/asks?offset=-1")).status_code == 422
+        assert (await client.get("/api/asks?limit=0")).status_code == 422
+        assert (await client.get("/api/asks?limit=201")).status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_mcp_round_trip_ask_list_answer(authenticated_async_context):
     pytest.importorskip("mcp")
     from src.api.mcp_server import INSTRUCTIONS, mcp_runtime

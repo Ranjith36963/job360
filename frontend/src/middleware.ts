@@ -8,6 +8,7 @@ const PROTECTED_PATHS = [
   "/bring",
   "/receipts",
   "/applications",
+  "/needs-you",
   "/settings",
   "/admin",
   "/oauth",

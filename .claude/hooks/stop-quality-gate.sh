@@ -20,7 +20,10 @@ if _truthy "${GITHUB_ACTIONS:-}" || _truthy "${CI:-}"; then exit 0; fi
 
 MAX_BLOCKS="${JOB360_QUALITY_GATE_MAX_BLOCKS:-3}"
 
-cat >/dev/null 2>&1 || true   # drain stdin; nothing in it is needed
+INPUT="$(cat 2>/dev/null || true)"
+# Fire at most ONCE per session (owner, 2026-10-03: it nagged 3x per task). The Stop
+# payload carries session_id; commit-gate.sh still refuses to commit unproven code.
+SID="$(printf '%s' "$INPUT" | python -c "import sys,json; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null | tr -cd 'A-Za-z0-9_-')"
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$ROOT" || exit 0
@@ -45,6 +48,12 @@ fi
 
 STATE="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/quality-gate"
 mkdir -p "$STATE" 2>/dev/null || exit 0
+if [ -n "$SID" ]; then
+  find "$STATE" -name 'session-*.fired' -mtime +7 -delete 2>/dev/null || true
+  MARK="$STATE/session-${SID}.fired"
+  [ -f "$MARK" ] && exit 0        # already told this session once; stay silent
+  : > "$MARK" 2>/dev/null || exit 0  # cannot record it -> do not risk nagging forever
+fi
 COUNT_FILE="$STATE/${FP}.count"
 N="$(cat "$COUNT_FILE" 2>/dev/null || echo 0)"
 N=$((N + 1))
@@ -55,6 +64,7 @@ if ! { printf '%s' "$N" > "$COUNT_FILE"; } 2>/dev/null; then
   exit 0
 fi
 
+[ -n "$SID" ] && { N=1; MAX_BLOCKS=1; }   # once per session: the header reads 1/1
 if [ "$N" -gt "$MAX_BLOCKS" ]; then
   python -c "
 import json, sys
