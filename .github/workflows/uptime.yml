@@ -171,3 +171,4 @@ jobs:
             The uptime probe passes again and outage issue #${{ steps.raise.outputs.issue }} was auto-closed.
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+# drill
