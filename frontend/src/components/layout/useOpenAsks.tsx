@@ -10,17 +10,33 @@ import { ASKS_CHANGED_EVENT, listAsks } from "@/lib/api";
  * fresh count after every reload (ASKS_CHANGED_EVENT), so the badge clears
  * while the user answers there, with no navigation needed.
  *
- * One hook, used by both the Sidebar and the mobile drawer in Navbar.
+ * One hook, used by both the Sidebar and the mobile drawer in Navbar. Both are
+ * mounted at once for a signed-in user (the Navbar only hides with CSS), so
+ * the request is shared: one call per navigation, not one per caller.
  */
+let inFlight: { key: string; count: Promise<number> } | null = null;
+
+function fetchOpenCount(key: string): Promise<number> {
+  if (inFlight?.key === key) return inFlight.count;
+  const count = listAsks("open").then((res) => res.open_count);
+  const entry = { key, count };
+  inFlight = entry;
+  const clear = () => {
+    if (inFlight === entry) inFlight = null;
+  };
+  count.then(clear, clear);
+  return count;
+}
+
 export function useOpenAsks(signedIn: boolean, pathname: string): number {
   const [openAsks, setOpenAsks] = useState(0);
 
   useEffect(() => {
     if (!signedIn) return;
     let cancelled = false;
-    listAsks("open")
-      .then((res) => {
-        if (!cancelled) setOpenAsks(res.open_count);
+    fetchOpenCount(pathname)
+      .then((count) => {
+        if (!cancelled) setOpenAsks(count);
       })
       .catch(() => {
         if (!cancelled) setOpenAsks(0);
