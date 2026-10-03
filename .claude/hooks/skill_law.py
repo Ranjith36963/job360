@@ -21,6 +21,7 @@ Intent gates apply to the main agent only — workers never saw the prompt.
 Escape hatches, all logged in the ledger and visible in `report`:
   - owner: put the skip word (default "skip-law") in the prompt;
   - model: `python .claude/hooks/skill_law.py waive "<reason>"` waives the current prompt;
+  (both waive INTENT gates only — a path gate such as the hard-rules zone is never waived)
   - kill switch: create `.claude/SKILL-LAW-OFF` (no restart needed).
 
 Fails OPEN on any internal error, but LOUDLY (systemMessage + errors.log).
@@ -221,13 +222,15 @@ def owed_laws(reg: dict[str, Any], events: list[dict[str, Any]], agent: str, pat
     """Reasons the next write is DENIED (empty list = allowed)."""
     lp = last_prompt(events)
     since = lp.get("t", 0) if lp else 0
-    if lp and lp.get("waived"):
-        return []
-    if any(e.get("k") == "waive" and e.get("t", 0) >= since for e in events):
-        return []
+    # A waiver dismisses a false-positive INTENT match only. It never lifts a
+    # path gate: one "skip-law" (which can arrive inside pasted text) must not
+    # let an agent edit the hard-rules zone without the rules loaded.
+    waived = bool(lp and lp.get("waived")) or any(
+        e.get("k") == "waive" and e.get("t", 0) >= since for e in events
+    )
     owed: list[str] = []
     # 1. intent gates — main agent only (workers never saw the prompt)
-    if agent == "main" and lp:
+    if agent == "main" and lp and not waived:
         for iid in lp.get("gates", []):
             it = next((x for x in reg.get("intents", []) if x["id"] == iid), None)
             if not it:

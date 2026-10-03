@@ -281,6 +281,22 @@ def test_zone_edit_denied_until_hard_rules(run) -> None:
     assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": ZONE}})) == "allow"
 
 
+def test_skip_word_never_lifts_the_zone_gate(run) -> None:
+    """#712 review P0: the skip word waived the WHOLE turn, zone included."""
+    run("prompt", {"prompt": "skip-law, also add a column"})
+    assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": PLAIN}})) == "allow"
+    assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": ZONE}})) == "deny"
+    run("post", {"tool_name": "Skill", "tool_input": {"skill": "hard-rules"}})
+    assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": ZONE}})) == "allow"
+
+
+def test_model_waiver_never_lifts_the_zone_gate(run) -> None:
+    run("prompt", {"prompt": "the error text in the footer: ValueError shown to users"})
+    run("pre", {"tool_name": "Bash", "tool_input": {"command": 'python .claude/hooks/skill_law.py waive "copy change, not a defect"'}})
+    assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": PLAIN}})) == "allow"
+    assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": ZONE}})) == "deny"
+
+
 def test_zone_skill_under_worktree_prefix_counts(run) -> None:
     run("post", {"tool_name": "Skill", "tool_input": {"skill": ".claude/worktrees/x:hard-rules"}})
     assert decision(run("pre", {"tool_name": "Edit", "tool_input": {"file_path": ZONE}})) == "allow"
