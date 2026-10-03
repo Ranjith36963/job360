@@ -65,11 +65,13 @@ async def create_ask(
 @router.get("/asks", response_model=ListAsksResponse)
 async def list_asks(
     status: str = Query("open"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
-        rows = await asks_service.list_asks(db, user.id, status)
+        rows = await asks_service.list_asks(db, user.id, status, limit=limit, offset=offset)
         return {"asks": rows, "open_count": await asks_service.count_open_asks(db, user.id)}
     except SpineError as exc:
         _raise(exc)

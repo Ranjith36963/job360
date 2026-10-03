@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   User,
   Menu,
@@ -12,11 +12,13 @@ import {
   Receipt,
   Settings,
   Plug,
+  MessageCircleQuestion,
   LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/components/layout/AuthProvider";
+import { ASKS_CHANGED_EVENT, listAsks } from "@/lib/api";
 
 // R14 (docs/plans/2026-09-04-application-spine) removed /receipts from the
 // nav — the URL kept working, but a new-user walk (2026-09-27) found no way
@@ -33,6 +35,7 @@ const NAV_LINKS = [
   { href: "/profile", label: "Profile", icon: User },
   { href: "/bring", label: "Bring a job", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },
+  { href: "/needs-you", label: "Needs you", icon: MessageCircleQuestion },
   { href: "/receipts", label: "Receipts", icon: Receipt },
   { href: "/settings/connect", label: "Connect your assistant", icon: Plug },
 ] as const;
@@ -52,6 +55,43 @@ export function Navbar() {
   // the session resolves. While unknown, the header shows the logo only.
   const signedIn = Boolean(user);
   const signedOut = !loading && !user;
+
+  // Count of questions waiting on the user. A light fetch after mount — it
+  // never blocks render, and a failure just means no badge.
+  const [openAsks, setOpenAsks] = useState(0);
+  useEffect(() => {
+    if (!signedIn) return;
+    let cancelled = false;
+    listAsks("open")
+      .then((res) => {
+        if (!cancelled) setOpenAsks(res.open_count);
+      })
+      .catch(() => {
+        if (!cancelled) setOpenAsks(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, pathname]);
+
+  // The Needs-you page announces the fresh count after every reload, so the
+  // badge clears while the user answers there — no navigation needed.
+  useEffect(() => {
+    const onChanged = (e: Event) => setOpenAsks(Number((e as CustomEvent).detail) || 0);
+    window.addEventListener(ASKS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(ASKS_CHANGED_EVENT, onChanged);
+  }, []);
+
+  const badge = (href: string) =>
+    href === "/needs-you" && signedIn && openAsks > 0 ? (
+      <span
+        data-testid="needs-you-badge"
+        aria-label={`${openAsks} waiting`}
+        className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground"
+      >
+        {openAsks}
+      </span>
+    ) : null;
 
   // /settings/connect is now its own NAV_LINKS entry (see above), so the gear
   // must not also light up for it — otherwise two nav controls look active
@@ -90,6 +130,7 @@ export function Navbar() {
               >
                 <Icon className="h-4 w-4" aria-hidden="true" />
                 {label}
+                {badge(href)}
               </Link>
             );
           })}
@@ -196,6 +237,7 @@ export function Navbar() {
                   >
                     <Icon className="h-4 w-4" aria-hidden="true" />
                     {label}
+                    {badge(href)}
                   </Link>
                 );
               })}
