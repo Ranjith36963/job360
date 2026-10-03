@@ -277,7 +277,7 @@ jobs:
           # of the queue, on purpose, and must not be picked up here.
           keep=""
           for pr in $prs; do
-            meta=$(gh pr view "$pr" --json state,isDraft,headRepositoryOwner,labels,headRefName 2>/dev/null || echo '')
+            meta=$(gh pr view "$pr" --json state,isDraft,headRepositoryOwner,labels,headRefName,mergeable 2>/dev/null || echo '')
             [ -n "$meta" ] || continue
             [ "$(echo "$meta" | jq -r .state)" = "OPEN" ] || continue
             [ "$(echo "$meta" | jq -r .isDraft)" = "false" ] || continue
@@ -295,6 +295,23 @@ jobs:
               fix/issue-*) continue ;;
             esac
             [ "$(echo "$meta" | jq -r .headRepositoryOwner.login)" = "${GH_REPO%%/*}" ] || continue
+            # NO MERGED TREE, NO JUDGEMENT (FC-007, 2026-10-03). The arm checks out
+            # `refs/pull/N/merge`, and GitHub only builds that ref for a PR that
+            # merges cleanly. A CONFLICTING PR has none, so the checkout died with
+            # exit 128 and turned 7 runs red in 13h on #712 and #713 while the lane
+            # was behaving correctly. Conflicts are pr-repair.yml's job. UNKNOWN
+            # means GitHub is still computing: ask once more, and if it is still
+            # unknown the next event or the 20-min sweep judges it — this lane
+            # never needs to merge in the next minute. Skipped out loud.
+            mergeable=$(echo "$meta" | jq -r '.mergeable // "UNKNOWN"')
+            if [ "$mergeable" = "UNKNOWN" ]; then
+              sleep 5
+              mergeable=$(gh pr view "$pr" --json mergeable --jq '.mergeable // "UNKNOWN"' 2>/dev/null || echo UNKNOWN)
+            fi
+            if [ "$mergeable" != "MERGEABLE" ]; then
+              echo "skipped #$pr: mergeable=$mergeable — no merged tree to judge yet" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
             keep="$keep $pr"
           done
           # BUILT WITHOUT A PIPELINE, because the pipeline produced TWO answers.

@@ -120,6 +120,12 @@ EXPECTED: dict[str, tuple[float, str]] = {
     # from). Not exceeding its 32-day budget; left alone for lack of evidence
     # either way, not because it was re-confirmed generous.
     "revert-main.yml": (32 * 24, "monthly, 1st 06:00"),
+    # Added 2026-10-03: both gained a cron on 2026-10-02 (#682, #708) and were
+    # flagged as roster drift by issue #702. Not yet measured — budgets copy
+    # the same-cadence entries above. claude-md-apply.yml first fires Monday
+    # 2026-10-05; until then SCHEDULE_SINCE makes it "not due yet", not STOPPED.
+    "daily-digest.yml": (36, "daily 07:45"),
+    "claude-md-apply.yml": (9 * 24, "weekly Mon 06:30"),
     # ci.yml is event-triggered only — silence is normal, so it is
     # deliberately NOT watched here. Watching it would produce a permanent
     # false alarm, and a permanent alarm is how a loop dies.
@@ -167,13 +173,21 @@ class Verdict:
 
 
 def assess(runs: list[dict], now: datetime, max_h: float | None, workflow: str,
-           cadence: str) -> Verdict:
+           cadence: str, born_h: float | None = None) -> Verdict:
     """Classify one watcher from its recent runs. PURE — this is what the drill
     breaks. `runs` is newest-first, each with createdAt/status/conclusion.
 
     max_h None means the STOPPED question is not asked (RED_ONLY workflows).
+    born_h is how long ago its schedule started (SCHEDULE_SINCE; None = unknown).
     """
     if not runs:
+        # NOT DUE YET IS NOT STOPPED (2026-10-03). A weekly cron added on a
+        # Friday has no run until Monday; calling it STOPPED for those days is a
+        # false alarm on every new loop (claude-md-apply.yml, issue #702). Only
+        # a workflow older than its own budget with no run has really stopped.
+        if max_h is not None and born_h is not None and born_h <= max_h:
+            return Verdict(workflow, cadence, None, stopped=False, red=False, streak=0,
+                           last_green=None, note=f"not due yet (added {born_h:.0f}h ago)")
         return Verdict(workflow, cadence, None, stopped=max_h is not None, red=False,
                        streak=0, last_green=None, note="never ran")
     newest = datetime.fromisoformat(runs[0]["createdAt"].replace("Z", "+00:00"))
@@ -261,6 +275,27 @@ def recent_runs(workflow: str, branch: str | None = None) -> list[dict] | str:
     return json.loads(out.stdout or "[]")
 
 
+# When each schedule STARTED (the merge that gave the workflow its cron), for
+# the "not due yet" grace in assess(). Explicit on purpose: GitHub's workflow
+# `created_at` is when the FILE was first registered, so a cron added later to
+# an old file (auto-merge.yml gained its cron in #525) would read as ancient
+# and alarm on day one (reviewer-bugs P1 on #720). When you add a cron and its
+# EXPECTED entry, add its merge time here. Only read while it has NO runs, so a
+# stale entry is harmless; no entry keeps the old verdict (never ran = STOPPED).
+SCHEDULE_SINCE: dict[str, str] = {
+    "claude-md-apply.yml": "2026-10-02T11:47:10+00:00",  # #682
+    "daily-digest.yml": "2026-10-02T20:35:53+00:00",  # #708
+}
+
+
+def workflow_age_h(workflow: str, now: datetime) -> float | None:
+    """Hours since `workflow`'s schedule started, or None if not recorded."""
+    since = SCHEDULE_SINCE.get(workflow)
+    if since is None:
+        return None
+    return (now - datetime.fromisoformat(since)).total_seconds() / 3600
+
+
 def _drill() -> int:
     """Break the pure classifier on purpose. Needs no gh and no network."""
     now = datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc)
@@ -291,6 +326,22 @@ def _drill() -> int:
     check("never ran is STOPPED", v.stopped, True)
     v = assess([], now, None, "ci.yml", "push")
     check("a RED_ONLY watcher that never ran is NOT stopped", v.stopped, False)
+    v = assess([], now, 216, "x.yml", "weekly", born_h=48)
+    check("never ran but added inside its budget is NOT stopped", v.stopped, False)
+    v = assess([], now, 216, "x.yml", "weekly", born_h=300)
+    check("never ran and older than its budget IS stopped", v.stopped, True)
+    # The grace reads ONLY the recorded schedule start — an unrecorded workflow
+    # (e.g. a cron added to an old file) keeps the old verdict, never silence.
+    check("unrecorded schedule start gives no grace", workflow_age_h("x.yml", now), None)
+    v = assess([], now, 216, "x.yml", "weekly", born_h=workflow_age_h("x.yml", now))
+    check("...so never ran with no record IS stopped", v.stopped, True)
+    # Every EXPECTED entry added with a new cron must carry its start; the two
+    # added together on 2026-10-02 must both be recorded (reviewer-bugs #720).
+    check("both 2026-10-02 crons record their start",
+          {"claude-md-apply.yml", "daily-digest.yml"} <= set(SCHEDULE_SINCE), True)
+    since = datetime.fromisoformat(SCHEDULE_SINCE["claude-md-apply.yml"])
+    check("recorded start is measured from that start",
+          round(workflow_age_h("claude-md-apply.yml", since) or 0, 3), 0.0)
 
     # RED — the new question.
     v = assess([run(1, "failure"), run(7, "failure"), run(13, "success")], now, 14, "x.yml", "6h")
@@ -344,9 +395,10 @@ def main(argv: list[str] | None = None) -> int:
             # Declared here but not yet on the default branch — informational.
             rows.append((wf, "not on main yet", "—", "—"))
             continue
-        v = assess(runs, now, max_h, wf, cadence)  # type: ignore[arg-type]
+        born = workflow_age_h(wf, now) if not runs and max_h is not None else None
+        v = assess(runs, now, max_h, wf, cadence, born)  # type: ignore[arg-type]
         if v.last_run_age_h is None:
-            age = "never"
+            age = v.note or "never"
         else:
             age = f"{v.last_run_age_h:.1f}h ago"
         health = "ok"
