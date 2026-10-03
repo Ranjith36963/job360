@@ -123,7 +123,7 @@ EXPECTED: dict[str, tuple[float, str]] = {
     # Added 2026-10-03: both gained a cron on 2026-10-02 (#682, #708) and were
     # flagged as roster drift by issue #702. Not yet measured — budgets copy
     # the same-cadence entries above. claude-md-apply.yml first fires Monday
-    # 2026-10-05; until then it reports "never ran", which is the truth.
+    # 2026-10-05; until then SCHEDULE_SINCE makes it "not due yet", not STOPPED.
     "daily-digest.yml": (36, "daily 07:45"),
     "claude-md-apply.yml": (9 * 24, "weekly Mon 06:30"),
     # ci.yml is event-triggered only — silence is normal, so it is
@@ -178,7 +178,7 @@ def assess(runs: list[dict], now: datetime, max_h: float | None, workflow: str,
     breaks. `runs` is newest-first, each with createdAt/status/conclusion.
 
     max_h None means the STOPPED question is not asked (RED_ONLY workflows).
-    born_h is how long ago GitHub registered the workflow (None = unknown).
+    born_h is how long ago its schedule started (SCHEDULE_SINCE; None = unknown).
     """
     if not runs:
         # NOT DUE YET IS NOT STOPPED (2026-10-03). A weekly cron added on a
@@ -275,25 +275,24 @@ def recent_runs(workflow: str, branch: str | None = None) -> list[dict] | str:
     return json.loads(out.stdout or "[]")
 
 
-def workflow_age_h(workflow: str, now: datetime) -> float | None:
-    """Hours since GitHub registered `workflow`, or None if it cannot say.
+# When each schedule STARTED (the merge that gave the workflow its cron), for
+# the "not due yet" grace in assess(). Explicit on purpose: GitHub's workflow
+# `created_at` is when the FILE was first registered, so a cron added later to
+# an old file (auto-merge.yml gained its cron in #525) would read as ancient
+# and alarm on day one (reviewer-bugs P1 on #720). When you add a cron and its
+# EXPECTED entry, add its merge time here. Only read while it has NO runs, so a
+# stale entry is harmless; no entry keeps the old verdict (never ran = STOPPED).
+SCHEDULE_SINCE: dict[str, str] = {
+    "claude-md-apply.yml": "2026-10-02T11:47:10+00:00",  # #682
+}
 
-    Asked only for a watcher with NO runs, so it costs one call in the rare
-    case. Any failure returns None, which keeps the old verdict (STOPPED): a
-    probe that cannot answer must never be the thing that silences an alarm.
-    """
-    out = subprocess.run(
-        ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/workflows/{workflow}",
-         "--jq", ".created_at"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
-    )
-    if out.returncode != 0 or not out.stdout.strip():
+
+def workflow_age_h(workflow: str, now: datetime) -> float | None:
+    """Hours since `workflow`'s schedule started, or None if not recorded."""
+    since = SCHEDULE_SINCE.get(workflow)
+    if since is None:
         return None
-    try:
-        born = datetime.fromisoformat(out.stdout.strip().replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return (now - born).total_seconds() / 3600
+    return (now - datetime.fromisoformat(since)).total_seconds() / 3600
 
 
 def _drill() -> int:
@@ -330,6 +329,14 @@ def _drill() -> int:
     check("never ran but added inside its budget is NOT stopped", v.stopped, False)
     v = assess([], now, 216, "x.yml", "weekly", born_h=300)
     check("never ran and older than its budget IS stopped", v.stopped, True)
+    # The grace reads ONLY the recorded schedule start — an unrecorded workflow
+    # (e.g. a cron added to an old file) keeps the old verdict, never silence.
+    check("unrecorded schedule start gives no grace", workflow_age_h("x.yml", now), None)
+    v = assess([], now, 216, "x.yml", "weekly", born_h=workflow_age_h("x.yml", now))
+    check("...so never ran with no record IS stopped", v.stopped, True)
+    since = datetime.fromisoformat(SCHEDULE_SINCE["claude-md-apply.yml"])
+    check("recorded start is measured from that start",
+          round(workflow_age_h("claude-md-apply.yml", since) or 0, 3), 0.0)
 
     # RED — the new question.
     v = assess([run(1, "failure"), run(7, "failure"), run(13, "success")], now, 14, "x.yml", "6h")
