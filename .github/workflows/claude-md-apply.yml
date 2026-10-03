@@ -165,7 +165,7 @@ jobs:
       - name: Agent verifies each proposal and edits CLAUDE.md
         id: agent
         if: steps.gate.outputs.count != '0' && steps.token.outputs.have == 'true'
-        uses: anthropics/claude-code-action@4036a180cf690f49529f5d8c79c998855287f590 # v1
+        uses: anthropics/claude-code-action@12dd8d74c712f5f3669365b2369b558c495b1104 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}

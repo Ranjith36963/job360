@@ -2065,7 +2065,7 @@ def self_drill() -> int:  # noqa: C901 - a drill is a list, not a branch tree
     # widen the allow side to `.claude/**` and the reds below go green, which is
     # the drill doing its job.
     red("a git hook is refused — an agent may not edit its own exam",
-        check_paths([".claude/hooks/worktree-reaper.sh"]), "cage is escaped", P)
+        check_paths([".claude/hooks/commit-gate.sh"]), "cage is escaped", P)
     red("the agent's own permissions file is refused",
         check_paths([".claude/settings.json"]), "authorisation", P)
 
