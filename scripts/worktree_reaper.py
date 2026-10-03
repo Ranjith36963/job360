@@ -21,8 +21,8 @@ went 14 -> 62 -> 98 worktrees. That is the finding:
 So this file adds no classifier. It imports the census, trusts its verdicts, and
 supplies the four things that stood between "correct" and "actually ran":
 
-  1. AN ENTRANCE          .claude/hooks/worktree-reaper.sh calls this at
-                          SessionStart. Nothing else ever calls the other two.
+  1. AN ENTRANCE          RETIRED 2026-10-03: the SessionStart hook that
+                          called this was removed; run it by hand or on a schedule.
   2. AN IDLE FLOOR        the census asks "does this folder hold work?" — around
                           14 sessions run in parallel here, and a clean, shipped
                           worktree somebody is simply not typing in right now is
@@ -516,42 +516,6 @@ def _drill_hook_tick() -> list[tuple[str, bool, str]]:
     return rows
 
 
-def _drill_hook_finds_its_script() -> list[tuple[str, bool, str]]:
-    """The hook must read the reaper from BESIDE ITSELF, never from $ROOT.
-
-    Measured 2026-09-05, after this shipped to main: the hook exited 0 on every
-    session and reaped nothing, because it tested
-    `[ -f "$ROOT/scripts/worktree_reaper.py" ]` — and $ROOT is the MAIN repo's
-    WORKING TREE, which sat on `chore/repo-hygiene`, a branch predating the
-    reaper. The file was on `main` but not in that checkout, so the guard was
-    false and the hook bailed. Live feature, could never run, exit code 0.
-
-    A hook is not covered by drill_registry.py, so nothing else watches this.
-    """
-    hook = Path(__file__).resolve().parent.parent / ".claude" / "hooks" / "worktree-reaper.sh"
-    if not hook.is_file():
-        return [("hook_exists", False, f"no hook at {hook}")]
-    src = hook.read_text(encoding="utf-8")
-
-    # Strip comments: this file's own post-mortem quotes the bad pattern.
-    code = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("#"))
-
-    return [
-        (
-            "hook_resolves_script_beside_itself",
-            "BASH_SOURCE" in code,
-            "hook must locate the reaper relative to its own path",
-        ),
-        (
-            "hook_never_runs_ROOT_copy_directly",
-            'python "$ROOT/scripts/worktree_reaper.py"' not in code
-            and "python scripts/worktree_reaper.py" not in code,
-            "invoking $ROOT's copy silently no-ops when that checkout is on an "
-            "older branch",
-        ),
-    ]
-
-
 def _drill_delegation() -> list[tuple[str, bool, str]]:
     """This file must never grow a second opinion about what is SAFE.
 
@@ -636,7 +600,6 @@ def drill() -> int:
         + _drill_prune_before_remove()
         + _drill_hook_tick()
         + _drill_remote()
-        + _drill_hook_finds_its_script()
         + _drill_delegation()
     )
     width = max(len(n) for n, _, _ in rows)
