@@ -1,0 +1,14 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          R: ${{ needs.verify.result }}
+        run: |
+          if [ "$R" != success ] && [ "$R" != skipped ]; then
+            echo "::error::verify $R"; exit 1
+          elif [ "$R" = skipped ]; then
+            echo "verify skipped"
+          fi

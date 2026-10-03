@@ -284,6 +284,12 @@ jobs:
         if: needs.scope.outputs.scope == 'full'
         run: python scripts/check_workflow_slack_wiring.py
 
+      # FC-001: a branch over a job result with no catch-all is a silent no-op
+      # on a cancelled/timed-out job (PR #679). docs/harness/FAILURE_CATALOG.md
+      - name: Every job-result branch has a catch-all
+        if: needs.scope.outputs.scope == 'full'
+        run: python scripts/check_job_result_routing.py
+
       - name: The review-debt reader can still fail (and still refuses to gate)
         if: needs.scope.outputs.scope == 'full'
         run: python scripts/review_debt.py --drill
