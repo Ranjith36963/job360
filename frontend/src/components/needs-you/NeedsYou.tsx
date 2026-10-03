@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { answerAsk, listAsks, withdrawAsk } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, answerAsk, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,6 +13,9 @@ import { Textarea } from "@/components/ui/textarea";
 // a React text node, never as HTML or markdown.
 
 type Pending = "answer" | "withdraw" | null;
+
+// One page of the answered history; the route pages, it never caps.
+const PAGE = 50;
 
 const confirmBtn =
   "rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50";
@@ -37,11 +40,12 @@ function AskCard({
   const [pending, setPending] = useState<Pending>(null);
   const [busy, setBusy] = useState(false);
 
-  async function run(fn: () => Promise<unknown>, failMsg: string) {
+  async function run(fn: () => Promise<unknown>, failMsg: string, onDone?: () => void) {
     setBusy(true);
     try {
       await fn();
       setPending(null);
+      onDone?.();
       await onChanged();
     } catch {
       toast.error(failMsg);
@@ -118,7 +122,15 @@ function AskCard({
                 data-testid="ask-answer-confirm"
                 disabled={busy}
                 onClick={() =>
-                  void run(() => answerAsk(ask.id, draft.trim()), "Could not save your answer.")
+                  void run(
+                    () => answerAsk(ask.id, draft.trim()),
+                    "Could not save your answer.",
+                    // A changed answer goes back to the read-only view; an open
+                    // card moves to the Answered list and remounts there.
+                    () => {
+                      if (mode === "answered") setEditing(false);
+                    },
+                  )
                 }
                 className={confirmBtn}
               >
@@ -203,30 +215,44 @@ function AskCard({
   );
 }
 
+function announce(openCount: number) {
+  window.dispatchEvent(new CustomEvent(ASKS_CHANGED_EVENT, { detail: openCount }));
+}
+
 export function NeedsYou() {
   const [open, setOpen] = useState<Ask[] | null>(null);
   const [answered, setAnswered] = useState<Ask[]>([]);
+  const [moreAnswered, setMoreAnswered] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const apply = useCallback(
+    (o: Awaited<ReturnType<typeof listAsks>>, a: Awaited<ReturnType<typeof listAsks>>) => {
+      setOpen(o.asks);
+      setAnswered(a.asks);
+      setMoreAnswered(a.asks.length >= PAGE);
+      setError(null);
+      announce(o.open_count);
+    },
+    [],
+  );
+
+  // Reload after an answer or withdraw. On failure the old lists stay on
+  // screen and the error shows above them with a retry.
   const load = useCallback(async () => {
     try {
       const [o, a] = await Promise.all([listAsks("open"), listAsks("answered")]);
-      setOpen(o.asks);
-      setAnswered(a.asks);
-      setError(null);
+      apply(o, a);
     } catch {
       setError("Could not load your questions.");
     }
-  }, []);
+  }, [apply]);
 
   useEffect(() => {
     let cancelled = false;
     Promise.all([listAsks("open"), listAsks("answered")])
       .then(([o, a]) => {
-        if (cancelled) return;
-        setOpen(o.asks);
-        setAnswered(a.asks);
-        setError(null);
+        if (!cancelled) apply(o, a);
       })
       .catch(() => {
         if (!cancelled) setError("Could not load your questions.");
@@ -234,7 +260,20 @@ export function NeedsYou() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [apply]);
+
+  async function loadOlder() {
+    setLoadingMore(true);
+    try {
+      const page = await listAsks("answered", answered.length);
+      setAnswered((prev) => [...prev, ...page.asks.filter((x) => !prev.some((p) => p.id === x.id))]);
+      setMoreAnswered(page.asks.length >= PAGE);
+    } catch {
+      toast.error("Could not load older answers.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   if (error && open === null) {
     return (
@@ -253,6 +292,14 @@ export function NeedsYou() {
 
   return (
     <div className="flex flex-col gap-8">
+      {error && (
+        <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
+          <span>{error} What you see may be out of date.</span>
+          <button type="button" data-testid="needs-you-retry" onClick={() => void load()} className={linkBtn}>
+            Try again
+          </button>
+        </div>
+      )}
       <section aria-labelledby="open-asks" className="flex flex-col gap-3">
         <h2 id="open-asks" className="font-heading text-lg font-semibold">
           Waiting for you
@@ -280,6 +327,19 @@ export function NeedsYou() {
               <AskCard key={a.id} ask={a} mode="answered" onChanged={load} />
             ))}
           </ul>
+          {moreAnswered && (
+            <div>
+              <button
+                type="button"
+                data-testid="needs-you-older"
+                disabled={loadingMore}
+                onClick={() => void loadOlder()}
+                className={linkBtn}
+              >
+                {loadingMore ? "Loading…" : "Show older answers"}
+              </button>
+            </div>
+          )}
         </section>
       )}
     </div>

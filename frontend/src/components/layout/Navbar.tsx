@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/components/layout/AuthProvider";
-import { listAsks } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, listAsks } from "@/lib/api";
 
 // R14 (docs/plans/2026-09-04-application-spine) removed /receipts from the
 // nav — the URL kept working, but a new-user walk (2026-09-27) found no way
@@ -73,6 +73,14 @@ export function Navbar() {
       cancelled = true;
     };
   }, [signedIn, pathname]);
+
+  // The Needs-you page announces the fresh count after every reload, so the
+  // badge clears while the user answers there — no navigation needed.
+  useEffect(() => {
+    const onChanged = (e: Event) => setOpenAsks(Number((e as CustomEvent).detail) || 0);
+    window.addEventListener(ASKS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(ASKS_CHANGED_EVENT, onChanged);
+  }, []);
 
   const badge = (href: string) =>
     href === "/needs-you" && signedIn && openAsks > 0 ? (

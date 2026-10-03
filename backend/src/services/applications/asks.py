@@ -244,9 +244,11 @@ async def list_asks(
     status: str = "open",
     application_id: Optional[int] = None,
     limit: int = 50,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     """The caller's asks, newest first (open ones first when ``status="all"``,
-    which also lists withdrawn ones)."""
+    which also lists withdrawn ones). ``offset`` pages further back — the
+    answered history is never capped, only paged."""
     if status not in STATUS_FILTERS:
         raise SpineError(422, f"status must be one of {list(STATUS_FILTERS)}")
     where = ["k.user_id = ?"]
@@ -259,10 +261,11 @@ async def list_asks(
         where.append("k.application_id = ?")
         params.append(application_id)
     limit = max(1, int(limit))
+    offset = max(0, int(offset))
     cur = await db._db.execute(
         _SELECT + "WHERE " + " AND ".join(where)
         + " ORDER BY (CASE WHEN k.answered_at IS NULL AND k.withdrawn_at IS NULL THEN 0 ELSE 1 END),"
-        + " k.asked_at DESC, k.id DESC LIMIT ?",
-        [*params, limit],
+        + " k.asked_at DESC, k.id DESC LIMIT ? OFFSET ?",
+        [*params, limit, offset],
     )
     return [_serialize(dict(r)) for r in await cur.fetchall()]

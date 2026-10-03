@@ -7,6 +7,7 @@ const answerAsk = vi.fn();
 const withdrawAsk = vi.fn();
 
 vi.mock("@/lib/api", () => ({
+  ASKS_CHANGED_EVENT: "job360:asks-changed",
   listAsks: (...a: unknown[]) => listAsks(...a),
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   withdrawAsk: (...a: unknown[]) => withdrawAsk(...a),
@@ -97,5 +98,66 @@ describe("NeedsYou", () => {
     setup([]);
     render(<NeedsYou />);
     expect(await screen.findByText("Nothing needs you right now.")).toBeInTheDocument();
+  });
+
+  it("tells the header the fresh open count after every load", async () => {
+    const seen: number[] = [];
+    const on = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener("job360:asks-changed", on);
+    setup([openAsk]);
+    render(<NeedsYou />);
+    await waitFor(() => expect(seen).toEqual([1]));
+    setup([]); // the user answered it
+    fireEvent.change(screen.getByTestId("ask-input-1"), { target: { value: "Yes" } });
+    fireEvent.click(screen.getByTestId("ask-save"));
+    fireEvent.click(screen.getByTestId("ask-answer-confirm"));
+    await waitFor(() => expect(seen).toEqual([1, 0]));
+    window.removeEventListener("job360:asks-changed", on);
+  });
+
+  it("a changed answer goes back to the read-only view after saving", async () => {
+    const done = { ...base, id: 2, question: "Q2", status: "answered", answer: "A2", answered_by_user: true };
+    setup([], [done]);
+    render(<NeedsYou />);
+    fireEvent.click(await screen.findByTestId("ask-change"));
+    fireEvent.change(screen.getByTestId("ask-input-2"), { target: { value: "B2" } });
+    setup([], [{ ...done, answer: "B2" }]);
+    fireEvent.click(screen.getByTestId("ask-save"));
+    fireEvent.click(screen.getByTestId("ask-answer-confirm"));
+    await waitFor(() => expect(answerAsk).toHaveBeenCalledWith(2, "B2"));
+    expect(await screen.findByText("B2")).toBeInTheDocument();
+    expect(screen.queryByTestId("ask-input-2")).toBeNull();
+  });
+
+  it("a failed reload after an action shows the error and a retry, keeping the list", async () => {
+    setup([openAsk]);
+    render(<NeedsYou />);
+    await screen.findByTestId("ask-input-1");
+    listAsks.mockRejectedValue(new Error("down"));
+    fireEvent.click(screen.getByTestId("ask-withdraw"));
+    fireEvent.click(screen.getByTestId("ask-withdraw-confirm"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your questions.");
+    expect(screen.getByTestId("ask-input-1")).toBeInTheDocument(); // old list kept
+    setup([]);
+    fireEvent.click(screen.getByTestId("needs-you-retry"));
+    expect(await screen.findByText("Nothing needs you right now.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("pages older answers instead of stopping at the first 50", async () => {
+    const page = (from: number, n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        ...base, id: 100 + from + i, question: `Q${from + i}`, status: "answered", answer: "a",
+      }));
+    listAsks.mockImplementation(async (s: string, offset = 0) =>
+      s === "open"
+        ? { asks: [], open_count: 0 }
+        : { asks: offset === 0 ? page(0, 50) : page(50, 1), open_count: 0 }
+    );
+    render(<NeedsYou />);
+    fireEvent.click(await screen.findByTestId("needs-you-older"));
+    expect(await screen.findByText("Q50")).toBeInTheDocument();
+    expect(listAsks).toHaveBeenCalledWith("answered", 50);
+    expect(screen.queryByTestId("needs-you-older")).toBeNull(); // last page was short
   });
 });

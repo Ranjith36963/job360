@@ -690,10 +690,14 @@ export type Ask = _Schemas["AskOut"];
 export type AskStatus = "open" | "answered" | "all";
 
 export async function listAsks(
-  status: AskStatus = "open"
+  status: AskStatus = "open",
+  offset = 0
 ): Promise<_Schemas["ListAsksResponse"]> {
-  return request(`/api/asks${qs({ status })}`);
+  return request(`/api/asks${qs({ status, offset: offset || undefined })}`);
 }
+
+/** Fired after the Needs-you page reloads, so the header badge follows. */
+export const ASKS_CHANGED_EVENT = "job360:asks-changed";
 
 export async function answerAsk(id: number, answer: string): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/answer`, {
