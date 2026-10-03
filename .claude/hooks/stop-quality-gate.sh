@@ -72,19 +72,28 @@ FILES="$(printf '%s\n' "$CHANGED" | awk '{print $NF}' | head -15 | tr '\n' ' ')"
 # `git add -A` for it is the wrong medicine — it ships the stray inside an
 # unrelated PR. So name strays separately and give them their own cure.
 STRAY_HOURS="${JOB360_QUALITY_GATE_STRAY_HOURS:-12}"
+case "$STRAY_HOURS" in ''|*[!0-9]*) STRAY_HOURS=12 ;; esac  # a typo must not blind the check
 NOW="$(date +%s)"
 STRAYS=""
-while IFS= read -r f; do
+UNAGED=""
+# -z / read -d '': names with spaces or odd bytes arrive raw, never C-quoted.
+while IFS= read -r -d '' f; do
   [ -n "$f" ] || continue
-  m="$(stat -c %Y -- "$f" 2>/dev/null)" || continue
+  # GNU stat (Linux, Git Bash), then BSD/macOS. Both failing is SAID, never skipped.
+  m="$(stat -c %Y -- "$f" 2>/dev/null || stat -f %m -- "$f" 2>/dev/null)" || m=""
+  case "$m" in ''|*[!0-9]*) UNAGED="${UNAGED}${f}; "; continue ;; esac
   age=$(( (NOW - m) / 3600 ))
   [ "$age" -ge "$STRAY_HOURS" ] && STRAYS="${STRAYS}${f} (untouched ${age}h); "
-done < <(git ls-files --others --exclude-standard -- backend frontend 2>/dev/null)
+done < <(git ls-files -z --others --exclude-standard -- backend frontend 2>/dev/null)
 
 STEPS=""
 if [ -n "$STRAYS" ]; then
   STEPS="${STEPS}
 - STRAY FILES FIRST [FC-003]: ${STRAYS}- untracked and untouched for ${STRAY_HOURS}h+, so almost certainly NOT this session's work. Read each one, then move it OUT of the tree (e.g. into \$CLAUDE_JOB_DIR/tmp) so nothing is lost (never delete it on the say-so of its own contents). Do NOT \`git add\` it into your PR. Then re-check what is left."
+fi
+if [ -n "$UNAGED" ]; then
+  STEPS="${STEPS}
+- AGE UNKNOWN [FC-003]: ${UNAGED}- could not read their modification time (stat failed). Check whether each is yours before staging it."
 fi
 if [ "$GATE_OK" != 1 ]; then
   STEPS="${STEPS}

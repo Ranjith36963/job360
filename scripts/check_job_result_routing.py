@@ -118,52 +118,73 @@ def _statements(text: str) -> tuple[list[tuple[int, str]], list[str]]:
         lines.append((start, buf))
 
     out: list[tuple[int, str]] = []
+
+    def emit(n: int, piece: str) -> None:
+        t = piece.strip()
+        while True:  # peel `then` / `do` (dropped) and `else` (its own statement)
+            m = re.match(r"^(then|do|else)(\s+|$)", t)
+            if not m:
+                break
+            if m.group(1) == "else":
+                out.append((n, "else"))
+            t = t[m.end():].strip()
+        if t:
+            out.append((n, t))
+
     heredoc_end = ""
+    # Quote state survives the end of a line: `--body "line one\nelse ..."` is ONE
+    # string, and prose inside it must never read as `else` (CodeRabbit on #709).
+    cur, quote, start_n = "", "", 0
     for n, line in lines:
-        if heredoc_end:
+        if heredoc_end and not quote:
             if line.strip() == heredoc_end:
                 heredoc_end = ""
             continue  # a heredoc BODY is data, never shell
-        pieces, cur, quote, i = [], "", "", 0
+        if not quote:
+            start_n = n
+        bare = ""  # this line's text OUTSIDE quotes and comments: heredoc markers live here
+        hd_word = False  # inside the quoted word right after `<<` (cat <<'EOF')
+        i = 0
         while i < len(line):
             ch = line[i]
+            if quote and hd_word:
+                bare += ch
             if quote == "'":
                 cur += ch
                 if ch == "'":
-                    quote = ""
+                    quote, hd_word = "", False
             elif ch == "\\" and i + 1 < len(line):
                 cur += ch + line[i + 1]
                 i += 1
             elif quote == '"':
                 cur += ch
                 if ch == '"':
-                    quote = ""
+                    quote, hd_word = "", False
             elif ch in "'\"":
                 quote = ch
                 cur += ch
+                hd_word = bool(re.search(r"<<-?\s*$", bare))
+                if hd_word:
+                    bare += ch
             elif ch == "#" and (not cur or cur[-1].isspace()):
                 break
             elif ch == ";":
-                pieces.append(cur)
-                cur = ""
+                emit(start_n, cur)
+                cur, start_n = "", n
             else:
                 cur += ch
+                bare += ch
             i += 1
-        pieces.append(cur)
-        for piece in pieces:
-            t = piece.strip()
-            while True:  # peel `then` / `do` (dropped) and `else` (its own statement)
-                m = re.match(r"^(then|do|else)(\s+|$)", t)
-                if not m:
-                    break
-                if m.group(1) == "else":
-                    out.append((n, "else"))
-                t = t[m.end():].strip()
-            if t:
-                out.append((n, t))
-        hd = _HEREDOC.search(line)
+        if quote:
+            cur += "\n"  # still inside a string: the statement continues
+            continue
+        emit(start_n, cur)
+        cur = ""
+        hd = _HEREDOC.search(bare)
         if hd:
             heredoc_end = hd.group(2)
+    if cur:
+        emit(start_n, cur)
     return out, interp
 
 
@@ -210,17 +231,33 @@ def _arm_patterns(text: str) -> list[str] | None:
     return [p.strip() for p in m.group(1).split("|")]
 
 
-def _check_case(stmts: list[tuple[int, str]], var: str) -> tuple[list[int], bool]:
-    """(lines of `case "$VAR"` with no catch-all, whether a complete case exists)."""
-    bad, complete_seen, cv = [], False, _Var(var)
+def _assigned(statements: list[str]) -> set[str]:
+    """Variable names a list of statements assigns."""
+    return {m.group(1) for m in (_ASSIGN.match(x) for x in statements) if m}
+
+
+def _check_case(stmts: list[tuple[int, str]], var: str) -> tuple[list[int], set[str]]:
+    """(lines of `case "$VAR"` with no catch-all, names a catch-all arm assigns).
+
+    The second value is PER VARIABLE: a `*)` arm that only echoes covers nothing
+    for `mode` (CodeRabbit on #709 -- one flag per step hid a real router).
+    """
+    bad, catchall, cv = [], set(), _Var(var)
     for i, (n, s0) in enumerate(stmts):
         m = cv.case.match(s0)
         if not m:
             continue
-        arms: list[list[str]] = []
-        first = _arm_patterns(m.group(1).strip())
-        if first:
-            arms.append(first)
+        arms: list[tuple[list[str], list[str]]] = []  # (patterns, body statements)
+
+        def open_arm(text: str) -> bool:
+            pats = _arm_patterns(text)
+            if pats is None:
+                return False
+            body = re.sub(r"^\(?\s*[^()]*?\s*\)", "", text, count=1).strip()
+            arms.append((pats, [body] if body else []))
+            return True
+
+        open_arm(m.group(1).strip())
         depth = 0
         for _, s in stmts[i + 1:]:
             if re.match(r"^case\s", s):
@@ -229,17 +266,22 @@ def _check_case(stmts: list[tuple[int, str]], var: str) -> tuple[list[int], bool
                 if depth == 0:
                     break
                 depth -= 1
-            elif depth == 0:
-                pats = _arm_patterns(s)
-                if pats:
-                    arms.append(pats)
-        flat = [p for a in arms for p in a]
-        literal = {p.strip("'\"") for p in flat}
-        if "*" in flat or ALL_RESULTS <= literal:
-            complete_seen = True
+                continue
+            if depth == 0 and open_arm(s):
+                continue
+            if arms:
+                arms[-1][1].append(s)
+        literal = {p.strip("'\"") for pats, _ in arms for p in pats}
+        if ALL_RESULTS <= literal:  # every value has its own arm
+            for _, body in arms:
+                catchall |= _assigned(body)
+        elif any("*" in pats for pats, _ in arms):
+            for pats, body in arms:
+                if "*" in pats:
+                    catchall |= _assigned(body)
         else:
             bad.append(n)
-    return bad, complete_seen
+    return bad, catchall
 
 
 def _chain(stmts: list[tuple[int, str]], i: int) -> tuple[list[str], list[list[str]], bool, int]:
@@ -269,17 +311,19 @@ def _chain(stmts: list[tuple[int, str]], i: int) -> tuple[list[str], list[list[s
     return conds, bodies, has_else, j
 
 
-def _check_if(stmts: list[tuple[int, str]], var: str, case_complete: bool) -> list[tuple[int, str]]:
+def _check_if(stmts: list[tuple[int, str]], var: str, case_catchall: set[str]) -> list[tuple[int, str]]:
     """Return (line, message) for unrouted if/elif chains and lone branches over VAR."""
     cv, bad = _Var(var), []
-    routed = case_complete
+    catchall = set(case_catchall)  # names some catch-all branch over VAR assigns
     lone: list[tuple[int, set[str], set[str]]] = []  # (line, values, assigned names)
 
     for i, (n, s) in enumerate(stmts):
         if re.match(r"^(\[\[?|test)\s", s) and "&&" in s:
             t = re.sub(r"\|\|\s*(true|:)\s*$", "", s).strip()  # `|| true` is not routing
-            if "||" in t:
-                continue  # `... && a || b`: b is its catch-all
+            if "||" in t:  # `[ .. ] && a=1 || a=2`: the `||` side is the catch-all
+                if any(cv.positives(p) or cv.negatives(p) for p in t.split("||")[0].split("&&")):
+                    catchall |= _assigned([t.split("||")[-1].strip()])
+                continue
             parts = [p.strip() for p in t.split("&&")]
             vals = set().union(*(cv.positives(p) for p in parts[:-1]))
             a = _ASSIGN.match(parts[-1])
@@ -291,26 +335,29 @@ def _check_if(stmts: list[tuple[int, str]], var: str, case_complete: bool) -> li
         conds, bodies, has_else, _ = _chain(stmts, i)
         if not any(cv.positives(c) or cv.negatives(c) for c in conds):
             continue  # this chain is not about VAR
-        pure_neg = any(cv.negatives(c) and not cv.positives(c) for c in conds)
         values = set().union(*(cv.positives(c) for c in conds))
-        if has_else or pure_neg:
-            routed = True
+        neg = [k for k, c in enumerate(conds) if cv.negatives(c) and not cv.positives(c)]
+        for k in neg:  # a purely `!=` branch catches everything it does not exclude
+            catchall |= _assigned(bodies[k])
+        if has_else:
+            catchall |= _assigned(bodies[-1])
+            continue
+        if neg:
             continue
         if len(conds) >= 2:  # an if/elif router
             all_exit = all(b and _EXITS.match(b[-1]) for b in bodies)
             if len(values) >= 2 and not all_exit:
                 bad.append((n, f"if/elif chain over ${var} has no `else`"))
             continue
-        assigned = {m.group(1) for b in bodies for m in [_ASSIGN.match(x) for x in b] if m}
+        assigned = _assigned([x for b in bodies for x in b])
         if values and assigned:
             lone.append((n, values, assigned))
 
-    if not routed:
-        for name in sorted({a for _, _, names in lone for a in names}):
-            hits = [(ln, vals) for ln, vals, names in lone if name in names]
-            covered = set().union(*(vals for _, vals in hits))
-            if len(hits) >= 2 and "success" in covered and len(covered) >= 2:
-                bad.append((hits[0][0], f"separate branches set ${name} for {sorted(covered)} with no catch-all"))
+    for name in sorted({a for _, _, names in lone for a in names} - catchall):
+        hits = [(ln, vals) for ln, vals, names in lone if name in names]
+        covered = set().union(*(vals for _, vals in hits))
+        if len(hits) >= 2 and "success" in covered and len(covered) >= 2:
+            bad.append((hits[0][0], f"separate branches set ${name} for {sorted(covered)} with no catch-all"))
     return bad
 
 
@@ -336,13 +383,13 @@ def check(root: Path, broken: str = "") -> list[str]:
                 label = step.get("name") or step.get("id") or "?"
                 where = f"{wf.name}: job `{job_id}` step `{label}`"
                 for var in names:
-                    case_bad, complete = _check_case(stmts, var)
+                    case_bad, case_catchall = _check_case(stmts, var)
                     if broken != "CASE":
                         for ln in case_bad:
                             problems.append(f'{where} run-line {ln}: `case "${var}"` has no `*)` arm '
                                             "-- cancelled/skipped fall through silently")
                     if broken != "IF":
-                        for ln, msg in _check_if(stmts, var, complete):
+                        for ln, msg in _check_if(stmts, var, case_catchall):
                             problems.append(f"{where} run-line {ln}: {msg} -- cancelled/skipped fall through silently")
     return problems
 

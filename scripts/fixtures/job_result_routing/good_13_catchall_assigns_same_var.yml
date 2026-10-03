@@ -1,0 +1,15 @@
+on: workflow_dispatch
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: route
+        env:
+          R: ${{ needs.verify.result }}
+        run: |
+          mode=none
+          if [ "$R" = success ]; then mode=ship; fi
+          if [ "$R" = failure ]; then mode=failed; fi
+          if [ "$R" != success ] && [ "$R" != failure ]; then mode=incomplete; fi
+          gh pr comment "$PR" --body "Result: $R.
+          if this looks wrong, else-where docs say re-run"
