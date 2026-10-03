@@ -43,6 +43,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -57,6 +58,32 @@ MAX_REPORTED = int(os.getenv("SENTRY_MAX_REPORTED", "15"))
 # A drill knob: forces a red without touching Sentry, so the whole
 # poll -> issue -> triage chain can be exercised on purpose.
 FORCE_RED = os.getenv("SENTRY_FORCE_RED", "") == "1"
+# Only issues first seen AT/AFTER this ISO-8601 time count (the merge time).
+# Without it the window is a plain "last Nh", so an issue born in merge A's
+# deploy re-trips merge B's watch and rolls good code back (#722/#724/#725).
+SINCE = os.getenv("SENTRY_SINCE", "").strip()
+
+
+def _parse_ts(value: str) -> datetime | None:
+    """Parse a Sentry/GitHub ISO timestamp (`Z` or offset); None if unreadable."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def issues_since(issues: list[dict], since: str) -> list[dict]:
+    """Keep issues first seen at/after `since`. An unreadable `since` filters nothing
+    (over-report, never miss); an issue with an unreadable firstSeen is kept."""
+    cutoff = _parse_ts(since) if since else None
+    if cutoff is None:
+        return issues
+    kept = []
+    for it in issues:
+        seen = _parse_ts(str(it.get("firstSeen", "")))
+        if seen is None or seen >= cutoff:
+            kept.append(it)
+    return kept
 
 
 def _get(url: str, token: str) -> list[dict]:

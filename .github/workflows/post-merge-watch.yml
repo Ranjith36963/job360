@@ -243,6 +243,9 @@ jobs:
         env:
           SENTRY_API_TOKEN: ${{ secrets.SENTRY_API_TOKEN || secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_WINDOW_HOURS: "1"
+          # Count only issues born after THIS merge (push event; empty on a
+          # manual dispatch, which falls back to the plain 1h window).
+          SENTRY_SINCE: ${{ github.event.head_commit.timestamp }}
         run: |
           set +e
           if [ -z "$SENTRY_API_TOKEN" ]; then
