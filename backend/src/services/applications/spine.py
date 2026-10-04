@@ -1270,16 +1270,71 @@ async def _list_receipts_for_application(
     )
     rows = [dict(r) for r in await cur.fetchall()]
     for row in rows:
-        # Only well-formed {question, answer} pairs survive — the response
-        # model is strict (extra="forbid"), so a malformed legacy entry would
-        # otherwise turn a read into a 500.
-        row["answers"] = [
-            {"question": str(a["question"]), "answer": str(a["answer"])}
-            for a in _receipt_json(row.get("answers"), list)
-            if isinstance(a, dict) and "question" in a and "answer" in a
-        ]
+        row["answers"] = _receipt_answers(row.get("answers"))
         row["fields_filled"] = _receipt_json(row.get("fields_filled"), dict)
     return rows
+
+
+def _receipt_answers(raw: Any) -> list[dict[str, str]]:
+    """Only well-formed {question, answer} pairs survive — the response model
+    is strict (extra="forbid"), so a malformed legacy entry would otherwise
+    turn a read into a 500."""
+    return [
+        {"question": str(a["question"]), "answer": str(a["answer"])}
+        for a in _receipt_json(raw, list)
+        if isinstance(a, dict) and "question" in a and "answer" in a
+    ]
+
+
+async def _artifact_version_no(
+    db: JobDatabase, user_id: str, application_id: Optional[int], kind: str, artifact_id: Optional[int]
+) -> Optional[int]:
+    """The stored ``version_no`` of the artifact a receipt names, or None when
+    the receipt names none (or the named row is not this user's)."""
+    if artifact_id is None or application_id is None:
+        return None
+    cur = await db._db.execute(
+        "SELECT version_no FROM application_artifacts "
+        "WHERE id = ? AND user_id = ? AND application_id = ? AND kind = ?",
+        (artifact_id, user_id, application_id, kind),
+    )
+    row = await cur.fetchone()
+    return int(row["version_no"]) if row is not None else None
+
+
+async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Optional[dict[str, Any]]:
+    """What the assistant recorded when the user applied, for ONE receipt —
+    read off the same ``application_receipts`` row the legacy
+    ``GET /receipts/{id}`` route already serves (no join: it is one table).
+
+    Stored facts only (rule #29): an empty answers list, an empty
+    fields mapping, a blank confirmation or blank actor read as empty / None,
+    never a default. Scoped by ``user_id`` (rule #12): a foreign id is None.
+    Read-only — receipts are append-only (M3).
+    """
+    cur = await db._db.execute(
+        "SELECT application_id, cv_artifact_id, cover_letter_artifact_id, answers, fields_filled, "
+        "confirmation, recorded_by FROM application_receipts WHERE user_id = ? AND id = ?",
+        (user_id, receipt_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return None
+    r = dict(row)
+    application_id = r.get("application_id")
+    return {
+        "application_id": application_id,
+        "answers": _receipt_answers(r.get("answers")),
+        "fields_filled": _receipt_json(r.get("fields_filled"), dict),
+        "confirmation": r.get("confirmation") or None,
+        "recorded_by": r.get("recorded_by") or None,
+        "cv_version_no": await _artifact_version_no(
+            db, user_id, application_id, "cv", r.get("cv_artifact_id")
+        ),
+        "cover_letter_version_no": await _artifact_version_no(
+            db, user_id, application_id, "cover_letter", r.get("cover_letter_artifact_id")
+        ),
+    }
 
 
 def _visa_for(app_row: dict[str, Any], countries: list[str]) -> dict[str, Any]:

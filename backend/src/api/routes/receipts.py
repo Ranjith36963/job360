@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
+from src.api.routes.applications import ReceiptAnswerOut
 from src.repositories.database import JobDatabase
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -50,6 +51,24 @@ class Receipt(BaseModel):
     profile_version: int | None
     channel: str
     note: str
+    # What the assistant recorded when the user applied (record_application,
+    # spine R8) — stored facts read off this same row, never computed. A
+    # receipt made without them (the web "I applied" button, rows from before
+    # 0037) reads empty / None: no defaults, no placeholders (rule #29).
+    application_id: int | None = None
+    answers: list[ReceiptAnswerOut] = Field(default_factory=list)
+    fields_filled: dict[str, Any] = Field(default_factory=dict)
+    confirmation: str | None = None
+    cv_version_no: int | None = None
+    cover_letter_version_no: int | None = None
+    recorded_by: str | None = None
+
+
+_RECEIPT_BASE_FIELDS = (
+    "id", "job_id", "sent_at", "job_title", "job_company", "job_location", "job_apply_url",
+    "job_source", "job_description", "cv_text", "cv_origin", "cover_letter_text",
+    "cover_letter_origin", "profile_version", "channel", "note",
+)
 
 
 class ReceiptSummary(BaseModel):
@@ -72,8 +91,13 @@ class ReceiptListResponse(BaseModel):
     total: int
 
 
-def _to_receipt(row: dict[str, Any]) -> Receipt:
-    return Receipt(**{k: row[k] for k in Receipt.model_fields})
+async def _to_receipt(db: JobDatabase, user_id: str, row: dict[str, Any]) -> Receipt:
+    """The frozen row plus the details recorded on the SAME
+    `application_receipts` row (spine.receipt_details), scoped by owner."""
+    from src.services.applications import spine as applications_spine  # noqa: PLC0415
+
+    details = await applications_spine.receipt_details(db, user_id, int(row["id"])) or {}
+    return Receipt(**{k: row[k] for k in _RECEIPT_BASE_FIELDS}, **details)
 
 
 def _to_summary(row: dict[str, Any]) -> ReceiptSummary:
@@ -186,7 +210,7 @@ async def create_receipt(
             "has_cover_letter": cl_text is not None, "status": "ok",
         },
     )
-    return _to_receipt(receipt)
+    return await _to_receipt(db, user.id, receipt)
 
 
 @router.get("/receipts", response_model=ReceiptListResponse, dependencies=AUTH_FIRST)
@@ -211,4 +235,4 @@ async def get_receipt(
     row = await db.get_receipt(user.id, receipt_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Receipt not found")
-    return _to_receipt(row)
+    return await _to_receipt(db, user.id, row)

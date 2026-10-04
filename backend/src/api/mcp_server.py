@@ -332,6 +332,14 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "cover_letter_origin": r.cover_letter_origin,
         "channel": r.channel,
         "note": r.note,
+        # What was recorded at apply time — stored facts, empty when never recorded.
+        "application_id": r.application_id,
+        "answers": [a.model_dump() for a in r.answers],
+        "fields_filled": r.fields_filled,
+        "confirmation": r.confirmation,
+        "cv_version_no": r.cv_version_no,
+        "cover_letter_version_no": r.cover_letter_version_no,
+        "recorded_by": r.recorded_by,
         "url": _receipt_url(r.id),
     }
 
@@ -691,7 +699,9 @@ def build_server(version: str = "") -> MCPServer:
     @mcp.tool()
     async def get_receipt(receipt_id: int) -> dict[str, Any]:
         """One application receipt in full: the job as it read at the time and the exact
-        CV / cover letter text that was sent."""
+        CV / cover letter text that was sent, plus what was recorded when the user applied
+        (answers, fields_filled, confirmation, the CV / cover letter version numbers sent,
+        application_id, recorded_by) — empty when nobody recorded them."""
         try:
             async with _request_db() as db:
                 resp = await receipts_route.get_receipt(receipt_id, db, _user())
