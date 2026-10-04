@@ -81,6 +81,7 @@ export function ConsentBanner() {
   return (
     <div
       ref={bannerRef}
+      data-print-hide
       role="dialog"
       aria-modal="false"
       aria-label="Analytics cookie consent"
