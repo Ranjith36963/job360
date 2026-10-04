@@ -153,7 +153,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if watchdog is not None:
             watchdog.cancel()
         # Background session `last_seen` touches (FC-008): finish or cancel
-        # them before the DB closes. Short timeout, never blocks shutdown long.
+        # them before the DB closes. Bound: up to 2 s waiting, then up to 1 s
+        # more for the cancelled ones to unwind, so at most ~3 s in total.
         await drain_session_touches(timeout=2.0)
     await close_db()
     # Idempotent — a no-op if the pool was never opened (e.g. TEST_MODE).

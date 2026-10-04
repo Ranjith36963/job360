@@ -305,14 +305,14 @@ async def test_resolve_returns_before_the_touch_is_written(
     cookie = await _stale_cookie(session_db)
     release, started = _gate_the_write(monkeypatch)
     spy = StatementSpy(monkeypatch)
-
-    assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
-    await asyncio.sleep(0)  # let the background task start and block on the gate
-    assert len(started) == 1, "a stale session must schedule exactly one touch"
-    assert spy.session_updates() == [], "resolve returned, yet the UPDATE already ran — it is not off-path"
-    assert (await _read_session(session_db))["last_seen"] == (T0 - timedelta(hours=1)).isoformat()
-
-    release.set()
+    try:
+        assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
+        await asyncio.sleep(0)  # let the background task start and block on the gate
+        assert len(started) == 1, "a stale session must schedule exactly one touch"
+        assert spy.session_updates() == [], "resolve returned, yet the UPDATE already ran — it is not off-path"
+        assert (await _read_session(session_db))["last_seen"] == (T0 - timedelta(hours=1)).isoformat()
+    finally:
+        release.set()
     await auth_sessions.drain_session_touches()
     assert len(spy.session_updates()) == 1, spy.statements
     assert (await _read_session(session_db))["last_seen"] == T0.isoformat()
@@ -326,12 +326,13 @@ async def test_seven_concurrent_resolves_on_a_stale_session_write_once(
     cookie = await _stale_cookie(session_db)
     release, started = _gate_the_write(monkeypatch)
     spy = StatementSpy(monkeypatch)
-
-    results = await asyncio.gather(
-        *(auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) for _ in range(7))
-    )
-    assert results == ["user-1"] * 7
-    release.set()
+    try:
+        results = await asyncio.gather(
+            *(auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) for _ in range(7))
+        )
+        assert results == ["user-1"] * 7
+    finally:
+        release.set()
     await auth_sessions.drain_session_touches()
     assert len(started) == 1
     assert len(spy.session_updates()) == 1, spy.statements
@@ -345,12 +346,14 @@ async def test_interval_zero_is_still_deduplicated_while_a_write_is_in_flight(
     monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 0)
     cookie = await _stale_cookie(session_db)
     release, started = _gate_the_write(monkeypatch)
-    await asyncio.gather(
-        *(auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) for _ in range(5))
-    )
-    await asyncio.sleep(0)
-    assert len(started) == 1
-    release.set()
+    try:
+        await asyncio.gather(
+            *(auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) for _ in range(5))
+        )
+        await asyncio.sleep(0)
+        assert len(started) == 1
+    finally:
+        release.set()
     await auth_sessions.drain_session_touches()
 
 
@@ -363,13 +366,17 @@ async def test_a_failing_touch_never_fails_the_resolve_and_is_retried_later(
     orig = auth_sessions._write_last_seen
 
     async def boom(db_path: str, sid: str, when_iso: str) -> None:
-        raise RuntimeError("disk on fire")
+        raise RuntimeError("password=hunter2 host=db.internal")
 
     monkeypatch.setattr(auth_sessions, "_write_last_seen", boom)
     with caplog.at_level(logging.WARNING, logger="job360.auth.sessions"):
         assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
         await auth_sessions.drain_session_touches()
-    assert any("disk on fire" in r.getMessage() for r in caplog.records), caplog.text
+    messages = [r.getMessage() for r in caplog.records if r.name == "job360.auth.sessions"]
+    assert any("touch failed" in m and "RuntimeError" in m for m in messages), caplog.text
+    assert not any("hunter2" in m or "db.internal" in m for m in messages), (
+        "the warning must log the exception TYPE only — its text can carry SQL or connection details"
+    )
     assert (await _read_session(session_db))["last_seen"] == (T0 - timedelta(hours=1)).isoformat()
     assert auth_sessions._inflight_touches == {}
 
@@ -382,6 +389,65 @@ async def test_a_failing_touch_never_fails_the_resolve_and_is_retried_later(
 
 
 @pytest.mark.asyncio
+async def test_a_touch_that_never_finishes_times_out_frees_its_slot_and_is_retried(
+    session_db: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A stalled disk / dead TCP link must not hold a Postgres connection forever."""
+    monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 300)
+    monkeypatch.setattr(settings, "SESSION_TOUCH_TIMEOUT_SECONDS", 0.1)
+    cookie = await _stale_cookie(session_db)
+    never = asyncio.Event()  # never set
+    calls: list[str] = []
+    orig = auth_sessions._write_last_seen
+
+    async def stuck(db_path: str, sid: str, when_iso: str) -> None:
+        calls.append(sid)
+        await never.wait()
+
+    monkeypatch.setattr(auth_sessions, "_write_last_seen", stuck)
+    with caplog.at_level(logging.WARNING, logger="job360.auth.sessions"):
+        assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
+        await auth_sessions.drain_session_touches()  # no timeout: the touch's own timeout must end it
+    assert len(calls) == 1
+    assert auth_sessions._inflight_touches == {}, "a timed-out touch must free its slot"
+    assert auth_sessions._touch_tasks == set()
+    assert any("touch failed" in r.getMessage() and "TimeoutError" in r.getMessage() for r in caplog.records), (
+        caplog.text
+    )
+    assert (await _read_session(session_db))["last_seen"] == (T0 - timedelta(hours=1)).isoformat()
+
+    # Not recorded as touched: a later resolve schedules a fresh write, which lands.
+    monkeypatch.setattr(auth_sessions, "_write_last_seen", orig)
+    t1 = T0 + timedelta(seconds=1)
+    assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=t1) == "user-1"
+    await auth_sessions.drain_session_touches()
+    assert (await _read_session(session_db))["last_seen"] == t1.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_at_the_cap_a_further_touch_is_skipped_and_the_request_still_succeeds(
+    session_db: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 300)
+    monkeypatch.setattr(settings, "SESSION_TOUCH_MAX_INFLIGHT", 2)
+    cookies = [await _stale_cookie(session_db) for _ in range(4)]
+    release, started = _gate_the_write(monkeypatch)
+    try:
+        with caplog.at_level(logging.WARNING, logger="job360.auth.sessions"):
+            for c in cookies:
+                assert await auth_sessions.resolve_session(session_db, c, secret=SESSION_SECRET, now=T0) == "user-1"
+            await asyncio.sleep(0)
+        assert len(auth_sessions._inflight_touches) == 2
+        assert len(started) == 2, "sessions past the cap must not start a touch"
+        cap_warnings = [r for r in caplog.records if "touch skipped" in r.getMessage()]
+        assert len(cap_warnings) == 1, "two skips inside a minute = ONE warning (rate-limited), not one per request"
+    finally:
+        release.set()
+    await auth_sessions.drain_session_touches()
+    assert auth_sessions._inflight_touches == {}
+
+
+@pytest.mark.asyncio
 async def test_nothing_is_left_in_flight_after_draining(
     session_db: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -389,10 +455,12 @@ async def test_nothing_is_left_in_flight_after_draining(
     monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 300)
     cookies = [await _stale_cookie(session_db) for _ in range(3)]
     release, _started = _gate_the_write(monkeypatch)
-    for c in cookies:
-        assert await auth_sessions.resolve_session(session_db, c, secret=SESSION_SECRET, now=T0) == "user-1"
-    assert len(auth_sessions._inflight_touches) == 3
-    release.set()
+    try:
+        for c in cookies:
+            assert await auth_sessions.resolve_session(session_db, c, secret=SESSION_SECRET, now=T0) == "user-1"
+        assert len(auth_sessions._inflight_touches) == 3
+    finally:
+        release.set()
     await auth_sessions.drain_session_touches()
     assert auth_sessions._inflight_touches == {}
     assert auth_sessions._touch_tasks == set()
@@ -405,13 +473,16 @@ async def test_drain_with_timeout_cancels_a_stuck_touch(
     """Shutdown path: a touch that never finishes is cancelled, not left pending."""
     monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 300)
     cookie = await _stale_cookie(session_db)
-    _release, started = _gate_the_write(monkeypatch)  # never released
-    assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
-    await asyncio.sleep(0)
-    assert len(started) == 1
-    await auth_sessions.drain_session_touches(timeout=0.05)
-    assert auth_sessions._inflight_touches == {}
-    assert auth_sessions._touch_tasks == set()
+    release, started = _gate_the_write(monkeypatch)
+    try:
+        assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
+        await asyncio.sleep(0)
+        assert len(started) == 1
+        await auth_sessions.drain_session_touches(timeout=0.05)
+        assert auth_sessions._inflight_touches == {}
+        assert auth_sessions._touch_tasks == set()
+    finally:
+        release.set()  # harmless after the cancel; frees the gate if an assert failed first
 
 
 @pytest.mark.asyncio

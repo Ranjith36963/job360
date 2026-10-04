@@ -243,6 +243,15 @@ OAUTH_PRUNE_SAMPLE = int(os.getenv("OAUTH_PRUNE_SAMPLE", "20"))
 # expiry is the absolute `expires_at`, nothing reads `last_seen` to decide
 # access. `0` restores the old write-every-request behaviour.
 SESSION_TOUCH_INTERVAL_SECONDS = int(os.getenv("SESSION_TOUCH_INTERVAL_SECONDS", "300"))
+# The touch runs in a background task on its OWN Postgres connection (outside
+# the pool). A stalled disk or dead TCP link must not hold that connection
+# forever: the whole write (connect + UPDATE + commit + close) is abandoned
+# after this many seconds and retried on a later request.
+SESSION_TOUCH_TIMEOUT_SECONDS = float(os.getenv("SESSION_TOUCH_TIMEOUT_SECONDS", "10"))
+# At most this many touches run at once per process; each holds a real
+# connection, and Postgres allows ~100. Extra touches are skipped (informational
+# only) with a rate-limited warning.
+SESSION_TOUCH_MAX_INFLIGHT = int(os.getenv("SESSION_TOUCH_MAX_INFLIGHT", "20"))
 
 def _env_flag(name: str, default: bool) -> bool:
     """Read a boolean env var. Unset -> ``default``. Accepts 1/true/yes/on."""

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
@@ -39,11 +40,16 @@ logger = logging.getLogger("job360.auth.sessions")
 # These structures are in-process and bounded. They only ever SKIP an
 # informational write; they never grant or refuse access. Losing them (restart,
 # another worker process) costs at most a few extra writes.
-_MAX_INFLIGHT_TOUCHES = 1000  # beyond this many running touches, skip (informational)
+#
+# Limits are settings (``SESSION_TOUCH_TIMEOUT_SECONDS``,
+# ``SESSION_TOUCH_MAX_INFLIGHT``): each running touch holds a real Postgres
+# connection outside the pool, so both how long and how many are capped.
 _MAX_RECENT_TOUCHES = 10000  # LRU cap on remembered successful touches
+_CAP_WARNING_EVERY_SECONDS = 60.0  # at most one "cap hit" warning per minute
 _touch_tasks: set[asyncio.Task[None]] = set()  # strong refs, so no GC mid-flight
 _inflight_touches: dict[str, asyncio.Task[None]] = {}  # session id -> its running touch
 _recent_touches: OrderedDict[str, datetime] = OrderedDict()  # session id -> last OK touch
+_cap_state: dict[str, float] = {"last_warning": float("-inf"), "skipped": 0.0}
 
 
 async def _write_last_seen(db_path: str, sid: str, when_iso: str) -> None:
@@ -54,15 +60,22 @@ async def _write_last_seen(db_path: str, sid: str, when_iso: str) -> None:
 
 
 async def _run_touch(db_path: str, sid: str, when: datetime) -> None:
-    """Run one touch and swallow every failure: a failed touch never affects a request."""
+    """Run one touch and swallow every failure: a failed touch never affects a request.
+
+    The whole write (connect + UPDATE + commit + close) is bounded by
+    ``SESSION_TOUCH_TIMEOUT_SECONDS``. A timeout or error is logged by
+    exception TYPE only (the text can carry SQL or connection details), is NOT
+    recorded as a touch, and so is retried on a later request.
+    """
     try:
-        await _write_last_seen(db_path, sid, when.isoformat())
+        await asyncio.wait_for(
+            _write_last_seen(db_path, sid, when.isoformat()),
+            timeout=settings.SESSION_TOUCH_TIMEOUT_SECONDS,
+        )
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 — informational write, must never raise
-        logger.warning(
-            "session last_seen touch failed (session %s...): %s: %s", sid[:8], type(exc).__name__, exc
-        )
+        logger.warning("session last_seen touch failed (session %s...): %s", sid[:8], type(exc).__name__)
         return
     _recent_touches[sid] = when
     _recent_touches.move_to_end(sid)
@@ -104,7 +117,17 @@ def _schedule_touch(db_path: str, sid: str, when: datetime) -> None:
     """Start the background touch for ``sid`` unless one is already running."""
     if _touch_in_flight(sid):
         return
-    if len(_inflight_touches) >= _MAX_INFLIGHT_TOUCHES:
+    if len(_inflight_touches) >= settings.SESSION_TOUCH_MAX_INFLIGHT:
+        _cap_state["skipped"] += 1
+        now_mono = time.monotonic()
+        if now_mono - _cap_state["last_warning"] >= _CAP_WARNING_EVERY_SECONDS:
+            logger.warning(
+                "session last_seen touch skipped: %d already in flight (cap "
+                "SESSION_TOUCH_MAX_INFLIGHT=%d); %d skipped since the last warning",
+                len(_inflight_touches), settings.SESSION_TOUCH_MAX_INFLIGHT, int(_cap_state["skipped"]),
+            )
+            _cap_state["last_warning"] = now_mono
+            _cap_state["skipped"] = 0
         return
     task = asyncio.get_running_loop().create_task(_run_touch(db_path, sid, when))
     _touch_tasks.add(task)
@@ -139,6 +162,20 @@ async def drain_session_touches(timeout: Optional[float] = None) -> None:
     for t in list(_touch_tasks):
         if t.done() or t.get_loop() is not loop:
             _touch_tasks.discard(t)
+
+
+def reset_session_touch_state() -> None:
+    """Forget all in-process touch bookkeeping (tests only).
+
+    Drops references; it does not cancel tasks (a task may belong to another
+    thread's loop, where ``cancel()`` is not safe). Call
+    ``drain_session_touches`` first for the current loop's tasks.
+    """
+    _touch_tasks.clear()
+    _inflight_touches.clear()
+    _recent_touches.clear()
+    _cap_state["last_warning"] = float("-inf")
+    _cap_state["skipped"] = 0.0
 
 
 def _signer(secret: str) -> TimestampSigner:
