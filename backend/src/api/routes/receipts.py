@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from src.api.auth_deps import CurrentUser, require_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
 from src.repositories.database import JobDatabase
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -113,7 +113,7 @@ async def _document_sent(
     return _sent_text(await db.get_tailored_doc(user_id, job_id, kind))
 
 
-@router.post("/receipts/{job_id}", response_model=Receipt, status_code=201)
+@router.post("/receipts/{job_id}", response_model=Receipt, status_code=201, dependencies=AUTH_FIRST)
 async def create_receipt(
     job_id: int,
     body: CreateReceiptRequest,
@@ -181,7 +181,7 @@ async def create_receipt(
     return _to_receipt(receipt)
 
 
-@router.get("/receipts", response_model=ReceiptListResponse)
+@router.get("/receipts", response_model=ReceiptListResponse, dependencies=AUTH_FIRST)
 async def list_receipts(
     job_id: int | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
@@ -194,7 +194,7 @@ async def list_receipts(
     return ReceiptListResponse(receipts=[_to_summary(r) for r in rows], total=total)
 
 
-@router.get("/receipts/{receipt_id}", response_model=Receipt)
+@router.get("/receipts/{receipt_id}", response_model=Receipt, dependencies=AUTH_FIRST)
 async def get_receipt(
     receipt_id: int,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008

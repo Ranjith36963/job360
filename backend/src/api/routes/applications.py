@@ -27,7 +27,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.auth_deps import CurrentUser, require_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
 from src.api.models import JobResponse, LessonsResponse
 from src.api.routes.bring import job_row_to_response
@@ -885,7 +885,7 @@ class StatsResponse(BaseModel):
 # ── Routes — order matters: /export before /{application_id} ────────────────
 
 
-@router.get("/applications/export", response_model=ExportHistoryResponse)
+@router.get("/applications/export", response_model=ExportHistoryResponse, dependencies=AUTH_FIRST)
 async def export_history(
     since: Optional[str] = Query(None),
     include_text: bool = Query(False),
@@ -922,7 +922,7 @@ async def list_lessons(
     return {"lessons": rows, "total": total}
 
 
-@router.get("/applications/stats", response_model=StatsResponse)
+@router.get("/applications/stats", response_model=StatsResponse, dependencies=AUTH_FIRST)
 async def stats(
     since: Optional[str] = Query(None),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
@@ -935,7 +935,7 @@ async def stats(
         raise AssertionError("unreachable")  # pragma: no cover
 
 
-@router.get("/applications", response_model=ListApplicationsResponse)
+@router.get("/applications", response_model=ListApplicationsResponse, dependencies=AUTH_FIRST)
 async def list_applications(
     status: Optional[str] = Query(None),
     updated_since: Optional[str] = Query(None),
@@ -958,7 +958,7 @@ async def list_applications(
         raise AssertionError("unreachable")  # pragma: no cover
 
 
-@router.get("/applications/job/{job_id}", response_model=JobResponse)
+@router.get("/applications/job/{job_id}", response_model=JobResponse, dependencies=AUTH_FIRST)
 async def get_job(
     job_id: int,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
@@ -985,7 +985,7 @@ async def get_job(
     return job_row_to_response(dict(row))
 
 
-@router.get("/applications/{application_id}", response_model=ApplicationDetailOut)
+@router.get("/applications/{application_id}", response_model=ApplicationDetailOut, dependencies=AUTH_FIRST)
 async def get_application(
     application_id: int,
     with_artifact_text: bool = Query(False),
@@ -1001,7 +1001,8 @@ async def get_application(
 
 
 @router.get(
-    "/applications/{application_id}/artifacts/{artifact_id}", response_model=ApplicationArtifactRowOut
+    "/applications/{application_id}/artifacts/{artifact_id}", response_model=ApplicationArtifactRowOut,
+    dependencies=AUTH_FIRST,
 )
 async def get_application_artifact(
     application_id: int,
@@ -1016,7 +1017,8 @@ async def get_application_artifact(
 
 
 @router.get(
-    "/applications/{application_id}/artifacts/{artifact_id}/diff", response_model=ArtifactDiffOut
+    "/applications/{application_id}/artifacts/{artifact_id}/diff", response_model=ArtifactDiffOut,
+    dependencies=AUTH_FIRST,
 )
 async def diff_application_artifact(
     application_id: int,
@@ -1078,7 +1080,7 @@ async def diff_application_artifact(
     }
 
 
-@router.get("/applications/{application_id}/alignment", response_model=AlignmentOut)
+@router.get("/applications/{application_id}/alignment", response_model=AlignmentOut, dependencies=AUTH_FIRST)
 async def application_alignment(
     application_id: int,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
@@ -1128,6 +1130,7 @@ async def application_alignment(
     # (frontend `api-types.ts` included) treated a successful create as an
     # undocumented response.
     responses={201: {"model": AddContactResponse, "description": "Contact created"}},
+    dependencies=AUTH_FIRST,
 )
 async def add_contact(
     application_id: int,
@@ -1156,6 +1159,7 @@ async def add_contact(
     "/contacts",
     response_model=AddContactResponse,
     responses={201: {"model": AddContactResponse, "description": "Contact created"}},
+    dependencies=AUTH_FIRST,
 )
 async def add_person(
     body: AddPersonRequest,
@@ -1180,7 +1184,7 @@ async def add_person(
     return result
 
 
-@router.patch("/contacts/{contact_id}", response_model=ContactOut)
+@router.patch("/contacts/{contact_id}", response_model=ContactOut, dependencies=AUTH_FIRST)
 async def update_contact(
     contact_id: int,
     body: UpdateContactRequest,
@@ -1206,6 +1210,7 @@ async def update_contact(
     "/contacts/{contact_id}/outreach",
     response_model=RecordOutreachResponse,
     responses={201: {"model": RecordOutreachResponse, "description": "Outreach recorded"}},
+    dependencies=AUTH_FIRST,
 )
 async def record_outreach(
     contact_id: int,
@@ -1236,7 +1241,7 @@ async def record_outreach(
     return result
 
 
-@router.get("/people", response_model=ListPeopleResponse)
+@router.get("/people", response_model=ListPeopleResponse, dependencies=AUTH_FIRST)
 async def list_people(
     contact_id: Optional[int] = Query(None),
     email: Optional[str] = Query(None),
@@ -1255,7 +1260,8 @@ async def list_people(
 
 
 @router.post(
-    "/applications/{application_id}/artifacts", status_code=201, response_model=SaveArtifactResponse
+    "/applications/{application_id}/artifacts", status_code=201, response_model=SaveArtifactResponse,
+    dependencies=AUTH_FIRST,
 )
 async def save_artifact(
     application_id: int,
@@ -1296,7 +1302,7 @@ async def save_artifact(
         raise AssertionError("unreachable")  # pragma: no cover
 
 
-@router.put("/applications/{application_id}/fit", response_model=SaveFitResponse)
+@router.put("/applications/{application_id}/fit", response_model=SaveFitResponse, dependencies=AUTH_FIRST)
 async def save_fit(
     application_id: int,
     body: SaveFitRequest,
@@ -1333,7 +1339,7 @@ class SetVisaResponse(BaseModel):
     visa: ApplicationVisaOut
 
 
-@router.put("/applications/{application_id}/visa", response_model=SetVisaResponse)
+@router.put("/applications/{application_id}/visa", response_model=SetVisaResponse, dependencies=AUTH_FIRST)
 async def set_visa(
     application_id: int,
     body: SetVisaRequest,
@@ -1351,7 +1357,8 @@ async def set_visa(
 
 
 @router.post(
-    "/applications/{application_id}/events", status_code=201, response_model=RecordEventResponse
+    "/applications/{application_id}/events", status_code=201, response_model=RecordEventResponse,
+    dependencies=AUTH_FIRST,
 )
 async def record_event(
     application_id: int,
@@ -1430,6 +1437,7 @@ async def record_event(
     "/applications/{application_id}/receipt",
     status_code=201,
     response_model=RecordApplicationReceiptResponse,
+    dependencies=AUTH_FIRST,
 )
 async def record_application_receipt(
     application_id: int,
@@ -1451,7 +1459,7 @@ async def record_application_receipt(
         raise AssertionError("unreachable")  # pragma: no cover
 
 
-@router.get("/whats-new", response_model=WhatsNewResponse)
+@router.get("/whats-new", response_model=WhatsNewResponse, dependencies=AUTH_FIRST)
 async def whats_new(
     since: Optional[str] = Query(None),
     after_id: Optional[int] = Query(None),

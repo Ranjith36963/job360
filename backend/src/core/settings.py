@@ -236,6 +236,13 @@ OAUTH_MAX_CLIENTS = int(os.getenv("OAUTH_MAX_CLIENTS", "10000"))
 # computed, so a slow prune can never delay a token exchange (Claude.ai's 10s
 # budget). `1` = every call; `0` disables housekeeping entirely.
 OAUTH_PRUNE_SAMPLE = int(os.getenv("OAUTH_PRUNE_SAMPLE", "20"))
+# A session's `last_seen` is written at most once per this many seconds.
+# Writing it on EVERY cookie resolve turned each signed-in read into a commit,
+# and prod's commits wait on a slow disk (0.2-1 s, spikes past 10 s), so
+# `/api/auth/me` took 17-61 s under a burst. `last_seen` is informational only:
+# expiry is the absolute `expires_at`, nothing reads `last_seen` to decide
+# access. `0` restores the old write-every-request behaviour.
+SESSION_TOUCH_INTERVAL_SECONDS = int(os.getenv("SESSION_TOUCH_INTERVAL_SECONDS", "300"))
 
 def _env_flag(name: str, default: bool) -> bool:
     """Read a boolean env var. Unset -> ``default``. Accepts 1/true/yes/on."""
