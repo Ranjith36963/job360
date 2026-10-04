@@ -122,7 +122,7 @@ function ChangePasswordCard() {
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           <div className="space-y-1">
-            <Label htmlFor="" className={LABEL_CLASS}>Current password</Label>
+            <Label htmlFor="cp-current" className={LABEL_CLASS}>Current password</Label>
             <Input
               id="cp-current"
               type="password"
@@ -133,7 +133,7 @@ function ChangePasswordCard() {
             <FieldError message={errors.currentPassword?.message} />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="" className={LABEL_CLASS}>New password</Label>
+            <Label htmlFor="cp-new" className={LABEL_CLASS}>New password</Label>
             <Input
               id="cp-new"
               type="password"
@@ -144,7 +144,7 @@ function ChangePasswordCard() {
             <FieldError message={errors.newPassword?.message} />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="" className={LABEL_CLASS}>Confirm new password</Label>
+            <Label htmlFor="cp-confirm" className={LABEL_CLASS}>Confirm new password</Label>
             <Input
               id="cp-confirm"
               type="password"
@@ -204,7 +204,7 @@ function ChangeEmailCard() {
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           <div className="space-y-1">
-            <Label htmlFor="" className={LABEL_CLASS}>Current password</Label>
+            <Label htmlFor="ce-current" className={LABEL_CLASS}>Current password</Label>
             <Input
               id="ce-current"
               type="password"
@@ -215,7 +215,7 @@ function ChangeEmailCard() {
             <FieldError message={errors.currentPassword?.message} />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="" className={LABEL_CLASS}>New email address</Label>
+            <Label htmlFor="ce-email" className={LABEL_CLASS}>New email address</Label>
             <Input
               id="ce-email"
               type="email"
@@ -301,7 +301,7 @@ function DeleteAccountCard() {
           <form onSubmit={handleSubmit(onConfirmDelete)} noValidate>
             <div className="space-y-4 py-2">
               <div className="space-y-1">
-                <Label htmlFor="" className={LABEL_CLASS}>Current password</Label>
+                <Label htmlFor="del-password" className={LABEL_CLASS}>Current password</Label>
                 <Input
                   id="del-password"
                   type="password"
@@ -314,7 +314,7 @@ function DeleteAccountCard() {
                 <FieldError message={errors.currentPassword?.message} />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="" className={LABEL_CLASS}>Type DELETE to confirm</Label>
+                <Label htmlFor="del-confirm" className={LABEL_CLASS}>Type DELETE to confirm</Label>
                 <Input
                   id="del-confirm"
                   placeholder="DELETE"
@@ -438,7 +438,7 @@ function TimezoneCard() {
       <CardContent className="space-y-3">
         <div className="flex items-end gap-2">
           <div className="flex-1 space-y-1">
-            <Label htmlFor="" className={LABEL_CLASS}>Time zone</Label>
+            <Label htmlFor="timezone-input" className={LABEL_CLASS}>Time zone</Label>
             <Input
               id="timezone-input"
               data-testid="timezone-input"
