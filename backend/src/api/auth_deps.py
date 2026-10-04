@@ -298,3 +298,16 @@ async def require_verified_user(
             detail="email_not_verified",
         )
     return user
+
+
+# Auth BEFORE the pooled DB handle (FC-008). FastAPI resolves a route's
+# ``dependencies=`` before the endpoint's own parameters, in order. A route that
+# takes ``db = Depends(get_request_db)`` ahead of ``user = Depends(require_user)``
+# would otherwise borrow a pool connection first and hold it while auth runs —
+# under a slow disk that pinned the 10-connection pool. Passing one of these as
+# ``dependencies=`` runs the gate first; the endpoint's own ``user`` parameter
+# then reuses the cached result (same callable, so it is resolved once), and an
+# unauthenticated request is refused before any connection is borrowed. The
+# endpoint signatures stay unchanged, so MCP's positional calls keep working.
+AUTH_FIRST = (Depends(require_user),)
+VERIFIED_FIRST = (Depends(require_verified_user),)

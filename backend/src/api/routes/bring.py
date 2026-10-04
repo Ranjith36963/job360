@@ -37,7 +37,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from src.api.auth_deps import CurrentUser, require_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
 from src.api.models import JobResponse
 from src.core import settings
@@ -146,7 +146,7 @@ class BringJobResponse(BaseModel):
     status: str
 
 
-@router.post("/jobs/bring", response_model=BringJobResponse)
+@router.post("/jobs/bring", response_model=BringJobResponse, dependencies=AUTH_FIRST)
 async def bring_job(
     body: BringJobRequest,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008 — FastAPI DI idiom

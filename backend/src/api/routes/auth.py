@@ -15,6 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from src.api.auth_deps import (
+    AUTH_FIRST,
     SESSION_COOKIE_NAME,
     CurrentUser,
     _secret,
@@ -337,7 +338,7 @@ class TimezoneResponse(BaseModel):
     timezone: str
 
 
-@router.put("/me/timezone", response_model=TimezoneResponse)
+@router.put("/me/timezone", response_model=TimezoneResponse, dependencies=AUTH_FIRST)
 async def set_timezone(
     body: TimezoneRequest,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
@@ -360,7 +361,7 @@ async def set_timezone(
 # ── GDPR Article 20 — data portability (docs/fable/05 C7) ────────────────────
 
 
-@router.get("/users/me/export")
+@router.get("/users/me/export", dependencies=AUTH_FIRST)
 async def export_my_data(
     db: JobDatabase = Depends(get_request_db),
     user: CurrentUser = Depends(require_user),
@@ -394,7 +395,7 @@ class AccountDeleteRequest(BaseModel):
     current_password: str
 
 
-@router.delete("/users/me", status_code=204)
+@router.delete("/users/me", status_code=204, dependencies=AUTH_FIRST)
 async def delete_account(
     req: AccountDeleteRequest,
     response: Response,
@@ -432,7 +433,7 @@ class PasswordChangeRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=256)
 
 
-@router.patch("/users/me/password", status_code=204)
+@router.patch("/users/me/password", status_code=204, dependencies=AUTH_FIRST)
 async def change_password(
     req: PasswordChangeRequest,
     response: Response,
@@ -471,7 +472,7 @@ class EmailChangeRequest(BaseModel):
     new_email: EmailStr
 
 
-@router.patch("/users/me/email", status_code=204)
+@router.patch("/users/me/email", status_code=204, dependencies=AUTH_FIRST)
 async def change_email(
     req: EmailChangeRequest,
     response: Response,

@@ -18,6 +18,7 @@ from typing import Optional, cast
 
 from itsdangerous import BadSignature, TimestampSigner
 
+from src.core import settings
 from src.repositories import pg
 from src.repositories.db_retry import open_db
 from src.utils.logger import get_audit_logger
@@ -64,32 +65,75 @@ def _unsign(cookie: str, secret: str) -> Optional[str]:
     return raw.decode("ascii")
 
 
+def _parse_ts(value: object) -> Optional[datetime]:
+    """Parse a stored timestamp (ISO text, or Postgres CURRENT_TIMESTAMP text).
+
+    Naive values are taken as UTC. Anything unparseable returns None, which the
+    caller treats as stale — so a strange value costs one write, never a skip.
+    """
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value:
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _touch_due(last_seen: object, now: datetime, interval_seconds: int) -> bool:
+    """True when ``last_seen`` is older than the touch window (or unknown)."""
+    if interval_seconds <= 0:
+        return True
+    seen = _parse_ts(last_seen)
+    if seen is None:
+        return True
+    return (now - seen).total_seconds() >= interval_seconds
+
+
 async def resolve_session(
-    db_path: str, cookie: str, *, secret: str
+    db_path: str,
+    cookie: str,
+    *,
+    secret: str,
+    now: Optional[datetime] = None,
 ) -> Optional[str]:
     """Return the ``user_id`` for a valid, unexpired session cookie, else None.
 
-    Signature is verified before any DB lookup.
+    Signature is verified before any DB lookup. Access is decided ONLY by the
+    row existing and ``expires_at`` (absolute) being in the future.
+
+    ``last_seen`` is informational and written at most once per
+    ``settings.SESSION_TOUCH_INTERVAL_SECONDS``: inside the window the resolve
+    is a pure read (one SELECT, no UPDATE, no commit). Writing it on every
+    request made each signed-in read wait on a commit (FC-008).
+
+    ``now`` is an injectable clock for tests; production passes nothing.
     """
     sid = _unsign(cookie, secret)
     if sid is None:
         return None
-    now = datetime.now(timezone.utc).isoformat()
+    now_dt = now if now is not None else datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat()
     async with open_db(db_path) as db:
         db.row_factory = pg.Row
         cur = await db.execute(
-            "SELECT user_id, expires_at FROM sessions WHERE id = ?", (sid,)
+            "SELECT user_id, expires_at, last_seen FROM sessions WHERE id = ?", (sid,)
         )
         row = await cur.fetchone()
         if row is None:
             return None
-        if row["expires_at"] <= now:
+        if row["expires_at"] <= now_iso:
             return None
-        # Slide last_seen; best-effort — ignore commit contention.
-        await db.execute(
-            "UPDATE sessions SET last_seen = ? WHERE id = ?", (now, sid)
-        )
-        await db.commit()
+        if _touch_due(row["last_seen"], now_dt, settings.SESSION_TOUCH_INTERVAL_SECONDS):
+            await db.execute(
+                "UPDATE sessions SET last_seen = ? WHERE id = ?", (now_iso, sid)
+            )
+            await db.commit()
     return cast(Optional[str], row["user_id"])
 
 

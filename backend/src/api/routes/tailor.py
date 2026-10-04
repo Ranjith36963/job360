@@ -29,7 +29,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
-from src.api.auth_deps import CurrentUser, require_verified_user
+from src.api.auth_deps import VERIFIED_FIRST, CurrentUser, require_verified_user
 from src.api.dependencies import get_request_db
 from src.repositories.database import JobDatabase
 from src.services.applications import spine as applications_spine
@@ -131,7 +131,7 @@ def _load_cv_text(user_id: str) -> str:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.get("/tailor/{job_id}", response_model=TailorBundle)
+@router.get("/tailor/{job_id}", response_model=TailorBundle, dependencies=VERIFIED_FIRST)
 async def get_tailored(
     job_id: int,
     db: JobDatabase = Depends(get_request_db),
@@ -149,7 +149,11 @@ async def get_tailored(
     return TailorBundle(job_id=job_id, application_id=application_id, documents=documents)
 
 
-@router.get("/tailor/{job_id}/{doc_kind}/provenance", response_model=list[ProvenanceSegment])
+@router.get(
+    "/tailor/{job_id}/{doc_kind}/provenance",
+    response_model=list[ProvenanceSegment],
+    dependencies=VERIFIED_FIRST,
+)
 async def provenance(
     job_id: int,
     doc_kind: str,
@@ -168,7 +172,7 @@ async def provenance(
     return annotate_provenance(row.get("text") or "", source)
 
 
-@router.patch("/tailor/{job_id}/{doc_kind}", response_model=TailoredDocOut)
+@router.patch("/tailor/{job_id}/{doc_kind}", response_model=TailoredDocOut, dependencies=VERIFIED_FIRST)
 async def save_edit(
     job_id: int,
     doc_kind: str,
@@ -198,7 +202,7 @@ async def save_edit(
     )
 
 
-@router.post("/tailor/{job_id}/{doc_kind}/keep", response_model=TailoredDocOut)
+@router.post("/tailor/{job_id}/{doc_kind}/keep", response_model=TailoredDocOut, dependencies=VERIFIED_FIRST)
 async def keep(
     job_id: int,
     doc_kind: str,
@@ -224,7 +228,7 @@ async def keep(
     return _doc_out(doc_kind, row)
 
 
-@router.post("/tailor/{job_id}/{doc_kind}/download")
+@router.post("/tailor/{job_id}/{doc_kind}/download", dependencies=VERIFIED_FIRST)
 async def download(
     job_id: int,
     doc_kind: str,
