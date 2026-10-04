@@ -53,6 +53,7 @@ describe("AppShell", () => {
 
     const side = screen.getByTestId("app-sidebar");
     const labels = [
+      "Home",
       "Profile",
       "Bring a job",
       "Applications",
@@ -61,6 +62,7 @@ describe("AppShell", () => {
       "Connect your assistant",
     ];
     const hrefs = [
+      "/",
       "/profile",
       "/bring",
       "/applications",
@@ -80,6 +82,29 @@ describe("AppShell", () => {
     expect(within(side).getByRole("button", { name: "Log out" })).toBeInTheDocument();
     expect(within(side).getByRole("group", { name: "Theme" })).toBeInTheDocument();
     expect(screen.getByText("page body")).toBeInTheDocument();
+  });
+
+  it("the Home link is first and active only on exactly /", () => {
+    mockAuth.user = { email: "someone@example.com" };
+    for (const [path, homeActive] of [
+      ["/", true],
+      ["/applications", false],
+      ["/applications/12", false],
+      ["/needs-you", false],
+    ] as const) {
+      mockPathname = path;
+      const { unmount } = render(
+        <AppShell>
+          <p>page body</p>
+        </AppShell>
+      );
+      const side = screen.getByTestId("app-sidebar");
+      const links = within(within(side).getByRole("navigation", { name: "Main navigation" })).getAllByRole("link");
+      expect(links[0]).toHaveAccessibleName("Home");
+      if (homeActive) expect(links[0]).toHaveAttribute("aria-current", "page");
+      else expect(links[0]).not.toHaveAttribute("aria-current");
+      unmount();
+    }
   });
 
   it("signed out: no sidebar; a top bar with a theme toggle, and the footer", () => {

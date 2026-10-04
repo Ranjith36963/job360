@@ -26,7 +26,7 @@ const linkBtn =
 const confirmBox =
   "flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs";
 
-function AskCard({
+export function AskCard({
   ask,
   mode,
   onChanged,
@@ -60,14 +60,16 @@ function AskCard({
   return (
     <li
       data-testid={`ask-${ask.id}`}
-      className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4"
+      className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 shadow-card"
     >
-      <div className="flex flex-col gap-1">
-        <p className="whitespace-pre-wrap font-medium">{ask.question}</p>
+      <div className="flex flex-col gap-1.5">
+        <p className="whitespace-pre-wrap font-heading text-xl leading-snug">{ask.question}</p>
         {ask.context && (
           <p className="whitespace-pre-wrap text-sm text-muted-foreground">{ask.context}</p>
         )}
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[12.5px] text-muted-foreground">
+          asked by {ask.asked_by} · <span className="font-mono">{relativeTime(ask.asked_at)}</span>
+          {job && " · "}
           {job &&
             (ask.application_id != null ? (
               <Link
@@ -79,8 +81,6 @@ function AskCard({
             ) : (
               <span>{job}</span>
             ))}
-          {job && " · "}
-          asked by {ask.asked_by} · {relativeTime(ask.asked_at)}
         </p>
       </div>
 
@@ -291,7 +291,7 @@ export function NeedsYou() {
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex max-w-3xl flex-col gap-8">
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>
@@ -301,7 +301,7 @@ export function NeedsYou() {
         </div>
       )}
       <section aria-labelledby="open-asks" className="flex flex-col gap-3">
-        <h2 id="open-asks" className="font-heading text-lg font-semibold">
+        <h2 id="open-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
           Waiting for you
         </h2>
         {open.length === 0 ? (
@@ -319,7 +319,7 @@ export function NeedsYou() {
 
       {answered.length > 0 && (
         <section aria-labelledby="answered-asks" className="flex flex-col gap-3">
-          <h2 id="answered-asks" className="font-heading text-lg font-semibold">
+          <h2 id="answered-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
             Answered
           </h2>
           <ul className="flex flex-col gap-3">

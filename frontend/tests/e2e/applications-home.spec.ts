@@ -135,6 +135,41 @@ async function mockBackend(page: Page) {
     })
   );
 
+  // The signed-in Home also reads what-changed, the open asks and the counts
+  // (redesign slice 2). Registered BEFORE the applications route below.
+  await page.route("**/api/whats-new**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        now: "2026-09-05T00:00:00Z",
+        since: "2026-08-29T00:00:00Z",
+        events: [],
+        applications: [],
+        next_since: "2026-09-05T00:00:00Z",
+        next_after_id: null,
+        truncated: false,
+        open_asks: [],
+      }),
+    })
+  );
+  await page.route("**/api/asks**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ asks: [], open_count: 0 }),
+    })
+  );
+  await page.route("**/api/applications/stats", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        overall: { brought: 1, applied: status === "applied" ? 1 : 0, replied: 0, interview: 0 },
+      }),
+    })
+  );
+
   await page.route("**/api/applications?**", (route) =>
     route.fulfill({
       status: 200,
