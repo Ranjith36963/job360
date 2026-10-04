@@ -85,7 +85,7 @@ export function ConsentBanner() {
       role="dialog"
       aria-modal="false"
       aria-label="Analytics cookie consent"
-      className="fixed inset-x-0 bottom-0 z-50 border-t bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background p-4"
     >
       <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">

@@ -137,7 +137,9 @@ export default function ResetPasswordPage() {
     <div className="mx-auto max-w-md px-4 py-16">
       <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle className="font-heading text-2xl font-normal tracking-tight">Set a new password</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">
+            <h1>Set a new password</h1>
+          </CardTitle>
           <CardDescription>
             Pick a fresh password. After you update it, every existing
             session on every device will be signed out.

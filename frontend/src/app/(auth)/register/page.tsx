@@ -122,7 +122,9 @@ export default function RegisterPage() {
     <div className="mx-auto max-w-md px-4 py-16">
       <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle className="font-heading text-2xl font-normal tracking-tight">Create your Job360 account</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">
+            <h1>Create your Job360 account</h1>
+          </CardTitle>
           <CardDescription>
             Upload your CV next — it becomes the memory your assistant works from.
           </CardDescription>
