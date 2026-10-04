@@ -82,10 +82,10 @@ function MagicBody() {
 
 export default function MagicLinkPage() {
   return (
-    <div className="mx-auto max-w-md py-16">
-      <Card>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle>Sign in</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">Sign in</CardTitle>
           <CardDescription>Completing your passwordless sign-in.</CardDescription>
         </CardHeader>
         <CardContent>

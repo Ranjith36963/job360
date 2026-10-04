@@ -8,9 +8,7 @@ import {
   ArrowRight,
   Upload,
   Zap,
-  Clock,
   Shield,
-  Sparkles,
   Plug,
 } from "lucide-react";
 
@@ -119,27 +117,26 @@ export default function Landing() {
       <section className="relative flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-start px-4 pt-8 sm:justify-center sm:px-6 sm:pt-16">
         <div className="mx-auto max-w-4xl text-center">
           {/* Pill badge */}
-          <div className="animate-fade-in-up stagger-1 mb-8 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/[0.06] px-4 py-1.5 text-sm text-brand">
-            <Sparkles className="h-3.5 w-3.5" />
-            <span className="font-medium">Works with {ASSISTANTS}</span>
+          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-border px-4 py-1.5 font-mono text-xs text-muted-foreground">
+            <span>Works with {ASSISTANTS}</span>
           </div>
 
           {/* Headline — the owner-approved category line (CATEGORY_LINE
               above), split at the em dash into two staggered lines for
               layout only — never reworded. */}
           <h1
-            className="font-heading text-4xl font-medium tracking-tight sm:text-5xl lg:text-6xl"
+            className="text-balance font-heading text-4xl font-normal leading-[1.05] tracking-[-0.022em] sm:text-5xl lg:text-6xl"
           >
-            <span className="animate-fade-in-up stagger-2 block">
+            <span className="block">
               {CATEGORY_LINE_LEAD}
             </span>
-            <span className="animate-fade-in-up stagger-3 block mt-1">
+            <span className="mt-1 block">
               {` — ${CATEGORY_LINE_TAIL}`}
             </span>
           </h1>
 
           {/* Subtitle */}
-          <p className="animate-fade-in-up stagger-5 mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground sm:text-xl">
+          <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground sm:text-xl">
             Context, memory and every version, in one place any assistant can
             read and write. Your assistant judges fit and writes the CV. You
             apply. Job
@@ -153,10 +150,10 @@ export default function Landing() {
               the product does nothing until an assistant reads and writes.
               A signed-out visitor is bounced to /login?next=... by
               middleware.ts, same as any other protected route. */}
-          <div className="animate-fade-in-up stagger-6 mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+          <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
             <Link
               href="/settings/connect"
-              className="group inline-flex h-12 items-center gap-2 rounded-xl bg-primary px-8 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+              className="group inline-flex h-12 items-center gap-2 rounded-lg bg-primary px-8 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
             >
               <Plug className="h-4 w-4" />
               Connect your assistant
@@ -164,7 +161,7 @@ export default function Landing() {
             </Link>
             <Link
               href="/profile"
-              className="inline-flex h-12 items-center gap-2 rounded-xl border border-border/60 bg-transparent px-8 text-sm font-semibold text-foreground transition-colors hover:border-primary/60 hover:text-brand"
+              className="inline-flex h-12 items-center gap-2 rounded-lg border border-border bg-transparent px-8 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
             >
               <Upload className="h-4 w-4" />
               Upload your CV
@@ -173,9 +170,9 @@ export default function Landing() {
         </div>
 
         {/* Scroll indicator — below CTAs with spacing */}
-        <div className="animate-fade-in-up stagger-7 mt-16 hidden sm:flex flex-col items-center gap-2 text-muted-foreground/30">
+        <div className="mt-16 hidden sm:flex flex-col items-center gap-2 text-faint">
           <span className="text-[10px] tracking-[0.2em] uppercase">Scroll</span>
-          <div className="h-6 w-[1px] bg-gradient-to-b from-muted-foreground/20 to-transparent" />
+          <div className="h-6 w-px bg-border" />
         </div>
       </section>
 
@@ -184,30 +181,23 @@ export default function Landing() {
           ═══════════════════════════════════════════════════ */}
       <section className="relative px-4 py-16 sm:px-6">
         <div className="mx-auto max-w-5xl">
-          <div className="glass-card rounded-2xl p-2">
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-              {STATS.map(({ icon: Icon, value, label, description }, i) => (
-                <div
-                  key={label}
-                  className={`animate-fade-in-up stagger-${i + 1} flex flex-col items-center gap-3 rounded-xl px-4 py-6 text-center transition-colors hover:bg-primary/[0.04]`}
-                >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-                    <Icon className="h-5 w-5 text-brand" />
-                  </div>
-                  <div>
-                    <p className="font-mono text-2xl font-bold tracking-tight text-foreground">
-                      {value}
-                    </p>
-                    <p className="text-sm font-semibold text-foreground/90">
-                      {label}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {description}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div className="grid grid-cols-2 gap-px border-y border-border bg-border lg:grid-cols-4">
+            {STATS.map(({ value, label, description }) => (
+              <div
+                key={label}
+                className="flex flex-col gap-1 bg-background px-5 py-8"
+              >
+                <p className="font-heading text-4xl font-normal tracking-tight text-foreground">
+                  {value}
+                </p>
+                <p className="font-mono text-xs uppercase tracking-wider text-faint">
+                  {label}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {description}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -218,11 +208,11 @@ export default function Landing() {
       <section className="relative px-4 py-16 sm:px-6 lg:py-24">
         <div className="mx-auto max-w-7xl">
           {/* Section header */}
-          <div className="animate-fade-in-up stagger-1 mx-auto max-w-2xl text-center mb-12 lg:mb-16">
-            <p className="text-sm font-semibold uppercase tracking-widest text-brand">
+          <div className="mx-auto max-w-2xl text-center mb-12 lg:mb-16">
+            <p className="font-mono text-xs uppercase tracking-widest text-faint">
               What Job360 keeps
             </p>
-            <h2 className="font-heading mt-3 text-3xl font-medium tracking-tight sm:text-4xl">
+            <h2 className="mt-3 text-balance font-heading text-3xl font-normal tracking-tight sm:text-4xl">
               Context, memory and every version
             </h2>
             <p className="mt-4 text-muted-foreground text-lg">
@@ -235,15 +225,13 @@ export default function Landing() {
           {/* Cards grid */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map(
-              ({ icon: Icon, title, description, stagger }) => (
+              ({ icon: Icon, title, description }) => (
                 <div
                   key={title}
-                  className={`animate-fade-in-up stagger-${stagger} glass-card group rounded-xl p-6`}
+                  className="rounded-xl border border-border bg-card p-6"
                 >
-                  <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20 transition-all group-hover:bg-primary/15 group-hover:ring-primary/40">
-                    <Icon className="h-5 w-5 text-brand" />
-                  </div>
-                  <h3 className="font-heading text-lg font-medium tracking-tight">
+                  <Icon className="mb-4 h-5 w-5 text-muted-foreground" />
+                  <h3 className="font-heading text-lg font-normal tracking-tight">
                     {title}
                   </h3>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -261,11 +249,11 @@ export default function Landing() {
           ═══════════════════════════════════════════════════ */}
       <section className="relative px-4 py-16 sm:px-6 lg:py-24">
         <div className="mx-auto max-w-5xl">
-          <div className="animate-fade-in-up stagger-1 mx-auto max-w-2xl text-center mb-12">
-            <p className="text-sm font-semibold uppercase tracking-widest text-brand">
+          <div className="mx-auto max-w-2xl text-center mb-12">
+            <p className="font-mono text-xs uppercase tracking-widest text-faint">
               How it works
             </p>
-            <h2 className="font-heading mt-3 text-3xl font-medium tracking-tight sm:text-4xl">
+            <h2 className="mt-3 text-balance font-heading text-3xl font-normal tracking-tight sm:text-4xl">
               Three steps to your next role
             </h2>
           </div>
@@ -292,28 +280,16 @@ export default function Landing() {
                   "Your assistant judges fit and writes the CV. You apply. Job360 keeps every version, every step and the receipt of what you sent.",
                 icon: Target,
               },
-            ].map(({ step, title, description, icon: Icon }, i) => (
-              <div
-                key={step}
-                className={`animate-fade-in-up stagger-${i + 2} relative`}
-              >
-                {/* Connector line (hidden on last card and mobile) */}
-                {i < 2 && (
-                  <div
-                    aria-hidden
-                    className="absolute right-0 top-10 hidden h-[1px] w-8 translate-x-full bg-gradient-to-r from-primary/30 to-transparent md:block"
-                  />
-                )}
-                <div className="glass-card rounded-xl p-6 h-full flex flex-col">
-                  <div className="mb-4 flex items-center gap-3">
-                    <span className="font-mono text-3xl font-bold text-brand/30">
+            ].map(({ step, title, description, icon: Icon }) => (
+              <div key={step} className="relative">
+                <div className="flex h-full flex-col rounded-xl border border-border bg-card p-6">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <span className="font-mono text-sm text-faint">
                       {step}
                     </span>
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-                      <Icon className="h-5 w-5 text-brand" />
-                    </div>
+                    <Icon className="h-5 w-5 text-muted-foreground" />
                   </div>
-                  <h3 className="font-heading text-lg font-medium">
+                  <h3 className="font-heading text-lg font-normal tracking-tight">
                     {title}
                   </h3>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground flex-1">
@@ -332,21 +308,21 @@ export default function Landing() {
       <section className="relative px-4 py-20 sm:px-6 lg:py-28">
         <div className="mx-auto max-w-3xl text-center">
           <div className="relative">
-            <h2 className="animate-fade-in-up stagger-1 font-heading text-3xl font-medium tracking-tight sm:text-4xl lg:text-5xl">
+            <h2 className="text-balance font-heading text-3xl font-normal leading-[1.1] tracking-tight sm:text-4xl lg:text-5xl">
               Give your{" "}
               <span className="text-brand">
                 assistant
               </span>{" "}
               the full story
             </h2>
-            <p className="animate-fade-in-up stagger-2 mx-auto mt-4 max-w-xl text-lg text-muted-foreground">
+            <p className="mx-auto mt-4 max-w-xl text-lg text-muted-foreground">
               Connect your assistant, bring the jobs you find, and keep your
               whole job hunt in one shared record.
             </p>
-            <div className="animate-fade-in-up stagger-3 mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+            <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
               <Link
                 href="/settings/connect"
-                className="group inline-flex h-14 items-center gap-3 rounded-xl bg-primary px-10 text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+                className="group inline-flex h-14 items-center gap-3 rounded-lg bg-primary px-10 text-base font-semibold text-primary-foreground transition-opacity hover:opacity-90"
               >
                 <Plug className="h-5 w-5" />
                 Connect your assistant
@@ -354,13 +330,13 @@ export default function Landing() {
               </Link>
               <Link
                 href="/profile"
-                className="inline-flex h-14 items-center gap-3 rounded-xl border border-border/60 bg-transparent px-10 text-base font-semibold text-foreground transition-colors hover:border-primary/60 hover:text-brand"
+                className="inline-flex h-14 items-center gap-3 rounded-lg border border-border bg-transparent px-10 text-base font-semibold text-foreground transition-colors hover:bg-muted"
               >
                 <Upload className="h-5 w-5" />
                 Upload your CV
               </Link>
             </div>
-            <p className="animate-fade-in-up stagger-4 mt-6 text-xs text-muted-foreground/60">
+            <p className="mt-6 text-xs text-faint">
               No spam, no fluff.
             </p>
           </div>

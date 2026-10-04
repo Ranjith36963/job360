@@ -54,10 +54,10 @@ export default function ForgotPasswordPage() {
   });
 
   return (
-    <div className="mx-auto max-w-md py-16">
-      <Card>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle>Reset your password</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">Reset your password</CardTitle>
           <CardDescription>
             Enter the email you registered with. If we find a matching
             account, we&apos;ll send a reset link that works for the next
@@ -76,7 +76,7 @@ export default function ForgotPasswordPage() {
                 in an hour. You can request another one if it does.
               </p>
               <p className="text-center text-sm">
-                <Link href="/login" className="underline">
+                <Link href="/login" className="text-foreground underline">
                   Back to sign in
                 </Link>
               </p>
@@ -106,7 +106,7 @@ export default function ForgotPasswordPage() {
                 {isSubmitting ? "Sending…" : "Send reset link"}
               </Button>
               <p className="text-center text-sm text-muted-foreground">
-                <Link href="/login" className="underline">
+                <Link href="/login" className="text-foreground underline">
                   Back to sign in
                 </Link>
               </p>

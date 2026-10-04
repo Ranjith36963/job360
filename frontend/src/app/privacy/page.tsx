@@ -56,15 +56,15 @@ const SUBPROCESSORS: {
 
 export default function PrivacyPage() {
   return (
-    <main className="mx-auto max-w-3xl px-6 py-16">
-      <h1 className="text-3xl font-semibold">Privacy Policy</h1>
+    <main className="mx-auto max-w-[65ch] px-6 py-16">
+      <h1 className="text-balance font-heading text-4xl font-normal tracking-tight">Privacy Policy</h1>
       <p className="mt-2 text-sm text-muted-foreground">
         Last updated: {LAST_UPDATED}
       </p>
 
       <div className="mt-8 space-y-8 text-sm leading-relaxed text-muted-foreground">
-        <section>
-          <h2 className="text-lg font-medium text-foreground">Who we are</h2>
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">Who we are</h2>
           <p className="mt-2">
             Job360 (&ldquo;we&rdquo;, &ldquo;us&rdquo;) operates the job-search
             service at job360.uk. We are the data controller for the personal
@@ -77,8 +77,8 @@ export default function PrivacyPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             What we collect
           </h2>
           <ul className="mt-2 list-disc space-y-2 pl-5">
@@ -111,8 +111,8 @@ export default function PrivacyPage() {
           </ul>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             Why we process it (lawful basis)
           </h2>
           <ul className="mt-2 list-disc space-y-2 pl-5">
@@ -140,8 +140,8 @@ export default function PrivacyPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             AI access — read this part
           </h2>
           <p className="mt-2">
@@ -159,8 +159,8 @@ export default function PrivacyPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             Who we share data with (subprocessors)
           </h2>
           <p className="mt-2">
@@ -196,8 +196,8 @@ export default function PrivacyPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             How long we keep it
           </h2>
           <ul className="mt-2 list-disc space-y-2 pl-5">
@@ -219,8 +219,8 @@ export default function PrivacyPage() {
           </ul>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             How we protect it
           </h2>
           <p className="mt-2">
@@ -234,8 +234,8 @@ export default function PrivacyPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">Your rights</h2>
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">Your rights</h2>
           <p className="mt-2">
             Under UK GDPR you can access, correct, export, or delete your
             personal data, object to processing, and withdraw consent.
@@ -260,8 +260,8 @@ export default function PrivacyPage() {
           </p>
         </section>
 
-        <section>
-          <h2 className="text-lg font-medium text-foreground">
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">
             Changes to this policy
           </h2>
           <p className="mt-2">
