@@ -46,6 +46,7 @@ from src.api.routes import (
 from src.core import settings
 from src.core.settings import LOG_LEVEL, validate_required_env
 from src.repositories import pg, pool
+from src.services.auth.sessions import drain_session_touches
 from src.utils.logger import setup_audit_logger, setup_logging
 from src.utils.loop_guard import start_loop_watchdog
 
@@ -151,6 +152,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if watchdog is not None:
             watchdog.cancel()
+        # Background session `last_seen` touches (FC-008): finish or cancel
+        # them before the DB closes. Short timeout, never blocks shutdown long.
+        await drain_session_touches(timeout=2.0)
     await close_db()
     # Idempotent — a no-op if the pool was never opened (e.g. TEST_MODE).
     await pool.close_pool()

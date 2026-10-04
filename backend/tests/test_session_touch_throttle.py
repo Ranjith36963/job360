@@ -22,6 +22,8 @@ This file pins three things:
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import re
 import tempfile
@@ -160,11 +162,13 @@ async def test_two_resolves_inside_the_window_write_once_and_after_it_write_agai
     spy = StatementSpy(monkeypatch)
 
     assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
+    await auth_sessions.drain_session_touches()
     assert len(spy.session_updates()) == 1, spy.statements
     assert (await _read_session(session_db))["last_seen"] == T0.isoformat()
 
     t1 = T0 + timedelta(seconds=299)
     assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=t1) == "user-1"
+    await auth_sessions.drain_session_touches()
     assert len(spy.session_updates()) == 1, (
         "a resolve inside the touch window must issue NO UPDATE — it is a pure read. "
         f"statements: {spy.statements}"
@@ -173,6 +177,7 @@ async def test_two_resolves_inside_the_window_write_once_and_after_it_write_agai
 
     t2 = T0 + timedelta(seconds=300)
     assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=t2) == "user-1"
+    await auth_sessions.drain_session_touches()
     assert len(spy.session_updates()) == 2, spy.statements
     assert (await _read_session(session_db))["last_seen"] == t2.isoformat()
 
@@ -190,6 +195,7 @@ async def test_interval_zero_restores_write_every_resolve(
         await auth_sessions.resolve_session(
             session_db, cookie, secret=SESSION_SECRET, now=T0 + timedelta(seconds=i)
         )
+        await auth_sessions.drain_session_touches()
     assert len(spy.session_updates()) == 3
 
 
@@ -203,6 +209,7 @@ async def test_unparseable_last_seen_counts_as_stale(
     await _set_session(session_db, last_seen="not a timestamp", expires_at=(T0 + timedelta(days=1)).isoformat())
     spy = StatementSpy(monkeypatch)
     assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
+    await auth_sessions.drain_session_touches()
     assert len(spy.session_updates()) == 1
     assert (await _read_session(session_db))["last_seen"] == T0.isoformat()
 
@@ -234,6 +241,7 @@ async def test_valid_session_is_accepted_even_with_a_very_old_last_seen(
         expires_at=(T0 + timedelta(hours=1)).isoformat(),
     )
     assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
+    await auth_sessions.drain_session_touches()
 
 
 @pytest.mark.asyncio
@@ -252,10 +260,171 @@ async def test_touching_never_extends_expiry(session_db: str, monkeypatch: pytes
         assert await auth_sessions.resolve_session(
             session_db, cookie, secret=SESSION_SECRET, now=T0 + timedelta(minutes=minutes)
         ) == "user-1"
+        await auth_sessions.drain_session_touches()
     row = await _read_session(session_db)
     assert row["expires_at"] == expires.isoformat()
     assert row["last_seen"] == (T0 + timedelta(minutes=5)).isoformat()
     assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=expires) is None
+
+
+# ── 1b. The write is OFF the request path (background, de-duplicated) ─────────
+
+
+async def _stale_cookie(path: str) -> str:
+    cookie = await auth_sessions.create_session(path, user_id="user-1", secret=SESSION_SECRET)
+    await _set_session(
+        path,
+        last_seen=(T0 - timedelta(hours=1)).isoformat(),
+        expires_at=(T0 + timedelta(days=30)).isoformat(),
+    )
+    return cookie
+
+
+def _gate_the_write(monkeypatch: pytest.MonkeyPatch) -> tuple[asyncio.Event, list[str]]:
+    """Hold every touch behind an Event so the test controls when it lands."""
+    release = asyncio.Event()
+    started: list[str] = []
+    orig = auth_sessions._write_last_seen
+
+    async def gated(db_path: str, sid: str, when_iso: str) -> None:
+        started.append(sid)
+        await release.wait()
+        await orig(db_path, sid, when_iso)
+
+    monkeypatch.setattr(auth_sessions, "_write_last_seen", gated)
+    return release, started
+
+
+@pytest.mark.asyncio
+async def test_resolve_returns_before_the_touch_is_written(
+    session_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Prod 2026-10-04: the request that did the throttled write took 16.7 s,
+    because it awaited a slow commit. Now the resolve answers first."""
+    monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 300)
+    cookie = await _stale_cookie(session_db)
+    release, started = _gate_the_write(monkeypatch)
+    spy = StatementSpy(monkeypatch)
+
+    assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
+    await asyncio.sleep(0)  # let the background task start and block on the gate
+    assert len(started) == 1, "a stale session must schedule exactly one touch"
+    assert spy.session_updates() == [], "resolve returned, yet the UPDATE already ran — it is not off-path"
+    assert (await _read_session(session_db))["last_seen"] == (T0 - timedelta(hours=1)).isoformat()
+
+    release.set()
+    await auth_sessions.drain_session_touches()
+    assert len(spy.session_updates()) == 1, spy.statements
+    assert (await _read_session(session_db))["last_seen"] == T0.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_seven_concurrent_resolves_on_a_stale_session_write_once(
+    session_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 300)
+    cookie = await _stale_cookie(session_db)
+    release, started = _gate_the_write(monkeypatch)
+    spy = StatementSpy(monkeypatch)
+
+    results = await asyncio.gather(
+        *(auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) for _ in range(7))
+    )
+    assert results == ["user-1"] * 7
+    release.set()
+    await auth_sessions.drain_session_touches()
+    assert len(started) == 1
+    assert len(spy.session_updates()) == 1, spy.statements
+    assert (await _read_session(session_db))["last_seen"] == T0.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_interval_zero_is_still_deduplicated_while_a_write_is_in_flight(
+    session_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 0)
+    cookie = await _stale_cookie(session_db)
+    release, started = _gate_the_write(monkeypatch)
+    await asyncio.gather(
+        *(auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) for _ in range(5))
+    )
+    await asyncio.sleep(0)
+    assert len(started) == 1
+    release.set()
+    await auth_sessions.drain_session_touches()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_touch_never_fails_the_resolve_and_is_retried_later(
+    session_db: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 300)
+    cookie = await _stale_cookie(session_db)
+    orig = auth_sessions._write_last_seen
+
+    async def boom(db_path: str, sid: str, when_iso: str) -> None:
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(auth_sessions, "_write_last_seen", boom)
+    with caplog.at_level(logging.WARNING, logger="job360.auth.sessions"):
+        assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
+        await auth_sessions.drain_session_touches()
+    assert any("disk on fire" in r.getMessage() for r in caplog.records), caplog.text
+    assert (await _read_session(session_db))["last_seen"] == (T0 - timedelta(hours=1)).isoformat()
+    assert auth_sessions._inflight_touches == {}
+
+    # A failed touch is not remembered as done: the next resolve tries again.
+    monkeypatch.setattr(auth_sessions, "_write_last_seen", orig)
+    t1 = T0 + timedelta(seconds=1)
+    assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=t1) == "user-1"
+    await auth_sessions.drain_session_touches()
+    assert (await _read_session(session_db))["last_seen"] == t1.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_left_in_flight_after_draining(
+    session_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No leak per session: the in-flight map and task set empty out."""
+    monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 300)
+    cookies = [await _stale_cookie(session_db) for _ in range(3)]
+    release, _started = _gate_the_write(monkeypatch)
+    for c in cookies:
+        assert await auth_sessions.resolve_session(session_db, c, secret=SESSION_SECRET, now=T0) == "user-1"
+    assert len(auth_sessions._inflight_touches) == 3
+    release.set()
+    await auth_sessions.drain_session_touches()
+    assert auth_sessions._inflight_touches == {}
+    assert auth_sessions._touch_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_drain_with_timeout_cancels_a_stuck_touch(
+    session_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Shutdown path: a touch that never finishes is cancelled, not left pending."""
+    monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 300)
+    cookie = await _stale_cookie(session_db)
+    _release, started = _gate_the_write(monkeypatch)  # never released
+    assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
+    await asyncio.sleep(0)
+    assert len(started) == 1
+    await auth_sessions.drain_session_touches(timeout=0.05)
+    assert auth_sessions._inflight_touches == {}
+    assert auth_sessions._touch_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_revoke_applies_on_the_very_next_resolve(
+    session_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No session cache: a background touch must not keep a revoked session alive."""
+    monkeypatch.setattr(settings, "SESSION_TOUCH_INTERVAL_SECONDS", 300)
+    cookie = await _stale_cookie(session_db)
+    assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) == "user-1"
+    await auth_sessions.drain_session_touches()
+    await auth_sessions.revoke_session(session_db, cookie, secret=SESSION_SECRET)
+    assert await auth_sessions.resolve_session(session_db, cookie, secret=SESSION_SECRET, now=T0) is None
 
 
 # ── 3. The class guard: hidden write on a read path ────────────────────────────
@@ -302,6 +471,7 @@ async def test_authenticated_reads_issue_no_writes(
             spy.clear()
             resp = await client.get(path)
             assert resp.status_code == 200, f"{path} -> {resp.status_code}: {resp.text[:300]}"
+            await auth_sessions.drain_session_touches()  # a background touch would show up here
             assert spy.statements, f"{path}: the spy saw NO statements at all — it is blind, not green"
             if spy.writes:
                 offenders[path] = spy.writes
@@ -326,11 +496,13 @@ async def test_negative_control_spy_sees_the_touch_on_a_stale_session(
     async with authenticated_async_context() as client:
         resp = await client.get("/api/auth/me")
         assert resp.status_code == 200
+        await auth_sessions.drain_session_touches()
         assert len(spy.session_updates()) == 1, spy.statements
         assert spy.writes == spy.session_updates()
         spy.clear()
         resp = await client.get("/api/auth/me")
         assert resp.status_code == 200
+        await auth_sessions.drain_session_touches()
         assert spy.writes == [], "the touch just happened; the next read must be pure"
 
 
