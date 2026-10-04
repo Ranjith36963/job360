@@ -68,7 +68,7 @@ export function AskCard({
           <p className="whitespace-pre-wrap text-sm text-muted-foreground">{ask.context}</p>
         )}
         <p className="text-[12.5px] text-muted-foreground">
-          asked by {ask.asked_by} · <span className="font-mono">{relativeTime(ask.asked_at)}</span>
+          asked by {ask.asked_by === "web" ? "you" : ask.asked_by} · <span className="font-mono">{relativeTime(ask.asked_at)}</span>
           {job && " · "}
           {job &&
             (ask.application_id != null ? (

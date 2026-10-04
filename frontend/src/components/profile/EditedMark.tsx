@@ -52,11 +52,11 @@ export function EditedMark({
     "font-mono text-[10px] normal-case tracking-normal text-faint underline-offset-2 transition-colors hover:text-foreground hover:underline disabled:opacity-50";
 
   return (
-    <span className="ml-2 inline-flex flex-wrap items-center gap-1.5 normal-case tracking-normal">
+    <span className="ml-2 inline-flex min-w-0 flex-wrap items-center gap-1.5 normal-case tracking-normal">
       <span
         data-testid="agent-edit-mark"
         title={`Changed by ${edit.set_by} on ${formatEditedDate(edit.set_at)}`}
-        className="inline-flex items-center rounded-full bg-brand-soft px-2 py-0.5 font-mono text-[10px] font-medium text-brand"
+        className="line-clamp-2 min-w-0 rounded-md bg-brand-soft px-2 py-0.5 font-mono text-[10px] font-medium text-brand [overflow-wrap:anywhere]"
       >
         Changed by {who} · was {was}
       </span>

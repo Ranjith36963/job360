@@ -61,7 +61,7 @@ export function FieldHistory({ paths, label, pathLabels, buttonLabel }: FieldHis
         onClick={toggle}
         aria-expanded={open}
         aria-label={`History of ${label}`}
-        className="text-faint underline-offset-2 hover:text-foreground hover:underline"
+        className="whitespace-nowrap text-faint underline-offset-2 hover:text-foreground hover:underline"
       >
         {buttonLabel ?? "History"}
       </button>
