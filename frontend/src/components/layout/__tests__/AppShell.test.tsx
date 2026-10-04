@@ -54,7 +54,7 @@ describe("AppShell", () => {
     const side = screen.getByTestId("app-sidebar");
     const labels = [
       "Profile",
-      "Bring a job",
+      "Jobs in",
       "Applications",
       "Needs you",
       "Receipts",

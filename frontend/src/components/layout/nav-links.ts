@@ -21,7 +21,7 @@ import {
 // via the gear icon. It is a first-class destination now, not a settings tab.
 export const NAV_LINKS: readonly { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/profile", label: "Profile", icon: User },
-  { href: "/bring", label: "Bring a job", icon: ClipboardPaste },
+  { href: "/bring", label: "Jobs in", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },
   { href: "/needs-you", label: "Needs you", icon: MessageCircleQuestion },
   { href: "/receipts", label: "Receipts", icon: Receipt },
