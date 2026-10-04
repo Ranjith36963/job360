@@ -11,6 +11,20 @@
 4. **Write the message yourself** — short, specific to this job, true facts
    only. Save it with `save_artifact` (`contact_id`, kind `outreach`, channel
    `email`, `linkedin` or `other`). This is a draft.
-5. **The user sends it.** Never send it yourself. Only after the user says it
-   went out, record `outreach_sent` with `record_event` (`contact_id` and
-   `channel`).
+5. **Sending depends on the mode.** Read `preferences.daily_check` from
+   `get_profile`.
+   - `auto` (or the older `scheduled`): you may send this message from the
+     user's own Gmail (your own connector) — only if you saved it with
+     channel `email` and the contact has an email address. First make sure it
+     was not sent already: look in the user's Gmail Sent folder for a message
+     to that address since this version was saved, and check `list_people`
+     for a `sent` mark on this contact recorded after this version's
+     `recorded_at`. If either exists, do not send. Right after sending,
+     record `outreach_sent` with `record_event` (`contact_id`, `channel`, and
+     the Gmail message id as `source`).
+   - `ask`, `paused`, `declined` or empty: draft only. The user sends it.
+     Never send it yourself. Only after the user says it went out, record
+     `outreach_sent` with `record_event` (`contact_id` and `channel`).
+   - Any mode: a LinkedIn message is always sent by the user. Never reply to
+     an answer; just record it. Never submit a job application without the
+     user's yes for that one application.

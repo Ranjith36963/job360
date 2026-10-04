@@ -253,6 +253,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/artifacts/{artifact_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Download Application Artifact
+         * @description Render ONE stored CV / cover-letter version as PDF or DOCX (web-only —
+         *     the agent already holds the text). POST like the tailor download so it is
+         *     Origin-checked; it writes nothing. Foreign application/artifact -> 404.
+         */
+        post: operations["download_application_artifact_api_applications__application_id__artifacts__artifact_id__download_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/contacts": {
         parameters: {
             query?: never;
@@ -4743,6 +4765,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ArtifactDiffOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_application_artifact_api_applications__application_id__artifacts__artifact_id__download_post: {
+        parameters: {
+            query?: {
+                /** @description `pdf` or `docx`. */
+                fmt?: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+                artifact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

@@ -506,6 +506,37 @@ export async function downloadTailored(
   URL.revokeObjectURL(url);
 }
 
+/** Download ONE stored CV / cover-letter version as Word or PDF. POST like
+ * `downloadTailored` (Origin-checked); same blob + anchor pattern. */
+export async function downloadApplicationArtifact(
+  applicationId: number,
+  artifactId: number,
+  fmt: TailorFormat,
+  filenameStem = "document"
+): Promise<void> {
+  const res = await fetch(
+    `${API}/api/applications/${applicationId}/artifacts/${artifactId}/download?fmt=${fmt}`,
+    { method: "POST", credentials: "include" }
+  );
+  if (!res.ok) {
+    let detail = "Download failed";
+    try {
+      const body = await res.json();
+      detail = body?.detail ?? detail;
+    } catch {
+      // no JSON body — keep the fallback detail
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${filenameStem}.${fmt}`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ---------------------------------------------------------------------------
 // Bring a job + application receipts (career-ops pivot, slice one)
 // ---------------------------------------------------------------------------
