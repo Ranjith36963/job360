@@ -10,6 +10,7 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getReceipt } from "@/lib/api";
 import { closedSetLabel } from "@/lib/closed-sets";
+import { whoLabel } from "@/lib/event-labels";
 import { safeUrl } from "@/lib/utils";
 import type { Receipt } from "@/lib/types";
 
@@ -33,6 +34,12 @@ const ORIGIN_LABEL: Record<string, string> = {
   ai_draft: "the AI draft, unedited",
   artifact: "saved by your assistant",
 };
+
+function formatFieldValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
 
 function originLabel(origin: string | null | undefined): string | null {
   if (!origin) return null;
@@ -100,6 +107,11 @@ export default function ReceiptDetailPage() {
     );
   }
 
+  // What was recorded when you applied — stored facts, shown only when they
+  // exist (an older receipt, or one made with the web button, has none).
+  const answers = receipt.answers ?? [];
+  const fieldEntries = Object.entries(receipt.fields_filled ?? {});
+
   return (
     <PageContainer className="receipt-desk flex flex-col items-center gap-4 py-8">
       <div className="flex w-full max-w-[720px] items-center justify-between gap-3">
@@ -149,6 +161,22 @@ export default function ReceiptDetailPage() {
           {receipt.profile_version != null && (
             <Fact label="Profile" value={`v${receipt.profile_version}`} />
           )}
+          {receipt.cv_version_no != null && <Fact label="CV" value={`v${receipt.cv_version_no}`} />}
+          {receipt.cover_letter_version_no != null && (
+            <Fact label="Cover letter" value={`v${receipt.cover_letter_version_no}`} />
+          )}
+          {receipt.confirmation && <Fact label="Confirmation" value={receipt.confirmation} />}
+          {receipt.recorded_by && <Fact label="Recorded by" value={whoLabel(receipt.recorded_by).name} />}
+          {receipt.application_id != null && (
+            <Fact
+              label="Application"
+              value={
+                <Link href={`/applications/${receipt.application_id}`} className="underline">
+                  APP-{String(receipt.application_id).padStart(3, "0")}
+                </Link>
+              }
+            />
+          )}
           {/* safeUrl returns "#" for anything that is not http(s): no link then. */}
           {receipt.job_apply_url && safeUrl(receipt.job_apply_url) !== "#" && (
             <Fact
@@ -167,6 +195,37 @@ export default function ReceiptDetailPage() {
           )}
         </dl>
         {receipt.note && <p className="mt-4 text-sm italic text-paper-dim">“{receipt.note}”</p>}
+
+        {answers.length > 0 && (
+          <section className="mt-8 border-t border-paper-line pt-4" data-testid="receipt-answers">
+            <h2 className="mb-3 font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-paper-dim">
+              Answers given
+            </h2>
+            <dl className="flex flex-col gap-3">
+              {answers.map((qa, i) => (
+                <div key={i} data-testid="receipt-answer" className="receipt-fact">
+                  <dt className="text-[13px] text-paper-dim">{qa.question}</dt>
+                  <dd className="mt-0.5 whitespace-pre-wrap font-heading text-[17px] leading-snug [overflow-wrap:anywhere]">
+                    {qa.answer}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        )}
+
+        {fieldEntries.length > 0 && (
+          <section className="mt-8 border-t border-paper-line pt-4" data-testid="receipt-fields">
+            <h2 className="mb-1 font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-paper-dim">
+              Fields filled
+            </h2>
+            <dl>
+              {fieldEntries.map(([key, value]) => (
+                <Fact key={key} label={key} value={formatFieldValue(value)} />
+              ))}
+            </dl>
+          </section>
+        )}
 
         <Section title="CV you sent" origin={receipt.cv_origin} body={receipt.cv_text} testId="receipt-cv" />
         <Section

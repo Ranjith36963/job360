@@ -3559,16 +3559,30 @@ export interface components {
         };
         /** Receipt */
         Receipt: {
+            /** Answers */
+            answers?: components["schemas"]["ReceiptAnswerOut"][];
+            /** Application Id */
+            application_id?: number | null;
             /** Channel */
             channel: string;
+            /** Confirmation */
+            confirmation?: string | null;
             /** Cover Letter Origin */
             cover_letter_origin: string | null;
             /** Cover Letter Text */
             cover_letter_text: string | null;
+            /** Cover Letter Version No */
+            cover_letter_version_no?: number | null;
             /** Cv Origin */
             cv_origin: string | null;
             /** Cv Text */
             cv_text: string | null;
+            /** Cv Version No */
+            cv_version_no?: number | null;
+            /** Fields Filled */
+            fields_filled?: {
+                [key: string]: unknown;
+            };
             /** Id */
             id: number;
             /** Job Apply Url */
@@ -3589,6 +3603,8 @@ export interface components {
             note: string;
             /** Profile Version */
             profile_version: number | null;
+            /** Recorded By */
+            recorded_by?: string | null;
             /** Sent At */
             sent_at: string;
         };
