@@ -74,7 +74,7 @@ function ReceiptsList() {
           <Link href="/bring">
             <Button className="gap-2">
               <ClipboardPaste className="h-4 w-4" />
-              Bring a job
+              Jobs in
             </Button>
           </Link>
         }

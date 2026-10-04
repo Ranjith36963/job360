@@ -103,7 +103,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
       <p className="text-sm text-muted-foreground">
         Nothing yet. Bring a job from your assistant, or the{" "}
         <Link href="/bring" className="text-brand underline">
-          Bring a job
+          Jobs in
         </Link>{" "}
         page, to start your record.
       </p>
