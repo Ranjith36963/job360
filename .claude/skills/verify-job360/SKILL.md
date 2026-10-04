@@ -66,7 +66,6 @@ Wait for `Ready in …`. If `:3000` is busy, a server is already up — reuse it
 - **State:** a fresh account has no jobs, so empty states are expected. To see populated UI you need jobs in the DB (see Backend "seed" note) — don't mistake a correct empty state for a bug.
 
 **Known benign console noise** (do NOT chase these as bugs):
-- Dark-mode **hydration mismatch** on `<html className="dark">` — the Next.js dev "1 Issue" badge. Cosmetic.
 - `GET /api/auth/me` → **401** when logged out — that's the auth check working.
 - `GET /api/profile` → **404** for a brand-new user — means "no profile yet", expected.
 
