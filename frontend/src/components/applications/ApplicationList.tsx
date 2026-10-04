@@ -41,6 +41,136 @@ function titleFor(app: ApplicationSummary): string {
   return "Untitled job";
 }
 
+/** Statuses where the ball is moving — these get the one neon status dot. */
+const LIVE_STATUSES = new Set([
+  "applied",
+  "replied",
+  "interview_requested",
+  "interview_scheduled",
+  "interview_done",
+  "offer",
+]);
+
+/**
+ * The calm ledger rows (redesign slice 2) — shared by `/applications` (with its
+ * filters) and the signed-in Home (all of them). Hairline separators, not
+ * cards. Owner decision, 2026-09-25 — ONE wide row per application: the most
+ * important facts (title, company, status) read on the left, the rest (Next,
+ * fit, documents/sent, location/visa, last update) fill the right on wide
+ * screens; everything stacks on phones.
+ */
+export function ApplicationRows({ applications }: { applications: ApplicationSummary[] }) {
+  return (
+    <ul className="flex flex-col">
+      {applications.map((app) => {
+        const hasCv = (app.artifacts?.cv ?? 0) > 0;
+        const hasCoverLetter = (app.artifacts?.cover_letter ?? 0) > 0;
+        const showVisa = app.visa_signal === "sponsors" || app.visa_signal === "no_sponsorship";
+        const hasFit = typeof app.fit_score === "number";
+        const fitScore = hasFit ? Math.max(0, Math.min(100, app.fit_score as number)) : 0;
+
+        return (
+          <li key={app.id} className="border-t border-border first:border-t-0">
+            <Link
+              href={`/applications/${app.id}`}
+              className="flex flex-col gap-3 py-4 transition-colors hover:bg-muted/40 md:flex-row md:items-start md:gap-6"
+            >
+              {/* 1. Title, company, status — most prominent, reads left on wide screens.
+                  Long titles/company names wrap to 2 lines instead of being cut to one
+                  with an ellipsis (owner report, 2026-09-25); the `title` attribute
+                  carries the full text for anyone who still wants the one-line version
+                  on hover. */}
+              <div className="min-w-0 md:w-72 md:shrink-0 lg:w-80">
+                <p className="line-clamp-2 font-medium" title={titleFor(app)}>
+                  {titleFor(app)}
+                </p>
+                <p className="line-clamp-2 text-sm text-muted-foreground" title={app.job_company}>
+                  {app.job_company}
+                </p>
+                <span className="mt-1.5 inline-flex items-center gap-1.5 font-mono text-[11px] font-medium tracking-wide text-muted-foreground">
+                  <i
+                    aria-hidden="true"
+                    className={`h-1.5 w-1.5 rounded-full ${LIVE_STATUSES.has(app.status) ? "bg-primary" : "bg-faint"}`}
+                  />
+                  {STATUS_LABEL[app.status] ?? app.status}
+                </span>
+              </div>
+
+              {/* 2-6. Everything else — fills the right on wide screens. */}
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                {/* 2. Next line, with the interview date/time when there is one. */}
+                {(app.next_step?.label || app.interview_at || (app.follow_up_due && app.follow_up_on)) && (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                    {app.next_step?.label && (
+                      <span data-testid="row-next-step" className="truncate text-brand">
+                        Next: {app.next_step.label}
+                      </span>
+                    )}
+                    {app.interview_at && (
+                      <span
+                        data-testid="row-interview"
+                        className="rounded-full bg-accent/20 px-2 py-0.5 font-medium text-accent-foreground"
+                      >
+                        Interview {formatDateTime(app.interview_at)}
+                      </span>
+                    )}
+                    {app.follow_up_due && app.follow_up_on && (
+                      <span
+                        data-testid="row-follow-up"
+                        className="rounded-full bg-warning/15 px-3 py-1 font-medium text-warning"
+                      >
+                        Follow up {formatDayMonth(app.follow_up_on)}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* 3. Fit — the assistant's verdict is the main thing, the score a small
+                    mono note beside it. Silent (rule #29) when no fit has been judged yet. */}
+                {hasFit && (
+                  <div data-testid="row-fit" className="flex items-baseline gap-2 text-sm">
+                    {app.fit_verdict && <span className="min-w-0 truncate">{app.fit_verdict}</span>}
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{fitScore}/100</span>
+                  </div>
+                )}
+
+                {/* 4. Documents + sent — only the tags that actually exist. */}
+                {(hasCv || hasCoverLetter || app.last_receipt_at) && (
+                  <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+                    {hasCv && <span className="rounded-full bg-muted px-2 py-0.5">CV ✓</span>}
+                    {hasCoverLetter && (
+                      <span className="rounded-full bg-muted px-2 py-0.5">Cover letter ✓</span>
+                    )}
+                    {app.last_receipt_at && (
+                      <span data-testid="row-sent" className="rounded-full bg-muted px-2 py-0.5">
+                        Sent {formatDayMonth(app.last_receipt_at)}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* 5. Location + visa — omit empty parts; visa only when recorded. */}
+                {(app.job_location || showVisa) && (
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                    {app.job_location && <span className="truncate">{app.job_location}</span>}
+                    <VisaBadge
+                      signal={app.visa_signal ?? "unknown"}
+                      needsSponsorship={app.needs_sponsorship}
+                    />
+                  </div>
+                )}
+
+                {/* 6. Last update — relative, least prominent. */}
+                <p className="font-mono text-xs text-faint">{relativeTime(app.last_event_at)}</p>
+              </div>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function ApplicationList({ limit = 50 }: { limit?: number }) {
   const [applications, setApplications] = useState<ApplicationSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -160,116 +290,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
       {visibleApplications && visibleApplications.length === 0 ? (
         <p className="text-sm text-muted-foreground">No applications with this status.</p>
       ) : (
-        // Owner decision, 2026-09-25 — ONE wide row per application instead
-        // of a two-up grid, laid out so the most important facts (title,
-        // company, status) read on the left and the rest (Next, fit,
-        // documents/sent, location/visa, last update) fill the right on wide
-        // screens; everything stacks on phones.
-        <ul className="flex flex-col gap-3">
-          {visibleApplications?.map((app) => {
-            const hasCv = (app.artifacts?.cv ?? 0) > 0;
-            const hasCoverLetter = (app.artifacts?.cover_letter ?? 0) > 0;
-            const showVisa = app.visa_signal === "sponsors" || app.visa_signal === "no_sponsorship";
-            const hasFit = typeof app.fit_score === "number";
-            const fitScore = hasFit ? Math.max(0, Math.min(100, app.fit_score as number)) : 0;
-
-            return (
-              <li key={app.id} className="glass-card rounded-xl p-4">
-                <Link
-                  href={`/applications/${app.id}`}
-                  className="flex flex-col gap-3 md:flex-row md:items-start md:gap-6"
-                >
-                  {/* 1. Title, company, status — most prominent, reads left on wide screens.
-                      Long titles/company names wrap to 2 lines instead of being cut to one
-                      with an ellipsis (owner report, 2026-09-25); the `title` attribute
-                      carries the full text for anyone who still wants the one-line version
-                      on hover. */}
-                  <div className="min-w-0 md:w-72 md:shrink-0 lg:w-80">
-                    <p className="line-clamp-2 font-semibold" title={titleFor(app)}>
-                      {titleFor(app)}
-                    </p>
-                    <p className="line-clamp-2 text-sm text-muted-foreground" title={app.job_company}>
-                      {app.job_company}
-                    </p>
-                    <span className="mt-1.5 inline-block rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-brand">
-                      {STATUS_LABEL[app.status] ?? app.status}
-                    </span>
-                  </div>
-
-                  {/* 2-6. Everything else — fills the right on wide screens. */}
-                  <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                    {/* 2. Next line, with the interview date/time when there is one. */}
-                    {(app.next_step?.label || app.interview_at || (app.follow_up_due && app.follow_up_on)) && (
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                        {app.next_step?.label && (
-                          <span data-testid="row-next-step" className="truncate text-brand">
-                            Next: {app.next_step.label}
-                          </span>
-                        )}
-                        {app.interview_at && (
-                          <span
-                            data-testid="row-interview"
-                            className="rounded-full bg-accent/20 px-2 py-0.5 font-medium text-accent-foreground"
-                          >
-                            Interview {formatDateTime(app.interview_at)}
-                          </span>
-                        )}
-                        {app.follow_up_due && app.follow_up_on && (
-                          <span
-                            data-testid="row-follow-up"
-                            className="rounded-full bg-warning/15 px-3 py-1 font-medium text-warning"
-                          >
-                            Follow up {formatDayMonth(app.follow_up_on)}
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 3. Fit — silent (rule #29) when no fit has been judged yet. */}
-                    {hasFit && (
-                      <div data-testid="row-fit" className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted">
-                          <span className="block h-full rounded-full bg-primary" style={{ width: `${fitScore}%` }} />
-                        </span>
-                        <span className="shrink-0 font-medium text-foreground">{fitScore}/100</span>
-                        {app.fit_verdict && <span className="truncate">{app.fit_verdict}</span>}
-                      </div>
-                    )}
-
-                    {/* 4. Documents + sent — only the tags that actually exist. */}
-                    {(hasCv || hasCoverLetter || app.last_receipt_at) && (
-                      <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-                        {hasCv && <span className="rounded-full bg-muted px-2 py-0.5">CV ✓</span>}
-                        {hasCoverLetter && (
-                          <span className="rounded-full bg-muted px-2 py-0.5">Cover letter ✓</span>
-                        )}
-                        {app.last_receipt_at && (
-                          <span data-testid="row-sent" className="rounded-full bg-muted px-2 py-0.5">
-                            Sent {formatDayMonth(app.last_receipt_at)}
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 5. Location + visa — omit empty parts; visa only when recorded. */}
-                    {(app.job_location || showVisa) && (
-                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                        {app.job_location && <span className="truncate">{app.job_location}</span>}
-                        <VisaBadge
-                          signal={app.visa_signal ?? "unknown"}
-                          needsSponsorship={app.needs_sponsorship}
-                        />
-                      </div>
-                    )}
-
-                    {/* 6. Last update — relative, least prominent. */}
-                    <p className="text-xs text-muted-foreground/70">{relativeTime(app.last_event_at)}</p>
-                  </div>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        <ApplicationRows applications={visibleApplications ?? []} />
       )}
     </div>
   );

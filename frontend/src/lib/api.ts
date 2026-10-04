@@ -820,6 +820,21 @@ export async function recordApplicationReceipt(
 }
 
 export type WhatsNewResponse = _Schemas["WhatsNewResponse"];
+export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
+export type StatsResponse = _Schemas["StatsResponse"];
+
+/** What changed since `since` (events oldest first, `limit` max 200). Page on
+ * with `next_since` + `next_after_id` while `truncated` is true. */
+export async function whatsNew(
+  params: { since?: string; after_id?: number; limit?: number } = {}
+): Promise<WhatsNewResponse> {
+  return request(`/api/whats-new${qs(params as Record<string, unknown>)}`);
+}
+
+/** The hunt in counts (brought / applied / replied / interview …). */
+export async function getStats(): Promise<StatsResponse> {
+  return request("/api/applications/stats");
+}
 /** Add a person to an application (spec R1/R2). 201 for a new row, 200
  * (`already_existed: true`) for the same non-empty email seen again on this
  * application — the caller reads the status from the response body, not the

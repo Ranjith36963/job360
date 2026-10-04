@@ -260,3 +260,29 @@ describe("ApplicationList — status filter", () => {
     expect(screen.getByText("Job Two")).toBeInTheDocument();
   });
 });
+
+describe("ApplicationList — fit display (redesign slice 2)", () => {
+  beforeEach(() => {
+    listApplications.mockReset();
+  });
+
+  it("shows the assistant's verdict as the main text and the score as a small 70/100", async () => {
+    listApplications.mockResolvedValue({
+      applications: [summary({ fit_score: 70, fit_verdict: "Good fit for agent work" })],
+      total: 1,
+    });
+    render(<ApplicationList />);
+    const fit = await screen.findByTestId("row-fit");
+    expect(fit).toHaveTextContent("Good fit for agent work");
+    expect(fit).toHaveTextContent("70/100");
+    expect(fit.querySelector(".bg-primary")).toBeNull();
+  });
+
+  it("with no fit judged, row-fit is absent and the next-step line stays", async () => {
+    listApplications.mockResolvedValue({ applications: [summary()], total: 1 });
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    expect(screen.queryByTestId("row-fit")).toBeNull();
+    expect(screen.getByTestId("row-next-step")).toHaveTextContent("No fit judged yet");
+  });
+});
