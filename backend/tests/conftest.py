@@ -166,6 +166,26 @@ def _close_leaked_app_db():
             dependencies._db = None
 
 
+@pytest.fixture(autouse=True)
+async def _drain_session_touches():
+    """No test leaks a background ``last_seen`` touch (FC-008).
+
+    Any authenticated request on a stale session schedules a background
+    UPDATE. Undrained, it could land during a later statement-counting assert,
+    or be destroyed pending when the loop closes. After each test: await this
+    loop's touches (1 s cap), then forget all in-process touch state. For a
+    sync TestClient test the touches lived on the client's own loop; the drain
+    just skips them and the reset drops the references. Never raises.
+    """
+    yield
+    from src.services.auth import sessions as _sessions
+
+    try:
+        await _sessions.drain_session_touches(timeout=1)
+    finally:
+        _sessions.reset_session_touch_state()
+
+
 # Pinned test timestamp — avoid non-determinism from datetime.now() leaking
 # into fixture-built Job objects. Tier-A #7.
 _TEST_NOW = datetime(2026, 4, 23, 12, 0, 0, tzinfo=timezone.utc)

@@ -12,7 +12,11 @@ Security properties:
 """
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import Optional, cast
 
@@ -24,6 +28,154 @@ from src.repositories.db_retry import open_db
 from src.utils.logger import get_audit_logger
 
 SESSION_MAX_AGE_DAYS = 30
+
+logger = logging.getLogger("job360.auth.sessions")
+
+# ── Background `last_seen` touch (FC-008) ─────────────────────────────────────
+# The touch runs OFF the request path: the request returns at once and the
+# UPDATE runs in a task with its own connection. Prod commits can take 10 s+,
+# and awaiting the write made the first request after an idle window take
+# 16.7 s (measured 2026-10-04).
+#
+# These structures are in-process and bounded. They only ever SKIP an
+# informational write; they never grant or refuse access. Losing them (restart,
+# another worker process) costs at most a few extra writes.
+#
+# Limits are settings (``SESSION_TOUCH_TIMEOUT_SECONDS``,
+# ``SESSION_TOUCH_MAX_INFLIGHT``): each running touch holds a real Postgres
+# connection outside the pool, so both how long and how many are capped.
+_MAX_RECENT_TOUCHES = 10000  # LRU cap on remembered successful touches
+_CAP_WARNING_EVERY_SECONDS = 60.0  # at most one "cap hit" warning per minute
+_touch_tasks: set[asyncio.Task[None]] = set()  # strong refs, so no GC mid-flight
+_inflight_touches: dict[str, asyncio.Task[None]] = {}  # session id -> its running touch
+_recent_touches: OrderedDict[str, datetime] = OrderedDict()  # session id -> last OK touch
+_cap_state: dict[str, float] = {"last_warning": float("-inf"), "skipped": 0.0}
+
+
+async def _write_last_seen(db_path: str, sid: str, when_iso: str) -> None:
+    """The touch itself, on its OWN short-lived connection (never the request's)."""
+    async with open_db(db_path) as db:
+        await db.execute("UPDATE sessions SET last_seen = ? WHERE id = ?", (when_iso, sid))
+        await db.commit()
+
+
+async def _run_touch(db_path: str, sid: str, when: datetime) -> None:
+    """Run one touch and swallow every failure: a failed touch never affects a request.
+
+    The whole write (connect + UPDATE + commit + close) is bounded by
+    ``SESSION_TOUCH_TIMEOUT_SECONDS``. A timeout or error is logged by
+    exception TYPE only (the text can carry SQL or connection details), is NOT
+    recorded as a touch, and so is retried on a later request.
+    """
+    try:
+        await asyncio.wait_for(
+            _write_last_seen(db_path, sid, when.isoformat()),
+            timeout=settings.SESSION_TOUCH_TIMEOUT_SECONDS,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — informational write, must never raise
+        logger.warning("session last_seen touch failed (session %s...): %s", sid[:8], type(exc).__name__)
+        return
+    _recent_touches[sid] = when
+    _recent_touches.move_to_end(sid)
+    while len(_recent_touches) > _MAX_RECENT_TOUCHES:
+        _recent_touches.popitem(last=False)
+
+
+def _touch_in_flight(sid: str) -> bool:
+    """True while a touch for ``sid`` is running on THIS event loop.
+
+    A finished task, or one from another (closed) loop — only possible in
+    tests — is dropped, so a stale entry can never block touches forever.
+    """
+    task = _inflight_touches.get(sid)
+    if task is None:
+        return False
+    if task.done() or task.get_loop() is not asyncio.get_running_loop():
+        _inflight_touches.pop(sid, None)
+        _touch_tasks.discard(task)
+        return False
+    return True
+
+
+def _recently_touched(sid: str, now: datetime, interval_seconds: int) -> bool:
+    """True when THIS process already wrote ``last_seen`` inside the window.
+
+    Saves a write when the request's SELECT raced the background UPDATE. With
+    ``interval_seconds <= 0`` (write every request) it never skips.
+    """
+    if interval_seconds <= 0:
+        return False
+    when = _recent_touches.get(sid)
+    if when is None:
+        return False
+    return 0 <= (now - when).total_seconds() < interval_seconds
+
+
+def _schedule_touch(db_path: str, sid: str, when: datetime) -> None:
+    """Start the background touch for ``sid`` unless one is already running."""
+    if _touch_in_flight(sid):
+        return
+    if len(_inflight_touches) >= settings.SESSION_TOUCH_MAX_INFLIGHT:
+        _cap_state["skipped"] += 1
+        now_mono = time.monotonic()
+        if now_mono - _cap_state["last_warning"] >= _CAP_WARNING_EVERY_SECONDS:
+            logger.warning(
+                "session last_seen touch skipped: %d already in flight (cap "
+                "SESSION_TOUCH_MAX_INFLIGHT=%d); %d skipped since the last warning",
+                len(_inflight_touches), settings.SESSION_TOUCH_MAX_INFLIGHT, int(_cap_state["skipped"]),
+            )
+            _cap_state["last_warning"] = now_mono
+            _cap_state["skipped"] = 0
+        return
+    task = asyncio.get_running_loop().create_task(_run_touch(db_path, sid, when))
+    _touch_tasks.add(task)
+    _inflight_touches[sid] = task
+
+    def _done(t: asyncio.Task[None]) -> None:
+        _touch_tasks.discard(t)
+        if _inflight_touches.get(sid) is t:
+            del _inflight_touches[sid]
+
+    task.add_done_callback(_done)
+
+
+async def drain_session_touches(timeout: Optional[float] = None) -> None:
+    """Wait for this loop's pending ``last_seen`` touches; cancel any left at ``timeout``.
+
+    Used by tests (deterministic asserts) and by app shutdown (no "task was
+    destroyed but it is pending", no long block). Never raises.
+    """
+    loop = asyncio.get_running_loop()
+    mine = {t for t in _touch_tasks if t.get_loop() is loop and not t.done()}
+    if mine:
+        _, pending = await asyncio.wait(mine, timeout=timeout)
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.wait(pending, timeout=1.0)
+    # Purge anything finished or owned by another (closed) loop.
+    for sid, t in list(_inflight_touches.items()):
+        if t.done() or t.get_loop() is not loop:
+            _inflight_touches.pop(sid, None)
+    for t in list(_touch_tasks):
+        if t.done() or t.get_loop() is not loop:
+            _touch_tasks.discard(t)
+
+
+def reset_session_touch_state() -> None:
+    """Forget all in-process touch bookkeeping (tests only).
+
+    Drops references; it does not cancel tasks (a task may belong to another
+    thread's loop, where ``cancel()`` is not safe). Call
+    ``drain_session_touches`` first for the current loop's tasks.
+    """
+    _touch_tasks.clear()
+    _inflight_touches.clear()
+    _recent_touches.clear()
+    _cap_state["last_warning"] = float("-inf")
+    _cap_state["skipped"] = 0.0
 
 
 def _signer(secret: str) -> TimestampSigner:
@@ -110,7 +262,12 @@ async def resolve_session(
     ``last_seen`` is informational and written at most once per
     ``settings.SESSION_TOUCH_INTERVAL_SECONDS``: inside the window the resolve
     is a pure read (one SELECT, no UPDATE, no commit). Writing it on every
-    request made each signed-in read wait on a commit (FC-008).
+    request made each signed-in read wait on a commit (FC-008). When a touch
+    IS due it runs in the background (``_schedule_touch``): the request never
+    waits for it, and one session has at most one touch in flight.
+
+    The row is SELECTed on every call (no session cache), so logout, revoke
+    and expiry apply on the very next request.
 
     ``now`` is an injectable clock for tests; production passes nothing.
     """
@@ -129,11 +286,9 @@ async def resolve_session(
             return None
         if row["expires_at"] <= now_iso:
             return None
-        if _touch_due(row["last_seen"], now_dt, settings.SESSION_TOUCH_INTERVAL_SECONDS):
-            await db.execute(
-                "UPDATE sessions SET last_seen = ? WHERE id = ?", (now_iso, sid)
-            )
-            await db.commit()
+    interval = settings.SESSION_TOUCH_INTERVAL_SECONDS
+    if _touch_due(row["last_seen"], now_dt, interval) and not _recently_touched(sid, now_dt, interval):
+        _schedule_touch(db_path, sid, now_dt)
     return cast(Optional[str], row["user_id"])
 
 
