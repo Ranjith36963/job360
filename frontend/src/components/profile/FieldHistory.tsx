@@ -55,18 +55,18 @@ export function FieldHistory({ paths, label, pathLabels, buttonLabel }: FieldHis
   }
 
   return (
-    <div className="text-xs">
+    <div className="font-mono text-[11px]">
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
         aria-label={`History of ${label}`}
-        className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        className="text-faint underline-offset-2 hover:text-foreground hover:underline"
       >
         {buttonLabel ?? "History"}
       </button>
       {open && (
-        <div data-testid="field-history" className="mt-1 rounded-md bg-muted/30 px-2 py-1.5">
+        <div data-testid="field-history" className="mt-1 rounded-md border border-border px-2 py-1.5">
           {error ? (
             <p className="text-destructive">{error}</p>
           ) : rows === null ? (

@@ -138,11 +138,11 @@ function TagInput({
   const badgeClass =
     variant === "destructive"
       ? "bg-destructive/10 text-destructive border border-destructive/20"
-      : "skill-matched";
+      : "border border-border bg-card text-foreground";
 
   return (
     <div className="space-y-2" data-testid={testId}>
-      <Label className="text-sm font-medium">
+      <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
         {icon}
         {label}
         {trailing}
@@ -155,7 +155,7 @@ function TagInput({
           {tags.map((tag, i) => (
             <span
               key={`${tag}-${i}`}
-              className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${badgeClass}`}
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${badgeClass}`}
             >
               {tag}
               <button
@@ -197,7 +197,7 @@ function TagInput({
       {openSuggestions.length > 0 && (
         <div className="pt-1">
           {suggestionsLabel && (
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-brand">
+            <p className="mb-1 font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
               {suggestionsLabel}
             </p>
           )}
@@ -216,7 +216,7 @@ function TagInput({
                 // this control must stay clearly distinct from one.
                 aria-label={`Add ${s} to ${label}`}
                 onClick={() => appendTag(s)}
-                className="inline-flex items-center gap-1 rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-brand/90 transition-colors hover:border-primary/70 hover:bg-primary/10"
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
               >
                 <Plus className="h-3 w-3" />
                 {s}
@@ -262,7 +262,7 @@ function AssistantNotes({
   };
   return (
     <div className="space-y-2" data-testid="assistant-notes">
-      <Label className="text-sm font-medium">
+      <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
         Things your assistant should know
         {trailing}
       </Label>
@@ -275,7 +275,7 @@ function AssistantNotes({
           {notes.map((note, i) => (
             <li
               key={`${note}-${i}`}
-              className="flex items-start justify-between gap-2 rounded-md border border-border/60 px-2.5 py-1.5 text-sm"
+              className="flex items-start justify-between gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm"
             >
               <span className="break-words">{note}</span>
               <button
@@ -570,15 +570,15 @@ export function PreferencesForm({
   return (
     <div
       id="preferences"
-      className="glass-card rounded-xl p-6 animate-fade-in-up stagger-3 scroll-mt-24"
+      className="rounded-xl border border-border bg-card p-6 animate-fade-in-up stagger-3 scroll-mt-24"
     >
       <div className="flex items-center gap-3 mb-6">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-          <Briefcase className="h-5 w-5 text-brand" />
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-muted">
+          <Briefcase className="h-5 w-5 text-muted-foreground" />
         </div>
         <div>
           <h3 className="font-heading text-base font-medium">Your preferences</h3>
-          <p className="text-xs text-muted-foreground">
+          <p className="font-mono text-[11px] text-faint">
             What you want — your assistant reads this when it judges a job
           </p>
         </div>
@@ -677,7 +677,7 @@ export function PreferencesForm({
 
         {/* ── Salary Range ───────────────────────── */}
         <div className="space-y-2">
-          <Label className="text-sm font-medium">
+          <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
             <DollarSign className="h-3.5 w-3.5" />
             Salary Range
             <EditedMark
@@ -717,7 +717,7 @@ export function PreferencesForm({
         {/* ── Work Arrangement & Experience Level ── */}
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
-            <Label className="text-sm font-medium">
+            <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
               Work Arrangement
               {markOf("work_arrangement")}
             </Label>
@@ -737,7 +737,7 @@ export function PreferencesForm({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label className="text-sm font-medium">
+            <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
               Experience Level
               {markOf("experience_level")}
             </Label>
@@ -818,7 +818,7 @@ export function PreferencesForm({
 
         {/* ── About Me ───────────────────────────── */}
         <div className="space-y-2">
-          <Label className="text-sm font-medium">
+          <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
             About Me
             {markOf("about_me")}
           </Label>
