@@ -10,6 +10,7 @@ import {
   Zap,
   Shield,
   Plug,
+  Clock,
 } from "lucide-react";
 
 // R14 (docs/plans/2026-09-04-application-spine/spec.md) — the landing copy
