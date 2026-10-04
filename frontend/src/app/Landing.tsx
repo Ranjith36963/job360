@@ -128,10 +128,10 @@ export default function Landing() {
           <h1
             className="text-balance font-heading text-4xl font-normal leading-[1.05] tracking-[-0.022em] sm:text-5xl lg:text-6xl"
           >
-            <span className="block">
+            <span className="sm:block">
               {CATEGORY_LINE_LEAD}
             </span>
-            <span className="mt-1 block">
+            <span className="sm:mt-1 sm:block">
               {` — ${CATEGORY_LINE_TAIL}`}
             </span>
           </h1>
