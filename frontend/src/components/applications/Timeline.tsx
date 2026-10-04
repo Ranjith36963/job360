@@ -14,22 +14,30 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
   }
 
   return (
-    <ol className="flex flex-col gap-3">
+    <ol className="flex flex-col">
       {events.map((event) => (
         <li
           key={event.id}
           data-testid="timeline-event"
-          className={`glass-card rounded-lg p-3 text-sm ${event.superseded ? "opacity-50" : ""}`}
+          className={`border-t border-border py-2.5 text-sm first:border-t-0 first:pt-0 ${event.superseded ? "opacity-50" : ""}`}
         >
-          <div className="flex items-center justify-between gap-2">
+          <span className="mb-1 block font-mono text-[11.5px] tabular-nums text-faint">
+            {formatDateTime(event.occurred_at)}
+          </span>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <WhoChip recordedBy={event.recorded_by} />
             <span className={`font-medium ${event.superseded ? "line-through" : ""}`}>
               {eventLabel(event)}
             </span>
-            <span className="text-xs text-muted-foreground">
-              {formatDateTime(event.occurred_at)}
-            </span>
+            {event.superseded && (
+              <span className="font-mono text-[11px] text-faint">superseded</span>
+            )}
           </div>
-          {event.detail && <p className="mt-1 text-muted-foreground">{event.detail}</p>}
+          {event.detail && (
+            <p className="mt-1 font-heading text-[15px] leading-snug text-muted-foreground">
+              {event.detail}
+            </p>
+          )}
           {event.source && (
             <p className="mt-1 text-xs text-muted-foreground">
               {"✉ "}
@@ -40,16 +48,10 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
             </p>
           )}
           {event.scheduled_at && (
-            <p className="mt-1 text-xs font-medium text-foreground">
+            <p className="mt-1 font-mono text-xs text-foreground">
               Scheduled for {formatDateTime(event.scheduled_at)}
             </p>
           )}
-          <div className="mt-1 flex items-center gap-1.5">
-            <WhoChip recordedBy={event.recorded_by} />
-            {event.superseded && (
-              <span className="text-xs text-muted-foreground/70">superseded</span>
-            )}
-          </div>
         </li>
       ))}
     </ol>

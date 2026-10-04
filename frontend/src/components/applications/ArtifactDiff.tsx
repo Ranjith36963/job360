@@ -20,7 +20,7 @@ export function ArtifactDiff({ diff }: { diff: ArtifactDiffData }) {
 
   return (
     <div data-testid="artifact-diff" className="mt-3 flex flex-col gap-2">
-      <p className="text-xs text-muted-foreground">
+      <p className="font-mono text-xs tabular-nums text-faint">
         <span data-testid="artifact-diff-added">{diff.added} added</span>
         {" · "}
         <span data-testid="artifact-diff-removed">{diff.removed} removed</span>
@@ -44,8 +44,8 @@ function Pane({
   lines: ArtifactDiffData["lines"];
 }) {
   return (
-    <div data-testid={testId} className="min-w-0 rounded-md border border-border bg-muted/30">
-      <p className="border-b border-border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <div data-testid={testId} className="min-w-0 rounded-lg border border-border bg-muted/30">
+      <p className="border-b border-border px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider text-faint">
         {title}
       </p>
       <div className="max-h-[32rem] overflow-y-auto p-2 font-mono text-xs leading-5">
@@ -56,9 +56,9 @@ function Pane({
             data-diff={line.op}
             className={
               line.op === "add"
-                ? "whitespace-pre-wrap rounded-sm bg-success/15 px-1"
+                ? "whitespace-pre-wrap rounded-sm bg-success-soft px-1"
                 : line.op === "del"
-                  ? "whitespace-pre-wrap rounded-sm bg-danger/15 px-1 line-through decoration-danger/40"
+                  ? "whitespace-pre-wrap rounded-sm bg-danger-soft px-1 text-muted-foreground line-through decoration-danger/40"
                   : "whitespace-pre-wrap px-1"
             }
           >
