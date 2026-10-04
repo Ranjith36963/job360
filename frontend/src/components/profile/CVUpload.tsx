@@ -71,14 +71,14 @@ function UploadReceipt({
   return (
     <div
       data-testid="upload-receipt"
-      className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 px-3 py-2"
+      className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2"
     >
-      <CheckCircle className="h-4 w-4 shrink-0 text-success" />
+      <CheckCircle className="h-4 w-4 shrink-0 text-brand" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium text-foreground" title={name}>
           {name}
         </p>
-        {sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}
+        {sub && <p className="font-mono text-[11px] tabular-nums text-muted-foreground">{sub}</p>}
       </div>
     </div>
   );
@@ -320,13 +320,13 @@ export function CVUpload({
   return (
     <div className="space-y-6">
       {/* ── CV Upload Section ───────────────────────────── */}
-      <div className="glass-card rounded-xl p-6 animate-fade-in-up stagger-1">
+      <div className="rounded-xl border border-border bg-card p-6">
         <div className="flex items-center gap-3 mb-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-            <FileText className="h-5 w-5 text-brand" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-border">
+            <FileText className="h-5 w-5 text-muted-foreground" />
           </div>
           <div>
-            <h3 className="font-heading text-base font-medium">
+            <h3 className="font-heading text-lg font-normal">
               {hasCV ? "CV Uploaded" : "Upload CV"}
             </h3>
             <p className="text-xs text-muted-foreground">
@@ -336,7 +336,7 @@ export function CVUpload({
             </p>
           </div>
           {hasCV && (
-            <CheckCircle className="ml-auto h-5 w-5 text-success" />
+            <CheckCircle className="ml-auto h-4 w-4 text-brand" />
           )}
         </div>
 
@@ -423,10 +423,10 @@ export function CVUpload({
             tabIndex={uploading ? -1 : 0}
             aria-label="Upload a CV — click or drop a PDF or DOCX file here"
             aria-disabled={uploading}
-            className={`cursor-pointer border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+            className={`cursor-pointer border border-dashed rounded-xl p-8 text-center transition-colors ${
               dragging
-                ? "border-primary/60 bg-primary/5"
-                : "border-primary/20 hover:border-primary/40"
+                ? "border-foreground/40"
+                : "border-border hover:border-foreground/30"
             } ${uploading ? "pointer-events-none opacity-60" : ""}`}
           >
             <input
@@ -438,15 +438,15 @@ export function CVUpload({
             />
             {uploading || loading ? (
               <div className="flex flex-col items-center gap-3">
-                <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-foreground" />
                 <p className="text-sm text-muted-foreground">
                   Parsing your CV...
                 </p>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-3">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-                  <Upload className="h-7 w-7 text-brand" />
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-border">
+                  <Upload className="h-6 w-6 text-muted-foreground" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-foreground">
@@ -471,26 +471,26 @@ export function CVUpload({
                 dropped and the other keeps its real count. */}
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1.5">
-                <Wrench className="h-3.5 w-3.5 text-brand" />
+                <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">Skills:</span>
-                <Badge variant="secondary" className="font-mono text-xs">
+                <Badge variant="outline" className="font-mono text-xs tabular-nums">
                   {profile.skills_count}
                 </Badge>
               </div>
               {profile.job_titles.length > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <Briefcase className="h-3.5 w-3.5 text-info" />
+                  <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-xs text-muted-foreground">Roles:</span>
-                  <Badge variant="secondary" className="font-mono text-xs">
+                  <Badge variant="outline" className="font-mono text-xs tabular-nums">
                     {profile.job_titles.length}
                   </Badge>
                 </div>
               )}
               {profile.education.length > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <GraduationCap className="h-3.5 w-3.5 text-warning" />
+                  <GraduationCap className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-xs text-muted-foreground">Education:</span>
-                  <Badge variant="secondary" className="font-mono text-xs">
+                  <Badge variant="outline" className="font-mono text-xs tabular-nums">
                     {profile.education.length}
                   </Badge>
                 </div>
@@ -499,7 +499,7 @@ export function CVUpload({
                 <div className="flex items-center gap-1.5">
                   <Award className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-xs text-muted-foreground">Certs:</span>
-                  <Badge variant="secondary" className="font-mono text-xs">
+                  <Badge variant="outline" className="font-mono text-xs tabular-nums">
                     {cvDetail.certifications.length}
                   </Badge>
                 </div>
@@ -529,7 +529,7 @@ export function CVUpload({
                 {cvDetail.skills.slice(0, 30).map((skill) => (
                   <span
                     key={skill}
-                    className="inline-flex items-center rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-xs font-medium text-brand"
+                    className="inline-flex items-center rounded-full border border-border px-2.5 py-0.5 text-xs text-foreground"
                   >
                     {skill}
                   </span>
@@ -567,7 +567,7 @@ export function CVUpload({
                 </button>
                 {rawTextOpen && (
                   <div data-testid="raw-cv-text-content" className="mt-2 space-y-2">
-                    <div className="rounded-lg bg-muted/20 border border-border/40 p-4 max-h-[500px] overflow-y-auto">
+                    <div className="rounded-lg border border-border bg-card p-4 max-h-[500px] overflow-y-auto">
                       <pre className="whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-foreground/85">
                         {buildHighlightedCV(cvDetail.raw_text, highlightTerms)}
                       </pre>
@@ -654,8 +654,8 @@ export function CVUpload({
       </div>
 
       {/* ── Enrichment Section ──────────────────────────── */}
-      <div className="glass-card rounded-xl p-6 animate-fade-in-up stagger-2">
-        <h3 className="font-heading text-base font-medium mb-1">
+      <div className="rounded-xl border border-border bg-card p-6">
+        <h3 className="font-heading text-lg font-normal mb-1">
           Add LinkedIn and GitHub
         </h3>
         <p className="text-xs text-muted-foreground mb-4">
@@ -682,7 +682,7 @@ export function CVUpload({
               </p>
             </div>
             {profile?.has_linkedin && (
-              <CheckCircle className="h-4 w-4 text-success shrink-0" />
+              <CheckCircle className="h-4 w-4 text-brand shrink-0" />
             )}
           </div>
           <div>
@@ -701,7 +701,7 @@ export function CVUpload({
               className="gap-2 w-full"
             >
               {linkedinLoading ? (
-                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-foreground" />
               ) : (
                 <Upload className="h-3.5 w-3.5" />
               )}
@@ -732,7 +732,7 @@ export function CVUpload({
         {/* GitHub */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground/10 ring-1 ring-foreground/20">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border">
               <GitBranch className="h-4 w-4 text-foreground" />
             </div>
             <div className="flex-1 min-w-0">
@@ -742,7 +742,7 @@ export function CVUpload({
               </p>
             </div>
             {profile?.has_github && (
-              <CheckCircle className="h-4 w-4 text-success shrink-0" />
+              <CheckCircle className="h-4 w-4 text-brand shrink-0" />
             )}
           </div>
           <div className="flex gap-2">
@@ -766,7 +766,7 @@ export function CVUpload({
               className="gap-2 shrink-0"
             >
               {githubLoading ? (
-                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-foreground" />
               ) : (
                 <GitBranch className="h-3.5 w-3.5" />
               )}
@@ -810,8 +810,8 @@ export function CVUpload({
             itself (rule 4) — the old copy claimed LinkedIn/GitHub improved
             "semantic matching accuracy", which does not exist here. */}
         {profile && !profile.has_linkedin && !profile.has_github && (
-          <div className="mt-4 flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/10 p-3">
-            <AlertCircle className="h-4 w-4 text-brand shrink-0 mt-0.5" />
+          <div className="mt-4 flex items-start gap-2 rounded-lg border border-border p-3">
+            <AlertCircle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
             <p className="text-xs text-muted-foreground">
               Optional — your assistant can read these too.
             </p>

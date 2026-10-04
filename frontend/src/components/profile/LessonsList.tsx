@@ -34,9 +34,9 @@ export function LessonsList() {
   }, []);
 
   return (
-    <div className="animate-fade-in-up glass-card rounded-xl p-6">
-      <h2 className="font-heading text-base font-medium mb-4 flex items-center gap-2">
-        <BookOpen className="h-4 w-4 text-brand" />
+    <div className="rounded-xl border border-border bg-card p-6">
+      <h2 className="font-heading text-lg font-normal mb-4 flex items-center gap-2">
+        <BookOpen className="h-4 w-4 text-muted-foreground" />
         Lessons
       </h2>
 
@@ -50,11 +50,11 @@ export function LessonsList() {
         </p>
       ) : (
         <>
-          <ul className="space-y-4">
+          <ul className="divide-y divide-border">
             {lessons.map((l) => (
-              <li key={l.event_id} data-testid="lesson-item">
-                <p className="whitespace-pre-wrap text-sm text-foreground">{l.detail}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
+              <li key={l.event_id} data-testid="lesson-item" className="py-3 first:pt-0 last:pb-0">
+                <p className="whitespace-pre-wrap font-heading text-base text-foreground">{l.detail}</p>
+                <p className="mt-1 font-mono text-[11px] text-muted-foreground">
                   <Link
                     href={`/applications/${l.application_id}`}
                     data-testid="lesson-link"

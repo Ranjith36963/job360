@@ -64,7 +64,7 @@ export function CountryPicker({
 
   return (
     <div className="space-y-2" data-testid={testId}>
-      <Label className="text-sm font-medium">
+      <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
         {label}
         {trailing}
       </Label>
@@ -76,7 +76,7 @@ export function CountryPicker({
           {tags.map((code) => (
             <span
               key={code}
-              className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium skill-matched"
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground"
             >
               {countryName(code)}
               <button
@@ -116,7 +116,7 @@ export function CountryPicker({
               role="option"
               aria-selected={false}
               onClick={() => addCountry(c.code)}
-              className="inline-flex items-center gap-1 rounded-full border border-dashed border-primary/40 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-brand/90 transition-colors hover:border-primary/70 hover:bg-primary/10"
+              className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
             >
               {c.name}
             </button>

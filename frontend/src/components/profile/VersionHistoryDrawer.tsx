@@ -103,8 +103,8 @@ export function VersionHistoryDrawer({
       <SheetContent side="right" className="w-80 sm:w-96 p-0 flex flex-col">
         <SheetHeader className="p-4 pb-3 border-b border-border">
           <div className="flex items-center gap-2">
-            <History className="h-4 w-4 text-brand" />
-            <SheetTitle>Version History</SheetTitle>
+            <History className="h-4 w-4 text-muted-foreground" />
+            <SheetTitle className="font-heading font-normal">Version History</SheetTitle>
           </div>
           <SheetDescription>
             Restore your profile to a previous saved state.
@@ -150,13 +150,13 @@ export function VersionHistoryDrawer({
               {versions.map((version, idx) => (
                 <li
                   key={version.id}
-                  className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card/50 p-3 transition-colors hover:bg-muted/30"
+                  className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-muted/30"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-foreground truncate">
                       {formatSourceAction(version.source_action)}
                     </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                    <p className="font-mono text-[11px] tabular-nums text-muted-foreground mt-0.5">
                       {formatDate(version.created_at)}
                     </p>
                     {version.snapshot_id && (
@@ -168,7 +168,7 @@ export function VersionHistoryDrawer({
                       </p>
                     )}
                     {idx === 0 && (
-                      <span className="mt-1 inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-brand">
+                      <span className="mt-1 inline-block rounded-full border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-brand">
                         Current
                       </span>
                     )}
