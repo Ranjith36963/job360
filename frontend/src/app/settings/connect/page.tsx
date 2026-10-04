@@ -32,6 +32,15 @@ import {
   AddressStepCard,
   AssistantStepsCard,
   SayHelloCard,
+  CARD_CLASS,
+  TITLE_CLASS,
+  DESC_CLASS,
+  LABEL_CLASS,
+  MONO_FIELD_CLASS,
+  QUIET_BTN_CLASS,
+  PRIMARY_BTN_CLASS,
+  DANGER_BTN_CLASS,
+  DANGER_CONFIRM_BTN_CLASS,
   copyText,
   mcpUrl,
 } from "@/components/connect/ConnectSteps";
@@ -81,29 +90,32 @@ function NewTokenReveal({
 }) {
   const cmd = connectCommand(created.token);
   return (
-    <Card className="border-success/40" data-testid="token-reveal">
+    <Card className={CARD_CLASS} data-testid="token-reveal">
       <CardHeader>
-        <CardTitle>Your new token: {created.name}</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Your new token: {created.name}</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Copy it now. This is the only time it is shown — we keep a hash,
           not the token.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-1">
-          <Label htmlFor="new-token">Token</Label>
+          <Label htmlFor="new-token" className={LABEL_CLASS}>
+            Token
+          </Label>
           <div className="flex gap-2">
             <Input
               id="new-token"
               readOnly
               value={created.token}
-              className="font-mono text-xs"
+              className={MONO_FIELD_CLASS}
               data-testid="token-value"
               onFocus={(e) => e.currentTarget.select()}
             />
             <Button
               type="button"
               variant="outline"
+              className={`h-9 ${QUIET_BTN_CLASS}`}
               onClick={() => copyText(created.token, "Token")}
             >
               Copy
@@ -111,7 +123,9 @@ function NewTokenReveal({
           </div>
         </div>
         <div className="space-y-1">
-          <Label htmlFor="connect-cmd">Connect Claude Code</Label>
+          <Label htmlFor="connect-cmd" className={LABEL_CLASS}>
+            Connect Claude Code
+          </Label>
           <p className="text-xs text-muted-foreground">
             Run this once in a terminal. Then Claude can bring a job, read
             your profile and receipts, and record an application for you.
@@ -121,19 +135,25 @@ function NewTokenReveal({
             readOnly
             rows={3}
             value={cmd}
-            className="w-full rounded-md border border-border/40 bg-muted/30 p-2 font-mono text-xs"
+            className="w-full rounded-md border border-border bg-background p-3 font-mono text-xs"
             data-testid="connect-command"
             onFocus={(e) => e.currentTarget.select()}
           />
           <Button
             type="button"
             variant="outline"
+            className={QUIET_BTN_CLASS}
             onClick={() => copyText(cmd, "Command")}
           >
             Copy command
           </Button>
         </div>
-        <Button type="button" onClick={onDismiss} data-testid="token-reveal-done">
+        <Button
+          type="button"
+          className={PRIMARY_BTN_CLASS}
+          onClick={onDismiss}
+          data-testid="token-reveal-done"
+        >
           I have saved it
         </Button>
       </CardContent>
@@ -154,19 +174,19 @@ const EXAMPLE_PROMPTS: { label: string; prompt: string }[] = [
 
 function ExamplePromptsCard() {
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>What to say to your assistant</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>What to say to your assistant</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Once connected, just ask in plain words — the assistant picks the
           right tools.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ul className="divide-y divide-border/40">
+        <ul className="divide-y divide-border">
           {EXAMPLE_PROMPTS.map((e) => (
             <li key={e.label} className="space-y-1 py-3">
-              <p className="text-xs font-medium text-muted-foreground">
+              <p className={LABEL_CLASS}>
                 {e.label}
               </p>
               <p className="font-mono text-sm">&quot;{e.prompt}&quot;</p>
@@ -315,10 +335,10 @@ export function DailyCheckCard({
       ? null
       : dailyCheckStatusLine(dailyCheck, connected);
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Inbox check (scheduled task)</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Inbox check (scheduled task)</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Paste this into a ChatGPT or Claude scheduled task with Gmail
           connected — it reads your inbox and records what it finds, on your
           own agent, as often as you choose below. Job360 never reads your
@@ -335,7 +355,7 @@ export function DailyCheckCard({
           readOnly
           rows={6}
           value={DAILY_CHECK_PROMPT}
-          className="w-full rounded-md border border-border/40 bg-muted/30 p-2 font-mono text-xs"
+          className="w-full rounded-md border border-border bg-background p-3 font-mono text-xs"
           data-testid="daily-check-prompt"
           onFocus={(e) => e.currentTarget.select()}
         />
@@ -343,6 +363,7 @@ export function DailyCheckCard({
           <Button
             type="button"
             variant="outline"
+            className={QUIET_BTN_CLASS}
             onClick={() => copyText(DAILY_CHECK_PROMPT, "Prompt")}
           >
             Copy prompt
@@ -375,6 +396,9 @@ export function DailyCheckCard({
                 aria-checked={selectedMode === o.value}
                 size="sm"
                 variant={selectedMode === o.value ? "default" : "outline"}
+                className={
+                  selectedMode === o.value ? PRIMARY_BTN_CLASS : QUIET_BTN_CLASS
+                }
                 disabled={modeSaving}
                 onClick={() => onModeChange(o.value)}
                 data-testid={`inbox-mode-${o.value}`}
@@ -386,7 +410,7 @@ export function DailyCheckCard({
         )}
         {showControls && checkEvery !== null && (
           <div className="flex items-center gap-2">
-            <label htmlFor="inbox-check-every" className="text-sm">
+            <label htmlFor="inbox-check-every" className="text-sm text-muted-foreground">
               How often
             </label>
             <select
@@ -397,7 +421,7 @@ export function DailyCheckCard({
               onChange={(e) =>
                 onCheckEveryChange(e.target.value as EveryValue)
               }
-              className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+              className="h-9 rounded-md border border-border bg-background px-2 text-sm"
             >
               {CHECK_EVERY_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -434,7 +458,7 @@ function GrantRow({
       data-testid="grant-row"
     >
       <div className="min-w-0">
-        <p className="truncate font-medium">{grant.client_name}</p>
+        <p className="truncate font-normal">{grant.client_name}</p>
         <p className="text-xs text-muted-foreground">
           <span className="font-mono">{redirectHost(grant.redirect_uri)}</span>{" "}
           · connected {fmtDate(grant.created_at)} · last used{" "}
@@ -447,6 +471,7 @@ function GrantRow({
             type="button"
             variant="destructive"
             size="sm"
+            className={DANGER_CONFIRM_BTN_CLASS}
             onClick={() => onRevoke(grant)}
             data-testid={`grant-revoke-confirm-${grant.id}`}
           >
@@ -456,6 +481,7 @@ function GrantRow({
             type="button"
             variant="outline"
             size="sm"
+            className={QUIET_BTN_CLASS}
             onClick={() => setConfirming(false)}
           >
             Cancel
@@ -466,6 +492,7 @@ function GrantRow({
           type="button"
           variant="destructive"
           size="sm"
+          className={DANGER_BTN_CLASS}
           onClick={() => setConfirming(true)}
           aria-label={`Revoke access for ${grant.client_name}`}
           data-testid={`grant-revoke-${grant.id}`}
@@ -487,10 +514,10 @@ function ConnectedAppsCard({
   onRevoke: (g: OAuthGrant) => void;
 }) {
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Connected apps</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Connected apps</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Apps you signed in through — ChatGPT, Claude.ai, or any app that
           asked to connect. Revoking cuts that app off right away.
         </CardDescription>
@@ -503,7 +530,7 @@ function ConnectedAppsCard({
             No connected apps yet.
           </p>
         ) : (
-          <ul className="divide-y divide-border/40" data-testid="grant-list">
+          <ul className="divide-y divide-border" data-testid="grant-list">
             {grants.map((g) => (
               <GrantRow key={g.id} grant={g} onRevoke={onRevoke} />
             ))}
@@ -551,10 +578,10 @@ function CreateTokenCard({
   }
 
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Create a token</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Create a token</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           One token per agent or machine. Name it after where it lives
           (&quot;laptop Claude Code&quot;) so revoking later is easy.
         </CardDescription>
@@ -562,7 +589,9 @@ function CreateTokenCard({
       <CardContent>
         <form onSubmit={onSubmit} noValidate className="flex items-end gap-2">
           <div className="flex-1 space-y-1">
-            <Label htmlFor="token-name">Name</Label>
+            <Label htmlFor="token-name" className={LABEL_CLASS}>
+              Name
+            </Label>
             <Input
               id="token-name"
               value={name}
@@ -573,7 +602,7 @@ function CreateTokenCard({
               onChange={(e) => setName(e.target.value)}
             />
           </div>
-          <Button type="submit" disabled={submitting}>
+          <Button type="submit" className={PRIMARY_BTN_CLASS} disabled={submitting}>
             {submitting ? "Creating..." : "Create token"}
           </Button>
         </form>
@@ -601,10 +630,10 @@ function TokenList({
   onRevoke: (t: TokenSummary) => void;
 }) {
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Active tokens</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Active tokens</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Revoking a token cuts that agent off immediately. It cannot be
           undone — mint a new one instead.
         </CardDescription>
@@ -617,7 +646,7 @@ function TokenList({
             No tokens yet. Create one above to connect an agent.
           </p>
         ) : (
-          <ul className="divide-y divide-border/40" data-testid="token-list">
+          <ul className="divide-y divide-border" data-testid="token-list">
             {tokens.map((t) => (
               <li
                 key={t.id}
@@ -625,7 +654,7 @@ function TokenList({
                 data-testid="token-row"
               >
                 <div className="min-w-0">
-                  <p className="truncate font-medium">{t.name}</p>
+                  <p className="truncate font-normal">{t.name}</p>
                   <p className="text-xs text-muted-foreground">
                     <span className="font-mono">{t.prefix}…</span> · created{" "}
                     {fmtDate(t.created_at)} · last used {fmtDate(t.last_used_at)}
@@ -635,6 +664,7 @@ function TokenList({
                   type="button"
                   variant="destructive"
                   size="sm"
+                  className={DANGER_BTN_CLASS}
                   onClick={() => onRevoke(t)}
                   aria-label={`Revoke token ${t.name}`}
                 >
@@ -680,13 +710,13 @@ function DeveloperTokensSection({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-xl ring-1 ring-border/40">
+    <div className="rounded-lg border border-border bg-card">
       <button
         type="button"
         data-testid="developer-tokens-toggle"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 p-4 text-left text-sm font-medium text-muted-foreground hover:text-foreground"
+        className="flex w-full items-center gap-2 p-4 text-left text-sm font-normal text-muted-foreground hover:text-foreground"
       >
         <ChevronDown
           className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}
@@ -696,7 +726,7 @@ function DeveloperTokensSection({
       {open && (
         <div data-testid="developer-tokens-content" className="space-y-8 p-4 pt-0">
           <p
-            className="text-xs text-success"
+            className="font-mono text-[11px] text-brand"
             data-testid="developer-tokens-tested"
           >
             ✅ Tested: works — Claude Code, 28 September 2026
@@ -879,7 +909,9 @@ export default function ConnectAgentPage() {
   return (
     <div className="space-y-8 py-12">
       <div className="max-w-3xl">
-        <h1 className="text-3xl font-semibold">Connect your assistant</h1>
+        <h1 className="text-balance font-heading text-[clamp(1.9rem,3.6vw,2.75rem)] font-normal leading-[1.08] tracking-[-0.022em]">
+          Connect your assistant
+        </h1>
         {/* Owner-approved CATEGORY LINE (2026-09-28) — the ONLY positioning
             sentence in use; do not invent another. Same line as the landing
             headline (Landing.tsx), the <title>/meta description

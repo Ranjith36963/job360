@@ -7,11 +7,11 @@ export default function SettingsLayout({ children }: { children: ReactNode }) {
   return (
     <PageContainer>
       <div className="flex items-center gap-3 pb-6 pt-10">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
-          <Settings className="h-5 w-5 text-brand" />
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card">
+          <Settings className="h-5 w-5 text-muted-foreground" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+          <h1 className="font-heading text-2xl font-normal tracking-tight">Settings</h1>
           <p className="text-sm text-muted-foreground">
             Manage your account and connected assistants
           </p>

@@ -11,6 +11,23 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 // The three connect steps, shared by /settings/connect and the brand-new-user
 // Home. Moved here unchanged (same copy) so both screens say the same thing.
 
+// Shared look for the connect + settings pages (class-only; no copy here).
+export const CARD_CLASS =
+  "gap-5 rounded-lg border border-border bg-card py-5 shadow-none ring-0";
+export const TITLE_CLASS = "font-heading text-xl font-normal tracking-tight";
+export const DESC_CLASS = "text-muted-foreground";
+export const LABEL_CLASS =
+  "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
+export const MONO_FIELD_CLASS = "h-9 border-border bg-background font-mono text-xs";
+export const QUIET_BTN_CLASS =
+  "border-border bg-card font-medium text-muted-foreground hover:text-foreground";
+export const PRIMARY_BTN_CLASS =
+  "bg-foreground text-background hover:bg-foreground/90";
+export const DANGER_BTN_CLASS =
+  "border-danger/40 bg-transparent text-danger hover:bg-danger-soft dark:bg-transparent dark:hover:bg-danger-soft";
+export const DANGER_CONFIRM_BTN_CLASS =
+  "bg-danger text-background hover:bg-danger/90 dark:bg-danger dark:hover:bg-danger/90";
+
 export function mcpUrl(): string {
   // The frontend proxies /api/* to the backend, so the MCP endpoint lives on
   // the same origin the user is looking at — no separate host to explain.
@@ -35,24 +52,27 @@ export async function copyText(text: string, what: string) {
 export function AddressStepCard() {
   const url = mcpUrl();
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Step 1 — Copy this address</CardTitle>
+        <CardTitle className={TITLE_CLASS}>Step 1 — Copy this address</CardTitle>
       </CardHeader>
       <CardContent className="space-y-1">
-        <Label htmlFor="mcp-url">Address</Label>
+        <Label htmlFor="mcp-url" className={LABEL_CLASS}>
+          Address
+        </Label>
         <div className="flex gap-2">
           <Input
             id="mcp-url"
             readOnly
             value={url}
-            className="font-mono text-xs"
+            className={MONO_FIELD_CLASS}
             data-testid="mcp-url"
             onFocus={(e) => e.currentTarget.select()}
           />
           <Button
             type="button"
             variant="outline"
+            className={`h-9 ${QUIET_BTN_CLASS}`}
             onClick={() => {
               // Funnel event (owner decision, 2026-09-28): the moment a user
               // actually starts connecting an assistant, not just visits the
@@ -112,22 +132,22 @@ const ASSISTANT_STEPS: AssistantStep[] = [
 
 export function AssistantStepsCard() {
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Step 2 — Add it in your assistant</CardTitle>
-        <CardDescription>
+        <CardTitle className={TITLE_CLASS}>Step 2 — Add it in your assistant</CardTitle>
+        <CardDescription className={DESC_CLASS}>
           Same address for every assistant, from Step 1 above.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ul className="grid gap-4 border-t border-border/40 lg:grid-cols-2 lg:gap-x-8">
+        <ul className="grid gap-0 border-t border-border lg:grid-cols-2 lg:gap-x-8">
           {ASSISTANT_STEPS.map((a) => (
-            <li key={a.name} className="space-y-1 border-b border-border/40 py-3">
-              <p className="font-medium">{a.name}</p>
+            <li key={a.name} className="space-y-1 border-b border-border py-3">
+              <p className="font-normal">{a.name}</p>
               <p className="text-xs text-muted-foreground">{a.line}</p>
               {a.tested && (
                 <p
-                  className="text-xs text-success"
+                  className="font-mono text-[11px] text-brand"
                   data-testid={`assistant-status-${a.name.toLowerCase()}`}
                 >
                   ✅ Tested: works
@@ -149,9 +169,9 @@ export function AssistantStepsCard() {
 
 export function SayHelloCard() {
   return (
-    <Card>
+    <Card className={CARD_CLASS}>
       <CardHeader>
-        <CardTitle>Step 3 — Say hello</CardTitle>
+        <CardTitle className={TITLE_CLASS}>Step 3 — Say hello</CardTitle>
       </CardHeader>
       <CardContent>
         <p className="text-sm">
