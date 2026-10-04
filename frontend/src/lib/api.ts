@@ -710,6 +710,25 @@ export async function withdrawAsk(id: number): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/withdraw`, { method: "POST" });
 }
 
+// ---- Home (redesign slice 2) — what changed, and the hunt in counts ----
+export type WhatsNew = _Schemas["WhatsNewResponse"];
+export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
+export type Stats = _Schemas["StatsResponse"];
+
+/** One page of events across every application, OLDEST first, keyed on
+ *  `recorded_at`. `since` is compared to the stored text as-is, so pass back
+ *  a timestamp the server gave you (`now` / `next_since`) where you can.
+ *  Omitted `since` = the server's default window (7 days). */
+export async function getWhatsNew(
+  params: { since?: string; after_id?: number; limit?: number } = {}
+): Promise<WhatsNew> {
+  return request(`/api/whats-new${qs(params)}`);
+}
+
+export async function getStats(): Promise<Stats> {
+  return request("/api/applications/stats");
+}
+
 // ---- Lessons (slice 9, docs/plans/2026-09-11-lessons/spec.md) ----
 // "Flag for next time": written through recordApplicationEvent(event_type
 // "lesson"); read back here for the profile's Lessons list. The agent gets

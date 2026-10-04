@@ -7,6 +7,7 @@ import { ASKS_CHANGED_EVENT, answerAsk, listAsks, withdrawAsk } from "@/lib/api"
 import type { Ask } from "@/lib/api";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
+import { WhoChip } from "@/components/applications/WhoChip";
 
 // Every string on an ask (question, context, answer, job fields) is written by
 // the user's assistant or by the user — untrusted. It is only ever rendered as
@@ -26,16 +27,23 @@ const linkBtn =
 const confirmBox =
   "flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs";
 
-function AskCard({
+/** One ask. `variant="home"` is the home page's elevated card (redesign
+ * slice 2): who asked + when + job on one meta line, the question in the
+ * serif face, and an "Answer" button that opens the SAME answer + confirm
+ * flow as the Needs-you page. Withdraw stays on the Needs-you page only. */
+export function AskCard({
   ask,
   mode,
   onChanged,
+  variant = "page",
 }: {
   ask: Ask;
   mode: "open" | "answered";
   onChanged: () => Promise<void>;
+  variant?: "page" | "home";
 }) {
-  const [editing, setEditing] = useState(mode === "open");
+  const home = variant === "home";
+  const [editing, setEditing] = useState(mode === "open" && !home);
   const [draft, setDraft] = useState(mode === "open" ? "" : (ask.answer ?? ""));
   const [pending, setPending] = useState<Pending>(null);
   const [busy, setBusy] = useState(false);
@@ -56,6 +64,122 @@ function AskCard({
 
   const job = [ask.job_title, ask.job_company].filter(Boolean).join(" · ");
   const canSave = draft.trim().length > 0 && !busy;
+
+  const answerFlow = (
+    <div className="flex flex-col gap-2">
+      <Textarea
+        aria-label="Your answer"
+        data-testid={`ask-input-${ask.id}`}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        disabled={busy}
+      />
+      {pending === "answer" ? (
+        <div className={confirmBox}>
+          <span>Save this answer? Your assistants will use it.</span>
+          <button
+            type="button"
+            data-testid="ask-answer-confirm"
+            disabled={busy}
+            onClick={() =>
+              void run(
+                () => answerAsk(ask.id, draft.trim()),
+                "Could not save your answer.",
+                // A changed answer goes back to the read-only view; an open
+                // card moves to the Answered list and remounts there.
+                () => {
+                  if (mode === "answered") setEditing(false);
+                },
+              )
+            }
+            className={confirmBtn}
+          >
+            {busy ? "Saving…" : "Confirm"}
+          </button>
+          <button
+            type="button"
+            data-testid="ask-answer-cancel"
+            disabled={busy}
+            onClick={() => setPending(null)}
+            className={cancelBtn}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            data-testid="ask-save"
+            disabled={!canSave}
+            onClick={() => setPending("answer")}
+            className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+          >
+            Save answer
+          </button>
+          {(mode === "answered" || home) && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setDraft(ask.answer ?? "");
+              }}
+              className={linkBtn}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  if (home) {
+    const jobText = ask.job_company || ask.job_title;
+    return (
+      <li
+        data-testid={`ask-${ask.id}`}
+        className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-card sm:p-5"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <WhoChip recordedBy={ask.asked_by} />
+              <span aria-hidden="true">·</span>
+              <span>{relativeTime(ask.asked_at)}</span>
+              {jobText && <span aria-hidden="true">·</span>}
+              {jobText &&
+                (ask.application_id != null ? (
+                  <Link
+                    href={`/applications/${ask.application_id}`}
+                    className="underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    {jobText}
+                  </Link>
+                ) : (
+                  <span>{jobText}</span>
+                ))}
+            </p>
+            <p className="whitespace-pre-wrap font-heading text-xl leading-snug">{ask.question}</p>
+            {ask.context && (
+              <p className="whitespace-pre-wrap text-sm text-muted-foreground">{ask.context}</p>
+            )}
+          </div>
+          {!editing && (
+            <button
+              type="button"
+              data-testid={`ask-open-${ask.id}`}
+              onClick={() => setEditing(true)}
+              className="shrink-0 self-start rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              Answer
+            </button>
+          )}
+        </div>
+        {editing && answerFlow}
+      </li>
+    );
+  }
 
   return (
     <li
@@ -105,74 +229,7 @@ function AskCard({
         </div>
       )}
 
-      {editing && (
-        <div className="flex flex-col gap-2">
-          <Textarea
-            aria-label="Your answer"
-            data-testid={`ask-input-${ask.id}`}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            disabled={busy}
-          />
-          {pending === "answer" ? (
-            <div className={confirmBox}>
-              <span>Save this answer? Your assistants will use it.</span>
-              <button
-                type="button"
-                data-testid="ask-answer-confirm"
-                disabled={busy}
-                onClick={() =>
-                  void run(
-                    () => answerAsk(ask.id, draft.trim()),
-                    "Could not save your answer.",
-                    // A changed answer goes back to the read-only view; an open
-                    // card moves to the Answered list and remounts there.
-                    () => {
-                      if (mode === "answered") setEditing(false);
-                    },
-                  )
-                }
-                className={confirmBtn}
-              >
-                {busy ? "Saving…" : "Confirm"}
-              </button>
-              <button
-                type="button"
-                data-testid="ask-answer-cancel"
-                disabled={busy}
-                onClick={() => setPending(null)}
-                className={cancelBtn}
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                data-testid="ask-save"
-                disabled={!canSave}
-                onClick={() => setPending("answer")}
-                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
-                Save answer
-              </button>
-              {mode === "answered" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditing(false);
-                    setDraft(ask.answer ?? "");
-                  }}
-                  className={linkBtn}
-                >
-                  Cancel
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {editing && answerFlow}
 
       {mode === "open" &&
         (pending === "withdraw" ? (
@@ -215,7 +272,8 @@ function AskCard({
   );
 }
 
-function announce(openCount: number) {
+/** Tell the sidebar badge the fresh open count (it listens for this). */
+export function announce(openCount: number) {
   window.dispatchEvent(new CustomEvent(ASKS_CHANGED_EVENT, { detail: openCount }));
 }
 
