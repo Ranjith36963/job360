@@ -289,7 +289,7 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
           );
         })}
       </svg>
-      <figcaption className="mt-1 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      <figcaption className="mt-1 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 font-mono text-[11px] text-faint">
         <span className="inline-flex items-center gap-1.5">
           <span
             aria-hidden="true"
@@ -311,9 +311,9 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
        * enlarged size, so this is the number everyone actually reads (owner
        * decision 2026-09-25). Compact enough for a 360px phone: small text,
        * tight padding, no horizontal scroll. */}
-      <table data-testid="fit-radar-table" className="mx-auto mt-3 w-full max-w-lg border-collapse text-xs">
+      <table data-testid="fit-radar-table" className="mx-auto mt-3 w-full max-w-lg border-collapse text-[13px]">
         <thead>
-          <tr className="border-b border-border text-left text-muted-foreground">
+          <tr className="border-b border-border text-left font-mono text-[11px] uppercase tracking-[0.09em] text-faint">
             <th scope="col" className="py-1 pr-2 font-medium">
               Line
             </th>
@@ -327,15 +327,15 @@ export function FitRadar({ axes, size = 320 }: { axes: FitAxis[]; size?: number 
         </thead>
         <tbody>
           {axes.map((axis) => (
-            <tr key={axis.name} data-testid="fit-radar-row" className="border-b border-border/50 last:border-0">
+            <tr key={axis.name} data-testid="fit-radar-row" className="border-b border-border last:border-0">
               {/* Row header, not a plain cell: the axis name is what names
                * both numbers in the row, so screen-reader table navigation
                * must announce it alongside the column header. */}
               <th scope="row" className="py-1 pr-2 text-left font-normal [overflow-wrap:anywhere]">
                 {axis.name}
               </th>
-              <td className="px-1 py-1 text-right tabular-nums">{axis.role}</td>
-              <td className="py-1 pl-1 text-right tabular-nums">{axis.you}</td>
+              <td className="px-1 py-1 text-right font-mono tabular-nums">{axis.role}</td>
+              <td className="py-1 pl-1 text-right font-mono tabular-nums">{axis.you}</td>
             </tr>
           ))}
         </tbody>

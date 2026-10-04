@@ -69,7 +69,7 @@ export function FollowUpField({
 
   return (
     <div className="flex flex-col items-start gap-1.5">
-      <Label htmlFor="follow-up-date" className="text-xs text-muted-foreground">
+      <Label htmlFor="follow-up-date" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
         Follow up on
       </Label>
       <div className="flex items-center gap-2">
@@ -80,12 +80,13 @@ export function FollowUpField({
           value={value}
           disabled={saving}
           onChange={(e) => setValue(e.target.value)}
-          className="h-8 w-auto"
+          className="h-8 w-auto font-mono text-xs tabular-nums"
         />
         <Button
           type="button"
           size="sm"
           data-testid="follow-up-save"
+          className="bg-foreground text-background hover:bg-foreground/90"
           disabled={saving || !value || unchanged}
           onClick={() => void save()}
         >
@@ -96,6 +97,7 @@ export function FollowUpField({
             type="button"
             size="sm"
             variant="outline"
+            className="border-border bg-card"
             data-testid="follow-up-clear"
             disabled={saving}
             onClick={() => void clear()}

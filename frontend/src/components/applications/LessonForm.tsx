@@ -47,7 +47,7 @@ export function LessonForm({
         type="button"
         data-testid="lesson-add-toggle"
         onClick={() => setOpen(true)}
-        className="mt-3 text-sm font-medium text-brand hover:underline"
+        className="mt-3 text-[13px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
       >
         + Add a lesson
       </button>
@@ -56,7 +56,7 @@ export function LessonForm({
 
   return (
     <div className="mt-3 flex flex-col gap-2">
-      <p className="text-xs text-muted-foreground">
+      <p className="font-mono text-[11px] text-faint">
         A lesson your assistant reads before the next application.
       </p>
       <Textarea
@@ -74,7 +74,7 @@ export function LessonForm({
           data-testid="lesson-submit"
           disabled={submitting || !text.trim()}
           onClick={() => void submit()}
-          className="self-start"
+          className="self-start bg-foreground text-background hover:bg-foreground/90"
         >
           {submitting ? "Flagging…" : "Flag for next time"}
         </Button>
@@ -87,7 +87,7 @@ export function LessonForm({
             setOpen(false);
             setText("");
           }}
-          className="self-start"
+          className="self-start border-border bg-card"
         >
           Cancel
         </Button>
