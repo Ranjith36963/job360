@@ -23,6 +23,17 @@
             "title": "Email",
             "type": "string"
           },
+          "found_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found Via"
+          },
           "linkedin_url": {
             "default": "",
             "title": "Linkedin Url",
@@ -108,6 +119,17 @@
             "default": "",
             "title": "Email",
             "type": "string"
+          },
+          "found_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found Via"
           },
           "linkedin_url": {
             "default": "",
@@ -239,6 +261,28 @@
       "ApplicationArtifactOut": {
         "description": "The ``get_application`` artifacts-list shape: ``text`` is ALWAYS a key\n(null unless ``with_artifact_text=true`` and under the byte cap).",
         "properties": {
+          "ats_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats Notes"
+          },
+          "ats_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats Score"
+          },
           "chars": {
             "title": "Chars",
             "type": "integer"
@@ -324,6 +368,28 @@
       "ApplicationArtifactRowOut": {
         "description": "``get_application_artifact`` \u2014 one version in full. No ``truncated``:\nthis route always returns the real row, never a capped read.",
         "properties": {
+          "ats_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats Notes"
+          },
+          "ats_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats Score"
+          },
           "chars": {
             "title": "Chars",
             "type": "integer"
@@ -692,6 +758,28 @@
             "title": "Catalog Present",
             "type": "boolean"
           },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "found_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found On"
+          },
           "job_company": {
             "title": "Job Company",
             "type": "string"
@@ -715,6 +803,17 @@
           "job_url": {
             "title": "Job Url",
             "type": "string"
+          },
+          "remote": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote"
           },
           "snapshot_at": {
             "anyOf": [
@@ -911,6 +1010,17 @@
             "title": "Artifacts",
             "type": "object"
           },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
           "events": {
             "title": "Events",
             "type": "integer"
@@ -946,6 +1056,17 @@
               }
             ],
             "title": "Follow Up On"
+          },
+          "found_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found On"
           },
           "id": {
             "title": "Id",
@@ -1023,6 +1144,17 @@
           "receipts": {
             "title": "Receipts",
             "type": "integer"
+          },
+          "remote": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote"
           },
           "status": {
             "title": "Status",
@@ -1473,17 +1605,52 @@
             "title": "Company",
             "type": "string"
           },
+          "country": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
           "description": {
             "maxLength": 40000,
             "minLength": 1,
             "title": "Description",
             "type": "string"
           },
+          "found_on": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found On"
+          },
           "location": {
             "default": "",
             "maxLength": 300,
             "title": "Location",
             "type": "string"
+          },
+          "remote": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote"
           },
           "title": {
             "maxLength": 300,
@@ -1542,12 +1709,45 @@
             "title": "Application Id",
             "type": "integer"
           },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
           "existing": {
             "title": "Existing",
             "type": "boolean"
           },
+          "found_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found On"
+          },
           "job": {
             "$ref": "#/components/schemas/JobResponse"
+          },
+          "remote": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote"
           },
           "status": {
             "title": "Status",
@@ -1886,6 +2086,17 @@
             "title": "Email",
             "type": "string"
           },
+          "found_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found Via"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -2184,6 +2395,17 @@
             "title": "Contacts",
             "type": "array"
           },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -2194,6 +2416,17 @@
             },
             "title": "Events",
             "type": "array"
+          },
+          "found_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found On"
           },
           "id": {
             "title": "Id",
@@ -2229,6 +2462,17 @@
             "title": "Receipts",
             "type": "array"
           },
+          "remote": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -2258,6 +2502,28 @@
       "ExportArtifactOut": {
         "description": "``export_history``'s artifact METADATA (not the full row): ``text`` is\nonly a key at all when ``include_text=true`` \u2014 hence the default.",
         "properties": {
+          "ats_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats Notes"
+          },
+          "ats_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats Score"
+          },
           "chars": {
             "title": "Chars",
             "type": "integer"
@@ -2626,6 +2892,55 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "JobFactsOut": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "found_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found On"
+          },
+          "remote": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote"
+          }
+        },
+        "required": [
+          "application_id",
+          "country",
+          "remote",
+          "found_on"
+        ],
+        "title": "JobFactsOut",
         "type": "object"
       },
       "JobResponse": {
@@ -3241,6 +3556,17 @@
             "title": "Email",
             "type": "string"
           },
+          "found_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found Via"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -3324,6 +3650,17 @@
           "email": {
             "title": "Email",
             "type": "string"
+          },
+          "found_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found Via"
           },
           "jobs": {
             "items": {
@@ -4564,6 +4901,30 @@
       "SaveArtifactRequest": {
         "additionalProperties": false,
         "properties": {
+          "ats_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats Notes"
+          },
+          "ats_score": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats Score"
+          },
           "channel": {
             "anyOf": [
               {
@@ -4625,6 +4986,28 @@
           "artifact_id": {
             "title": "Artifact Id",
             "type": "integer"
+          },
+          "ats_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats Notes"
+          },
+          "ats_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ats Score"
           },
           "chars": {
             "title": "Chars",
@@ -4903,6 +5286,59 @@
         "title": "SetVisaResponse",
         "type": "object"
       },
+      "StatsContactFoundViaGroupOut": {
+        "description": "Owner decision 2026-10-04 \u2014 per current contact ``found_via``: how\nmany contacts, how many had an outreach marked sent / a reply recorded,\nand ``reply_rate`` = contacts with both / contacts with a sent mark\n(``null`` when nothing was sent).",
+        "properties": {
+          "contacts": {
+            "title": "Contacts",
+            "type": "integer"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "outreach_replied": {
+            "title": "Outreach Replied",
+            "type": "integer"
+          },
+          "outreach_sent": {
+            "title": "Outreach Sent",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "contacts",
+          "outreach_sent",
+          "outreach_replied",
+          "reply_rate"
+        ],
+        "title": "StatsContactFoundViaGroupOut",
+        "type": "object"
+      },
       "StatsCvVersionGroupOut": {
         "properties": {
           "applied": {
@@ -5009,6 +5445,98 @@
         "title": "StatsCvVersionGroupOut",
         "type": "object"
       },
+      "StatsKeyedGroupOut": {
+        "description": "Owner decision 2026-10-04 \u2014 ``by_country`` / ``by_job_source`` /\n``by_channel``: same counts and rates as ``by_role``. ``key`` is the\ncanonical value (an ISO alpha-2 code or ``\"remote\"``; a closed-set\nmember); ``null`` = unset, its ``label`` is \"Not set\".",
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "integer"
+          },
+          "brought": {
+            "title": "Brought",
+            "type": "integer"
+          },
+          "interview": {
+            "title": "Interview",
+            "type": "integer"
+          },
+          "interview_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interview Rate"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "offer": {
+            "title": "Offer",
+            "type": "integer"
+          },
+          "offer_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Rate"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "replied": {
+            "title": "Replied",
+            "type": "integer"
+          },
+          "reply_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Rate"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "brought",
+          "applied",
+          "replied",
+          "interview",
+          "offer",
+          "rejected",
+          "reply_rate",
+          "interview_rate",
+          "offer_rate"
+        ],
+        "title": "StatsKeyedGroupOut",
+        "type": "object"
+      },
       "StatsOverallOut": {
         "properties": {
           "applied": {
@@ -5089,11 +5617,39 @@
             "title": "Applications Truncated",
             "type": "boolean"
           },
+          "by_channel": {
+            "items": {
+              "$ref": "#/components/schemas/StatsKeyedGroupOut"
+            },
+            "title": "By Channel",
+            "type": "array"
+          },
+          "by_contact_found_via": {
+            "items": {
+              "$ref": "#/components/schemas/StatsContactFoundViaGroupOut"
+            },
+            "title": "By Contact Found Via",
+            "type": "array"
+          },
+          "by_country": {
+            "items": {
+              "$ref": "#/components/schemas/StatsKeyedGroupOut"
+            },
+            "title": "By Country",
+            "type": "array"
+          },
           "by_cv_version": {
             "items": {
               "$ref": "#/components/schemas/StatsCvVersionGroupOut"
             },
             "title": "By Cv Version",
+            "type": "array"
+          },
+          "by_job_source": {
+            "items": {
+              "$ref": "#/components/schemas/StatsKeyedGroupOut"
+            },
+            "title": "By Job Source",
             "type": "array"
           },
           "by_role": {
@@ -5131,6 +5687,10 @@
           "overall",
           "by_cv_version",
           "by_role",
+          "by_country",
+          "by_job_source",
+          "by_channel",
+          "by_contact_found_via",
           "groups_truncated",
           "applications_truncated",
           "computed_at"
@@ -5498,6 +6058,17 @@
             ],
             "title": "Email"
           },
+          "found_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found Via"
+          },
           "linkedin_url": {
             "anyOf": [
               {
@@ -5544,6 +6115,49 @@
           }
         },
         "title": "UpdateContactRequest",
+        "type": "object"
+      },
+      "UpdateJobFactsRequest": {
+        "additionalProperties": false,
+        "description": "Owner decision 2026-10-04 \u2014 set or fix the job's facts after\nbring_job: ISO alpha-2 ``country``, ``remote``, ``found_on`` (closed set\nJOB_FOUND_ON). Only the keys SENT change; an explicit ``null`` (or \"\")\nclears one (rule #29: unset is null, never a default). Validated by\n``job_facts.validate_job_facts`` \u2014 the same rules bring_job uses.",
+        "properties": {
+          "country": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "found_on": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found On"
+          },
+          "remote": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote"
+          }
+        },
+        "title": "UpdateJobFactsRequest",
         "type": "object"
       },
       "UpdateProfileRequest": {
@@ -7091,6 +7705,91 @@
           }
         },
         "summary": "Save Fit",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/job": {
+      "patch": {
+        "description": "The web job page's door, and the ``update_job`` MCP tool's route.\nWrites the caller's OWN application row only (never the shared ``jobs``\ncatalog \u2014 hard rule #10); a foreign/unknown id reads 404 (S2).",
+        "operationId": "update_job_facts_api_applications__application_id__job_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateJobFactsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobFactsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Job Facts",
         "tags": [
           "applications"
         ]

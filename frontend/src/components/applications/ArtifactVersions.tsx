@@ -17,6 +17,43 @@ function describeMadeBy(madeBy: string): string {
   return madeBy;
 }
 
+/** Whose opinion the ATS score is: the assistant that saved the version —
+ * never Job360's (it has no LLM and scores nothing). */
+function opinionOwner(madeBy: string): string {
+  if (madeBy.startsWith("agent:")) {
+    const name = madeBy.slice("agent:".length).trim();
+    if (name) return `${name}'s opinion`;
+  }
+  return "your assistant's opinion";
+}
+
+/** "ATS 82 (Claude's opinion)", the notes folded under it. Nothing when the
+ * assistant gave no score (rule #29: empty stays silent). */
+function AtsOpinion({ artifact }: { artifact: ApplicationArtifact }) {
+  if (artifact.ats_score == null) return null;
+  const head = (
+    <>
+      <span className="font-mono tabular-nums text-foreground">ATS {artifact.ats_score}</span>
+      <span className="ml-1.5 text-muted-foreground">({opinionOwner(artifact.made_by)})</span>
+    </>
+  );
+  const notes = artifact.ats_notes?.trim();
+  return (
+    <div data-testid="artifact-ats" className="mt-1 text-xs">
+      {notes ? (
+        <details>
+          <summary className="cursor-pointer">{head}</summary>
+          <p className="mt-1 whitespace-pre-wrap border-l border-border pl-2 text-muted-foreground">
+            {notes}
+          </p>
+        </details>
+      ) : (
+        <p>{head}</p>
+      )}
+    </div>
+  );
+}
+
 /** Approximate page count from a character count — chars/3000, minimum 1
  * page (owner decision 6). */
 function pageCount(chars: number): string {
@@ -190,6 +227,7 @@ export function ArtifactVersions({
                       {compareId === artifact.id ? "Close" : "Compare"}
                     </button>
                   </div>
+                  <AtsOpinion artifact={artifact} />
                   {openId === artifact.id && (
                     <div className="mt-2 whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 text-sm">
                       {loadingId === artifact.id ? "Loading…" : texts[artifact.id]}

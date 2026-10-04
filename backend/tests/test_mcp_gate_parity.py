@@ -88,6 +88,8 @@ TOOL_ROUTES = {
     # "Needs you" (owner plan 2026-10-01) - require_user, no email gate.
     "ask_user": ("asks", "create_ask", {"question": "x"}),
     "answer_ask": ("asks", "answer_ask", {"ask_id": 987654321, "answer": "x"}),
+    # Job facts fix-later door (owner decision 2026-10-04) - require_user.
+    "update_job": ("applications", "update_job_facts", {"application_id": 987654321, "country": "FR"}),
 }
 
 

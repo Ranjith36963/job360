@@ -87,4 +87,33 @@ describe("ArtifactVersions — Compare", () => {
     expect(badges).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /keep/i })).toBeNull();
   });
+  it("shows the assistant's ATS score with its notes and says whose opinion it is", () => {
+    render(
+      <ArtifactVersions
+        applicationId={1}
+        artifacts={[{ ...artifact(901, 1), made_by: "agent:Claude", ats_score: 82, ats_notes: "Add the keyword Kubernetes." }]}
+      />
+    );
+    const ats = screen.getByTestId("artifact-ats");
+    expect(ats).toHaveTextContent("ATS 82");
+    expect(ats).toHaveTextContent("Claude's opinion");
+    const details = ats.querySelector("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText("ATS 82"));
+    expect(screen.getByText("Add the keyword Kubernetes.")).toBeInTheDocument();
+  });
+
+  it("shows a score with no notes as a plain line, and a generic owner for a non-agent maker", () => {
+    render(<ArtifactVersions applicationId={1} artifacts={[{ ...artifact(901, 1), ats_score: 40, ats_notes: null }]} />);
+    const ats = screen.getByTestId("artifact-ats");
+    expect(ats.querySelector("details")).toBeNull();
+    expect(ats).toHaveTextContent("your assistant's opinion");
+  });
+
+  it("shows nothing when there is no ATS score", () => {
+    render(<ArtifactVersions applicationId={1} artifacts={[{ ...artifact(901, 1), ats_score: null, ats_notes: "stray" }]} />);
+    expect(screen.queryByTestId("artifact-ats")).toBeNull();
+    expect(screen.queryByText(/ATS/)).toBeNull();
+  });
 });

@@ -1,5 +1,6 @@
 import type { ApplicationReceiptEntry } from "@/lib/api";
 import { formatDate } from "@/lib/format-date";
+import { closedSetLabel } from "@/lib/closed-sets";
 
 function formatFieldValue(value: unknown): string {
   if (value === null || value === undefined) return "—";
@@ -26,7 +27,7 @@ export function Receipts({ receipts }: { receipts: ApplicationReceiptEntry[] }) 
         return (
           <li key={receipt.id} data-testid="receipt-row" className="border-t border-border py-3 text-sm first:border-t-0 first:pt-0">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="font-medium">{receipt.channel || "Applied"}</span>
+              <span className="font-medium">{receipt.channel ? closedSetLabel(receipt.channel) : "Applied"}</span>
               <span className="font-mono text-xs tabular-nums text-faint">
                 {formatDate(receipt.sent_at)}
               </span>

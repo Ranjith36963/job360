@@ -50,6 +50,8 @@ EXPECTED_TOOLS = {
     # "Needs you" (owner plan 2026-10-01) - two more tools, 20 -> 22.
     "ask_user",
     "answer_ask",
+    # Job facts fix-later door (owner decision 2026-10-04) - 22 -> 23.
+    "update_job",
 }
 
 JOB = {
@@ -258,7 +260,7 @@ async def test_bring_then_read_then_record_then_list_round_trip(authenticated_as
                 )
             )
             assert receipt["job_id"] == job_id and receipt["sent_at"]
-            assert receipt["channel"] == "company site"
+            assert receipt["channel"] == "company_site"  # closed set since 2026-10-04
             assert receipt["event_id"]
 
             listed = _payload(await mcp.call_tool("list_receipts", {}))
@@ -266,7 +268,7 @@ async def test_bring_then_read_then_record_then_list_round_trip(authenticated_as
             assert listed["receipts"][0]["id"] == receipt["receipt_id"]
 
             full = _payload(await mcp.call_tool("get_receipt", {"receipt_id": receipt["receipt_id"]}))
-            assert full["note"] == "via MCP" and full["channel"] == "company site"
+            assert full["note"] == "via MCP" and full["channel"] == "company_site"
 
     # The web app sees the same record — one API, every surface.
     async with authenticated_async_context() as client:

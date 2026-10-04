@@ -113,6 +113,15 @@ class BringJobRequest(BaseModel):
     visa_signal: Optional[str] = Field(None, max_length=32)
     visa_detail: Optional[str] = Field(None, max_length=4_000)
     visa_country: Optional[str] = Field(None, max_length=8)
+    # Owner decision 2026-10-04 — the assistant's reading of the ad, stored
+    # per USER on the application (never on the shared `jobs` row, rule #10):
+    # ISO alpha-2 `country`, `remote`, and `found_on` (closed set
+    # JOB_FOUND_ON). Omitted = not said (rule #29); a re-bring sets only what
+    # it sends and never clears an earlier value. Rules live in
+    # services/applications/job_facts.py so every door validates the same way.
+    country: Optional[str] = Field(None, max_length=8)
+    remote: Optional[bool] = Field(None, strict=True)
+    found_on: Optional[str] = Field(None, max_length=40)
 
     @field_validator("title", "company", "location", "apply_url")
     @classmethod
@@ -144,6 +153,11 @@ class BringJobResponse(BaseModel):
     # spec 2026-09-04-application-spine R1 — an Application is born HERE.
     application_id: int
     status: str
+    # Owner decision 2026-10-04 — the application's CURRENT job facts (null
+    # when unset), so the caller sees what was stored.
+    country: Optional[str] = None
+    remote: Optional[bool] = None
+    found_on: Optional[str] = None
 
 
 @router.post("/jobs/bring", response_model=BringJobResponse, dependencies=AUTH_FIRST)
@@ -161,8 +175,23 @@ async def bring_job(
     """
     # Lazy import (rule #16) — keeps the spine off the module import path.
     from src.models import Job  # noqa: PLC0415
+    from src.services.applications import job_facts  # noqa: PLC0415
     from src.services.applications import spine as applications_spine  # noqa: PLC0415
     from src.services.applications.authorship import actor_for  # noqa: PLC0415
+    from src.services.applications.spine import SpineError  # noqa: PLC0415
+
+    # Validate the job facts BEFORE anything is written — a bad country or
+    # found_on must not leave a half-brought job behind.
+    given_facts = {
+        k: v for k, v in (("country", body.country), ("remote", body.remote), ("found_on", body.found_on))
+        # '' is "not said" on the bring door: a re-bring never clears an
+        # earlier value (clearing is PATCH /applications/{id}/job's job).
+        if v is not None and v != ""
+    }
+    try:
+        job_facts.validate_job_facts(given_facts)
+    except SpineError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
     now = datetime.now(timezone.utc).isoformat()
     job = Job(
@@ -211,7 +240,6 @@ async def bring_job(
     # judgement recorded earlier through save_fit or the web.
     if body.visa_signal is not None or body.visa_detail or body.visa_country:
         from src.services.applications import visa as visa_service  # noqa: PLC0415
-        from src.services.applications.spine import SpineError  # noqa: PLC0415
 
         try:
             await visa_service.set_visa_signal(
@@ -220,6 +248,18 @@ async def bring_job(
             )
         except SpineError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+    try:
+        if given_facts:
+            stored = await job_facts.set_job_facts(
+                db, user_id=user.id, application_id=birth["application_id"], given=given_facts,
+            )
+        else:
+            app_row = await applications_spine.get_owned_application(db, user.id, birth["application_id"])
+            stored = job_facts.job_facts_view(app_row or {})
+    except SpineError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    facts: dict[str, Any] = {k: stored[k] for k in job_facts.JOB_FACT_FIELDS}
 
     get_audit_logger().info(
         "job_brought",
@@ -249,6 +289,7 @@ async def bring_job(
         existing=not inserted,
         application_id=birth["application_id"],
         status=birth["status"],
+        **facts,
     )
 
 

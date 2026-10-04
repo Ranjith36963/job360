@@ -136,6 +136,18 @@ def _validate_notes(raw: str) -> str:
     return notes
 
 
+def _validate_found_via(raw: Optional[str]) -> Optional[str]:
+    """Owner decision 2026-10-04 — where this person was found. ``None``/'' →
+    ``None`` (not said, rule #29); a case/space/hyphen-insensitive spelling of
+    a ``CONTACT_FOUND_VIA`` member → that member; anything else → 422."""
+    if raw is None or not raw.strip():
+        return None
+    slug = re.sub(r"[\s\-]+", "_", raw.strip().lower())
+    if slug not in settings.CONTACT_FOUND_VIA:
+        raise SpineError(422, f"found_via must be one of CONTACT_FOUND_VIA {settings.CONTACT_FOUND_VIA}")
+    return slug
+
+
 def _serialize(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -145,6 +157,8 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         "email": row.get("email") or "",
         "linkedin_url": row.get("linkedin_url") or "",
         "notes": row.get("notes") or "",
+        # None when unset (rule #29) — never a default source.
+        "found_via": row.get("found_via") or None,
         "added_by": row["added_by"],
         "created_at": row["created_at"],
     }
@@ -179,7 +193,7 @@ async def _find_contact_by_current_email(
         exclude_sql = " AND ac.id != ?"
         params.append(exclude_contact_id)
     cur = await db._db.execute(
-        f"SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, "  # noqa: S608
+        f"SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, ac.found_via, "  # noqa: S608
         f"ac.added_by, ac.created_at FROM application_contacts ac "
         f"LEFT JOIN ("
         f"  SELECT contact_id, value FROM ("
@@ -243,6 +257,7 @@ async def _create_contact_with_deferred_email(
     linkedin_url: str,
     notes: str,
     occurred_at: str,
+    found_via: Optional[str] = None,
 ) -> dict[str, Any]:
     """The rare recovery path ``add_contact`` falls into when the base-row
     UNIQUE index collides with a STALE identity — a different, still-existing
@@ -259,9 +274,9 @@ async def _create_contact_with_deferred_email(
     async with db._db.transaction():
         cur = await db._db.execute(
             "INSERT INTO application_contacts "
-            "(user_id, application_id, name, role, email, linkedin_url, notes, added_by, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (user_id, application_id, name, role, "", linkedin_url, notes, actor, now),
+            "(user_id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, application_id, name, role, "", linkedin_url, notes, found_via, actor, now),
         )
         contact_id = int(cur.lastrowid or 0)
         # Bug fix (coordinator review, 2026-09-26) — `is_initial=TRUE` marks
@@ -289,7 +304,8 @@ async def _create_contact_with_deferred_email(
     )
     base_row = {
         "id": contact_id, "application_id": application_id, "name": name, "role": role,
-        "email": "", "linkedin_url": linkedin_url, "notes": notes, "added_by": actor, "created_at": now,
+        "email": "", "linkedin_url": linkedin_url, "notes": notes, "found_via": found_via,
+        "added_by": actor, "created_at": now,
     }
     view = await _full_contact_view(db, user_id, base_row)
     return {"contact": view, "already_existed": False, "event_id": event_id}
@@ -307,6 +323,7 @@ async def add_contact(
     linkedin_url: str = "",
     notes: str = "",
     occurred_at: Optional[str] = None,
+    found_via: Optional[str] = None,
 ) -> dict[str, Any]:
     """R1/R2 — add a contact (idempotent on lower/trim email) and, for a
     LINKED contact, append the ``contact_added`` event naming it.
@@ -343,6 +360,7 @@ async def add_contact(
     clean_email = _validate_email(email)
     clean_linkedin = _validate_linkedin_url(linkedin_url)
     clean_notes = _validate_notes(notes)
+    clean_found_via = _validate_found_via(found_via)
     occurred = parse_occurred_at(occurred_at)
 
     if application_id is not None:
@@ -378,9 +396,12 @@ async def add_contact(
         async with db._db.transaction():
             cur = await db._db.execute(
                 "INSERT INTO application_contacts "
-                "(user_id, application_id, name, role, email, linkedin_url, notes, added_by, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (user_id, application_id, clean_name, clean_role, "", clean_linkedin, clean_notes, actor, now),
+                "(user_id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    user_id, application_id, clean_name, clean_role, "", clean_linkedin, clean_notes,
+                    clean_found_via, actor, now,
+                ),
             )
             contact_id = int(cur.lastrowid or 0)
             if application_id is not None:
@@ -399,7 +420,7 @@ async def add_contact(
         )
         base_row = {
             "id": contact_id, "application_id": application_id, "name": clean_name, "role": clean_role,
-            "email": "", "linkedin_url": clean_linkedin, "notes": clean_notes,
+            "email": "", "linkedin_url": clean_linkedin, "notes": clean_notes, "found_via": clean_found_via,
             "added_by": actor, "created_at": now,
         }
         view = await _full_contact_view(db, user_id, base_row)
@@ -463,11 +484,11 @@ async def add_contact(
             async with db._db.transaction():
                 cur = await db._db.execute(
                     "INSERT INTO application_contacts "
-                    "(user_id, application_id, name, role, email, linkedin_url, notes, added_by, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(user_id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, "
+                    " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         user_id, application_id, clean_name, clean_role, clean_email,
-                        clean_linkedin, clean_notes, actor, now,
+                        clean_linkedin, clean_notes, clean_found_via, actor, now,
                     ),
                 )
                 contact_id = int(cur.lastrowid or 0)
@@ -489,7 +510,7 @@ async def add_contact(
                 return {"contact": view, "already_existed": True, "event_id": None}
             return await _create_contact_with_deferred_email(
                 db, user_id, application_id, actor, name=clean_name, role=clean_role, email=clean_email,
-                linkedin_url=clean_linkedin, notes=clean_notes, occurred_at=occurred,
+                linkedin_url=clean_linkedin, notes=clean_notes, occurred_at=occurred, found_via=clean_found_via,
             )
 
     get_audit_logger().info(
@@ -501,7 +522,7 @@ async def add_contact(
     )
     base_row = {
         "id": contact_id, "application_id": application_id, "name": clean_name, "role": clean_role,
-        "email": clean_email, "linkedin_url": clean_linkedin, "notes": clean_notes,
+        "email": clean_email, "linkedin_url": clean_linkedin, "notes": clean_notes, "found_via": clean_found_via,
         "added_by": actor, "created_at": now,
     }
     view = await _full_contact_view(db, user_id, base_row)
@@ -513,7 +534,7 @@ async def get_owned_contact(db: JobDatabase, user_id: str, contact_id: int) -> O
     foreign or unknown id reads as None (the route turns that into 404 —
     ``"contact not found"``, never 403)."""
     cur = await db._db.execute(
-        "SELECT id, application_id, name, role, email, linkedin_url, notes, added_by, created_at "
+        "SELECT id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, created_at "
         "FROM application_contacts WHERE id = ? AND user_id = ?",
         (contact_id, user_id),
     )
@@ -529,7 +550,7 @@ async def list_contacts(
     ``include_text=False`` (export_history only — every other caller keeps
     the default) strips outreach message/sent/reply text."""
     cur = await db._db.execute(
-        "SELECT id, application_id, name, role, email, linkedin_url, notes, added_by, created_at "
+        "SELECT id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, created_at "
         "FROM application_contacts WHERE user_id = ? AND application_id = ? ORDER BY id ASC",
         (user_id, application_id),
     )
@@ -595,6 +616,7 @@ async def update_contact(
     email: Optional[str] = None,
     linkedin_url: Optional[str] = None,
     notes: Optional[str] = None,
+    found_via: Optional[str] = None,
 ) -> dict[str, Any]:
     """Owner decision, 2026-09-25 — contacts ARE editable, but the base row
     stays append-only (S12): each provided field appends one ``contact_edits``
@@ -617,6 +639,9 @@ async def update_contact(
         given["linkedin_url"] = validators["linkedin_url"](linkedin_url)
     if notes is not None:
         given["notes"] = validators["notes"](notes)
+    if found_via is not None:
+        # '' clears it (stored as the edit value '', read back as None).
+        given["found_via"] = _validate_found_via(found_via) or ""
     if not given:
         raise SpineError(422, "at least one field must be given")
 
@@ -961,6 +986,8 @@ async def _full_contact_view(
         field_edits = edits.get(field, [])
         if field_edits:
             view[field] = field_edits[-1]["value"]
+            if field == "found_via":
+                view[field] = view[field] or None  # a cleared found_via reads as unset
         # Bug fix (coordinator review, 2026-09-26) — the deferred-email
         # creation-time edit (`is_initial=True`) IS the real starting value;
         # fold it into the base entry instead of listing the base row's own
@@ -974,7 +1001,7 @@ async def _full_contact_view(
             rest = field_edits[1:]
         else:
             base_entry = {
-                "value": _serialize(base)[field], "recorded_at": base["created_at"],
+                "value": _serialize(base)[field] or "", "recorded_at": base["created_at"],
                 "recorded_by": base["added_by"],
             }
             rest = field_edits
@@ -1022,6 +1049,8 @@ def _apply_current_fields(row: dict[str, Any], edits: dict[str, str]) -> None:
     for field in settings.CONTACT_EDIT_FIELDS:
         if field in edits:
             row[field] = edits[field]
+    if "found_via" in edits:
+        row["found_via"] = edits["found_via"] or None
 
 
 async def _contacts_by_current_email(db: JobDatabase, user_id: str, email: str) -> list[dict[str, Any]]:
@@ -1031,7 +1060,7 @@ async def _contacts_by_current_email(db: JobDatabase, user_id: str, email: str) 
     naturally small, so there is nothing here to page."""
     clean = email.strip().lower()
     cur = await db._db.execute(
-        "SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, "
+        "SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, ac.found_via, "
         "ac.added_by, ac.created_at, a.job_title, a.job_company "
         "FROM application_contacts ac LEFT JOIN applications a ON a.id = ac.application_id "
         "LEFT JOIN ("
@@ -1101,7 +1130,7 @@ async def list_people(
         # first), and one extra row fetched to detect truncation honestly
         # instead of silently dropping the tail.
         cur = await db._db.execute(
-            "SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, "
+            "SELECT ac.id, ac.application_id, ac.name, ac.role, ac.email, ac.linkedin_url, ac.notes, ac.found_via, "
             "ac.added_by, ac.created_at, a.job_title, a.job_company "
             "FROM application_contacts ac LEFT JOIN applications a ON a.id = ac.application_id "
             "WHERE ac.user_id = ? ORDER BY ac.id DESC LIMIT ?",
@@ -1152,6 +1181,7 @@ async def list_people(
                 "email": primary.get("email") or "",
                 "linkedin_url": primary.get("linkedin_url") or "",
                 "notes": primary.get("notes") or "",
+                "found_via": primary.get("found_via") or None,
                 "jobs": jobs,
                 "message_count": summary["message_count"],
                 "last_sent": summary["last_sent"],
@@ -1172,7 +1202,7 @@ async def list_unlinked_contacts_page(
     id`` is INCLUSIVE — a page cut short by the byte budget re-offers its
     first un-included row next time by naming that row's own id."""
     cur = await db._db.execute(
-        "SELECT id, application_id, name, role, email, linkedin_url, notes, added_by, created_at "
+        "SELECT id, application_id, name, role, email, linkedin_url, notes, found_via, added_by, created_at "
         "FROM application_contacts WHERE user_id = ? AND application_id IS NULL AND id >= ? "
         "ORDER BY id ASC LIMIT ?",
         (user_id, after_id, limit),

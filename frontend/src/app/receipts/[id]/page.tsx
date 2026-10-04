@@ -9,6 +9,7 @@ import { Logo } from "@/components/brand/Logo";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getReceipt } from "@/lib/api";
+import { closedSetLabel } from "@/lib/closed-sets";
 import { safeUrl } from "@/lib/utils";
 import type { Receipt } from "@/lib/types";
 
@@ -144,7 +145,7 @@ export default function ReceiptDetailPage() {
 
         <dl className="mt-6 grid grid-cols-1 gap-x-8 sm:grid-cols-2">
           <Fact label="Frozen" value={sentOn(receipt.sent_at)} />
-          {receipt.channel && <Fact label="via" value={receipt.channel} />}
+          {receipt.channel && <Fact label="via" value={closedSetLabel(receipt.channel)} />}
           {receipt.profile_version != null && (
             <Fact label="Profile" value={`v${receipt.profile_version}`} />
           )}
