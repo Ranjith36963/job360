@@ -13,8 +13,8 @@ vi.mock("@/lib/api", () => ({
   listApplications: vi.fn().mockResolvedValue({ applications: [], total: 0 }),
 }));
 
-describe("/applications — Bring a job button (owner report, 2026-09-25)", () => {
-  it("renders a Bring a job link to /bring, top-right next to the heading", async () => {
+describe("/applications — Jobs in button (owner report, 2026-09-25)", () => {
+  it("renders a Jobs in link to /bring, top-right next to the heading", async () => {
     render(<ApplicationsPage />);
     const heading = await screen.findByText("Your applications");
 
@@ -22,7 +22,7 @@ describe("/applications — Bring a job button (owner report, 2026-09-25)", () =
     // as src/app/page.tsx — not the *All*By query, because the empty-state
     // copy below also links to /bring and isn't the button being tested.
     const headerRow = heading.parentElement?.parentElement as HTMLElement;
-    const link = within(headerRow).getByRole("link", { name: "Bring a job" });
+    const link = within(headerRow).getByRole("link", { name: "Jobs in" });
     expect(link).toHaveAttribute("href", "/bring");
   });
 });

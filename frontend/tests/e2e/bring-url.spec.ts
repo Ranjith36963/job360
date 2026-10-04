@@ -128,7 +128,7 @@ test.describe("Bring a job — fetch from a link", () => {
     });
 
     await page.goto("/bring");
-    await expect(page.getByRole("heading", { name: "Bring a job" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Jobs in" })).toBeVisible();
 
     const linkInput = page.getByLabel(/fetch a job from a link/i);
     await linkInput.fill(url);

@@ -125,7 +125,7 @@ export default function BringJobPage() {
     <PageContainer className="py-8">
       <div className="max-w-3xl">
         <div className="mb-6">
-          <h1 className="font-heading text-2xl font-medium tracking-tight">Bring a job</h1>
+          <h1 className="font-heading text-2xl font-medium tracking-tight">Jobs in</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Paste a link and we&apos;ll try to fill the form, or paste the ad you found. We keep
             it, every CV your assistant writes for it, and a receipt of exactly what you sent.
@@ -181,7 +181,7 @@ export default function BringJobPage() {
             void submit();
           }}
           className="space-y-5"
-          aria-label="Bring a job"
+          aria-label="Jobs in"
         >
           <div className="grid gap-5 sm:grid-cols-2">
             <div className="space-y-2">

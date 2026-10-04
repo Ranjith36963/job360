@@ -55,7 +55,7 @@ describe("AppShell", () => {
     const labels = [
       "Home",
       "Profile",
-      "Bring a job",
+      "Jobs in",
       "Applications",
       "Needs you",
       "Receipts",
