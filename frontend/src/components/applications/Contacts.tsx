@@ -28,7 +28,7 @@ function LinkedinCell({ url }: { url: string }) {
         href={url}
         target="_blank"
         rel="noreferrer"
-        className="text-brand hover:underline"
+        className="text-foreground underline underline-offset-2 hover:text-muted-foreground"
       >
         LinkedIn
       </a>
@@ -58,10 +58,10 @@ function addedByLabel(addedBy: string): string {
 /** "Sent on 3 Oct via LinkedIn" / "Not sent yet". */
 function SentLine({ contact }: { contact: Contact }) {
   const last = contact.outreach?.last_sent;
-  if (!last) return <p className="text-xs text-muted-foreground">Not sent yet.</p>;
+  if (!last) return <p className="font-mono text-[11px] text-faint">Not sent yet.</p>;
   const via = channelLabel(last.channel);
   return (
-    <p className="text-xs text-muted-foreground">
+    <p className="font-mono text-[11px] text-faint">
       Sent on {formatDate(last.occurred_at)}
       {via && ` via ${via}`}
     </p>
@@ -71,8 +71,8 @@ function SentLine({ contact }: { contact: Contact }) {
 /** "Replied on 5 Oct" / "No reply yet". */
 function RepliedLine({ contact }: { contact: Contact }) {
   const last = contact.outreach?.last_reply;
-  if (!last) return <p className="text-xs text-muted-foreground">No reply yet.</p>;
-  return <p className="text-xs text-muted-foreground">Replied on {formatDate(last.occurred_at)}.</p>;
+  if (!last) return <p className="font-mono text-[11px] text-faint">No reply yet.</p>;
+  return <p className="font-mono text-[11px] text-faint">Replied on {formatDate(last.occurred_at)}.</p>;
 }
 
 /** The latest message text, with earlier versions folded away — plain text
@@ -87,10 +87,10 @@ function MessageVersions({ contact }: { contact: Contact }) {
       <p className="whitespace-pre-wrap text-foreground/90">{latest.text}</p>
       {earlier.length > 0 && (
         <details className="mt-1">
-          <summary className="cursor-pointer text-muted-foreground">
+          <summary className="cursor-pointer font-mono text-[11px] text-faint">
             Earlier versions ({earlier.length})
           </summary>
-          <ul className="mt-1 flex flex-col gap-1 border-l pl-2">
+          <ul className="mt-1 flex flex-col gap-1 border-l border-border pl-2">
             {[...earlier].reverse().map((m) => (
               <li key={m.id} className="text-muted-foreground">
                 <span className="text-[11px]">{formatDate(m.occurred_at)}</span>
@@ -165,14 +165,14 @@ function EditContact({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="text-[11px] font-medium text-brand hover:underline"
+          className="font-mono text-[11px] text-faint underline-offset-2 hover:text-foreground hover:underline"
         >
           Edit
         </button>
         {hasHistory && (
-          <details className="text-[11px] text-muted-foreground">
+          <details className="font-mono text-[11px] text-faint">
             <summary className="cursor-pointer">History</summary>
-            <ul className="mt-1 flex flex-col gap-1 border-l pl-2">
+            <ul className="mt-1 flex flex-col gap-1 border-l border-border pl-2">
               {EDITABLE_FIELDS.flatMap((field) => {
                 const rows = history[field] ?? [];
                 if (rows.length <= 1) return [];
@@ -191,11 +191,11 @@ function EditContact({
   }
 
   return (
-    <form onSubmit={save} className="mt-2 flex flex-col gap-2 rounded border border-border/60 p-2">
+    <form onSubmit={save} className="mt-2 flex flex-col gap-2 rounded-lg border border-border p-3">
       <div className="grid gap-2 sm:grid-cols-2">
         {EDITABLE_FIELDS.map((field) => (
           <div key={field} className="flex flex-col gap-1">
-            <Label htmlFor={`edit-${field}-${contact.id}`} className="text-[11px]">
+            <Label htmlFor={`edit-${field}-${contact.id}`} className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
               {FIELD_LABEL[field]}
             </Label>
             <Input
@@ -208,10 +208,10 @@ function EditContact({
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
       <div className="flex gap-2">
-        <Button type="submit" size="sm" disabled={saving}>
+        <Button type="submit" size="sm" disabled={saving} className="bg-foreground text-background hover:bg-foreground/90">
           {saving ? "Saving…" : "Save"}
         </Button>
-        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setOpen(false)}>
+        <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => setOpen(false)} className="border-border bg-card">
           Cancel
         </Button>
       </div>
@@ -299,11 +299,11 @@ export function Contacts({
           No people yet. Your assistant can add one, or use the button below.
         </p>
       ) : (
-        <ul data-testid="contacts-list" className="flex flex-col gap-2">
+        <ul data-testid="contacts-list" className="flex flex-col">
           {list.map((contact) => (
-            <li key={contact.id} className="glass-card rounded-lg p-3 text-sm">
+            <li key={contact.id} className="border-t border-border py-3 text-sm first:border-t-0 first:pt-0">
               <div className="flex flex-wrap items-baseline gap-x-2">
-                <span className="font-medium">{contact.name}</span>
+                <span>{contact.name}</span>
                 {contact.role && (
                   <span className="text-muted-foreground">· {contact.role}</span>
                 )}
@@ -311,7 +311,7 @@ export function Contacts({
               {(contact.email || contact.linkedin_url) && (
                 <div className="mt-1 flex flex-wrap gap-3 text-xs">
                   {contact.email && (
-                    <a href={`mailto:${contact.email}`} className="text-brand hover:underline">
+                    <a href={`mailto:${contact.email}`} className="text-foreground underline underline-offset-2 hover:text-muted-foreground">
                       {contact.email}
                     </a>
                   )}
@@ -319,9 +319,9 @@ export function Contacts({
                 </div>
               )}
               {contact.notes && (
-                <p className="mt-1 text-xs text-foreground/80">{contact.notes}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{contact.notes}</p>
               )}
-              <p className="mt-1 text-[11px] text-muted-foreground/70">
+              <p className="mt-1 font-mono text-[11px] text-faint">
                 added by {addedByLabel(contact.added_by)} ·{" "}
                 {formatDate(contact.created_at)}
               </p>
@@ -346,13 +346,13 @@ export function Contacts({
           type="button"
           data-testid="contacts-add-toggle"
           onClick={() => setFormOpen(true)}
-          className="self-start text-sm font-medium text-brand hover:underline"
+          className="self-start text-[13px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
         >
           + Add person
         </button>
       ) : (
-      <form onSubmit={submit} className="glass-card flex flex-col gap-3 rounded-lg p-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      <form onSubmit={submit} className="flex flex-col gap-3 border-t border-border pt-3">
+        <p className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
           Add a person
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -413,7 +413,7 @@ export function Contacts({
             type="submit"
             size="sm"
             disabled={submitting || !form.name.trim()}
-            className="self-start"
+            className="self-start bg-foreground text-background hover:bg-foreground/90"
           >
             {submitting ? "Adding…" : "Add person"}
           </Button>
@@ -427,7 +427,7 @@ export function Contacts({
               setFormError(null);
               setForm(EMPTY_FORM);
             }}
-            className="self-start"
+            className="self-start border-border bg-card"
           >
             Cancel
           </Button>

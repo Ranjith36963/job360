@@ -53,14 +53,14 @@ export function VisaBadge({
       <span
         data-testid="visa-badge"
         data-visa={dataVisa}
-        className={`rounded-full px-3 py-1 text-sm font-medium ${pillClass}`}
+        className={`self-start rounded-full px-2.5 py-0.5 font-mono text-xs font-medium ${pillClass}`}
       >
         {label}
       </span>
       {detail && detail.trim() && (
         <p
           data-testid="visa-detail"
-          className="whitespace-pre-wrap text-xs text-muted-foreground/70"
+          className="whitespace-pre-wrap text-xs text-faint"
         >
           {detail}
         </p>

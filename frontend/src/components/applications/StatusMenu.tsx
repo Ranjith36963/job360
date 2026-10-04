@@ -58,7 +58,7 @@ export function StatusMenu({
 
   return (
     <div className="flex flex-col items-start gap-1.5">
-      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <label className="flex items-center gap-2 font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
         What happened?
         <select
           data-testid="status-menu"
@@ -66,7 +66,7 @@ export function StatusMenu({
           onChange={(e) => {
             if (e.target.value) setPending(e.target.value);
           }}
-          className="h-8 rounded-md border border-input bg-transparent px-2 text-xs"
+          className="h-8 rounded-lg border border-border bg-card px-2.5 font-sans text-xs normal-case tracking-normal text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           <option value="">Choose…</option>
           {STATUS_MENU_EVENT_TYPES.map((type) => (
@@ -77,7 +77,7 @@ export function StatusMenu({
         </select>
       </label>
       {pending && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-xs text-muted-foreground">
           <span>
             Record &quot;{STATUS_LABEL[pending] ?? pending}&quot;? This is added to the history.
           </span>
@@ -85,6 +85,7 @@ export function StatusMenu({
             type="button"
             size="sm"
             data-testid="status-confirm"
+            className="bg-foreground text-background hover:bg-foreground/90"
             disabled={saving}
             onClick={() => void confirm()}
           >
@@ -94,6 +95,7 @@ export function StatusMenu({
             type="button"
             size="sm"
             variant="outline"
+            className="border-border bg-card"
             data-testid="status-cancel"
             disabled={saving}
             onClick={cancel}
