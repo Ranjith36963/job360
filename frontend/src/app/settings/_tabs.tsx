@@ -14,7 +14,7 @@ export function SettingsNavTabs() {
   return (
     <nav
       aria-label="Settings navigation"
-      className="mb-8 flex gap-1 border-b border-border/40 pb-px"
+      className="mb-8 flex gap-1 border-b border-border pb-px"
     >
       {TABS.map((t) => {
         const isActive =
@@ -26,8 +26,8 @@ export function SettingsNavTabs() {
             aria-current={isActive ? "page" : undefined}
             className={`rounded-t-md px-4 py-2 text-sm font-medium transition-colors ${
               isActive
-                ? "-mb-px border border-border/40 border-b-background bg-primary/10 text-brand"
-                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                ? "-mb-px border border-border border-b-background bg-card text-foreground"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
             {t.label}
