@@ -16,7 +16,9 @@ vi.mock("@/lib/api", () => ({ ...api, ASKS_CHANGED_EVENT: "job360:asks-changed" 
 vi.mock("posthog-js", () => ({ default: { capture: vi.fn() } }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-const NOW = "2026-10-04T10:00:00Z";
+// "Now" is the real clock: the sentence counts events after the last visit
+// (7 days ago when none is stored), so a fixed date would rot.
+const NOW = new Date().toISOString();
 
 const event = (id: number, by: string) => ({
   id,
@@ -78,9 +80,7 @@ const ask = (id: number) => ({
 function happy({ events = [event(1, "agent:Claude"), event(2, "web")], asks = [] as unknown[] } = {}) {
   api.whatsNew.mockResolvedValue(whatsNewOk(events));
   api.getStats.mockResolvedValue({ overall: { brought: 5, applied: 3, replied: 1, interview: 1 } });
-  api.listApplications.mockImplementation((p: { due?: boolean }) =>
-    Promise.resolve({ applications: p?.due ? [] : [app], total: p?.due ? 0 : 1 })
-  );
+  api.listApplications.mockResolvedValue({ applications: [app], total: 1 });
   api.listAsks.mockResolvedValue({ asks, open_count: asks.length });
 }
 
@@ -140,6 +140,42 @@ describe("Home", () => {
     expect(screen.queryByText(/Nothing new since/)).toBeNull();
     expect(screen.queryByTestId("home-rail")).toBeNull();
     expect(screen.queryByTestId("home-apps")).toBeNull();
+  });
+
+  it("asks the backend as little as it can: one whats-new read, no separate due call", async () => {
+    happy();
+    render(<Home />);
+    await screen.findByRole("heading", { level: 1, name: /wrote 1 record/ });
+    await screen.findByTestId("home-feed");
+    expect(api.whatsNew).toHaveBeenCalledTimes(1);
+    expect(api.listApplications).toHaveBeenCalledTimes(1);
+    expect(api.listApplications.mock.calls[0][0]).not.toHaveProperty("due");
+  });
+
+  it("due follow-ups come from the ledger rows, soonest first", async () => {
+    happy();
+    api.listApplications.mockResolvedValue({
+      applications: [
+        { ...app, id: 8, job_company: "Lakera", follow_up_due: true, follow_up_on: "2026-10-09" },
+        { ...app, id: 9, job_company: "Sana", follow_up_due: true, follow_up_on: "2026-10-05" },
+        app,
+      ],
+      total: 3,
+    });
+    render(<Home />);
+    const due = await screen.findByTestId("home-due");
+    const text = due.textContent ?? "";
+    expect(text.indexOf("Sana")).toBeGreaterThan(-1);
+    expect(text.indexOf("Sana")).toBeLessThan(text.indexOf("Lakera"));
+    expect(text).not.toContain("Mistral AI");
+  });
+
+  it("events from before the last visit are in the feed but not in the sentence", async () => {
+    const old = { ...event(3, "agent:Claude"), recorded_at: new Date(Date.now() - 20 * 864e5).toISOString() };
+    happy({ events: [old, event(1, "agent:Claude")] });
+    render(<Home />);
+    await screen.findByRole("heading", { level: 1, name: /Claude wrote 1 record/ });
+    expect(screen.getByTestId("home-feed").querySelectorAll("li")).toHaveLength(2);
   });
 
   it("a failed right-pane call shows nothing; the rest still renders", async () => {

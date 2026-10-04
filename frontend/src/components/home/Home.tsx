@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ASKS_CHANGED_EVENT, getStats, listApplications, listAsks } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, getStats, listAsks } from "@/lib/api";
 import type { ApplicationSummary, Ask, StatsResponse } from "@/lib/api";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { ApplicationRows } from "@/components/applications/ApplicationList";
@@ -63,7 +63,6 @@ export function Home() {
   const [asks, setAsks] = useState<Load<Asks>>(LOADING);
   const [apps, setApps] = useState<Load<{ list: ApplicationSummary[]; total: number }>>(LOADING);
   const [stats, setStats] = useState<Load<StatsResponse["overall"]>>(LOADING);
-  const [due, setDue] = useState<Load<ApplicationSummary[]>>(LOADING);
   const [feed, setFeed] = useState<Load<Feed>>(LOADING);
 
   // Which "since" this page view uses — read once, so a retry or a reload after
@@ -76,10 +75,6 @@ export function Home() {
     const live = () => mine === epoch.current;
     if (sinceRef.current === null) sinceRef.current = readLastVisit();
     const sinceVisit = sinceRef.current;
-
-    fetchWhatsNewPages(sinceVisit)
-      .then((r) => live() && setSince({ status: "ok", value: r }))
-      .catch(() => live() && setSince({ status: "error" }));
 
     listAsks("open")
       .then((r) => live() && setAsks({ status: "ok", value: { asks: r.asks, openCount: r.open_count } }))
@@ -96,20 +91,31 @@ export function Home() {
       })
       .catch(() => live() && setStats({ status: "error" }));
 
-    listApplications({ due: true, limit: 200 })
-      .then((r) => live() && setDue({ status: "ok", value: r.applications }))
-      .catch(() => live() && setDue({ status: "error" }));
-
+    // ONE whats-new read feeds both the sentence and the feed: the last-visit
+    // window is cut out of the 30-day read here instead of asking twice. (A
+    // last visit older than the window is counted from the window's start.)
+    const sinceMs = Date.parse(sinceVisit);
     fetchWhatsNewPages(daysAgoIso(FEED_LOOKBACK_DAYS), FEED_MAX_PAGES)
-      .then(
-        (r) =>
-          live() &&
-          setFeed({
-            status: "ok",
-            value: { items: selectFeed(r.events, r.applications, FEED_LIMIT), eventCount: r.events.length },
-          })
-      )
-      .catch(() => live() && setFeed({ status: "error" }));
+      .then((r) => {
+        if (!live()) return;
+        setFeed({
+          status: "ok",
+          value: { items: selectFeed(r.events, r.applications, FEED_LIMIT), eventCount: r.events.length },
+        });
+        setSince({
+          status: "ok",
+          value: {
+            events: r.events.filter((e) => !(Date.parse(e.recorded_at) <= sinceMs)),
+            truncated: r.truncated,
+            now: r.now,
+          },
+        });
+      })
+      .catch(() => {
+        if (!live()) return;
+        setFeed({ status: "error" });
+        setSince({ status: "error" });
+      });
   }, []);
 
   useEffect(() => {
@@ -135,7 +141,6 @@ export function Home() {
     setAsks(LOADING);
     setApps(LOADING);
     setStats(LOADING);
-    setDue(LOADING);
     setFeed(LOADING);
     run();
   }
@@ -177,12 +182,18 @@ export function Home() {
       ? buildSentence({ events: since.value.events, truncated: since.value.truncated, openAsks: openCount })
       : null;
 
-  const dueList = due.status === "ok" ? due.value : [];
+  // Due follow-ups come from the ledger rows already on the page (each row
+  // carries `follow_up_due`), soonest first — no second request.
+  const dueList =
+    apps.status === "ok"
+      ? apps.value.list
+          .filter((a) => a.follow_up_due)
+          .sort((a, b) => (a.follow_up_on ?? "").localeCompare(b.follow_up_on ?? ""))
+      : [];
   const feedItems = feed.status === "ok" ? feed.value.items : [];
   const showRail =
     !settled ||
     stats.status === "loading" ||
-    due.status === "loading" ||
     stats.status === "ok" ||
     dueList.length > 0 ||
     feedItems.length > 0;
