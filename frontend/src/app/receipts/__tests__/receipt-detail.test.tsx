@@ -39,6 +39,59 @@ afterEach(() => {
 });
 
 describe("/receipts/[id]", () => {
+  it("shows what was recorded at apply time: answers, fields, confirmation, versions, who, the application", async () => {
+    getReceipt.mockResolvedValue({
+      ...BASE,
+      application_id: 52,
+      answers: [{ question: "Why us?", answer: "I built one." }],
+      fields_filled: { salary_expectation: 45000, notice: "1 month" },
+      confirmation: "MIS-48213",
+      cv_version_no: 3,
+      cover_letter_version_no: 1,
+      recorded_by: "agent:Claude",
+    });
+    render(<ReceiptDetailPage />);
+    await screen.findByTestId("receipt-title");
+
+    const answers = screen.getByTestId("receipt-answers");
+    expect(within(answers).getByRole("heading", { level: 2, name: "Answers given" })).toBeInTheDocument();
+    expect(within(answers).getByText("Why us?")).toBeInTheDocument();
+    expect(within(answers).getByText("I built one.")).toBeInTheDocument();
+
+    const fields = screen.getByTestId("receipt-fields");
+    expect(within(fields).getByText("salary_expectation")).toBeInTheDocument();
+    expect(within(fields).getByText("45000")).toBeInTheDocument();
+    expect(within(fields).getByText("1 month")).toBeInTheDocument();
+
+    expect(screen.getByText("MIS-48213")).toBeInTheDocument();
+    expect(screen.getByText("v3")).toBeInTheDocument();
+    expect(screen.getByText("v1")).toBeInTheDocument();
+    expect(screen.getByText("Claude")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "APP-052" })).toHaveAttribute("href", "/applications/52");
+  });
+
+  it("an older receipt with none of that stays silent: no empty sections, no placeholder rows", async () => {
+    getReceipt.mockResolvedValue({
+      ...BASE,
+      application_id: null,
+      answers: [],
+      fields_filled: {},
+      confirmation: null,
+      cv_version_no: null,
+      cover_letter_version_no: null,
+      recorded_by: null,
+    });
+    render(<ReceiptDetailPage />);
+    await screen.findByTestId("receipt-title");
+
+    expect(screen.queryByTestId("receipt-answers")).toBeNull();
+    expect(screen.queryByTestId("receipt-fields")).toBeNull();
+    expect(screen.queryByText("Confirmation")).toBeNull();
+    expect(screen.queryByText("Recorded by")).toBeNull();
+    expect(screen.queryByText("Application")).toBeNull();
+    expect(screen.queryByText("Cover letter")).toBeNull();
+  });
+
   it("renders the sheet: masthead id, title, facts and the three sections", async () => {
     getReceipt.mockResolvedValue(BASE);
     render(<ReceiptDetailPage />);

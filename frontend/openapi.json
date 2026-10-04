@@ -4146,9 +4146,38 @@
       },
       "Receipt": {
         "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptAnswerOut"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
           "channel": {
             "title": "Channel",
             "type": "string"
+          },
+          "confirmation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation"
           },
           "cover_letter_origin": {
             "anyOf": [
@@ -4172,6 +4201,17 @@
             ],
             "title": "Cover Letter Text"
           },
+          "cover_letter_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter Version No"
+          },
           "cv_origin": {
             "anyOf": [
               {
@@ -4193,6 +4233,22 @@
               }
             ],
             "title": "Cv Text"
+          },
+          "cv_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Version No"
+          },
+          "fields_filled": {
+            "additionalProperties": true,
+            "title": "Fields Filled",
+            "type": "object"
           },
           "id": {
             "title": "Id",
@@ -4240,6 +4296,17 @@
               }
             ],
             "title": "Profile Version"
+          },
+          "recorded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded By"
           },
           "sent_at": {
             "title": "Sent At",
