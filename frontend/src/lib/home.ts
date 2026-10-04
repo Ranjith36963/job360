@@ -94,6 +94,12 @@ export function needsYouSentence(k: number): string {
   return `${capitalise(word)} things need you.`;
 }
 
+/** "Claude" / "Claude and Codex" / "Claude, Codex and Grok" — every name, as recorded. */
+export function joinNames(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 /**
  * The owner-approved opening line of Home.
  *
@@ -116,7 +122,9 @@ export function buildSentence(args: {
     const names = assistantNames(mine);
     const count = `${n}${args.truncated ? "+" : ""}`;
     const noun = n === 1 && !args.truncated ? "record" : "records";
-    const who = names.length === 1 ? names[0] : "Your assistants";
+    // Owner decision (2026-10-04): name every assistant exactly as it signed
+    // its records — never a vague "Your assistants". Transparency.
+    const who = joinNames(names);
     parts.push({ text: `${who} wrote ` });
     parts.push({ text: `${count} ${noun}`, em: true });
     parts.push({ text: " since you were last here." });
