@@ -70,6 +70,15 @@ class SaveArtifactRequest(BaseModel):
     # `contact_id` but no `application_id`.
     contact_id: Optional[int] = None
     channel: Optional[str] = None
+    # Owner decision 2026-10-04 — the ASSISTANT's own ATS check of this
+    # document (Job360 never computes one). Only kinds in
+    # APPLICATION_ARTIFACT_ATS_KINDS (cv, cover_letter) may carry it — any
+    # other kind is a 422 (spine.validate_ats). `strict` so "70" or true is
+    # refused, not coerced. Notes are capped at call time by
+    # APPLICATION_ARTIFACT_ATS_NOTES_MAX_CHARS (a live setting), control
+    # characters removed.
+    ats_score: Optional[int] = Field(None, ge=0, le=100, strict=True)
+    ats_notes: Optional[str] = None
 
 
 class FitAxisIn(BaseModel):
@@ -210,6 +219,9 @@ class AddContactRequest(BaseModel):
     linkedin_url: str = ""
     notes: str = ""
     occurred_at: Optional[str] = None
+    # Owner decision 2026-10-04 — where this person was found; closed set
+    # CONTACT_FOUND_VIA, checked by contacts._validate_found_via at call time.
+    found_via: Optional[str] = None
 
 
 # ── Response models ──────────────────────────────────────────────────────────
@@ -232,6 +244,11 @@ class ApplicationJobOut(BaseModel):
     job_description_snapshot: str
     snapshot_at: Optional[str]
     catalog_present: bool
+    # Owner decision 2026-10-04 — the user's own facts about the job (null
+    # when unset, rule #29): ISO alpha-2 country, remote, where it was found.
+    country: Optional[str] = None
+    remote: Optional[bool] = None
+    found_on: Optional[str] = None
 
 
 class FitAxisOut(BaseModel):
@@ -321,6 +338,10 @@ class ApplicationArtifactOut(BaseModel):
     created_at: str
     text: Optional[str]
     truncated: bool
+    # Owner decision 2026-10-04 — the assistant's ATS opinion on this version
+    # (null when none was given).
+    ats_score: Optional[int] = None
+    ats_notes: Optional[str] = None
 
 
 class ApplicationArtifactRowOut(BaseModel):
@@ -337,6 +358,8 @@ class ApplicationArtifactRowOut(BaseModel):
     label: str
     chars: int
     created_at: str
+    ats_score: Optional[int] = None
+    ats_notes: Optional[str] = None
 
 
 class ArtifactDiffBaseOut(BaseModel):
@@ -450,6 +473,8 @@ class ContactOut(BaseModel):
     email: str
     linkedin_url: str
     notes: str
+    # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; null = unset.
+    found_via: Optional[str] = None
     added_by: str
     created_at: str
     edit_history: dict[str, list[ContactEditOut]] = Field(default_factory=dict)
@@ -551,6 +576,10 @@ class ApplicationSummaryOut(BaseModel):
     # list's "Due" chip and amber tag need no per-row detail fetch.
     follow_up_on: Optional[str] = None
     follow_up_due: bool = False
+    # Owner decision 2026-10-04 — same three job facts as the detail's `job`.
+    country: Optional[str] = None
+    remote: Optional[bool] = None
+    found_on: Optional[str] = None
 
 
 class ListApplicationsResponse(BaseModel):
@@ -574,6 +603,8 @@ class SaveArtifactResponse(BaseModel):
     created_at: str
     event_id: Optional[int]
     contact_id: Optional[int] = None
+    ats_score: Optional[int] = None
+    ats_notes: Optional[str] = None
 
 
 class SaveFitResponse(BaseModel):
@@ -667,6 +698,8 @@ class ExportArtifactOut(BaseModel):
     chars: int
     created_at: str
     text: Optional[str] = None
+    ats_score: Optional[int] = None
+    ats_notes: Optional[str] = None
 
 
 class ExportApplicationOut(BaseModel):
@@ -678,6 +711,9 @@ class ExportApplicationOut(BaseModel):
     created_at: str
     updated_at: str
     last_event_at: Optional[str]
+    country: Optional[str] = None
+    remote: Optional[bool] = None
+    found_on: Optional[str] = None
     events: list[ApplicationEventOut]
     artifacts: list[ExportArtifactOut]
     receipts: list[ApplicationReceiptExportOut]
@@ -755,6 +791,8 @@ class UpdateContactRequest(BaseModel):
     email: Optional[str] = None
     linkedin_url: Optional[str] = None
     notes: Optional[str] = None
+    # Owner decision 2026-10-04 — closed set CONTACT_FOUND_VIA; "" clears it.
+    found_via: Optional[str] = None
 
 
 class RecordOutreachRequest(BaseModel):
@@ -802,6 +840,7 @@ class PersonOut(BaseModel):
     email: str
     linkedin_url: str
     notes: str
+    found_via: Optional[str] = None
     jobs: list[PersonJobOut]
     message_count: int
     last_sent: Optional[OutreachEntryOut]
@@ -870,11 +909,48 @@ class StatsRoleGroupOut(BaseModel):
     offer_rate: Optional[float]
 
 
+class StatsKeyedGroupOut(BaseModel):
+    """Owner decision 2026-10-04 — ``by_country`` / ``by_job_source`` /
+    ``by_channel``: same counts and rates as ``by_role``. ``key`` is the
+    canonical value (an ISO alpha-2 code or ``"remote"``; a closed-set
+    member); ``null`` = unset, its ``label`` is "Not set"."""
+
+    key: Optional[str]
+    label: str
+    brought: int
+    applied: int
+    replied: int
+    interview: int
+    offer: int
+    rejected: int
+    reply_rate: Optional[float]
+    interview_rate: Optional[float]
+    offer_rate: Optional[float]
+
+
+class StatsContactFoundViaGroupOut(BaseModel):
+    """Owner decision 2026-10-04 — per current contact ``found_via``: how
+    many contacts, how many had an outreach marked sent / a reply recorded,
+    and ``reply_rate`` = contacts with both / contacts with a sent mark
+    (``null`` when nothing was sent)."""
+
+    key: Optional[str]
+    label: str
+    contacts: int
+    outreach_sent: int
+    outreach_replied: int
+    reply_rate: Optional[float]
+
+
 class StatsResponse(BaseModel):
     since: Optional[str]
     overall: StatsOverallOut
     by_cv_version: list[StatsCvVersionGroupOut]
     by_role: list[StatsRoleGroupOut]
+    by_country: list[StatsKeyedGroupOut]
+    by_job_source: list[StatsKeyedGroupOut]
+    by_channel: list[StatsKeyedGroupOut]
+    by_contact_found_via: list[StatsContactFoundViaGroupOut]
     groups_truncated: bool
     # S6 — true when only the newest STATS_MAX_APPLICATIONS applications were
     # counted; the numbers describe that window, not the whole history.
@@ -1146,7 +1222,7 @@ async def add_contact(
         result = await contacts_service.add_contact(
             db, user.id, application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
-            notes=body.notes, occurred_at=body.occurred_at,
+            notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
         )
     except SpineError as exc:
         _raise(exc)
@@ -1175,7 +1251,7 @@ async def add_person(
         result = await contacts_service.add_contact(
             db, user.id, body.application_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
-            notes=body.notes, occurred_at=body.occurred_at,
+            notes=body.notes, occurred_at=body.occurred_at, found_via=body.found_via,
         )
     except SpineError as exc:
         _raise(exc)
@@ -1199,7 +1275,7 @@ async def update_contact(
         return await contacts_service.update_contact(
             db, user.id, contact_id, actor_for(user),
             name=body.name, role=body.role, email=body.email, linkedin_url=body.linkedin_url,
-            notes=body.notes,
+            notes=body.notes, found_via=body.found_via,
         )
     except SpineError as exc:
         _raise(exc)
@@ -1279,6 +1355,9 @@ async def save_artifact(
             # which calls POST /api/contacts/{contact_id}/outreach directly).
             if body.kind != "outreach":
                 raise SpineError(422, "kind must be 'outreach' when contact_id is given")
+            # An outreach message is never an ATS document — refuse rather
+            # than silently drop the opinion.
+            spine.validate_ats(body.kind, body.ats_score, body.ats_notes)
             if not body.channel:
                 raise SpineError(422, "channel is required when contact_id is given")
             result = await contacts_service.record_outreach(
@@ -1296,6 +1375,7 @@ async def save_artifact(
         return await spine.save_artifact(
             db, user_id=user.id, application_id=application_id, kind=body.kind, text=body.text,
             made_by=actor_for(user), label=body.label, model=body.model,
+            ats_score=body.ats_score, ats_notes=body.ats_notes,
         )
     except SpineError as exc:
         _raise(exc)
@@ -1351,6 +1431,47 @@ async def set_visa(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
             signal=body.visa_signal, detail=body.visa_detail, country=body.visa_country,
         )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+class UpdateJobFactsRequest(BaseModel):
+    """Owner decision 2026-10-04 — set or fix the job's facts after
+    bring_job: ISO alpha-2 ``country``, ``remote``, ``found_on`` (closed set
+    JOB_FOUND_ON). Only the keys SENT change; an explicit ``null`` (or "")
+    clears one (rule #29: unset is null, never a default). Validated by
+    ``job_facts.validate_job_facts`` — the same rules bring_job uses."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    country: Optional[str] = Field(None, max_length=8)
+    remote: Optional[bool] = Field(None, strict=True)
+    found_on: Optional[str] = Field(None, max_length=40)
+
+
+class JobFactsOut(BaseModel):
+    application_id: int
+    country: Optional[str]
+    remote: Optional[bool]
+    found_on: Optional[str]
+
+
+@router.patch("/applications/{application_id}/job", response_model=JobFactsOut, dependencies=AUTH_FIRST)
+async def update_job_facts(
+    application_id: int,
+    body: UpdateJobFactsRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The web job page's door, and the ``update_job`` MCP tool's route.
+    Writes the caller's OWN application row only (never the shared ``jobs``
+    catalog — hard rule #10); a foreign/unknown id reads 404 (S2)."""
+    from src.services.applications import job_facts  # noqa: PLC0415
+
+    given = {k: getattr(body, k) for k in body.model_fields_set}
+    try:
+        return await job_facts.set_job_facts(db, user_id=user.id, application_id=application_id, given=given)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

@@ -132,4 +132,41 @@ describe("Contacts", () => {
       expect(screen.getByTestId("contacts-list").textContent).toContain("Talent Lead")
     );
   });
+
+  it("shows where a person was found in plain words, and nothing when unset", () => {
+    const { rerender } = render(
+      <Contacts applicationId={42} contacts={[makeContact({ found_via: "linkedin" })]} />
+    );
+    expect(screen.getByTestId("contact-found-via")).toHaveTextContent("Found via LinkedIn");
+    rerender(<Contacts applicationId={42} contacts={[makeContact({ found_via: "job_ad" })]} />);
+    expect(screen.getByTestId("contact-found-via")).toHaveTextContent("Found via Job ad");
+    rerender(<Contacts applicationId={42} contacts={[makeContact({ found_via: null })]} />);
+    expect(screen.queryByTestId("contact-found-via")).toBeNull();
+  });
+
+  it("the add form sends found_via only when one is chosen", async () => {
+    addContact.mockResolvedValue({ contact: makeContact({ id: 9, name: "Sam", found_via: "apollo" }), already_existed: false });
+    render(<Contacts applicationId={42} contacts={[]} />);
+    fireEvent.click(screen.getByTestId("contacts-add-toggle"));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Sam" } });
+    fireEvent.change(screen.getByLabelText("Found via (optional)"), { target: { value: "apollo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add person" }));
+    await waitFor(() => expect(addContact).toHaveBeenCalledWith(42, { name: "Sam", found_via: "apollo" }));
+  });
+
+  it("the edit form writes found_via, and Not set clears it", async () => {
+    updateContact.mockResolvedValue(makeContact({ found_via: "event" }));
+    render(<Contacts applicationId={42} contacts={[makeContact({ found_via: null })]} />);
+    fireEvent.click(screen.getByText("Edit"));
+    fireEvent.change(screen.getByLabelText("Found via"), { target: { value: "event" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateContact).toHaveBeenCalledWith(1, { found_via: "event" }));
+
+    updateContact.mockClear();
+    updateContact.mockResolvedValue(makeContact({ found_via: null }));
+    fireEvent.click(screen.getByText("Edit"));
+    fireEvent.change(screen.getByLabelText("Found via"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateContact).toHaveBeenCalledWith(1, { found_via: "" }));
+  });
 });

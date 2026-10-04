@@ -10,8 +10,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/format-date";
+import { closedSetLabel } from "@/lib/closed-sets";
+import { FoundViaSelect } from "@/components/applications/FoundViaSelect";
 
-const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "" };
+const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "", found_via: "" };
 // One stable empty list. An inline `= []` default would be a NEW array every
 // render, the `[contacts]` effect below would fire every render, and setList
 // would re-render forever.
@@ -123,11 +125,13 @@ function EditContact({
   const [form, setForm] = useState({
     name: contact.name, role: contact.role, email: contact.email, notes: contact.notes,
   });
+  const [foundVia, setFoundVia] = useState(contact.found_via ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setForm({ name: contact.name, role: contact.role, email: contact.email, notes: contact.notes });
+    setFoundVia(contact.found_via ?? "");
   }, [contact]);
 
   const save = useCallback(
@@ -136,10 +140,13 @@ function EditContact({
       setError(null);
       setSaving(true);
       try {
-        const body: Record<string, string> = {};
+        const body: Record<string, string | null> = {};
         for (const field of EDITABLE_FIELDS) {
           if (form[field] !== contact[field]) body[field] = form[field];
         }
+        // "Not set" clears it with "" (the backend reads null as "not given"),
+        // never a default.
+        if (foundVia !== (contact.found_via ?? "")) body.found_via = foundVia;
         if (Object.keys(body).length === 0) {
           setOpen(false);
           return;
@@ -153,7 +160,7 @@ function EditContact({
         setSaving(false);
       }
     },
-    [contact, form, onSaved]
+    [contact, form, foundVia, onSaved]
   );
 
   const history = contact.edit_history ?? {};
@@ -205,6 +212,12 @@ function EditContact({
             />
           </div>
         ))}
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`edit-found-via-${contact.id}`} className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
+            Found via
+          </Label>
+          <FoundViaSelect id={`edit-found-via-${contact.id}`} value={foundVia} onChange={setFoundVia} />
+        </div>
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
       <div className="flex gap-2">
@@ -268,7 +281,9 @@ export function Contacts({
           email?: string;
           linkedin_url?: string;
           notes?: string;
+          found_via?: string;
         } = { name };
+        if (form.found_via) body.found_via = form.found_via;
         if (form.role.trim()) body.role = form.role.trim();
         if (form.email.trim()) body.email = form.email.trim();
         if (form.linkedin_url.trim()) body.linkedin_url = form.linkedin_url.trim();
@@ -308,6 +323,11 @@ export function Contacts({
                   <span className="text-muted-foreground">· {contact.role}</span>
                 )}
               </div>
+              {contact.found_via && (
+                <p data-testid="contact-found-via" className="mt-1 font-mono text-[11px] text-faint">
+                  Found via {closedSetLabel(contact.found_via)}
+                </p>
+              )}
               {(contact.email || contact.linkedin_url) && (
                 <div className="mt-1 flex flex-wrap gap-3 text-xs">
                   {contact.email && (
@@ -394,6 +414,14 @@ export function Contacts({
               placeholder="https://linkedin.com/in/…"
             />
           </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="contact-found-via">Found via (optional)</Label>
+          <FoundViaSelect
+            id="contact-found-via"
+            value={form.found_via}
+            onChange={(v) => setForm((prev) => ({ ...prev, found_via: v }))}
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="contact-notes">Notes</Label>

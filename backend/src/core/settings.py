@@ -338,6 +338,12 @@ APPLICATION_ARTIFACT_MAX_VERSIONS = int(os.getenv("APPLICATION_ARTIFACT_MAX_VERS
 # Slice 8 (#515) — the read-only artifact diff caps each side in LINES before
 # difflib runs (quadratic worst case); the response says `truncated`.
 APPLICATION_DIFF_MAX_LINES = int(os.getenv("APPLICATION_DIFF_MAX_LINES", "4000"))
+# Owner decision 2026-10-04 — the ASSISTANT's own ATS opinion on a saved
+# document (score 0-100 + notes). Job360 never computes or markets it; it is
+# stored on the artifact version. Only these kinds may carry one — any other
+# kind given an ats_score/ats_notes is a 422 (the stricter choice).
+APPLICATION_ARTIFACT_ATS_KINDS = ("cv", "cover_letter")
+APPLICATION_ARTIFACT_ATS_NOTES_MAX_CHARS = int(os.getenv("APPLICATION_ARTIFACT_ATS_NOTES_MAX_CHARS", "2000"))
 # Slice 9 (#516) — "flag for next time". `get_profile` hands the agent the
 # last PROFILE_LESSONS_MAX lessons; the web's full list pages up to
 # LESSONS_PAGE_MAX per call.
@@ -365,6 +371,25 @@ APPLICATION_VISA_DETAIL_MAX_CHARS = int(os.getenv("APPLICATION_VISA_DETAIL_MAX_C
 APPLICATION_RECEIPT_ANSWERS_MAX = int(os.getenv("APPLICATION_RECEIPT_ANSWERS_MAX", "50"))
 APPLICATION_RECEIPT_ANSWER_MAX_CHARS = int(os.getenv("APPLICATION_RECEIPT_ANSWER_MAX_CHARS", "2000"))
 APPLICATION_RECEIPT_FIELDS_MAX_BYTES = int(os.getenv("APPLICATION_RECEIPT_FIELDS_MAX_BYTES", "8192"))
+# Owner decision 2026-10-04 — where the user applied. A CLOSED set for every
+# NEW receipt ('' = not said, rule #29); spine.normalize_receipt_channel is
+# the one validator every door calls. Receipts written before this were free
+# text and are history (append-only, never rewritten): stats maps a legacy
+# value that spells a set member (case/space/hyphen-insensitive, e.g.
+# "Company site") to it and everything else to "other".
+APPLICATION_RECEIPT_CHANNELS = (
+    "company_site", "linkedin_easy_apply", "job_board", "email", "referral", "recruiter", "other",
+)
+
+# Owner decision 2026-10-04 — facts about the job the ASSISTANT reads off
+# the ad and passes with bring_job (or fixes later): the ISO alpha-2 country
+# (validated by visa.normalize_country — no country table), remote yes/no,
+# and where the ad was found. Stored per USER on `applications`, never on the
+# shared `jobs` row (hard rule #10). Unset = NULL (rule #29).
+JOB_FOUND_ON = (
+    "indeed", "linkedin", "company_careers", "job_board", "referral", "visa_sponsor_list",
+    "pasted_by_user", "other",
+)
 
 # R6 — the fit verdict is stored, never computed.
 APPLICATION_FIT_REASONING_MAX_CHARS = int(os.getenv("APPLICATION_FIT_REASONING_MAX_CHARS", "4000"))
@@ -453,7 +478,10 @@ CONTACTS_UNLINKED_MAX = int(os.getenv("CONTACTS_UNLINKED_MAX", "500"))
 CONTACT_EDITS_PER_CONTACT_MAX = int(os.getenv("CONTACT_EDITS_PER_CONTACT_MAX", "200"))
 OUTREACH_MAX_PER_HOUR = int(os.getenv("OUTREACH_MAX_PER_HOUR", "120"))  # S7 — per USER
 LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
-CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes")
+# Owner decision 2026-10-04 — where a person was found. Closed set; unset =
+# NULL (rule #29). Editable like the other fields (a contact_edits row).
+CONTACT_FOUND_VIA = ("company_site", "linkedin", "apollo", "referral", "job_ad", "email", "event", "other")
+CONTACT_EDIT_FIELDS = ("name", "role", "email", "linkedin_url", "notes", "found_via")
 
 # stats (R5/R6/R7). Counts over the event log, grouped by CV version and role.
 STATS_MAX_GROUPS = int(os.getenv("STATS_MAX_GROUPS", "50"))

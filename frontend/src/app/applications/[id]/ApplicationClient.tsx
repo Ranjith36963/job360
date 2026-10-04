@@ -14,6 +14,7 @@ import { Contacts } from "@/components/applications/Contacts";
 import { Receipts } from "@/components/applications/Receipts";
 import { NoteForm } from "@/components/applications/NoteForm";
 import { LessonForm } from "@/components/applications/LessonForm";
+import { JobFacts } from "@/components/applications/JobFacts";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 import { VisaSelect } from "@/components/applications/VisaSelect";
 import { StatusMenu } from "@/components/applications/StatusMenu";
@@ -182,6 +183,14 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             </>
           )}
         </p>
+        <JobFacts
+          applicationId={detail.id}
+          facts={{
+            country: detail.job.country ?? null,
+            remote: detail.job.remote ?? null,
+            found_on: detail.job.found_on ?? null,
+          }}
+        />
         {!detail.job.catalog_present && (
           <p className="mt-1 text-xs text-muted-foreground/70">
             This listing is no longer in the catalog — the snapshot above is what it read when you brought it.

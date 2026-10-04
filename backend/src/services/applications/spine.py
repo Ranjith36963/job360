@@ -169,6 +169,96 @@ def _has_control_chars(value: str) -> bool:
     )
 
 
+def _strip_control_chars(value: str, *, keep: str = "\n\t") -> str:
+    """Remove (never 422) the same control characters ``_has_control_chars``
+    refuses, except the line breaks/tabs in ``keep`` — free-text notes are
+    legitimately multi-line."""
+    return "".join(
+        ch for ch in value
+        if ch in keep
+        or not (ch in _SOURCE_BANNED_CHARS or unicodedata.category(ch) in _SOURCE_BANNED_CATEGORIES)
+    )
+
+
+def _slug(raw: str) -> str:
+    """``" Company-site "`` → ``"company_site"`` — case/space/hyphen-insensitive
+    spelling of a closed-set member. Never maps one word to ANOTHER word."""
+    return re.sub(r"[\s\-]+", "_", raw.strip().lower())
+
+
+# The spellings agents and the old docstring actually used before the closed
+# set existed ("LinkedIn", "company website", "Indeed"). Mapped, not refused:
+# a refused channel would lose the RECEIPT itself, the one record that must
+# never go missing.
+_CHANNEL_ALIASES: dict[str, str] = {
+    "linkedin": "linkedin_easy_apply",
+    "easy_apply": "linkedin_easy_apply",
+    "company_website": "company_site",
+    "website": "company_site",
+    "careers_page": "company_site",
+    "indeed": "job_board",
+}
+
+
+def _channel_member(raw: str) -> Optional[str]:
+    slug = _slug(raw)
+    slug = _CHANNEL_ALIASES.get(slug, slug)
+    return slug if slug in settings.APPLICATION_RECEIPT_CHANNELS else None
+
+
+def normalize_receipt_channel(raw: Optional[str]) -> str:
+    """Owner decision 2026-10-04 — the ONE normaliser for a NEW receipt's
+    ``channel`` (rich receipt route, record_application tool, legacy
+    ``POST /receipts/{job_id}``). ``None``/'' → '' (not said, rule #29); a
+    spelling (or known alias) of a set member is stored as the member;
+    anything else is stored as ``"other"`` — never a 422, because refusing
+    the channel would drop the whole receipt."""
+    if raw is None or not raw.strip():
+        return ""
+    return _channel_member(raw) or "other"
+
+
+def receipt_channel_key(raw: Optional[str]) -> Optional[str]:
+    """Stats' reading of a STORED channel, new or legacy. Receipts are
+    append-only history, so a pre-2026-10-04 free-text value is never
+    rewritten — it is MAPPED here: empty → ``None`` (not said); a value that
+    spells a set member exactly (case/space/hyphen-insensitive, e.g.
+    "company site") → that member; any other legacy text → ``"other"``."""
+    if raw is None or not raw.strip():
+        return None
+    return _channel_member(raw) or "other"
+
+
+def validate_ats(kind: str, ats_score: Optional[int], ats_notes: Optional[str]) -> tuple[Optional[int], Optional[str]]:
+    """Owner decision 2026-10-04 — the assistant's ATS opinion on a saved
+    document. Only ``APPLICATION_ARTIFACT_ATS_KINDS`` may carry one (another
+    kind → 422, the stricter choice). Score 0-100 (bool is not a number here).
+    Notes: control characters removed (line breaks kept), trimmed, '' → None,
+    capped at ``APPLICATION_ARTIFACT_ATS_NOTES_MAX_CHARS`` (a breach is a 422,
+    never a silent clip)."""
+    if ats_score is None and ats_notes is None:
+        return None, None
+    if kind not in settings.APPLICATION_ARTIFACT_ATS_KINDS:
+        raise SpineError(
+            422,
+            f"ats_score/ats_notes are only allowed for kinds {settings.APPLICATION_ARTIFACT_ATS_KINDS}",
+        )
+    if ats_score is not None and (
+        isinstance(ats_score, bool) or not isinstance(ats_score, int) or not 0 <= ats_score <= 100
+    ):
+        raise SpineError(422, "ats_score must be a whole number from 0 to 100")
+    notes: Optional[str] = None
+    if ats_notes is not None:
+        notes = _strip_control_chars(ats_notes).strip() or None
+        if notes is not None and len(notes) > settings.APPLICATION_ARTIFACT_ATS_NOTES_MAX_CHARS:
+            raise SpineError(
+                422,
+                f"ats_notes exceeds APPLICATION_ARTIFACT_ATS_NOTES_MAX_CHARS "
+                f"({settings.APPLICATION_ARTIFACT_ATS_NOTES_MAX_CHARS} chars)",
+            )
+    return ats_score, notes
+
+
 def validate_source(raw: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
     """R1/S2/S3 — normalise-and-validate an event's optional email source.
 
@@ -351,7 +441,9 @@ async def get_application_by_job(db: JobDatabase, user_id: str, job_id: int) -> 
     write-through helper (legacy receipts, MCP ``record_application``) use to
     find the row a raw ``job_id`` maps to."""
     cur = await db._db.execute(
-        "SELECT id, status FROM applications WHERE user_id = ? AND job_id = ?", (user_id, job_id)
+        "SELECT id, status, job_country, job_remote, job_found_on FROM applications "
+        "WHERE user_id = ? AND job_id = ?",
+        (user_id, job_id),
     )
     row = await cur.fetchone()
     return dict(row) if row else None
@@ -745,6 +837,8 @@ async def save_artifact(
     made_by: str,
     label: str = "",
     model: Optional[str] = None,
+    ats_score: Optional[int] = None,
+    ats_notes: Optional[str] = None,
 ) -> dict[str, Any]:
     """R5 — save a NEW version of an artifact (never an update): allocates
     ``version_no = MAX(version_no) + 1`` per ``(application_id, kind)`` inside
@@ -762,6 +856,9 @@ async def save_artifact(
             422,
             f"text exceeds APPLICATION_ARTIFACT_MAX_CHARS ({settings.APPLICATION_ARTIFACT_MAX_CHARS} chars)",
         )
+    # Owner decision 2026-10-04 — the assistant's ATS opinion rides on THIS
+    # version; a re-check is a new version, never an UPDATE of an old row.
+    ats_score, ats_notes = validate_ats(kind, ats_score, ats_notes)
 
     # Lazy: profile storage pulls the scoring stack transitively (rule #16).
     from src.services.profile.storage import current_profile_version_id  # noqa: PLC0415
@@ -784,10 +881,10 @@ async def save_artifact(
             ins = await db._db.execute(
                 "INSERT INTO application_artifacts "
                 "(user_id, application_id, kind, version_no, text, made_by, model, profile_version, "
-                " label, chars, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " label, chars, created_at, ats_score, ats_notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     user_id, application_id, kind, version_no, text, made_by, model,
-                    profile_version, label or "", len(text), now,
+                    profile_version, label or "", len(text), now, ats_score, ats_notes,
                 ),
             )
         except pg.IntegrityError:
@@ -822,7 +919,7 @@ async def save_artifact(
     return {
         "artifact_id": artifact_id, "kind": kind, "version_no": version_no, "chars": len(text),
         "made_by": made_by, "model": model, "profile_version": profile_version, "created_at": now,
-        "event_id": event["event_id"],
+        "event_id": event["event_id"], "ats_score": ats_score, "ats_notes": ats_notes,
     }
 
 
@@ -837,7 +934,8 @@ async def get_artifact(
     if app_row is None:
         return None
     cur = await db._db.execute(
-        "SELECT id, kind, version_no, text, made_by, model, profile_version, label, chars, created_at "
+        "SELECT id, kind, version_no, text, made_by, model, profile_version, label, chars, created_at, "
+        "ats_score, ats_notes "
         "FROM application_artifacts WHERE id = ? AND application_id = ?",
         (artifact_id, application_id),
     )
@@ -858,7 +956,8 @@ async def latest_artifact(
     into a receipt when the caller names no version.
     """
     cur = await db._db.execute(
-        "SELECT id, kind, version_no, text, made_by, model, profile_version, label, chars, created_at "
+        "SELECT id, kind, version_no, text, made_by, model, profile_version, label, chars, created_at, "
+        "ats_score, ats_notes "
         "FROM application_artifacts WHERE application_id = ? AND user_id = ? AND kind = ? "
         "ORDER BY version_no DESC LIMIT 1",
         (application_id, user_id, kind),
@@ -869,7 +968,8 @@ async def latest_artifact(
 
 async def _list_artifacts(db: JobDatabase, application_id: int, *, with_text: bool) -> list[dict[str, Any]]:
     cur = await db._db.execute(
-        "SELECT id, kind, version_no, text, made_by, model, profile_version, label, chars, created_at "
+        "SELECT id, kind, version_no, text, made_by, model, profile_version, label, chars, created_at, "
+        "ats_score, ats_notes "
         "FROM application_artifacts WHERE application_id = ? ORDER BY created_at DESC, id DESC",
         (application_id,),
     )
@@ -882,6 +982,7 @@ async def _list_artifacts(db: JobDatabase, application_id: int, *, with_text: bo
             "id": r["id"], "kind": r["kind"], "version_no": r["version_no"], "made_by": r["made_by"],
             "model": r.get("model"), "profile_version": r.get("profile_version"), "label": r.get("label") or "",
             "chars": r["chars"], "created_at": r["created_at"], "text": None, "truncated": False,
+            "ats_score": r.get("ats_score"), "ats_notes": r.get("ats_notes"),
         }
         if with_text:
             size = len((r["text"] or "").encode("utf-8"))
@@ -1048,7 +1149,11 @@ async def record_receipt(
     CALLER's current profile (B6 fix — this used to be hardcoded ``None``,
     unlike the legacy ``/receipts/{job_id}`` route which has always stamped
     it via ``current_profile_version_id``).
+
+    ``channel`` is a closed set for every NEW receipt (owner decision
+    2026-10-04, ``normalize_receipt_channel``) — '' stays "not said".
     """
+    channel = normalize_receipt_channel(channel)
     app_row = await get_owned_application(db, user_id, application_id)
     if app_row is None:
         raise SpineError(404, "application not found")
@@ -1184,6 +1289,13 @@ def _visa_for(app_row: dict[str, Any], countries: list[str]) -> dict[str, Any]:
     return visa_view(app_row, countries)
 
 
+def _job_facts_for(app_row: Mapping[str, Any]) -> dict[str, Any]:
+    """Lazy for the same reason as ``_visa_for`` — job_facts.py imports from here."""
+    from src.services.applications.job_facts import job_facts_view  # noqa: PLC0415
+
+    return job_facts_view(app_row)
+
+
 async def _work_countries(db: JobDatabase, user_id: str) -> list[str]:
     from src.services.applications.visa import user_work_countries  # noqa: PLC0415
 
@@ -1256,6 +1368,9 @@ async def get_application_detail(
             "job_description_snapshot": app_row.get("job_description_snapshot") or "",
             "snapshot_at": app_row.get("snapshot_at"),
             "catalog_present": catalog_present,
+            # Owner decision 2026-10-04 — country / remote / found_on, the
+            # user's own facts about the job (None when unset, rule #29).
+            **_job_facts_for(app_row),
         },
         "fit": fit,
         "visa": _visa_for(app_row, await _work_countries(db, user_id)),
@@ -1367,7 +1482,8 @@ async def list_applications(
     order_sql = "follow_up_on ASC, id ASC" if due else "last_event_at DESC NULLS LAST, id DESC"
     cur = await db._db.execute(
         f"SELECT id, job_id, job_title, job_company, job_url, job_location, status, last_event_at, "  # noqa: S608
-        f"visa_signal, visa_country, fit_recorded_at, fit_score, fit_verdict, follow_up_on "
+        f"visa_signal, visa_country, fit_recorded_at, fit_score, fit_verdict, follow_up_on, "
+        f"job_country, job_remote, job_found_on "
         f"FROM applications WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
         [*params, limit, offset],
     )
@@ -1443,6 +1559,7 @@ async def list_applications(
                 "last_event_at": r.get("last_event_at"),
                 "visa_signal": signal, "visa_country": country,
                 "needs_sponsorship": visa_service.needs_sponsorship(signal, country, countries),
+                **_job_facts_for(r),
                 "events": await _count(db, "application_events", "application_id", app_id),
                 "artifacts": artifact_counts,
                 "receipts": receipts_count,
@@ -1570,15 +1687,15 @@ async def whats_new(
 
 async def _artifact_metadata(db: JobDatabase, application_id: int, *, include_text: bool) -> list[dict[str, Any]]:
     cur = await db._db.execute(
-        "SELECT id, kind, version_no, made_by, model, profile_version, label, chars, created_at, text "
-        "FROM application_artifacts WHERE application_id = ? ORDER BY kind, version_no",
+        "SELECT id, kind, version_no, made_by, model, profile_version, label, chars, created_at, text, "
+        "ats_score, ats_notes FROM application_artifacts WHERE application_id = ? ORDER BY kind, version_no",
         (application_id,),
     )
     rows = [dict(r) for r in await cur.fetchall()]
     out = []
     meta_cols = (
         "id", "kind", "version_no", "made_by", "model", "profile_version",
-        "label", "chars", "created_at",
+        "label", "chars", "created_at", "ats_score", "ats_notes",
     )
     for r in rows:
         entry = {k: r[k] for k in meta_cols}
@@ -1683,7 +1800,8 @@ async def export_history(
     where_sql = " AND ".join(where)
 
     cur = await db._db.execute(
-        f"SELECT id, job_id, status, job_title, job_company, created_at, updated_at, last_event_at "  # noqa: S608
+        f"SELECT id, job_id, status, job_title, job_company, created_at, updated_at, last_event_at, "  # noqa: S608
+        f"job_country, job_remote, job_found_on "
         f"FROM applications WHERE {where_sql} ORDER BY updated_at ASC, id ASC",
         params,
     )
@@ -1702,6 +1820,7 @@ async def export_history(
             "id": r["id"], "job_id": r["job_id"], "status": r["status"],
             "job_title": r["job_title"] or "", "job_company": r["job_company"] or "",
             "created_at": r["created_at"], "updated_at": r["updated_at"], "last_event_at": r.get("last_event_at"),
+            **_job_facts_for(r),
             "events": await list_events_for_display(db, r["id"]),
             "artifacts": await _artifact_metadata(db, r["id"], include_text=include_text),
             "receipts": await _list_receipts_for_application(db, user_id, r["id"], include_text=include_text),

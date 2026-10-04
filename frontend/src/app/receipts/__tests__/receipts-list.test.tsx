@@ -42,7 +42,7 @@ describe("/receipts list", () => {
     expect(list).toHaveTextContent(/Sent .*2026/);
     expect(list).toHaveTextContent("CV kept");
     expect(list).toHaveTextContent("No cover letter");
-    expect(list).toHaveTextContent("via email");
+    expect(list).toHaveTextContent("via Email");
     expect(screen.getByRole("link", { name: /Staff Engineer/ })).toHaveAttribute("href", "/receipts/7");
   });
 

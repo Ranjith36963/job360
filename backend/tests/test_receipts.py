@@ -42,7 +42,8 @@ async def test_receipt_freezes_job_and_marks_applied(authenticated_async_context
         assert r["job_description"] == _AD["description"]
         assert r["job_apply_url"] == _AD["apply_url"]
         assert r["cv_text"] is None and r["cv_origin"] is None       # applied without a tailored CV
-        assert r["channel"] == "company site" and r["note"] == "via referral"
+        # Closed set since 2026-10-04 — the spelling is stored as the member.
+        assert r["channel"] == "company_site" and r["note"] == "via referral"
         assert r["sent_at"]
 
         # The `applications` row (the spine's cache slot) agrees: this route

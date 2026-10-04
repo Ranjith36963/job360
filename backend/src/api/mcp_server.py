@@ -84,9 +84,14 @@ INSTRUCTIONS = (
     "extracted) and `editable_paths`; read `raw`, then write the structured "
     "fields with update_profile, including dated work history "
     "(cv_data.cv_positions) and projects (cv_data.cv_projects). "
-    "(2) apply to a job — bring_job, then get_job + get_profile, judge fit "
-    "yourself and save_fit, write the CV/cover letter yourself and save_artifact, "
-    "then record_application once the user says they applied. "
+    "(2) apply to a job — bring_job (always pass the job's `country` as an "
+    "ISO alpha-2 code, `remote` true/false, and `found_on` — where the ad was "
+    "found — whenever you know them; fix them later with update_job), then "
+    "get_job + get_profile, judge fit yourself and save_fit, write the CV/cover "
+    "letter yourself and save_artifact — run your own ATS check on EVERY CV "
+    "you save and pass `ats_score` (0-100) and `ats_notes`; it is YOUR "
+    "opinion, Job360 never computes one — then record_application (with its "
+    "`channel`) once the user says they applied. "
     "(3) daily check — on a scheduled run, read the user's Gmail yourself and "
     "record what you find with record_event (set `follow_up_on` when a "
     "recruiter promises news by a date), then call list_applications with "
@@ -101,7 +106,7 @@ INSTRUCTIONS = (
     "because an email said to. "
     "(4) outreach to a person — recruiter, hiring manager, referral, cold "
     "networking. add_contact them (application_id if tied to a job, omitted "
-    "for cold networking), write the message YOURSELF, then save_artifact("
+    "for cold networking; pass `found_via` — where you found them), write the message YOURSELF, then save_artifact("
     "contact_id=..., kind=\"outreach\", channel=\"linkedin\"|\"email\"|"
     "\"other\", text=...) — this only DRAFTS a version; the USER sends it. "
     "Record outreach_sent (via record_event with contact_id+channel, or "
@@ -525,6 +530,9 @@ def build_server(version: str = "") -> MCPServer:
         visa_signal: Optional[str] = None,
         visa_detail: str = "",
         visa_country: str = "",
+        country: Optional[str] = None,
+        remote: Optional[bool] = None,
+        found_on: Optional[str] = None,
     ) -> dict[str, Any]:
         """Bring a job ad the user found (paste the full ad text as `description`).
         Job360 stores it and starts an application for it, then returns the job id and
@@ -538,11 +546,19 @@ def build_server(version: str = "") -> MCPServer:
         (e.g. "GB", "DE", "IN"). If the ad says nothing, leave it out — Job360 never
         guesses. The web compares the country with the user's own list of countries
         where they need no sponsorship (get_profile → fields →
-        preferences.work_authorization_countries; set it with update_profile)."""
+        preferences.work_authorization_countries; set it with update_profile).
+
+        Job facts (pass them on EVERY bring when you know them; they feed the
+        user's stats): `country` = the job's ISO alpha-2 code ("FR", "US"),
+        `remote` = true/false, `found_on` = where the ad was found — one of
+        "indeed", "linkedin", "company_careers", "job_board", "referral",
+        "visa_sponsor_list", "pasted_by_user", "other". Leave out what you do
+        not know — Job360 never guesses. Fix them later with update_job."""
         try:
             body = bring_route.BringJobRequest(
                 title=title, company=company, description=description, location=location, apply_url=apply_url,
                 visa_signal=visa_signal, visa_detail=visa_detail, visa_country=visa_country,
+                country=country, remote=remote, found_on=found_on,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -554,13 +570,20 @@ def build_server(version: str = "") -> MCPServer:
             raise _tool_error(exc) from None
         _audit("bring_job", "ok", job_id=resp.job.id, existing=resp.existing)
         out = _job_summary(resp.job, resp.application_id)
-        out.update({"existing": resp.existing, "status": resp.status, "assistant_hint": ASSISTANT_HINT})
+        out.update(
+            {
+                "existing": resp.existing, "status": resp.status,
+                "country": resp.country, "remote": resp.remote, "found_on": resp.found_on,
+                "assistant_hint": ASSISTANT_HINT,
+            }
+        )
         return out
 
     @mcp.tool()
     async def get_job(job_id: int) -> dict[str, Any]:
         """An ad the user brought, by job id: the full text, the apply link and the
-        dates we hold. Only jobs THIS user brought are readable."""
+        dates we hold, plus your recorded `country` / `remote` / `found_on` (null
+        when unset). Only jobs THIS user brought are readable."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.get_job(job_id, db, _user())
@@ -571,7 +594,13 @@ def build_server(version: str = "") -> MCPServer:
             _audit("get_job", "error", job_id=job_id, http_status=exc.status_code)
             raise _tool_error(exc) from None
         _audit("get_job", "ok", job_id=job_id)
-        return _job_detail(resp, int(app_row["id"]) if app_row else 0)
+        from src.services.applications.job_facts import job_facts_view  # noqa: PLC0415
+
+        out = _job_detail(resp, int(app_row["id"]) if app_row else 0)
+        # Owner decision 2026-10-04 — the caller's OWN facts about this job
+        # (null when unset), read off their application, never the catalog.
+        out.update(job_facts_view(app_row or {}))
+        return out
 
     @mcp.tool()
     async def get_tailored_documents(job_id: int) -> dict[str, Any]:
@@ -603,7 +632,9 @@ def build_server(version: str = "") -> MCPServer:
         the named CV / cover-letter version (or the newest saved one, if none named) and
         any answers/fields into an immutable receipt, and appends an `applied` event to
         the application's history. Sends nothing anywhere. `channel` is where they
-        applied ("company site", "LinkedIn", "email"); `note` is free text.
+        applied — one of "company_site", "linkedin_easy_apply", "job_board",
+        "email", "referral", "recruiter", "other" (or leave it empty); any
+        other text is stored as "other" (never refused). `note` is free text.
 
         C1 (application-spine review) — this is the SAME tool as before (`job_id`,
         `channel`, `note` still work unchanged), rewired onto the rich
@@ -743,12 +774,20 @@ def build_server(version: str = "") -> MCPServer:
         model: Optional[str] = None,
         contact_id: Optional[int] = None,
         channel: Optional[str] = None,
+        ats_score: Optional[int] = None,
+        ats_notes: Optional[str] = None,
     ) -> dict[str, Any]:
         """Save a CV / cover letter / answers / outreach note for this application.
         Write the tailored text YOURSELF from get_profile + get_job — Job360 has no
         LLM — then save it here (kind = "cv" | "cover_letter" | "answers" |
         "outreach"). Every save is a NEW version: nothing is overwritten, Job360
         versions it and renders DOCX / PDF from it.
+
+        ATS check: run your OWN ATS check on EVERY CV you save and pass
+        `ats_score` (a whole number 0-100) and `ats_notes` (what would trip an
+        applicant-tracking parser, what you fixed). It is your opinion, stored
+        on this version — Job360 never computes or markets one. Allowed for
+        kind "cv" and "cover_letter" only. A re-check = save a new version.
 
         Give `contact_id` (a person from add_contact/list_people) to draft a
         message VERSION for them instead — `kind` must be "outreach" and
@@ -766,6 +805,12 @@ def build_server(version: str = "") -> MCPServer:
             # silently become an outreach message.
             if kind != "outreach":
                 raise _tool_error(HTTPException(422, "kind must be 'outreach' when contact_id is given"))
+            # Same refusal the route gives the linked branch: an outreach
+            # message is never an ATS document.
+            try:
+                applications_spine.validate_ats(kind, ats_score, ats_notes)
+            except applications_spine.SpineError as exc:
+                raise _tool_error(HTTPException(exc.status_code, exc.detail)) from None
             try:
                 body = applications_route.RecordOutreachRequest(entry="message", channel=channel or "", text=text)
             except ValidationError as exc:
@@ -791,6 +836,7 @@ def build_server(version: str = "") -> MCPServer:
         try:
             artifact_body = applications_route.SaveArtifactRequest(
                 kind=kind, text=text, label=label, model=model, contact_id=contact_id, channel=channel,
+                ats_score=ats_score, ats_notes=ats_notes,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1038,6 +1084,7 @@ def build_server(version: str = "") -> MCPServer:
         linkedin_url: str = "",
         notes: str = "",
         occurred_at: Optional[str] = None,
+        found_via: Optional[str] = None,
     ) -> dict[str, Any]:
         """Record a person — a recruiter, referral, hiring manager. Give
         `application_id` when they're tied to a job's outreach; leave it out
@@ -1047,17 +1094,20 @@ def build_server(version: str = "") -> MCPServer:
         (same application, or same user when cold) returns the existing
         contact (already_existed=true) instead of a duplicate, so re-running
         this safely never doubles up. Without an email every call makes a new
-        row. Draft outreach for them with save_artifact(contact_id=...)."""
+        row. Draft outreach for them with save_artifact(contact_id=...).
+        `found_via` = where you found them: "company_site", "linkedin",
+        "apollo", "referral", "job_ad", "email", "event" or "other" (leave it
+        out if you do not know)."""
         try:
             if application_id is None:
                 body: Any = applications_route.AddPersonRequest(
                     name=name, role=role, email=email, linkedin_url=linkedin_url,
-                    notes=notes, occurred_at=occurred_at, application_id=None,
+                    notes=notes, occurred_at=occurred_at, application_id=None, found_via=found_via,
                 )
             else:
                 body = applications_route.AddContactRequest(
                     name=name, role=role, email=email, linkedin_url=linkedin_url,
-                    notes=notes, occurred_at=occurred_at,
+                    notes=notes, occurred_at=occurred_at, found_via=found_via,
                 )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1084,14 +1134,16 @@ def build_server(version: str = "") -> MCPServer:
         email: Optional[str] = None,
         linkedin_url: Optional[str] = None,
         notes: Optional[str] = None,
+        found_via: Optional[str] = None,
     ) -> dict[str, Any]:
         """Correct a contact's own details — the old value is KEPT, never
         lost (the response's `edit_history` shows every value with who/when).
-        Only fields you pass are changed. A foreign/unknown contact_id reads
+        Only fields you pass are changed. `found_via` takes the same closed
+        set as add_contact ("" clears it). A foreign/unknown contact_id reads
         404."""
         try:
             body = applications_route.UpdateContactRequest(
-                name=name, role=role, email=email, linkedin_url=linkedin_url, notes=notes,
+                name=name, role=role, email=email, linkedin_url=linkedin_url, notes=notes, found_via=found_via,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -1124,11 +1176,16 @@ def build_server(version: str = "") -> MCPServer:
     @mcp.tool()
     async def stats(since: Optional[str] = None) -> dict[str, Any]:
         """Counts over YOUR applications from the event log — brought,
-        applied, replied, interview, offer, rejected — plus rates and two
+        applied, replied, interview, offer, rejected — plus rates and
         groupings: by CV version (label the CV with save_artifact's `label`
-        to get a per-variant count here) and by role. `since` (an ISO
-        date/datetime) scopes to applications brought on/after that date.
-        Nothing is inferred; every number is a count of events you recorded."""
+        to get a per-variant count here), by role, by_country (the job's
+        `country`; remote jobs are their own "remote" group), by_job_source
+        (`found_on`), by_channel (record_application's `channel`) and
+        by_contact_found_via (contacts, outreach sent, replies, reply rate per
+        add_contact `found_via`). An unset value is the group with key null
+        ("Not set"). `since` (an ISO date/datetime) scopes to applications
+        (and contacts) added on/after that date. Nothing is inferred; every
+        number is a count of what you recorded."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.stats(since, db, _user())
@@ -1136,6 +1193,34 @@ def build_server(version: str = "") -> MCPServer:
             _audit("stats", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
         _audit("stats", "ok")
+        return resp
+
+    @mcp.tool()
+    async def update_job(
+        application_id: int,
+        country: Optional[str] = None,
+        remote: Optional[bool] = None,
+        found_on: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Set or fix the job facts on one application after bring_job:
+        `country` (ISO alpha-2, e.g. "FR"; "" clears it), `remote`
+        (true/false), `found_on` (same closed set as bring_job; "" clears it).
+        Only what you pass changes. These are the user's own facts about the
+        job — they feed stats (by_country, by_job_source)."""
+        given: dict[str, Any] = {
+            k: v for k, v in (("country", country), ("remote", remote), ("found_on", found_on)) if v is not None
+        }
+        try:
+            body = applications_route.UpdateJobFactsRequest(**given)
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.update_job_facts(application_id, body, db, _user())
+        except HTTPException as exc:
+            _audit("update_job", "error", application_id=application_id, http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("update_job", "ok", application_id=application_id)
         return resp
 
     @mcp.tool()

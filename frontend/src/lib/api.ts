@@ -722,6 +722,15 @@ export async function listLessons(
   return request(`/api/applications/lessons${qs(params as Record<string, unknown>)}`);
 }
 
+/** Job facts the assistant (or you) read off the ad — ISO country, remote,
+ *  where it was found. Only the keys sent change; null clears one. */
+export type JobFacts = _Schemas["JobFactsOut"];
+export type JobFactsPatch = _Schemas["UpdateJobFactsRequest"];
+
+export async function updateApplicationJob(applicationId: number, body: JobFactsPatch): Promise<JobFacts> {
+  return request(`/api/applications/${applicationId}/job`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
 export async function getApplication(id: number, withArtifactText = false): Promise<ApplicationDetail> {
   // Query string omitted entirely in the (default) false case — not just an
   // empty value — so the URL is a bare `/api/applications/{id}` when no
@@ -847,6 +856,7 @@ export async function addContact(
     email?: string;
     linkedin_url?: string;
     notes?: string;
+    found_via?: string;
     occurred_at?: string;
   }
 ): Promise<AddContactResult> {
@@ -864,7 +874,14 @@ export async function addContact(
  *  (the response's `edit_history` shows every value with who/when). */
 export async function updateContact(
   contactId: number,
-  body: { name?: string; role?: string; email?: string; linkedin_url?: string; notes?: string }
+  body: {
+    name?: string;
+    role?: string;
+    email?: string;
+    linkedin_url?: string;
+    notes?: string;
+    found_via?: string; // "" clears it; null would mean "not given"
+  }
 ): Promise<Contact> {
   return request(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify(body) });
 }

@@ -49,7 +49,7 @@ describe("/receipts/[id]", () => {
     expect(screen.getByText("Globex · London")).toBeInTheDocument();
     expect(screen.getByTestId("logo")).toBeInTheDocument();
     expect(screen.getByText("RECEIPT R-0012")).toBeInTheDocument();
-    expect(screen.getByText("email")).toBeInTheDocument();
+    expect(screen.getByText("Email")).toBeInTheDocument();
     expect(screen.getByText("v4")).toBeInTheDocument();
     expect(screen.getByText(/sent on a Friday/)).toBeInTheDocument();
 

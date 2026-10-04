@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { listReceipts } from "@/lib/api";
+import { closedSetLabel } from "@/lib/closed-sets";
 import { toast } from "@/lib/toast";
 import type { ReceiptSummary } from "@/lib/types";
 
@@ -110,7 +111,7 @@ function ReceiptsList() {
                 <Mail className="h-3.5 w-3.5" />
                 {r.has_cover_letter ? "Cover letter kept" : "No cover letter"}
               </span>
-              {r.channel && <span>via {r.channel}</span>}
+              {r.channel && <span>via {closedSetLabel(r.channel)}</span>}
               {r.note && <span className="italic">“{r.note}”</span>}
             </div>
           </Link>

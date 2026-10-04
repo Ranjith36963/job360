@@ -84,20 +84,23 @@ async def test_receipt_list_is_bounded_and_light(authenticated_async_context, fi
     summary columns only, LIMIT/OFFSET honoured, `total` is the real count."""
     async with authenticated_async_context() as client:
         job_id = await _bring(client)
+        # Channel is a closed set since 2026-10-04 — three distinct members
+        # stand in for the old free-text "c0".."c2" ordering markers.
+        channels = ("email", "referral", "recruiter")
         for i in range(3):
-            r = await client.post(f"/api/receipts/{job_id}", json={"channel": f"c{i}"})
+            r = await client.post(f"/api/receipts/{job_id}", json={"channel": channels[i]})
             assert r.status_code == 201, r.text
 
         page = await client.get("/api/receipts", params={"limit": 2})
         assert page.status_code == 200, page.text
         body = page.json()
         assert body["total"] == 3 and len(body["receipts"]) == 2
-        assert body["receipts"][0]["channel"] == "c2"          # newest first
+        assert body["receipts"][0]["channel"] == "recruiter"   # newest first
         assert "cv_text" not in body["receipts"][0]
         assert "job_description" not in body["receipts"][0]
 
         rest = await client.get("/api/receipts", params={"limit": 2, "offset": 2})
-        assert [r["channel"] for r in rest.json()["receipts"]] == ["c0"]
+        assert [r["channel"] for r in rest.json()["receipts"]] == ["email"]
         assert rest.json()["total"] == 3
 
         too_big = await client.get("/api/receipts", params={"limit": 10_000})

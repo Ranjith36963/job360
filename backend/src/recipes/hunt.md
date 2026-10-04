@@ -18,8 +18,12 @@ pastes). Then you bring only the good ones into Job360.
    the user needs visa sponsorship, does the ad offer it, refuse it, or not
    say? Never guess — "not mentioned" is an answer.
 4. **Bring only the fits.** For each one: `bring_job` (title, company,
-   location, full description, apply URL), then `save_fit` with your score,
-   your verdict in one sentence, and the gaps.
+   location, full description, apply URL) and ALWAYS the job facts you know:
+   `country` (ISO code, e.g. `FR`), `remote` (true/false) and `found_on`
+   (`indeed`, `linkedin`, `company_careers`, `job_board`, `referral`,
+   `visa_sponsor_list`, `pasted_by_user` or `other`). Leave out only what you
+   truly do not know; fix it later with `update_job`. Then `save_fit` with your
+   score, your verdict in one sentence, and the gaps.
 5. **Skip the rest silently** — do not bring a job just to reject it.
 6. **Report** a short list: company, title, place, your score, visa answer,
    and the link to the Job360 application page. Ask which ones to apply to.

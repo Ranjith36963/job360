@@ -15,6 +15,11 @@ only VERIFIED with evidence — your word alone is "claimed, unverified".
 4. **Write the CV and cover letter yourself**, tailored to this ad, using only
    true facts from the profile. Save each with `save_artifact` (kind `cv` or
    `cover_letter`, a short `label` such as "v1 — agents focus").
+   **Run your own ATS check on EVERY CV you save** (would an applicant-tracking
+   parser read it cleanly? are the ad's must-have terms there, truthfully?) and
+   pass `ats_score` (0-100) and `ats_notes` with that `save_artifact`. It is
+   YOUR opinion — Job360 never computes or advertises one. A re-check after a
+   fix is a new version with its own score.
 5. **Ask before you guess.** If the form needs something the profile does not
    have (notice period, salary, a portfolio question), stop and ask the user.
    Never invent an answer. Call `ask_user` with the `application_id` and the
@@ -30,7 +35,9 @@ only VERIFIED with evidence — your word alone is "claimed, unverified".
    Never retry a submit you are not sure failed — a double application is
    worse than a slow one.
 7. **Record it** only when the user confirms it was sent:
-   `record_application` with the `channel`, the `cv_artifact_id` and
+   `record_application` with the `channel` (one of `company_site`,
+   `linkedin_easy_apply`, `job_board`, `email`, `referral`, `recruiter`,
+   `other`), the `cv_artifact_id` and
    `cover_letter_artifact_id` that were sent, and in `confirmation` any proof
    you have now: the application ID or portal reference, or "thank-you page
    seen at <time>". This saves an immutable receipt.

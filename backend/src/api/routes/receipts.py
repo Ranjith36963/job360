@@ -26,7 +26,10 @@ router = APIRouter(tags=["receipts"])
 
 
 class CreateReceiptRequest(BaseModel):
-    channel: str = Field("", max_length=100)   # "company site", "LinkedIn", "email"…
+    # Owner decision 2026-10-04 — a closed set for every NEW receipt
+    # (settings.APPLICATION_RECEIPT_CHANNELS; '' = not said), checked by the
+    # same spine.normalize_receipt_channel the rich receipt route uses.
+    channel: str = Field("", max_length=100)
     note: str = Field("", max_length=2_000)
 
 
@@ -126,6 +129,11 @@ async def create_receipt(
     from src.services.applications import spine as applications_spine  # noqa: PLC0415
     from src.services.profile.storage import current_profile_version_id  # noqa: PLC0415
 
+    try:
+        channel = applications_spine.normalize_receipt_channel(body.channel)
+    except applications_spine.SpineError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
     job = await db.get_job_by_id(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -154,7 +162,7 @@ async def create_receipt(
         cover_letter_text=cl_text,
         cover_letter_origin=cl_origin,
         profile_version=current_profile_version_id(user.id),
-        channel=body.channel.strip(),
+        channel=channel,
         note=body.note.strip(),
         application_id=application["id"] if application else None,
     )

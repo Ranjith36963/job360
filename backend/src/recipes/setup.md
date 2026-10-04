@@ -28,4 +28,6 @@ Go step by step, and say in one plain line what you are doing at each step.
    `preferences.daily_check` (auto / ask / paused) and
    `preferences.check_every`).
 7. **Finish** with three lines: what you changed, what is still missing, and
-   the next command (`360-hunt`).
+   the next command (`360-hunt`). From now on, every `bring_job` carries the
+   job's `country` (ISO code), `remote` and `found_on` — they power the user's
+   stats.

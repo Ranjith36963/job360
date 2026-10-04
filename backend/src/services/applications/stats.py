@@ -18,6 +18,26 @@ The fetch itself is capped at ``settings.STATS_MAX_APPLICATIONS`` (S6): the
 query reads the NEWEST N applications for the user, and the response says
 ``applications_truncated: true`` when there were more. Group count is capped
 separately at ``settings.STATS_MAX_GROUPS``.
+
+**Owner decision 2026-10-04 — four more splits**, every one over facts the
+caller stored (never inferred), with the same counts/rates/order/cap as the
+two above (``_group_by``):
+
+* ``by_country`` — a REMOTE job (``job_remote`` true) is its own group, key
+  ``"remote"``, whatever its country; any other job groups by its ISO alpha-2
+  country (``job_country`` only — never the visa slot's ``visa_country``,
+  which is a different fact). Unknown → key ``None``, label "Not set".
+* ``by_job_source`` — ``job_found_on`` (closed set ``JOB_FOUND_ON``).
+* ``by_channel`` — the LATEST receipt's ``channel``. New receipts are a
+  closed set; older free-text receipts are history and are MAPPED, never
+  rewritten (``spine.receipt_channel_key``): an exact set spelling → that
+  member, any other text → ``"other"``, empty/no receipt → ``None``.
+* ``by_contact_found_via`` — a different unit: CONTACTS, not applications.
+  Per current ``found_via`` (base row overlaid by its newest edit): how many
+  contacts, how many had an ``outreach_sent`` mark, how many had a reply
+  mark, and ``reply_rate`` = contacts with BOTH a sent and a reply mark /
+  contacts with a sent mark (``None`` when nothing was sent — rule #29).
+  One aggregate query, bounded by the closed set.
 """
 from __future__ import annotations
 
@@ -25,7 +45,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
-from src.services.applications.spine import SpineError
+from src.services.applications.spine import SpineError, receipt_channel_key
 from src.services.auth import rate_limit
 
 if TYPE_CHECKING:  # pragma: no cover — type-only, same reasoning as spine.py
@@ -139,6 +159,106 @@ def _group(
     return groups[: settings.STATS_MAX_GROUPS], truncated
 
 
+NOT_SET_LABEL = "Not set"
+REMOTE_KEY = "remote"
+
+
+def _country_key(row: dict[str, Any]) -> Optional[str]:
+    """``"remote"`` for a remote job; else the job's alpha-2 country (upper —
+    stored that way by every door); else ``None``."""
+    if row.get("job_remote") is True:
+        return REMOTE_KEY
+    # The job's own country only — never the visa slot's country, which is a
+    # different fact (a remote ad can name a sponsorship country). Every
+    # other reader shows `country` the same way (rule #29: no inferred value).
+    code = (row.get("job_country") or "").strip().upper()
+    return code or None
+
+
+def _group_by(
+    rows: list[dict[str, Any]], key_of: Any, *, label_of: Any = None
+) -> tuple[list[dict[str, Any]], bool]:
+    """Same counts, rates, order (``applied DESC, brought DESC, key ASC``,
+    null last) and ``STATS_MAX_GROUPS`` cap as ``_group`` — but the key is
+    already a canonical value (a closed-set member or an ISO code), so it is
+    NOT lower-cased. ``label`` is the key itself unless ``label_of`` names it
+    otherwise; the null group's label is always "Not set"."""
+    buckets: dict[Optional[str], list[dict[str, Any]]] = {}
+    for row in rows:
+        buckets.setdefault(key_of(row), []).append(row)
+    groups: list[dict[str, Any]] = []
+    for key, members in buckets.items():
+        if key is None:
+            label = NOT_SET_LABEL
+        else:
+            label = label_of(key) if label_of is not None else key
+        groups.append({"key": key, "label": label, **_summarize(members)})
+    groups.sort(key=lambda g: (-g["applied"], -g["brought"], g["key"] is None, g["key"] or ""))
+    truncated = len(groups) > settings.STATS_MAX_GROUPS
+    return groups[: settings.STATS_MAX_GROUPS], truncated
+
+
+async def _contact_found_via_groups(
+    db: JobDatabase, user_id: str, since_val: Optional[str]
+) -> list[dict[str, Any]]:
+    """``by_contact_found_via`` — ONE aggregate query over the caller's own
+    contacts (S1: ``user_id`` on every table), grouped by the CURRENT
+    ``found_via`` (the newest ``contact_edits`` row for that field, else the
+    base row; a cleared edit '' reads as unset). Bounded by the closed set,
+    so there is no row cap to apply. ``since`` scopes by the contact's own
+    ``created_at``."""
+    where = ["ac.user_id = ?"]
+    where_params: list[Any] = [user_id]
+    if since_val:
+        where.append("ac.created_at >= ?")
+        where_params.append(since_val)
+    where_sql = " AND ".join(where)
+    sql = f"""
+        SELECT fv, COUNT(*) AS contacts, SUM(sent) AS sent, SUM(replied) AS replied,
+               SUM(sent * replied) AS sent_and_replied
+        FROM (
+            SELECT
+                NULLIF(COALESCE(fe.value, ac.found_via), '') AS fv,
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM contact_outreach o
+                    WHERE o.contact_id = ac.id AND o.user_id = ac.user_id AND o.entry = 'sent'
+                ) THEN 1 ELSE 0 END AS sent,
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM contact_outreach o
+                    WHERE o.contact_id = ac.id AND o.user_id = ac.user_id AND o.entry = 'reply'
+                ) THEN 1 ELSE 0 END AS replied
+            FROM application_contacts ac
+            LEFT JOIN (
+                SELECT contact_id, value FROM (
+                    SELECT contact_id, value,
+                           ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY id DESC) AS rn
+                    FROM contact_edits WHERE field = 'found_via' AND user_id = ?
+                ) t WHERE rn = 1
+            ) fe ON fe.contact_id = ac.id
+            WHERE {where_sql}
+        ) per_contact
+        GROUP BY fv
+    """  # noqa: S608 — where_sql is built from constants, never user input
+    cur = await db._db.execute(sql, [user_id, *where_params])
+    groups: list[dict[str, Any]] = []
+    for r in await cur.fetchall():
+        row = dict(r)
+        key = row["fv"] or None
+        sent = int(row["sent"] or 0)
+        groups.append(
+            {
+                "key": key,
+                "label": NOT_SET_LABEL if key is None else key,
+                "contacts": int(row["contacts"] or 0),
+                "outreach_sent": sent,
+                "outreach_replied": int(row["replied"] or 0),
+                "reply_rate": round(int(row["sent_and_replied"] or 0) / sent, 3) if sent else None,
+            }
+        )
+    groups.sort(key=lambda g: (-g["contacts"], g["key"] is None, g["key"] or ""))
+    return groups
+
+
 async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = None) -> dict[str, Any]:
     """R5-R7 — overall counts + rates, ``by_cv_version``, ``by_role``, all
     scoped to the caller's own applications (S1: ``user_id`` filtered on
@@ -176,6 +296,10 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
         SELECT
             a.id AS application_id,
             a.job_title AS job_title,
+            a.job_country AS job_country,
+            a.visa_country AS visa_country,
+            a.job_remote AS job_remote,
+            a.job_found_on AS job_found_on,
             MAX(CASE WHEN e.event_type = ? THEN 1 ELSE 0 END) AS applied,
             MAX(CASE WHEN e.event_type = ? THEN 1 ELSE 0 END) AS replied,
             MAX(CASE WHEN e.event_type IN ({interview_placeholders}) THEN 1 ELSE 0 END) AS interview,
@@ -194,14 +318,19 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
                     ON art.id = r.cv_artifact_id AND art.user_id = a.user_id
                 WHERE r.application_id = a.id AND r.user_id = a.user_id
                 ORDER BY r.id DESC LIMIT 1
-            ) AS cv_profile_version
+            ) AS cv_profile_version,
+            (
+                SELECT r.channel FROM application_receipts r
+                WHERE r.application_id = a.id AND r.user_id = a.user_id
+                ORDER BY r.id DESC LIMIT 1
+            ) AS receipt_channel
         FROM applications a
         LEFT JOIN application_events e ON e.application_id = a.id AND e.user_id = a.user_id
             -- A corrects_event_id note retracts its target (status.py drops it
             -- too) — a retracted apply/interview must never be counted.
             AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id)
         WHERE {where_sql}
-        GROUP BY a.id, a.job_title, a.user_id
+        GROUP BY a.id, a.job_title, a.user_id, a.job_country, a.visa_country, a.job_remote, a.job_found_on
         ORDER BY a.id DESC
         LIMIT ?
     """  # noqa: S608 — where_sql/interview_placeholders are built from constants, never user input
@@ -228,13 +357,25 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
     by_role, role_truncated = _group(
         rows, key_field="job_title", label_key="role", with_profile_versions=False
     )
+    by_country, country_truncated = _group_by(
+        rows, _country_key, label_of=lambda k: "Remote" if k == REMOTE_KEY else k
+    )
+    by_job_source, source_truncated = _group_by(rows, lambda r: r.get("job_found_on") or None)
+    by_channel, channel_truncated = _group_by(rows, lambda r: receipt_channel_key(r.get("receipt_channel")))
+    by_contact_found_via = await _contact_found_via_groups(db, user_id, since_val)
 
     return {
         "since": since_val,
         "overall": overall,
         "by_cv_version": by_cv_version,
         "by_role": by_role,
-        "groups_truncated": cv_truncated or role_truncated,
+        "by_country": by_country,
+        "by_job_source": by_job_source,
+        "by_channel": by_channel,
+        "by_contact_found_via": by_contact_found_via,
+        "groups_truncated": (
+            cv_truncated or role_truncated or country_truncated or source_truncated or channel_truncated
+        ),
         "applications_truncated": applications_truncated,
         "computed_at": datetime.now(timezone.utc).isoformat(),
     }

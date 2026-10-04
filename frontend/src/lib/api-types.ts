@@ -309,6 +309,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Job Facts
+         * @description The web job page's door, and the ``update_job`` MCP tool's route.
+         *     Writes the caller's OWN application row only (never the shared ``jobs``
+         *     catalog — hard rule #10); a foreign/unknown id reads 404 (S2).
+         */
+        patch: operations["update_job_facts_api_applications__application_id__job_patch"];
+        trace?: never;
+    };
     "/api/applications/{application_id}/receipt": {
         parameters: {
             query?: never;
@@ -1854,6 +1876,8 @@ export interface components {
              * @default
              */
             email: string;
+            /** Found Via */
+            found_via?: string | null;
             /**
              * Linkedin Url
              * @default
@@ -1899,6 +1923,8 @@ export interface components {
              * @default
              */
             email: string;
+            /** Found Via */
+            found_via?: string | null;
             /**
              * Linkedin Url
              * @default
@@ -1970,6 +1996,10 @@ export interface components {
          *     (null unless ``with_artifact_text=true`` and under the byte cap).
          */
         ApplicationArtifactOut: {
+            /** Ats Notes */
+            ats_notes?: string | null;
+            /** Ats Score */
+            ats_score?: number | null;
             /** Chars */
             chars: number;
             /** Created At */
@@ -1999,6 +2029,10 @@ export interface components {
          *     this route always returns the real row, never a capped read.
          */
         ApplicationArtifactRowOut: {
+            /** Ats Notes */
+            ats_notes?: string | null;
+            /** Ats Score */
+            ats_score?: number | null;
             /** Chars */
             chars: number;
             /** Created At */
@@ -2110,6 +2144,10 @@ export interface components {
         ApplicationJobOut: {
             /** Catalog Present */
             catalog_present: boolean;
+            /** Country */
+            country?: string | null;
+            /** Found On */
+            found_on?: string | null;
             /** Job Company */
             job_company: string;
             /** Job Description Snapshot */
@@ -2122,6 +2160,8 @@ export interface components {
             job_title: string;
             /** Job Url */
             job_url: string;
+            /** Remote */
+            remote?: boolean | null;
             /** Snapshot At */
             snapshot_at: string | null;
         };
@@ -2186,6 +2226,8 @@ export interface components {
             artifacts: {
                 [key: string]: number;
             };
+            /** Country */
+            country?: string | null;
             /** Events */
             events: number;
             /** Fit Score */
@@ -2202,6 +2244,8 @@ export interface components {
             follow_up_due: boolean;
             /** Follow Up On */
             follow_up_on?: string | null;
+            /** Found On */
+            found_on?: string | null;
             /** Id */
             id: number;
             /** Interview At */
@@ -2231,6 +2275,8 @@ export interface components {
             next_step: components["schemas"]["NextStepOut"];
             /** Receipts */
             receipts: number;
+            /** Remote */
+            remote?: boolean | null;
             /** Status */
             status: string;
             /**
@@ -2405,13 +2451,19 @@ export interface components {
             apply_url: string;
             /** Company */
             company: string;
+            /** Country */
+            country?: string | null;
             /** Description */
             description: string;
+            /** Found On */
+            found_on?: string | null;
             /**
              * Location
              * @default
              */
             location: string;
+            /** Remote */
+            remote?: boolean | null;
             /** Title */
             title: string;
             /** Visa Country */
@@ -2425,9 +2477,15 @@ export interface components {
         BringJobResponse: {
             /** Application Id */
             application_id: number;
+            /** Country */
+            country?: string | null;
             /** Existing */
             existing: boolean;
+            /** Found On */
+            found_on?: string | null;
             job: components["schemas"]["JobResponse"];
+            /** Remote */
+            remote?: boolean | null;
             /** Status */
             status: string;
         };
@@ -2618,6 +2676,8 @@ export interface components {
             };
             /** Email */
             email: string;
+            /** Found Via */
+            found_via?: string | null;
             /** Id */
             id: number;
             /** Linkedin Url */
@@ -2741,10 +2801,14 @@ export interface components {
             artifacts: components["schemas"]["ExportArtifactOut"][];
             /** Contacts */
             contacts: components["schemas"]["ContactOut"][];
+            /** Country */
+            country?: string | null;
             /** Created At */
             created_at: string;
             /** Events */
             events: components["schemas"]["ApplicationEventOut"][];
+            /** Found On */
+            found_on?: string | null;
             /** Id */
             id: number;
             /** Job Company */
@@ -2757,6 +2821,8 @@ export interface components {
             last_event_at: string | null;
             /** Receipts */
             receipts: components["schemas"]["ApplicationReceiptExportOut"][];
+            /** Remote */
+            remote?: boolean | null;
             /** Status */
             status: string;
             /** Updated At */
@@ -2768,6 +2834,10 @@ export interface components {
          *     only a key at all when ``include_text=true`` — hence the default.
          */
         ExportArtifactOut: {
+            /** Ats Notes */
+            ats_notes?: string | null;
+            /** Ats Score */
+            ats_score?: number | null;
             /** Chars */
             chars: number;
             /** Created At */
@@ -2933,6 +3003,17 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /** JobFactsOut */
+        JobFactsOut: {
+            /** Application Id */
+            application_id: number;
+            /** Country */
+            country: string | null;
+            /** Found On */
+            found_on: string | null;
+            /** Remote */
+            remote: boolean | null;
         };
         /**
          * JobResponse
@@ -3183,6 +3264,8 @@ export interface components {
             };
             /** Email */
             email: string;
+            /** Found Via */
+            found_via?: string | null;
             /** Id */
             id: number;
             /** Jobs */
@@ -3217,6 +3300,8 @@ export interface components {
             contact_ids: number[];
             /** Email */
             email: string;
+            /** Found Via */
+            found_via?: string | null;
             /** Jobs */
             jobs: components["schemas"]["PersonJobOut"][];
             last_reply: components["schemas"]["OutreachEntryOut"] | null;
@@ -3735,6 +3820,10 @@ export interface components {
         };
         /** SaveArtifactRequest */
         SaveArtifactRequest: {
+            /** Ats Notes */
+            ats_notes?: string | null;
+            /** Ats Score */
+            ats_score?: number | null;
             /** Channel */
             channel?: string | null;
             /** Contact Id */
@@ -3755,6 +3844,10 @@ export interface components {
         SaveArtifactResponse: {
             /** Artifact Id */
             artifact_id: number;
+            /** Ats Notes */
+            ats_notes?: string | null;
+            /** Ats Score */
+            ats_score?: number | null;
             /** Chars */
             chars: number;
             /** Contact Id */
@@ -3822,6 +3915,27 @@ export interface components {
             application_id: number;
             visa: components["schemas"]["ApplicationVisaOut"];
         };
+        /**
+         * StatsContactFoundViaGroupOut
+         * @description Owner decision 2026-10-04 — per current contact ``found_via``: how
+         *     many contacts, how many had an outreach marked sent / a reply recorded,
+         *     and ``reply_rate`` = contacts with both / contacts with a sent mark
+         *     (``null`` when nothing was sent).
+         */
+        StatsContactFoundViaGroupOut: {
+            /** Contacts */
+            contacts: number;
+            /** Key */
+            key: string | null;
+            /** Label */
+            label: string;
+            /** Outreach Replied */
+            outreach_replied: number;
+            /** Outreach Sent */
+            outreach_sent: number;
+            /** Reply Rate */
+            reply_rate: number | null;
+        };
         /** StatsCvVersionGroupOut */
         StatsCvVersionGroupOut: {
             /** Applied */
@@ -3842,6 +3956,37 @@ export interface components {
             offer_rate: number | null;
             /** Profile Versions */
             profile_versions: number[];
+            /** Rejected */
+            rejected: number;
+            /** Replied */
+            replied: number;
+            /** Reply Rate */
+            reply_rate: number | null;
+        };
+        /**
+         * StatsKeyedGroupOut
+         * @description Owner decision 2026-10-04 — ``by_country`` / ``by_job_source`` /
+         *     ``by_channel``: same counts and rates as ``by_role``. ``key`` is the
+         *     canonical value (an ISO alpha-2 code or ``"remote"``; a closed-set
+         *     member); ``null`` = unset, its ``label`` is "Not set".
+         */
+        StatsKeyedGroupOut: {
+            /** Applied */
+            applied: number;
+            /** Brought */
+            brought: number;
+            /** Interview */
+            interview: number;
+            /** Interview Rate */
+            interview_rate: number | null;
+            /** Key */
+            key: string | null;
+            /** Label */
+            label: string;
+            /** Offer */
+            offer: number;
+            /** Offer Rate */
+            offer_rate: number | null;
             /** Rejected */
             rejected: number;
             /** Replied */
@@ -3874,8 +4019,16 @@ export interface components {
         StatsResponse: {
             /** Applications Truncated */
             applications_truncated: boolean;
+            /** By Channel */
+            by_channel: components["schemas"]["StatsKeyedGroupOut"][];
+            /** By Contact Found Via */
+            by_contact_found_via: components["schemas"]["StatsContactFoundViaGroupOut"][];
+            /** By Country */
+            by_country: components["schemas"]["StatsKeyedGroupOut"][];
             /** By Cv Version */
             by_cv_version: components["schemas"]["StatsCvVersionGroupOut"][];
+            /** By Job Source */
+            by_job_source: components["schemas"]["StatsKeyedGroupOut"][];
             /** By Role */
             by_role: components["schemas"]["StatsRoleGroupOut"][];
             /** Computed At */
@@ -4014,6 +4167,8 @@ export interface components {
         UpdateContactRequest: {
             /** Email */
             email?: string | null;
+            /** Found Via */
+            found_via?: string | null;
             /** Linkedin Url */
             linkedin_url?: string | null;
             /** Name */
@@ -4022,6 +4177,22 @@ export interface components {
             notes?: string | null;
             /** Role */
             role?: string | null;
+        };
+        /**
+         * UpdateJobFactsRequest
+         * @description Owner decision 2026-10-04 — set or fix the job's facts after
+         *     bring_job: ISO alpha-2 ``country``, ``remote``, ``found_on`` (closed set
+         *     JOB_FOUND_ON). Only the keys SENT change; an explicit ``null`` (or "")
+         *     clears one (rule #29: unset is null, never a default). Validated by
+         *     ``job_facts.validate_job_facts`` — the same rules bring_job uses.
+         */
+        UpdateJobFactsRequest: {
+            /** Country */
+            country?: string | null;
+            /** Found On */
+            found_on?: string | null;
+            /** Remote */
+            remote?: boolean | null;
         };
         /** UpdateProfileRequest */
         UpdateProfileRequest: {
@@ -4682,6 +4853,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaveFitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_job_facts_api_applications__application_id__job_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateJobFactsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobFactsOut"];
                 };
             };
             /** @description Validation Error */
