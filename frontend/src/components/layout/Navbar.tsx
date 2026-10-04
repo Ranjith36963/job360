@@ -56,6 +56,7 @@ export function Navbar() {
 
   return (
     <header
+      data-print-hide
       className={cn(
         "sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur-md",
         sidebarOnDesktop && "md:hidden"

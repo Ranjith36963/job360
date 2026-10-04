@@ -7,6 +7,7 @@ import { FileCheck2, FileText, Mail, ClipboardPaste } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageContainer } from "@/components/layout/PageContainer";
 import { listReceipts } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import type { ReceiptSummary } from "@/lib/types";
@@ -58,7 +59,7 @@ function ReceiptsList() {
     return (
       <div className="space-y-3" aria-busy="true">
         {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-20 w-full rounded-xl" />
+          <Skeleton key={i} className="h-16 w-full rounded-md" />
         ))}
       </div>
     );
@@ -83,22 +84,22 @@ function ReceiptsList() {
   }
 
   return (
-    <ul className="space-y-3" data-testid="receipts-list">
+    <ul className="border-b border-border" data-testid="receipts-list">
       {rows.map((r) => (
-        <li key={r.id}>
+        <li key={r.id} className="border-t border-border">
           <Link
             href={`/receipts/${r.id}`}
-            className="glass-card block rounded-xl p-4 transition-colors hover:border-primary/30"
+            className="block py-4 transition-colors hover:bg-muted/60"
           >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <div>
+              <div className="min-w-0">
                 <p className="font-medium">{r.job_title}</p>
                 <p className="text-sm text-muted-foreground">
                   {r.job_company}
                   {r.job_location ? ` · ${r.job_location}` : ""}
                 </p>
               </div>
-              <p className="text-xs text-muted-foreground">Sent {sentOn(r.sent_at)}</p>
+              <p className="font-mono text-xs text-faint">Sent {sentOn(r.sent_at)}</p>
             </div>
             <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1">
@@ -121,16 +122,16 @@ function ReceiptsList() {
 
 export default function ReceiptsPage() {
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+    <PageContainer className="py-8">
       <div className="mb-6">
         <h1 className="font-heading text-2xl font-medium tracking-tight">Receipts</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Every application, exactly as you sent it. These never change.
         </p>
       </div>
-      <Suspense fallback={<Skeleton className="h-20 w-full rounded-xl" />}>
+      <Suspense fallback={<Skeleton className="h-16 w-full rounded-md" />}>
         <ReceiptsList />
       </Suspense>
-    </div>
+    </PageContainer>
   );
 }

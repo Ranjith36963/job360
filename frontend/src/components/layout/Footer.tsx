@@ -11,7 +11,7 @@ const LEGAL_LINKS: { label: string; href: string }[] = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-border">
+    <footer data-print-hide className="border-t border-border">
       <div className="mx-auto flex h-auto flex-col items-center justify-between gap-2 px-6 py-3 sm:h-14 sm:flex-row sm:py-0 lg:px-10">
         <Link
           href="/"

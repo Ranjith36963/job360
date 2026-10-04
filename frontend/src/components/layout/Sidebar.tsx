@@ -36,6 +36,7 @@ export function Sidebar({ className }: { className?: string }) {
 
   return (
     <aside
+      data-print-hide
       data-testid="app-sidebar"
       className={cn(
         "flex w-[216px] shrink-0 flex-col gap-6 border-r border-sidebar-border bg-sidebar px-3 pb-4 pt-5",

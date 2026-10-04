@@ -54,6 +54,11 @@
   --color-brand: var(--brand);
   --color-brand-soft: var(--brand-soft);
   --color-faint: var(--faint);
+  --color-paper: var(--paper);
+  --color-paper-ink: var(--paper-ink);
+  --color-paper-dim: var(--paper-dim);
+  --color-paper-line: var(--paper-line);
+  --color-paper-green: var(--paper-green);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
@@ -112,6 +117,12 @@
   --sidebar-ring: #009900;
 
   --faint: #6f786f;
+  /* Paper: the receipt sheet is white with near-black ink in BOTH themes. */
+  --paper: #ffffff;
+  --paper-ink: #0b0d0b;
+  --paper-dim: #5d665d;
+  --paper-line: #dfe3df;
+  --paper-green: #009900;
   --brand: #006600;
   --brand-soft: #e6ffe6;
   --success: #006600;
@@ -162,6 +173,11 @@
   --sidebar-ring: #00ff00;
 
   --faint: #7d867d;
+  --paper: #ffffff;
+  --paper-ink: #0b0d0b;
+  --paper-dim: #5d665d;
+  --paper-line: #dfe3df;
+  --paper-green: #009900;
   --brand: #00d900;
   --brand-soft: #0b2a0b;
   --success: #00d900;
@@ -413,4 +429,80 @@
 
 .scroll-quiet:hover::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
+}
+
+/* ═══════════════════════════════════════════
+   RECEIPT SHEET — logo text follows the ink, not the theme
+   ═══════════════════════════════════════════ */
+.receipt-sheet {
+  --foreground: var(--paper-ink);
+}
+
+/* ═══════════════════════════════════════════
+   PRINT — any page prints as a clean black-on-white document.
+   The app shell (marked data-print-hide), toasts and the consent banner are
+   hidden; the dark theme is ignored; the receipt sheet prints edge to edge.
+   ═══════════════════════════════════════════ */
+@page {
+  margin: 16mm;
+}
+
+@media print {
+  :root,
+  .dark {
+    color-scheme: light;
+    --background: #ffffff;
+    --foreground: #0b0d0b;
+    --card: #ffffff;
+    --card-foreground: #0b0d0b;
+    --muted: #ffffff;
+    --muted-foreground: #5d665d;
+    --border: #dfe3df;
+    --faint: #5d665d;
+    --brand: #006600;
+    --shadow-card-value: none;
+  }
+
+  [data-print-hide],
+  [data-sonner-toaster] {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #0b0d0b !important;
+  }
+
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  a,
+  a:hover {
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+
+  .receipt-desk {
+    padding: 0 !important;
+  }
+
+  .receipt-sheet {
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .receipt-sheet h1,
+  .receipt-sheet h2 {
+    break-after: avoid;
+  }
+
+  .receipt-fact {
+    break-inside: avoid;
+  }
 }
