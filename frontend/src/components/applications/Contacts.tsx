@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/format-date";
 import { closedSetLabel } from "@/lib/closed-sets";
 import { FoundViaSelect } from "@/components/applications/FoundViaSelect";
+import { CopyButton } from "@/components/applications/CopyButton";
 
 const EMPTY_FORM = { name: "", role: "", email: "", linkedin_url: "", notes: "", found_via: "" };
 // One stable empty list. An inline `= []` default would be a NEW array every
@@ -87,6 +88,7 @@ function MessageVersions({ contact }: { contact: Contact }) {
   return (
     <div className="mt-1 text-xs">
       <p className="whitespace-pre-wrap text-foreground/90">{latest.text}</p>
+      <CopyButton getText={() => latest.text} testId="message-copy" className="mt-0.5" />
       {earlier.length > 0 && (
         <details className="mt-1">
           <summary className="cursor-pointer font-mono text-[11px] text-faint">
@@ -97,6 +99,7 @@ function MessageVersions({ contact }: { contact: Contact }) {
               <li key={m.id} className="text-muted-foreground">
                 <span className="text-[11px]">{formatDate(m.occurred_at)}</span>
                 <p className="whitespace-pre-wrap">{m.text}</p>
+                <CopyButton getText={() => m.text} testId="message-copy" />
               </li>
             ))}
           </ul>

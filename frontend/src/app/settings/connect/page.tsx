@@ -278,9 +278,9 @@ export function dailyCheckStatusLine(
   connected: boolean | null
 ): string | null {
   if (state === "auto" || state === "scheduled") {
-    return "Your assistant reads Gmail for your open applications and records what happened.";
+    return "Your assistant reads Gmail for your open applications, records what happened, and sends the outreach messages it wrote.";
   }
-  if (state === "ask") return "Your assistant asks you before each Gmail check.";
+  if (state === "ask") return "Your assistant asks you before each Gmail check and only drafts messages.";
   if (state === "paused") return "Off — your assistant reads nothing.";
   if (state === "declined") {
     return "You said no — your assistant won't ask again.";

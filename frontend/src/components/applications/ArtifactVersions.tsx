@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { getApplicationArtifact, getArtifactDiff } from "@/lib/api";
+import { downloadApplicationArtifact, getApplicationArtifact, getArtifactDiff } from "@/lib/api";
+import type { TailorFormat } from "@/lib/api";
+import { toast } from "@/lib/toast";
+import { CopyButton } from "@/components/applications/CopyButton";
 import type { ApplicationArtifact, ApplicationReceiptEntry, ArtifactDiff as ArtifactDiffData } from "@/lib/api";
 import { ArtifactDiff } from "@/components/applications/ArtifactDiff";
 import { formatDate } from "@/lib/format-date";
@@ -89,6 +92,7 @@ export function ArtifactVersions({
   const [diff, setDiff] = useState<ArtifactDiffData | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   const appliedIds = new Set<number>();
   for (const receipt of receipts) {
@@ -117,6 +121,38 @@ export function ArtifactVersions({
       }
     },
     [applicationId, openId, texts]
+  );
+
+  /** The version's full text — already loaded, else fetched once. */
+  const textOf = useCallback(
+    async (artifact: ApplicationArtifact): Promise<string> => {
+      if (artifact.text != null) return artifact.text;
+      if (texts[artifact.id] != null) return texts[artifact.id];
+      const full = await getApplicationArtifact(applicationId, artifact.id);
+      const text = full.text ?? "";
+      setTexts((prev) => ({ ...prev, [artifact.id]: text }));
+      return text;
+    },
+    [applicationId, texts]
+  );
+
+  const download = useCallback(
+    async (artifact: ApplicationArtifact, fmt: TailorFormat) => {
+      setDownloadingId(artifact.id);
+      try {
+        await downloadApplicationArtifact(
+          applicationId,
+          artifact.id,
+          fmt,
+          `${artifact.kind.replace("_", "-")}-v${artifact.version_no}`
+        );
+      } catch (err) {
+        toast.apiError(err, "Download failed");
+      } finally {
+        setDownloadingId(null);
+      }
+    },
+    [applicationId]
   );
 
   // Every diff fetch is numbered; a response that is not the newest request
@@ -227,6 +263,29 @@ export function ArtifactVersions({
                       {compareId === artifact.id ? "Close" : "Compare"}
                     </button>
                   </div>
+                  {(kind === "cv" || kind === "cover_letter") && (
+                    <div className="mt-1 flex items-center gap-3">
+                      <CopyButton getText={() => textOf(artifact)} testId="artifact-copy" />
+                      {downloadingId === artifact.id ? (
+                        <span data-testid="artifact-downloading" className="text-xs text-muted-foreground">
+                          Downloading…
+                        </span>
+                      ) : (
+                        (["docx", "pdf"] as const).map((fmt) => (
+                          <button
+                            key={fmt}
+                            type="button"
+                            data-testid={`artifact-download-${fmt}`}
+                            disabled={downloadingId !== null}
+                            onClick={() => void download(artifact, fmt)}
+                            className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+                          >
+                            {fmt === "docx" ? "Word" : "PDF"}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                   <AtsOpinion artifact={artifact} />
                   {openId === artifact.id && (
                     <div className="mt-2 whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 text-sm">

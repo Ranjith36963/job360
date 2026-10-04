@@ -1092,6 +1092,50 @@ async def get_application_artifact(
     return row
 
 
+@router.post("/applications/{application_id}/artifacts/{artifact_id}/download", dependencies=AUTH_FIRST)
+async def download_application_artifact(
+    application_id: int,
+    artifact_id: int,
+    fmt: str = Query("pdf", description="`pdf` or `docx`."),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> Response:
+    """Render ONE stored CV / cover-letter version as PDF or DOCX (web-only —
+    the agent already holds the text). POST like the tailor download so it is
+    Origin-checked; it writes nothing. Foreign application/artifact -> 404."""
+    import asyncio
+    import re
+
+    from src.services.tailoring.docx import render_docx
+    from src.services.tailoring.pdf import render_pdf
+
+    if fmt not in ("pdf", "docx"):
+        raise HTTPException(status_code=400, detail="format must be 'pdf' or 'docx'")
+    row = await spine.get_artifact(db, user.id, application_id, artifact_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    kind = row["kind"]
+    if kind not in ("cv", "cover_letter"):
+        raise HTTPException(status_code=400, detail="only a cv or cover_letter can be downloaded")
+    app_row = await spine.get_owned_application(db, user.id, application_id) or {}
+    text = row.get("text") or ""
+    title = "Curriculum Vitae" if kind == "cv" else "Cover Letter"
+    # Rendering is sync + CPU-bound: keep it off the event loop (as tailor.py).
+    if fmt == "docx":
+        content = await asyncio.to_thread(render_docx, text, title=title)
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else:
+        content = await asyncio.to_thread(render_pdf, text, title=title)
+        media_type = "application/pdf"
+    company = re.sub(r"[^a-z0-9]+", "-", str(app_row.get("job_company") or "").lower()).strip("-")[:40]
+    stem = "-".join(p for p in (company, kind.replace("_", "-"), f"v{row['version_no']}") if p)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{stem}.{fmt}"'},
+    )
+
+
 @router.get(
     "/applications/{application_id}/artifacts/{artifact_id}/diff", response_model=ArtifactDiffOut,
     dependencies=AUTH_FIRST,

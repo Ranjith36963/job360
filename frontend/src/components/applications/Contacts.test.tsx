@@ -70,6 +70,26 @@ describe("Contacts", () => {
     fireEvent.click(screen.getByText("Earlier versions (1)"));
   });
 
+  it("each message version has a Copy button that copies that text", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const msg = (id: number, text: string) => ({
+      id, contact_id: 1, entry: "message" as const, channel: "linkedin", text, version_no: id,
+      occurred_at: "2026-09-20T10:00:00+00:00", recorded_at: "2026-09-20T10:00:00+00:00",
+      recorded_by: "agent:1", source_message_id: "",
+    });
+    const contact = makeContact({
+      outreach: { ...emptyOutreach(), messages: [msg(1, "Hi Priya, v1"), msg(2, "Hi Priya, v2")] },
+    });
+    render(<Contacts applicationId={42} contacts={[contact]} />);
+    const buttons = screen.getAllByTestId("message-copy");
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Hi Priya, v2"));
+    fireEvent.click(buttons[1]);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Hi Priya, v1"));
+  });
+
   it('shows "Sent on … via LinkedIn" once a send is recorded', () => {
     const contact = makeContact({
       outreach: {

@@ -469,7 +469,8 @@ CONTACTS_MAX_PER_HOUR = int(os.getenv("CONTACTS_MAX_PER_HOUR", "120"))  # S7 —
 
 # ── Outreach tracking (owner decisions, 2026-09-25) ─────────────────────────
 # People: a contact can be linked to a job or to none (cold networking). The
-# user's own assistant WRITES messages; the USER sends; Job360 never sends.
+# user's own assistant WRITES messages; the USER sends them (or, in daily_check
+# mode auto, the assistant sends from the user's own Gmail); Job360 never sends.
 OUTREACH_CHANNELS = ("linkedin", "email", "other")
 OUTREACH_MESSAGE_MAX_CHARS = int(os.getenv("OUTREACH_MESSAGE_MAX_CHARS", "5000"))
 OUTREACH_VERSIONS_PER_CONTACT_MAX = int(os.getenv("OUTREACH_VERSIONS_PER_CONTACT_MAX", "50"))
