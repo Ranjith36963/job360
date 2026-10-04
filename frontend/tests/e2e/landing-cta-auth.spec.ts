@@ -97,8 +97,9 @@ test.describe("Landing CTA → profile journeys", () => {
     await expect(page).not.toHaveURL(/\/login/);
   });
 
-  // R14 — the signed-in home is now applications, not the marketing landing.
-  test("a signed-in visitor's '/' shows the applications home, not the landing hero", async ({
+  // R14 — the signed-in '/' is the app, not the marketing landing. Since the
+  // redesign it is the Home page (the sidebar's first link), not the bare list.
+  test("a signed-in visitor's '/' shows the signed-in Home, not the landing hero", async ({
     page,
     context,
   }) => {
@@ -113,9 +114,9 @@ test.describe("Landing CTA → profile journeys", () => {
     );
 
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: /your applications/i })).toBeVisible({
-      timeout: 20_000,
-    });
+    const homeLink = page.getByRole("link", { name: "Home", exact: true });
+    await expect(homeLink).toBeVisible({ timeout: 20_000 });
+    await expect(homeLink).toHaveAttribute("aria-current", "page");
     // The nav now carries "Connect your assistant" on every signed-in page, so
     // assert the landing HERO is absent instead of the link text. Owner-approved
     // CATEGORY LINE (2026-09-28) is the current headline.

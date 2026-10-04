@@ -1,4 +1,5 @@
 import {
+  House,
   User,
   ClipboardPaste,
   FolderClock,
@@ -20,6 +21,7 @@ import {
 // connecting their own assistant, but /settings/connect was reachable only
 // via the gear icon. It is a first-class destination now, not a settings tab.
 export const NAV_LINKS: readonly { href: string; label: string; icon: LucideIcon }[] = [
+  { href: "/", label: "Home", icon: House },
   { href: "/profile", label: "Profile", icon: User },
   { href: "/bring", label: "Jobs in", icon: ClipboardPaste },
   { href: "/applications", label: "Applications", icon: FolderClock },

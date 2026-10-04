@@ -52,10 +52,13 @@ describe("Applications list — fills the area beside the sidebar (owner decisio
     expect(allClasses).not.toMatch(/\bmax-w-/);
   });
 
-  it("src/app/page.tsx (the signed-in home) uses PageContainer, not its own hardcoded max-width", () => {
-    const source = readFileSync(join(process.cwd(), "src/app/page.tsx"), "utf-8");
-    expect(source).toMatch(/PageContainer/);
-    expect(source).not.toMatch(NARROWER_MAX_W_RE);
+  it("the signed-in home (src/app/page.tsx renders components/home/Home.tsx) uses PageContainer, not its own hardcoded max-width", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/page.tsx"), "utf-8");
+    expect(page).toMatch(/components\/home\/Home/);
+    expect(page).not.toMatch(NARROWER_MAX_W_RE);
+    const home = readFileSync(join(process.cwd(), "src/components/home/Home.tsx"), "utf-8");
+    expect(home).toMatch(/PageContainer/);
+    expect(home).not.toMatch(NARROWER_MAX_W_RE);
   });
 
   it("ApplicationList's own markup adds no competing max-width", () => {
