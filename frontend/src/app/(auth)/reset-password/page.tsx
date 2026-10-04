@@ -124,7 +124,7 @@ function ResetForm() {
         {isSubmitting ? "Updating…" : "Set new password"}
       </Button>
       <p className="text-center text-sm text-muted-foreground">
-        <Link href="/login" className="underline">
+        <Link href="/login" className="text-foreground underline">
           Back to sign in
         </Link>
       </p>
@@ -134,10 +134,10 @@ function ResetForm() {
 
 export default function ResetPasswordPage() {
   return (
-    <div className="mx-auto max-w-md py-16">
-      <Card>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle>Set a new password</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">Set a new password</CardTitle>
           <CardDescription>
             Pick a fresh password. After you update it, every existing
             session on every device will be signed out.

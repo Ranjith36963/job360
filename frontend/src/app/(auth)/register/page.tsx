@@ -119,10 +119,10 @@ function RegisterForm() {
 
 export default function RegisterPage() {
   return (
-    <div className="mx-auto max-w-md py-16">
-      <Card>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle>Create your Job360 account</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">Create your Job360 account</CardTitle>
           <CardDescription>
             Upload your CV next — it becomes the memory your assistant works from.
           </CardDescription>
@@ -133,7 +133,7 @@ export default function RegisterPage() {
           </Suspense>
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Already have an account?{" "}
-            <Link href="/login" className="underline">
+            <Link href="/login" className="text-foreground underline">
               Sign in
             </Link>
           </p>

@@ -7,30 +7,30 @@ export const metadata: Metadata = {
 
 export default function ContactPage() {
   return (
-    <main className="mx-auto max-w-3xl px-6 py-16">
-      <h1 className="text-3xl font-semibold">Contact</h1>
+    <main className="mx-auto max-w-[65ch] px-6 py-16">
+      <h1 className="text-balance font-heading text-4xl font-normal tracking-tight">Contact</h1>
 
       <div className="mt-8 space-y-6 text-sm leading-relaxed text-muted-foreground">
         <p>
           Questions, feedback, or found a bug? We&apos;d like to hear from you.
         </p>
-        <section>
-          <h2 className="text-lg font-medium text-foreground">Email</h2>
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">Email</h2>
           <p className="mt-2">
             <a
               href="mailto:ranjithmaligaguruprakash@gmail.com"
-              className="text-brand hover:underline"
+              className="text-foreground underline hover:text-brand"
             >
               ranjithmaligaguruprakash@gmail.com
             </a>
           </p>
         </section>
-        <section>
-          <h2 className="text-lg font-medium text-foreground">GitHub</h2>
+        <section className="border-t border-border pt-6">
+          <h2 className="font-heading text-xl font-normal tracking-tight text-foreground">GitHub</h2>
           <p className="mt-2">
             <a
               href="https://github.com/Ranjith36963/job360"
-              className="text-brand hover:underline"
+              className="text-foreground underline hover:text-brand"
               target="_blank"
               rel="noopener noreferrer"
             >

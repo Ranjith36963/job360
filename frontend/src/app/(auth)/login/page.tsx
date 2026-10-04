@@ -224,7 +224,7 @@ function LoginForm() {
       {serviceDown && (
         <p
           role="alert"
-          className="mb-4 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning"
+          className="mb-4 rounded-md border border-warning/30 bg-warning-soft p-3 text-sm text-warning"
         >
           We couldn&apos;t reach the server to verify your session — you may still be
           signed in. Please try again in a moment.
@@ -245,10 +245,10 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <div className="mx-auto max-w-md py-16">
-      <Card>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle>Sign in to Job360</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">Sign in to Job360</CardTitle>
           <CardDescription>
             Welcome back. Your applications are one step away.
           </CardDescription>
@@ -259,7 +259,7 @@ export default function LoginPage() {
           </Suspense>
           <p className="mt-6 text-center text-sm text-muted-foreground">
             No account yet?{" "}
-            <Link href="/register" className="underline">
+            <Link href="/register" className="text-foreground underline">
               Create one
             </Link>
           </p>

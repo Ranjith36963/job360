@@ -91,10 +91,10 @@ function VerifyBody() {
 
 export default function VerifyEmailPage() {
   return (
-    <div className="mx-auto max-w-md py-16">
-      <Card>
+    <div className="mx-auto max-w-md px-4 py-16">
+      <Card className="border border-border bg-card shadow-none">
         <CardHeader>
-          <CardTitle>Email verification</CardTitle>
+          <CardTitle className="font-heading text-2xl font-normal tracking-tight">Email verification</CardTitle>
           <CardDescription>Confirming the address you registered with.</CardDescription>
         </CardHeader>
         <CardContent>
