@@ -52,10 +52,17 @@ describe("buildSentence", () => {
     );
   });
 
-  it("several assistants", () => {
+  it("several assistants: every one is named exactly as it signed, never a vague plural", () => {
     const events = [ev(1, "agent:Claude"), ev(2, "token:Cursor"), ev(3, "agent:Claude")];
     expect(text({ events, truncated: false, openAsks: 0 })).toBe(
-      "Your assistants wrote 3 records since you were last here."
+      "Claude and Cursor wrote 3 records since you were last here."
+    );
+  });
+
+  it("three or more assistants are listed with commas, in first-seen order", () => {
+    const events = [ev(1, "agent:Claude Code (job360)"), ev(2, "agent:Codex"), ev(3, "agent:Grok"), ev(4, "agent:Codex")];
+    expect(text({ events, truncated: false, openAsks: 1 })).toBe(
+      "Claude Code (job360), Codex and Grok wrote 4 records since you were last here. One thing needs you."
     );
   });
 
