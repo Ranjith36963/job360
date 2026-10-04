@@ -24,10 +24,10 @@ export function TailorSection({ jobId, applicationId, hasDocuments = false }: Ta
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="glass-card rounded-2xl p-6 space-y-4">
+    <div className="space-y-4 rounded-xl border border-border bg-card p-5">
       <div className="space-y-1.5">
-        <h2 className="flex items-center gap-2 font-heading text-base font-medium">
-          <Bot className="h-4 w-4 text-brand" aria-hidden="true" />
+        <h2 className="flex items-center gap-2 font-heading text-lg leading-snug">
+          <Bot className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           Ask your assistant
         </h2>
         <p className="text-sm text-muted-foreground">
@@ -43,7 +43,7 @@ export function TailorSection({ jobId, applicationId, hasDocuments = false }: Ta
       <div className="flex flex-wrap items-center gap-3">
         <Link
           href="/settings/connect"
-          className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-2 text-sm font-medium transition-colors hover:bg-primary/10 hover:border-primary/40"
+          className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-muted"
         >
           Connect your assistant
         </Link>
@@ -51,7 +51,7 @@ export function TailorSection({ jobId, applicationId, hasDocuments = false }: Ta
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             <FileDown className="h-4 w-4" aria-hidden="true" />
             Edit &amp; download saved documents

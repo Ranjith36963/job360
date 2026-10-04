@@ -149,59 +149,61 @@ export function ArtifactVersions({
   for (const list of byKind.values()) list.sort((a, b) => a.version_no - b.version_no);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6">
       {[...byKind.entries()].map(([kind, versions]) => (
         <div key={kind}>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1 font-mono text-[11px] uppercase tracking-wider text-faint">
             {kind.replace("_", " ")}
           </p>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col">
             {versions.map((artifact) => {
               const applied = appliedIds.has(artifact.id);
               const others = versions.filter((v) => v.id !== artifact.id);
               return (
-                <div key={artifact.id} data-testid="artifact-version" className="glass-card rounded-lg p-3">
-                  <div className="flex w-full items-center justify-between gap-2 text-sm font-medium">
+                <div key={artifact.id} data-testid="artifact-version" className="border-t border-border py-2.5 first:border-t-0">
+                  <div className="flex w-full items-center justify-between gap-3 text-sm">
                     <button type="button" onClick={() => void open(artifact)} className="min-w-0 flex-1 text-left">
-                      <span data-testid="artifact-version-label">v{artifact.version_no}</span>
+                      <span data-testid="artifact-version-label" className="font-mono tabular-nums">
+                        v{artifact.version_no}
+                      </span>
                       {applied && (
                         <span
                           data-testid="artifact-applied-badge"
-                          className="ml-2 rounded-full bg-success/15 px-2 py-0.5 text-xs font-semibold text-success"
+                          className="ml-2 font-mono text-[11px] text-brand"
                         >
                           Applied
                         </span>
                       )}
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                      <span className="ml-2 text-[12.5px] text-muted-foreground">
                         {describeMadeBy(artifact.made_by)} · {pageCount(artifact.chars)}
                       </span>
                     </button>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="shrink-0 font-mono text-xs tabular-nums text-faint">
                       {formatDate(artifact.created_at)}
                     </span>
                     <button
                       type="button"
                       data-testid="artifact-compare"
                       onClick={() => void compare(artifact)}
-                      className="rounded-md border border-border px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                      className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
                     >
                       {compareId === artifact.id ? "Close" : "Compare"}
                     </button>
                   </div>
                   {openId === artifact.id && (
-                    <div className="mt-2 whitespace-pre-wrap rounded-md bg-muted/30 p-3 text-sm">
+                    <div className="mt-2 whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 text-sm">
                       {loadingId === artifact.id ? "Loading…" : texts[artifact.id]}
                     </div>
                   )}
                   {compareId === artifact.id && (
                     <div className="mt-2">
-                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <label className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-wider text-faint">
                         Compare with
                         <select
                           data-testid="artifact-compare-base"
                           value={against}
                           onChange={(e) => void changeBase(artifact.id, e.target.value)}
-                          className="rounded-md border border-border bg-background px-2 py-1 text-xs"
+                          className="rounded-md border border-border bg-background px-2 py-1 font-sans text-xs normal-case tracking-normal text-foreground"
                         >
                           <option value="">
                             {kind === "cv" ? "Original CV (your profile)" : "The version before this"}

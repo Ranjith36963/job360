@@ -16,7 +16,7 @@ function formatFieldValue(value: unknown): string {
  * (no keys) rendering rather than crashing. */
 export function Receipts({ receipts }: { receipts: ApplicationReceiptEntry[] }) {
   return (
-    <ul className="flex flex-col gap-2">
+    <ul className="flex flex-col">
       {receipts.map((receipt) => {
         const answers = receipt.answers ?? [];
         const fieldEntries = Object.entries(receipt.fields_filled ?? {}).sort(([a], [b]) =>
@@ -24,15 +24,15 @@ export function Receipts({ receipts }: { receipts: ApplicationReceiptEntry[] }) 
         );
 
         return (
-          <li key={receipt.id} data-testid="receipt-row" className="glass-card rounded-lg p-3 text-sm">
-            <div className="flex items-center justify-between gap-2">
+          <li key={receipt.id} data-testid="receipt-row" className="border-t border-border py-3 text-sm first:border-t-0 first:pt-0">
+            <div className="flex items-baseline justify-between gap-2">
               <span className="font-medium">{receipt.channel || "Applied"}</span>
-              <span className="text-xs text-muted-foreground">
+              <span className="font-mono text-xs tabular-nums text-faint">
                 {formatDate(receipt.sent_at)}
               </span>
             </div>
             {(receipt.cv_artifact_id != null || receipt.cover_letter_artifact_id != null) && (
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-1 font-mono text-xs text-muted-foreground">
                 {receipt.cv_artifact_id != null && `CV #${receipt.cv_artifact_id}`}
                 {receipt.cv_artifact_id != null && receipt.cover_letter_artifact_id != null && " · "}
                 {receipt.cover_letter_artifact_id != null &&
@@ -40,17 +40,17 @@ export function Receipts({ receipts }: { receipts: ApplicationReceiptEntry[] }) 
               </p>
             )}
             {receipt.confirmation && (
-              <p className="mt-1 text-xs text-muted-foreground">Confirmation: {receipt.confirmation}</p>
+              <p className="mt-1 font-mono text-xs text-muted-foreground">Confirmation: {receipt.confirmation}</p>
             )}
-            {receipt.note && <p className="mt-1 text-muted-foreground">{receipt.note}</p>}
+            {receipt.note && <p className="mt-1 font-heading text-[15px] text-muted-foreground">{receipt.note}</p>}
             {answers.length > 0 && (
               <div data-testid="receipt-answers" className="mt-2">
-                <p className="text-xs font-medium uppercase text-muted-foreground">Answers given</p>
-                <dl className="mt-1 flex flex-col gap-2">
+                <p className="font-mono text-[11px] uppercase tracking-wider text-faint">Answers given</p>
+                <dl className="mt-1.5 flex flex-col gap-2.5">
                   {answers.map((qa, i) => (
                     <div key={i} data-testid="receipt-answer">
                       <dt className="text-xs text-muted-foreground">{qa.question}</dt>
-                      <dd className="whitespace-pre-wrap">{qa.answer}</dd>
+                      <dd className="whitespace-pre-wrap font-heading text-[15px] leading-snug">{qa.answer}</dd>
                     </div>
                   ))}
                 </dl>
@@ -58,11 +58,11 @@ export function Receipts({ receipts }: { receipts: ApplicationReceiptEntry[] }) 
             )}
             {fieldEntries.length > 0 && (
               <div data-testid="receipt-fields" className="mt-2">
-                <p className="text-xs font-medium uppercase text-muted-foreground">Fields filled</p>
-                <dl className="mt-1 flex flex-col gap-1">
+                <p className="font-mono text-[11px] uppercase tracking-wider text-faint">Fields filled</p>
+                <dl className="mt-1.5 flex flex-col">
                   {fieldEntries.map(([key, value]) => (
-                    <div key={key} data-testid="receipt-field" className="flex items-baseline gap-1">
-                      <dt className="text-xs text-muted-foreground">{key}:</dt>
+                    <div key={key} data-testid="receipt-field" className="flex items-baseline gap-2 border-t border-border py-1 first:border-t-0">
+                      <dt className="font-mono text-xs text-faint">{key}:</dt>
                       <dd className="whitespace-pre-wrap">{formatFieldValue(value)}</dd>
                     </div>
                   ))}
