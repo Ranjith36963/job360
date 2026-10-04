@@ -13,6 +13,7 @@ import { fetchAllApplications, fetchWhatsNewPages } from "@/lib/home-fetch";
 import {
   FEED_LIMIT,
   FEED_LOOKBACK_DAYS,
+  FEED_MAX_PAGES,
   HOME_ASKS_LIMIT,
   buildSentence,
   daysAgoIso,
@@ -99,7 +100,7 @@ export function Home() {
       .then((r) => live() && setDue({ status: "ok", value: r.applications }))
       .catch(() => live() && setDue({ status: "error" }));
 
-    fetchWhatsNewPages(daysAgoIso(FEED_LOOKBACK_DAYS))
+    fetchWhatsNewPages(daysAgoIso(FEED_LOOKBACK_DAYS), FEED_MAX_PAGES)
       .then(
         (r) =>
           live() &&
@@ -121,10 +122,13 @@ export function Home() {
 
   // Store "now" as the new last visit only AFTER the sentence has rendered, so
   // a reload shows the quiet state but this view still shows what was new.
+  // The sentence also waits for the asks call, so the stamp does too — a visit
+  // that only ever showed the skeleton must not count as seen.
   const sinceNow = since.status === "ok" ? since.value.now : null;
+  const asksSettled = asks.status !== "loading";
   useEffect(() => {
-    if (sinceNow) writeLastVisit(sinceNow);
-  }, [sinceNow]);
+    if (sinceNow && asksSettled) writeLastVisit(sinceNow);
+  }, [sinceNow, asksSettled]);
 
   function retry() {
     setSince(LOADING);
@@ -151,6 +155,7 @@ export function Home() {
   const brandNew = isBrandNew({
     applicationsTotal: apps.status === "ok" ? apps.value.total : null,
     eventCount: feed.status === "ok" ? feed.value.eventCount : null,
+    openAsks: asks.status === "ok" ? asks.value.openCount : null,
   });
 
   const settled =

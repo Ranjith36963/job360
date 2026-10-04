@@ -23,6 +23,9 @@ export const FEED_LOOKBACK_DAYS = 30;
 export const FEED_LIMIT = 12;
 /** Most pages of `whats-new` Home will follow (200 events each). */
 export const MAX_WHATS_NEW_PAGES = 3;
+/** The feed needs the NEWEST events but the route pages oldest first, so it
+ * reads further (up to 5,000 events in the window) before giving up. */
+export const FEED_MAX_PAGES = 25;
 /** Open asks shown as cards on Home before "See all". */
 export const HOME_ASKS_LIMIT = 3;
 
@@ -131,13 +134,17 @@ export function sentenceText(parts: readonly SentencePart[]): string {
 
 // ---- Brand-new user -------------------------------------------------------
 
-/** A user with no applications and no events at all gets the connect steps
- * instead of an empty ledger. Unknown (a call failed → null) is never "brand new". */
+/** A user with no applications, no events and no open question gets the
+ * connect steps instead of an empty ledger. A general ask (no application)
+ * writes no event, so it is counted on its own — a waiting question must never
+ * be hidden behind the welcome. Unknown (a call failed → null) is never
+ * "brand new". */
 export function isBrandNew(args: {
   applicationsTotal: number | null;
   eventCount: number | null;
+  openAsks: number | null;
 }): boolean {
-  return args.applicationsTotal === 0 && args.eventCount === 0;
+  return args.applicationsTotal === 0 && args.eventCount === 0 && args.openAsks === 0;
 }
 
 // ---- "What your assistant did" feed ---------------------------------------

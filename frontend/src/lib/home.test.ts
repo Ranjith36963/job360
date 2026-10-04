@@ -160,11 +160,17 @@ describe("selectFeed", () => {
 });
 
 describe("isBrandNew", () => {
-  it("only when both are known to be zero", () => {
-    expect(isBrandNew({ applicationsTotal: 0, eventCount: 0 })).toBe(true);
-    expect(isBrandNew({ applicationsTotal: 0, eventCount: 2 })).toBe(false);
-    expect(isBrandNew({ applicationsTotal: 3, eventCount: 0 })).toBe(false);
-    expect(isBrandNew({ applicationsTotal: null, eventCount: 0 })).toBe(false);
-    expect(isBrandNew({ applicationsTotal: 0, eventCount: null })).toBe(false);
+  it("only when all three are known to be zero", () => {
+    expect(isBrandNew({ applicationsTotal: 0, eventCount: 0, openAsks: 0 })).toBe(true);
+    expect(isBrandNew({ applicationsTotal: 0, eventCount: 2, openAsks: 0 })).toBe(false);
+    expect(isBrandNew({ applicationsTotal: 3, eventCount: 0, openAsks: 0 })).toBe(false);
+    expect(isBrandNew({ applicationsTotal: null, eventCount: 0, openAsks: 0 })).toBe(false);
+    expect(isBrandNew({ applicationsTotal: 0, eventCount: null, openAsks: 0 })).toBe(false);
+  });
+
+  it("never hides a waiting question behind the welcome", () => {
+    // A general ask (no application) writes no event, so the feed stays empty.
+    expect(isBrandNew({ applicationsTotal: 0, eventCount: 0, openAsks: 1 })).toBe(false);
+    expect(isBrandNew({ applicationsTotal: 0, eventCount: 0, openAsks: null })).toBe(false);
   });
 });

@@ -170,13 +170,17 @@ async function mockBackend(page: Page) {
     })
   );
 
-  await page.route("**/api/applications?**", (route) =>
-    route.fulfill({
+  await page.route("**/api/applications?**", (route) => {
+    // Nothing is due in this story: the Home "Due" list asks with due=true.
+    const due = new URL(route.request().url()).searchParams.get("due") === "true";
+    return route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ applications: [applicationSummary(status)], total: 1 }),
-    })
-  );
+      body: JSON.stringify(
+        due ? { applications: [], total: 0 } : { applications: [applicationSummary(status)], total: 1 }
+      ),
+    });
+  });
 
   await page.route(`**/api/applications/${APPLICATION_ID}`, (route) => {
     if (route.request().method() !== "GET") return route.fallback();
@@ -246,8 +250,11 @@ test.describe("Applications home — the spine, end to end (hermetic)", () => {
     await expect(page.getByText(/^applied$/i).first()).toBeVisible({ timeout: 20_000 });
 
     // The list reflects the same change — reload the home page.
+    // Scoped to the ledger: Home's counts block also carries the word "applied".
     await page.goto("/");
-    await expect(page.getByText(/^applied$/i).first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("home-apps").getByText(/^applied$/i).first()).toBeVisible({
+      timeout: 20_000,
+    });
     // ...and the list row no longer offers a Mark Applied button at all.
     await expect(
       page.getByRole("button", { name: /mark applied/i })
