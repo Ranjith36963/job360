@@ -110,7 +110,3 @@ Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL`, `FRON
 ## Contributing
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branch naming, commit style, and the PR flow.
-
-## History
-
-The sourcing era (job search, scoring, dedup, enrichment) and the per-user notification-channel system were both deleted 2026-09-05 (slice 5, #483). Neither is archived in-tree — git history is the record. Never rebuild either.

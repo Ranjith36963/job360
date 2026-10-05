@@ -124,16 +124,6 @@ Profile extraction infers a candidate's seniority band from job titles
 
 ---
 
-## Notification System
-
-Job360 is **pull, not push** (VISION.md decision 11): the
-seeker reads `GET /whats-new` and the web home; there is no background delivery, no
-per-user notification channels, and no queue. The Apprise dispatcher, the per-user
-channel CRUD, the digest queue and `notification_rules` were all deleted 2026-09-05 along
-with the sourcing era — do not rebuild them.
-
----
-
 ## Database Schema
 
 > **The schema is code, not prose.** The legacy baseline `init_db()` hands to

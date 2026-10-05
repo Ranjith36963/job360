@@ -101,11 +101,12 @@ regression — fix it, do not merge around it.
 just the doc gates; a `frontend`-only PR runs lockfile sync, `tsc`, ESLint,
 vitest, `next build` and the Playwright specs but skips the backend suite and
 the Docker image build; everything else — any backend, schema, workflow or
-script file, any deploy-shaped frontend file (`Dockerfile`, `package.json`, the
-lockfile, `next.config.*`, `.env*`), any path the classifier has no rule for —
-is `full`. One restrictive file makes the whole PR `full`. Pushes to `main`
-are always `full`. Job names never change, so the required checks are always
-present; the scope decision and the files that made it are in the run summary.
+script file, a deploy-shaped frontend file
+(`ci_scope._DEPLOY_SHAPED_FRONTEND` / `_DEPLOY_SHAPED_PREFIXES`), any `.env*`
+file anywhere, any path the classifier has no rule for — is `full`. One
+restrictive file makes the whole PR `full`. Pushes to `main` are always `full`.
+Job names never change, so the required checks are always present; the scope
+decision and the files that made it are in the run summary.
 
 ## Local setup
 
