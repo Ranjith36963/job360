@@ -1,112 +1,110 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-09-05 by slice 5 (delete the sourcing era) -->
+<!-- doc: LIVING | last-verified: 2026-10-05 by README rewrite (current product state) -->
 
-**Job360 is the memory and context layer for the seeker's own AI agent.** Job boards find jobs. Agents (Claude Code, ChatGPT, Grok, Gemini, a browser agent) think and act — judge fit, write the CV, find the recruiter, read the inbox, fill the form. Job360 remembers: the structured profile, every artifact version, every typed event with its author, and the receipt of what was sent.
+**The job tracker your AI assistant fills in for you — every CV version, every reply, every receipt.**
 
-**We never source, rank or recommend jobs** (product rule 4). The user, or their agent, brings the job — a link or pasted text — and Job360 keeps everything that happens after the click. Read [`docs/product/VISION.md`](./docs/product/VISION.md) first.
+Your AI assistant (Claude, ChatGPT, Claude Code, any MCP client) does the work of a job hunt: it finds the job, judges the fit, writes the CV and cover letter, reads your Gmail, fills the form. **Job360 is where all of that is recorded** — the profile it works from, every document version it wrote, every event with who wrote it and when, and a receipt you can trust when you apply.
 
-> **What is live on `main` today:** magic-link login, profile extraction (CV / LinkedIn / GitHub / preferences), `POST /api/jobs/bring`, the application spine (one Application object, typed events, versioned artifacts, append-only receipts), a CV tailor kept as the web fallback, and an MCP server at `/api/mcp`. Three Railway services: `backend`, `frontend`, `Postgres` (worker + Redis were deleted 2026-09-02, so nothing runs in the background — no notifications, no crons).
->
-> **The sourcing era was deleted 2026-09-05** (slice 5, #483): the 40-source aggregator, the 0–100 scorer, the four-layer dedup, the search dashboard. **The per-user notification-channel system** (Apprise dispatcher, Slack/Discord/Telegram connect flows, digest queue) was deleted the same day. None of that code exists in this repo any more — git history is the record.
+Job360 has no AI of its own. It never searches for, ranks or recommends jobs (product rule 4), and it never judges you — it stores what your assistant decided and shows it back to you. Read [`docs/product/VISION.md`](./docs/product/VISION.md) first.
 
-### API docs (auto-generated)
+Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 
-Once the backend is running (`cd backend && python main.py`), interactive API docs are served at **http://localhost:8000/docs** (Swagger UI) and **http://localhost:8000/redoc** (ReDoc). Both are generated from the FastAPI route decorators + Pydantic models — no separate maintenance.
+---
 
-## How an agent uses Job360
+## How it works
 
-Point any MCP-capable client (Claude Code, Claude, ChatGPT, Grok) at `https://job360.uk/api/mcp` (or `http://localhost:8000/api/mcp` in dev). Two ways to authenticate:
+```
+ You ──► your AI assistant ──(MCP)──► Job360 ──► the record you see on job360.uk
+         (thinks + acts)               (stores)
+```
 
-- **OAuth 2.1** — the client discovers the authorization server from `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource` and runs the standard flow. This is how ChatGPT- and Grok-style connectors add Job360.
-- **Personal token** — sign in to the web app, open `/settings/connect`, and mint a token (`j360_…`). It is shown once; the backend stores only a hash. Good for CLI clients and Claude Code.
+1. **Connect your assistant** once — Settings → Connect gives the address `https://job360.uk/api/mcp`. Connector apps (Claude.ai is proven end to end; ChatGPT-style connectors use the same flow) sign in with OAuth 2.1; CLI clients like Claude Code use a personal token (`j360_…`, shown once, stored hashed).
+2. **Type `/run 360`.** The assistant fetches the setup recipe from Job360, reads your CV, fills your profile, asks to connect Gmail, and offers the inbox check.
+3. **Hunt and apply.** The assistant searches with its own tools, brings each job it judges a fit, writes a tailored CV + cover letter, and stops before Submit. You say yes; it records the application and Job360 freezes a receipt.
+4. **Follow up.** On its schedule the assistant reads Gmail, records replies, interviews and rejections against the right application, sends the outreach emails it wrote (Auto mode only), and tells you what is due and what has gone quiet.
+5. **Look back any time.** Ask your assistant "how is my hunt going?" or "tell me everything about the Mistral application" — it reads it all from Job360. Or open the web app.
 
-Once connected, the agent reads and writes the candidate's profile, brings a job, saves CV/cover-letter/answer versions, records typed events, and pulls `whats_new` — all through MCP tools backed by the same REST routes the web app uses. The agent still does the finding, judging and writing; Job360 only stores.
+## What is live today
 
-## What Job360 stores
+### For your assistant (MCP server at `/api/mcp`)
+- **Recipes — `/run 360` and friends.** Step-by-step playbooks the assistant fetches with `get_recipe`: setup, hunt, research, apply, prep, reach, daily, review (`backend/src/recipes/`).
+- **Profile** — `get_profile` returns the raw CV / LinkedIn / GitHub text plus the structured fields; the assistant writes skills, dated work history, projects, targets and preferences back with `update_profile`. Every agent edit is kept with its author and can be taken back.
+- **Bring a job** — `bring_job` stores the ad (link or pasted text) and births one **Application**, with the job's country, remote flag and where it was found.
+- **Fit and visa** — the assistant's own verdict, stored with `save_fit` (Job360 never computes a score).
+- **Documents** — `save_artifact` keeps every CV, cover-letter, answer and outreach version, with the assistant's **ATS score and notes** on each CV.
+- **Events** — `record_event` appends a typed history: replied, interview requested / scheduled / done, offer, rejected, follow-ups with dates, notes — each with its source (e.g. the Gmail message id) so a re-read never double-counts.
+- **Receipts** — `record_application` freezes exactly what was sent (CV version, cover letter, answers, channel, confirmation) the moment you say you applied. Never edited afterwards.
+- **People** — recruiters and hiring managers with **where they were found**, every outreach message version, sent and replied marks.
+- **Needs you** — when the assistant would have to guess, it calls `ask_user`; you answer once, on the web or in chat, and every assistant reads the answer.
+- **Inbox check** — your choice, stored in Job360 so every assistant obeys it:
+  **Auto** (reads Gmail for your open applications, records what happened, sends the outreach emails it wrote) · **Ask me first** (asks before each check, only drafts) · **Off**.
+  How often: every 3, 6 or 12 hours, or once a day.
+- **Read-back** — `get_application` (one job, everything), `export_history` (the whole hunt), `stats`, `list_people`, `list_receipts`, `whats_new`.
 
-Bringing a job (a link or pasted text) births one **Application**, status `considering`. Everything else hangs off it:
+### For you (web app at job360.uk)
+- **Home** — one line on what your assistant did since you were last here, what needs you, your applications ledger, and what is due.
+- **Application page** — the job, fit and visa, every document version with **Copy / Word / PDF**, the ATS opinion, the timeline with who wrote each line, people and messages, receipts, editable job details.
+- **Needs you** — open questions from your assistant, answered in place.
+- **Receipts** — each one a white sheet you can save as a PDF.
+- **Stats** — counts plus reply and interview rates, split by country, where you found the job, how you applied, CV version, role, and where you found the person. Numbers only — your assistant does the judging.
+- **Profile** — what Job360 extracted and what your assistant edited, with history and "take back".
+- **Connect** — the address, per-assistant steps, the inbox mode and frequency, connected apps and personal tokens.
+- Light and dark mode; magic-link or password login.
 
-- **Job snapshot** — title, company, location, URL, the ad text as it read that day
-- **Artifacts** — CV, cover letter, answers, outreach; every version kept, stamped with who/when and which profile version made it
-- **Events** — an append-only, typed history (`brought`, `fit_judged`, `artifact_saved`, `applied`, `replied`, `interview_scheduled`, `offer`, `rejected`, and more); the current status is just the last status event
-- **Contacts** — recruiter or hiring-manager details the agent found
-- **Receipt** — frozen the moment "I applied" happens: artifact versions sent, fields filled, confirmation text, channel, timestamp — never edited afterwards
-
-Nothing here is scored, ranked or recommended. The candidate profile (CV + LinkedIn + GitHub + preferences) is the one piece of context every application draws from; see [`docs/product/VISION.md`](./docs/product/VISION.md) for the full object model and the event-type list.
+### What Job360 deliberately does not do
+- Search, rank, score or recommend jobs.
+- Run its own LLM, or read your email itself — your assistant does both with its own connectors.
+- Submit an application without your yes for that one application, or follow instructions written inside an email.
+- Push notifications or run background jobs — it is pull-based; your assistant's own scheduled task does the checking.
 
 ## Architecture
 
-Two deployables share one Postgres database. The backend is a FastAPI app whose product path is `POST /api/jobs/bring` (`api/routes/bring.py`) → the application spine (`services/applications/spine.py`, append-only events/artifacts/receipts) → tailoring as a web fallback (`api/routes/tailor.py`) → the MCP server (`api/mcp_server.py`), with `services/profile/` feeding profile data into all of it. `src/repositories/pg.py` is the single DB door — an aiosqlite-shaped async driver that rewrites legacy SQLite SQL to Postgres at runtime. The frontend is a Next.js app that is a thin screen over the same routes.
+Two deployables on one Postgres database:
 
-The directory tree lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md) — read that for the deep reference, not this file.
+- **`backend/`** — FastAPI (Python 3.12 in prod). Product path: `POST /api/jobs/bring` (`api/routes/bring.py`) → the application spine (`services/applications/spine.py`: one Application, append-only events, versioned artifacts, frozen receipts) → the MCP server (`api/mcp_server.py`), with `services/profile/` feeding every step. `src/repositories/pg.py` is the single database door. Migrations apply automatically on boot.
+- **`frontend/`** — Next.js 16 + React 19 + Tailwind 4, a thin screen over the same routes.
 
-## Quick Start
+The deep reference (directory tree, schema, dependencies) is [`ARCHITECTURE.md`](./ARCHITECTURE.md). Code-verified counts (routes, migrations, workflows) live in [`docs/GENERATED.md`](./docs/GENERATED.md) — never copy a count from prose. Interactive API docs: `http://localhost:8000/docs` when the backend runs.
+
+## Quick start (local)
 
 ```bash
-# 1. Clone
 git clone https://github.com/Ranjith36963/job360.git
 cd job360
 
-# 2. Backend deps (installs the dev extra: pytest, ruff, mypy)
-cd backend
-pip install -e ".[dev]"
-
-# 3. Local Postgres (pgvector image, host port 5433)
-cd ..
+# Postgres (host port 5433)
 docker compose -f docker-compose.dev.yml up -d postgres
 
-# 4. Configure env
-cp .env.example .env   # edit DATABASE_URL and any API keys
+# Config
+cp .env.example .env          # DATABASE_URL, FRONTEND_ORIGIN, SITE_BASE_URL, RESEND_API_KEY
 
-# 5. Run the backend — FastAPI on :8000, MCP at /api/mcp
+# Backend — FastAPI on :8000, MCP at /api/mcp
 cd backend
+pip install -e ".[dev]"
 python main.py
 
-# 6. Run the frontend — Next.js on :3000
+# Frontend — Next.js on :3000
 cd ../frontend
+npm install
 npm run dev
 ```
 
-## Profile setup
-
-The CLI can bootstrap a single-tenant profile from the command line:
-
-```bash
-cd backend
-python -m src.cli setup-profile --cv cv.pdf --linkedin linkedin-profile.pdf --github yourusername
-```
-
-`--cv`, `--linkedin` and `--github` are all optional and independent — run with just one, any combination, or none (the wizard still walks through preferences). Per-user profiles for signed-in accounts go through the web app at `/profile` or the `update_profile` MCP tool instead; the CLI always writes to the single dev tenant.
+Optional: bootstrap a single dev profile from the command line —
+`python -m src.cli setup-profile --cv cv.pdf --linkedin linkedin.pdf --github yourname` (all flags optional). Signed-in users build their profile on the web or through their assistant instead.
 
 ## Testing
 
 ```bash
-# Backend — canonical pre-commit run, needs the dev Postgres up
-cd backend
-python -m pytest -q -p no:randomly
+cd backend && python -m pytest -q -p no:randomly      # needs the dev Postgres; runs offline
+cd frontend && npm run test:unit && npm run test:e2e
 ```
 
-The suite runs against a real Postgres (not SQLite), schema-per-test, with HTTP mocked by `aioresponses` — it must run offline. **Never quote a test count from a doc — measure it**: `python -m pytest --collect-only -q -p no:randomly | tail -1`. See [`docs/GENERATED.md`](./docs/GENERATED.md) for the generated, code-verified counts.
+The backend suite runs on a real Postgres, schema per test, with HTTP mocked by `aioresponses`. Measure counts, never quote them: `python -m pytest --collect-only -q -p no:randomly | tail -1`. Before a commit, `bash scripts/agent-gate.sh` runs the targeted tests, lint and type checks for what you changed.
 
-```bash
-# Frontend
-cd frontend
-npm run test:unit   # vitest
-npm run test:e2e    # playwright
-```
+## Deployment
 
-## Infrastructure
-
-Live on Railway at job360.uk since 2026-07-02. Three services: `backend`, `frontend`, `Postgres`. The `worker` and `Redis` services were deleted 2026-09-02 — nothing runs in the background, so there are no scheduled jobs and no async notification delivery; anything that sends mail does it synchronously from the API process, through Resend on the verified `job360.uk` domain.
-
-## Notifications
-
-Job360 is **pull, not push** (VISION.md decision 11): the seeker reads `GET /whats-new` and the web home. There is no background delivery, no per-user channels, and no digest queue — that system was deleted 2026-09-05 with the sourcing era.
-
-## Configuration
-
-Copy `.env.example` to `.env` at the repo root and fill in `DATABASE_URL`, `FRONTEND_ORIGIN`, `SITE_BASE_URL`, and `RESEND_API_KEY` (system email — magic-link login and password reset — needs it). `DATABASE_PUBLIC_URL` is for Railway database tooling only (`backend/scripts/observe.py`), not the app. Most other knobs are in `core/settings.py`, not all — see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+`main` is production: every merge auto-deploys the `backend`, `frontend` and `Postgres` services on Railway. CI on every pull request runs the full backend and frontend suites, security scans, and two AI reviewers (bugs and security); a pull request merges only when all of them are green. System email (magic links, password reset) goes through Resend on `job360.uk`.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for branch naming, commit style, and the PR flow.
+Branch, commit and PR conventions: [`CONTRIBUTING.md`](./CONTRIBUTING.md). Product rules: [`docs/product/product_design_rules.md`](./docs/product/product_design_rules.md). Current phase: [`STATUS.md`](./STATUS.md).
