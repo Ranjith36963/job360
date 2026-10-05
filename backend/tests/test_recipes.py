@@ -85,6 +85,10 @@ def test_setup_asks_once_and_forms_ask_only_what_is_missing():
     assert "only place personal facts are asked" in apply
     assert "all the missing questions for this form in one message" in apply
     assert "preferences.assistant_notes" in apply
+    # Sensitive lasting answers are remembered ONLY if the user agrees; otherwise
+    # used for that one form and stored nowhere (PR fixer, 2026-10-05).
+    assert "the user agreed to remember it" in apply
+    assert "use the answer for this form only and store nothing" in apply
     assert "ask once: setup asks its few questions in one message" in flat(INSTRUCTIONS)
 
 
