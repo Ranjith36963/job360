@@ -97,16 +97,14 @@ If the suite was green before your change and is red after, your change is the
 regression — fix it, do not merge around it.
 
 **CI runs only the steps your diff needs** (`scripts/ci_scope.py`, since
-2026-09-10). A `docs`-only PR (markdown anywhere, anything under `docs/`) runs
-just the doc gates; a `frontend`-only PR runs lockfile sync, `tsc`, ESLint,
-vitest, `next build` and the Playwright specs but skips the backend suite and
-the Docker image build; everything else — any backend, schema, workflow or
-script file, a deploy-shaped frontend file
-(`ci_scope._DEPLOY_SHAPED_FRONTEND` / `_DEPLOY_SHAPED_PREFIXES`), any `.env*`
-file anywhere, any path the classifier has no rule for — is `full`. One
-restrictive file makes the whole PR `full`. Pushes to `main` are always `full`.
-Job names never change, so the required checks are always present; the scope
-decision and the files that made it are in the run summary.
+2026-09-10). Which scope ONE path takes is `ci_scope.kind_of` — read it there,
+because a nested path does not inherit its top-level rule. The PR takes the most
+restrictive scope any of its files does, and a push to `main` is always `full`.
+What a scope then skips is the `needs.scope.outputs.scope` condition on each
+step in `.github/workflows/ci.yml` and `ci-offline.yml`: a `docs` PR runs only
+the doc gates, and a `frontend` PR skips the backend suite and the Docker image
+build. Job names never change, so the required checks are always present; the
+scope decision and the files that made it are in the run summary.
 
 ## Local setup
 
