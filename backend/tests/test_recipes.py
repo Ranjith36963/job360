@@ -85,6 +85,9 @@ def test_setup_asks_once_and_forms_ask_only_what_is_missing():
     assert "only place personal facts are asked" in apply
     assert "all the missing questions for this form in one message" in apply
     assert "preferences.assistant_notes" in apply
+    # Read the real form BEFORE asking (live run 2026-10-05: the ask missed the
+    # phone number and an OFAC question because the form had not been opened).
+    assert "open the application form first and read every field" in apply
     # Sensitive lasting answers are remembered ONLY if the user agrees; otherwise
     # used for that one form and stored nowhere (PR fixer, 2026-10-05).
     assert "the user agreed to remember it" in apply

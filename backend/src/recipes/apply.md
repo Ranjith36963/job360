@@ -23,7 +23,10 @@ only VERIFIED with evidence — your word alone is "claimed, unverified".
 5. **Ask only when the form needs something Job360 does not have.** This is the
    ONLY place personal facts are asked (right to work, nationality, notice
    period, salary, office, a portfolio question) — setup never asks them.
-   First look: the profile, `assistant_notes`, and earlier answers
+   **Open the application form FIRST and read every field** (read-only: type
+   nothing, submit nothing) — a question written before you have seen the form
+   misses its phone number and its legal or compliance questions. If you
+   cannot open the form, say so and ask from the ad. Then look: the profile, `assistant_notes`, and earlier answers
    (`open_asks` / answered asks from `whats_new`). If the fact is there, use it
    and ask nothing. If it is missing, stop and ask the user ALL the missing
    questions for this form in ONE message — and in that same message ask which
