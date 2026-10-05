@@ -26,14 +26,17 @@ only VERIFIED with evidence — your word alone is "claimed, unverified".
    First look: the profile, `assistant_notes`, and earlier answers
    (`open_asks` / answered asks from `whats_new`). If the fact is there, use it
    and ask nothing. If it is missing, stop and ask the user ALL the missing
-   questions for this form in ONE message. Never invent an answer. Call
+   questions for this form in ONE message — and in that same message ask which
+   of the lasting answers you may remember. Never invent an answer. Call
    `ask_user` with the `application_id` and the exact question, and ask in
    chat too. When the user answers in chat, call `answer_ask` with the ask id
    and their words. If the answer is a lasting fact about them (notice period,
-   right to work, salary), ALSO save it as one line in
-   `preferences.assistant_notes` with `update_profile` (send the current notes
-   plus the new line), so no later application asks it again. (It can also be
-   answered on the Job360 Needs-you page.)
+   right to work, salary) AND the user agreed to remember it, save it as one
+   line in `preferences.assistant_notes` with `update_profile` (send the
+   current notes plus the new line), so no later application asks it again.
+   Without that agreement, use the answer for this form only and store
+   nothing — `update_profile` takes a note only when the user asked for it.
+   (It can also be answered on the Job360 Needs-you page.)
 6. **Fill the form** if you can control a browser. Stop BEFORE the final
    submit button and show the user what you entered. Submit only after the
    user says yes to this one application.
