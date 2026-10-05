@@ -20,13 +20,20 @@ only VERIFIED with evidence — your word alone is "claimed, unverified".
    pass `ats_score` (0-100) and `ats_notes` with that `save_artifact`. It is
    YOUR opinion — Job360 never computes or advertises one. A re-check after a
    fix is a new version with its own score.
-5. **Ask before you guess.** If the form needs something the profile does not
-   have (notice period, salary, a portfolio question), stop and ask the user.
-   Never invent an answer. Call `ask_user` with the `application_id` and the
-   exact question, and ask in chat too. When the user answers in chat, call
-   `answer_ask` with the ask id and their words, so the answer is remembered
-   and never asked twice. (It can also be answered on the Job360 Needs-you
-   page; read `open_asks` from `whats_new` before acting.)
+5. **Ask only when the form needs something Job360 does not have.** This is the
+   ONLY place personal facts are asked (right to work, nationality, notice
+   period, salary, office, a portfolio question) — setup never asks them.
+   First look: the profile, `assistant_notes`, and earlier answers
+   (`open_asks` / answered asks from `whats_new`). If the fact is there, use it
+   and ask nothing. If it is missing, stop and ask the user ALL the missing
+   questions for this form in ONE message. Never invent an answer. Call
+   `ask_user` with the `application_id` and the exact question, and ask in
+   chat too. When the user answers in chat, call `answer_ask` with the ask id
+   and their words. If the answer is a lasting fact about them (notice period,
+   right to work, salary), ALSO save it as one line in
+   `preferences.assistant_notes` with `update_profile` (send the current notes
+   plus the new line), so no later application asks it again. (It can also be
+   answered on the Job360 Needs-you page.)
 6. **Fill the form** if you can control a browser. Stop BEFORE the final
    submit button and show the user what you entered. Submit only after the
    user says yes to this one application.
