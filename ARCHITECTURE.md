@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-09-19 by the daily truth check -->
+<!-- doc: LIVING | last-verified: 2026-10-06 by the daily truth check -->
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
@@ -40,10 +40,12 @@ job360/
 │   │   │   ├── tailoring/            # render + check a saved CV (no LLM since decision 28) — `ls` the folder for the module list
 │   │   │   └── profile/              # deterministic extraction + storage — `ls` the folder for the module list
 │   │   ├── repositories/             # (post-Phase-4 rename from storage/) — `ls` it; `repositories.pg` is the single Postgres door, `repositories.database.JobDatabase` the legacy baseline that goes through it
+│   │   ├── recipes/                  # the `/run 360` playbooks `get_recipe` serves — `ls` it
 │   │   └── utils/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes
 │   │       └── loop_guard.py         # refuses blocking work on the event loop
+│   ├── scripts/                      # backend-only helpers that may import src/ (CONTRIBUTING.md: why there are two scripts/ dirs)
 │   └── tests/                        # file count: `docs/GENERATED.md` (collected-test count: measure it, never quote it)
 ├── frontend/                         # Next.js 16 + React 19 + Tailwind 4
 │   └── src/app/                      # App Router pages (server/client split; params is Promise<...> per Next.js 16)
@@ -117,11 +119,6 @@ A profile save saves the profile — nothing else happens. There is no re-score
 to trigger any more (the code that queued one, and the queue itself, were
 deleted with the sourcing era).
 
-### Seniority helpers (`services/profile/seniority.py`)
-
-Profile extraction infers a candidate's seniority band from job titles
-(`seniority.detect_seniority`), independent of any job search.
-
 ---
 
 ## Database Schema
@@ -156,12 +153,6 @@ and `validate_required_env` read under variable names. Most knobs are
 - `.env` lives in the repo root (see `.env.example`).
 - Required in production: `core.settings._REQUIRED_PROD_VARS`, enforced at boot
   by `core.settings.validate_required_env`.
-
----
-
-## Architectural Decisions
-
-1. **Normalization for dedup on the one table that still needs it.** `jobs.normalized_key()` (company/title, suffix-stripped, lowercased) still backs the `UNIQUE(normalized_company, normalized_title)` constraint, because two users pasting the same job ad must land on one shared catalog row (hard rule 1). There is no dedup SERVICE any more — this is the DB constraint alone.
 
 ---
 

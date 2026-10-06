@@ -1,4 +1,4 @@
-<!-- doc: LIVING | last-verified: 2026-09-11 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-10-06 by the daily truth check -->
 # Breach Runbook — the 72-hour plan
 
 **Read this top-to-bottom the moment you suspect a breach.** Do the steps in
@@ -45,21 +45,23 @@ Variables → edit → redeploy happens automatically.
 - PostHog (EU) — unusual usage patterns, mass exports.
 - R2 backups — timestamps tell you the last clean snapshot.
 
-**What data could be exposed — sensitivity map:**
+**What data could be exposed.** Enumerate the live schema — never a list written
+here (`SELECT tablename FROM pg_tables WHERE schemaname='public'`); the table
+added since this page was last read is exactly the one a written list omits, and
+`backend/tests/test_dropped_tables_stay_dropped.py` keeps the dropped ones gone.
+Sort what you find into the four categories — the judgement the schema cannot
+give you:
 
-| Table | What's in it | Sensitivity |
-|---|---|---|
-| `user_profiles`, `user_profile_versions` | CV text, LinkedIn text, GitHub data, preferences | **HIGH — this is the crown jewels** |
-| `tailored_documents` | tailored CVs / cover letters (legacy — nothing writes it since decision 28, 2026-09-21; the live ones are `application_artifacts`) | **HIGH** |
-| `users` | email addresses, argon2id password hashes, timezone | Medium (hashes are argon2id — not reversible in practice, but report as exposed) |
-| `applications`, `application_events`, `application_artifacts`, `application_receipts` | job-hunt activity (who applied where, and the exact CV sent) | Medium — sensitive in context (current employer must not learn) |
-| `sessions`, `api_tokens`, `oauth_tokens`, `oauth_grants` | session + OAuth artifacts | Low once rotated/deleted |
-| `jobs` | public job listings | Not personal data |
-
-Do not work this table from memory during an incident — enumerate the live schema
-first (`SELECT tablename FROM pg_tables WHERE schemaname='public'`). Tables listed
-here have been dropped before; `backend/tests/test_dropped_tables_stay_dropped.py`
-is the standing check that the dropped ones stay dropped.
+- **The candidate's own words** — CV and LinkedIn text, every profile version,
+  anything an agent wrote or edited, the documents sent. Crown jewels.
+- **Third-party personal data** — recruiters and hiring managers (name, email,
+  LinkedIn) and the outreach sent to them. Data subjects who never signed up
+  with us; do not leave them out of the ICO count.
+- **Job-hunt activity** — who applied where and what happened. Severe in
+  context: a current employer must not learn it.
+- **Credentials** — password hashes (argon2id; report as exposed anyway),
+  sessions, tokens, OAuth artifacts: low risk *once* Hour 0–1 really rotated
+  and deleted them. The shared `jobs` catalog of public ads is not personal data.
 
 **Answer these four questions in writing** (the ICO form asks exactly this):
 1. What happened, and how? 2. Whose data and how many people?
