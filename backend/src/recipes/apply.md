@@ -38,7 +38,13 @@ only VERIFIED with evidence — your word alone is "claimed, unverified".
    line in `preferences.assistant_notes` with `update_profile` (send the
    current notes plus the new line), so no later application asks it again.
    Without that agreement, use the answer for this form only and store
-   nothing — `update_profile` takes a note only when the user asked for it.
+   nothing in `preferences.assistant_notes` — `update_profile` takes a note
+   only when the user asked for it. Say plainly that the answer still stays
+   in this application's ask history: `answer_ask` keeps it on the ask and
+   appends an `answered` event, and history here is append-only, so it is
+   not a promise you can take back. If the user does not want even that,
+   do not call `answer_ask` for that fact — use it in the form and leave
+   the ask open.
    (It can also be answered on the Job360 Needs-you page.)
 6. **Fill the form** if you can control a browser. Stop BEFORE the final
    submit button and show the user what you entered. Submit only after the
