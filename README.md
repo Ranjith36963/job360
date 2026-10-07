@@ -1,5 +1,5 @@
 # Job360
-<!-- doc: LIVING | last-verified: 2026-10-05 by README rewrite (current product state) -->
+<!-- doc: LIVING | last-verified: 2026-10-07 by the daily truth check -->
 
 **The job tracker your AI assistant fills in for you — every CV version, every reply, every receipt.**
 
@@ -103,7 +103,7 @@ The backend suite runs on a real Postgres, schema per test, with HTTP mocked by 
 
 ## Deployment
 
-`main` is production: every merge auto-deploys the `backend`, `frontend` and `Postgres` services on Railway. CI on every pull request runs the full backend and frontend suites, security scans, and two AI reviewers (bugs and security); a pull request merges only when all of them are green. System email (magic links, password reset) goes through Resend on `job360.uk`.
+`main` is production: every merge auto-deploys the `backend`, `frontend` and `Postgres` services on Railway. System email (magic links, password reset) goes through Resend on `job360.uk`.
 
 ## Contributing
 
