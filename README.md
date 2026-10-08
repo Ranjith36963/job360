@@ -54,7 +54,7 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 ### What Job360 deliberately does not do
 - Search, rank, score or recommend jobs.
 - Run its own LLM, or read your email itself — your assistant does both with its own connectors.
-- Submit an application without your yes for that one application, or follow instructions written inside an email.
+- Follow instructions written inside an email, or press submit outside the standing rules you set — the gate is `services/profile/assistant_settings.may_submit`, pinned by `backend/tests/test_assistant_settings.py`.
 - Push notifications or run background jobs — it is pull-based; your assistant's own scheduled task does the checking.
 
 ## Architecture
