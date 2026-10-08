@@ -235,6 +235,28 @@ async def test_get_profile_result_carries_the_assistant_hint(authenticated_async
     assert 'get_recipe("setup")' in result["assistant_hint"]
 
 
+def test_profile_tool_docstrings_teach_the_user_info_memory():
+    """S1 (2026-10-08) — the tool descriptions are the only place a connected
+    assistant learns the memory paths and the rules for using them."""
+    pytest.importorskip("mcp")
+    from src.api.mcp_server import build_server
+
+    manager = build_server()._tool_manager
+    read = (manager.get_tool("get_profile").description or "").lower()
+    write = (manager.get_tool("update_profile").description or "").lower()
+    for name in ("contact", "right_to_work", "logistics", "languages", "equality", "answers"):
+        assert f"user_info.{name}" in read, name
+        assert f"user_info.{name}" in write, name
+    assert "preferences.salary_by_country" in read
+    assert "preferences.salary_by_country" in write
+    assert "hiring country" in read
+    assert "never convert currency" in read
+    assert "approved" in read and "approved" in write
+    assert "replaces the whole value" in write
+    assert "not answered" in read
+    assert "minimum salary" in read
+
+
 @pytest.mark.asyncio
 async def test_bring_then_read_then_record_then_list_round_trip(authenticated_async_context, fixture_user_id):
     from src.api.mcp_server import mcp_runtime

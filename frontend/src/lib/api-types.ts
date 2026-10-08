@@ -1222,7 +1222,15 @@ export interface paths {
          * Clear Profile Section
          * @description Empty ONE input (or the whole profile), so the next upload starts clean.
          *
-         *     ``section``: cv | linkedin | github | preferences | all.
+         *     ``section``: cv | linkedin | github | preferences | memory | all.
+         *
+         *     ``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory
+         *     (``user_info.*``: contact, right to work, logistics, languages, equality
+         *     answers, saved answers): the base column and the assistant's overlay rows.
+         *     It takes no version snapshot and leaves the CV, the preferences and
+         *     ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
+         *     ``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /
+         *     ``github`` leave it alone; only ``all`` resets it.
          *
          *     Deliberately does NOT re-run extraction: there is nothing left to read, so
          *     rebuilding an emptied profile would be pure waste. The stored snapshot taken
@@ -1235,8 +1243,9 @@ export interface paths {
          *     fresh upload: the whole point is a clean experiment. So each cleared
          *     scope also appends a clearing row (``value = NULL``, append-only) for
          *     every overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``
-         *     -> ``preferences.*``, ``all`` -> both. ``linkedin`` and ``github`` own no
-         *     editable path, so they clear nothing in the overlay.
+         *     -> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.
+         *     ``linkedin`` and ``github`` own no editable path, so they clear nothing in
+         *     the overlay.
          */
         post: operations["clear_profile_section_api_profile_clear_post"];
         delete?: never;
@@ -3482,6 +3491,13 @@ export interface components {
                 [key: string]: string[];
             };
             summary: components["schemas"]["ProfileSummary"];
+            /**
+             * User Info
+             * @default {}
+             */
+            user_info: {
+                [key: string]: unknown;
+            };
         };
         /** ProfileSummary */
         ProfileSummary: {

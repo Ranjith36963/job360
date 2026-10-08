@@ -3959,6 +3959,12 @@
           },
           "summary": {
             "$ref": "#/components/schemas/ProfileSummary"
+          },
+          "user_info": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "User Info",
+            "type": "object"
           }
         },
         "required": [
@@ -10510,7 +10516,7 @@
     },
     "/api/profile/clear": {
       "post": {
-        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\n``section``: cv | linkedin | github | preferences | all.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``all`` -> both. ``linkedin`` and ``github`` own no\neditable path, so they clear nothing in the overlay.",
+        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\n``section``: cv | linkedin | github | preferences | memory | all.\n\n``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory\n(``user_info.*``: contact, right to work, logistics, languages, equality\nanswers, saved answers): the base column and the assistant's overlay rows.\nIt takes no version snapshot and leaves the CV, the preferences and\n``daily_check`` alone. ``preferences`` leaves the memory alone (and clears\n``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /\n``github`` leave it alone; only ``all`` resets it.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.\n``linkedin`` and ``github`` own no editable path, so they clear nothing in\nthe overlay.",
         "operationId": "clear_profile_section_api_profile_clear_post",
         "parameters": [
           {

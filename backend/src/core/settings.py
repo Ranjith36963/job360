@@ -550,6 +550,16 @@ PROFILE_EDITABLE_PATHS = (
     # Standing instructions for the assistant — one short line each
     # (PROFILE_NOTE_MAX_CHARS), at most PROFILE_EDIT_MAX_LIST_ITEMS lines.
     "preferences.assistant_notes",
+    # Owner decision 2026-10-08 — THREE STORES. (1) The salary the user wants,
+    # one record per hiring country, is a normal PREFERENCE. (2) USER INFO
+    # MEMORY — the facts job forms ask (contact, right to work, logistics,
+    # languages, equality answers, approved free-text answers) — lives in its
+    # own `user_profiles.user_info` column under the `user_info.*` head, written
+    # only by storage.save_user_info. (3) The assistant's edits ride the
+    # profile_edits overlay on top of both. Shapes: services/profile/user_info.py.
+    "preferences.salary_by_country",
+    "user_info.contact", "user_info.right_to_work", "user_info.logistics",
+    "user_info.languages", "user_info.equality", "user_info.answers",
 )
 # Env-added paths must ALSO be declared dataclass fields — an unknown one is a
 # startup error, not an accepted path.
@@ -575,6 +585,11 @@ PROFILE_NOTE_MAX_CHARS = int(os.getenv("PROFILE_NOTE_MAX_CHARS", "200"))
 # GET /profile/edits/history — how many rows of one field's history come back
 # (newest first). The export carries the full log.
 PROFILE_EDIT_HISTORY_MAX = int(os.getenv("PROFILE_EDIT_HISTORY_MAX", "50"))
+# user_info.answers — one saved question (a line), one answer (keeps
+# newlines), and the ENCODED ceiling for the whole list write.
+USER_INFO_QUESTION_MAX_CHARS = int(os.getenv("USER_INFO_QUESTION_MAX_CHARS", "300"))
+USER_INFO_ANSWER_MAX_CHARS = int(os.getenv("USER_INFO_ANSWER_MAX_CHARS", "2000"))
+USER_INFO_ANSWERS_MAX_CHARS = int(os.getenv("USER_INFO_ANSWERS_MAX_CHARS", "120000"))
 
 
 # Outbound HTTP defaults. Kept through slice 5 (#483) on purpose: the URL
