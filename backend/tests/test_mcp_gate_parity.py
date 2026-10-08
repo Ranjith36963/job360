@@ -90,6 +90,8 @@ TOOL_ROUTES = {
     "answer_ask": ("asks", "answer_ask", {"ask_id": 987654321, "answer": "x"}),
     # Job facts fix-later door (owner decision 2026-10-04) - require_user.
     "update_job": ("applications", "update_job_facts", {"application_id": 987654321, "country": "FR"}),
+    # The one submit gate (owner decision 2026-10-08, S2) - require_user, read-only.
+    "check_submit": ("applications", "submit_check", {"application_id": 987654321, "form_url": ""}),
 }
 
 

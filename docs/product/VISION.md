@@ -37,7 +37,7 @@ That persistent, agent-accessible record is the product.
 | One **Application** object per job, born the moment the job is brought | Fit judging, CV / cover-letter / answer writing (we store, the agent writes) |
 | **Every version** of every artifact, forever, stamped with who/when/which profile | Gmail OAuth, inbox polling, email classification (the agent's connector reads; we store the event) |
 | A **typed event log**, one door (`record_event`), every event says who wrote it | People databases (Apollo, LinkedIn lookups) — the agent finds, we store the contact |
-| A rich **receipt** on "I applied" — fields, answers, confirmation, exact CV version | Form filling, browser automation, auto-submit at volume |
+| A rich **receipt** on "I applied" — fields, answers, confirmation, exact CV version | Browser automation of our own; auto-submit only when the user turns it on (never Indeed/LinkedIn; practice run first; pause switch) |
 | `whats_new` — pull, not push | Push notifications, WhatsApp, mobile apps (later, on evidence) |
 | OAuth 2.1 so ChatGPT / Grok / any client can connect | Our own LLM, our own general agent |
 | Cheap counts (reply rate per CV version / role) + full `export_history` | Charts-heavy analytics; the agent analyses the export |
@@ -68,7 +68,9 @@ Candidate (one profile per user, versioned; multiple named profiles = later)
 `outreach_replied`, `applied`, `replied`, `interview_requested`, `interview_scheduled`,
 `interview_done`, `offer`, `rejected`, `withdrawn`, `ghosted`, `note`,
 `lesson` ("flag for next time"), `asked` / `answered` / `ask_withdrawn` (the
-"Needs you" queue — note-family, never move the status). Every event: `type`, `detail`, `occurred_at`,
+"Needs you" queue — note-family, never move the status), `submit_mode_set`
+(per-job submit switch: `confirm` | `auto_when_sure` | `inherit` — note-family; an
+assistant may only send `confirm`). Every event: `type`, `detail`, `occurred_at`,
 `recorded_by` (which token/agent/web), `recorded_at`. Nothing is deleted.
 
 Today's `applications` (stage) + `application_receipts` (snapshot) +
@@ -152,7 +154,7 @@ applications and events in the database, not a doc.
 | 18 | Success measure | **Owner uses it daily for his own hunt.** |
 
 Taken from the 2026-09-02 pivot without re-asking: recruiters later and
-consent-first; everything free; no auto-submit at volume; global from day one.
+consent-first; everything free; auto-submit only when the user switches it on (owner decision 2026-10-08, no cap by default); global from day one.
 
 ### Additions, 2026-09-07 (the Tsenta competitor read — decisions kept, the read itself deleted 2026-09-12)
 

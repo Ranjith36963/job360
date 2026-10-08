@@ -286,6 +286,10 @@ APPLICATION_STATUS_EVENT_TYPES = (
 APPLICATION_NOTE_EVENT_TYPES = (
     "fit_judged", "artifact_saved", "contact_added", "outreach_sent", "outreach_replied", "note", "lesson",
     "asked", "answered", "ask_withdrawn",
+    # Owner decision 2026-10-08 (S2) — the per-job submit switch
+    # (payload {"submit_mode": "confirm" | "auto_when_sure" | "inherit"}). A NOTE
+    # event: it never moves the status. Latest one wins (spine.submit_override).
+    "submit_mode_set",
 )
 # Env-added types are non-status only — a status type also needs an R4
 # mapping entry, which an env var cannot supply.
@@ -560,6 +564,15 @@ PROFILE_EDITABLE_PATHS = (
     "preferences.salary_by_country",
     "user_info.contact", "user_info.right_to_work", "user_info.logistics",
     "user_info.languages", "user_info.equality", "user_info.answers",
+    # Owner decision 2026-10-08 (S2) — ASSISTANT SETTINGS, a fourth head with
+    # its own `user_profiles.assistant_settings` column (default '{}'). The
+    # values ride the same profile_edits overlay (who/when history for free).
+    # A RISKIER change from an assistant is never written here: it becomes a
+    # waiting request the user confirms on the website
+    # (services/profile/setting_requests.py). Rules: services/profile/assistant_settings.py.
+    "assistant_settings.apply_mode", "assistant_settings.apply_min_score",
+    "assistant_settings.submit_mode", "assistant_settings.daily_cap",
+    "assistant_settings.paused_until", "assistant_settings.pause_reason",
 )
 # Env-added paths must ALSO be declared dataclass fields — an unknown one is a
 # startup error, not an accepted path.
@@ -582,6 +595,21 @@ PROFILE_EDIT_MAX_BULLET_CHARS = int(os.getenv("PROFILE_EDIT_MAX_BULLET_CHARS", "
 PROFILE_EDIT_MAX_RECORDS_CHARS = int(os.getenv("PROFILE_EDIT_MAX_RECORDS_CHARS", "60000"))
 # preferences.assistant_notes — the length of ONE note (a line, not an essay).
 PROFILE_NOTE_MAX_CHARS = int(os.getenv("PROFILE_NOTE_MAX_CHARS", "200"))
+# Assistant settings (S2, owner decision 2026-10-08). The most applications a
+# user may cap themselves to per day; no cap is the default (owner: "no cap by
+# default"), this is only the ceiling a typed cap may take.
+ASSISTANT_DAILY_CAP_MAX = int(os.getenv("ASSISTANT_DAILY_CAP_MAX", "500"))
+# A waiting (riskier) change request the user never answered stops counting
+# after this many days; the assistant has to ask again.
+ASSISTANT_SETTING_REQUEST_TTL_DAYS = int(os.getenv("ASSISTANT_SETTING_REQUEST_TTL_DAYS", "7"))
+# How many waiting requests ONE user's assistants may create per hour — a loop
+# cannot bury the Needs-you page. Counted off the table, never per IP.
+ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR = int(os.getenv("ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR", "20"))
+# Sites where auto-submit never runs: the assistant fills the form, stops and
+# asks yes. Matched against whole host labels (indeed.co.uk, uk.indeed.com,
+# linkedin.com, lnkd.in all hit; notindeed.com does not). Over-blocking only
+# asks, so a loose match is the safe direction. Owner: Indeed bans automated apply.
+SUBMIT_ASK_ALWAYS_BRANDS = _env_list("SUBMIT_ASK_ALWAYS_BRANDS", ("indeed", "linkedin", "lnkd"))
 # GET /profile/edits/history — how many rows of one field's history come back
 # (newest first). The export carries the full log.
 PROFILE_EDIT_HISTORY_MAX = int(os.getenv("PROFILE_EDIT_HISTORY_MAX", "50"))

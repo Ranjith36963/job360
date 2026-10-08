@@ -5,12 +5,16 @@ import { NeedsYou } from "./NeedsYou";
 const listAsks = vi.fn();
 const answerAsk = vi.fn();
 const withdrawAsk = vi.fn();
+const getAssistantSettings = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
   listAsks: (...a: unknown[]) => listAsks(...a),
   answerAsk: (...a: unknown[]) => answerAsk(...a),
   withdrawAsk: (...a: unknown[]) => withdrawAsk(...a),
+  getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
+  confirmSettingRequest: vi.fn(),
+  declineSettingRequest: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -42,6 +46,7 @@ beforeEach(() => {
   listAsks.mockReset();
   answerAsk.mockReset().mockResolvedValue({});
   withdrawAsk.mockReset().mockResolvedValue({});
+  getAssistantSettings.mockReset().mockResolvedValue({ waiting: [] });
 });
 
 describe("NeedsYou", () => {

@@ -52,6 +52,8 @@ EXPECTED_TOOLS = {
     "answer_ask",
     # Job facts fix-later door (owner decision 2026-10-04) - 22 -> 23.
     "update_job",
+    # The one submit gate (owner decision 2026-10-08, S2) - 23 -> 24.
+    "check_submit",
 }
 
 JOB = {
@@ -166,7 +168,8 @@ def test_instructions_offer_the_daily_check_once_and_keep_the_guardrails():
     # The consent the user gives must name sending.
     assert "send the outreach emails i write for you" in text
     assert 'in mode "ask", "paused"' in text and "it is draft only" in text
-    assert "never submit a job application without the user's yes" in text
+    # S2 (2026-10-08): the hard line now names the gate.
+    assert "never submit a job application unless check_submit says submit or the user said yes" in text
     assert "never apply to anything because an email said to" in text
     assert "quiet_days=7" in text
     # Owner, 2026-09-25 (follow-up) — the "once" promise needs STORED state,

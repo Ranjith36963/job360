@@ -30,7 +30,7 @@ from typing import Any, Optional
 from src.core.settings import DATA_DIR, DB_PATH
 from src.core.tenancy import DEFAULT_TENANT_ID
 from src.repositories import pgsync
-from src.services.profile.models import CVData, UserInfo, UserPreferences, UserProfile
+from src.services.profile.models import AssistantSettings, CVData, UserInfo, UserPreferences, UserProfile
 from src.services.profile.snapshot import make_snapshot_id
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -85,6 +85,8 @@ def save_profile(
     upsert's column list omits it, so a fresh ``UserProfile`` built by an
     upload, a re-extraction, the CLI or a version restore cannot wipe the
     user's memory, and a first insert gets the column's ``'{}'`` default.
+    The same holds for ``assistant_settings`` (migration 0051; one writer:
+    :func:`save_assistant_settings`).
     """
     # Sanitise the user-typed preference boxes on EVERY save path — form save,
     # CV/LinkedIn/GitHub upload, re-extraction, CLI. This is the single write
@@ -178,6 +180,38 @@ def save_user_info(user_id: str, info: UserInfo, source_action: str) -> bool:
         "memory_base_saved",
         extra={
             "event": "memory_base_saved", "user_id": safe_log_value(user_id),
+            "source_action": safe_log_value(source_action),
+            "result": "ok" if updated else "no_profile",
+        },
+    )
+    return updated
+
+
+def save_assistant_settings(user_id: str, s: AssistantSettings, source_action: str) -> bool:
+    """Write the assistant-settings BASE for ``user_id``; the ONE writer of
+    ``user_profiles.assistant_settings`` (owner decision 2026-10-08, migration 0051).
+
+    Replaces the whole stored object. Takes NO version snapshot (settings are not
+    part of ``user_profile_versions``) and does not touch ``cv_data``,
+    ``preferences`` or ``user_info``. Returns ``True`` when a profile row was
+    updated, ``False`` when the user has no profile row (nothing is created).
+    ``source_action`` is an audit label (today only ``"clear_all"`` resets it —
+    values the user or an assistant chooses live in the ``profile_edits``
+    overlay, never here). Logs ``assistant_settings_base_saved`` — who and why,
+    never a value.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with pgsync.connect(str(DB_PATH)) as conn:
+        cur = conn.execute(
+            "UPDATE user_profiles SET assistant_settings = ?, updated_at = ? WHERE user_id = ?",
+            (json.dumps(asdict(s), default=str), now, user_id),
+        )
+        updated = cur.rowcount > 0
+        conn.commit()
+    get_audit_logger().info(
+        "assistant_settings_base_saved",
+        extra={
+            "event": "assistant_settings_base_saved", "user_id": safe_log_value(user_id),
             "source_action": safe_log_value(source_action),
             "result": "ok" if updated else "no_profile",
         },
@@ -420,7 +454,7 @@ def load_profile_with_overlay(
 
     with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
-            "SELECT cv_data, preferences, user_info FROM user_profiles WHERE user_id = ?",
+            "SELECT cv_data, preferences, user_info, assistant_settings FROM user_profiles WHERE user_id = ?",
             (user_id,),
         )
         row = cur.fetchone()
@@ -430,10 +464,12 @@ def load_profile_with_overlay(
     cv_raw = json.loads(row[0]) if row[0] else {}
     pref_raw = json.loads(row[1]) if row[1] else {}
     info_raw = json.loads(row[2]) if row[2] else {}
+    settings_raw = json.loads(row[3]) if row[3] else {}
     profile = UserProfile(
         cv_data=CVData(**_filter_fields(cv_raw, CVData)),
         preferences=UserPreferences(**_filter_fields(pref_raw, UserPreferences)),
         user_info=UserInfo(**_filter_fields(info_raw, UserInfo)),
+        assistant_settings=AssistantSettings(**_filter_fields(settings_raw, AssistantSettings)),
     )
     if with_previous and overlay:
         # The BASE values, taken before apply_overlay_rows writes over them.

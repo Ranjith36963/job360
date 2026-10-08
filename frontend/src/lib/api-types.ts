@@ -370,6 +370,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/submit-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Submit Check
+         * @description THE one gate before a final submit (owner decision 2026-10-08, S2).
+         *
+         *     Reads the user's settings, this application's own facts (status, receipt,
+         *     the per-job override) and the day's counts, then answers through
+         *     ``settings_rules.may_submit`` - the same function for every caller (this route
+         *     and the MCP ``check_submit`` tool). ``form_url`` is the address of the page
+         *     the form is on (a bare host works too); without it the answer is ``ask``
+         *     (``unknown_site``). Read-only. 404 for an application that is not the
+         *     caller's (rule #12).
+         */
+        get: operations["submit_check_api_applications__application_id__submit_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/visa": {
         parameters: {
             query?: never;
@@ -436,6 +464,116 @@ export interface paths {
          * @description Take an open ask back. Web only - there is deliberately no MCP tool.
          */
         post: operations["withdraw_ask_api_asks__ask_id__withdraw_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assistant-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Assistant Settings
+         * @description The caller's settings (each raw + effective), the practice-run state and
+         *     the requests waiting for the user's OK. Read-only; any signed-in caller.
+         */
+        get: operations["get_assistant_settings_api_assistant_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assistant-settings/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Setting History
+         * @description Every change to ONE setting, newest first, both sides (the user's web
+         *     rows and the assistant's). At most ``PROFILE_EDIT_HISTORY_MAX`` rows.
+         */
+        get: operations["setting_history_api_assistant_settings_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assistant-settings/requests/{request_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Request
+         * @description The user confirms a waiting request: the change is applied now as a WEB
+         *     row (so history says the human did it). 404 when the id is not the caller's;
+         *     409 when it was already decided or has expired; 422 when the stored value no
+         *     longer passes validation (for example a pause time that has since passed).
+         */
+        post: operations["confirm_request_api_assistant_settings_requests__request_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assistant-settings/requests/{request_id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline Request
+         * @description The user declines a waiting request ("Don't change"): nothing is applied
+         *     and the request is closed. Same 404 / 409 rules as confirm.
+         */
+        post: operations["decline_request_api_assistant_settings_requests__request_id__decline_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/assistant-settings/take-back": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take Back Setting
+         * @description Put one setting back to what it held BEFORE its newest change.
+         *
+         *     Append-only: a new ``web`` row carries the value of the row before the
+         *     newest one (``null`` — the safe default — when there was none). Not
+         *     rate-limited (the human's own action). 404 when the setting never changed.
+         */
+        post: operations["take_back_setting_api_assistant_settings_take_back_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2432,6 +2570,45 @@ export interface components {
             /** Withdrawn At */
             withdrawn_at: string | null;
         };
+        /**
+         * AssistantSettingsView
+         * @description The assistant settings, as the web and MCP ``get_profile`` read them.
+         *
+         *     ``inbox_mode`` / ``check_every`` / ``notes`` are an ALIAS of
+         *     ``preferences.daily_check`` / ``check_every`` / ``assistant_notes`` — shown
+         *     here, still edited at those paths.
+         */
+        AssistantSettingsView: {
+            apply_min_score: components["schemas"]["SettingFieldOut"];
+            apply_mode: components["schemas"]["SettingFieldOut"];
+            /**
+             * Check Every
+             * @default
+             */
+            check_every: string;
+            daily_cap: components["schemas"]["SettingFieldOut"];
+            /**
+             * Inbox Mode
+             * @default
+             */
+            inbox_mode: string;
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
+            pause_reason: components["schemas"]["SettingFieldOut"];
+            /** Paused */
+            paused: boolean;
+            paused_until: components["schemas"]["SettingFieldOut"];
+            practice_run: components["schemas"]["PracticeRunOut"];
+            submit_mode: components["schemas"]["SettingFieldOut"];
+            /**
+             * Waiting
+             * @default []
+             */
+            waiting: components["schemas"]["SettingRequestOut"][];
+        };
         /** Body_clear_profile_section_api_profile_clear_post */
         Body_clear_profile_section_api_profile_clear_post: {
             /** Section */
@@ -2899,6 +3076,11 @@ export interface components {
              * @default []
              */
             assistant_notes: string[];
+            /**
+             * Assistant Setting Requests
+             * @default []
+             */
+            assistant_setting_requests: components["schemas"]["SettingRequestExportOut"][];
             /** Bytes */
             bytes: number;
             /** Next Since */
@@ -3350,6 +3532,13 @@ export interface components {
             /** Role */
             role: string;
         };
+        /** PracticeRunOut */
+        PracticeRunOut: {
+            /** Auto On Since */
+            auto_on_since?: string | null;
+            /** Needed */
+            needed: boolean;
+        };
         /**
          * ProfileEditExportOut
          * @description One row of ``export_history``'s top-level ``profile_edits`` — EVERY
@@ -3425,6 +3614,7 @@ export interface components {
              * @default []
              */
             agent_edits: components["schemas"]["AgentEditOut"][];
+            assistant_settings?: components["schemas"]["AssistantSettingsView"] | null;
             /** Current Version Id */
             current_version_id?: number | null;
             cv_detail?: components["schemas"]["CVDetail"] | null;
@@ -3970,6 +4160,68 @@ export interface components {
             visa: components["schemas"]["ApplicationVisaOut"];
         };
         /**
+         * SettingFieldOut
+         * @description One assistant setting: ``value`` as chosen ("" / null = not chosen),
+         *     ``effective`` with the safe default filled in.
+         */
+        SettingFieldOut: {
+            /** Effective */
+            effective?: unknown;
+            /** Value */
+            value?: unknown;
+        };
+        /**
+         * SettingRequestExportOut
+         * @description One setting-change request in the export: waiting or decided.
+         */
+        SettingRequestExportOut: {
+            /** Decided At */
+            decided_at?: string | null;
+            /** Decided By */
+            decided_by?: string | null;
+            /** Decision */
+            decision?: string | null;
+            /** Expires At */
+            expires_at: string;
+            /** Id */
+            id: number;
+            /** Path */
+            path: string;
+            /** Requested At */
+            requested_at: string;
+            /** Requested By */
+            requested_by: string;
+            /** Status */
+            status: string;
+            /** Value */
+            value?: unknown;
+        };
+        /**
+         * SettingRequestOut
+         * @description One RISKIER setting change an assistant asked for and the user has not
+         *     yet confirmed (S2, owner decision 2026-10-08). Nothing is applied until the
+         *     signed-in user confirms it on the Job360 website.
+         */
+        SettingRequestOut: {
+            /** Expires At */
+            expires_at: string;
+            /** Id */
+            id: number;
+            /** Path */
+            path: string;
+            /** Requested At */
+            requested_at: string;
+            /** Requested By */
+            requested_by: string;
+            /**
+             * Status
+             * @default waiting
+             */
+            status: string;
+            /** Value */
+            value?: unknown;
+        };
+        /**
          * StatsContactFoundViaGroupOut
          * @description Owner decision 2026-10-04 — per current contact ``found_via``: how
          *     many contacts, how many had an outreach marked sent / a reply recorded,
@@ -4125,6 +4377,26 @@ export interface components {
             /** Profile Exists */
             profile_exists: boolean;
         };
+        /**
+         * SubmitCheckResponse
+         * @description The answer to "may I press submit on this application?" - one gate
+         *     (``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,
+         *     stop before submit and ask the user yes for this one; ``stop``: do not submit.
+         *     ``reason`` is a closed code; ``detail`` is one plain sentence.
+         */
+        SubmitCheckResponse: {
+            /** Application Id */
+            application_id: number;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "submit" | "ask" | "stop";
+            /** Detail */
+            detail: string;
+            /** Reason */
+            reason: string;
+        };
         /** TailorBundle */
         TailorBundle: {
             /** Application Id */
@@ -4267,6 +4539,11 @@ export interface components {
             /** Applied */
             applied: components["schemas"]["ProfileEditOut"][];
             profile: components["schemas"]["ProfileResponse"];
+            /**
+             * Waiting
+             * @default []
+             */
+            waiting: components["schemas"]["SettingRequestOut"][];
         };
         /** UserResponse */
         UserResponse: {
@@ -5037,6 +5314,43 @@ export interface operations {
             };
         };
     };
+    submit_check_api_applications__application_id__submit_check_get: {
+        parameters: {
+            query?: {
+                form_url?: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_visa_api_applications__application_id__visa_put: {
         parameters: {
             query?: never;
@@ -5211,6 +5525,181 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_assistant_settings_api_assistant_settings_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    setting_history_api_assistant_settings_history_get: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileEditHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_request_api_assistant_settings_requests__request_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                request_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decline_request_api_assistant_settings_requests__request_id__decline_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                request_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantSettingsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    take_back_setting_api_assistant_settings_take_back_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TakeBackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantSettingsView"];
                 };
             };
             /** @description Validation Error */

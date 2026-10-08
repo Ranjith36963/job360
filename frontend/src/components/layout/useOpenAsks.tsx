@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ASKS_CHANGED_EVENT, listAsks } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, getAssistantSettings, listAsks } from "@/lib/api";
 
 /**
- * Count of questions waiting on the user (the Needs-you badge). A light fetch
+ * Count of things waiting on the user (the Needs-you badge): open questions plus
+ * the setting changes an assistant asked for that wait for the user's OK (S2).
+ * The settings read is best-effort: if it fails the badge still counts the asks.
+ * A light fetch
  * after mount when signed in, re-fetched on every navigation. It never blocks
  * render, and a failure just means no badge. The Needs-you page announces the
  * fresh count after every reload (ASKS_CHANGED_EVENT), so the badge clears
@@ -18,7 +21,13 @@ let inFlight: { key: string; count: Promise<number> } | null = null;
 
 function fetchOpenCount(key: string): Promise<number> {
   if (inFlight?.key === key) return inFlight.count;
-  const count = listAsks("open").then((res) => res.open_count);
+  const count = Promise.all([
+    listAsks("open"),
+    getAssistantSettings().then(
+      (view) => view.waiting.length,
+      () => 0,
+    ),
+  ]).then(([asks, waiting]) => asks.open_count + waiting);
   const entry = { key, count };
   inFlight = entry;
   const clear = () => {

@@ -25,15 +25,34 @@ question step by step. Say in one plain line what you are doing as you go.
       write for you) / Ask me first (I ask before each check and only draft
       messages) / Not now" — and, for Auto or Ask, how often: every 3, 6, 12
       hours or once a day.
-   3. **Anything from step 2** you could not settle from the CV. Skip this if
+   3. **How much you may do alone.** Read `settings` from `get_profile` and show
+      what is set; "ok" keeps it. Offer, with the safe default first:
+      *Applying* - `ask_each` (ask me about every job, default) / `apply_all` /
+      `selective_above_score` (only above a score line; the line is
+      `settings.apply_min_score.effective`, default 75). *Submitting* -
+      `confirm` (I check every application before it is sent, default) /
+      `auto_when_sure` (you submit when `check_submit` says go; Indeed and
+      LinkedIn always ask, and the first one is a practice run I check).
+      *A daily limit* - optional: a number, or none (no cap by default; never
+      assume one).
+   4. **Anything from step 2** you could not settle from the CV. Skip this if
       there is nothing.
-   Do NOT ask for a daily application limit, and do NOT ask for facts that only
+   A daily application limit is only the optional line in question 3 - never
+   assume a number. Do NOT ask for facts that only
    a job form needs (right to work, notice period, salary, office, nationality).
    Those are asked later, once, at the moment an application needs them — see
    `360-apply`.
 4. **Save every answer in one go.** `update_profile` for the targets;
    `preferences.daily_check` (auto / ask / paused) and `preferences.check_every`
-   for Gmail. Then set up the scheduled task if your app supports one.
+   for Gmail; `assistant_settings.apply_mode`, `assistant_settings.apply_min_score`,
+   `assistant_settings.submit_mode` and `assistant_settings.daily_cap` for the
+   rest - send only what the user chose. **Waiting for your OK:** a choice that
+   gives you MORE freedom (`apply_all`, a lower score line, `auto_when_sure`, a
+   higher or removed limit, Gmail `auto`) is NOT applied by `update_profile` - it
+   comes back in `waiting`. Tell the user plainly: "Open Job360, Needs you,
+   and click Confirm once. I cannot confirm it for you; until then the safe
+   setting stands." Safer choices apply at once. Then set up the scheduled task
+   if your app supports one.
 5. **Tell the user what to connect, in YOUR app** — do not ask a question, just
    state what is missing: Gmail (to read replies), a job-search connector (for
    example Indeed), and browser control if you have it. Job360 does not connect

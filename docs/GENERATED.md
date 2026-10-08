@@ -15,10 +15,10 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0050** | `backend/migrations/` |
-| Migration files | **51** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 13 route modules (88 endpoints) | `backend/src/api/routes/` |
-| Test files | across 148 `test_*.py` files | `backend/tests/` |
+| Migration head | **0051** | `backend/migrations/` |
+| Migration files | **52** | `backend/migrations/*.up.sql` |
+| FastAPI surface | 14 route modules (94 endpoints) | `backend/src/api/routes/` |
+| Test files | across 149 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 28 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -49,6 +49,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `PUT` | `/api/applications/{application_id}/fit` | `applications.py` |
 | `PATCH` | `/api/applications/{application_id}/job` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/receipt` | `applications.py` |
+| `GET` | `/api/applications/{application_id}/submit-check` | `applications.py` |
 | `PUT` | `/api/applications/{application_id}/visa` | `applications.py` |
 | `POST` | `/api/contacts` | `applications.py` |
 | `PATCH` | `/api/contacts/{contact_id}` | `applications.py` |
@@ -59,6 +60,11 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/asks` | `asks.py` |
 | `POST` | `/api/asks/{ask_id}/answer` | `asks.py` |
 | `POST` | `/api/asks/{ask_id}/withdraw` | `asks.py` |
+| `GET` | `/api/assistant-settings` | `assistant_settings.py` |
+| `GET` | `/api/assistant-settings/history` | `assistant_settings.py` |
+| `POST` | `/api/assistant-settings/requests/{request_id}/confirm` | `assistant_settings.py` |
+| `POST` | `/api/assistant-settings/requests/{request_id}/decline` | `assistant_settings.py` |
+| `POST` | `/api/assistant-settings/take-back` | `assistant_settings.py` |
 | `POST` | `/api/auth/login` | `auth.py` |
 | `POST` | `/api/auth/logout` | `auth.py` |
 | `POST` | `/api/auth/magic-link/consume` | `auth.py` |
@@ -122,5 +128,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**88 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**94 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->

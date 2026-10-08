@@ -741,6 +741,29 @@ export async function withdrawAsk(id: number): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/withdraw`, { method: "POST" });
 }
 
+// ---- Assistant settings (S2, owner decision 2026-10-08) ----
+// A RISKIER change an assistant asks for (more freedom for it) is never applied;
+// it waits as a request that only the signed-in user can confirm here. The full
+// settings page is S5; this slice is the "Waiting for your OK" cards only.
+export type AssistantSettingsView = _Schemas["AssistantSettingsView"];
+export type SettingRequest = _Schemas["SettingRequestOut"];
+
+export async function getAssistantSettings(): Promise<AssistantSettingsView> {
+  return request<AssistantSettingsView>("/api/assistant-settings");
+}
+
+export async function confirmSettingRequest(id: number): Promise<AssistantSettingsView> {
+  return request<AssistantSettingsView>(`/api/assistant-settings/requests/${id}/confirm`, {
+    method: "POST",
+  });
+}
+
+export async function declineSettingRequest(id: number): Promise<AssistantSettingsView> {
+  return request<AssistantSettingsView>(`/api/assistant-settings/requests/${id}/decline`, {
+    method: "POST",
+  });
+}
+
 // ---- Lessons (slice 9, docs/plans/2026-09-11-lessons/spec.md) ----
 // "Flag for next time": written through recordApplicationEvent(event_type
 // "lesson"); read back here for the profile's Lessons list. The agent gets
