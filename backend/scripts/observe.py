@@ -70,6 +70,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("profile_edits", "user_id"),
     # S2 assistant settings (migration 0051): riskier changes waiting on the user.
     ("assistant_setting_requests", "user_id"),
+    ("artifact_links", "user_id"),
     # Outreach tracking (migration 0046) — CI's test_observe.py caught these
     # missing (coordinator review, 2026-09-26): a per-user table nobody
     # registers here is one this layer silently cannot see.

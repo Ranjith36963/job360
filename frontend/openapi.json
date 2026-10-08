@@ -460,6 +460,48 @@
         "title": "ApplicationArtifactRowOut",
         "type": "object"
       },
+      "ApplicationControlsOut": {
+        "description": "The state behind the four human-in-the-loop buttons on the application\npage, each with who / where / when.",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "autofill": {
+            "$ref": "#/components/schemas/ControlsAutofillOut"
+          },
+          "cv": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ControlsCvOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "declined": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitSeenOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duplicate": {
+            "$ref": "#/components/schemas/KitDuplicateOut"
+          }
+        },
+        "required": [
+          "application_id",
+          "autofill",
+          "duplicate"
+        ],
+        "title": "ApplicationControlsOut",
+        "type": "object"
+      },
       "ApplicationDetailOut": {
         "properties": {
           "artifacts": {
@@ -838,6 +880,123 @@
           "catalog_present"
         ],
         "title": "ApplicationJobOut",
+        "type": "object"
+      },
+      "ApplicationKitOut": {
+        "description": "Everything an assistant needs to fill ONE application form (S3). Binds to\nTHIS application only: its latest CV and cover letter, never another job's.",
+        "properties": {
+          "account_site": {
+            "$ref": "#/components/schemas/KitAccountSiteOut"
+          },
+          "answers": {
+            "$ref": "#/components/schemas/KitAnswersOut"
+          },
+          "application": {
+            "$ref": "#/components/schemas/KitApplicationOut"
+          },
+          "autofill": {
+            "enum": [
+              "allow",
+              "deny",
+              "unset"
+            ],
+            "title": "Autofill",
+            "type": "string"
+          },
+          "cover_letter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitDocumentOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cover_letter_none_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter None Reason"
+          },
+          "cv": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitDocumentOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cv_none_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv None Reason"
+          },
+          "duplicate": {
+            "$ref": "#/components/schemas/KitDuplicateOut"
+          },
+          "hold": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitHoldOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "instructions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Instructions",
+            "type": "array"
+          },
+          "job": {
+            "$ref": "#/components/schemas/KitJobOut"
+          },
+          "kit": {
+            "$ref": "#/components/schemas/KitIdOut"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/KitMissingOut"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "title": "Settings",
+            "type": "object"
+          }
+        },
+        "required": [
+          "kit",
+          "job",
+          "application",
+          "answers",
+          "missing",
+          "settings",
+          "duplicate",
+          "account_site",
+          "autofill",
+          "instructions"
+        ],
+        "title": "ApplicationKitOut",
         "type": "object"
       },
       "ApplicationReceiptExportOut": {
@@ -1577,6 +1736,24 @@
         "title": "AssistantSettingsView",
         "type": "object"
       },
+      "AutofillRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "allow",
+              "deny"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "AutofillRequest",
+        "type": "object"
+      },
       "Body_clear_profile_section_api_profile_clear_post": {
         "properties": {
           "section": {
@@ -2268,6 +2445,100 @@
         "title": "ContactOutreachOut",
         "type": "object"
       },
+      "ControlsAutofillOut": {
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By"
+          },
+          "mode": {
+            "enum": [
+              "allow",
+              "deny",
+              "unset"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "where": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Where"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "ControlsAutofillOut",
+        "type": "object"
+      },
+      "ControlsCvOut": {
+        "properties": {
+          "approved": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitSeenOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "seen": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitSeenOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "version",
+          "sha256"
+        ],
+        "title": "ControlsCvOut",
+        "type": "object"
+      },
       "CreateAskRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2329,6 +2600,24 @@
           "name"
         ],
         "title": "CreateTokenRequest",
+        "type": "object"
+      },
+      "CvSeenRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Id"
+          }
+        },
+        "title": "CvSeenRequest",
         "type": "object"
       },
       "EmailChangeRequest": {
@@ -3175,6 +3464,530 @@
           "resume"
         ],
         "title": "JsonResumeResponse",
+        "type": "object"
+      },
+      "KitAccountSiteOut": {
+        "properties": {
+          "host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "known_account": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitKnownAccountOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "likely_needs_account": {
+            "title": "Likely Needs Account",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "likely_needs_account"
+        ],
+        "title": "KitAccountSiteOut",
+        "type": "object"
+      },
+      "KitAnswerOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "saved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved At"
+          },
+          "source": {
+            "enum": [
+              "memory",
+              "profile",
+              "approved_text"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "value",
+          "source"
+        ],
+        "title": "KitAnswerOut",
+        "type": "object"
+      },
+      "KitAnswersOut": {
+        "properties": {
+          "approved_text": {
+            "items": {
+              "$ref": "#/components/schemas/KitAnswerOut"
+            },
+            "title": "Approved Text",
+            "type": "array"
+          },
+          "contact": {
+            "items": {
+              "$ref": "#/components/schemas/KitAnswerOut"
+            },
+            "title": "Contact",
+            "type": "array"
+          },
+          "equality": {
+            "items": {
+              "$ref": "#/components/schemas/KitAnswerOut"
+            },
+            "title": "Equality",
+            "type": "array"
+          },
+          "languages": {
+            "items": {
+              "$ref": "#/components/schemas/KitAnswerOut"
+            },
+            "title": "Languages",
+            "type": "array"
+          },
+          "logistics": {
+            "items": {
+              "$ref": "#/components/schemas/KitAnswerOut"
+            },
+            "title": "Logistics",
+            "type": "array"
+          },
+          "right_to_work": {
+            "items": {
+              "$ref": "#/components/schemas/KitAnswerOut"
+            },
+            "title": "Right To Work",
+            "type": "array"
+          },
+          "salary": {
+            "items": {
+              "$ref": "#/components/schemas/KitAnswerOut"
+            },
+            "title": "Salary",
+            "type": "array"
+          }
+        },
+        "title": "KitAnswersOut",
+        "type": "object"
+      },
+      "KitApplicationOut": {
+        "properties": {
+          "follow_up_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Up On"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "submit_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submit Override"
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "KitApplicationOut",
+        "type": "object"
+      },
+      "KitDocumentOut": {
+        "properties": {
+          "approved": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitSeenOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "chars": {
+            "title": "Chars",
+            "type": "integer"
+          },
+          "file": {
+            "$ref": "#/components/schemas/KitFileOut"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "seen": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitSeenOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "version",
+          "label",
+          "text",
+          "sha256",
+          "chars",
+          "file"
+        ],
+        "title": "KitDocumentOut",
+        "type": "object"
+      },
+      "KitDuplicateOut": {
+        "properties": {
+          "cleared": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitSeenOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "flag": {
+            "title": "Flag",
+            "type": "string"
+          },
+          "same_company_30d": {
+            "title": "Same Company 30D",
+            "type": "integer"
+          },
+          "same_job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitSameJobOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "same_company_30d",
+          "flag"
+        ],
+        "title": "KitDuplicateOut",
+        "type": "object"
+      },
+      "KitFileOut": {
+        "description": "A short-lived download link. The token is in ``url`` and exists nowhere else.",
+        "properties": {
+          "downloads_left": {
+            "title": "Downloads Left",
+            "type": "integer"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "mime": {
+            "title": "Mime",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "expires_at",
+          "downloads_left",
+          "filename",
+          "mime",
+          "size"
+        ],
+        "title": "KitFileOut",
+        "type": "object"
+      },
+      "KitHoldOut": {
+        "properties": {
+          "held_by": {
+            "title": "Held By",
+            "type": "string"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "until": {
+            "title": "Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "held_by",
+          "since",
+          "until"
+        ],
+        "title": "KitHoldOut",
+        "type": "object"
+      },
+      "KitIdOut": {
+        "properties": {
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sha256",
+          "generated_at"
+        ],
+        "title": "KitIdOut",
+        "type": "object"
+      },
+      "KitJobOut": {
+        "properties": {
+          "apply_url": {
+            "title": "Apply Url",
+            "type": "string"
+          },
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "found_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Found On"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "remote": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "company",
+          "location",
+          "apply_url"
+        ],
+        "title": "KitJobOut",
+        "type": "object"
+      },
+      "KitKnownAccountOut": {
+        "properties": {
+          "recorded_at": {
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "recorded_by": {
+            "title": "Recorded By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recorded_by",
+          "recorded_at"
+        ],
+        "title": "KitKnownAccountOut",
+        "type": "object"
+      },
+      "KitMissingOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "why"
+        ],
+        "title": "KitMissingOut",
+        "type": "object"
+      },
+      "KitSameJobOut": {
+        "properties": {
+          "application_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application Id"
+          },
+          "applied_at": {
+            "title": "Applied At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "applied_at"
+        ],
+        "title": "KitSameJobOut",
+        "type": "object"
+      },
+      "KitSeenOut": {
+        "description": "Who saw / approved a document, where (web | chat) and when.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "where": {
+            "title": "Where",
+            "type": "string"
+          }
+        },
+        "required": [
+          "by",
+          "where",
+          "at"
+        ],
+        "title": "KitSeenOut",
         "type": "object"
       },
       "LessonOut": {
@@ -4398,8 +5211,29 @@
             "title": "Job Title",
             "type": "string"
           },
+          "kit_event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kit Event Id"
+          },
+          "kit_sha256": {
+            "default": "",
+            "title": "Kit Sha256",
+            "type": "string"
+          },
           "note": {
             "title": "Note",
+            "type": "string"
+          },
+          "possible_duplicate": {
+            "default": "",
+            "title": "Possible Duplicate",
             "type": "string"
           },
           "profile_version": {
@@ -4733,6 +5567,11 @@
           "event_id": {
             "title": "Event Id",
             "type": "integer"
+          },
+          "possible_duplicate": {
+            "default": "",
+            "title": "Possible Duplicate",
+            "type": "string"
           },
           "receipt_id": {
             "title": "Receipt Id",
@@ -7896,6 +8735,91 @@
         ]
       }
     },
+    "/api/applications/{application_id}/autofill": {
+      "post": {
+        "description": "\"Autofill\" / \"Don't autofill\" - may the assistant type into this form at\nall. Latest wins; unset means the assistant follows its own app permission.",
+        "operationId": "set_autofill_api_applications__application_id__autofill_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutofillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationControlsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Autofill",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/applications/{application_id}/contacts": {
       "post": {
         "description": "201 for a new contact, 200 (``already_existed: true``) for the same\nemail seen again on this application (R2) \u2014 the status code is set\ndynamically since the same call can legitimately answer either.",
@@ -7986,6 +8910,241 @@
           }
         },
         "summary": "Add Contact",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/controls": {
+      "get": {
+        "description": "What the four buttons on the application page show: is the latest CV seen /\napproved (who, where, when), did the user say don't send, the autofill choice,\nand the duplicate warning. Read-only.",
+        "operationId": "get_application_controls_api_applications__application_id__controls_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationControlsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Application Controls",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/cv-seen": {
+      "post": {
+        "description": "\"I've checked this CV\" - the user's own click records ``cv_seen`` (where=web)\nfor the latest CV, once per version. Session only; no MCP twin.",
+        "operationId": "mark_cv_seen_api_applications__application_id__cv_seen_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CvSeenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationControlsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Cv Seen",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/duplicate/clear": {
+      "post": {
+        "description": "\"Not a duplicate, go ahead\" - clears the duplicate-job ask and the unattended\nduplicate stop for THIS application. Web only.",
+        "operationId": "clear_duplicate_api_applications__application_id__duplicate_clear_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationControlsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Duplicate",
         "tags": [
           "applications"
         ]
@@ -8244,6 +9403,81 @@
         ]
       }
     },
+    "/api/applications/{application_id}/kit": {
+      "get": {
+        "description": "The application kit (S3): the CV and cover letter of THIS application, every\nstored answer with its source, what is missing for the job's country, fresh\n30-minute file links, the duplicate / hold / account-site / autofill state and\nthe gate's preview. Writes one ``kit_read`` event (the timeline shows who read\nit and when) and one link row per document; the file tokens appear only in this\nresponse. 404 for an application that is not the caller's; 429 over the\nhourly cap. ``Cache-Control: no-store``.",
+        "operationId": "get_application_kit_api_applications__application_id__kit_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationKitOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Application Kit",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/applications/{application_id}/receipt": {
       "post": {
         "operationId": "record_application_receipt_api_applications__application_id__receipt_post",
@@ -8323,6 +9557,156 @@
           }
         },
         "summary": "Record Application Receipt",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/send/approve": {
+      "post": {
+        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching. Clears an earlier\n\"don't send\".",
+        "operationId": "approve_send_api_applications__application_id__send_approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationControlsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Send",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/send/decline": {
+      "post": {
+        "description": "\"Don't send\" - the gate answers ``stop`` / ``user_declined`` until a later\n\"Send this one\".",
+        "operationId": "decline_send_api_applications__application_id__send_decline_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationControlsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decline Send",
         "tags": [
           "applications"
         ]
@@ -10375,6 +11759,47 @@
         "summary": "Record Outreach",
         "tags": [
           "applications"
+        ]
+      }
+    },
+    "/api/files/{token}": {
+      "get": {
+        "description": "Serve one kit file. See the module docstring for the rules.",
+        "operationId": "download_file_api_files__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download File",
+        "tags": [
+          "files"
         ]
       }
     },

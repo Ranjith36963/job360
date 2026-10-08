@@ -327,12 +327,26 @@ class SubmitCounts:
 
 @dataclass(frozen=True)
 class SubmitFacts:
-    """The application's own facts: its status, whether a receipt exists, and the
-    per-job override (``confirm`` | ``auto_when_sure`` | ``None``)."""
+    """The application's own facts: its status, whether a receipt exists, the
+    per-job override (``confirm`` | ``auto_when_sure`` | ``None``), and the S3
+    kit facts (``kit.gate_facts`` loads them):
+
+    * ``duplicate_job`` - the same job was already applied to (and the user has
+      not said "not a duplicate, go ahead");
+    * ``cv_seen`` - the user saw the latest CV (web click / download, or an OK
+      in chat);
+    * ``approved`` - a stored ``submit_approved`` matches the latest CV
+      (artifact id + hash); a CV edit makes it stop matching;
+    * ``declined`` - the user's newest word on this application is "don't send".
+    """
 
     status: str
     has_receipt: bool
     submit_override: Optional[str]
+    duplicate_job: bool = False
+    cv_seen: bool = False
+    approved: bool = False
+    declined: bool = False
 
 
 @dataclass(frozen=True)
@@ -347,8 +361,9 @@ class SubmitDecision:
 
 
 REASONS: tuple[str, ...] = (
-    "paused", "already_applied", "daily_cap_reached", "unknown_site", "ask_always_site",
-    "job_override_confirm", "submit_mode_confirm", "practice_run", "auto_when_sure",
+    "paused", "already_applied", "user_declined", "daily_cap_reached", "duplicate_job", "unknown_site",
+    "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
+    "user_approved", "auto_when_sure",
 )
 
 
@@ -409,21 +424,65 @@ def may_submit(
 
     1. paused -> stop ``paused``
     2. receipt exists, or status is not ``considering`` -> stop ``already_applied``
-    3. daily cap reached -> stop ``daily_cap_reached``
-    4. site unknown -> ask ``unknown_site``
-    5. Indeed / LinkedIn style site -> ask ``ask_always_site``
-    6. the mode (the job's override, else ``submit_mode``) is ``confirm`` -> ask
-    7. first application since auto-submit was turned on -> ask ``practice_run``
-    8. otherwise -> submit ``auto_when_sure``
+    3. the user said "don't send" (newer than any yes) -> stop ``user_declined``
+    4. daily cap reached -> stop ``daily_cap_reached``
+    5. same job already applied to -> ``duplicate_job``: STOP when the mode is
+       auto (nobody is watching), else ask
+    6. site unknown -> ask ``unknown_site``
+    7. Indeed / LinkedIn style site -> ask ``ask_always_site``
+    8. the mode (the job's override, else ``submit_mode``) is ``confirm`` -> ask
+    9. auto, but the user has not seen the latest CV -> ask ``cv_not_seen``
+    10. first application since auto-submit was turned on -> ask ``practice_run``
+    11. otherwise -> submit ``auto_when_sure``
+
+    A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (even
+    Indeed / LinkedIn and the practice run) and answers ``submit`` /
+    ``user_approved``. Rules 1-4 and the auto-mode duplicate stop are NEVER
+    cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
         return SubmitDecision("stop", "paused", "Applications are paused. Do not submit anything.")
     if application.has_receipt or application.status != "considering":
         return SubmitDecision("stop", "already_applied", "This application is already applied or closed.")
+    if application.declined:
+        return SubmitDecision(
+            "stop", "user_declined", "The user said not to send this application. Do not submit it."
+        )
     if cfg.daily_cap is not None and counts.submitted_today >= cfg.daily_cap:
         return SubmitDecision("stop", "daily_cap_reached", "The daily limit of applications is reached. Try tomorrow.")
-    host = parse_site_host(site_host)
-    kind = host_kind(host)
+    override = application.submit_override if application.submit_override in VALID_SUBMIT_MODES else None
+    mode = override or cfg.submit_mode
+    auto = mode == AUTO_SUBMIT_MODE
+    if application.duplicate_job and auto:
+        return SubmitDecision(
+            "stop", "duplicate_job",
+            "Needs you: possible duplicate - this job was already applied to. Do not submit; the user decides.",
+        )
+    ask = _first_ask(application, site_host, counts, override=override, auto=auto)
+    if ask is None:
+        return SubmitDecision("submit", "auto_when_sure", "Auto-submit is on and this site allows it. You may submit.")
+    if application.approved:
+        return SubmitDecision(
+            "submit", "user_approved", "The user said yes to sending this application with this CV. You may submit."
+        )
+    return ask
+
+
+def _first_ask(
+    application: SubmitFacts,
+    site_host: Optional[str],
+    counts: SubmitCounts,
+    *,
+    override: Optional[str],
+    auto: bool,
+) -> Optional[SubmitDecision]:
+    """The first reason to ASK, in rule order, or ``None`` when nothing asks."""
+    if application.duplicate_job:
+        return SubmitDecision(
+            "ask", "duplicate_job",
+            "Possible duplicate: this job was already applied to. Fill the form, stop before submit and ask yes.",
+        )
+    kind = host_kind(parse_site_host(site_host))
     if kind == "invalid":
         return SubmitDecision(
             "ask", "unknown_site", "The site could not be read. Fill the form, stop before submit and ask yes."
@@ -433,9 +492,7 @@ def may_submit(
             "ask", "ask_always_site",
             "This site does not allow automatic applying. Fill the form, stop before submit and ask yes.",
         )
-    override = application.submit_override if application.submit_override in VALID_SUBMIT_MODES else None
-    mode = override or cfg.submit_mode
-    if mode != AUTO_SUBMIT_MODE:
+    if not auto:
         if override is not None:
             return SubmitDecision(
                 "ask", "job_override_confirm",
@@ -444,13 +501,18 @@ def may_submit(
         return SubmitDecision(
             "ask", "submit_mode_confirm", "Submit mode is confirm. Fill the form, stop before submit and ask yes."
         )
+    if not (application.cv_seen or application.approved):
+        return SubmitDecision(
+            "ask", "cv_not_seen",
+            "The user has not seen the latest CV. Show it, get the user's OK, then fill the form and ask yes.",
+        )
     if counts.applied_since_auto_on == 0:
         return SubmitDecision(
             "ask", "practice_run",
             "First application since auto-submit was turned on: a practice run. "
             "Fill the form, stop before submit and let the user check it.",
         )
-    return SubmitDecision("submit", "auto_when_sure", "Auto-submit is on and this site allows it. You may submit.")
+    return None
 
 
 # ── Loaders (the only I/O here) ──────────────────────────────────────────────

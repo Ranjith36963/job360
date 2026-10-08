@@ -882,6 +882,49 @@ export async function recordApplicationReceipt(
   });
 }
 
+// ── S3 application kit: the four human-in-the-loop buttons ────────────────────
+// Every one is a signed-in WEB action (the server refuses a token / OAuth caller).
+
+/** Who / where (web | chat) / when for a decision on an application. */
+export type DecisionMark = _Schemas["KitSeenOut"];
+/** What the four buttons show: CV seen / approved, don't-send, autofill, duplicate. */
+export type ApplicationControls = _Schemas["ApplicationControlsOut"];
+
+export async function getApplicationControls(applicationId: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/controls`);
+}
+
+/** "I've checked this CV" - marks the latest CV seen (where=web). */
+export async function markCvSeen(applicationId: number, artifactId?: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/cv-seen`, {
+    method: "POST",
+    body: JSON.stringify(artifactId == null ? {} : { artifact_id: artifactId }),
+  });
+}
+
+/** "Send this one" - the user says yes to sending with the latest CV. */
+export async function approveSend(applicationId: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/send/approve`, { method: "POST" });
+}
+
+/** "Don't send" - the gate stops until a later "Send this one". */
+export async function declineSend(applicationId: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/send/decline`, { method: "POST" });
+}
+
+/** "Autofill" / "Don't autofill" - may the assistant type into this form. */
+export async function setAutofill(applicationId: number, mode: "allow" | "deny"): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/autofill`, {
+    method: "POST",
+    body: JSON.stringify({ mode }),
+  });
+}
+
+/** "Not a duplicate, go ahead" - clears the duplicate warning for this application. */
+export async function clearDuplicate(applicationId: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/duplicate/clear`, { method: "POST" });
+}
+
 export type WhatsNewResponse = _Schemas["WhatsNewResponse"];
 export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
 export type StatsResponse = _Schemas["StatsResponse"];

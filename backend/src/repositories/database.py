@@ -725,7 +725,7 @@ class JobDatabase:
         "api_tokens", "application_artifacts", "application_asks", "application_contacts",
         "application_events",
         "application_receipts", "application_stage_history", "applications",
-        "assistant_setting_requests", "contact_edits",
+        "artifact_links", "assistant_setting_requests", "contact_edits",
         "contact_outreach", "email_verifications",
         "oauth_grants",
         "password_resets", "profile_edits", "sessions", "tailored_documents", "tailored_usage",

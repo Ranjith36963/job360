@@ -35,6 +35,7 @@ from src.api.routes import (
     auth,
     bring,
     client_log,
+    files,
     health,
     oauth,
     profile,
@@ -48,7 +49,7 @@ from src.core import settings
 from src.core.settings import LOG_LEVEL, validate_required_env
 from src.repositories import pg, pool
 from src.services.auth.sessions import drain_session_touches
-from src.utils.logger import setup_audit_logger, setup_logging
+from src.utils.logger import AccessPathRedactFilter, setup_audit_logger, setup_logging
 from src.utils.loop_guard import start_loop_watchdog
 
 
@@ -116,6 +117,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging(LOG_LEVEL)
     setup_audit_logger()
     logging.getLogger().setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+    # S3 - a file-link token rides in /api/files/<token>; keep it out of uvicorn's own access line.
+    _uvicorn_access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, AccessPathRedactFilter) for f in _uvicorn_access.filters):
+        _uvicorn_access.addFilter(AccessPathRedactFilter())
     # Fail fast in production when required env vars are absent (no-op in dev).
     validate_required_env()
     # OAuth R1: the discovery documents advertise SITE_BASE_URL as the issuer.
@@ -215,6 +220,7 @@ app.include_router(profile.router, prefix="/api")
 app.include_router(bring.router, prefix="/api")
 app.include_router(receipts.router, prefix="/api")
 app.include_router(applications.router, prefix="/api")
+app.include_router(files.router, prefix="/api")  # PUBLIC token download for application-kit file links (S3)
 # /run 360 recipes — the playbooks a connected assistant follows (owner plan 2026-10-01)
 app.include_router(recipes.router, prefix="/api")
 app.include_router(asks.router, prefix="/api")  # "Needs you" queue (owner plan 2026-10-01)

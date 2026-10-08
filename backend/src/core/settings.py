@@ -290,6 +290,11 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # (payload {"submit_mode": "confirm" | "auto_when_sure" | "inherit"}). A NOTE
     # event: it never moves the status. Latest one wins (spine.submit_override).
     "submit_mode_set",
+    # Owner decision 2026-10-08 (S3, application kit) - the human-in-the-loop
+    # trail. All note-family, none moves the status. Payload shapes and who may
+    # write each are checked in the record_event ROUTE (applications._check_kit_event).
+    "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
+    "form_filled", "hold_released", "site_account", "account_needed",
 )
 # Env-added types are non-status only — a status type also needs an R4
 # mapping entry, which an env var cannot supply.
@@ -610,6 +615,35 @@ ASSISTANT_SETTING_REQUESTS_MAX_PER_HOUR = int(os.getenv("ASSISTANT_SETTING_REQUE
 # linkedin.com, lnkd.in all hit; notindeed.com does not). Over-blocking only
 # asks, so a loose match is the safe direction. Owner: Indeed bans automated apply.
 SUBMIT_ASK_ALWAYS_BRANDS = _env_list("SUBMIT_ASK_ALWAYS_BRANDS", ("indeed", "linkedin", "lnkd"))
+# ── S3 application kit (owner decisions 2026-10-08). Every number a parameter. ──
+# A file link the kit hands out: how long it lives and how often it downloads.
+KIT_LINK_TTL_MINUTES = int(os.getenv("KIT_LINK_TTL_MINUTES", "30"))
+KIT_LINK_MAX_DOWNLOADS = int(os.getenv("KIT_LINK_MAX_DOWNLOADS", "3"))
+# Kit reads one user may make per hour (each mints links + writes an event).
+KIT_READS_MAX_PER_HOUR = int(os.getenv("KIT_READS_MAX_PER_HOUR", "60"))
+# Public /api/files/{token}: downloads per link OWNER per minute (not per IP:
+# behind the Next rewrite every caller may share one address), and bad tokens
+# per IP per minute before that IP's bad tokens are refused (a valid link is
+# never locked out).
+FILE_DOWNLOADS_MAX_PER_MIN = int(os.getenv("FILE_DOWNLOADS_MAX_PER_MIN", "30"))
+FILE_BAD_TOKEN_MAX_PER_MIN = int(os.getenv("FILE_BAD_TOKEN_MAX_PER_MIN", "20"))
+# "Another assistant is on this application": a kit read by someone else this
+# recently warns (never blocks).
+KIT_HOLD_MINUTES = int(os.getenv("KIT_HOLD_MINUTES", "30"))
+# A second application at the same company inside this window is flagged.
+DUPLICATE_COMPANY_WINDOW_DAYS = int(os.getenv("DUPLICATE_COMPANY_WINDOW_DAYS", "30"))
+# Hosts that need an account before you can apply (seed list; the user's own
+# `account_needed` events add more). Registrable-domain match, subdomains included.
+ACCOUNT_REQUIRED_HOST_SUFFIXES = _env_list(
+    "ACCOUNT_REQUIRED_HOST_SUFFIXES",
+    (
+        "myworkdayjobs.com", "myworkdaysite.com", "taleo.net", "icims.com",
+        "successfactors.com", "successfactors.eu",
+    ),
+)
+# Most fields a `form_filled` event may claim.
+KIT_FORM_FIELDS_MAX = int(os.getenv("KIT_FORM_FIELDS_MAX", "500"))
+
 # GET /profile/edits/history — how many rows of one field's history come back
 # (newest first). The export carries the full log.
 PROFILE_EDIT_HISTORY_MAX = int(os.getenv("PROFILE_EDIT_HISTORY_MAX", "50"))

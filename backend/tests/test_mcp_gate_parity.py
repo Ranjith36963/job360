@@ -92,6 +92,8 @@ TOOL_ROUTES = {
     "update_job": ("applications", "update_job_facts", {"application_id": 987654321, "country": "FR"}),
     # The one submit gate (owner decision 2026-10-08, S2) - require_user, read-only.
     "check_submit": ("applications", "submit_check", {"application_id": 987654321, "form_url": ""}),
+    # The application kit (owner decision 2026-10-08, S3) - require_user, no email gate.
+    "get_application_kit": ("applications", "get_application_kit", {"application_id": 987654321}),
 }
 
 

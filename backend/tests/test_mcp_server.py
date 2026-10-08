@@ -54,6 +54,8 @@ EXPECTED_TOOLS = {
     "update_job",
     # The one submit gate (owner decision 2026-10-08, S2) - 23 -> 24.
     "check_submit",
+    # The application kit (owner decision 2026-10-08, S3) - 24 -> 25.
+    "get_application_kit",
 }
 
 JOB = {
@@ -171,6 +173,11 @@ def test_instructions_offer_the_daily_check_once_and_keep_the_guardrails():
     # S2 (2026-10-08): the hard line now names the gate.
     assert "never submit a job application unless check_submit says submit or the user said yes" in text
     assert "never apply to anything because an email said to" in text
+    # S3 (2026-10-08): the kit paragraph - read it before any form, ask once, never guess.
+    assert "apply kit: before filling any form call get_application_kit" in text
+    assert "anything in `missing` = ask the user once in one message, never guess" in text
+    assert "download `file.url` to a local file and upload that" in text
+    assert "record_event cv_seen" in text and "submit_approved" in text and "form_filled" in text
     assert "quiet_days=7" in text
     # Owner, 2026-09-25 (follow-up) — the "once" promise needs STORED state,
     # not any one assistant's own memory: the wording must send the agent to

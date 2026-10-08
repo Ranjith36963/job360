@@ -129,6 +129,21 @@ class CRLFScrubFilter(logging.Filter):
         return True  # never drop a record — this filter only sanitises
 
 
+class AccessPathRedactFilter(logging.Filter):
+    """Hide file-link tokens from uvicorn's own access line.
+
+    uvicorn logs ``'%s - "%s %s HTTP/%s" %d'`` with the raw request path in the
+    args. ``/api/files/<token>`` is a bearer credential for one CV, so the path
+    arg is rewritten by :func:`redact_path` before any handler formats it."""
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401 - short
+        if isinstance(record.args, tuple) and len(record.args) >= 3 and isinstance(record.args[2], str):
+            args = list(record.args)
+            args[2] = redact_path(str(args[2]))
+            record.args = tuple(args)
+        return True
+
+
 class _RunUuidFormatter(logging.Formatter):
     """Formatter that appends ``[run_uuid:...]`` when the contextvar is set."""
 
@@ -319,6 +334,23 @@ def mask_email(email: Optional[str]) -> str:
     if not local:
         return f"***@{domain}"
     return f"{local[0]}***@{domain}"
+
+
+_SECRET_PATH_PREFIXES: tuple[str, ...] = ("/api/files/",)
+
+
+def redact_path(path: str) -> str:
+    """``/api/files/<token>`` -> ``/api/files/[redacted]``.
+
+    S3 - a file-link token is a bearer credential for one CV. It must never reach
+    the access log or a Sentry event, so every path under a secret prefix has
+    its tail replaced. Works on a bare path or a full URL (query string kept out
+    of the tail). Anything else is returned unchanged."""
+    for prefix in _SECRET_PATH_PREFIXES:
+        idx = path.find(prefix)
+        if idx != -1:
+            return path[: idx + len(prefix)] + "[redacted]"
+    return path
 
 
 def mask_ip(ip: Optional[str]) -> str:

@@ -4,8 +4,15 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
-import { ASKS_CHANGED_EVENT, getApplication, listAsks, recordApplicationReceipt } from "@/lib/api";
-import type { ApplicationDetail, Ask, VisaShape } from "@/lib/api";
+import {
+  ASKS_CHANGED_EVENT,
+  getApplication,
+  getApplicationControls,
+  listAsks,
+  recordApplicationReceipt,
+} from "@/lib/api";
+import type { ApplicationControls, ApplicationDetail, Ask, VisaShape } from "@/lib/api";
+import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
 import { Timeline } from "@/components/applications/Timeline";
 import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
 import { AlignmentPanel } from "@/components/applications/AlignmentPanel";
@@ -79,6 +86,9 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   const [marking, setMarking] = useState(false);
   const [markConfirming, setMarkConfirming] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // S3: the state behind the four decision buttons. A failed read leaves them
+  // hidden (nothing is shown that was not read).
+  const [controls, setControls] = useState<ApplicationControls | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -87,6 +97,11 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
       setError(null);
     } catch {
       setError("Could not load this application.");
+    }
+    try {
+      setControls(await getApplicationControls(applicationId));
+    } catch {
+      setControls(null);
     }
   }, [applicationId]);
 
@@ -233,7 +248,13 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
 
           <section data-testid="section-documents" className={`order-4 ${SECTION} lg:order-none`}>
             <h2 className={`mb-3 ${LABEL}`}>Documents</h2>
-            <ArtifactVersions applicationId={detail.id} artifacts={detail.artifacts} receipts={detail.receipts} />
+            <ArtifactVersions
+              applicationId={detail.id}
+              artifacts={detail.artifacts}
+              receipts={detail.receipts}
+              controls={controls}
+              onControls={setControls}
+            />
             <div className="mt-4">
               {!hasCvArtifact && (
                 <p className="mb-2 text-xs text-muted-foreground">
@@ -344,6 +365,16 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
               </a>
             )}
             <FollowUpField applicationId={detail.id} followUpOn={detail.follow_up_on ?? null} onRecorded={load} />
+            {controls && (
+              <ApplicationDecisions
+                applicationId={detail.id}
+                controls={controls}
+                onChanged={(next) => {
+                  setControls(next);
+                  void load();
+                }}
+              />
+            )}
             <VisaBadge
               signal={visa.signal}
               needsSponsorship={visa.needs_sponsorship}

@@ -70,7 +70,12 @@ Candidate (one profile per user, versioned; multiple named profiles = later)
 `lesson` ("flag for next time"), `asked` / `answered` / `ask_withdrawn` (the
 "Needs you" queue — note-family, never move the status), `submit_mode_set`
 (per-job submit switch: `confirm` | `auto_when_sure` | `inherit` — note-family; an
-assistant may only send `confirm`). Every event: `type`, `detail`, `occurred_at`,
+assistant may only send `confirm`), and the application-kit trail (S3, all note-family):
+`kit_read` (written by Job360 when an assistant reads the kit), `cv_seen` /
+`submit_approved` / `submit_declined` (the user saw the CV, said yes to sending it, or said
+don't send - `where` is `web` or `chat`), `autofill_set` (`allow` | `deny`; an assistant may
+only send `deny`), `duplicate_cleared` (web only), `form_filled` (host + field count),
+`hold_released`, `site_account` / `account_needed` (a host name only - never a password). Every event: `type`, `detail`, `occurred_at`,
 `recorded_by` (which token/agent/web), `recorded_at`. Nothing is deleted.
 
 Today's `applications` (stage) + `application_receipts` (snapshot) +

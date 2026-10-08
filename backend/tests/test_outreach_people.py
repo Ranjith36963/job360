@@ -559,7 +559,7 @@ async def test_bug1_mcp_tools_list_has_no_extra_tools(authenticated_async_contex
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             listed = await mcp.list_tools()
-            assert len(listed.tools) == 24  # 23 -> 24: `check_submit` (S2, 2026-10-08)
+            assert len(listed.tools) == 25  # 24 -> 25: `get_application_kit` (S3, 2026-10-08)
 
 
 # ── Bug 2 [P1] — list_people / add_contact ignored contact edits ───────────

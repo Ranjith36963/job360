@@ -11,6 +11,8 @@ import logging
 import os
 from typing import Any
 
+from src.utils.logger import redact_path
+
 logger = logging.getLogger("job360.observability")
 
 # H4 — request headers that must NEVER reach Sentry (credentials / session).
@@ -40,7 +42,12 @@ def _scrub_pii(event: Any, _hint: Any) -> Any:
     """
     try:
         req = event.get("request") if isinstance(event, dict) else None
+        # S3 - a file-link token rides in the URL path; never let it reach Sentry.
+        if isinstance(event, dict) and isinstance(event.get("transaction"), str):
+            event["transaction"] = redact_path(event["transaction"])
         if isinstance(req, dict):
+            if isinstance(req.get("url"), str):
+                req["url"] = redact_path(req["url"])
             headers = req.get("headers")
             if isinstance(headers, dict):
                 for h in [h for h in headers if h.lower() in _SENSITIVE_HEADERS]:
@@ -103,6 +110,9 @@ def init_sentry(*, component: str = "api") -> bool:
         environment=os.environ.get("RAILWAY_ENVIRONMENT") or "production",
         send_default_pii=False,
         before_send=_scrub_pii,
+        # traces_sample_rate > 0 sends TRANSACTION events, which skip before_send;
+        # they carry request.url too (a file-link token rides in the path).
+        before_send_transaction=_scrub_pii,
         traces_sample_rate=0.1,
     )
     sentry_sdk.set_tag("component", component)

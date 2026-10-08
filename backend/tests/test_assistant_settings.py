@@ -64,8 +64,11 @@ def _counts(today: int = 0, since: int = 1) -> rules.SubmitCounts:
     return rules.SubmitCounts(submitted_today=today, applied_since_auto_on=since)
 
 
-def _facts(status: str = "considering", receipt: bool = False, override: str | None = None) -> rules.SubmitFacts:
-    return rules.SubmitFacts(status=status, has_receipt=receipt, submit_override=override)
+def _facts(
+    status: str = "considering", receipt: bool = False, override: str | None = None, *, seen: bool = True, **kit: Any
+) -> rules.SubmitFacts:
+    """S3: auto-submit only sends a CV the user has seen, so the S2 rule tests default to seen."""
+    return rules.SubmitFacts(status=status, has_receipt=receipt, submit_override=override, cv_seen=seen, **kit)
 
 
 AUTO = {"submit_mode": "auto_when_sure"}
@@ -401,6 +404,17 @@ async def _bring(client: AsyncClient, ad: dict[str, Any] = _AD) -> int:
 
 async def _check(client: AsyncClient, app_id: int, url: str = FORM):
     return await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": url})
+
+
+async def _seen(client: AsyncClient, app_id: int) -> None:
+    """S3: auto-submit only sends a CV the user has seen - save one and click
+    "I've checked this CV" (web session)."""
+    saved = await client.post(
+        f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada Lovelace - data engineer."}
+    )
+    assert saved.status_code == 201, saved.text
+    marked = await client.post(f"/api/applications/{app_id}/cv-seen", json={})
+    assert marked.status_code == 201, marked.text
 
 
 async def _apply(client: AsyncClient, app_id: int) -> None:
@@ -774,6 +788,8 @@ async def test_paused_cap_and_already_applied_stop_through_the_api(authenticated
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         first, second = await _bring(client), await _bring(client, _AD_2)
+        await _seen(client, first)
+        await _seen(client, second)
         assert (await _patch(client, _e(SUBMIT, "auto_when_sure"), _e(CAP, 1))).status_code == 200
         assert (await _check(client, first)).json()["reason"] == "practice_run"
         await _apply(client, first)
@@ -794,6 +810,8 @@ async def test_practice_run_is_derived_from_the_first_auto_row_and_ends_after_on
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         a1, a2, a3 = await _bring(client), await _bring(client, _AD_2), await _bring(client, _AD_3)
+        for seen_id in (a1, a2, a3):
+            await _seen(client, seen_id)
         before = (await _view(client))["practice_run"]
         assert before == {"needed": False, "auto_on_since": None}
         assert (await _patch(client, _e(SUBMIT, "auto_when_sure"))).status_code == 200
@@ -818,6 +836,7 @@ async def test_per_job_override_an_assistant_may_only_send_confirm(authenticated
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         app_id = await _bring(client)
+        await _seen(client, app_id)
         token = await _mint_token(client)
         assert (await _patch(client, _e(SUBMIT, "auto_when_sure"))).status_code == 200
         other = await _bring(client, _AD_2)
@@ -854,6 +873,7 @@ async def test_an_override_auto_with_a_global_confirm_gets_its_own_practice_run(
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         a1, a2 = await _bring(client), await _bring(client, _AD_2)
+        await _seen(client, a1)
         url = f"/api/applications/{a1}/events"
         assert (await client.post(url, json={"event_type": "submit_mode_set", "payload": AUTO})).status_code == 201
         assert (await _check(client, a1)).json()["reason"] == "practice_run"
