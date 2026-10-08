@@ -77,20 +77,9 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 
 ## The agent surface (MCP + same REST)
 
-| Tool | Does |
-|---|---|
-| `get_profile` / `update_profile` | structured candidate context; agent may fix or add fields |
-| `bring_job` | link or text → Application (status `considering`) |
-| `get_application` / `list_applications` | full object with events and artifact versions |
-| `save_artifact` | new version of cv / cover_letter / answers / outreach |
-| `save_fit` | agent's verdict + gaps on this application |
-| `add_contact` | recruiter / hiring manager on this application |
-| `record_event` | typed event, free-text detail |
-| `record_application` | the receipt — what was actually sent |
-| `whats_new` | everything since a timestamp (replaces push for now) |
-| `export_history` | applications + events + versions + outcomes as clean JSON |
-| `stats` | cheap counts: reply / interview rate per CV version, per role |
-| `get_tailored_documents` | the newest saved CV / cover letter — **we write neither** (decision 28); the agent writes them and saves them with `save_artifact`, the web renders DOCX / PDF from the saved text |
+Every tool is a `@mcp.tool()` function in `api/mcp_server.py`, and its own
+docstring is the contract the agent reads. The exact set is pinned by
+`backend/tests/test_mcp_server.py::test_tools_list_is_exactly_the_expected_tools`.
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
 `api/routes/well_known.py`), with personal `j360_…` tokens as the CLI fallback.

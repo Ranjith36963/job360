@@ -1,9 +1,6 @@
 # Job360 — Documentation Index
 <!-- doc: LIVING -->
 
-A complete map of every doc under `docs/` (plus the load-bearing docs at the
-repo root). Every link below resolves; nothing is left out.
-
 Pruned 2026-09-12 (slice 8) to the minimum set. The shipped per-slice plans
 (`docs/plans/`) and the ADR folder (`docs/decisions/`) were deleted, not
 archived: a shipped plan describes a decision the code has already made, and a
