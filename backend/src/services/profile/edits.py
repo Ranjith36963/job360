@@ -8,7 +8,9 @@ fall back to what extraction says". ``storage.load_profile`` calls
 web route, the tailor, MCP ``get_profile`` — sees one profile.
 
 The editable set is closed (R9) and validated against the DECLARED dataclass
-fields of ``CVData``/``UserPreferences`` at import (S8): a path naming a
+fields of ``CVData``/``UserPreferences``/``UserInfo``/``AssistantSettings`` at import (S8; the
+``user_info.*`` head is the user-info MEMORY, its own ``user_profiles`` column,
+owner decision 2026-10-08; its record shapes live in ``user_info.py``): a path naming a
 field that does not exist refuses to boot rather than being silently
 accepted. Values are typed by the field's own annotation (R10), not by a
 hand-written table — the two exceptions are ``preferences.work_arrangement``
@@ -38,7 +40,9 @@ from src.services.profile.models import (
     VALID_DAILY_CHECK_VALUES,
     VALID_EXPERIENCE_LEVELS,
     VALID_WORK_ARRANGEMENTS,
+    AssistantSettings,
     CVData,
+    UserInfo,
     UserPreferences,
     UserProfile,
 )
@@ -74,10 +78,13 @@ _editable_paths_cache: tuple[str, ...] | None = None
 
 
 def _declared_fields() -> dict[str, set[str]]:
-    """``{"cv_data": {...field names...}, "preferences": {...}}``."""
+    """``{"cv_data": {...}, "preferences": {...}, "user_info": {...}, "assistant_settings": {...}}``
+    — each value the set of declared field names."""
     return {
         "cv_data": {f.name for f in dataclass_fields(CVData)},
         "preferences": {f.name for f in dataclass_fields(UserPreferences)},
+        "user_info": {f.name for f in dataclass_fields(UserInfo)},
+        "assistant_settings": {f.name for f in dataclass_fields(AssistantSettings)},
     }
 
 
@@ -127,9 +134,27 @@ def _field_type(path: str) -> Any:
     with ``get_origin``/``get_args``.
     """
     head, _, field_name = path.partition(".")
-    cls: type[Any] = CVData if head == "cv_data" else UserPreferences
-    hints = typing.get_type_hints(cls)
+    classes: dict[str, type[Any]] = {
+        "cv_data": CVData, "preferences": UserPreferences, "user_info": UserInfo,
+        "assistant_settings": AssistantSettings,
+    }
+    hints = typing.get_type_hints(classes[head])
     return hints[field_name]
+
+
+def profile_section(profile: UserProfile, head: str) -> Any:
+    """The dataclass a dotted path's head names: ``cv_data`` | ``preferences``
+    | ``user_info`` (the memory) | ``assistant_settings`` (S2). Any other head is a ``KeyError`` — callers
+    only pass heads that passed :func:`editable_paths`."""
+    if head == "cv_data":
+        return profile.cv_data
+    if head == "preferences":
+        return profile.preferences
+    if head == "user_info":
+        return profile.user_info
+    if head == "assistant_settings":
+        return profile.assistant_settings
+    raise KeyError(head)
 
 
 def _validate_string(path: str, value: Any) -> str:
@@ -498,6 +523,27 @@ def validate_edit(path: str, value: Any) -> Any:
         )
     if value is None:
         return None
+    from src.services.profile import assistant_settings, user_info  # noqa: PLC0415 — both import this module
+
+    if path in assistant_settings.SETTING_PATHS:
+        # Owner decision 2026-10-08 (S2): ints / closed sets / a future time /
+        # one plain line — each refusal names the path, never the value.
+        return assistant_settings.validate_setting(path, value)
+    if path in user_info.USER_INFO_PATHS:
+        answers = path == user_info.USER_INFO_ANSWERS_PATH
+        return _bound_encoded_size(
+            path,
+            user_info.validate_user_info(path, value),
+            limit=settings.USER_INFO_ANSWERS_MAX_CHARS if answers else settings.PROFILE_EDIT_MAX_RECORDS_CHARS,
+            setting="USER_INFO_ANSWERS_MAX_CHARS" if answers else "PROFILE_EDIT_MAX_RECORDS_CHARS",
+        )
+    if path == user_info.SALARY_BY_COUNTRY_PATH:
+        return _bound_encoded_size(
+            path,
+            user_info.validate_salary_by_country(path, value),
+            limit=settings.PROFILE_EDIT_MAX_RECORDS_CHARS,
+            setting="PROFILE_EDIT_MAX_RECORDS_CHARS",
+        )
     if path in _CLOSED_SET_PATHS:
         return _validate_closed_set(path, value, _CLOSED_SET_PATHS[path])
     if path in NOTE_PATHS:
@@ -679,8 +725,7 @@ def apply_overlay_rows(profile: UserProfile, rows: list[dict[str, Any]]) -> User
             # profile read over a historical row.
             continue
         head, _, field_name = path.partition(".")
-        target: Any = profile.cv_data if head == "cv_data" else profile.preferences
-        setattr(target, field_name, row["value"])
+        setattr(profile_section(profile, head), field_name, row["value"])
         touched_inference = touched_inference or path in INFERENCE_INPUT_PATHS
     if touched_inference:
         # The stored ``experience_level_inferred`` was computed at extraction
@@ -780,6 +825,5 @@ def field_values(profile: UserProfile, paths: Iterable[str]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for path in paths:
         head, _, field_name = path.partition(".")
-        target: Any = profile.cv_data if head == "cv_data" else profile.preferences
-        out[path] = getattr(target, field_name)
+        out[path] = getattr(profile_section(profile, head), field_name)
     return out

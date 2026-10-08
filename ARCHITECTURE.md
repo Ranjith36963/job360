@@ -82,6 +82,32 @@ row. `grep -rn "normalized_key()" backend/src` for its call sites.
 The fields are the dataclasses `services/profile/models.CVData` and
 `services/profile/models.UserPreferences`. Read them there.
 
+`user_profiles` holds three JSON columns, one store each (owner decision
+2026-10-08, migration 0050): `cv_data`, `preferences` and `user_info` — the
+user-info MEMORY (`models.UserInfo`: contact, right to work, logistics,
+languages, equality answers, approved answers). `save_profile` writes the
+first two and snapshots them into `user_profile_versions`; `user_info` has ONE
+writer, `storage.save_user_info`, and is not in a snapshot, so an upload, a
+re-extraction or a version restore cannot wipe it. The assistant's edits ride
+`profile_edits` on top of all three (`user_info.*` paths; shapes in
+`services/profile/user_info.py`). The salary per hiring country is a normal
+preference, `preferences.salary_by_country`.
+
+A fourth column, `user_profiles.assistant_settings` (owner decision 2026-10-08,
+migration 0051), holds the ASSISTANT SETTINGS (`models.AssistantSettings`: apply
+mode, score line, submit mode, daily cap, pause switch). Same pattern as
+`user_info`: ONE writer, `storage.save_assistant_settings` (only "Clear all"
+resets it), not in a snapshot, values ride `profile_edits` on
+`assistant_settings.*` paths. An assistant's RISKIER change (more freedom;
+`services/profile/assistant_settings.classify_change`) is never written: it is a
+row in `assistant_setting_requests` ("Waiting for your OK") that only the
+signed-in user can confirm (`api/routes/assistant_settings.py`, session-only, no
+MCP twin). `assistant_settings.may_submit` is the one submit gate behind
+`GET /api/applications/{id}/submit-check` and the MCP `check_submit` tool; the
+per-job override is the `submit_mode_set` note event; the practice run is derived,
+never stored. The inbox mode, check frequency and notes keep their
+`preferences.*` paths and are only shown in the settings view.
+
 ### Extraction pipelines
 
 One entry point each — read the function and what it calls:

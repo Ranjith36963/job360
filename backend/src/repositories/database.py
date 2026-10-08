@@ -724,7 +724,8 @@ class JobDatabase:
     _PER_USER_TABLES = (
         "api_tokens", "application_artifacts", "application_asks", "application_contacts",
         "application_events",
-        "application_receipts", "application_stage_history", "applications", "contact_edits",
+        "application_receipts", "application_stage_history", "applications",
+        "assistant_setting_requests", "contact_edits",
         "contact_outreach", "email_verifications",
         "oauth_grants",
         "password_resets", "profile_edits", "sessions", "tailored_documents", "tailored_usage",
@@ -744,8 +745,8 @@ class JobDatabase:
     _EXPORT_TABLES = (
         "api_tokens", "application_artifacts", "application_asks", "application_contacts",
         "application_events",
-        "application_receipts", "applications", "application_stage_history", "audit_log",
-        "contact_edits", "contact_outreach",
+        "application_receipts", "applications", "application_stage_history", "assistant_setting_requests",
+        "audit_log", "contact_edits", "contact_outreach",
         "oauth_grants", "profile_edits", "tailored_documents",
         "tailored_usage",
         "user_profile_versions", "user_profiles",

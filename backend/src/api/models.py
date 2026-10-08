@@ -207,6 +207,54 @@ class LessonOut(BaseModel):
     recorded_by: str
 
 
+class SettingRequestOut(BaseModel):
+    """One RISKIER setting change an assistant asked for and the user has not
+    yet confirmed (S2, owner decision 2026-10-08). Nothing is applied until the
+    signed-in user confirms it on the Job360 website."""
+
+    id: int
+    path: str
+    value: Any = None
+    requested_by: str
+    requested_at: str
+    expires_at: str
+    status: str = "waiting"
+
+
+class SettingFieldOut(BaseModel):
+    """One assistant setting: ``value`` as chosen ("" / null = not chosen),
+    ``effective`` with the safe default filled in."""
+
+    value: Any = None
+    effective: Any = None
+
+
+class PracticeRunOut(BaseModel):
+    needed: bool
+    auto_on_since: Optional[str] = None
+
+
+class AssistantSettingsView(BaseModel):
+    """The assistant settings, as the web and MCP ``get_profile`` read them.
+
+    ``inbox_mode`` / ``check_every`` / ``notes`` are an ALIAS of
+    ``preferences.daily_check`` / ``check_every`` / ``assistant_notes`` — shown
+    here, still edited at those paths."""
+
+    apply_mode: SettingFieldOut
+    apply_min_score: SettingFieldOut
+    submit_mode: SettingFieldOut
+    daily_cap: SettingFieldOut
+    paused_until: SettingFieldOut
+    pause_reason: SettingFieldOut
+    paused: bool
+    inbox_mode: str = ""
+    check_every: str = ""
+    notes: list[str] = []
+    practice_run: PracticeRunOut
+    waiting: list[SettingRequestOut] = []
+
+
 class ProfileResponse(BaseModel):
     summary: ProfileSummary
     preferences: dict[Any, Any]
@@ -268,6 +316,16 @@ class ProfileResponse(BaseModel):
     # the profile sees them BEFORE it tailors the next CV. The full list is
     # `GET /applications/lessons`.
     lessons: list[LessonOut] = []
+    # Owner decision 2026-10-08 — USER INFO MEMORY (contact, right_to_work,
+    # logistics, languages, equality, answers): the facts job forms ask, merged
+    # with the assistant's overlay. Its own store, not part of `preferences`.
+    # Empty = nothing answered (rule #29).
+    user_info: dict[str, Any] = {}
+    # Owner decision 2026-10-08 (S2) — ASSISTANT SETTINGS (apply mode, score
+    # line, submit mode, daily cap, pause switch) with the safe defaults filled
+    # in, the practice-run state and the riskier changes WAITING for the user's
+    # click. None only on a response built without the settings read.
+    assistant_settings: Optional[AssistantSettingsView] = None
 
 
 class LessonsResponse(BaseModel):

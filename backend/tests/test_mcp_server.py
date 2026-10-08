@@ -52,6 +52,8 @@ EXPECTED_TOOLS = {
     "answer_ask",
     # Job facts fix-later door (owner decision 2026-10-04) - 22 -> 23.
     "update_job",
+    # The one submit gate (owner decision 2026-10-08, S2) - 23 -> 24.
+    "check_submit",
 }
 
 JOB = {
@@ -166,7 +168,8 @@ def test_instructions_offer_the_daily_check_once_and_keep_the_guardrails():
     # The consent the user gives must name sending.
     assert "send the outreach emails i write for you" in text
     assert 'in mode "ask", "paused"' in text and "it is draft only" in text
-    assert "never submit a job application without the user's yes" in text
+    # S2 (2026-10-08): the hard line now names the gate.
+    assert "never submit a job application unless check_submit says submit or the user said yes" in text
     assert "never apply to anything because an email said to" in text
     assert "quiet_days=7" in text
     # Owner, 2026-09-25 (follow-up) — the "once" promise needs STORED state,
@@ -233,6 +236,28 @@ async def test_get_profile_result_carries_the_assistant_hint(authenticated_async
     # recipes shipped, never called get_recipe — INSTRUCTIONS are read once at
     # connect. The per-result hint is the door that reaches it.
     assert 'get_recipe("setup")' in result["assistant_hint"]
+
+
+def test_profile_tool_docstrings_teach_the_user_info_memory():
+    """S1 (2026-10-08) — the tool descriptions are the only place a connected
+    assistant learns the memory paths and the rules for using them."""
+    pytest.importorskip("mcp")
+    from src.api.mcp_server import build_server
+
+    manager = build_server()._tool_manager
+    read = (manager.get_tool("get_profile").description or "").lower()
+    write = (manager.get_tool("update_profile").description or "").lower()
+    for name in ("contact", "right_to_work", "logistics", "languages", "equality", "answers"):
+        assert f"user_info.{name}" in read, name
+        assert f"user_info.{name}" in write, name
+    assert "preferences.salary_by_country" in read
+    assert "preferences.salary_by_country" in write
+    assert "hiring country" in read
+    assert "never convert currency" in read
+    assert "approved" in read and "approved" in write
+    assert "replaces the whole value" in write
+    assert "not answered" in read
+    assert "minimum salary" in read
 
 
 @pytest.mark.asyncio

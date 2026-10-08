@@ -1,41 +1,57 @@
 ---
 name: model-delegation
-description: Use at the start of EVERY task (owner rule, 2026-09-20) — decide which model does which part before doing any of it; the big model manages and reviews, cheaper models implement, test and verify in parallel.
+description: Use at the start of EVERY task (owner rule, 2026-09-20, sharpened 2026-10-08) — decide which model does which part before doing any of it. Fable 5.1 decides, Opus 5.5 does the hard parts, Sonnet 5.5 does most of the work, Haiku reads logs and does clerical sweeps. Name the model on every dispatch.
 ---
 
-<!-- doc: LIVING | last-verified: 2026-09-20 by the owner rule (split every task by model) -->
+<!-- doc: LIVING | last-verified: 2026-10-08 by the owner rule (Fable decides, Opus hard, Sonnet most, Haiku logs) -->
 
-# Model delegation (owner rule — every prompt, not just big ones)
+# Model delegation (owner rule — every prompt, STRICT for the whole build)
 
-The owner said it three times. The lead model (Fable / Opus) is the manager.
-It does not type the repetitive middle. It plans, writes the contract, and
-reviews. Everything else goes down to the cheapest model that can do it
-right the first time.
+The owner said it four times. The lead model is the manager: it plans,
+writes the contract, dispatches, and reviews. It does not type the
+repetitive middle. Every part goes to the right model on the first try.
+
+## The roster (owner, 2026-10-08)
+
+| Model | `model:` value | Use it for | Never for |
+|---|---|---|---|
+| **Fable 5.1** | `fable` | **Decisions**: design calls, product judgement, picking between options, chairing a debate, final sign-off of a slice. | Typing code, greps, polling, log reading (expensive). |
+| **Opus 5.5** | `opus` | **Hard tasks**: schema and migrations, auth and MCP gates, security, the application spine, root cause of a subtle bug, backend contracts, the bug + security review of every diff. | Mechanical edits, frontend boilerplate. |
+| **Sonnet 5.5** | `sonnet` | **Most of the work — use it a lot**: implement from a written contract (routes, components, tests, recipes, docs), browser verification against a checklist, library or web research with sources. | Design calls, security sign-off. |
+| **Haiku 5.5** | `haiku` | **Reading and clerical**: Railway / Sentry / CI logs, grep and rename sweeps, counting, polling a check until it finishes, copying a pattern to N places. | Anything needing judgement. |
+
+API IDs (Anthropic models page, checked 2026-10-08): `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` (Haiku 5.5 released 2026-10-07). If the `haiku` alias still starts Haiku 4.5 in an older Claude Code, update the CLI. Never claim a model does or does not exist from memory — check the models page first.
 
 ## Step 0 — before any tool call, split the task
 
-Write one line per part with the model beside it. Then dispatch in ONE
-message so they run in parallel. Name `model:` on every `Agent` call.
+Write one line per part with the model beside it, then dispatch the
+independent parts in ONE message so they run in parallel. Name `model:` on
+every `Agent` call and every `agent()` in a Workflow; never inherit by
+accident.
 
-| Part of the work | Model | Why |
-|---|---|---|
-| Design call, product judgement, security, root cause of a subtle bug, final review of a worker's diff | **Fable / Opus** | wrong answer is expensive |
-| Implement from a written contract (component, route, migration, test file), update specs, fix what a test says | **Sonnet** | tightly specified, parallelisable |
-| Grep / rename sweeps, log trawling, reading many files for one fact, copying a pattern to N places, running a check list | **Haiku** | clerical |
-| Research a library / spec (Context7, web) and report the API with sources | **Sonnet** (Explore) | cheap, verifiable |
-| Verify in the browser (Playwright / Claude in Chrome) against a checklist | **Sonnet** | mechanical, needs the checklist written by the lead |
+## The build map (S0–S7 in the plan of record)
 
-Rule of thumb: if the lead model would be *typing* for more than a few
-minutes, it should have been a worker.
+| Work | Model |
+|---|---|
+| Decide anything left open, sign off each slice | Fable |
+| Backend contract + data model + migration + MCP/route gates | Opus |
+| Implement the contract (backend code, tests, recipes) | Sonnet |
+| Frontend pages, components, unit tests | Sonnet |
+| Bug review + security review of the diff | Opus |
+| Real-browser verification of the slice | Sonnet |
+| CI logs, Railway deploy logs, Sentry trawl, gate polling | Haiku |
+| Logging audit (find files with no logs) | Haiku finds → Sonnet adds logs → Opus reviews |
 
 ## The contract a worker gets
 
 - The exact files it may touch and the ones it must not (`api-types.ts`,
-  `openapi.json`, docs).
-- Every `data-testid`, heading, message, setting name it must use.
-- The commands to run and that it must paste the pass/fail lines verbatim.
+  `openapi.json`, docs unless named).
+- Every `data-testid`, heading, message and setting name it must use.
+- The commands to run, with the pass/fail lines pasted verbatim.
+- Logging: every new route, tool, job and page logs what happened, for whom
+  (ids, never secrets or personal values), when, and whether it failed.
 - "Do not run git." The lead commits after review.
-- Worktree: a worker that could clash with another worker's files gets
+- A worker that could clash with another worker's files gets
   `isolation: "worktree"`.
 
 ## The review the lead does
@@ -53,6 +69,7 @@ send it one message to finish in the foreground, else take over.
 ## Anti-patterns the owner has called out
 
 - Lead model writing frontend components, test fixtures, spec updates.
-- Lead model running e2e loops and fixing selectors.
+- Lead model running e2e loops, fixing selectors, or polling CI.
+- Fable used for typing, greps or log reading.
 - One worker doing three unrelated parts in sequence.
 - Skipping the split because "it is small" — the split takes one line.

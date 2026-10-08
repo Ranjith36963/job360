@@ -188,6 +188,44 @@ class TestPreferences:
         _apply_preferences(json.dumps({"target_job_titles": ["AI Engineer"]}), profile)
         assert profile.preferences.daily_check == "scheduled"
 
+    def test_apply_preferences_salary_by_country_partial_save(self):
+        """Owner decision 2026-10-08 — salary_by_country is a normal web-owned
+        preference with the partial-save shape: omitted keeps it, [] clears it,
+        a bad record is a 422."""
+        import json
+
+        from fastapi import HTTPException
+
+        from src.api.routes.profile import _apply_preferences
+        from src.services.profile.models import CVData, UserProfile
+
+        record = {"country": "AE", "amount": 25000, "currency": "AED", "period": "month"}
+        profile = UserProfile(cv_data=CVData(), preferences=UserPreferences(salary_by_country=[record]))
+        _apply_preferences(json.dumps({"target_job_titles": ["AI Engineer"]}), profile)
+        assert profile.preferences.salary_by_country == [record]
+        _apply_preferences(json.dumps({"salary_by_country": []}), profile)
+        assert profile.preferences.salary_by_country == []
+        with pytest.raises(HTTPException) as exc:
+            _apply_preferences(json.dumps({"salary_by_country": [{"country": "AE", "amount": 1}]}), profile)
+        assert exc.value.status_code == 422
+
+    def test_apply_preferences_ignores_posted_user_info(self):
+        """The user-info memory is its own store: a posted `user_info` key (or
+        a stray memory key) changes nothing on the profile."""
+        import json
+
+        from src.api.routes.profile import _apply_preferences
+        from src.services.profile.models import CVData, UserInfo, UserProfile
+
+        info = UserInfo(contact={"email": "ada@example.com"})
+        profile = UserProfile(cv_data=CVData(), preferences=UserPreferences(), user_info=info)
+        _apply_preferences(
+            json.dumps({"user_info": {"contact": {"email": "x@y.zz"}}, "user_info_contact": {"email": "x@y.zz"}}),
+            profile,
+        )
+        assert profile.user_info.contact == {"email": "ada@example.com"}
+        assert not hasattr(profile.preferences, "user_info_contact")
+
 
 # -----------------------------------------------------------------------
 # Profile storage — see tests/test_profile_storage.py for per-user

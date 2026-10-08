@@ -33,6 +33,19 @@ VALID_DAILY_CHECK_VALUES: frozenset[str] = frozenset(
 # Owner decision 2026-10-03 — how often the assistant's inbox check runs.
 # "" = not set = once a day (24h; rule #29: empty is silent).
 VALID_CHECK_EVERY_VALUES: frozenset[str] = frozenset({"3h", "6h", "12h", "24h"})
+# Preference fields the web preferences form does not own: written only through
+# the agent-edit overlay, carried forward by a web save, kept by a "Clear
+# preferences" (only "Clear all" resets them).
+OVERLAY_ONLY_PREFERENCE_FIELDS: frozenset[str] = frozenset({"daily_check", "check_every"})
+VALID_WORK_AUTH_STATUSES: frozenset[str] = frozenset(
+    {"citizen", "permanent_resident", "visa", "needs_sponsorship"}
+)
+VALID_LANGUAGE_LEVELS: frozenset[str] = frozenset({"native", "fluent", "professional", "basic"})
+# Owner decision 2026-10-08 (S2) — assistant settings. Closed sets. "" / None on
+# the dataclass = "not chosen" (rule #29); the SAFE default applies:
+# ask_each / 75 / confirm / no cap / not paused (services/profile/assistant_settings.py).
+VALID_APPLY_MODES: frozenset[str] = frozenset({"ask_each", "apply_all", "selective_above_score"})
+VALID_SUBMIT_MODES: frozenset[str] = frozenset({"confirm", "auto_when_sure"})
 
 
 @dataclass
@@ -586,6 +599,12 @@ class UserPreferences:
     # "12h" or "24h"; "" = not set = once a day. Same write/carry-forward rules as
     # `daily_check` (overlay only; kept on a "preferences" clear).
     check_every: str = ""
+    # Owner decision 2026-10-08 — the salary the user wants, one record per
+    # HIRING country: {country (ISO2), amount, currency (ISO 4217), period
+    # ("year" | "month")}. A normal web-owned preference (partial-save shape like
+    # assistant_notes). Never converted, no minimum ever stored. Empty = not set
+    # (rule #29). Shapes: services/profile/user_info.validate_salary_by_country.
+    salary_by_country: list[dict[str, Any]] = field(default_factory=list)
 
     # Values the workplace scorer can actually match. A CLOSED set, because the
     # job side of the comparison (`JobEnrichment.workplace_type`) is an enum —
@@ -623,9 +642,52 @@ class UserPreferences:
 
 
 @dataclass
+class UserInfo:
+    """USER INFO MEMORY (owner decision 2026-10-08) — the facts job forms ask.
+
+    Lives in its own column (``user_profiles.user_info``) with ONE writer,
+    ``storage.save_user_info``; ``save_profile`` never touches it, so no fresh
+    ``UserProfile`` can wipe it. Empty = not answered (rule #29). Shapes:
+    ``services/profile/user_info.py``. Not part of a version snapshot.
+    """
+
+    contact: dict[str, Any] = field(default_factory=dict)
+    right_to_work: dict[str, Any] = field(default_factory=dict)
+    logistics: dict[str, Any] = field(default_factory=dict)
+    languages: list[dict[str, Any]] = field(default_factory=list)
+    equality: dict[str, Any] = field(default_factory=dict)
+    answers: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class AssistantSettings:
+    """ASSISTANT SETTINGS (owner decision 2026-10-08, S2) — how much the user's
+    assistant may do on its own.
+
+    Own column (``user_profiles.assistant_settings``) with ONE writer,
+    ``storage.save_assistant_settings``; ``save_profile`` never touches it. The
+    values the user or the assistant sets ride the ``profile_edits`` overlay.
+    ``""`` / ``None`` = not chosen (rule #29) — the safe default applies, read
+    through ``assistant_settings.effective``. Not part of a version snapshot.
+    The inbox mode, check frequency and standing notes stay where they were
+    (``preferences.daily_check`` / ``check_every`` / ``assistant_notes``) and
+    are only SHOWN here (an alias, not a move).
+    """
+
+    apply_mode: str = ""
+    apply_min_score: Optional[int] = None
+    submit_mode: str = ""
+    daily_cap: Optional[int] = None
+    paused_until: str = ""
+    pause_reason: str = ""
+
+
+@dataclass
 class UserProfile:
     cv_data: CVData = field(default_factory=CVData)
     preferences: UserPreferences = field(default_factory=UserPreferences)
+    user_info: UserInfo = field(default_factory=UserInfo)
+    assistant_settings: AssistantSettings = field(default_factory=AssistantSettings)
 
     @property
     def is_complete(self) -> bool:

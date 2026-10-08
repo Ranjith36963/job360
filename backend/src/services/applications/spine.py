@@ -1233,6 +1233,28 @@ async def write_through_legacy_receipt(
     )
 
 
+async def submit_override(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
+    """The per-job submit switch (owner decision 2026-10-08, S2): the payload of
+    this application's NEWEST ``submit_mode_set`` event — ``"confirm"`` or
+    ``"auto_when_sure"`` — or ``None`` when there is none or it says ``"inherit"``
+    (use the account's ``submit_mode``). Append-only history, latest wins; no
+    column. Scoped by ``user_id`` as well as the application (rule #12)."""
+    cur = await db._db.execute(
+        "SELECT payload FROM application_events "
+        "WHERE application_id = ? AND user_id = ? AND event_type = 'submit_mode_set' "
+        "ORDER BY id DESC LIMIT 1",
+        (application_id, user_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return None
+    try:
+        mode = json.loads(dict(row)["payload"]).get("submit_mode")
+    except (ValueError, AttributeError):
+        return None
+    return mode if mode in ("confirm", "auto_when_sure") else None
+
+
 # ── R11 — get_application / list_applications ────────────────────────────────
 
 
@@ -1899,6 +1921,12 @@ async def export_history(
     # history is already in `profile_edits` under `preferences.assistant_notes`.
     assistant_notes = await _current_assistant_notes(user_id)
     total_bytes += len(json.dumps(assistant_notes).encode("utf-8"))
+    # S2 (owner decision 2026-10-08) — the queue of setting changes the user's
+    # assistants asked for, waiting and decided: part of the user's own record.
+    from src.services.profile import setting_requests  # noqa: PLC0415 — lazy, like current_profile_version_id
+
+    setting_request_rows = await setting_requests.export_rows(db, user_id)
+    total_bytes += len(json.dumps(setting_request_rows, default=str).encode("utf-8"))
 
     # Owner decision, 2026-09-25 — cold contacts (no application) have no
     # home in `applications[].contacts`; this is where the export shows them.
@@ -1935,7 +1963,8 @@ async def export_history(
     result: dict[str, Any] = {
         "applications": out_apps, "truncated": truncated, "bytes": total_bytes,
         "profile_edits": profile_edits, "profile_edits_truncated": edits_truncated,
-        "assistant_notes": assistant_notes, "unlinked_contacts": unlinked_contacts,
+        "assistant_notes": assistant_notes, "assistant_setting_requests": setting_request_rows,
+        "unlinked_contacts": unlinked_contacts,
         "unlinked_contacts_truncated": unlinked_next_after_id is not None,
     }
     if unlinked_next_after_id is not None:

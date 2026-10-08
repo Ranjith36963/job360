@@ -1509,6 +1509,74 @@
         "title": "AskOut",
         "type": "object"
       },
+      "AssistantSettingsView": {
+        "description": "The assistant settings, as the web and MCP ``get_profile`` read them.\n\n``inbox_mode`` / ``check_every`` / ``notes`` are an ALIAS of\n``preferences.daily_check`` / ``check_every`` / ``assistant_notes`` \u2014 shown\nhere, still edited at those paths.",
+        "properties": {
+          "apply_min_score": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "apply_mode": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "check_every": {
+            "default": "",
+            "title": "Check Every",
+            "type": "string"
+          },
+          "daily_cap": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "inbox_mode": {
+            "default": "",
+            "title": "Inbox Mode",
+            "type": "string"
+          },
+          "notes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "pause_reason": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "paused_until": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "practice_run": {
+            "$ref": "#/components/schemas/PracticeRunOut"
+          },
+          "submit_mode": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
+          "waiting": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SettingRequestOut"
+            },
+            "title": "Waiting",
+            "type": "array"
+          }
+        },
+        "required": [
+          "apply_mode",
+          "apply_min_score",
+          "submit_mode",
+          "daily_cap",
+          "paused_until",
+          "pause_reason",
+          "paused",
+          "practice_run"
+        ],
+        "title": "AssistantSettingsView",
+        "type": "object"
+      },
       "Body_clear_profile_section_api_profile_clear_post": {
         "properties": {
           "section": {
@@ -2615,6 +2683,14 @@
               "type": "string"
             },
             "title": "Assistant Notes",
+            "type": "array"
+          },
+          "assistant_setting_requests": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SettingRequestExportOut"
+            },
+            "title": "Assistant Setting Requests",
             "type": "array"
           },
           "bytes": {
@@ -3730,6 +3806,30 @@
         "title": "PersonOut",
         "type": "object"
       },
+      "PracticeRunOut": {
+        "properties": {
+          "auto_on_since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto On Since"
+          },
+          "needed": {
+            "title": "Needed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "needed"
+        ],
+        "title": "PracticeRunOut",
+        "type": "object"
+      },
       "ProfileEditExportOut": {
         "description": "One row of ``export_history``'s top-level ``profile_edits`` \u2014 EVERY\nrow, including a clear (``value: null``); it is the history, unlike\n``GET /profile``'s ``agent_edits`` (the live, non-cleared overlay only).",
         "properties": {
@@ -3855,6 +3955,16 @@
             "title": "Agent Edits",
             "type": "array"
           },
+          "assistant_settings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssistantSettingsView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "current_version_id": {
             "anyOf": [
               {
@@ -3959,6 +4069,12 @@
           },
           "summary": {
             "$ref": "#/components/schemas/ProfileSummary"
+          },
+          "user_info": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "User Info",
+            "type": "object"
           }
         },
         "required": [
@@ -5353,6 +5469,136 @@
         "title": "SetVisaResponse",
         "type": "object"
       },
+      "SettingFieldOut": {
+        "description": "One assistant setting: ``value`` as chosen (\"\" / null = not chosen),\n``effective`` with the safe default filled in.",
+        "properties": {
+          "effective": {
+            "title": "Effective"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "title": "SettingFieldOut",
+        "type": "object"
+      },
+      "SettingRequestExportOut": {
+        "description": "One setting-change request in the export: waiting or decided.",
+        "properties": {
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided By"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "requested_at": {
+            "title": "Requested At",
+            "type": "string"
+          },
+          "requested_by": {
+            "title": "Requested By",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "requested_by",
+          "requested_at",
+          "expires_at",
+          "status"
+        ],
+        "title": "SettingRequestExportOut",
+        "type": "object"
+      },
+      "SettingRequestOut": {
+        "description": "One RISKIER setting change an assistant asked for and the user has not\nyet confirmed (S2, owner decision 2026-10-08). Nothing is applied until the\nsigned-in user confirms it on the Job360 website.",
+        "properties": {
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "requested_at": {
+            "title": "Requested At",
+            "type": "string"
+          },
+          "requested_by": {
+            "title": "Requested By",
+            "type": "string"
+          },
+          "status": {
+            "default": "waiting",
+            "title": "Status",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "requested_by",
+          "requested_at",
+          "expires_at"
+        ],
+        "title": "SettingRequestOut",
+        "type": "object"
+      },
       "StatsContactFoundViaGroupOut": {
         "description": "Owner decision 2026-10-04 \u2014 per current contact ``found_via``: how\nmany contacts, how many had an outreach marked sent / a reply recorded,\nand ``reply_rate`` = contacts with both / contacts with a sent mark\n(``null`` when nothing was sent).",
         "properties": {
@@ -5881,6 +6127,40 @@
         "title": "StatusResponse",
         "type": "object"
       },
+      "SubmitCheckResponse": {
+        "description": "The answer to \"may I press submit on this application?\" - one gate\n(``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,\nstop before submit and ask the user yes for this one; ``stop``: do not submit.\n``reason`` is a closed code; ``detail`` is one plain sentence.",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "decision": {
+            "enum": [
+              "submit",
+              "ask",
+              "stop"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "decision",
+          "reason",
+          "detail"
+        ],
+        "title": "SubmitCheckResponse",
+        "type": "object"
+      },
       "TailorBundle": {
         "properties": {
           "application_id": {
@@ -6257,6 +6537,14 @@
           },
           "profile": {
             "$ref": "#/components/schemas/ProfileResponse"
+          },
+          "waiting": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SettingRequestOut"
+            },
+            "title": "Waiting",
+            "type": "array"
           }
         },
         "required": [
@@ -8040,6 +8328,92 @@
         ]
       }
     },
+    "/api/applications/{application_id}/submit-check": {
+      "get": {
+        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). Read-only. 404 for an application that is not the\ncaller's (rule #12).",
+        "operationId": "submit_check_api_applications__application_id__submit_check_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "form_url",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 2048,
+              "title": "Form Url",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Check",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/applications/{application_id}/visa": {
       "put": {
         "operationId": "set_visa_api_applications__application_id__visa_put",
@@ -8451,6 +8825,374 @@
         "summary": "Withdraw Ask",
         "tags": [
           "asks"
+        ]
+      }
+    },
+    "/api/assistant-settings": {
+      "get": {
+        "description": "The caller's settings (each raw + effective), the practice-run state and\nthe requests waiting for the user's OK. Read-only; any signed-in caller.",
+        "operationId": "get_assistant_settings_api_assistant_settings_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Assistant Settings",
+        "tags": [
+          "assistant-settings"
+        ]
+      }
+    },
+    "/api/assistant-settings/history": {
+      "get": {
+        "description": "Every change to ONE setting, newest first, both sides (the user's web\nrows and the assistant's). At most ``PROFILE_EDIT_HISTORY_MAX`` rows.",
+        "operationId": "setting_history_api_assistant_settings_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileEditHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Setting History",
+        "tags": [
+          "assistant-settings"
+        ]
+      }
+    },
+    "/api/assistant-settings/requests/{request_id}/confirm": {
+      "post": {
+        "description": "The user confirms a waiting request: the change is applied now as a WEB\nrow (so history says the human did it). 404 when the id is not the caller's;\n409 when it was already decided or has expired; 422 when the stored value no\nlonger passes validation (for example a pause time that has since passed).",
+        "operationId": "confirm_request_api_assistant_settings_requests__request_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Request",
+        "tags": [
+          "assistant-settings"
+        ]
+      }
+    },
+    "/api/assistant-settings/requests/{request_id}/decline": {
+      "post": {
+        "description": "The user declines a waiting request (\"Don't change\"): nothing is applied\nand the request is closed. Same 404 / 409 rules as confirm.",
+        "operationId": "decline_request_api_assistant_settings_requests__request_id__decline_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decline Request",
+        "tags": [
+          "assistant-settings"
+        ]
+      }
+    },
+    "/api/assistant-settings/take-back": {
+      "post": {
+        "description": "Put one setting back to what it held BEFORE its newest change.\n\nAppend-only: a new ``web`` row carries the value of the row before the\nnewest one (``null`` \u2014 the safe default \u2014 when there was none). Not\nrate-limited (the human's own action). 404 when the setting never changed.",
+        "operationId": "take_back_setting_api_assistant_settings_take_back_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeBackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantSettingsView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Take Back Setting",
+        "tags": [
+          "assistant-settings"
         ]
       }
     },
@@ -10510,7 +11252,7 @@
     },
     "/api/profile/clear": {
       "post": {
-        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\n``section``: cv | linkedin | github | preferences | all.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``all`` -> both. ``linkedin`` and ``github`` own no\neditable path, so they clear nothing in the overlay.",
+        "description": "Empty ONE input (or the whole profile), so the next upload starts clean.\n\n``section``: cv | linkedin | github | preferences | memory | all.\n\n``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory\n(``user_info.*``: contact, right to work, logistics, languages, equality\nanswers, saved answers): the base column and the assistant's overlay rows.\nIt takes no version snapshot and leaves the CV, the preferences and\n``daily_check`` alone. ``preferences`` leaves the memory alone (and clears\n``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /\n``github`` leave it alone; only ``all`` resets it.\n\nDeliberately does NOT re-run extraction: there is nothing left to read, so\nrebuilding an emptied profile would be pure waste. The stored snapshot taken\nby ``save_profile`` is what makes this reversible.\n\nCLEARS THE AGENT'S EDITS TOO. The overlay sits ON TOP of the stored\nprofile, so emptying only the base left every agent edit in the cleared\nscope still showing on the page \u2014 the button said \"Clear\" and the value\nstayed. Worse, the overlay is what \"Clear\" exists to remove before a\nfresh upload: the whole point is a clean experiment. So each cleared\nscope also appends a clearing row (``value = NULL``, append-only) for\nevery overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``\n-> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.\n``linkedin`` and ``github`` own no editable path, so they clear nothing in\nthe overlay.",
         "operationId": "clear_profile_section_api_profile_clear_post",
         "parameters": [
           {

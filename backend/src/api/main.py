@@ -31,6 +31,7 @@ from src.api.middleware import (
 from src.api.routes import (
     applications,
     asks,
+    assistant_settings,
     auth,
     bring,
     client_log,
@@ -217,6 +218,7 @@ app.include_router(applications.router, prefix="/api")
 # /run 360 recipes — the playbooks a connected assistant follows (owner plan 2026-10-01)
 app.include_router(recipes.router, prefix="/api")
 app.include_router(asks.router, prefix="/api")  # "Needs you" queue (owner plan 2026-10-01)
+app.include_router(assistant_settings.router, prefix="/api")  # assistant settings + waiting requests (S2, 2026-10-08)
 # Batch 2 — auth
 app.include_router(auth.router, prefix="/api")
 # Per-User AI CV & Cover Letter (docs/product/peruser_cv_coverletter.md)

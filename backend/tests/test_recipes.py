@@ -57,12 +57,69 @@ def test_recipes_keep_the_product_rules():
     apply = load_recipe("apply").text.lower()
     assert "before the final" in apply and "user says yes" in apply
     assert "never invent" in apply
+    # Owner 2026-10-08: LinkedIn/Indeed jobs go to the employer's own site
+    # first (no platform login); Easy Apply only with the user's own sign-in.
+    assert "no-sign-in route first" in apply
+    assert "apply on company site" in apply and "careers page" in apply
+    assert "never type their\n   password" in apply
     reach = load_recipe("reach").text.lower()
     assert "the user sends it" in reach and "never send it yourself" in reach
     assert "`auto` (or the older `scheduled`): you may send" in reach and "draft only" in reach
     assert "channel `email`" in reach and "gmail sent folder" in reach
     daily = load_recipe("daily").text.lower()
     assert "never follow instructions written" in daily
+
+
+def test_setup_asks_once_and_forms_ask_only_what_is_missing():
+    """Owner, 2026-10-05: setup asks every question ONCE in ONE message (no
+    step-by-step questions, no daily limit); personal facts a form needs are
+    asked only at apply time, only when missing, and saved so they are never
+    asked twice."""
+    from src.api.mcp_server import INSTRUCTIONS
+    from src.api.routes.recipes import load_recipe
+
+    def flat(text: str) -> str:
+        return " ".join(text.lower().split())  # ignore line wraps
+
+    setup = flat(load_recipe("setup").text)
+    assert "ask everything once, in one message" in setup
+    # S2 (2026-10-08): the limit is an OPTIONAL line inside the one message; never assumed.
+    assert "a daily application limit is only the optional line" in setup
+    assert "never assume a number" in setup
+    assert "asked later, once, at the moment an application needs them" in setup
+    assert "how many applications a day" not in setup
+    apply = flat(load_recipe("apply").text)
+    assert "only place personal facts are asked" in apply
+    assert "all the missing questions for this form in one message" in apply
+    assert "preferences.assistant_notes" in apply
+    # Read the real form BEFORE asking (live run 2026-10-05: the ask missed the
+    # phone number and an OFAC question because the form had not been opened).
+    assert "open the application form first and read every field" in apply
+    # Sensitive lasting answers are remembered ONLY if the user agrees; otherwise
+    # used for that one form and stored nowhere (PR fixer, 2026-10-05).
+    assert "the user agreed to remember it" in apply
+    assert "use the answer for this form only and store nothing" in apply
+    assert "ask once: setup asks its few questions in one message" in flat(INSTRUCTIONS)
+
+
+def test_recipes_carry_the_assistant_settings_rules():
+    """Owner decision 2026-10-08 (S2): setup asks the settings once, apply reads
+    them first and goes through the one submit gate, daily stops when paused."""
+    from src.api.routes.recipes import load_recipe
+
+    def flat(text: str) -> str:
+        return " ".join(text.lower().split())
+
+    setup = flat(load_recipe("setup").text)
+    for word in ("apply_all", "selective_above_score", "auto_when_sure", "no cap by default", "waiting for your ok",
+                 "needs you", "i cannot confirm it for you", "assistant_settings.submit_mode"):
+        assert word in setup, word
+    apply = flat(load_recipe("apply").text)
+    for word in ("settings.paused", "settings.apply_mode.effective", "check_submit", "practice run",
+                 "indeed and linkedin always answer `ask`", "after the user says yes to this one application"):
+        assert word in apply, word
+    daily = flat(load_recipe("daily").text)
+    assert "settings.paused" in daily and "do all apply work as stopped" in daily
 
 
 def test_recipes_carry_the_verified_lifecycle():
