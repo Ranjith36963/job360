@@ -41,6 +41,11 @@ VALID_WORK_AUTH_STATUSES: frozenset[str] = frozenset(
     {"citizen", "permanent_resident", "visa", "needs_sponsorship"}
 )
 VALID_LANGUAGE_LEVELS: frozenset[str] = frozenset({"native", "fluent", "professional", "basic"})
+# Owner decision 2026-10-08 (S2) — assistant settings. Closed sets. "" / None on
+# the dataclass = "not chosen" (rule #29); the SAFE default applies:
+# ask_each / 75 / confirm / no cap / not paused (services/profile/assistant_settings.py).
+VALID_APPLY_MODES: frozenset[str] = frozenset({"ask_each", "apply_all", "selective_above_score"})
+VALID_SUBMIT_MODES: frozenset[str] = frozenset({"confirm", "auto_when_sure"})
 
 
 @dataclass
@@ -655,10 +660,34 @@ class UserInfo:
 
 
 @dataclass
+class AssistantSettings:
+    """ASSISTANT SETTINGS (owner decision 2026-10-08, S2) — how much the user's
+    assistant may do on its own.
+
+    Own column (``user_profiles.assistant_settings``) with ONE writer,
+    ``storage.save_assistant_settings``; ``save_profile`` never touches it. The
+    values the user or the assistant sets ride the ``profile_edits`` overlay.
+    ``""`` / ``None`` = not chosen (rule #29) — the safe default applies, read
+    through ``assistant_settings.effective``. Not part of a version snapshot.
+    The inbox mode, check frequency and standing notes stay where they were
+    (``preferences.daily_check`` / ``check_every`` / ``assistant_notes``) and
+    are only SHOWN here (an alias, not a move).
+    """
+
+    apply_mode: str = ""
+    apply_min_score: Optional[int] = None
+    submit_mode: str = ""
+    daily_cap: Optional[int] = None
+    paused_until: str = ""
+    pause_reason: str = ""
+
+
+@dataclass
 class UserProfile:
     cv_data: CVData = field(default_factory=CVData)
     preferences: UserPreferences = field(default_factory=UserPreferences)
     user_info: UserInfo = field(default_factory=UserInfo)
+    assistant_settings: AssistantSettings = field(default_factory=AssistantSettings)
 
     @property
     def is_complete(self) -> bool:

@@ -22,7 +22,8 @@ module's code ever runs (S3).
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from datetime import datetime, timezone
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -41,6 +42,10 @@ from src.services.applications import stats as stats_service
 from src.services.applications import visa as visa_service
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
+from src.services.profile import assistant_settings as settings_rules
+from src.services.profile.models import UserProfile
+from src.services.profile.storage import load_profile
+from src.utils.logger import get_audit_logger, safe_log_value
 
 router = APIRouter(tags=["applications"])
 
@@ -731,6 +736,33 @@ class ProfileEditExportOut(BaseModel):
     set_at: str
 
 
+class SettingRequestExportOut(BaseModel):
+    """One setting-change request in the export: waiting or decided."""
+
+    id: int
+    path: str
+    value: Any = None
+    requested_by: str
+    requested_at: str
+    expires_at: str
+    status: str
+    decision: Optional[str] = None
+    decided_by: Optional[str] = None
+    decided_at: Optional[str] = None
+
+
+class SubmitCheckResponse(BaseModel):
+    """The answer to "may I press submit on this application?" - one gate
+    (``settings_rules.may_submit``). ``submit``: go ahead; ``ask``: fill the form,
+    stop before submit and ask the user yes for this one; ``stop``: do not submit.
+    ``reason`` is a closed code; ``detail`` is one plain sentence."""
+
+    application_id: int
+    decision: Literal["submit", "ask", "stop"]
+    reason: str
+    detail: str
+
+
 class ExportHistoryResponse(BaseModel):
     applications: list[ExportApplicationOut]
     truncated: bool
@@ -742,6 +774,9 @@ class ExportHistoryResponse(BaseModel):
     # The user's standing instructions to their assistant, as they read now.
     # Empty = none (rule #29); their history is in `profile_edits`.
     assistant_notes: list[str] = []
+    # Owner decision 2026-10-08 (S2) - the queue of setting changes the user's
+    # assistants asked for (waiting and decided), oldest first.
+    assistant_setting_requests: list[SettingRequestExportOut] = []
     next_since: Optional[str] = None
     # Owner decision, 2026-09-25 — cold (job-less) contacts. Paged by their
     # OWN cursor (`unlinked_after_id`/`unlinked_next_after_id`), independent
@@ -1521,6 +1556,59 @@ async def update_job_facts(
         raise AssertionError("unreachable")  # pragma: no cover
 
 
+@router.get(
+    "/applications/{application_id}/submit-check", response_model=SubmitCheckResponse, dependencies=AUTH_FIRST
+)
+async def submit_check(
+    application_id: int,
+    form_url: str = Query("", max_length=2048),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """THE one gate before a final submit (owner decision 2026-10-08, S2).
+
+    Reads the user's settings, this application's own facts (status, receipt,
+    the per-job override) and the day's counts, then answers through
+    ``settings_rules.may_submit`` - the same function for every caller (this route
+    and the MCP ``check_submit`` tool). ``form_url`` is the address of the page
+    the form is on (a bare host works too); without it the answer is ``ask``
+    (``unknown_site``). Read-only. 404 for an application that is not the
+    caller's (rule #12)."""
+    try:
+        app_row = await spine.get_owned_application(db, user.id, application_id)
+        if app_row is None:
+            raise SpineError(404, "application not found")
+        cur = await db._db.execute(
+            "SELECT 1 FROM application_receipts WHERE application_id = ? AND user_id = ? LIMIT 1",
+            (application_id, user.id),
+        )
+        has_receipt = await cur.fetchone() is not None
+        override = await spine.submit_override(db, user.id, application_id)
+        now = datetime.now(timezone.utc)
+        cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
+        counts = await settings_rules.load_submit_counts(db, user.id, now)
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+    facts = settings_rules.SubmitFacts(
+        status=str(app_row["status"]), has_receipt=has_receipt, submit_override=override
+    )
+    verdict = settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
+    get_audit_logger().info(
+        "submit_check",
+        extra={
+            "event": "submit_check", "user_id": safe_log_value(user.id),
+            "actor": safe_log_value(actor_for(user)), "application_id": application_id,
+            "decision": verdict.decision, "reason": verdict.reason,
+            "host_kind": settings_rules.host_kind(settings_rules.parse_site_host(form_url)), "result": "ok",
+        },
+    )
+    return {
+        "application_id": application_id, "decision": verdict.decision,
+        "reason": verdict.reason, "detail": verdict.detail,
+    }
+
+
 @router.post(
     "/applications/{application_id}/events", status_code=201, response_model=RecordEventResponse,
     dependencies=AUTH_FIRST,
@@ -1583,6 +1671,8 @@ async def record_event(
             follow_up_on_arg = spine.parse_follow_up_on(body.follow_up_on, today)
         if await spine.get_owned_application(db, user.id, application_id) is None:
             raise SpineError(404, "application not found")
+        if body.event_type == "submit_mode_set":
+            _check_submit_mode_event(user, application_id, payload)
         # append_event always returns the REAL final follow_up_on — set,
         # cleared, auto-cleared (an overdue date + a status event), replay-
         # derived (a correction), or unchanged — so there is nothing left to
@@ -1596,6 +1686,40 @@ async def record_event(
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _check_submit_mode_event(user: CurrentUser, application_id: int, payload: dict[str, Any]) -> None:
+    """The per-job submit switch (owner decision 2026-10-08, S2): payload
+    ``{"submit_mode": "confirm" | "auto_when_sure" | "inherit"}`` and nothing else.
+
+    An assistant (any non-web actor) may only SEND ``confirm`` - the safe
+    direction. ``auto_when_sure`` and ``inherit`` (which hands the job back to the
+    account setting, possibly auto) need the user's own click on the website.
+    Lives in the ROUTE function, so the MCP ``record_event`` tool inherits it."""
+    actor = actor_for(user)
+    mode = payload.get("submit_mode")
+    if set(payload) != {"submit_mode"} or mode not in settings_rules.VALID_OVERRIDE_VALUES:
+        raise SpineError(
+            422,
+            'submit_mode_set needs payload {"submit_mode": "confirm" | "auto_when_sure" | "inherit"} and nothing else',
+        )
+    if actor != "web" and mode != "confirm":
+        get_audit_logger().warning(
+            "submit_mode_set_refused",
+            extra={
+                "event": "submit_mode_set_refused", "user_id": safe_log_value(user.id),
+                "actor": safe_log_value(actor), "application_id": application_id,
+                "submit_mode": safe_log_value(mode, max_len=20), "status": 403, "result": "refused",
+            },
+        )
+        raise SpineError(403, "this needs your click on the Job360 website")
+    get_audit_logger().info(
+        "submit_mode_set",
+        extra={
+            "event": "submit_mode_set", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor),
+            "application_id": application_id, "submit_mode": safe_log_value(mode, max_len=20), "result": "ok",
+        },
+    )
 
 
 @router.post(

@@ -8,7 +8,7 @@ fall back to what extraction says". ``storage.load_profile`` calls
 web route, the tailor, MCP ``get_profile`` — sees one profile.
 
 The editable set is closed (R9) and validated against the DECLARED dataclass
-fields of ``CVData``/``UserPreferences``/``UserInfo`` at import (S8; the
+fields of ``CVData``/``UserPreferences``/``UserInfo``/``AssistantSettings`` at import (S8; the
 ``user_info.*`` head is the user-info MEMORY, its own ``user_profiles`` column,
 owner decision 2026-10-08; its record shapes live in ``user_info.py``): a path naming a
 field that does not exist refuses to boot rather than being silently
@@ -40,6 +40,7 @@ from src.services.profile.models import (
     VALID_DAILY_CHECK_VALUES,
     VALID_EXPERIENCE_LEVELS,
     VALID_WORK_ARRANGEMENTS,
+    AssistantSettings,
     CVData,
     UserInfo,
     UserPreferences,
@@ -77,11 +78,13 @@ _editable_paths_cache: tuple[str, ...] | None = None
 
 
 def _declared_fields() -> dict[str, set[str]]:
-    """``{"cv_data": {...field names...}, "preferences": {...}, "user_info": {...}}``."""
+    """``{"cv_data": {...}, "preferences": {...}, "user_info": {...}, "assistant_settings": {...}}``
+    — each value the set of declared field names."""
     return {
         "cv_data": {f.name for f in dataclass_fields(CVData)},
         "preferences": {f.name for f in dataclass_fields(UserPreferences)},
         "user_info": {f.name for f in dataclass_fields(UserInfo)},
+        "assistant_settings": {f.name for f in dataclass_fields(AssistantSettings)},
     }
 
 
@@ -133,6 +136,7 @@ def _field_type(path: str) -> Any:
     head, _, field_name = path.partition(".")
     classes: dict[str, type[Any]] = {
         "cv_data": CVData, "preferences": UserPreferences, "user_info": UserInfo,
+        "assistant_settings": AssistantSettings,
     }
     hints = typing.get_type_hints(classes[head])
     return hints[field_name]
@@ -140,7 +144,7 @@ def _field_type(path: str) -> Any:
 
 def profile_section(profile: UserProfile, head: str) -> Any:
     """The dataclass a dotted path's head names: ``cv_data`` | ``preferences``
-    | ``user_info`` (the memory). Any other head is a ``KeyError`` — callers
+    | ``user_info`` (the memory) | ``assistant_settings`` (S2). Any other head is a ``KeyError`` — callers
     only pass heads that passed :func:`editable_paths`."""
     if head == "cv_data":
         return profile.cv_data
@@ -148,6 +152,8 @@ def profile_section(profile: UserProfile, head: str) -> Any:
         return profile.preferences
     if head == "user_info":
         return profile.user_info
+    if head == "assistant_settings":
+        return profile.assistant_settings
     raise KeyError(head)
 
 
@@ -517,8 +523,12 @@ def validate_edit(path: str, value: Any) -> Any:
         )
     if value is None:
         return None
-    from src.services.profile import user_info  # noqa: PLC0415 — user_info imports this module
+    from src.services.profile import assistant_settings, user_info  # noqa: PLC0415 — both import this module
 
+    if path in assistant_settings.SETTING_PATHS:
+        # Owner decision 2026-10-08 (S2): ints / closed sets / a future time /
+        # one plain line — each refusal names the path, never the value.
+        return assistant_settings.validate_setting(path, value)
     if path in user_info.USER_INFO_PATHS:
         answers = path == user_info.USER_INFO_ANSWERS_PATH
         return _bound_encoded_size(

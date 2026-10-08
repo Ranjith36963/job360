@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ASKS_CHANGED_EVENT, answerAsk, listAsks, withdrawAsk } from "@/lib/api";
-import type { Ask } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, answerAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
+import type { Ask, SettingRequest } from "@/lib/api";
+import { SettingRequestCard } from "./SettingRequestCard";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -215,24 +216,42 @@ export function AskCard({
   );
 }
 
+/** The requests waiting for the user's OK. Best-effort: a failed read just
+ *  shows none, it never blocks the questions. */
+async function waitingRequests(): Promise<SettingRequest[]> {
+  try {
+    return (await getAssistantSettings()).waiting;
+  } catch {
+    return [];
+  }
+}
+
 function announce(openCount: number) {
   window.dispatchEvent(new CustomEvent(ASKS_CHANGED_EVENT, { detail: openCount }));
 }
 
 export function NeedsYou() {
   const [open, setOpen] = useState<Ask[] | null>(null);
+  // Setting changes an assistant asked for, waiting for the user's OK (S2).
+  const [waiting, setWaiting] = useState<SettingRequest[]>([]);
   const [answered, setAnswered] = useState<Ask[]>([]);
   const [moreAnswered, setMoreAnswered] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const apply = useCallback(
-    (o: Awaited<ReturnType<typeof listAsks>>, a: Awaited<ReturnType<typeof listAsks>>) => {
+    (
+      o: Awaited<ReturnType<typeof listAsks>>,
+      a: Awaited<ReturnType<typeof listAsks>>,
+      w: SettingRequest[],
+    ) => {
       setOpen(o.asks);
       setAnswered(a.asks);
+      setWaiting(w);
       setMoreAnswered(a.asks.length >= PAGE);
       setError(null);
-      announce(o.open_count);
+      // The badge counts the questions AND the changes waiting for an OK.
+      announce(o.open_count + w.length);
     },
     [],
   );
@@ -241,8 +260,8 @@ export function NeedsYou() {
   // screen and the error shows above them with a retry.
   const load = useCallback(async () => {
     try {
-      const [o, a] = await Promise.all([listAsks("open"), listAsks("answered")]);
-      apply(o, a);
+      const [o, a, w] = await Promise.all([listAsks("open"), listAsks("answered"), waitingRequests()]);
+      apply(o, a, w);
     } catch {
       setError("Could not load your questions.");
     }
@@ -250,9 +269,9 @@ export function NeedsYou() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listAsks("open"), listAsks("answered")])
-      .then(([o, a]) => {
-        if (!cancelled) apply(o, a);
+    Promise.all([listAsks("open"), listAsks("answered"), waitingRequests()])
+      .then(([o, a, w]) => {
+        if (!cancelled) apply(o, a, w);
       })
       .catch(() => {
         if (!cancelled) setError("Could not load your questions.");
@@ -300,13 +319,25 @@ export function NeedsYou() {
           </button>
         </div>
       )}
+      {waiting.length > 0 && (
+        <section aria-labelledby="waiting-ok" className="flex flex-col gap-3">
+          <h2 id="waiting-ok" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
+            Waiting for your OK
+          </h2>
+          <ul className="flex flex-col gap-3" data-testid="waiting-for-ok">
+            {waiting.map((r) => (
+              <SettingRequestCard key={r.id} request={r} onChanged={load} />
+            ))}
+          </ul>
+        </section>
+      )}
       <section aria-labelledby="open-asks" className="flex flex-col gap-3">
         <h2 id="open-asks" className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
           Waiting for you
         </h2>
         {open.length === 0 ? (
           <p className="text-sm text-muted-foreground" data-testid="needs-you-empty">
-            Nothing needs you right now.
+            {waiting.length > 0 ? "No questions right now." : "Nothing needs you right now."}
           </p>
         ) : (
           <ul className="flex flex-col gap-3">

@@ -4,6 +4,7 @@ import { Navbar } from "./Navbar";
 import { Sidebar } from "./Sidebar";
 
 const listAsks = vi.fn();
+const getAssistantSettings = vi.fn();
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 vi.mock("next-themes", () => ({
@@ -15,9 +16,13 @@ vi.mock("@/components/layout/AuthProvider", () => ({
 vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
   listAsks: (...a: unknown[]) => listAsks(...a),
+  getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
 }));
 
-beforeEach(() => listAsks.mockReset());
+beforeEach(() => {
+  listAsks.mockReset();
+  getAssistantSettings.mockReset().mockResolvedValue({ waiting: [] });
+});
 
 // Redesign slice 1: on desktop the Sidebar owns the nav, below md the Navbar's
 // drawer does. Both share one hook (useOpenAsks), so the badge is checked in
@@ -35,6 +40,24 @@ describe("Navbar drawer — Needs you badge", () => {
     expect(badge).toHaveTextContent("3");
     expect(badge).toHaveAttribute("aria-label", "3 waiting");
     expect(screen.getByRole("link", { name: /Needs you/ })).toHaveAttribute("href", "/needs-you");
+  });
+
+  it("counts the setting changes waiting for the user's OK with the open asks", async () => {
+    listAsks.mockResolvedValue({ asks: [], open_count: 2 });
+    getAssistantSettings.mockResolvedValue({ waiting: [{ id: 1 }, { id: 2 }] });
+    render(<Navbar />);
+    await waitFor(() => expect(getAssistantSettings).toHaveBeenCalled());
+    openDrawer();
+    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("4");
+  });
+
+  it("a failed settings read still shows the open asks", async () => {
+    listAsks.mockResolvedValue({ asks: [], open_count: 2 });
+    getAssistantSettings.mockRejectedValue(new Error("down"));
+    render(<Navbar />);
+    await waitFor(() => expect(getAssistantSettings).toHaveBeenCalled());
+    openDrawer();
+    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("2");
   });
 
   it("shows no badge at zero", async () => {

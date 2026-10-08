@@ -20,6 +20,7 @@ from src.api.auth_deps import CurrentUser, require_session_user, require_user
 from src.api.dependencies import save_upload_to_temp
 from src.api.models import (
     AgentEditOut,
+    AssistantSettingsView,
     CVDetail,
     GitHubResponse,
     JsonResumeResponse,
@@ -32,14 +33,16 @@ from src.api.models import (
     ProfileSummary,
     ProfileVersionsListResponse,
     ProfileVersionSummary,
+    SettingRequestOut,
     TakeBackRequest,
 )
 from src.core import settings
 from src.core.settings import PROFILE_EXTRACT_MAX_PER_HOUR
 from src.services.applications.authorship import actor_for
 from src.services.auth import rate_limit as auth_rate_limit
+from src.services.profile import assistant_settings as settings_rules
 from src.services.profile import edits as profile_edits
-from src.services.profile import user_info
+from src.services.profile import setting_requests, user_info
 from src.services.profile.cv_parser import extract_text
 from src.services.profile.github_enricher import (
     enrich_cv_from_github,
@@ -56,6 +59,7 @@ from src.services.profile.models import (
     OVERLAY_ONLY_PREFERENCE_FIELDS,
     VALID_EXPERIENCE_LEVELS,
     VALID_WORK_ARRANGEMENTS,
+    AssistantSettings,
     CVData,
     UserInfo,
     UserPreferences,
@@ -68,6 +72,7 @@ from src.services.profile.storage import (
     load_profile,
     load_profile_with_overlay,
     restore_profile_version,
+    save_assistant_settings,
     save_profile,
     save_user_info,
 )
@@ -87,6 +92,7 @@ def _build_profile_response(
     user_id: str,
     agent_edits: list[AgentEditOut],
     lessons: list[LessonOut] | None = None,
+    settings_view: dict[str, Any] | None = None,
 ) -> ProfileResponse:
     """Render ``profile`` as the API's ``ProfileResponse``.
 
@@ -300,6 +306,9 @@ def _build_profile_response(
         # pure, the caller does the read.
         lessons=lessons or [],
         user_info=asdict(profile.user_info),
+        # Owner decision 2026-10-08 (S2) — passed IN like `lessons`: this
+        # builder is pure, the caller does the reads (waiting requests, practice).
+        assistant_settings=AssistantSettingsView(**settings_view) if settings_view is not None else None,
     )
 
 
@@ -352,6 +361,14 @@ def _recent_lessons(user_id: str) -> list[LessonOut]:
     return [LessonOut(**row) for row in rows]
 
 
+def settings_view(profile: UserProfile, user_id: str) -> dict[str, Any]:
+    """The assistant-settings read model for ``profile`` (already overlaid): the
+    waiting requests and the derived practice-run state are the two reads."""
+    return settings_rules.build_settings_view(
+        profile, setting_requests.list_waiting(user_id), settings_rules.practice_info(user_id)
+    )
+
+
 def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
     """The caller's profile AND its rendered response, from ONE profile read.
 
@@ -373,7 +390,10 @@ def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
     rows = [
         AgentEditOut(**row) for row in overlay if profile_edits.is_assistant_actor(str(row["set_by"]))
     ]
-    return profile, _build_profile_response(profile, user_id, rows, lessons=_recent_lessons(user_id))
+    return profile, _build_profile_response(
+        profile, user_id, rows, lessons=_recent_lessons(user_id),
+        settings_view=settings_view(profile, user_id)
+    )
 
 
 # ``_user_id_for(profile)`` used to live here. It did
@@ -436,6 +456,10 @@ class UpdateProfileResponse(BaseModel):
 
     applied: list[ProfileEditOut]
     profile: ProfileResponse
+    # Owner decision 2026-10-08 (S2) — RISKIER setting changes an assistant asked
+    # for. NOT applied: the user confirms each one on the Job360 website
+    # ("Waiting for your OK"). Empty when nothing was held back.
+    waiting: list[SettingRequestOut] = []
 
 
 def _log_edit_rejected(
@@ -454,6 +478,81 @@ def _log_edit_rejected(
             "status": status, "result": "rejected",
         },
     )
+
+
+_SETTING_LOG_VALUE_PATHS = frozenset(
+    {
+        settings_rules.APPLY_MODE_PATH, settings_rules.SUBMIT_MODE_PATH,
+        settings_rules.APPLY_MIN_SCORE_PATH, settings_rules.DAILY_CAP_PATH,
+    }
+)
+
+
+def _split_gated(
+    user_id: str, actor: str, pairs: list[tuple[str, Any]]
+) -> tuple[list[tuple[str, Any]], list[tuple[str, Any]], dict[str, str]]:
+    """Owner decision 2026-10-08 (S2) — split ``pairs`` into ``(write_now, hold,
+    risk)``.
+
+    Only the gated paths (the six ``assistant_settings.*`` paths and the inbox
+    mode ``preferences.daily_check``) are looked at. Each is classified
+    ``safer`` / ``riskier`` against the EFFECTIVE value the user has right now,
+    with the running value carried across the call so two pairs on one path
+    are judged in order. ``riskier`` pairs from a non-web actor go to ``hold``
+    (they become waiting requests); everything else is written now. The signed-in
+    user's own click (``WEB_ACTOR``) applies every pair at once — that click IS
+    the confirmation. ``risk`` maps path -> classification for the audit line.
+    """
+    if not any(path in settings_rules.GATED_PATHS for path, _ in pairs):
+        return list(pairs), [], {}
+    now = datetime.now(timezone.utc)
+    current = load_profile(user_id) or UserProfile()
+    base: UserProfile | None = None
+    running: dict[str, Any] = {}
+    write_now: list[tuple[str, Any]] = []
+    hold: list[tuple[str, Any]] = []
+    risk: dict[str, str] = {}
+    for path, value in pairs:
+        if path not in settings_rules.GATED_PATHS:
+            write_now.append((path, value))
+            continue
+        head, _, field_name = path.partition(".")
+        if path not in running:
+            running[path] = getattr(profile_edits.profile_section(current, head), field_name)
+        if value is None:  # a clear falls back to the BASE value
+            if base is None:
+                base = load_profile(user_id, with_overlay=False) or UserProfile()
+            after_raw = getattr(profile_edits.profile_section(base, head), field_name)
+        else:
+            after_raw = profile_edits.validate_edit(path, value)
+        before = settings_rules.effective_path_value(path, running[path], now)
+        after = settings_rules.effective_path_value(path, after_raw, now)
+        verdict = settings_rules.classify_change(path, before, after)
+        risk[path] = verdict
+        if verdict == "riskier" and actor != profile_edits.WEB_ACTOR:
+            hold.append((path, profile_edits.validate_edit(path, value) if value is not None else None))
+        else:
+            write_now.append((path, value))
+            running[path] = after_raw
+    return write_now, hold, risk
+
+
+def _log_settings_saved(user_id: str, actor: str, applied: list[dict[str, Any]], risk: dict[str, str]) -> None:
+    """One audit line per ``assistant_settings.*`` path written: who, which path,
+    safer/riskier, and the value ONLY for the closed modes and the whole numbers.
+    Never ``pause_reason`` (free text) nor the pause time."""
+    audit = get_audit_logger()
+    for row in applied:
+        if not str(row["path"]).startswith(f"{settings_rules.HEAD}."):
+            continue
+        extra: dict[str, Any] = {
+            "event": "assistant_setting_saved", "user_id": safe_log_value(user_id),
+            "actor": safe_log_value(actor), "path": safe_log_value(row["path"]),
+            "risk": risk.get(row["path"], "safer"), "cleared": row["value"] is None, "result": "ok",
+        }
+        if row["path"] in _SETTING_LOG_VALUE_PATHS and row["value"] is not None:
+            extra["value"] = safe_log_value(row["value"], max_len=40)
+        audit.info("assistant_setting_saved", extra=extra)
 
 
 @router.patch("/profile", response_model=UpdateProfileResponse)
@@ -507,6 +606,24 @@ async def update_profile(
             profile_edits.validate_edit(path, value)
     except profile_edits.ProfileEditError as exc:
         _log_edit_rejected(user.id, actor, pairs, failed_path, exc.status_code)
+        if failed_path in settings_rules.GATED_PATHS:
+            get_audit_logger().warning(
+                "assistant_setting_request_rejected",
+                extra={
+                    "event": "assistant_setting_request_rejected", "user_id": safe_log_value(user.id),
+                    "actor": safe_log_value(actor), "path": safe_log_value(failed_path, max_len=100),
+                    "status": exc.status_code, "result": "rejected",
+                },
+            )
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    # S2 — a RISKIER setting change from an assistant is held, not written. The
+    # hourly budget for held requests is checked HERE, before any write of the
+    # call, so a 429 changes nothing.
+    write_now, hold, risk = _split_gated(user.id, actor, pairs)
+    try:
+        setting_requests.check_capacity(user.id, actor, len(hold))
+    except profile_edits.ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     if load_profile(user.id, with_overlay=False) is None:
@@ -522,7 +639,7 @@ async def update_profile(
         # including every MCP update_profile call (/api/mcp is bearer-only),
         # are never WEB_ACTOR and stay limited.
         applied = profile_edits.record_edits(
-            user.id, actor, pairs, enforce_rate_limit=actor != profile_edits.WEB_ACTOR
+            user.id, actor, write_now, enforce_rate_limit=actor != profile_edits.WEB_ACTOR
         )
     except profile_edits.ProfileEditError as exc:
         _log_edit_rejected(user.id, actor, pairs, "", exc.status_code)
@@ -535,7 +652,7 @@ async def update_profile(
     audit.info(
         "profile_edit",
         extra={
-            "event": "profile_edit", "paths": [path for path, _ in pairs],
+            "event": "profile_edit", "paths": [path for path, _ in write_now],
             "actor": safe_log_value(actor), "user_id": safe_log_value(user.id), "result": "ok",
         },
     )
@@ -554,9 +671,14 @@ async def update_profile(
                 },
             )
 
+    _log_settings_saved(user.id, actor, applied, risk)
+    created = setting_requests.create_requests(user.id, actor, hold) if hold else []
+
     rendered = load_profile_response(user.id)[1]
     return UpdateProfileResponse(
-        applied=[ProfileEditOut(**row) for row in applied], profile=rendered
+        applied=[ProfileEditOut(**row) for row in applied],
+        profile=rendered,
+        waiting=[SettingRequestOut(**setting_requests.waiting_out(r)) for r in created],
     )
 
 
@@ -681,6 +803,11 @@ async def keep_edit(
     if head == "user_info":
         # Memory has its own column and its own single writer; no version snapshot.
         save_user_info(user.id, base.user_info, "keep_edit")
+    elif head == "assistant_settings":
+        # S2 — the settings BASE stays at its defaults on purpose (it is written
+        # only by "Clear all"): a cleared value (null) must always mean "the safe
+        # default". Keep just makes the value the human's own via the web row below.
+        pass
     else:
         save_profile(base, user.id, source_action="keep_edit")
     profile_edits.record_edits(
@@ -1564,6 +1691,29 @@ def _log_profile_cleared(user_id: str, section: str) -> None:
     )
 
 
+def _settings_riskier_to_reset(user: CurrentUser) -> frozenset[str]:
+    """The ``assistant_settings.*`` paths whose reset to the safe default would be
+    RISKIER for this caller (S2 injection guard): ``frozenset()`` for the user's
+    own web session (the click IS the confirmation), else every setting whose
+    current EFFECTIVE value is stricter than its default — a pause in force, a
+    daily cap. A "Clear all" from a token leaves those rows standing."""
+    if actor_for(user) == profile_edits.WEB_ACTOR:
+        return frozenset()
+    current = load_profile(user.id)
+    if current is None:
+        return frozenset()
+    now = datetime.now(timezone.utc)
+    default = AssistantSettings()
+    riskier: set[str] = set()
+    for path in settings_rules.SETTING_PATHS:
+        field_name = path.partition(".")[2]
+        before = settings_rules.effective_path_value(path, getattr(current.assistant_settings, field_name), now)
+        after = settings_rules.effective_path_value(path, getattr(default, field_name), now)
+        if settings_rules.classify_change(path, before, after) == "riskier":
+            riskier.add(path)
+    return frozenset(riskier)
+
+
 @router.post("/profile/clear", response_model=ProfileResponse)
 async def clear_profile_section(
     section: str = Form(...),  # noqa: B008 — FastAPI dependency-injection idiom
@@ -1601,6 +1751,11 @@ async def clear_profile_section(
             status_code=400,
             detail=f"section must be one of: {', '.join(_CLEAR_SCOPES)}",
         )
+    # S2 injection guard — this route takes a bearer token too, and "all" resets
+    # the assistant settings. A reset that would LOOSEN one (end a pause, remove a
+    # daily cap) is a riskier change: only the user's own web click may make it,
+    # so for any other caller those setting rows are left standing.
+    keep_settings = _settings_riskier_to_reset(user) if section == "all" else frozenset()
     # BASE profile (``with_overlay=False``) — this route mutates and saves, so
     # starting from the merged profile would write the agent's values into the
     # base while clearing it.
@@ -1664,6 +1819,10 @@ async def clear_profile_section(
     save_profile(profile, user.id, f"clear_{section}")
     if section == "all":
         save_user_info(user.id, UserInfo(), "clear_all")
+        # S2 — a full reset also returns the assistant settings to their safe
+        # defaults and cancels every request still waiting for the user's OK.
+        save_assistant_settings(user.id, AssistantSettings(), "clear_all")
+        setting_requests.cancel_waiting(user.id, actor_for(user))
 
     # The overlay half of the clear. Prefixes, not a hand-written path list —
     # PROFILE_EDITABLE_PATHS is env-extendable, so anything enumerated here
@@ -1674,7 +1833,7 @@ async def clear_profile_section(
     elif section == "preferences":
         cleared_prefixes = ("preferences.",)
     elif section == "all":
-        cleared_prefixes = ("cv_data.", "preferences.", "user_info.")
+        cleared_prefixes = ("cv_data.", "preferences.", "user_info.", f"{settings_rules.HEAD}.")
     if cleared_prefixes:
         _clear_overlay_paths(
             user,
@@ -1689,6 +1848,7 @@ async def clear_profile_section(
                     section == "preferences"
                     and row["path"] in {f"preferences.{n}" for n in OVERLAY_ONLY_PREFERENCE_FIELDS}
                 )
+                and row["path"] not in keep_settings
             ],
         )
 
@@ -1769,7 +1929,7 @@ def _resync_web_rows_to_base(user: CurrentUser) -> None:
             continue
         # The user-info memory is its own store (not in a version snapshot), so
         # a restore knows nothing about it either.
-        if path.startswith("user_info."):
+        if path.startswith(("user_info.", f"{settings_rules.HEAD}.")):
             continue
         value = profile_edits.field_values(base, [path])[path]
         if value == row["value"]:

@@ -711,7 +711,8 @@ async def test_clear_memory_clears_only_the_memory_and_takes_no_version(
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
     async with _bearer_client(token) as agent:
-        assert (await _patch(agent, *ALL_EDITS, {"path": "preferences.daily_check", "value": "auto"})).status_code == 200
+        # "ask" (not "auto"): S2 holds an assistant's "auto" as a waiting request.
+        assert (await _patch(agent, *ALL_EDITS, {"path": "preferences.daily_check", "value": "ask"})).status_code == 200
     async with authenticated_async_context() as client:
         assert (await client.post("/api/profile/edits/keep", json={"path": CONTACT})).status_code == 200
         assert _base_info(fixture_user_id).contact["email"] == "ada@example.com"
@@ -724,7 +725,7 @@ async def test_clear_memory_clears_only_the_memory_and_takes_no_version(
         }
         assert _base_info(fixture_user_id) == UserInfo(), "the base column is emptied too"
         assert body["preferences"]["target_job_titles"] == ["Data Engineer"], "the CV/preferences are untouched"
-        assert body["preferences"]["daily_check"] == "auto"
+        assert body["preferences"]["daily_check"] == "ask"
         assert body["preferences"]["salary_by_country"][0]["currency"] == "AED", "salary is a preference, not memory"
         assert await _versions(client) == versions, "memory is not in a version snapshot"
         rows = (await client.get("/api/profile/edits/history", params={"path": CONTACT})).json()["rows"]
@@ -741,7 +742,8 @@ async def test_clear_preferences_keeps_the_memory_and_clears_salary(authenticate
             "/api/profile/preferences", data={"preferences": json.dumps({"salary_by_country": [record]})}
         )).status_code == 200
     async with _bearer_client(token) as agent:
-        assert (await _patch(agent, *ALL_EDITS, {"path": "preferences.daily_check", "value": "auto"})).status_code == 200
+        # "ask" (not "auto"): S2 holds an assistant's "auto" as a waiting request.
+        assert (await _patch(agent, *ALL_EDITS, {"path": "preferences.daily_check", "value": "ask"})).status_code == 200
     async with authenticated_async_context() as client:
         assert (await client.post("/api/profile/edits/keep", json={"path": EQ})).status_code == 200
         resp = await client.post("/api/profile/clear", data={"section": "preferences"})
@@ -749,7 +751,7 @@ async def test_clear_preferences_keeps_the_memory_and_clears_salary(authenticate
         body = await _get(client)
         assert body["preferences"]["target_job_titles"] == [], "the clear really ran"
         assert body["preferences"]["salary_by_country"] == [], "salary is cleared, base and overlay"
-        assert body["preferences"]["daily_check"] == "auto"
+        assert body["preferences"]["daily_check"] == "ask"
         assert body["user_info"]["contact"]["email"] == "ada@example.com"
         assert body["user_info"]["equality"] == {"gender": "Prefer not to say"}
         assert len(body["user_info"]["answers"]) == 1

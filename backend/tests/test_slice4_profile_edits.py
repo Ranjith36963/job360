@@ -246,12 +246,13 @@ def test_every_editable_path_is_a_declared_dataclass_field():
 
     from src.core import settings
     from src.services.profile import edits
-    from src.services.profile.models import CVData, UserInfo, UserPreferences
+    from src.services.profile.models import AssistantSettings, CVData, UserInfo, UserPreferences
 
     declared = {
         "cv_data": {f.name for f in dataclasses.fields(CVData)},
         "preferences": {f.name for f in dataclasses.fields(UserPreferences)},
         "user_info": {f.name for f in dataclasses.fields(UserInfo)},  # the memory head (2026-10-08)
+        "assistant_settings": {f.name for f in dataclasses.fields(AssistantSettings)},  # S2 (2026-10-08)
     }
     for path in edits.editable_paths():
         head, _, field = path.partition(".")
