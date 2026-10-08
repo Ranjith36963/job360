@@ -80,12 +80,20 @@ _DICT_SCHEMAS: dict[str, dict[str, str]] = {
     "user_info.equality": _EQUALITY,
 }
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE_CHARS_RE = re.compile(r"^[0-9 +().\-]+$")
 _CURRENCY_RE = re.compile(r"^[A-Za-z]{3}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MONTH_RE = re.compile(r"^\d{4}-\d{2}(-\d{2})?$")
 _EMAIL_MAX = 254
+
+
+def _is_email(text: str) -> bool:
+    """name@domain.tld without a regex (CodeQL py/polynomial-redos): one '@',
+    no whitespace, non-empty name, and a dot inside the domain."""
+    if any(ch.isspace() for ch in text) or text.count("@") != 1:
+        return False
+    name, domain = text.split("@")
+    return bool(name) and "." in domain[1:-1]
 _PHONE_MAX = 40
 _ADDRESS_LINES_MAX = 3
 _COUNTRY_MESSAGE = (
@@ -159,7 +167,7 @@ def _value(where: str, key: str, kind: str, raw: Any) -> Any:
         text = _line(at, raw, _EMAIL_MAX)
         if not text:
             return None
-        if not _EMAIL_RE.match(text):
+        if not _is_email(text):
             raise _fail(f"{at} is not an email address (expected name@domain)")
         return text
     if kind == "phone":
