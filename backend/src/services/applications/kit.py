@@ -121,6 +121,12 @@ def host_needs_account(host: Optional[str], learned: set[str]) -> bool:
     return False
 
 
+def _link_on(url: Any, domain: str) -> bool:
+    """True when ``url``'s host is ``domain`` or a subdomain of it (never a substring match)."""
+    host = settings_rules.parse_site_host(str(url) if url else None)
+    return bool(host) and (host == domain or str(host).endswith("." + domain))
+
+
 def _present(value: Any) -> bool:
     """Rule #29: None / "" / [] / {} are absent. ``False`` and ``0`` are answers."""
     if value is None:
@@ -494,8 +500,8 @@ def compute_answers(
             out["contact"].append(_item(f"contact.{k}", v, "memory", at))
     for key, value in (
         ("contact.name", cvd.name), ("contact.location", cvd.location),
-        ("contact.linkedin_url", next((u for u in cvd.links or [] if "linkedin.com" in str(u).lower()), "")),
-        ("contact.github_url", next((u for u in cvd.links or [] if "github.com" in str(u).lower()), "")),
+        ("contact.linkedin_url", next((u for u in cvd.links or [] if _link_on(u, "linkedin.com")), "")),
+        ("contact.github_url", next((u for u in cvd.links or [] if _link_on(u, "github.com")), "")),
     ):
         if _present(value):
             out["contact"].append(_item(key, value, "profile", None))

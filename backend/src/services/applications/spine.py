@@ -1232,8 +1232,10 @@ async def record_receipt(
         get_audit_logger().info(
             "possible_duplicate",
             extra={
-                "event": "possible_duplicate", "user_id": user_id, "application_id": application_id,
-                "receipt_id": receipt_id, "flag": possible_duplicate, "actor": recorded_by[:80], "result": "ok",
+                "event": "possible_duplicate", "user_id": safe_log_value(user_id),
+                "application_id": application_id, "receipt_id": receipt_id,
+                "flag": safe_log_value(possible_duplicate, max_len=40),
+                "actor": safe_log_value(recorded_by, max_len=80), "result": "ok",
             },
         )
     return {
