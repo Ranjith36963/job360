@@ -268,6 +268,11 @@ class ProfileResponse(BaseModel):
     # the profile sees them BEFORE it tailors the next CV. The full list is
     # `GET /applications/lessons`.
     lessons: list[LessonOut] = []
+    # Owner decision 2026-10-08 — USER INFO MEMORY (contact, right_to_work,
+    # logistics, languages, equality, answers): the facts job forms ask, merged
+    # with the assistant's overlay. Its own store, not part of `preferences`.
+    # Empty = nothing answered (rule #29).
+    user_info: dict[str, Any] = {}
 
 
 class LessonsResponse(BaseModel):

@@ -471,6 +471,21 @@ def build_server(version: str = "") -> MCPServer:
         `raw.truncated` is true, a document was longer than the cap and you are
         seeing its opening — the full text is on the web profile page.
 
+        MEMORY (owner decision, 2026-10-08): the facts job forms ask are in
+        `fields["user_info.contact"]`, `fields["user_info.right_to_work"]`,
+        `fields["user_info.logistics"]`, `fields["user_info.languages"]`,
+        `fields["user_info.equality"]` and `fields["user_info.answers"]`. Read
+        them before filling any form. A missing key means "not answered": ask
+        the user only that, once, then save it with `update_profile`; never
+        guess. Per country, use the record of the HIRING country in
+        `right_to_work.countries` and `logistics.countries` (also for a remote
+        job). The salary is a PREFERENCE: `fields["preferences.salary_by_country"]`,
+        the hiring country's record, with its period (year or month); if there
+        is none, ask. Never convert currency. A minimum salary is never stored
+        or sent. Equality answers are reused as stored ("prefer not to say" is
+        a valid answer); if one is skipped, ask on that form. Reuse a saved
+        free-text answer word for word only when its `approved` is true.
+
         `assistant_hint` (owner decision, 2026-09-28) is a one-line reminder
         of the daily-check offer above — INSTRUCTIONS only reaches an
         assistant that connects AFTER it shipped, so this field carries the
@@ -1295,6 +1310,37 @@ def build_server(version: str = "") -> MCPServer:
         [str], "dates"}], name required. No other keys. `dates` is
         "Jan 2020 – Present", "Mar 2018 – Jun 2020", "2019 – 2021" or "2020",
         stored in that form.
+
+        Memory (the facts job forms ask) is six `user_info.*` paths plus one
+        preference, each with a CLOSED key set — an unknown key is refused. A
+        write REPLACES the whole value: send the current `fields[...]` with
+        your change. Empty ("" / null / []) means not answered and is dropped;
+        `false` is a real answer.
+        `user_info.contact` = {email, phone, address_lines: [up to 3 str],
+        address_city, address_postcode, address_country (ISO2), date_of_birth
+        (YYYY-MM-DD), residence_city, residence_country (ISO2),
+        legal_first_name, legal_last_name, preferred_name}.
+        `user_info.right_to_work` = {countries: [ONE record per country
+        {country (ISO2, required), work_authorization (citizen |
+        permanent_resident | visa | needs_sponsorship), needs_sponsorship
+        (bool), visa_type, visa_expires (YYYY-MM or YYYY-MM-DD)}], citizenship:
+        [ISO2], sanctions_country_citizen (bool)}.
+        `user_info.logistics` = {notice_period, earliest_start, countries:
+        [ONE record per country {country (ISO2, required), willing_to_relocate
+        (bool), relocate_where, travel_ok_pct (whole number 0-100),
+        driving_licence (bool), driving_licence_country (ISO2)}]}.
+        `user_info.languages` = [{language, level: native | fluent |
+        professional | basic}].
+        `user_info.equality` = {gender, ethnicity, disability, veteran,
+        sexual_orientation, transgender}; "prefer not to say" is valid.
+        `user_info.answers` = [{question, answer, approved (bool, default
+        false), recorded_at}] — set `approved: true` only after the user
+        agrees to that exact wording, and send `recorded_at` back as stored.
+        `preferences.salary_by_country` = [{country (ISO2), amount (number >
+        0), currency (3 letters, e.g. EUR), period: year | month}], ONE record
+        per country, all four keys required. No "remote" record (a remote job
+        uses the hiring country's record) and no salary minimum key; nothing
+        is ever converted between currencies.
         A re-extraction (a fresh CV/LinkedIn/GitHub) never undoes your edit —
         only clearing it does."""
         try:

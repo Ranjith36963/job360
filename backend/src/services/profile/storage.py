@@ -30,9 +30,9 @@ from typing import Any, Optional
 from src.core.settings import DATA_DIR, DB_PATH
 from src.core.tenancy import DEFAULT_TENANT_ID
 from src.repositories import pgsync
-from src.services.profile.models import CVData, UserPreferences, UserProfile
+from src.services.profile.models import CVData, UserInfo, UserPreferences, UserProfile
 from src.services.profile.snapshot import make_snapshot_id
-from src.utils.logger import safe_log_value
+from src.utils.logger import get_audit_logger, safe_log_value
 
 logger = logging.getLogger("job360.profile.storage")
 
@@ -80,6 +80,11 @@ def save_profile(
     The writes happen in one transaction: if the snapshot insert fails
     (e.g. missing migration in a stale DB), the tip upsert also rolls
     back rather than leaving the two tables inconsistent.
+
+    NEVER writes ``user_info`` (one writer: :func:`save_user_info`). The
+    upsert's column list omits it, so a fresh ``UserProfile`` built by an
+    upload, a re-extraction, the CLI or a version restore cannot wipe the
+    user's memory, and a first insert gets the column's ``'{}'`` default.
     """
     # Sanitise the user-typed preference boxes on EVERY save path — form save,
     # CV/LinkedIn/GitHub upload, re-extraction, CLI. This is the single write
@@ -148,6 +153,36 @@ def save_profile(
         len(getattr(_cv, "skills", None) or []),
         len(getattr(_cv, "job_titles", None) or []),
     )
+
+
+def save_user_info(user_id: str, info: UserInfo, source_action: str) -> bool:
+    """Write the user-info MEMORY base for ``user_id``; the ONE writer of
+    ``user_profiles.user_info`` (owner decision 2026-10-08, migration 0050).
+
+    Replaces the whole stored object. Takes NO version snapshot (memory is not
+    part of ``user_profile_versions``) and does not touch ``cv_data`` or
+    ``preferences``. Returns ``True`` when a profile row was updated, ``False``
+    when the user has no profile row (nothing is created). ``source_action`` is
+    an audit label (``"keep_edit"``, ``"clear_memory"``, ``"clear_all"``).
+    Logs ``memory_base_saved`` — who and why, never a value.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with pgsync.connect(str(DB_PATH)) as conn:
+        cur = conn.execute(
+            "UPDATE user_profiles SET user_info = ?, updated_at = ? WHERE user_id = ?",
+            (json.dumps(asdict(info), default=str), now, user_id),
+        )
+        updated = cur.rowcount > 0
+        conn.commit()
+    get_audit_logger().info(
+        "memory_base_saved",
+        extra={
+            "event": "memory_base_saved", "user_id": safe_log_value(user_id),
+            "source_action": safe_log_value(source_action),
+            "result": "ok" if updated else "no_profile",
+        },
+    )
+    return updated
 
 
 VERSION_RETENTION = 10
@@ -385,7 +420,7 @@ def load_profile_with_overlay(
 
     with pgsync.connect(str(DB_PATH)) as conn:
         cur = conn.execute(
-            "SELECT cv_data, preferences FROM user_profiles WHERE user_id = ?",
+            "SELECT cv_data, preferences, user_info FROM user_profiles WHERE user_id = ?",
             (user_id,),
         )
         row = cur.fetchone()
@@ -394,9 +429,11 @@ def load_profile_with_overlay(
         overlay = current_overlay(user_id, conn) if with_overlay else []
     cv_raw = json.loads(row[0]) if row[0] else {}
     pref_raw = json.loads(row[1]) if row[1] else {}
+    info_raw = json.loads(row[2]) if row[2] else {}
     profile = UserProfile(
         cv_data=CVData(**_filter_fields(cv_raw, CVData)),
         preferences=UserPreferences(**_filter_fields(pref_raw, UserPreferences)),
+        user_info=UserInfo(**_filter_fields(info_raw, UserInfo)),
     )
     if with_previous and overlay:
         # The BASE values, taken before apply_overlay_rows writes over them.

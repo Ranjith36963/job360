@@ -82,6 +82,17 @@ row. `grep -rn "normalized_key()" backend/src` for its call sites.
 The fields are the dataclasses `services/profile/models.CVData` and
 `services/profile/models.UserPreferences`. Read them there.
 
+`user_profiles` holds three JSON columns, one store each (owner decision
+2026-10-08, migration 0050): `cv_data`, `preferences` and `user_info` — the
+user-info MEMORY (`models.UserInfo`: contact, right to work, logistics,
+languages, equality answers, approved answers). `save_profile` writes the
+first two and snapshots them into `user_profile_versions`; `user_info` has ONE
+writer, `storage.save_user_info`, and is not in a snapshot, so an upload, a
+re-extraction or a version restore cannot wipe it. The assistant's edits ride
+`profile_edits` on top of all three (`user_info.*` paths; shapes in
+`services/profile/user_info.py`). The salary per hiring country is a normal
+preference, `preferences.salary_by_country`.
+
 ### Extraction pipelines
 
 One entry point each — read the function and what it calls:

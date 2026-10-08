@@ -39,6 +39,7 @@ from src.core.settings import PROFILE_EXTRACT_MAX_PER_HOUR
 from src.services.applications.authorship import actor_for
 from src.services.auth import rate_limit as auth_rate_limit
 from src.services.profile import edits as profile_edits
+from src.services.profile import user_info
 from src.services.profile.cv_parser import extract_text
 from src.services.profile.github_enricher import (
     enrich_cv_from_github,
@@ -52,9 +53,11 @@ from src.services.profile.linkedin_parser import (
     _looks_like_linkedin,
 )
 from src.services.profile.models import (
+    OVERLAY_ONLY_PREFERENCE_FIELDS,
     VALID_EXPERIENCE_LEVELS,
     VALID_WORK_ARRANGEMENTS,
     CVData,
+    UserInfo,
     UserPreferences,
     UserProfile,
 )
@@ -66,6 +69,7 @@ from src.services.profile.storage import (
     load_profile_with_overlay,
     restore_profile_version,
     save_profile,
+    save_user_info,
 )
 from src.services.profile.two_pass import reset_cv_owned_fields, run_two_pass_extraction
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -295,6 +299,7 @@ def _build_profile_response(
         # Passed IN like `agent_edits` (slice-4 review N4): this builder is
         # pure, the caller does the read.
         lessons=lessons or [],
+        user_info=asdict(profile.user_info),
     )
 
 
@@ -315,7 +320,7 @@ _NOTES_PATH = "preferences.assistant_notes"
 # through the agent-edit overlay (update_profile / PATCH /api/profile). A web
 # preferences save ignores them in `_apply_preferences` and never records a
 # history row for them (owner decision 2026-09-25, daily-check offer).
-_OVERLAY_ONLY_PREFERENCES: frozenset[str] = frozenset({"daily_check", "check_every"})
+_OVERLAY_ONLY_PREFERENCES: frozenset[str] = OVERLAY_ONLY_PREFERENCE_FIELDS
 
 
 def _notes_or_422(value: Any) -> list[str]:
@@ -323,6 +328,18 @@ def _notes_or_422(value: Any) -> list[str]:
     a 422 naming the limit — never a silent cut."""
     try:
         return cast(list[str], profile_edits.validate_edit(_NOTES_PATH, value if value is not None else []))
+    except profile_edits.ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+def _salary_by_country_or_422(value: Any) -> list[dict[str, Any]]:
+    """The salary records through the SAME validator ``update_profile`` uses
+    (``None`` -> ``[]``), or a 422 naming the rule — never a silent cut."""
+    try:
+        return cast(
+            list[dict[str, Any]],
+            profile_edits.validate_edit(user_info.SALARY_BY_COUNTRY_PATH, value if value is not None else []),
+        )
     except profile_edits.ProfileEditError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
@@ -421,6 +438,24 @@ class UpdateProfileResponse(BaseModel):
     profile: ProfileResponse
 
 
+def _log_edit_rejected(
+    user_id: str, actor: str, pairs: list[tuple[str, Any]], failed_path: str, status: int
+) -> None:
+    """Audit a refused ``update_profile`` call: who, which paths, which one
+    failed, the status. NEVER the detail — a message can quote a rule about a
+    value, and no submitted value belongs in a log line."""
+    get_audit_logger().warning(
+        "profile_edit_rejected",
+        extra={
+            "event": "profile_edit_rejected", "user_id": safe_log_value(user_id),
+            "actor": safe_log_value(actor),
+            "paths": [safe_log_value(path, max_len=100) for path, _ in pairs],
+            "failed_path": safe_log_value(failed_path, max_len=100),
+            "status": status, "result": "rejected",
+        },
+    )
+
+
 @router.patch("/profile", response_model=UpdateProfileResponse)
 async def update_profile(
     body: UpdateProfileRequest, user: CurrentUser = Depends(require_user)  # noqa: B008 — FastAPI DI idiom
@@ -465,10 +500,13 @@ async def update_profile(
     # /profile` then answered 200-with-nothing instead of 404, and the user's
     # own first CV upload started from a profile they never made. A 422 must
     # change nothing.
+    failed_path = ""
     try:
         for path, value in pairs:
+            failed_path = path
             profile_edits.validate_edit(path, value)
     except profile_edits.ProfileEditError as exc:
+        _log_edit_rejected(user.id, actor, pairs, failed_path, exc.status_code)
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     if load_profile(user.id, with_overlay=False) is None:
@@ -487,15 +525,34 @@ async def update_profile(
             user.id, actor, pairs, enforce_rate_limit=actor != profile_edits.WEB_ACTOR
         )
     except profile_edits.ProfileEditError as exc:
+        _log_edit_rejected(user.id, actor, pairs, "", exc.status_code)
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     # S3 — audit line names PATHS and the ACTOR only, never a value. Goes to
     # the dedicated `job360.audit` logger (durable + DB-teed), the same
     # channel `services.applications.spine` uses for every other write.
-    get_audit_logger().info(
+    audit = get_audit_logger()
+    audit.info(
         "profile_edit",
-        extra={"event": "profile_edit", "paths": [path for path, _ in pairs], "actor": actor},
+        extra={
+            "event": "profile_edit", "paths": [path for path, _ in pairs],
+            "actor": safe_log_value(actor), "user_id": safe_log_value(user.id), "result": "ok",
+        },
     )
+    # One line per memory path written: a COUNT and a flag, never a value and
+    # never a key name (owner decision 2026-10-08). `preferences.salary_by_country`
+    # is a normal preference, so it is audited by `profile_edit` above only.
+    for row in applied:
+        if row["path"] in user_info.USER_INFO_PATHS:
+            audit.info(
+                "memory_saved",
+                extra={
+                    "event": "memory_saved", "user_id": safe_log_value(user.id),
+                    "actor": safe_log_value(actor), "path": safe_log_value(row["path"]),
+                    "answered": user_info.answered_count(row["path"], row["value"]),
+                    "cleared": row["value"] is None, "result": "ok",
+                },
+            )
 
     rendered = load_profile_response(user.id)[1]
     return UpdateProfileResponse(
@@ -574,6 +631,7 @@ async def take_back_edit(
         # control chars, so both are run through the shared sanitizer here.
         extra={
             "event": "profile_edit_taken_back",
+            "user_id": safe_log_value(user.id),
             "paths": [safe_log_value(path)],
             "actor": safe_log_value(actor_for(user)),
         },
@@ -619,9 +677,12 @@ async def keep_edit(
     if base is None:  # pragma: no cover — an overlay row implies a profile row (R8)
         raise HTTPException(status_code=404, detail="No profile found")
     head, _, field_name = path.partition(".")
-    target: Any = base.cv_data if head == "cv_data" else base.preferences
-    setattr(target, field_name, copy.deepcopy(value))
-    save_profile(base, user.id, source_action="keep_edit")
+    setattr(profile_edits.profile_section(base, head), field_name, copy.deepcopy(value))
+    if head == "user_info":
+        # Memory has its own column and its own single writer; no version snapshot.
+        save_user_info(user.id, base.user_info, "keep_edit")
+    else:
+        save_profile(base, user.id, source_action="keep_edit")
     profile_edits.record_edits(
         user.id, actor_for(user), [(path, value)], enforce_rate_limit=False, store_as_given=True
     )
@@ -630,6 +691,7 @@ async def keep_edit(
         # CodeQL py/log-injection — same sanitizing as take_back above.
         extra={
             "event": "profile_edit_kept",
+            "user_id": safe_log_value(user.id),
             "paths": [safe_log_value(path)],
             "actor": safe_log_value(actor_for(user)),
         },
@@ -859,20 +921,6 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         work_authorization_countries=_countries_or_422(
             pref_dict.get("work_authorization_countries", existing.work_authorization_countries)
         ),
-        # Owner decision 2026-09-25 — the preferences form never sends this
-        # (it is written only by the connected assistant, through the
-        # agent-edit overlay). Not carrying it forward would reset the BASE
-        # object's copy on every routine web save — harmless on its own since
-        # the overlay wins on read, but the same "rebuilds from scratch"
-        # pattern already bit needs_visa/work_authorization_countries twice
-        # (PR #630), so it is carried forward here too rather than relying on
-        # the overlay alone. A posted `daily_check` key is ignored on purpose,
-        # and `_record_web_preference_changes` skips it too
-        # (`_OVERLAY_ONLY_PREFERENCES`), so a web save never writes a history
-        # row that would wipe the assistant's remembered answer.
-        daily_check=existing.daily_check,
-        # Owner decision 2026-10-03 — same overlay-only rule as daily_check.
-        check_every=existing.check_every,
         # Standing instructions for the assistant. Same partial-save shape: an
         # OMITTED key keeps the stored notes, an explicit [] clears them. Same
         # validator as update_profile (length cap, count cap, control chars
@@ -880,7 +928,30 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         assistant_notes=_notes_or_422(
             pref_dict.get("assistant_notes", existing.assistant_notes)
         ),
+        # Owner decision 2026-10-08 — the salary per hiring country. Same
+        # partial-save shape as assistant_notes: OMITTED keeps the stored
+        # records, an explicit [] clears them. A NORMAL web-owned preference
+        # (history row on a web change), validated by the SAME validator as
+        # update_profile so the two doors can never store different shapes.
+        salary_by_country=_salary_by_country_or_422(
+            pref_dict.get("salary_by_country", existing.salary_by_country)
+        ),
     )
+    # Overlay-only fields (daily_check, check_every): the
+    # preferences form never sends them — they are written only by the
+    # connected assistant through the agent-edit overlay (owner decisions
+    # 2026-09-25 / 2026-10-03). The user-info MEMORY is not here at all: it is
+    # its own store (`profile.user_info`) that this function never touches, and
+    # a posted "user_info" key is ignored. Not carrying them forward would
+    # reset the BASE object's copy on every routine web save — harmless on its
+    # own since the overlay wins on read, but the same "rebuilds from scratch"
+    # pattern already bit needs_visa/work_authorization_countries twice
+    # (PR #630). A posted key is ignored on purpose, and
+    # `_record_web_preference_changes` skips these too
+    # (`_OVERLAY_ONLY_PREFERENCES`), so a web save never writes a history row
+    # that would wipe the assistant's remembered answer.
+    for overlay_only in OVERLAY_ONLY_PREFERENCE_FIELDS:
+        setattr(profile.preferences, overlay_only, copy.deepcopy(getattr(existing, overlay_only)))
     # Scrub extraction pollution before it is stored. The frontend autosaves the
     # loaded preference chips straight back, so a profile whose additional_skills
     # / target_job_titles were polluted by an older extraction merge would keep
@@ -1407,7 +1478,7 @@ async def upload_github(
 # the SAME file was not skipped as "already read". That cache went with the LLM
 # passes in decision 28 — there is no paid call left to skip.)
 
-_CLEAR_SCOPES = ("cv", "linkedin", "github", "preferences", "all")
+_CLEAR_SCOPES = ("cv", "linkedin", "github", "preferences", "memory", "all")
 
 
 def _reinfer_level_from_what_remains(profile: UserProfile) -> None:
@@ -1479,6 +1550,20 @@ def _clear_github(cv: CVData, prefs: UserPreferences) -> None:
     prefs.github_username = ""  # the handle belongs to this section
 
 
+def _log_profile_cleared(user_id: str, section: str) -> None:
+    """Audit a clear: who and which scope, never a value."""
+    logger.info(
+        # CodeQL py/log-injection — `section` is closed-enum validated by the
+        # caller (`_CLEAR_SCOPES`), but sanitized here too so the barrier is
+        # visible at the sink, not just at the validator.
+        "profile_cleared",
+        extra={
+            "event": "profile_cleared", "section": safe_log_value(section),
+            "user_id": safe_log_value(user_id),
+        },
+    )
+
+
 @router.post("/profile/clear", response_model=ProfileResponse)
 async def clear_profile_section(
     section: str = Form(...),  # noqa: B008 — FastAPI dependency-injection idiom
@@ -1486,7 +1571,15 @@ async def clear_profile_section(
 ) -> ProfileResponse:
     """Empty ONE input (or the whole profile), so the next upload starts clean.
 
-    ``section``: cv | linkedin | github | preferences | all.
+    ``section``: cv | linkedin | github | preferences | memory | all.
+
+    ``memory`` (owner decision 2026-10-08) empties ONLY the user-info memory
+    (``user_info.*``: contact, right to work, logistics, languages, equality
+    answers, saved answers): the base column and the assistant's overlay rows.
+    It takes no version snapshot and leaves the CV, the preferences and
+    ``daily_check`` alone. ``preferences`` leaves the memory alone (and clears
+    ``salary_by_country`` with the other job preferences); ``cv`` / ``linkedin`` /
+    ``github`` leave it alone; only ``all`` resets it.
 
     Deliberately does NOT re-run extraction: there is nothing left to read, so
     rebuilding an emptied profile would be pure waste. The stored snapshot taken
@@ -1499,8 +1592,9 @@ async def clear_profile_section(
     fresh upload: the whole point is a clean experiment. So each cleared
     scope also appends a clearing row (``value = NULL``, append-only) for
     every overlay path it covers: ``cv`` -> ``cv_data.*``, ``preferences``
-    -> ``preferences.*``, ``all`` -> both. ``linkedin`` and ``github`` own no
-    editable path, so they clear nothing in the overlay.
+    -> ``preferences.*``, ``memory`` -> ``user_info.*``, ``all`` -> all three.
+    ``linkedin`` and ``github`` own no editable path, so they clear nothing in
+    the overlay.
     """
     if section not in _CLEAR_SCOPES:
         raise HTTPException(
@@ -1513,6 +1607,21 @@ async def clear_profile_section(
     profile = load_profile(user.id, with_overlay=False)
     if profile is None:
         raise HTTPException(status_code=404, detail="No profile to clear")
+
+    if section == "memory":
+        # The memory has its own column and ONE writer, and is not part of a
+        # version snapshot: no save_profile, no new version.
+        save_user_info(user.id, UserInfo(), "clear_memory")
+        _clear_overlay_paths(
+            user,
+            [
+                row["path"]
+                for row in profile_edits.current_overlay(user.id)
+                if str(row["path"]).startswith("user_info.")
+            ],
+        )
+        _log_profile_cleared(user.id, section)
+        return load_profile_response(user.id)[1]
 
     cv = profile.cv_data
     prefs = profile.preferences or UserPreferences()
@@ -1533,14 +1642,16 @@ async def clear_profile_section(
         # "Clear preferences" button owns; it is the connected assistant's
         # remembered answer to a one-time offer. Only a full "clear all"
         # (starting the whole profile over) may reset it.
-        keep_daily_check = "" if section == "all" else prefs.daily_check
-        keep_check_every = "" if section == "all" else prefs.check_every
+        # The user-info MEMORY (owner decision 2026-10-08) is not on the
+        # preferences object at all — it has its own column; see below.
+        old_prefs = prefs
         prefs = UserPreferences(
             github_username=keep_handle,
             experience_level_inferred=prefs.experience_level_inferred,
-            daily_check=keep_daily_check,
-            check_every=keep_check_every,
         )
+        if section != "all":
+            for overlay_only in OVERLAY_ONLY_PREFERENCE_FIELDS:
+                setattr(prefs, overlay_only, copy.deepcopy(getattr(old_prefs, overlay_only)))
     if section == "all":
         # about_me-derived skills live on the CV object but are owned by the
         # preferences the user typed, so a full clear takes them too.
@@ -1551,6 +1662,8 @@ async def clear_profile_section(
         # Both clear dated positions the stored level was read from.
         _reinfer_level_from_what_remains(profile)
     save_profile(profile, user.id, f"clear_{section}")
+    if section == "all":
+        save_user_info(user.id, UserInfo(), "clear_all")
 
     # The overlay half of the clear. Prefixes, not a hand-written path list —
     # PROFILE_EDITABLE_PATHS is env-extendable, so anything enumerated here
@@ -1561,7 +1674,7 @@ async def clear_profile_section(
     elif section == "preferences":
         cleared_prefixes = ("preferences.",)
     elif section == "all":
-        cleared_prefixes = ("cv_data.", "preferences.")
+        cleared_prefixes = ("cv_data.", "preferences.", "user_info.")
     if cleared_prefixes:
         _clear_overlay_paths(
             user,
@@ -1574,17 +1687,12 @@ async def clear_profile_section(
                 # rows; only "all" may.
                 and not (
                     section == "preferences"
-                    and row["path"] in ("preferences.daily_check", "preferences.check_every")
+                    and row["path"] in {f"preferences.{n}" for n in OVERLAY_ONLY_PREFERENCE_FIELDS}
                 )
             ],
         )
 
-    logger.info(
-        # CodeQL py/log-injection — `section` is closed-enum validated above
-        # (`_CLEAR_SCOPES`), but sanitized here too so the barrier is visible
-        # at the sink, not just at the validator.
-        "profile_cleared", extra={"event": "profile_cleared", "section": safe_log_value(section)}
-    )
+    _log_profile_cleared(user.id, section)
     return load_profile_response(user.id)[1]
 
 
@@ -1653,6 +1761,15 @@ def _resync_web_rows_to_base(user: CurrentUser) -> None:
     for row in profile_edits.current_overlay(user.id):
         path = str(row["path"])
         if path not in valid or profile_edits.is_assistant_actor(str(row["set_by"])):
+            continue
+        # Overlay-only fields are not in the base, so a restore knows nothing
+        # about them: skipping keeps what the web/assistant set (it used to
+        # wipe a web-set daily_check back to the base's empty value).
+        if path.partition(".")[2] in _OVERLAY_ONLY_PREFERENCES:
+            continue
+        # The user-info memory is its own store (not in a version snapshot), so
+        # a restore knows nothing about it either.
+        if path.startswith("user_info."):
             continue
         value = profile_edits.field_values(base, [path])[path]
         if value == row["value"]:
