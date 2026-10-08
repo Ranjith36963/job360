@@ -18,9 +18,9 @@ repetitive middle. Every part goes to the right model on the first try.
 | **Fable 5.1** | `fable` | **Decisions**: design calls, product judgement, picking between options, chairing a debate, final sign-off of a slice. | Typing code, greps, polling, log reading (expensive). |
 | **Opus 5.5** | `opus` | **Hard tasks**: schema and migrations, auth and MCP gates, security, the application spine, root cause of a subtle bug, backend contracts, the bug + security review of every diff. | Mechanical edits, frontend boilerplate. |
 | **Sonnet 5.5** | `sonnet` | **Most of the work — use it a lot**: implement from a written contract (routes, components, tests, recipes, docs), browser verification against a checklist, library or web research with sources. | Design calls, security sign-off. |
-| **Haiku 4.5** | `haiku` | **Reading and clerical**: Railway / Sentry / CI logs, grep and rename sweeps, counting, polling a check until it finishes, copying a pattern to N places. | Anything needing judgement. |
+| **Haiku 5.5** | `haiku` | **Reading and clerical**: Railway / Sentry / CI logs, grep and rename sweeps, counting, polling a check until it finishes, copying a pattern to N places. | Anything needing judgement. |
 
-There is no Haiku 5.5. `haiku` resolves to the newest Haiku (4.5); recheck the model list before claiming a newer one exists.
+API IDs (Anthropic models page, checked 2026-10-08): `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` (Haiku 5.5 released 2026-10-07). If the `haiku` alias still starts Haiku 4.5 in an older Claude Code, update the CLI. Never claim a model does or does not exist from memory — check the models page first.
 
 ## Step 0 — before any tool call, split the task
 
