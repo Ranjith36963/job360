@@ -1126,7 +1126,7 @@ def build_server(version: str = "") -> MCPServer:
         clear}; send several per call. An unknown path/key or a wrong type is refused, naming what is allowed.
 
         A write REPLACES THE WHOLE VALUE of its path: send the current `fields[...]` plus your change (also for
-        assistant_notes, excluded_skills, cv_positions, cv_projects). Only add a note
+        preferences.assistant_notes, preferences.excluded_skills, cv_positions, cv_projects). Only add a note
         (`preferences.assistant_notes`) the user asked you to remember.
 
         Memory paths (closed key sets): `user_info.contact`, `user_info.right_to_work`, `user_info.logistics`,
