@@ -25,6 +25,8 @@ vi.mock("@/lib/api", () => ({
   recordApplicationEvent: (...args: unknown[]) => recordApplicationEvent(...args),
   getApplicationArtifact: (...args: unknown[]) => getApplicationArtifact(...args),
   getArtifactDiff: (...args: unknown[]) => getArtifactDiff(...args),
+  // S3: the decision buttons read this on mount; a failed read hides them.
+  getApplicationControls: vi.fn().mockRejectedValue(new Error("not mocked")),
 }));
 
 type DetailWithNextStep = ApplicationDetail & {

@@ -9,7 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from src.utils.logger import _request_id_var, get_logger, get_request_id, mask_ip, set_request_id
+from src.utils.logger import _request_id_var, get_logger, get_request_id, mask_ip, redact_path, set_request_id
 
 _access_log = get_logger("access")  # "job360.access" → main job360 handlers (jsonl + log file)
 
@@ -103,13 +103,13 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             _access_log.info(
                 "%s %s %s %sms",
                 request.method,
-                request.url.path,
+                redact_path(request.url.path),
                 status,
                 duration_ms,
                 extra={
                     "event": "http_request",
                     "method": request.method,
-                    "path": request.url.path,
+                    "path": redact_path(request.url.path),
                     "status_code": status,
                     "duration_ms": duration_ms,
                     "request_id": get_request_id(),
@@ -147,7 +147,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # A route may set a STRICTER policy itself (the public file download sends
+        # ``no-referrer``); only fill the default when it did not.
+        if "referrer-policy" not in response.headers:
+            response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = _CSP
         if _is_production():
             response.headers["Strict-Transport-Security"] = _HSTS

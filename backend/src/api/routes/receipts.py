@@ -62,6 +62,11 @@ class Receipt(BaseModel):
     cv_version_no: int | None = None
     cover_letter_version_no: int | None = None
     recorded_by: str | None = None
+    # S3 - '' | same_job | same_company, the kit the assistant filled from. Set
+    # at INSERT; a receipt made without a kit reads '' / None / ''.
+    possible_duplicate: str = ""
+    kit_event_id: int | None = None
+    kit_sha256: str = ""
 
 
 _RECEIPT_BASE_FIELDS = (

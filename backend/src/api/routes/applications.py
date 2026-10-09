@@ -28,7 +28,7 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
 from src.api.dependencies import get_request_db
 from src.api.models import JobResponse, LessonsResponse
 from src.api.routes.bring import job_row_to_response
@@ -36,6 +36,7 @@ from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
+from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
 from src.services.applications import spine
 from src.services.applications import stats as stats_service
@@ -650,6 +651,8 @@ class RecordApplicationReceiptResponse(BaseModel):
     confirmation: str
     url: str
     event_id: int
+    # S3 - '' | same_job | same_company. A flag, never a block.
+    possible_duplicate: str = ""
 
 
 class WhatsNewEventOut(BaseModel):
@@ -749,6 +752,174 @@ class SettingRequestExportOut(BaseModel):
     decision: Optional[str] = None
     decided_by: Optional[str] = None
     decided_at: Optional[str] = None
+
+
+class KitSeenOut(BaseModel):
+    """Who saw / approved a document, where (web | chat) and when."""
+
+    by: str
+    where: str
+    at: str
+
+
+class KitFileOut(BaseModel):
+    """A short-lived download link. The token is in ``url`` and exists nowhere else."""
+
+    url: str
+    expires_at: str
+    downloads_left: int
+    filename: str
+    mime: str
+    size: int
+
+
+class KitDocumentOut(BaseModel):
+    artifact_id: int
+    version: int
+    label: str
+    text: str
+    sha256: str
+    chars: int
+    seen: Optional[KitSeenOut] = None
+    approved: Optional[KitSeenOut] = None
+    file: KitFileOut
+
+
+class KitAnswerOut(BaseModel):
+    key: str
+    value: Any
+    source: Literal["memory", "profile", "approved_text"]
+    saved_at: Optional[str] = None
+    label: Optional[str] = None
+
+
+class KitAnswersOut(BaseModel):
+    contact: list[KitAnswerOut] = Field(default_factory=list)
+    right_to_work: list[KitAnswerOut] = Field(default_factory=list)
+    logistics: list[KitAnswerOut] = Field(default_factory=list)
+    salary: list[KitAnswerOut] = Field(default_factory=list)
+    languages: list[KitAnswerOut] = Field(default_factory=list)
+    equality: list[KitAnswerOut] = Field(default_factory=list)
+    approved_text: list[KitAnswerOut] = Field(default_factory=list)
+
+
+class KitMissingOut(BaseModel):
+    key: str
+    why: str
+
+
+class KitIdOut(BaseModel):
+    id: int
+    sha256: str
+    generated_at: str
+
+
+class KitJobOut(BaseModel):
+    job_id: Optional[int] = None
+    title: str
+    company: str
+    location: str
+    country: Optional[str] = None
+    remote: Optional[bool] = None
+    apply_url: str
+    found_on: Optional[str] = None
+
+
+class KitApplicationOut(BaseModel):
+    id: int
+    status: str
+    follow_up_on: Optional[str] = None
+    submit_override: Optional[str] = None
+
+
+class KitSameJobOut(BaseModel):
+    application_id: Optional[int] = None
+    status: str
+    applied_at: str
+
+
+class KitDuplicateOut(BaseModel):
+    same_job: Optional[KitSameJobOut] = None
+    same_company_30d: int
+    flag: str
+    cleared: Optional[KitSeenOut] = None
+
+
+class KitHoldOut(BaseModel):
+    held_by: str
+    since: str
+    until: str
+
+
+class KitKnownAccountOut(BaseModel):
+    recorded_by: str
+    recorded_at: str
+
+
+class KitAccountSiteOut(BaseModel):
+    host: Optional[str] = None
+    likely_needs_account: bool
+    known_account: Optional[KitKnownAccountOut] = None
+
+
+class ApplicationKitOut(BaseModel):
+    """Everything an assistant needs to fill ONE application form (S3). Binds to
+    THIS application only: its latest CV and cover letter, never another job's."""
+
+    kit: KitIdOut
+    job: KitJobOut
+    application: KitApplicationOut
+    cv: Optional[KitDocumentOut] = None
+    cv_none_reason: Optional[str] = None
+    cover_letter: Optional[KitDocumentOut] = None
+    cover_letter_none_reason: Optional[str] = None
+    answers: KitAnswersOut
+    missing: list[KitMissingOut]
+    settings: dict[str, Any]
+    duplicate: KitDuplicateOut
+    hold: Optional[KitHoldOut] = None
+    account_site: KitAccountSiteOut
+    autofill: Literal["allow", "deny", "unset"]
+    instructions: list[str]
+
+
+class ControlsCvOut(BaseModel):
+    artifact_id: int
+    version: int
+    sha256: str
+    seen: Optional[KitSeenOut] = None
+    approved: Optional[KitSeenOut] = None
+
+
+class ControlsAutofillOut(BaseModel):
+    mode: Literal["allow", "deny", "unset"]
+    by: Optional[str] = None
+    where: Optional[str] = None
+    at: Optional[str] = None
+
+
+class ApplicationControlsOut(BaseModel):
+    """The state behind the four human-in-the-loop buttons on the application
+    page, each with who / where / when."""
+
+    application_id: int
+    cv: Optional[ControlsCvOut] = None
+    declined: Optional[KitSeenOut] = None
+    autofill: ControlsAutofillOut
+    duplicate: KitDuplicateOut
+
+
+class CvSeenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Default: the latest CV. A named id must still BE the latest one.
+    artifact_id: Optional[int] = None
+
+
+class AutofillRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["allow", "deny"]
 
 
 class SubmitCheckResponse(BaseModel):
@@ -1139,7 +1310,6 @@ async def download_application_artifact(
     the agent already holds the text). POST like the tailor download so it is
     Origin-checked; it writes nothing. Foreign application/artifact -> 404."""
     import asyncio
-    import re
 
     from src.services.tailoring.docx import render_docx
     from src.services.tailoring.pdf import render_pdf
@@ -1162,8 +1332,19 @@ async def download_application_artifact(
     else:
         content = await asyncio.to_thread(render_pdf, text, title=title)
         media_type = "application/pdf"
-    company = re.sub(r"[^a-z0-9]+", "-", str(app_row.get("job_company") or "").lower()).strip("-")[:40]
-    stem = "-".join(p for p in (company, kind.replace("_", "-"), f"v{row['version_no']}") if p)
+    stem = kit_service.file_stem(str(app_row.get("job_company") or ""), kind, int(row["version_no"]))
+    # S3 - the user's own download is "the user saw this CV" (one mark per version).
+    # Only a signed-in web session counts; a bearer call writes nothing, and a stale
+    # version (not the latest) is simply not marked - the download still works.
+    if actor_for(user) == "web":
+        try:
+            await kit_service.record_decision(
+                db, user, application_id, "cv_seen",
+                {"artifact_id": row["id"], "sha256": kit_service.sha256_text(text), "where": "web"},
+                once_per_version=True,
+            )
+        except SpineError:
+            pass
     return Response(
         content=content,
         media_type=media_type,
@@ -1557,6 +1738,167 @@ async def update_job_facts(
 
 
 @router.get(
+    "/applications/{application_id}/kit", response_model=ApplicationKitOut, dependencies=AUTH_FIRST
+)
+async def get_application_kit(
+    application_id: int,
+    response: Response,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """The application kit (S3): the CV and cover letter of THIS application, every
+    stored answer with its source, what is missing for the job's country, fresh
+    30-minute file links, the duplicate / hold / account-site / autofill state and
+    the gate's preview. Writes one ``kit_read`` event (the timeline shows who read
+    it and when) and one link row per document; the file tokens appear only in this
+    response. 404 for an application that is not the caller's; 429 over the
+    hourly cap. ``Cache-Control: no-store``."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return await kit_service.build_kit(db, user, application_id, now=datetime.now(timezone.utc))
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+async def _controls(db: JobDatabase, user: CurrentUser, application_id: int) -> dict[str, Any]:
+    """The decision state for one application (404 when it is not the caller's)."""
+    app_row = await spine.get_owned_application(db, user.id, application_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    state = await kit_service.controls_state(db, user.id, app_row, datetime.now(timezone.utc))
+    return {"application_id": application_id, **state}
+
+
+@router.get(
+    "/applications/{application_id}/controls", response_model=ApplicationControlsOut, dependencies=AUTH_FIRST
+)
+async def get_application_controls(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """What the four buttons on the application page show: is the latest CV seen /
+    approved (who, where, when), did the user say don't send, the autofill choice,
+    and the duplicate warning. Read-only."""
+    return await _controls(db, user, application_id)
+
+
+async def _web_decision(
+    db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, payload: dict[str, Any],
+    *, once_per_version: bool = False,
+) -> None:
+    """One button click: prove the application is the caller's, then write the
+    event through the same rules the chat path uses."""
+    if await spine.get_owned_application(db, user.id, application_id) is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    try:
+        await kit_service.record_decision(
+            db, user, application_id, event_type, payload, once_per_version=once_per_version
+        )
+    except SpineError as exc:
+        _raise(exc)
+
+
+async def _latest_cv_or_409(db: JobDatabase, user: CurrentUser, application_id: int) -> dict[str, Any]:
+    cv = await spine.latest_artifact(db, user.id, application_id, "cv")
+    if cv is None:
+        raise HTTPException(status_code=409, detail="no CV saved for this application")
+    return cv
+
+
+@router.post(
+    "/applications/{application_id}/cv-seen", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
+async def mark_cv_seen(
+    application_id: int,
+    body: CvSeenRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"I've checked this CV" - the user's own click records ``cv_seen`` (where=web)
+    for the latest CV, once per version. Session only; no MCP twin."""
+    cv = await _latest_cv_or_409(db, user, application_id)
+    artifact_id = body.artifact_id if body.artifact_id is not None else cv["id"]
+    row = await spine.get_artifact(db, user.id, application_id, artifact_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    await _web_decision(
+        db, user, application_id, "cv_seen",
+        {"artifact_id": row["id"], "sha256": kit_service.sha256_text(row["text"]), "where": "web"},
+        once_per_version=True,
+    )
+    return await _controls(db, user, application_id)
+
+
+@router.post(
+    "/applications/{application_id}/send/approve", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
+async def approve_send(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"Send this one" - the user says yes to sending this application with the
+    latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
+    where=web. A CV edited later makes the yes stop matching. Clears an earlier
+    "don't send"."""
+    cv = await _latest_cv_or_409(db, user, application_id)
+    payload = {"artifact_id": cv["id"], "sha256": kit_service.sha256_text(cv["text"]), "where": "web"}
+    await _web_decision(db, user, application_id, "cv_seen", payload, once_per_version=True)
+    await _web_decision(db, user, application_id, "submit_approved", payload)
+    return await _controls(db, user, application_id)
+
+
+@router.post(
+    "/applications/{application_id}/send/decline", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
+async def decline_send(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"Don't send" - the gate answers ``stop`` / ``user_declined`` until a later
+    "Send this one"."""
+    await _web_decision(db, user, application_id, "submit_declined", {"where": "web"})
+    return await _controls(db, user, application_id)
+
+
+@router.post(
+    "/applications/{application_id}/autofill", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
+async def set_autofill(
+    application_id: int,
+    body: AutofillRequest,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"Autofill" / "Don't autofill" - may the assistant type into this form at
+    all. Latest wins; unset means the assistant follows its own app permission."""
+    await _web_decision(db, user, application_id, "autofill_set", {"mode": body.mode})
+    return await _controls(db, user, application_id)
+
+
+@router.post(
+    "/applications/{application_id}/duplicate/clear", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
+async def clear_duplicate(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"Not a duplicate, go ahead" - clears the duplicate-job ask and the unattended
+    duplicate stop for THIS application. Web only."""
+    await _web_decision(db, user, application_id, "duplicate_cleared", {"where": "web"})
+    return await _controls(db, user, application_id)
+
+
+@router.get(
     "/applications/{application_id}/submit-check", response_model=SubmitCheckResponse, dependencies=AUTH_FIRST
 )
 async def submit_check(
@@ -1578,21 +1920,13 @@ async def submit_check(
         app_row = await spine.get_owned_application(db, user.id, application_id)
         if app_row is None:
             raise SpineError(404, "application not found")
-        cur = await db._db.execute(
-            "SELECT 1 FROM application_receipts WHERE application_id = ? AND user_id = ? LIMIT 1",
-            (application_id, user.id),
-        )
-        has_receipt = await cur.fetchone() is not None
-        override = await spine.submit_override(db, user.id, application_id)
         now = datetime.now(timezone.utc)
         cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
         counts = await settings_rules.load_submit_counts(db, user.id, now)
+        facts = await kit_service.gate_facts(db, user.id, app_row)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
-    facts = settings_rules.SubmitFacts(
-        status=str(app_row["status"]), has_receipt=has_receipt, submit_override=override
-    )
     verdict = settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
     get_audit_logger().info(
         "submit_check",
@@ -1673,16 +2007,22 @@ async def record_event(
             raise SpineError(404, "application not found")
         if body.event_type == "submit_mode_set":
             _check_submit_mode_event(user, application_id, payload)
+        if body.event_type in kit_service.KIT_EVENT_TYPES:
+            # S3: closed payloads + who may write which (the MCP tool inherits this).
+            payload = await kit_service.check_kit_event(db, user, application_id, body.event_type, payload)
         # append_event always returns the REAL final follow_up_on — set,
         # cleared, auto-cleared (an overdue date + a status event), replay-
         # derived (a correction), or unchanged — so there is nothing left to
         # patch here (coordinator review, 2026-09-25).
-        return await spine.append_event(
+        result = await spine.append_event(
             db, user_id=user.id, application_id=application_id, event_type=body.event_type,
             detail=detail, payload=payload, occurred_at=occurred_at, recorded_by=actor_for(user),
             corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
             follow_up_on=follow_up_on_arg,
         )
+        if body.event_type in kit_service.KIT_EVENT_TYPES:
+            kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
+        return result
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

@@ -275,6 +275,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/autofill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Autofill
+         * @description "Autofill" / "Don't autofill" - may the assistant type into this form at
+         *     all. Latest wins; unset means the assistant follows its own app permission.
+         */
+        post: operations["set_autofill_api_applications__application_id__autofill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/contacts": {
         parameters: {
             query?: never;
@@ -291,6 +312,70 @@ export interface paths {
          *     dynamically since the same call can legitimately answer either.
          */
         post: operations["add_contact_api_applications__application_id__contacts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Application Controls
+         * @description What the four buttons on the application page show: is the latest CV seen /
+         *     approved (who, where, when), did the user say don't send, the autofill choice,
+         *     and the duplicate warning. Read-only.
+         */
+        get: operations["get_application_controls_api_applications__application_id__controls_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/cv-seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Cv Seen
+         * @description "I've checked this CV" - the user's own click records ``cv_seen`` (where=web)
+         *     for the latest CV, once per version. Session only; no MCP twin.
+         */
+        post: operations["mark_cv_seen_api_applications__application_id__cv_seen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/duplicate/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear Duplicate
+         * @description "Not a duplicate, go ahead" - clears the duplicate-job ask and the unattended
+         *     duplicate stop for THIS application. Web only.
+         */
+        post: operations["clear_duplicate_api_applications__application_id__duplicate_clear_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -353,6 +438,32 @@ export interface paths {
         patch: operations["update_job_facts_api_applications__application_id__job_patch"];
         trace?: never;
     };
+    "/api/applications/{application_id}/kit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Application Kit
+         * @description The application kit (S3): the CV and cover letter of THIS application, every
+         *     stored answer with its source, what is missing for the job's country, fresh
+         *     30-minute file links, the duplicate / hold / account-site / autofill state and
+         *     the gate's preview. Writes one ``kit_read`` event (the timeline shows who read
+         *     it and when) and one link row per document; the file tokens appear only in this
+         *     response. 404 for an application that is not the caller's; 429 over the
+         *     hourly cap. ``Cache-Control: no-store``.
+         */
+        get: operations["get_application_kit_api_applications__application_id__kit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/receipt": {
         parameters: {
             query?: never;
@@ -364,6 +475,50 @@ export interface paths {
         put?: never;
         /** Record Application Receipt */
         post: operations["record_application_receipt_api_applications__application_id__receipt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/send/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Send
+         * @description "Send this one" - the user says yes to sending this application with the
+         *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
+         *     where=web. A CV edited later makes the yes stop matching. Clears an earlier
+         *     "don't send".
+         */
+        post: operations["approve_send_api_applications__application_id__send_approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/send/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline Send
+         * @description "Don't send" - the gate answers ``stop`` / ``user_declined`` until a later
+         *     "Send this one".
+         */
+        post: operations["decline_send_api_applications__application_id__send_decline_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1035,6 +1190,26 @@ export interface paths {
          *     ``application_id`` in its URL.
          */
         post: operations["record_outreach_api_contacts__contact_id__outreach_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download File
+         * @description Serve one kit file. See the module docstring for the rules.
+         */
+        get: operations["download_file_api_files__token__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2223,6 +2398,19 @@ export interface components {
             /** Version No */
             version_no: number;
         };
+        /**
+         * ApplicationControlsOut
+         * @description The state behind the four human-in-the-loop buttons on the application
+         *     page, each with who / where / when.
+         */
+        ApplicationControlsOut: {
+            /** Application Id */
+            application_id: number;
+            autofill: components["schemas"]["ControlsAutofillOut"];
+            cv?: components["schemas"]["ControlsCvOut"] | null;
+            declined?: components["schemas"]["KitSeenOut"] | null;
+            duplicate: components["schemas"]["KitDuplicateOut"];
+        };
         /** ApplicationDetailOut */
         ApplicationDetailOut: {
             /** Artifacts */
@@ -2333,6 +2521,39 @@ export interface components {
             remote?: boolean | null;
             /** Snapshot At */
             snapshot_at: string | null;
+        };
+        /**
+         * ApplicationKitOut
+         * @description Everything an assistant needs to fill ONE application form (S3). Binds to
+         *     THIS application only: its latest CV and cover letter, never another job's.
+         */
+        ApplicationKitOut: {
+            account_site: components["schemas"]["KitAccountSiteOut"];
+            answers: components["schemas"]["KitAnswersOut"];
+            application: components["schemas"]["KitApplicationOut"];
+            /**
+             * Autofill
+             * @enum {string}
+             */
+            autofill: "allow" | "deny" | "unset";
+            cover_letter?: components["schemas"]["KitDocumentOut"] | null;
+            /** Cover Letter None Reason */
+            cover_letter_none_reason?: string | null;
+            cv?: components["schemas"]["KitDocumentOut"] | null;
+            /** Cv None Reason */
+            cv_none_reason?: string | null;
+            duplicate: components["schemas"]["KitDuplicateOut"];
+            hold?: components["schemas"]["KitHoldOut"] | null;
+            /** Instructions */
+            instructions: string[];
+            job: components["schemas"]["KitJobOut"];
+            kit: components["schemas"]["KitIdOut"];
+            /** Missing */
+            missing: components["schemas"]["KitMissingOut"][];
+            /** Settings */
+            settings: {
+                [key: string]: unknown;
+            };
         };
         /** ApplicationReceiptExportOut */
         ApplicationReceiptExportOut: {
@@ -2608,6 +2829,14 @@ export interface components {
              * @default []
              */
             waiting: components["schemas"]["SettingRequestOut"][];
+        };
+        /** AutofillRequest */
+        AutofillRequest: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "allow" | "deny";
         };
         /** Body_clear_profile_section_api_profile_clear_post */
         Body_clear_profile_section_api_profile_clear_post: {
@@ -2913,6 +3142,31 @@ export interface components {
             /** Sent */
             sent: components["schemas"]["OutreachEntryOut"][];
         };
+        /** ControlsAutofillOut */
+        ControlsAutofillOut: {
+            /** At */
+            at?: string | null;
+            /** By */
+            by?: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "allow" | "deny" | "unset";
+            /** Where */
+            where?: string | null;
+        };
+        /** ControlsCvOut */
+        ControlsCvOut: {
+            approved?: components["schemas"]["KitSeenOut"] | null;
+            /** Artifact Id */
+            artifact_id: number;
+            seen?: components["schemas"]["KitSeenOut"] | null;
+            /** Sha256 */
+            sha256: string;
+            /** Version */
+            version: number;
+        };
         /** CreateAskRequest */
         CreateAskRequest: {
             /** Application Id */
@@ -2942,6 +3196,11 @@ export interface components {
         CreateTokenRequest: {
             /** Name */
             name: string;
+        };
+        /** CvSeenRequest */
+        CvSeenRequest: {
+            /** Artifact Id */
+            artifact_id?: number | null;
         };
         /** EmailChangeRequest */
         EmailChangeRequest: {
@@ -3290,6 +3549,175 @@ export interface components {
             resume: {
                 [key: string]: unknown;
             };
+        };
+        /** KitAccountSiteOut */
+        KitAccountSiteOut: {
+            /** Host */
+            host?: string | null;
+            known_account?: components["schemas"]["KitKnownAccountOut"] | null;
+            /** Likely Needs Account */
+            likely_needs_account: boolean;
+        };
+        /** KitAnswerOut */
+        KitAnswerOut: {
+            /** Key */
+            key: string;
+            /** Label */
+            label?: string | null;
+            /** Saved At */
+            saved_at?: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "memory" | "profile" | "approved_text";
+            /** Value */
+            value: unknown;
+        };
+        /** KitAnswersOut */
+        KitAnswersOut: {
+            /** Approved Text */
+            approved_text?: components["schemas"]["KitAnswerOut"][];
+            /** Contact */
+            contact?: components["schemas"]["KitAnswerOut"][];
+            /** Equality */
+            equality?: components["schemas"]["KitAnswerOut"][];
+            /** Languages */
+            languages?: components["schemas"]["KitAnswerOut"][];
+            /** Logistics */
+            logistics?: components["schemas"]["KitAnswerOut"][];
+            /** Right To Work */
+            right_to_work?: components["schemas"]["KitAnswerOut"][];
+            /** Salary */
+            salary?: components["schemas"]["KitAnswerOut"][];
+        };
+        /** KitApplicationOut */
+        KitApplicationOut: {
+            /** Follow Up On */
+            follow_up_on?: string | null;
+            /** Id */
+            id: number;
+            /** Status */
+            status: string;
+            /** Submit Override */
+            submit_override?: string | null;
+        };
+        /** KitDocumentOut */
+        KitDocumentOut: {
+            approved?: components["schemas"]["KitSeenOut"] | null;
+            /** Artifact Id */
+            artifact_id: number;
+            /** Chars */
+            chars: number;
+            file: components["schemas"]["KitFileOut"];
+            /** Label */
+            label: string;
+            seen?: components["schemas"]["KitSeenOut"] | null;
+            /** Sha256 */
+            sha256: string;
+            /** Text */
+            text: string;
+            /** Version */
+            version: number;
+        };
+        /** KitDuplicateOut */
+        KitDuplicateOut: {
+            cleared?: components["schemas"]["KitSeenOut"] | null;
+            /** Flag */
+            flag: string;
+            /** Same Company 30D */
+            same_company_30d: number;
+            same_job?: components["schemas"]["KitSameJobOut"] | null;
+        };
+        /**
+         * KitFileOut
+         * @description A short-lived download link. The token is in ``url`` and exists nowhere else.
+         */
+        KitFileOut: {
+            /** Downloads Left */
+            downloads_left: number;
+            /** Expires At */
+            expires_at: string;
+            /** Filename */
+            filename: string;
+            /** Mime */
+            mime: string;
+            /** Size */
+            size: number;
+            /** Url */
+            url: string;
+        };
+        /** KitHoldOut */
+        KitHoldOut: {
+            /** Held By */
+            held_by: string;
+            /** Since */
+            since: string;
+            /** Until */
+            until: string;
+        };
+        /** KitIdOut */
+        KitIdOut: {
+            /** Generated At */
+            generated_at: string;
+            /** Id */
+            id: number;
+            /** Sha256 */
+            sha256: string;
+        };
+        /** KitJobOut */
+        KitJobOut: {
+            /** Apply Url */
+            apply_url: string;
+            /** Company */
+            company: string;
+            /** Country */
+            country?: string | null;
+            /** Found On */
+            found_on?: string | null;
+            /** Job Id */
+            job_id?: number | null;
+            /** Location */
+            location: string;
+            /** Remote */
+            remote?: boolean | null;
+            /** Title */
+            title: string;
+        };
+        /** KitKnownAccountOut */
+        KitKnownAccountOut: {
+            /** Recorded At */
+            recorded_at: string;
+            /** Recorded By */
+            recorded_by: string;
+        };
+        /** KitMissingOut */
+        KitMissingOut: {
+            /** Key */
+            key: string;
+            /** Why */
+            why: string;
+        };
+        /** KitSameJobOut */
+        KitSameJobOut: {
+            /** Application Id */
+            application_id?: number | null;
+            /** Applied At */
+            applied_at: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * KitSeenOut
+         * @description Who saw / approved a document, where (web | chat) and when.
+         */
+        KitSeenOut: {
+            /** At */
+            at: string;
+            /** By */
+            by: string;
+            /** Where */
+            where: string;
         };
         /**
          * LessonOut
@@ -3827,8 +4255,20 @@ export interface components {
             job_source: string;
             /** Job Title */
             job_title: string;
+            /** Kit Event Id */
+            kit_event_id?: number | null;
+            /**
+             * Kit Sha256
+             * @default
+             */
+            kit_sha256: string;
             /** Note */
             note: string;
+            /**
+             * Possible Duplicate
+             * @default
+             */
+            possible_duplicate: string;
             /** Profile Version */
             profile_version: number | null;
             /** Recorded By */
@@ -3950,6 +4390,11 @@ export interface components {
             cv_version_no: number | null;
             /** Event Id */
             event_id: number;
+            /**
+             * Possible Duplicate
+             * @default
+             */
+            possible_duplicate: string;
             /** Receipt Id */
             receipt_id: number;
             /** Sent At */
@@ -5110,6 +5555,45 @@ export interface operations {
             };
         };
     };
+    set_autofill_api_applications__application_id__autofill_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutofillRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     add_contact_api_applications__application_id__contacts_post: {
         parameters: {
             query?: never;
@@ -5145,6 +5629,115 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AddContactResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_application_controls_api_applications__application_id__controls_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_cv_seen_api_applications__application_id__cv_seen_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CvSeenRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_duplicate_api_applications__application_id__duplicate_clear_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
                 };
             };
             /** @description Validation Error */
@@ -5275,6 +5868,41 @@ export interface operations {
             };
         };
     };
+    get_application_kit_api_applications__application_id__kit_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationKitOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     record_application_receipt_api_applications__application_id__receipt_post: {
         parameters: {
             query?: never;
@@ -5301,6 +5929,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecordApplicationReceiptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_send_api_applications__application_id__send_approve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decline_send_api_applications__application_id__send_decline_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
                 };
             };
             /** @description Validation Error */
@@ -6394,6 +7092,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecordOutreachResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_file_api_files__token__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

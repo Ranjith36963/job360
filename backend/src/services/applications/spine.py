@@ -1173,13 +1173,34 @@ async def record_receipt(
     answers_json = json.dumps(answers or [])
     fields_json = json.dumps(fields_filled or {})
 
+    # S3 - flag a possible duplicate and name the kit the assistant filled from.
+    # Both are set HERE, at INSERT (M3): a flag never blocks the receipt.
+    from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
+
+    dup = await kit_service.duplicate_facts(db, user_id, app_row, datetime.now(timezone.utc))
+    possible_duplicate = dup["flag"]
+    cur = await db._db.execute(
+        "SELECT id, payload FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type = 'kit_read' ORDER BY id DESC LIMIT 1",
+        (application_id, user_id),
+    )
+    kit_row = await cur.fetchone()
+    kit_event_id: Optional[int] = None
+    kit_sha256 = ""
+    if kit_row is not None:
+        kit_event_id = int(dict(kit_row)["id"])
+        try:
+            kit_sha256 = str(json.loads(dict(kit_row)["payload"]).get("kit_sha256") or "")
+        except (ValueError, AttributeError):
+            kit_sha256 = ""
+
     cur = await db._db.execute(
         "INSERT INTO application_receipts "
         "(user_id, job_id, sent_at, job_title, job_company, job_location, job_apply_url, job_source, "
         " job_description, cv_text, cv_origin, cover_letter_text, cover_letter_origin, profile_version, "
         " channel, note, created_at, application_id, cv_artifact_id, cover_letter_artifact_id, answers, "
-        " fields_filled, confirmation, recorded_by) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " fields_filled, confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             user_id, app_row["job_id"], sent_at,
             app_row.get("job_title") or "", app_row.get("job_company") or "",
@@ -1190,14 +1211,14 @@ async def record_receipt(
             profile_version, channel or "", note or "", now,
             application_id, cv_artifact["id"] if cv_artifact else None,
             cl_artifact["id"] if cl_artifact else None, answers_json, fields_json,
-            confirmation or "", recorded_by,
+            confirmation or "", recorded_by, possible_duplicate, kit_event_id, kit_sha256,
         ),
     )
     receipt_id = int(cur.lastrowid or 0)
 
     event = await append_event(
         db, user_id=user_id, application_id=application_id, event_type="applied",
-        payload={"receipt_id": receipt_id, "channel": channel or ""},
+        payload={"receipt_id": receipt_id, "channel": channel or "", "possible_duplicate": possible_duplicate},
         occurred_at=sent_at, recorded_by=recorded_by,
     )
     get_audit_logger().info(
@@ -1207,6 +1228,16 @@ async def record_receipt(
             "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
         },
     )
+    if possible_duplicate:
+        get_audit_logger().info(
+            "possible_duplicate",
+            extra={
+                "event": "possible_duplicate", "user_id": safe_log_value(user_id),
+                "application_id": application_id, "receipt_id": receipt_id,
+                "flag": safe_log_value(possible_duplicate, max_len=40),
+                "actor": safe_log_value(recorded_by, max_len=80), "result": "ok",
+            },
+        )
     return {
         "receipt_id": receipt_id, "sent_at": sent_at,
         "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
@@ -1214,6 +1245,7 @@ async def record_receipt(
         "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
         "channel": channel or "", "confirmation": confirmation or "",
         "url": f"/applications/{application_id}", "event_id": event["event_id"],
+        "possible_duplicate": possible_duplicate,
     }
 
 
@@ -1336,7 +1368,8 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
     """
     cur = await db._db.execute(
         "SELECT application_id, cv_artifact_id, cover_letter_artifact_id, answers, fields_filled, "
-        "confirmation, recorded_by FROM application_receipts WHERE user_id = ? AND id = ?",
+        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256 "
+        "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
     )
     row = await cur.fetchone()
@@ -1350,6 +1383,9 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
         "fields_filled": _receipt_json(r.get("fields_filled"), dict),
         "confirmation": r.get("confirmation") or None,
         "recorded_by": r.get("recorded_by") or None,
+        "possible_duplicate": r.get("possible_duplicate") or "",
+        "kit_event_id": r.get("kit_event_id"),
+        "kit_sha256": r.get("kit_sha256") or "",
         "cv_version_no": await _artifact_version_no(
             db, user_id, application_id, "cv", r.get("cv_artifact_id")
         ),

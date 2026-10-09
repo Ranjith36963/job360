@@ -108,6 +108,27 @@ per-job override is the `submit_mode_set` note event; the practice run is derive
 never stored. The inbox mode, check frequency and notes keep their
 `preferences.*` paths and are only shown in the settings view.
 
+The APPLICATION KIT (S3, owner decision 2026-10-08, migration 0052) is what an
+assistant reads to fill ONE application form: `GET /api/applications/{id}/kit`
+and the MCP `get_application_kit` call the same route function
+(`services/applications/kit.build_kit`). It carries the CV and letter of that
+application only, every stored answer with its source (memory / profile /
+approved text), `missing` for the job's country, the duplicate / hold /
+account-site / autofill state and a preview of the gate. Each read writes a
+`kit_read` event and mints one `artifact_links` row per document: a random
+32-byte token, only its SHA-256 stored, 30 minutes, 3 downloads, served by the
+public `GET /api/files/{token}` (`api/routes/files.py`: constant-time compare,
+one atomic counter UPDATE, per-IP limits, `no-store`; the token is rewritten to
+`[redacted]` in the access log, uvicorn's log and Sentry). `artifact_links` is
+erased with the account and not exported. `application_receipts` gained
+`possible_duplicate`, `kit_event_id`, `kit_sha256`, all set at INSERT. The human
+in the loop is a set of note events (`cv_seen`, `submit_approved`,
+`submit_declined`, `autofill_set`, `duplicate_cleared`, `form_filled`,
+`hold_released`, `site_account`, `account_needed`) validated in the
+`record_event` route (`kit.check_kit_event`), plus four website-only buttons
+(`/cv-seen`, `/send/approve|decline`, `/autofill`, `/duplicate/clear`);
+`may_submit` reads them through `kit.gate_facts`.
+
 ### Extraction pipelines
 
 One entry point each — read the function and what it calls:
