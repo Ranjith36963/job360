@@ -1,5 +1,9 @@
 # 360-prep — get ready for an interview
-<!-- doc: REFERENCE — a /run 360 recipe the connected assistant reads; served by routes/recipes.py -->
+<!-- doc: REFERENCE — a run 360 recipe the connected assistant reads; served by routes/recipes.py -->
+
+Print this checklist and tick each step:
+[ ] 1 Read  [ ] 2 Facts  [ ] 3 Prepare  [ ] 4 Save  [ ] 5 After
+
 
 Use this when an application has an interview requested or scheduled.
 

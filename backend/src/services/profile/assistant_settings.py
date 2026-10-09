@@ -69,6 +69,11 @@ SETTING_PATHS: tuple[str, ...] = (
 # cached instructions that write it). "auto" there is a RISKIER change too
 # (owner answer 1, 2026-10-08), so it goes through the same request flow.
 INBOX_MODE_PATH = "preferences.daily_check"
+# S4 - how far the six-round setup got. NOT in SETTING_PATHS / GATED_PATHS: it is
+# progress the assistant reports, never a freedom, so it is never "riskier".
+SETUP_PROGRESS_PATH = f"{HEAD}.setup_progress"
+SETUP_ROUNDS: tuple[str, ...] = ("you", "visa", "logistics", "equality", "targets", "settings")
+SETUP_PROGRESS_FUTURE_SLACK = timedelta(minutes=5)
 GATED_PATHS: tuple[str, ...] = SETTING_PATHS + (INBOX_MODE_PATH,)
 
 UNTIL_RESUMED = "until_resumed"
@@ -161,6 +166,35 @@ def _validate_pause_reason(path: str, value: Any) -> str:
         if ch in profile_edits._BANNED_CHARS or unicodedata.category(ch) in profile_edits._BANNED_CATEGORIES:
             raise _bad(path, "must be one plain line (no line breaks or control characters)")
     return text
+
+
+def validate_setup_progress(path: str, value: Any, *, now: Optional[datetime] = None) -> dict[str, dict[str, str]]:
+    """``{round: {"done_at": ISO-with-offset}}`` -> the same in UTC, in round order.
+
+    Keys must be setup rounds; each value is exactly ``{"done_at"}`` holding a
+    time that carries an offset and is not more than five minutes ahead. ``{}``
+    is fine (nothing done). Refusals name the PATH, never the submitted value.
+    """
+    when = now if now is not None else datetime.now(timezone.utc)
+    if not isinstance(value, dict):
+        raise _bad(path, f"must be an object of rounds, not {type(value).__name__}")
+    if any(k not in SETUP_ROUNDS for k in value):
+        raise _bad(path, f"may only hold these rounds: {', '.join(SETUP_ROUNDS)}")
+    out: dict[str, dict[str, str]] = {}
+    for name in SETUP_ROUNDS:
+        if name not in value:
+            continue
+        entry = value[name]
+        if not isinstance(entry, dict) or set(entry) != {"done_at"} or not isinstance(entry["done_at"], str):
+            raise _bad(path, f"round {name} must be exactly done_at: an ISO-8601 time with an offset")
+        try:
+            done = parse_iso_with_offset(entry["done_at"])
+        except ValueError:
+            raise _bad(path, f"round {name}: done_at must be an ISO-8601 time with an offset") from None
+        if done > when + SETUP_PROGRESS_FUTURE_SLACK:
+            raise _bad(path, f"round {name}: done_at must not be in the future")
+        out[name] = {"done_at": done.isoformat()}
+    return out
 
 
 def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -> Any:
@@ -589,6 +623,25 @@ async def load_submit_counts(db: JobDatabase, user_id: str, now: datetime) -> Su
 # ── The read model ───────────────────────────────────────────────────────────
 
 
+def setup_progress_view(progress: Any) -> dict[str, Any]:
+    """``{rounds, done, total, next}`` from the stored progress. ``next`` is the
+    first unfinished round in order, ``""`` when all six are done. A malformed
+    stored value reads as nothing done (it can only be a historical row)."""
+    rounds = progress if isinstance(progress, dict) else {}
+    done_rounds = {
+        name: {"done_at": str(rounds[name].get("done_at", ""))}
+        for name in SETUP_ROUNDS
+        if isinstance(rounds.get(name), dict)
+    }
+    pending = [name for name in SETUP_ROUNDS if name not in done_rounds]
+    return {
+        "rounds": done_rounds,
+        "done": len(done_rounds),
+        "total": len(SETUP_ROUNDS),
+        "next": pending[0] if pending else "",
+    }
+
+
 def build_settings_view(
     profile: UserProfile,
     waiting: list[dict[str, Any]],
@@ -624,4 +677,5 @@ def build_settings_view(
             "auto_on_since": since,
         },
         "waiting": waiting,
+        "setup_progress": setup_progress_view(raw.setup_progress),
     }

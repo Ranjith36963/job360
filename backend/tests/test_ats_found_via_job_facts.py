@@ -514,8 +514,12 @@ def test_instructions_and_recipes_tell_the_assistant_about_the_new_params():
     from src.api.mcp_server import INSTRUCTIONS
     from src.api.routes.recipes import load_recipe
 
+    # S4 (2026-10-09): the job-fact words moved into the `rules` recipe ("Job
+    # facts"); INSTRUCTIONS points at it.
+    rules = load_recipe("rules").text
     for word in ("ats_score", "ats_notes", "found_via", "country", "remote", "found_on", "update_job"):
-        assert word in INSTRUCTIONS, word
+        assert word in rules, word
+    assert 'get_recipe("rules")' in INSTRUCTIONS
     apply = load_recipe("apply").text
     assert "ats_score" in apply and "ats_notes" in apply and "EVERY CV" in apply
     assert "linkedin_easy_apply" in apply

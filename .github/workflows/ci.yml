@@ -301,6 +301,12 @@ jobs:
         if: needs.scope.outputs.scope == 'full'
         run: python scripts/ssrf_drill.py --drill
 
+      # Claude Code truncates MCP text at 2,048 characters (anthropics/claude-code#81268);
+      # the live-server half of this guard is backend/tests/test_mcp_text_budget.py.
+      - name: The MCP text budget guard can still fail
+        if: needs.scope.outputs.scope == 'full'
+        run: python scripts/mcp_text_budget.py --drill
+
       - name: Every guard declares its drill
         if: needs.scope.outputs.scope == 'full'
         run: python scripts/drill_registry.py --run-drills

@@ -459,6 +459,17 @@ REGISTRY: dict[str, Guard] = {
         drill=[sys.executable, "scripts/ssrf_drill.py", "--drill"],
         no_negative="ten inline mutations against an injected resolver",
     ),
+    # ── S4 playbooks: the MCP text budget ───────────────────────────────────
+    # Claude Code silently truncates server instructions and every tool
+    # description at 2,048 characters (anthropics/claude-code#81268). The
+    # drill plants a 2,001-character text and demands it is named, then a
+    # 2,000-character one that must pass. The negative blinds the limit check:
+    # the drill must then FAIL, which proves it can still go red.
+    "scripts/mcp_text_budget.py": Guard(
+        status="drilled",
+        drill=[sys.executable, "scripts/mcp_text_budget.py", "--drill"],
+        negative=[sys.executable, "scripts/mcp_text_budget.py", "--drill", "--break-checker", "LIMIT"],
+    ),
     # ── owed: real guards, no fire-test yet, and here is exactly why ────────
     "scripts/already_built.py": Guard(
         status="owed",

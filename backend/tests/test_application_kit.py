@@ -1391,12 +1391,15 @@ async def test_mcp_get_application_kit_is_the_same_kit(authenticated_async_conte
 
 
 def test_instructions_docstrings_and_recipe_carry_the_kit_rules():
-    from src.api.mcp_server import INSTRUCTIONS, build_server
+    from src.api.mcp_server import build_server
     from src.api.routes.recipes import load_recipe
 
+    # S4 (2026-10-09): the kit paragraph moved word for word from INSTRUCTIONS
+    # (2,000-character budget) into the `rules` recipe, section "Apply kit".
+    rules = load_recipe("rules").text
     for word in ("APPLY KIT", "get_application_kit", "missing", "file.url", "cv_seen", "submit_approved",
                  "form_filled", "site_account", "account_needed", "autofill"):
-        assert word in INSTRUCTIONS, word
+        assert word in rules, word
     tools = {t.name: t for t in build_server()._tool_manager.list_tools()}
     assert "cv_not_seen" in tools["check_submit"].description and "user_declined" in tools["check_submit"].description
     assert "autofill_set" in tools["record_event"].description and "account_needed" in tools["record_event"].description

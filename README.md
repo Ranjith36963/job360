@@ -19,7 +19,7 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 ```
 
 1. **Connect your assistant** once — Settings → Connect gives the address `https://job360.uk/api/mcp`. Connector apps (Claude.ai is proven end to end; ChatGPT-style connectors use the same flow) sign in with OAuth 2.1; CLI clients like Claude Code use a personal token (`j360_…`, shown once, stored hashed).
-2. **Type `/run 360`.** The assistant fetches the setup recipe from Job360, reads your CV, fills your profile, asks to connect Gmail, and offers the inbox check.
+2. **Type `run 360`.** The assistant fetches the setup recipe from Job360, reads your CV, fills your profile, asks to connect Gmail, and offers the inbox check.
 3. **Hunt and apply.** The assistant searches with its own tools, brings each job it judges a fit, writes a tailored CV + cover letter, and stops before Submit. You say yes; it records the application and Job360 freezes a receipt.
 4. **Follow up.** On its schedule the assistant reads Gmail, records replies, interviews and rejections against the right application, sends the outreach emails it wrote (Auto mode only), and tells you what is due and what has gone quiet.
 5. **Look back any time.** Ask your assistant "how is my hunt going?" or "tell me everything about the Mistral application" — it reads it all from Job360. Or open the web app.
@@ -27,7 +27,7 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 ## What is live today
 
 ### For your assistant (MCP server at `/api/mcp`)
-- **Recipes — `/run 360` and friends.** Step-by-step playbooks the assistant fetches with `get_recipe`: setup, hunt, research, apply, prep, reach, daily, review (`backend/src/recipes/`).
+- **Recipes — `run 360` and friends.** Step-by-step playbooks the assistant fetches with `get_recipe`: setup, hunt, research, apply, prep, reach, daily, review (`backend/src/recipes/`).
 - **Profile** — `get_profile` returns the raw CV / LinkedIn / GitHub text plus the structured fields; the assistant writes skills, dated work history, projects, targets and preferences back with `update_profile`. Every agent edit is kept with its author and can be taken back.
 - **Bring a job** — `bring_job` stores the ad (link or pasted text) and births one **Application**, with the job's country, remote flag and where it was found.
 - **Fit and visa** — the assistant's own verdict, stored with `save_fit` (Job360 never computes a score).

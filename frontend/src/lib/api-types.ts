@@ -2823,6 +2823,15 @@ export interface components {
             paused: boolean;
             paused_until: components["schemas"]["SettingFieldOut"];
             practice_run: components["schemas"]["PracticeRunOut"];
+            /**
+             * @default {
+             *       "done": 0,
+             *       "next": "you",
+             *       "rounds": {},
+             *       "total": 6
+             *     }
+             */
+            setup_progress: components["schemas"]["SetupProgressOut"];
             submit_mode: components["schemas"]["SettingFieldOut"];
             /**
              * Waiting
@@ -4665,6 +4674,37 @@ export interface components {
             status: string;
             /** Value */
             value?: unknown;
+        };
+        /**
+         * SetupProgressOut
+         * @description How far the six-round setup got: the rounds done (with when), how many,
+         *     and the first unfinished one (``""`` when all are done).
+         */
+        SetupProgressOut: {
+            /**
+             * Done
+             * @default 0
+             */
+            done: number;
+            /**
+             * Next
+             * @default you
+             */
+            next: string;
+            /**
+             * Rounds
+             * @default {}
+             */
+            rounds: {
+                [key: string]: {
+                    [key: string]: string;
+                };
+            };
+            /**
+             * Total
+             * @default 6
+             */
+            total: number;
         };
         /**
          * StatsContactFoundViaGroupOut
