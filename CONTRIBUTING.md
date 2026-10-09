@@ -1,4 +1,4 @@
-<!-- doc: LIVING | last-verified: 2026-08-24 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-10-09 by the daily truth check -->
 # Contributing to Job360
 
 Thanks for helping improve Job360. This guide covers the conventions you need to

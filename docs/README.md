@@ -35,7 +35,7 @@ in git log; the binding rules live in `.claude/skills/hard-rules/SKILL.md` and
 | Doc | What it is |
 |---|---|
 | [`product/VISION.md`](product/VISION.md) | **The mission.** Agent thinks, Job360 remembers; never source/rank; build order; the decision log. |
-| [`product/product_design_rules.md`](product/product_design_rules.md) | The owner's product rules in full — rules 4–6 (never source, agent thinks, free/pull) are the mission. |
+| [`product/product_design_rules.md`](product/product_design_rules.md) | The owner's standing product rules, each with the reason it exists. The mission rules are `../.claude/skills/hard-rules/SKILL.md` M1–M5. |
 
 ---
 

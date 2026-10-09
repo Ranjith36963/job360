@@ -73,6 +73,6 @@ npm run dev | build | lint | type-check | test:unit | test:e2e
 - `src/repositories/pg.py` is the single DB door — an `aiosqlite`-shaped async driver whose `translate()` rewrites legacy SQLite SQL to Postgres at runtime. It is production-critical, not test-only (guard: `tests/test_pg_translate.py`). Every module does `from src.repositories import pg as aiosqlite`.
 - `ARCHITECTURE.md` — system overview, full directory tree, DB schema, dependencies. Env vars are read off `core/settings.py`, never a doc table.
 - `docs/README.md` — index of every surviving doc (product, operations, harness). History lives in git log, not in docs.
-- `docs/product/product_design_rules.md` — the owner's product rules in full (rules 4–6 are the mission).
+- `docs/product/product_design_rules.md` — the owner's standing product rules, each with the reason it exists. The mission rules are `.claude/skills/hard-rules/SKILL.md` M1–M5 and the build/never-build table in `docs/product/VISION.md`.
 - `STATUS.md` — current phase, what is live on main. `CONTRIBUTING.md` — branch/commit/PR conventions. `backend/README.md` / `frontend/README.md` — install + run.
 - Second brain: older project memory lives at `D:\second-brain\wiki\projects\job360\`.
