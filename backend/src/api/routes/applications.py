@@ -1808,7 +1808,8 @@ async def _latest_cv_or_409(db: JobDatabase, user: CurrentUser, application_id: 
 
 
 @router.post(
-    "/applications/{application_id}/cv-seen", response_model=ApplicationControlsOut, status_code=201
+    "/applications/{application_id}/cv-seen", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
 )
 async def mark_cv_seen(
     application_id: int,
@@ -1832,7 +1833,8 @@ async def mark_cv_seen(
 
 
 @router.post(
-    "/applications/{application_id}/send/approve", response_model=ApplicationControlsOut, status_code=201
+    "/applications/{application_id}/send/approve", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
 )
 async def approve_send(
     application_id: int,
@@ -1851,7 +1853,8 @@ async def approve_send(
 
 
 @router.post(
-    "/applications/{application_id}/send/decline", response_model=ApplicationControlsOut, status_code=201
+    "/applications/{application_id}/send/decline", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
 )
 async def decline_send(
     application_id: int,
@@ -1864,7 +1867,10 @@ async def decline_send(
     return await _controls(db, user, application_id)
 
 
-@router.post("/applications/{application_id}/autofill", response_model=ApplicationControlsOut, status_code=201)
+@router.post(
+    "/applications/{application_id}/autofill", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
 async def set_autofill(
     application_id: int,
     body: AutofillRequest,
@@ -1878,7 +1884,8 @@ async def set_autofill(
 
 
 @router.post(
-    "/applications/{application_id}/duplicate/clear", response_model=ApplicationControlsOut, status_code=201
+    "/applications/{application_id}/duplicate/clear", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
 )
 async def clear_duplicate(
     application_id: int,
