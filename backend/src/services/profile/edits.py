@@ -525,6 +525,8 @@ def validate_edit(path: str, value: Any) -> Any:
         return None
     from src.services.profile import assistant_settings, user_info  # noqa: PLC0415 — both import this module
 
+    if path == assistant_settings.SETUP_PROGRESS_PATH:
+        return _bound_encoded_size(path, assistant_settings.validate_setup_progress(path, value))
     if path in assistant_settings.SETTING_PATHS:
         # Owner decision 2026-10-08 (S2): ints / closed sets / a future time /
         # one plain line — each refusal names the path, never the value.

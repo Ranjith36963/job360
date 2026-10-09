@@ -578,6 +578,8 @@ PROFILE_EDITABLE_PATHS = (
     "assistant_settings.apply_mode", "assistant_settings.apply_min_score",
     "assistant_settings.submit_mode", "assistant_settings.daily_cap",
     "assistant_settings.paused_until", "assistant_settings.pause_reason",
+    # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.
+    "assistant_settings.setup_progress",
 )
 # Env-added paths must ALSO be declared dataclass fields — an unknown one is a
 # startup error, not an accepted path.

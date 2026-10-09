@@ -1711,6 +1711,15 @@
           "practice_run": {
             "$ref": "#/components/schemas/PracticeRunOut"
           },
+          "setup_progress": {
+            "$ref": "#/components/schemas/SetupProgressOut",
+            "default": {
+              "done": 0,
+              "next": "you",
+              "rounds": {},
+              "total": 6
+            }
+          },
           "submit_mode": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
@@ -6436,6 +6445,39 @@
           "expires_at"
         ],
         "title": "SettingRequestOut",
+        "type": "object"
+      },
+      "SetupProgressOut": {
+        "description": "How far the six-round setup got: the rounds done (with when), how many,\nand the first unfinished one (``\"\"`` when all are done).",
+        "properties": {
+          "done": {
+            "default": 0,
+            "title": "Done",
+            "type": "integer"
+          },
+          "next": {
+            "default": "you",
+            "title": "Next",
+            "type": "string"
+          },
+          "rounds": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "default": {},
+            "title": "Rounds",
+            "type": "object"
+          },
+          "total": {
+            "default": 6,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "SetupProgressOut",
         "type": "object"
       },
       "StatsContactFoundViaGroupOut": {

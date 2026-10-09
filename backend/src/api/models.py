@@ -234,6 +234,16 @@ class PracticeRunOut(BaseModel):
     auto_on_since: Optional[str] = None
 
 
+class SetupProgressOut(BaseModel):
+    """How far the six-round setup got: the rounds done (with when), how many,
+    and the first unfinished one (``""`` when all are done)."""
+
+    rounds: dict[str, dict[str, str]] = {}
+    done: int = 0
+    total: int = 6
+    next: str = "you"
+
+
 class AssistantSettingsView(BaseModel):
     """The assistant settings, as the web and MCP ``get_profile`` read them.
 
@@ -253,6 +263,7 @@ class AssistantSettingsView(BaseModel):
     notes: list[str] = []
     practice_run: PracticeRunOut
     waiting: list[SettingRequestOut] = []
+    setup_progress: SetupProgressOut = SetupProgressOut()
 
 
 class ProfileResponse(BaseModel):

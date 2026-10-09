@@ -1,5 +1,9 @@
 # 360-review — the weekly look back
-<!-- doc: REFERENCE — a /run 360 recipe the connected assistant reads; served by routes/recipes.py -->
+<!-- doc: REFERENCE — a run 360 recipe the connected assistant reads; served by routes/recipes.py -->
+
+Print this checklist and tick each step:
+[ ] 1 Numbers  [ ] 2 Say  [ ] 3 Suggest  [ ] 4 Save
+
 
 1. **Read the numbers:** `stats` (counts by CV version and by role) and
    `export_history` for the full record.
