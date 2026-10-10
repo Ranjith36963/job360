@@ -27,8 +27,8 @@ NO_PROOF: dict[str, Any] = {"has_text": False, "has_email": False, "screenshots"
 
 
 def _audit(event: str, level: str = "info", **fields: Any) -> None:
-    """One audit line; every non-number goes through ``safe_log_value`` (log injection)."""
-    extra = {k: v if isinstance(v, (int, float)) or v is None else safe_log_value(v) for k, v in fields.items()}
+    """One audit line; every value goes through ``safe_log_value`` - ids too (CodeQL py/log-injection)."""
+    extra = {k: None if v is None else safe_log_value(str(v)) for k, v in fields.items()}
     getattr(get_audit_logger(), level)(event, extra={"event": event, **extra})
 
 

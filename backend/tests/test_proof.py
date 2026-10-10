@@ -279,7 +279,7 @@ async def test_the_audit_log_never_carries_the_proof_text(authenticated_async_co
     blob = " ".join(f"{r.getMessage()} {sorted(r.__dict__.items(), key=str)}" for r in logs.records)
     assert secret_text not in blob
     recorded = [r for r in logs.records if getattr(r, "event", "") == "proof_text_recorded"][0]
-    assert (recorded.chars, recorded.page_host, recorded.result) == (len(secret_text), "northwind.example", "ok")
+    assert (recorded.chars, recorded.page_host, recorded.result) == (str(len(secret_text)), "northwind.example", "ok")
 
 
 @pytest.mark.asyncio

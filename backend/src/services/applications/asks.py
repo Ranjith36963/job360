@@ -102,7 +102,8 @@ async def count_open_asks(db: JobDatabase, user_id: str) -> int:
 
 def _log_no_proof_ask(user_id: str, application_id: Optional[int], result: str) -> None:
     get_audit_logger().info("no_proof_ask", extra={
-        "event": "no_proof_ask", "user_id": safe_log_value(user_id), "application_id": application_id, "result": result,
+        "event": "no_proof_ask", "user_id": safe_log_value(user_id),
+        "application_id": safe_log_value(str(application_id)), "result": safe_log_value(result),
     })
 
 
