@@ -232,6 +232,7 @@ def _receipt_summary(r: Any) -> dict[str, Any]:
         "has_cover_letter": r.has_cover_letter,
         "channel": r.channel,
         "note": r.note,
+        "proof": r.proof.model_dump(),
         "url": _receipt_url(r.id),
     }
 
@@ -265,6 +266,7 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "possible_duplicate": r.possible_duplicate,
         "kit_event_id": r.kit_event_id,
         "kit_sha256": r.kit_sha256,
+        "proof": r.proof.model_dump(),
         "url": _receipt_url(r.id),
     }
 
@@ -846,7 +848,7 @@ def build_server(version: str = "") -> MCPServer:
         submit_declined, autofill_set {mode:"deny"}, form_filled (+ `answers`: each field typed, its source, kit
         key), hold_released, site_account {host}, account_needed {host}; submit_mode_set {"submit_mode":"confirm"}
         only. Stuck: blocked {reason, step, page_host, detail}, then stop that application; unblocked {resolution}.
-        Payloads, 403/409: get_recipe("rules"), Events."""
+        proof_text {text, page_host}: the pasted confirmation text. Payloads, 403/409: get_recipe("rules"), Events."""
         if contact_id is not None:
             # Bug fix (coordinator review, 2026-09-26) — same refusal as the
             # route: neither the cold outreach door nor the linked branch

@@ -299,6 +299,9 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # (`blocked`, which opens one Needs-you ask) and the way out (`unblocked`).
     # Note-family; closed payloads checked in services/applications/blocked.py.
     "blocked", "unblocked",
+    # Owner decision 2026-10-10 (S7, proof of application): the pasted
+    # confirmation text, and the server-written trail of an uploaded screenshot.
+    "proof_text", "proof_screenshot",
 )
 # Env-added types are non-status only — a status type also needs an R4
 # mapping entry, which an env var cannot supply.
@@ -653,6 +656,11 @@ KIT_FORM_FIELDS_MAX = int(os.getenv("KIT_FORM_FIELDS_MAX", "500"))
 KIT_FORM_PAYLOAD_MAX_BYTES = int(os.getenv("KIT_FORM_PAYLOAD_MAX_BYTES", "65536"))
 # S5b - the most "ready to send" applications one read returns (newest first).
 READY_TO_SEND_MAX = int(os.getenv("READY_TO_SEND_MAX", "50"))
+
+# ── S7 proof of application (owner decision 2026-10-10). Every number a parameter. ──
+PROOF_TEXT_MAX_CHARS = int(os.getenv("PROOF_TEXT_MAX_CHARS", "4000"))
+# An applied job with no proof after this many days becomes a "Needs you" ask.
+PROOF_NO_PROOF_AFTER_DAYS = int(os.getenv("PROOF_NO_PROOF_AFTER_DAYS", "7"))
 
 # GET /profile/edits/history — how many rows of one field's history come back
 # (newest first). The export carries the full log.

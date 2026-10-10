@@ -78,7 +78,10 @@ only send `deny`), `duplicate_cleared` (web only), `form_filled` (host + field c
 `hold_released`, `site_account` / `account_needed` (a host name only - never a password), and the
 blocked record (S6, note-family): `blocked` (the assistant got stuck - reason, step, host only, short
 detail; opens one Needs-you ask, and `check_submit` asks until) `unblocked` (`retried` | `user_did_it` |
-`skipped`; closes the ask). Every event: `type`, `detail`, `occurred_at`,
+`skipped`; closes the ask), and the
+proof trail (S7, note-family): `proof_text` (the thank-you page text, <=4,000 chars plain, plus the page
+host; the server fills who/when) and `proof_screenshot` (written by Job360 when a screenshot is stored;
+the image lives in its own table and is erasable). Every event: `type`, `detail`, `occurred_at`,
 `recorded_by` (which token/agent/web), `recorded_at`. Nothing is deleted.
 
 Today's `applications` (stage) + `application_receipts` (snapshot) +

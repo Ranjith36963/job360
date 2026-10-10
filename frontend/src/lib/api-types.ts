@@ -2504,6 +2504,7 @@ export interface components {
             /** Last Event At */
             last_event_at: string | null;
             next_step: components["schemas"]["NextStepOut"];
+            proof: components["schemas"]["ProofOut"];
             /** Receipts */
             receipts: components["schemas"]["ApplicationReceiptOut"][];
             /** Status */
@@ -2729,6 +2730,7 @@ export interface components {
             /** Needs Sponsorship */
             needs_sponsorship?: boolean | null;
             next_step: components["schemas"]["NextStepOut"];
+            proof: components["schemas"]["ProofOut"];
             /** Receipts */
             receipts: number;
             /** Remote */
@@ -4336,6 +4338,50 @@ export interface components {
             /** Versions */
             versions: components["schemas"]["ProfileVersionSummary"][];
         };
+        /**
+         * ProofMissingOut
+         * @description An applied job with no proof yet; ``question``/``context`` go straight into ask_user.
+         */
+        ProofMissingOut: {
+            /** Application Id */
+            application_id: number;
+            /** Applied At */
+            applied_at: string;
+            /** Company */
+            company: string;
+            /** Context */
+            context: string;
+            /** Question */
+            question: string;
+        };
+        /**
+         * ProofOut
+         * @description How well an application is backed up (S7): ``level`` is the strongest of
+         *     email > text > screenshot_only, else none - the one shape every surface reuses.
+         */
+        ProofOut: {
+            /**
+             * Has Email
+             * @default false
+             */
+            has_email: boolean;
+            /**
+             * Has Text
+             * @default false
+             */
+            has_text: boolean;
+            /**
+             * Level
+             * @default none
+             * @enum {string}
+             */
+            level: "none" | "screenshot_only" | "text" | "email";
+            /**
+             * Screenshots
+             * @default 0
+             */
+            screenshots: number;
+        };
         /** ProvenanceSegment */
         ProvenanceSegment: {
             /** Grounded */
@@ -4482,6 +4528,7 @@ export interface components {
             possible_duplicate: string;
             /** Profile Version */
             profile_version: number | null;
+            proof?: components["schemas"]["ProofOut"];
             /** Recorded By */
             recorded_by?: string | null;
             /** Sent At */
@@ -4538,6 +4585,7 @@ export interface components {
             job_title: string;
             /** Note */
             note: string;
+            proof?: components["schemas"]["ProofOut"];
             /** Sent At */
             sent_at: string;
         };
@@ -5334,6 +5382,8 @@ export interface components {
             now: string;
             /** Open Asks */
             open_asks: components["schemas"]["AskOut"][];
+            /** Proof Missing */
+            proof_missing: components["schemas"]["ProofMissingOut"][];
             /** Since */
             since: string;
             /** Truncated */

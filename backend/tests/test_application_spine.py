@@ -449,6 +449,8 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         "form_filled", "hold_released", "site_account", "account_needed",
         # S6 blocked record (2026-10-10).
         "blocked", "unblocked",
+        # S7 proof of application (2026-10-10).
+        "proof_text", "proof_screenshot",
     }
     code_types = set(settings.APPLICATION_STATUS_EVENT_TYPES) | set(settings.APPLICATION_NOTE_EVENT_TYPES)
     assert code_types == vision_types

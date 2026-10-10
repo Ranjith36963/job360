@@ -39,6 +39,7 @@ from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
+from src.services.applications import proof as proof_service
 from src.services.applications import ready as ready_service
 from src.services.applications import spine
 from src.services.applications import stats as stats_service
@@ -520,6 +521,26 @@ class AskOut(BaseModel):
     status: str
 
 
+class ProofOut(BaseModel):
+    """How well an application is backed up (S7): ``level`` is the strongest of
+    email > text > screenshot_only, else none - the one shape every surface reuses."""
+
+    has_text: bool = False
+    has_email: bool = False
+    screenshots: int = 0
+    level: Literal["none", "screenshot_only", "text", "email"] = "none"
+
+
+class ProofMissingOut(BaseModel):
+    """An applied job with no proof yet; ``question``/``context`` go straight into ask_user."""
+
+    application_id: int
+    company: str
+    applied_at: str
+    question: str
+    context: str
+
+
 class ApplicationDetailOut(BaseModel):
     id: int
     job_id: int
@@ -545,6 +566,8 @@ class ApplicationDetailOut(BaseModel):
     # timezone), and whether it has arrived. `null`/`false` when unset.
     follow_up_on: Optional[str]
     follow_up_due: bool
+    # S7 - proof of application (email > text > screenshot_only > none).
+    proof: ProofOut
 
 
 class ApplicationSummaryOut(BaseModel):
@@ -588,6 +611,7 @@ class ApplicationSummaryOut(BaseModel):
     country: Optional[str] = None
     remote: Optional[bool] = None
     found_on: Optional[str] = None
+    proof: ProofOut
 
 
 class ListApplicationsResponse(BaseModel):
@@ -692,6 +716,8 @@ class WhatsNewResponse(BaseModel):
     truncated: bool
     # Always the user's open asks, whatever `since` says.
     open_asks: list[AskOut]
+    # S7 - applied jobs with no proof after PROOF_NO_PROOF_AFTER_DAYS and no ask yet.
+    proof_missing: list[ProofMissingOut]
 
 
 class ExportArtifactOut(BaseModel):
@@ -2044,10 +2070,26 @@ async def record_event(
             }
 
         spine.validate_event_type(body.event_type)
+        if body.event_type in proof_service.SERVER_ONLY_EVENTS:
+            raise SpineError(422, f"{body.event_type} is written by Job360 itself (the upload), not by a caller")
         detail = body.clamp_detail()
-        payload = spine.validate_payload(
-            body.payload, max_bytes=settings.KIT_FORM_PAYLOAD_MAX_BYTES if body.event_type == "form_filled" else None
-        )
+        # proof_text is capped in CHARACTERS (owner limit), so it skips the generic byte cap.
+        if body.event_type == "proof_text":
+            if source is not None:
+                raise SpineError(422, "proof_text takes no source")
+            payload = proof_service.check_proof_text(user, body.payload)
+            if body.corrects_event_id is not None:
+                cur = await db._db.execute(
+                    "SELECT 1 FROM application_events WHERE id = ? AND user_id = ? AND application_id = ? "
+                    "AND event_type = 'proof_text'", (body.corrects_event_id, user.id, application_id),
+                )
+                if await cur.fetchone() is None:
+                    raise SpineError(422, "corrects_event_id must be a proof_text event on this application")
+        else:
+            payload = spine.validate_payload(
+                body.payload,
+                max_bytes=settings.KIT_FORM_PAYLOAD_MAX_BYTES if body.event_type == "form_filled" else None,
+            )
         occurred_at = spine.parse_occurred_at(body.occurred_at)
         scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
         follow_up_on_arg: Any = spine.FOLLOW_UP_UNSET
@@ -2083,6 +2125,8 @@ async def record_event(
         )
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
+        if body.event_type == "proof_text":
+            proof_service.log_proof_text(user, application_id, int(result["event_id"]), payload)
         return result
     except SpineError as exc:
         _raise(exc)

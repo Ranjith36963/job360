@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
 from src.api.dependencies import get_request_db
-from src.api.routes.applications import ReceiptAnswerOut
+from src.api.routes.applications import ProofOut, ReceiptAnswerOut
 from src.repositories.database import JobDatabase
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -67,6 +67,8 @@ class Receipt(BaseModel):
     possible_duplicate: str = ""
     kit_event_id: int | None = None
     kit_sha256: str = ""
+    # S7 - how well this application is backed up; "none" when there is no application.
+    proof: ProofOut = Field(default_factory=ProofOut)
 
 
 _RECEIPT_BASE_FIELDS = (
@@ -89,6 +91,7 @@ class ReceiptSummary(BaseModel):
     has_cover_letter: bool
     channel: str
     note: str
+    proof: ProofOut = Field(default_factory=ProofOut)
 
 
 class ReceiptListResponse(BaseModel):
@@ -105,13 +108,13 @@ async def _to_receipt(db: JobDatabase, user_id: str, row: dict[str, Any]) -> Rec
     return Receipt(**{k: row[k] for k in _RECEIPT_BASE_FIELDS}, **details)
 
 
-def _to_summary(row: dict[str, Any]) -> ReceiptSummary:
+def _to_summary(row: dict[str, Any], proof: dict[str, Any] | None = None) -> ReceiptSummary:
     return ReceiptSummary(
         id=row["id"], job_id=row["job_id"], sent_at=row["sent_at"],
         job_title=row["job_title"], job_company=row["job_company"],
         job_location=row["job_location"], job_apply_url=row["job_apply_url"],
         has_cv=bool(row["has_cv"]), has_cover_letter=bool(row["has_cover_letter"]),
-        channel=row["channel"], note=row["note"],
+        channel=row["channel"], note=row["note"], proof=ProofOut(**(proof or {})),
     )
 
 
@@ -228,7 +231,12 @@ async def list_receipts(
 ) -> ReceiptListResponse:
     rows = await db.list_receipts(user.id, job_id=job_id, limit=limit, offset=offset)
     total = await db.count_receipts(user.id, job_id=job_id)
-    return ReceiptListResponse(receipts=[_to_summary(r) for r in rows], total=total)
+    from src.services.applications.proof import proof_for  # noqa: PLC0415
+
+    proofs = await proof_for(db, user.id, sorted({int(r["application_id"]) for r in rows if r.get("application_id")}))
+    return ReceiptListResponse(
+        receipts=[_to_summary(r, proofs.get(int(r.get("application_id") or 0))) for r in rows], total=total
+    )
 
 
 @router.get("/receipts/{receipt_id}", response_model=Receipt, dependencies=AUTH_FIRST)

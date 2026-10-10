@@ -607,6 +607,9 @@
           "next_step": {
             "$ref": "#/components/schemas/NextStepOut"
           },
+          "proof": {
+            "$ref": "#/components/schemas/ProofOut"
+          },
           "receipts": {
             "items": {
               "$ref": "#/components/schemas/ApplicationReceiptOut"
@@ -644,7 +647,8 @@
           "asks",
           "next_step",
           "follow_up_on",
-          "follow_up_due"
+          "follow_up_due",
+          "proof"
         ],
         "title": "ApplicationDetailOut",
         "type": "object"
@@ -1310,6 +1314,9 @@
           "next_step": {
             "$ref": "#/components/schemas/NextStepOut"
           },
+          "proof": {
+            "$ref": "#/components/schemas/ProofOut"
+          },
           "receipts": {
             "title": "Receipts",
             "type": "integer"
@@ -1350,7 +1357,8 @@
           "events",
           "artifacts",
           "receipts",
-          "next_step"
+          "next_step",
+          "proof"
         ],
         "title": "ApplicationSummaryOut",
         "type": "object"
@@ -5240,6 +5248,73 @@
         "title": "ProfileVersionsListResponse",
         "type": "object"
       },
+      "ProofMissingOut": {
+        "description": "An applied job with no proof yet; ``question``/``context`` go straight into ask_user.",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "applied_at": {
+            "title": "Applied At",
+            "type": "string"
+          },
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "context": {
+            "title": "Context",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "company",
+          "applied_at",
+          "question",
+          "context"
+        ],
+        "title": "ProofMissingOut",
+        "type": "object"
+      },
+      "ProofOut": {
+        "description": "How well an application is backed up (S7): ``level`` is the strongest of\nemail > text > screenshot_only, else none - the one shape every surface reuses.",
+        "properties": {
+          "has_email": {
+            "default": false,
+            "title": "Has Email",
+            "type": "boolean"
+          },
+          "has_text": {
+            "default": false,
+            "title": "Has Text",
+            "type": "boolean"
+          },
+          "level": {
+            "default": "none",
+            "enum": [
+              "none",
+              "screenshot_only",
+              "text",
+              "email"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "screenshots": {
+            "default": 0,
+            "title": "Screenshots",
+            "type": "integer"
+          }
+        },
+        "title": "ProofOut",
+        "type": "object"
+      },
       "ProvenanceSegment": {
         "properties": {
           "grounded": {
@@ -5721,6 +5796,9 @@
             ],
             "title": "Profile Version"
           },
+          "proof": {
+            "$ref": "#/components/schemas/ProofOut"
+          },
           "recorded_by": {
             "anyOf": [
               {
@@ -5861,6 +5939,9 @@
           "note": {
             "title": "Note",
             "type": "string"
+          },
+          "proof": {
+            "$ref": "#/components/schemas/ProofOut"
           },
           "sent_at": {
             "title": "Sent At",
@@ -8190,6 +8271,13 @@
             "title": "Open Asks",
             "type": "array"
           },
+          "proof_missing": {
+            "items": {
+              "$ref": "#/components/schemas/ProofMissingOut"
+            },
+            "title": "Proof Missing",
+            "type": "array"
+          },
           "since": {
             "title": "Since",
             "type": "string"
@@ -8207,7 +8295,8 @@
           "next_since",
           "next_after_id",
           "truncated",
-          "open_asks"
+          "open_asks",
+          "proof_missing"
         ],
         "title": "WhatsNewResponse",
         "type": "object"

@@ -1387,8 +1387,11 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
         return None
     r = dict(row)
     application_id = r.get("application_id")
+    from src.services.applications.proof import NO_PROOF, proof_for  # noqa: PLC0415
+
     return {
         "application_id": application_id,
+        "proof": (await proof_for(db, user_id, [application_id]))[application_id] if application_id else NO_PROOF,
         "answers": _receipt_answers(r.get("answers")),
         "fields_filled": _receipt_json(r.get("fields_filled"), dict),
         "confirmation": r.get("confirmation") or None,
@@ -1438,6 +1441,7 @@ async def get_application_detail(
     # spec.md R3).
     from src.services.applications.asks import list_asks  # noqa: PLC0415
     from src.services.applications.contacts import list_contacts  # noqa: PLC0415
+    from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     app_row = await get_owned_application(db, user_id, application_id)
     if app_row is None:
@@ -1508,6 +1512,7 @@ async def get_application_detail(
         ),
         "follow_up_on": follow_up_on,
         "follow_up_due": follow_up_due,
+        "proof": (await proof_for(db, user_id, [application_id]))[application_id],
     }
     # 2026-09-20 — the one line at the top: what to do next, read off the
     # stored state above (never a judgement of the job). The same value
@@ -1664,6 +1669,9 @@ async def list_applications(
             receipt_count_by_app[row[0]] = int(row[1])
             last_receipt_at_by_app[row[0]] = row[2]
 
+    from src.services.applications.proof import proof_for  # noqa: PLC0415
+
+    proofs = await proof_for(db, user_id, app_ids)
     out = []
     for r in rows:
         app_id = r["id"]
@@ -1692,6 +1700,7 @@ async def list_applications(
                 "fit_verdict": r.get("fit_verdict") or "",
                 "follow_up_on": follow_up_on,
                 "follow_up_due": follow_up_due,
+                "proof": proofs[app_id],
                 # 2026-09-24 — same state machine `get_application` feeds its
                 # header with, over the same stored facts (S21: real values,
                 # not a schema-presence default).
@@ -1727,7 +1736,9 @@ async def whats_new(
     event forever. ``(recorded_at, id)`` is a real keyset pair (B4 fix): the
     ``after_id`` half only fires alongside its own ``recorded_at`` boundary,
     never as an independent predicate, so a row from either side of that
-    boundary is never dropped."""
+    boundary is never dropped.
+
+    Also carries open_asks and proof_missing (applied jobs past PROOF_NO_PROOF_AFTER_DAYS with no proof and no ask) whatever `since` says."""  # noqa: E501
     limit = max(1, min(int(limit), settings.WHATS_NEW_MAX_EVENTS))
     now = datetime.now(timezone.utc).isoformat()
     since_val = since or (
@@ -1797,11 +1808,15 @@ async def whats_new(
     from src.services.applications.asks import list_asks  # noqa: PLC0415
 
     open_asks = await list_asks(db, user_id, "open", limit=settings.ASKS_WHATS_NEW_MAX)
+    # S7 - likewise carried: an applied job still without proof (the assistant asks once).
+    from src.services.applications.proof import proof_missing  # noqa: PLC0415
+
+    missing_proof = await proof_missing(db, user_id, datetime.now(timezone.utc))
 
     return {
         "now": now, "since": since_val, "events": events, "applications": applications,
         "next_since": next_since, "next_after_id": next_after_id, "truncated": truncated,
-        "open_asks": open_asks,
+        "open_asks": open_asks, "proof_missing": missing_proof,
     }
 
 

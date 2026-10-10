@@ -640,7 +640,7 @@ class JobDatabase:
     _RECEIPT_SUMMARY_COLS = (
         "id, user_id, job_id, sent_at, job_title, job_company, job_location, "
         "job_apply_url, job_source, cv_text IS NOT NULL, cover_letter_text IS NOT NULL, "
-        "profile_version, channel, note, created_at"
+        "profile_version, channel, note, created_at, application_id"
     )
 
     async def list_receipts(
@@ -667,7 +667,7 @@ class JobDatabase:
         keys = (
             "id", "user_id", "job_id", "sent_at", "job_title", "job_company",
             "job_location", "job_apply_url", "job_source", "has_cv", "has_cover_letter",
-            "profile_version", "channel", "note", "created_at",
+            "profile_version", "channel", "note", "created_at", "application_id",
         )
         out = []
         for r in await cursor.fetchall():
@@ -725,10 +725,10 @@ class JobDatabase:
         "api_tokens", "application_artifacts", "application_asks", "application_contacts",
         "application_events",
         "application_receipts", "application_stage_history", "applications",
-        "artifact_links", "assistant_setting_requests", "contact_edits",
+        "application_proof_screenshots", "artifact_links", "assistant_setting_requests", "contact_edits",
         "contact_outreach", "email_verifications",
         "oauth_grants",
-        "password_resets", "profile_edits", "sessions", "tailored_documents", "tailored_usage",
+        "password_resets", "proof_upload_links", "profile_edits", "sessions", "tailored_documents", "tailored_usage",
         "user_profile_versions", "user_profiles",
     )
 
@@ -745,8 +745,8 @@ class JobDatabase:
     _EXPORT_TABLES = (
         "api_tokens", "application_artifacts", "application_asks", "application_contacts",
         "application_events",
-        "application_receipts", "applications", "application_stage_history", "assistant_setting_requests",
-        "audit_log", "contact_edits", "contact_outreach",
+        "application_proof_screenshots", "application_receipts", "applications", "application_stage_history",
+        "assistant_setting_requests", "audit_log", "contact_edits", "contact_outreach",
         "oauth_grants", "profile_edits", "tailored_documents",
         "tailored_usage",
         "user_profile_versions", "user_profiles",
@@ -759,6 +759,14 @@ class JobDatabase:
         "password_hash", "config_encrypted", "credentials_encrypted", "token",
         "token_hash", "secret", "access_token", "refresh_token", "webhook_url",
     })
+
+    # Tables whose export must not be `SELECT *`: proof screenshots keep their
+    # metadata (and the delete note) but never the image bytes (S7).
+    _EXPORT_COLUMNS = {
+        "application_proof_screenshots": (
+            "id, user_id, application_id, mime, sha256, size, created_by, created_at, deleted_at, delete_note"
+        ),
+    }
 
     @classmethod
     def _scrub_export_row(cls, row: dict[str, Any]) -> dict[str, Any]:
@@ -787,7 +795,8 @@ class JobDatabase:
         for tbl in self._EXPORT_TABLES:
             try:
                 cur = await self._db.execute(
-                    f"SELECT * FROM {tbl} WHERE user_id = ?", (user_id,)  # noqa: S608 — name from a module constant
+                    f"SELECT {self._EXPORT_COLUMNS.get(tbl, '*')} FROM {tbl} WHERE user_id = ?",  # noqa: S608 — constants
+                    (user_id,),
                 )
                 out[tbl] = [self._scrub_export_row(dict(r)) for r in await cur.fetchall()]
             except Exception as exc:  # noqa: BLE001 — tolerate a table absent in a partial test schema
