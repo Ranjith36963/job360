@@ -336,13 +336,13 @@ def mask_email(email: Optional[str]) -> str:
     return f"{local[0]}***@{domain}"
 
 
-_SECRET_PATH_PREFIXES: tuple[str, ...] = ("/api/files/",)
+_SECRET_PATH_PREFIXES: tuple[str, ...] = ("/api/files/", "/api/proof/")
 
 
 def redact_path(path: str) -> str:
     """``/api/files/<token>`` -> ``/api/files/[redacted]``.
 
-    S3 - a file-link token is a bearer credential for one CV. It must never reach
+    S3/S7 - a file-link or proof-upload token is a bearer credential. It must never reach
     the access log or a Sentry event, so every path under a secret prefix has
     its tail replaced. Works on a bare path or a full URL (query string kept out
     of the tail). Anything else is returned unchanged."""

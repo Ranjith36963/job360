@@ -94,6 +94,8 @@ TOOL_ROUTES = {
     "check_submit": ("applications", "submit_check", {"application_id": 987654321, "form_url": ""}),
     # The application kit (owner decision 2026-10-08, S3) - require_user, no email gate.
     "get_application_kit": ("applications", "get_application_kit", {"application_id": 987654321}),
+    # Proof of application (owner decision 2026-10-10, S7) - require_user, no email gate.
+    "get_proof_upload_link": ("proof", "create_proof_link", {"application_id": 987654321}),
 }
 
 

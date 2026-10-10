@@ -659,8 +659,18 @@ READY_TO_SEND_MAX = int(os.getenv("READY_TO_SEND_MAX", "50"))
 
 # ── S7 proof of application (owner decision 2026-10-10). Every number a parameter. ──
 PROOF_TEXT_MAX_CHARS = int(os.getenv("PROOF_TEXT_MAX_CHARS", "4000"))
+PROOF_SCREENSHOT_MAX_BYTES = int(os.getenv("PROOF_SCREENSHOT_MAX_BYTES", str(3 * 1024 * 1024)))
+# Live (not deleted) screenshots one application may hold.
+PROOF_SCREENSHOTS_MAX_LIVE = int(os.getenv("PROOF_SCREENSHOTS_MAX_LIVE", "3"))
+# Deadline for reading an upload body; it runs before a DB connection is borrowed so a trickling client
+# cannot pin one of the pool's 10 connections.
+PROOF_UPLOAD_READ_SECONDS = float(os.getenv("PROOF_UPLOAD_READ_SECONDS", "30"))
+# An upload link lives this long and works once.
+PROOF_LINK_TTL_MINUTES = int(os.getenv("PROOF_LINK_TTL_MINUTES", "5"))
 # An applied job with no proof after this many days becomes a "Needs you" ask.
 PROOF_NO_PROOF_AFTER_DAYS = int(os.getenv("PROOF_NO_PROOF_AFTER_DAYS", "7"))
+# Upload links one user may mint per hour.
+PROOF_LINKS_MAX_PER_HOUR = int(os.getenv("PROOF_LINKS_MAX_PER_HOUR", "30"))
 
 # GET /profile/edits/history — how many rows of one field's history come back
 # (newest first). The export carries the full log.
