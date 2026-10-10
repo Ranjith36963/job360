@@ -945,6 +945,31 @@ export async function clearDuplicate(applicationId: number): Promise<Application
   return request(`/api/applications/${applicationId}/duplicate/clear`, { method: "POST" });
 }
 
+// ---- Proof screenshots (S7b) ----
+export type ProofOut = _Schemas["ProofOut"];
+export type ProofScreenshotOut = _Schemas["ProofScreenshotOut"];
+export type ProofStateOut = _Schemas["ProofStateOut"];
+export async function getProof(applicationId: number): Promise<ProofStateOut> {
+  return request(`/api/applications/${applicationId}/proof`);
+}
+
+export async function uploadProofScreenshot(applicationId: number, file: File): Promise<ProofScreenshotOut> {
+  const form = new FormData();
+  form.append("file", file);
+  return request(`/api/applications/${applicationId}/proof/screenshots`, { method: "POST", body: form });
+}
+
+/** Image bytes via the session cookie (fetch-blob, like CV downloads); the caller revokes its blob URL. */
+export async function fetchProofScreenshot(applicationId: number, screenshotId: number): Promise<Blob> {
+  const res = await fetch(`${API}/api/applications/${applicationId}/proof/screenshots/${screenshotId}`, { credentials: "include" });
+  if (!res.ok) throw new ApiError(res.status, "Image unavailable");
+  return res.blob();
+}
+
+export async function deleteProofScreenshot(applicationId: number, screenshotId: number): Promise<ProofScreenshotOut> {
+  return request(`/api/applications/${applicationId}/proof/screenshots/${screenshotId}`, { method: "DELETE" });
+}
+
 /** "Mark resolved" - the user sorted out what stopped their assistant; records `unblocked` {resolution: user_did_it}. */
 export async function resolveBlocked(applicationId: number): Promise<ApplicationControls> {
   return request(`/api/applications/${applicationId}/blocked/resolve`, { method: "POST" });
