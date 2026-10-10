@@ -1,29 +1,30 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ProofDropZone } from "./ProofDropZone";
-import type { ProofResponse, ProofScreenshot } from "@/lib/api";
+import type { ProofScreenshotOut, ProofStateOut } from "@/lib/api";
 
 const getProof = vi.fn();
 const uploadProofScreenshot = vi.fn();
 const deleteProofScreenshot = vi.fn();
+const fetchProofScreenshot = vi.fn();
 vi.mock("@/lib/api", () => ({
   getProof: (...a: unknown[]) => getProof(...a),
   uploadProofScreenshot: (...a: unknown[]) => uploadProofScreenshot(...a),
   deleteProofScreenshot: (...a: unknown[]) => deleteProofScreenshot(...a),
-  proofScreenshotUrl: (a: number, s: number) => `/api/applications/${a}/proof/screenshots/${s}`,
+  fetchProofScreenshot: (...a: unknown[]) => fetchProofScreenshot(...a),
 }));
 const toastError = vi.fn();
 vi.mock("@/lib/toast", () => ({
   toast: { success: vi.fn(), apiError: vi.fn(), error: (...a: unknown[]) => toastError(...a), info: vi.fn() },
 }));
 
-function shot(id: number, deleted = false): ProofScreenshot {
+function shot(id: number, deleted = false): ProofScreenshotOut {
   return {
     id, mime: "image/png", size: 10, sha256: "a", created_by: "web", created_at: "2026-10-10T00:00:00Z",
     deleted_at: deleted ? "2026-10-10T01:00:00Z" : null, delete_note: deleted ? "Deleted by you on 10 Oct" : "",
   };
 }
-function resp(level: ProofResponse["proof"]["level"], shots: ProofScreenshot[]): ProofResponse {
+function resp(level: ProofStateOut["proof"]["level"], shots: ProofScreenshotOut[]): ProofStateOut {
   return {
     application_id: 7,
     proof: { has_text: level === "text", has_email: level === "email", screenshots: shots.length, level },
@@ -40,13 +41,35 @@ describe("ProofDropZone", () => {
     uploadProofScreenshot.mockReset();
     deleteProofScreenshot.mockReset();
     toastError.mockReset();
+    fetchProofScreenshot.mockReset();
+    fetchProofScreenshot.mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    URL.createObjectURL = vi.fn(() => "blob:proof-1");
+    URL.revokeObjectURL = vi.fn();
   });
+  afterEach(() => vi.restoreAllMocks());
 
   it("renders the proof level as plain text", async () => {
     getProof.mockResolvedValue(resp("screenshot_only", [shot(1)]));
     render(<ProofDropZone applicationId={7} />);
     await waitFor(() => expect(screen.getByTestId("proof-level").textContent).toBe("Screenshot only"));
-    expect(screen.getByTestId("proof-thumb-1")).toBeTruthy();
+    const img = await screen.findByAltText("Proof screenshot");
+    expect(img.getAttribute("src")).toBe("blob:proof-1");
+    expect(fetchProofScreenshot).toHaveBeenCalledWith(7, 1);
+  });
+
+  it("revokes the blob URL on unmount", async () => {
+    getProof.mockResolvedValue(resp("screenshot_only", [shot(1)]));
+    const { unmount } = render(<ProofDropZone applicationId={7} />);
+    await screen.findByAltText("Proof screenshot");
+    unmount();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:proof-1");
+  });
+
+  it("shows 'Image unavailable' when the fetch fails", async () => {
+    getProof.mockResolvedValue(resp("screenshot_only", [shot(1)]));
+    fetchProofScreenshot.mockRejectedValue(new Error("boom"));
+    render(<ProofDropZone applicationId={7} />);
+    await waitFor(() => expect(screen.getByTestId("proof-thumb-1").textContent).toBe("Image unavailable"));
   });
 
   it("rejects a 4 MB file and a text file without uploading", async () => {
@@ -62,7 +85,7 @@ describe("ProofDropZone", () => {
 
   it("uploads a png then reloads", async () => {
     getProof.mockResolvedValueOnce(resp("none", [])).mockResolvedValueOnce(resp("screenshot_only", [shot(5)]));
-    uploadProofScreenshot.mockResolvedValue({ screenshot_id: 5 });
+    uploadProofScreenshot.mockResolvedValue(shot(5));
     render(<ProofDropZone applicationId={7} />);
     const input = await screen.findByTestId("proof-file-input");
     fireEvent.change(input, { target: { files: [file("image/png", 100)] } });

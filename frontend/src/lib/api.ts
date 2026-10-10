@@ -926,43 +926,31 @@ export async function clearDuplicate(applicationId: number): Promise<Application
 }
 
 // ---- Proof screenshots (S7b) ----
-export interface ApplicationProof {
-  has_text: boolean;
-  has_email: boolean;
-  screenshots: number;
-  level: "email" | "text" | "screenshot_only" | "none";
-}
-export interface ProofScreenshot {
-  id: number;
-  mime: string;
-  size: number;
-  sha256: string;
-  created_by: string;
-  created_at: string;
-  deleted_at: string | null;
-  delete_note: string;
-}
-export interface ProofResponse {
-  application_id: number;
-  proof: ApplicationProof;
-  screenshots: ProofScreenshot[];
-}
+export type ProofOut = _Schemas["ProofOut"];
+export type ProofScreenshotOut = _Schemas["ProofScreenshotOut"];
+export type ProofStateOut = _Schemas["ProofStateOut"];
 
-export async function getProof(applicationId: number): Promise<ProofResponse> {
+export async function getProof(applicationId: number): Promise<ProofStateOut> {
   return request(`/api/applications/${applicationId}/proof`);
 }
 
-export async function uploadProofScreenshot(applicationId: number, file: File): Promise<{ screenshot_id: number }> {
+export async function uploadProofScreenshot(applicationId: number, file: File): Promise<ProofScreenshotOut> {
   const form = new FormData();
   form.append("file", file);
   return request(`/api/applications/${applicationId}/proof/screenshots`, { method: "POST", body: form });
 }
 
-export function proofScreenshotUrl(applicationId: number, screenshotId: number): string {
-  return `${API}/api/applications/${applicationId}/proof/screenshots/${screenshotId}`;
+/** The image bytes, fetched with the session cookie (fetch-blob pattern, like the CV downloads) so a
+ * thumbnail never depends on a cross-origin <img src>. The caller owns the blob URL and must revoke it. */
+export async function fetchProofScreenshot(applicationId: number, screenshotId: number): Promise<Blob> {
+  const res = await fetch(`${API}/api/applications/${applicationId}/proof/screenshots/${screenshotId}`, {
+    credentials: "include",
+  });
+  if (!res.ok) throw new ApiError(res.status, "Image unavailable");
+  return res.blob();
 }
 
-export async function deleteProofScreenshot(applicationId: number, screenshotId: number): Promise<ProofScreenshot> {
+export async function deleteProofScreenshot(applicationId: number, screenshotId: number): Promise<ProofScreenshotOut> {
   return request(`/api/applications/${applicationId}/proof/screenshots/${screenshotId}`, { method: "DELETE" });
 }
 

@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { deleteProofScreenshot, getProof, proofScreenshotUrl, uploadProofScreenshot } from "@/lib/api";
+import { deleteProofScreenshot, fetchProofScreenshot, getProof, uploadProofScreenshot } from "@/lib/api";
 import { ApiError } from "@/lib/api-error";
-import type { ProofResponse } from "@/lib/api";
+import type { ProofStateOut } from "@/lib/api";
 import { toast } from "@/lib/toast";
 
 const BTN =
@@ -29,11 +29,48 @@ function uploadMessage(err: unknown): string | null {
   return null;
 }
 
+/** One thumbnail: the image is fetched with the session cookie and shown from a blob URL
+ * (revoked on unmount), never from a cross-origin <img src>. */
+function Thumb({ applicationId, id }: { applicationId: number; id: number }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let url: string | null = null;
+    let cancelled = false;
+    fetchProofScreenshot(applicationId, id)
+      .then((blob) => {
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setSrc(url);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [applicationId, id]);
+
+  if (failed) return <p data-testid={`proof-thumb-${id}`} className={NOTE}>Image unavailable</p>;
+  if (!src) return <div data-testid={`proof-thumb-${id}`} className="h-20 w-28 rounded-md border border-border bg-muted" />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      data-testid={`proof-thumb-${id}`}
+      src={src}
+      alt="Proof screenshot"
+      className="h-20 w-auto rounded-md border border-border object-cover"
+    />
+  );
+}
+
 /** Proof that an application was submitted: what Job360 holds, plus a drop zone
  * for screenshots (max 3 live, 3 MB each). Deleting erases the image but keeps
  * the record that it existed. File contents are never logged. */
 export function ProofDropZone({ applicationId }: { applicationId: number }) {
-  const [data, setData] = useState<ProofResponse | null>(null);
+  const [data, setData] = useState<ProofStateOut | null>(null);
   const [busy, setBusy] = useState(false);
   const [over, setOver] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -126,13 +163,7 @@ export function ProofDropZone({ applicationId }: { applicationId: number }) {
         <ul className="flex flex-wrap gap-3">
           {live.map((s) => (
             <li key={s.id} className="flex flex-col items-start gap-1.5">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                data-testid={`proof-thumb-${s.id}`}
-                src={proofScreenshotUrl(applicationId, s.id)}
-                alt="Proof screenshot"
-                className="h-20 w-auto rounded-md border border-border object-cover"
-              />
+              <Thumb key={`${applicationId}-${s.id}`} applicationId={applicationId} id={s.id} />
               <button type="button" data-testid={`proof-delete-${s.id}`} disabled={busy} onClick={() => void remove(s.id)} className={BTN}>
                 Delete
               </button>

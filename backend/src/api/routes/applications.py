@@ -2065,7 +2065,16 @@ async def record_event(
         detail = body.clamp_detail()
         # proof_text is capped in CHARACTERS (owner limit), so it skips the generic byte cap.
         if body.event_type == "proof_text":
+            if source is not None:
+                raise SpineError(422, "proof_text takes no source")
             payload = proof_service.check_proof_text(user, body.payload)
+            if body.corrects_event_id is not None:
+                cur = await db._db.execute(
+                    "SELECT 1 FROM application_events WHERE id = ? AND user_id = ? AND application_id = ? "
+                    "AND event_type = 'proof_text'", (body.corrects_event_id, user.id, application_id),
+                )
+                if await cur.fetchone() is None:
+                    raise SpineError(422, "corrects_event_id must be a proof_text event on this application")
         else:
             payload = spine.validate_payload(body.payload)
         occurred_at = spine.parse_occurred_at(body.occurred_at)
