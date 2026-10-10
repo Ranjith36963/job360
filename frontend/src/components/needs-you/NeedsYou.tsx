@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask, SettingRequest } from "@/lib/api";
+import { MorningCheck } from "./MorningCheck";
 import { SettingRequestCard } from "./SettingRequestCard";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -311,6 +312,7 @@ export function NeedsYou() {
 
   return (
     <div className="flex max-w-3xl flex-col gap-8">
+      <MorningCheck />
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>
