@@ -469,6 +469,18 @@ async def _events_for_replay(db: JobDatabase, application_id: int) -> list[dict[
     return [dict(r) for r in await cur.fetchall()]
 
 
+def _display_payload(event_type: str, raw: Optional[str]) -> dict[str, Any]:
+    """S5d - the payload every timeline reader emits. A ``form_filled`` event
+    carries a COUNT (``answers_count``), never the typed answers; storage keeps
+    the full list (the ready-to-send route reads it straight from the row)."""
+    payload: dict[str, Any] = json.loads(raw or "{}")
+    if event_type == "form_filled" and isinstance(payload.get("answers"), list):
+        count = len(payload["answers"])
+        payload = {k: v for k, v in payload.items() if k != "answers"}
+        payload["answers_count"] = count
+    return payload
+
+
 async def list_events_for_display(db: JobDatabase, application_id: int) -> list[dict[str, Any]]:
     """Timeline order — ``occurred_at`` (backdated events included), NOT the
     ``recorded_at`` order the status recompute uses."""
@@ -487,7 +499,7 @@ async def list_events_for_display(db: JobDatabase, application_id: int) -> list[
                 "id": r["id"],
                 "event_type": r["event_type"],
                 "detail": r["detail"],
-                "payload": json.loads(r["payload"] or "{}"),
+                "payload": _display_payload(r["event_type"], r["payload"]),
                 "occurred_at": r["occurred_at"],
                 "recorded_at": r["recorded_at"],
                 "recorded_by": r["recorded_by"],
@@ -1757,7 +1769,7 @@ async def whats_new(
         events.append(
             {
                 "id": r["id"], "application_id": r["application_id"], "event_type": r["event_type"],
-                "detail": r["detail"], "payload": json.loads(r["payload"] or "{}"),
+                "detail": r["detail"], "payload": _display_payload(r["event_type"], r["payload"]),
                 "occurred_at": r["occurred_at"], "recorded_at": r["recorded_at"],
                 "recorded_by": r["recorded_by"], "corrects_event_id": r["corrects_event_id"],
                 "source": _event_source(r), "scheduled_at": r["scheduled_at"] or None,

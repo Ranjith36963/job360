@@ -64,7 +64,8 @@ user_declined (the user said don't send), daily_cap_reached, duplicate_job
 (same job already applied to: `stop` in auto mode, else `ask`), unknown_site,
 ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
-(the user said yes to this CV: `submit`), auto_when_sure. Indeed and LinkedIn
+(the user said yes to this CV: `submit`), auto_when_sure, blocked (you
+recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it). Indeed and LinkedIn
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
 `practice_run`). It is read-only: it records nothing - after a real submit,
@@ -281,6 +282,23 @@ the form; answers = [{question, answer, source: memory|profile|approved|written|
 wall (never a password anywhere). A CV that changed since you read it is 409:
 get the kit again. `duplicate_cleared` and where="web" need the user's own click
 on the website (403). `kit_read` is written by Job360 itself.
+
+STUCK (the blocked record): when you get stuck on a form, record_event
+`blocked` {reason, step, page_host, detail}, then stop that application and
+move on to the next. `reason` is one of captcha, bot_check, login_needed,
+site_error, upload_failed, unknown_question, safety_block,
+quick_apply_warning, other; `step` is plain text up to 120 characters;
+`page_host` is the host only (jobs.example.com), never a full URL; `detail`
+is up to 300 plain characters. Any other key is 422; never put a password, a
+token or page text in it. Job360 fills in who you are and opens one Needs-you
+ask for the user. Never retry a CAPTCHA or bot check and never bypass one; a
+login page means the user signs in themselves. Until `unblocked`
+{resolution: retried | user_did_it | skipped} is recorded (by you, or the
+user's "Mark resolved" on the website), check_submit answers `ask` with
+reason `blocked`. `unblocked` closes the ask; with nothing blocked it is 409.
+When the user answers a blocked ask, do what they said, then record
+`unblocked`. If Needs-you is full no ask opens (`check_submit` still asks):
+tell the user in chat.
 
 ## Profile
 

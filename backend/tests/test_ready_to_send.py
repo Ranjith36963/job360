@@ -246,6 +246,24 @@ async def test_the_log_carries_counts_never_answers(authenticated_async_context)
 
 
 @pytest.mark.asyncio
+async def test_timeline_and_export_carry_answers_count_never_the_answers(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _fill(client, app_id, [{"question": "Secretq", "answer": "Zebrasecret", "source": "written"}, MEM])
+        got = await client.get(f"/api/applications/{app_id}")
+        export = await client.get("/api/applications/export")
+        ready = await _ready(client)
+    assert got.status_code == 200 and export.status_code == 200
+    for body in (got.text, export.text):
+        assert "Zebrasecret" not in body and "Secretq" not in body
+    ev = [e for e in got.json()["events"] if e["event_type"] == "form_filled"][0]
+    assert ev["payload"]["answers_count"] == 2 and "answers" not in ev["payload"]
+    assert ev["payload"]["fields_count"] == 4  # the other payload keys survive
+    # storage unchanged: the ready-to-send card still reads the full answers
+    assert "Zebrasecret" in str(ready)
+
+
+@pytest.mark.asyncio
 async def test_send_refuses_a_stale_card_and_records_nothing(authenticated_async_context):
     """The yes names what the user saw: a newer CV or a newer fill is 409, nothing saved."""
     async with authenticated_async_context() as client:

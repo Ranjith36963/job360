@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { approveSend, clearDuplicate, declineSend, setAutofill } from "@/lib/api";
+import { approveSend, clearDuplicate, declineSend, resolveBlocked, setAutofill } from "@/lib/api";
 import type { ApplicationControls, DecisionMark } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { formatDate } from "@/lib/format-date";
@@ -25,6 +25,8 @@ function stamp(mark: DecisionMark): string {
  *    with the latest CV. A CV edit voids the yes.
  *  - Autofill / Don't autofill - may the assistant type into the form at all.
  *  - Not a duplicate, go ahead - shown only when Job360 flagged a duplicate.
+ *  - Your assistant got stuck (S6) - shown at the top while a block is recorded
+ *    (CAPTCHA, sign-in...), with who / when; "Mark resolved" clears it.
  *
  * ("I've checked this CV" lives next to the CV version itself.) All of these are
  * website-only actions: an assistant cannot press them.
@@ -57,9 +59,34 @@ export function ApplicationDecisions({
   const autofill = controls.autofill;
   const dup = controls.duplicate;
   const dupOpen = dup.flag !== "" && !dup.cleared;
+  const blocked = controls.blocked ?? null;
 
   return (
     <div data-testid="app-decisions" className="flex w-full flex-col gap-3 border-t border-border pt-3">
+      {blocked && (
+        <div data-testid="blocked-state" className="flex flex-col gap-1.5">
+          <p className="text-xs text-warning">
+            {`Your assistant got stuck: ${blocked.reason_label}${blocked.step ? ` at ${blocked.step}` : ""}${blocked.page_host ? ` on ${blocked.page_host}` : ""}.`}
+          </p>
+          <p data-testid="blocked-who" className={NOTE}>
+            {stamp({ by: blocked.by, where: blocked.by === "web" ? "web" : "chat", at: blocked.at })}
+          </p>
+          {blocked.detail && (
+            <p data-testid="blocked-detail" className={NOTE}>
+              {blocked.detail}
+            </p>
+          )}
+          <button
+            type="button"
+            data-testid="blocked-resolve-button"
+            disabled={busy}
+            onClick={() => void run(() => resolveBlocked(applicationId), "Couldn't mark it resolved")}
+            className={`${BTN} self-start`}
+          >
+            Mark resolved
+          </button>
+        </div>
+      )}
       {dupOpen && (
         <div data-testid="duplicate-warning" className="flex flex-col gap-1.5">
           <p className="text-xs text-warning">
