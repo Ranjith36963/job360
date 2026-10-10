@@ -66,7 +66,7 @@ def payload_bytes(payload: Mapping[str, Any]) -> int:
     return len(json.dumps(payload).encode("utf-8"))
 
 
-def validate_payload(payload: Any) -> dict[str, Any]:
+def validate_payload(payload: Any, *, max_bytes: Optional[int] = None) -> dict[str, Any]:
     """S5 — payload must be a JSON OBJECT (never a list/scalar), size-capped
     on the SERIALISED form, because that is what the column costs.
 
@@ -84,12 +84,10 @@ def validate_payload(payload: Any) -> dict[str, Any]:
     if "follow_up_on" in payload:
         raise SpineError(422, "pass follow_up_on as its own field, not inside payload")
     size = payload_bytes(payload)
-    if size > settings.APPLICATION_EVENT_PAYLOAD_MAX_BYTES:
-        raise SpineError(
-            422,
-            f"payload exceeds APPLICATION_EVENT_PAYLOAD_MAX_BYTES "
-            f"({settings.APPLICATION_EVENT_PAYLOAD_MAX_BYTES} bytes)",
-        )
+    cap = settings.APPLICATION_EVENT_PAYLOAD_MAX_BYTES if max_bytes is None else max_bytes
+    if size > cap:
+        name = "APPLICATION_EVENT_PAYLOAD_MAX_BYTES" if max_bytes is None else "KIT_FORM_PAYLOAD_MAX_BYTES"
+        raise SpineError(422, f"payload exceeds {name} ({cap} bytes)")
     return payload
 
 
@@ -471,6 +469,18 @@ async def _events_for_replay(db: JobDatabase, application_id: int) -> list[dict[
     return [dict(r) for r in await cur.fetchall()]
 
 
+def _display_payload(event_type: str, raw: Optional[str]) -> dict[str, Any]:
+    """S5d - the payload every timeline reader emits. A ``form_filled`` event
+    carries a COUNT (``answers_count``), never the typed answers; storage keeps
+    the full list (the ready-to-send route reads it straight from the row)."""
+    payload: dict[str, Any] = json.loads(raw or "{}")
+    if event_type == "form_filled" and isinstance(payload.get("answers"), list):
+        count = len(payload["answers"])
+        payload = {k: v for k, v in payload.items() if k != "answers"}
+        payload["answers_count"] = count
+    return payload
+
+
 async def list_events_for_display(db: JobDatabase, application_id: int) -> list[dict[str, Any]]:
     """Timeline order — ``occurred_at`` (backdated events included), NOT the
     ``recorded_at`` order the status recompute uses."""
@@ -489,7 +499,7 @@ async def list_events_for_display(db: JobDatabase, application_id: int) -> list[
                 "id": r["id"],
                 "event_type": r["event_type"],
                 "detail": r["detail"],
-                "payload": json.loads(r["payload"] or "{}"),
+                "payload": _display_payload(r["event_type"], r["payload"]),
                 "occurred_at": r["occurred_at"],
                 "recorded_at": r["recorded_at"],
                 "recorded_by": r["recorded_by"],
@@ -1770,7 +1780,7 @@ async def whats_new(
         events.append(
             {
                 "id": r["id"], "application_id": r["application_id"], "event_type": r["event_type"],
-                "detail": r["detail"], "payload": json.loads(r["payload"] or "{}"),
+                "detail": r["detail"], "payload": _display_payload(r["event_type"], r["payload"]),
                 "occurred_at": r["occurred_at"], "recorded_at": r["recorded_at"],
                 "recorded_by": r["recorded_by"], "corrects_event_id": r["corrects_event_id"],
                 "source": _event_source(r), "scheduled_at": r["scheduled_at"] or None,

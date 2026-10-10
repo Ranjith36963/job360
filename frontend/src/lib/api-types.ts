@@ -537,7 +537,9 @@ export interface paths {
          * @description "Send this one" - the user says yes to sending this application with the
          *     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
          *     where=web. A CV edited later makes the yes stop matching. Clears an earlier
-         *     "don't send".
+         *     "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
+         *     the fill the user was looking at; when either is no longer the newest, 409 and
+         *     nothing is recorded (the yes must name what the user saw).
          */
         post: operations["approve_send_api_applications__application_id__send_approve_post"];
         delete?: never;
@@ -1954,6 +1956,27 @@ export interface paths {
          *     Token first (short connection), then the body read holding none, then a second short one to store.
          */
         post: operations["upload_proof_via_link_api_proof__token__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ready-to-send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ready To Send
+         * @description The caller's ready-to-send cards, newest fill first. ``limit=0`` = counts
+         *     only. ``application_id`` narrows it to one (404 when it is not the caller's).
+         */
+        get: operations["ready_to_send_api_ready_to_send_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4436,6 +4459,87 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** ReadyAnswer */
+        ReadyAnswer: {
+            /** Answer */
+            answer: string;
+            /** Key */
+            key?: string | null;
+            /** Question */
+            question: string;
+            /** Saved At */
+            saved_at?: string | null;
+            /** Saved By */
+            saved_by?: string | null;
+            /** Source */
+            source: string;
+        };
+        /** ReadyCard */
+        ReadyCard: {
+            /** Answers */
+            answers: components["schemas"]["ReadyAnswer"][];
+            /** Application Id */
+            application_id: number;
+            /** Brought At */
+            brought_at?: string | null;
+            /** Brought By */
+            brought_by?: string | null;
+            cover_letter?: components["schemas"]["ReadyDoc"] | null;
+            cv?: components["schemas"]["ReadyDoc"] | null;
+            /** Filled At */
+            filled_at: string;
+            /** Filled By */
+            filled_by: string;
+            /** Fit By */
+            fit_by?: string | null;
+            /** Fit Score */
+            fit_score?: number | null;
+            /** Flags */
+            flags: components["schemas"]["ReadyFlag"][];
+            /** Form Filled Event Id */
+            form_filled_event_id: number;
+            /** Job Company */
+            job_company: string;
+            /** Job Country */
+            job_country?: string | null;
+            /** Job Location */
+            job_location: string;
+            /** Job Title */
+            job_title: string;
+        };
+        /** ReadyDoc */
+        ReadyDoc: {
+            /** Artifact Id */
+            artifact_id: number;
+            /** Made By */
+            made_by: string;
+            /** Saved At */
+            saved_at: string;
+            /** Version */
+            version: number;
+        };
+        /** ReadyFlag */
+        ReadyFlag: {
+            /** Code */
+            code: string;
+            /** Country */
+            country?: string | null;
+            /** Key */
+            key?: string | null;
+            /** Text */
+            text: string;
+        };
+        /** ReadyToSendOut */
+        ReadyToSendOut: {
+            /** Items */
+            items: components["schemas"]["ReadyCard"][];
+            /** Paused */
+            paused: boolean;
+            /** Total */
+            total: number;
+            /** Unflagged */
+            unflagged: number;
+        };
         /** Receipt */
         Receipt: {
             /** Answers */
@@ -6292,7 +6396,10 @@ export interface operations {
     };
     approve_send_api_applications__application_id__send_approve_post: {
         parameters: {
-            query?: never;
+            query?: {
+                artifact_id?: number | null;
+                form_filled_event_id?: number | null;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -8456,6 +8563,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProofUploadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ready_to_send_api_ready_to_send_get: {
+        parameters: {
+            query?: {
+                application_id?: number | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadyToSendOut"];
                 };
             };
             /** @description Validation Error */

@@ -846,10 +846,10 @@ def build_server(version: str = "") -> MCPServer:
         for a cold contact; a reply never changes the job status.
 
         Kit events (closed payloads, else 422): cv_seen and submit_approved ONLY after the user said so in chat;
-        submit_declined, autofill_set {mode:"deny"}, form_filled, hold_released, site_account {host}, account_needed
-        {host}; submit_mode_set {"submit_mode":"confirm"} only. Stuck: blocked {reason, step, page_host, detail},
-        then stop that application; unblocked {resolution}. proof_text {text, page_host}: the pasted confirmation
-        text. Payloads, 403/409: get_recipe("rules"), Events."""
+        submit_declined, autofill_set {mode:"deny"}, form_filled (+ `answers`: each field typed, its source, kit
+        key), hold_released, site_account {host}, account_needed {host}; submit_mode_set {"submit_mode":"confirm"}
+        only. Stuck: blocked {reason, step, page_host, detail}, then stop that application; unblocked {resolution}.
+        proof_text {text, page_host}: the pasted confirmation text. Payloads, 403/409: get_recipe("rules"), Events."""
         if contact_id is not None:
             # Bug fix (coordinator review, 2026-09-26) — same refusal as the
             # route: neither the cold outreach door nor the linked branch

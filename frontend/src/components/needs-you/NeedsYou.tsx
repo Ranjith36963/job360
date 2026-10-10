@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask, SettingRequest } from "@/lib/api";
 import { MorningCheck } from "./MorningCheck";
+import { ReadyToSend } from "./ReadyToSend";
 import { SettingRequestCard } from "./SettingRequestCard";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
@@ -239,6 +240,11 @@ export function NeedsYou() {
   const [moreAnswered, setMoreAnswered] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The badge counts the questions, the changes waiting for an OK AND what is ready to send.
+  const [askCount, setAskCount] = useState(0);
+  // null until Ready to send has answered (0 if its read failed): announcing
+  // before then would drop the ready count from the badge for a moment.
+  const [readyTotal, setReadyTotal] = useState<number | null>(null);
 
   const apply = useCallback(
     (
@@ -251,8 +257,7 @@ export function NeedsYou() {
       setWaiting(w);
       setMoreAnswered(a.asks.length >= PAGE);
       setError(null);
-      // The badge counts the questions AND the changes waiting for an OK.
-      announce(o.open_count + w.length);
+      setAskCount(o.open_count + w.length);
     },
     [],
   );
@@ -281,6 +286,10 @@ export function NeedsYou() {
       cancelled = true;
     };
   }, [apply]);
+
+  useEffect(() => {
+    if (open !== null && readyTotal !== null) announce(askCount + readyTotal);
+  }, [open, askCount, readyTotal]);
 
   async function loadOlder() {
     setLoadingMore(true);
@@ -313,6 +322,7 @@ export function NeedsYou() {
   return (
     <div className="flex max-w-3xl flex-col gap-8">
       <MorningCheck />
+      <ReadyToSend onTotal={setReadyTotal} />
       {error && (
         <div role="alert" className="flex items-center gap-3 text-sm text-destructive">
           <span>{error} What you see may be out of date.</span>
