@@ -4534,6 +4534,10 @@ export interface components {
         ProofStateOut: {
             /** Application Id */
             application_id: number;
+            /** Max Bytes */
+            max_bytes: number;
+            /** Max Live */
+            max_live: number;
             proof: components["schemas"]["ProofOut"];
             /** Screenshots */
             screenshots: components["schemas"]["ProofScreenshotOut"][];

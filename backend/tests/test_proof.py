@@ -214,6 +214,19 @@ async def test_the_mint_is_capped_per_hour(authenticated_async_context, monkeypa
         assert codes == [201, 201, 429]
 
 
+@pytest.mark.asyncio
+async def test_the_read_carries_the_limits_from_settings(authenticated_async_context, monkeypatch):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        state = await _proof(client, app_id)
+        assert (state["max_bytes"], state["max_live"]) == (
+            settings.PROOF_SCREENSHOT_MAX_BYTES, settings.PROOF_SCREENSHOTS_MAX_LIVE)
+        monkeypatch.setattr(settings, "PROOF_SCREENSHOT_MAX_BYTES", 5 * 1024 * 1024)
+        monkeypatch.setattr(settings, "PROOF_SCREENSHOTS_MAX_LIVE", 5)
+        state = await _proof(client, app_id)
+        assert (state["max_bytes"], state["max_live"]) == (5 * 1024 * 1024, 5)
+
+
 # ── the count limit, delete, export ──────────────────────────────────────────
 
 
@@ -247,8 +260,9 @@ async def test_delete_erases_the_bytes_keeps_the_row_and_the_export_never_has_by
             assert (await agent.post(f"/api/applications/{app_id}/proof/link")).status_code == 201
             assert (await agent.get(f"/api/applications/{app_id}/proof")).json()["proof"]["screenshots"] == 2
         deleted = await client.delete(f"{url}/{gone}")
-        today = datetime.now(timezone.utc).date().isoformat()
-        assert deleted.json()["delete_note"] == f"Deleted by you, {today}" and deleted.json()["deleted_at"]
+        _n = datetime.now(timezone.utc)
+        today = f"{_n.day} {_n:%b %Y}"
+        assert deleted.json()["delete_note"] == f"Deleted by you on {today}" and deleted.json()["deleted_at"]
         assert _sql("SELECT bytes FROM application_proof_screenshots WHERE id = ?", (gone,))[0][0] is None
         assert (await client.delete(f"{url}/{gone}")).status_code == 404
         assert (await client.get(f"{url}/{gone}")).status_code == 410
@@ -263,7 +277,7 @@ async def test_delete_erases_the_bytes_keeps_the_row_and_the_export_never_has_by
         rows = exported["application_proof_screenshots"]
         assert {r["id"] for r in rows} == {keep, gone} and all("bytes" not in r for r in rows)
         assert "proof_upload_links" not in exported and "_incomplete_tables" not in exported
-        assert [r["delete_note"] for r in rows if r["id"] == gone] == [f"Deleted by you, {today}"]
+        assert [r["delete_note"] for r in rows if r["id"] == gone] == [f"Deleted by you on {today}"]
 
 
 def test_both_tables_are_registered_for_erasure_and_only_one_for_export():

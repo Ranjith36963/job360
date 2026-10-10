@@ -58,7 +58,9 @@ FP_START="$(tree_fingerprint)"
 # with the connection, so a hard-killed gate can never leave a stale lockfile.
 LOCK_HELD=""
 if command -v python >/dev/null 2>&1; then
-  LOCK_OUT="$(cd backend 2>/dev/null && python - <<'PYLOCK' 2>/dev/null || true
+  # The probe source lives in a variable, NOT in a heredoc inside $( ): bash 5.2 mis-parses a
+  # quoted heredoc (with parens/quotes in its body) nested in a command substitution.
+  IFS= read -r -d '' PYLOCK_SRC <<'PYLOCK' || true
 import sys
 try:
     import psycopg
@@ -79,7 +81,7 @@ try:
 except Exception:
     print("UNKNOWN")
 PYLOCK
-)"
+  LOCK_OUT="$(cd backend 2>/dev/null && python -c "$PYLOCK_SRC" 2>/dev/null || true)"
   if [ "$LOCK_OUT" = "BUSY" ]; then
     echo "[gate] ABORT: another gate is already running against this Postgres." >&2
     echo "[gate] Wait for it — do NOT run a second gate. Concurrent suites share" >&2

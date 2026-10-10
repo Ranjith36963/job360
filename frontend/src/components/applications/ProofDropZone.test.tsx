@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { ProofDropZone } from "./ProofDropZone";
 import type { ProofScreenshotOut, ProofStateOut } from "@/lib/api";
 
@@ -14,11 +14,14 @@ vi.mock("@/lib/toast", () => ({ toast: { apiError: vi.fn(), error: m.toastError 
 function shot(id: number, deleted = false): ProofScreenshotOut {
   return {
     id, mime: "image/png", size: 10, sha256: "a", created_by: "web", created_at: "2026-10-10T00:00:00Z",
-    deleted_at: deleted ? "2026-10-10T01:00:00Z" : null, delete_note: deleted ? "Deleted by you on 10 Oct" : "",
+    deleted_at: deleted ? "2026-10-10T01:00:00Z" : null, delete_note: deleted ? "Deleted by you on 10 Oct 2026" : "",
   };
 }
-function resp(level: ProofStateOut["proof"]["level"], shots: ProofScreenshotOut[]): ProofStateOut {
+function resp(
+  level: ProofStateOut["proof"]["level"], shots: ProofScreenshotOut[], max_bytes = 3 * 1024 * 1024, max_live = 3,
+): ProofStateOut {
   return {
+    max_bytes, max_live,
     application_id: 7,
     proof: { has_text: level === "text", has_email: level === "email", screenshots: shots.length, level },
     screenshots: shots,
@@ -66,6 +69,23 @@ describe("ProofDropZone", () => {
     expect(uploadProofScreenshot).not.toHaveBeenCalled();
   });
 
+  it("builds the copy from the server limits, not constants", async () => {
+    getProof.mockResolvedValue(resp("screenshot_only", [shot(1), shot(2)], 5 * 1024 * 1024, 2));
+    mount();
+    await screen.findByText(/2 of 2 screenshots/);
+    cleanup();
+    getProof.mockResolvedValue(resp("none", [], 5 * 1024 * 1024, 4));
+    mount();
+    await screen.findByText(/up to 5 MB/);
+    const input = await screen.findByTestId("proof-file-input");
+    fireEvent.change(input, { target: { files: [file("image/png", 6 * 1024 * 1024)] } });
+    expect(toastError).toHaveBeenLastCalledWith("That image is over 5 MB.");
+    cleanup();
+    getProof.mockResolvedValue(resp("none", [], 2.5 * 1024 * 1024, 4));
+    mount();
+    await screen.findByText(/up to 2.5 MB/);
+  });
+
   it("uploads a png then reloads", async () => {
     getProof.mockResolvedValueOnce(resp("none", [])).mockResolvedValueOnce(resp("screenshot_only", [shot(5)]));
     uploadProofScreenshot.mockResolvedValue(shot(5));
@@ -89,7 +109,7 @@ describe("ProofDropZone", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     mount();
     fireEvent.click(await screen.findByTestId("proof-delete-1"));
-    await waitFor(() => expect(screen.getByTestId("proof-deleted-1").textContent).toBe("Deleted by you on 10 Oct"));
+    await waitFor(() => expect(screen.getByTestId("proof-deleted-1").textContent).toBe("Deleted by you on 10 Oct 2026"));
     expect(deleteProofScreenshot).toHaveBeenCalledWith(7, 1);
     expect(screen.queryByTestId("proof-thumb-1")).toBeNull();
   });
