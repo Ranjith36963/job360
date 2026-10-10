@@ -31,12 +31,16 @@ export const HOME_ASKS_LIMIT = 3;
 
 // ---- Last visit (per browser) --------------------------------------------
 
-/** The time of the last visit as an ISO string. Absent, unreadable or
- * unparseable → 7 days before `now`. Never throws (storage can be blocked). */
-export function readLastVisit(now: Date = new Date()): string {
-  const fallback = new Date(now.getTime() - DEFAULT_LOOKBACK_DAYS * DAY_MS).toISOString();
+/** The ISO stamp under `key` (Home and the Needs-you morning check own different
+ * keys). Absent, unreadable or unparseable → `lookbackDays` before `now`. Never throws. */
+export function readLastVisit(
+  now: Date = new Date(),
+  key: string = LAST_VISIT_KEY,
+  lookbackDays: number = DEFAULT_LOOKBACK_DAYS,
+): string {
+  const fallback = new Date(now.getTime() - lookbackDays * DAY_MS).toISOString();
   try {
-    const raw = window.localStorage.getItem(LAST_VISIT_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return fallback;
     return Number.isNaN(new Date(raw).getTime()) ? fallback : raw;
   } catch {
@@ -44,12 +48,21 @@ export function readLastVisit(now: Date = new Date()): string {
   }
 }
 
-/** Remember `iso` as the last visit. A blocked or full store is silently ignored. */
-export function writeLastVisit(iso: string): void {
+/** True when a readable stamp is stored under `key` (false on a first visit). */
+export function hasStamp(key: string): boolean {
   try {
-    window.localStorage.setItem(LAST_VISIT_KEY, iso);
+    return !Number.isNaN(new Date(window.localStorage.getItem(key) ?? "").getTime());
   } catch {
-    // Private window / blocked storage — Home still works, it just won't remember.
+    return false;
+  }
+}
+
+/** Remember `iso` under `key`. A blocked or full store is silently ignored. */
+export function writeLastVisit(iso: string, key: string = LAST_VISIT_KEY): void {
+  try {
+    window.localStorage.setItem(key, iso);
+  } catch {
+    // Private window / blocked storage — the page still works, it just won't remember.
   }
 }
 

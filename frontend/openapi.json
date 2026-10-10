@@ -4240,6 +4240,117 @@
         "title": "MagicLinkRequest",
         "type": "object"
       },
+      "MorningCheckOut": {
+        "properties": {
+          "now": {
+            "title": "Now",
+            "type": "string"
+          },
+          "since": {
+            "title": "Since",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MorningState"
+          },
+          "tally": {
+            "$ref": "#/components/schemas/MorningTally"
+          }
+        },
+        "required": [
+          "now",
+          "since",
+          "state",
+          "tally"
+        ],
+        "title": "MorningCheckOut",
+        "type": "object"
+      },
+      "MorningState": {
+        "properties": {
+          "applied_today": {
+            "title": "Applied Today",
+            "type": "integer"
+          },
+          "apply_mode": {
+            "title": "Apply Mode",
+            "type": "string"
+          },
+          "daily_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Cap"
+          },
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "paused_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused At"
+          },
+          "paused_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused By"
+          },
+          "submit_mode": {
+            "title": "Submit Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "paused",
+          "apply_mode",
+          "submit_mode",
+          "applied_today"
+        ],
+        "title": "MorningState",
+        "type": "object"
+      },
+      "MorningTally": {
+        "properties": {
+          "blocked": {
+            "$ref": "#/components/schemas/TallyBucket"
+          },
+          "failed": {
+            "$ref": "#/components/schemas/TallyBucket"
+          },
+          "sent": {
+            "$ref": "#/components/schemas/TallyBucket"
+          },
+          "waiting": {
+            "$ref": "#/components/schemas/TallyBucket"
+          }
+        },
+        "required": [
+          "sent",
+          "blocked",
+          "waiting",
+          "failed"
+        ],
+        "title": "MorningTally",
+        "type": "object"
+      },
       "NextStepOut": {
         "description": "What to do next on this application \u2014 a state machine over the stored\nrecord (status, fit, CV versions, receipt, interview date, lesson), never\na judgement of the job. ``code`` is the closed vocabulary an agent\nbranches on; ``label`` is the sentence the web shows.",
         "properties": {
@@ -7290,6 +7401,66 @@
           "path"
         ],
         "title": "TakeBackRequest",
+        "type": "object"
+      },
+      "TallyBucket": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TallyItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "TallyBucket",
+        "type": "object"
+      },
+      "TallyItem": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "receipt_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receipt Id"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "company",
+          "title",
+          "at"
+        ],
+        "title": "TallyItem",
         "type": "object"
       },
       "TimezoneRequest": {
@@ -12270,6 +12441,89 @@
         "summary": "Livez",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/morning-check": {
+      "get": {
+        "description": "State + the four-bucket tally since ``since``.",
+        "operationId": "morning_check_api_morning_check_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MorningCheckOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Morning Check",
+        "tags": [
+          "morning-check"
         ]
       }
     },

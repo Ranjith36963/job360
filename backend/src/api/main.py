@@ -37,6 +37,7 @@ from src.api.routes import (
     client_log,
     files,
     health,
+    morning_check,
     oauth,
     profile,
     proof,
@@ -227,6 +228,7 @@ app.include_router(files.router, prefix="/api")  # PUBLIC token download for app
 app.include_router(recipes.router, prefix="/api")
 app.include_router(asks.router, prefix="/api")  # "Needs you" queue (owner plan 2026-10-01)
 app.include_router(assistant_settings.router, prefix="/api")  # assistant settings + waiting requests (S2, 2026-10-08)
+app.include_router(morning_check.router, prefix="/api")  # state strip + since-last-visit tally (S5b)
 # Batch 2 — auth
 app.include_router(auth.router, prefix="/api")
 # Per-User AI CV & Cover Letter (docs/product/peruser_cv_coverletter.md)
