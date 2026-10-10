@@ -339,9 +339,9 @@ def build_server(version: str = "") -> MCPServer:
         `fields["user_info.logistics"]`, `fields["user_info.languages"]`, `fields["user_info.equality"]` and
         `fields["user_info.answers"]`; the salary is `fields["preferences.salary_by_country"]`. Read them before any
         form. A missing key means "not answered": ask only that, once, then save it; never guess. Use the
-        HIRING country's record (also for a remote job). Never convert currency. A minimum salary is never stored or
-        sent. "prefer not to say" is an answer. Reuse a saved free-text answer word for word only when `approved` is
-        true.
+        HIRING country's record (also for a remote job). Never convert currency. A salary floor is never stored or
+        sent; salary has `min` and `max`. "prefer not to say" is an answer. Reuse a saved free-text answer word for
+        word only when `approved` is true.
 
         Other keys: job_titles, experience_level, experience_level_inferred, agent_edits, lessons, assistant_hint.
         Full rules and shapes: get_recipe("rules")."""

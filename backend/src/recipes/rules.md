@@ -380,7 +380,8 @@ means "not answered": ask the user only that, once, then save it with
 in `right_to_work.countries` and `logistics.countries` (also for a remote job).
 The salary is a PREFERENCE: `fields["preferences.salary_by_country"]`, the
 hiring country's record, with its period (year or month); if there is none, ask.
-Never convert currency. A minimum salary is never stored or sent. Equality
+A form asking ONE number gets `min`; a form asking a range gets `min` and `max`.
+Never convert currency. A salary floor is never stored or sent. Equality
 answers are reused as stored ("prefer not to say" is a valid answer); if one is
 skipped, ask on that form. Reuse a saved free-text answer word for word only
 when its `approved` is true.
@@ -396,7 +397,7 @@ legal_last_name, preferred_name}.
 `user_info.right_to_work` = {countries: [ONE record per country {country (ISO2,
 required), work_authorization (citizen | permanent_resident | visa |
 needs_sponsorship), needs_sponsorship (bool), visa_type, visa_expires (YYYY-MM
-or YYYY-MM-DD)}], citizenship: [ISO2], sanctions_country_citizen (bool)}.
+or YYYY-MM-DD)}], citizenship: [ISO2], sanctions_country_citizen (bool, or "Prefer not to say")}.
 `user_info.logistics` = {notice_period, earliest_start, countries: [ONE record
 per country {country (ISO2, required), willing_to_relocate (bool),
 relocate_where, travel_ok_pct (whole number 0-100), driving_licence (bool),
@@ -408,11 +409,11 @@ sexual_orientation, transgender}; "prefer not to say" is valid.
 `user_info.answers` = [{question, answer, approved (bool, default false),
 recorded_at}] — set `approved: true` only after the user agrees to that exact
 wording, and send `recorded_at` back as stored.
-`preferences.salary_by_country` = [{country (ISO2), amount (number > 0),
-currency (3 letters, e.g. EUR), period: year | month}], ONE record per country,
-all four keys required. No "remote" record (a remote job uses the hiring
-country's record) and no salary minimum key; nothing is ever converted between
-currencies.
+`preferences.salary_by_country` = [{country (ISO2), min, max (numbers > 0, min
+not above max; equal = one figure), currency (3 letters, e.g. EUR), period:
+year | month}], ONE record per country (`min` alone = one figure; never `max`
+alone). No "remote" record (a remote job uses the hiring country's
+record); nothing is ever converted between currencies.
 
 A re-extraction (a fresh CV/LinkedIn/GitHub) never undoes your edit — only
 clearing it does.

@@ -143,7 +143,7 @@ def test_rules_recipe_holds_every_moved_rule():
                   "practice run", "get_application_kit(application_id)", "cv_not_seen", "user_declined",
                   "linkedin_easy_apply", "autofill_set", "submit_mode_set", "account_needed",
                   "assistant_settings.setup_progress", "user_info.contact", "user_info.answers",
-                  "preferences.salary_by_country", "never convert currency", "a minimum salary is never stored",
+                  "preferences.salary_by_country", "never convert currency", "a salary floor is never stored",
                   "replaces the whole list", "cv_data.cv_positions", "ats_score", "found_via", "found_on",
                   "prefer not to say", "the hiring country", "approved",
                   # restored by the S4 review (they were dropped from the old texts):

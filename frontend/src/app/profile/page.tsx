@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import posthog from "posthog-js";
 import { User, AlertCircle, History } from "lucide-react";
@@ -13,6 +13,8 @@ import { VersionHistoryDrawer } from "@/components/profile/VersionHistoryDrawer"
 import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportButton";
 import { ClearButton } from "@/components/profile/ClearButton";
 import { LessonsList } from "@/components/profile/LessonsList";
+import { MemoryTab } from "@/components/profile/MemoryTab";
+import { ProfileHeader, ProfileTabs, useProfileTab } from "@/components/profile/ProfileTabs";
 import { PageContainer } from "@/components/layout/PageContainer";
 import {
   getProfile,
@@ -140,7 +142,8 @@ function headerLine(profile: ProfileResponse | null): string {
 
 // ── Page component ──────────────────────────────────────────
 
-export default function ProfilePage() {
+/** The CV tab: today's Profile page (the tab row sits under its header). */
+function CvTab() {
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -365,6 +368,9 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        <ProfileTabs />
+        <div className="mb-6" />
+
         {/* ── Error banner ────────────────────────────── */}
         {error && (
           <div className="mb-6 flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
@@ -563,5 +569,33 @@ export default function ProfilePage() {
         onRestore={fetchProfile}
       />
     </div>
+  );
+}
+
+/** Profile has four tabs, picked by `?tab=` (CV when absent). Only the open
+ *  tab mounts, so the CV page's fetches stay off the other tabs. */
+function ProfileRouter() {
+  const tab = useProfileTab();
+  if (tab === "cv") return <CvTab />;
+  return (
+    <PageContainer className="py-8 lg:py-12">
+      <ProfileHeader />
+      <ProfileTabs />
+      {tab === "memory" ? (
+        <MemoryTab />
+      ) : (
+        <p data-testid={`profile-${tab}-soon`} className="pt-6 text-sm text-muted-foreground">
+          Coming in the next update.
+        </p>
+      )}
+    </PageContainer>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense fallback={null}>
+      <ProfileRouter />
+    </Suspense>
   );
 }
