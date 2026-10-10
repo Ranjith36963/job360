@@ -13,7 +13,9 @@ import { VersionHistoryDrawer } from "@/components/profile/VersionHistoryDrawer"
 import { JsonResumeExportButton } from "@/components/profile/JsonResumeExportButton";
 import { ClearButton } from "@/components/profile/ClearButton";
 import { LessonsList } from "@/components/profile/LessonsList";
+import { AssistantTab } from "@/components/profile/AssistantTab";
 import { MemoryTab } from "@/components/profile/MemoryTab";
+import { SetupTab } from "@/components/profile/SetupProgress";
 import { ProfileHeader, ProfileTabs, useProfileTab } from "@/components/profile/ProfileTabs";
 import { PageContainer } from "@/components/layout/PageContainer";
 import {
@@ -581,13 +583,7 @@ function ProfileRouter() {
     <PageContainer className="py-8 lg:py-12">
       <ProfileHeader />
       <ProfileTabs />
-      {tab === "memory" ? (
-        <MemoryTab />
-      ) : (
-        <p data-testid={`profile-${tab}-soon`} className="pt-6 text-sm text-muted-foreground">
-          Coming in the next update.
-        </p>
-      )}
+      {tab === "memory" ? <MemoryTab /> : tab === "assistant" ? <AssistantTab /> : <SetupTab />}
     </PageContainer>
   );
 }

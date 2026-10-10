@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getReadyToSend } from "@/lib/api";
 import type { ReadyToSend as ReadyData } from "@/lib/api";
-import { PAUSE_CHANGED_EVENT } from "@/lib/assistant-state";
+import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state";
 import { splitReady } from "@/lib/ready-to-send";
 import { ReadyCard } from "./ReadyCard";
 import { SendAllCard } from "./SendAllCard";
@@ -45,6 +45,12 @@ export function ReadyToSend({ onTotal }: { onTotal?: (total: number) => void }) 
     return () => window.removeEventListener(PAUSE_CHANGED_EVENT, onPause);
   }, [load]);
 
+  // After any send or decline: re-read this list, and tell the morning check strip.
+  const changed = useCallback(() => {
+    load();
+    window.dispatchEvent(new CustomEvent(READY_CHANGED_EVENT));
+  }, [load]);
+
   const { clean, held } = useMemo(() => splitReady(data?.items ?? []), [data]);
 
   if (failed && !data) {
@@ -67,11 +73,11 @@ export function ReadyToSend({ onTotal }: { onTotal?: (total: number) => void }) 
       <ul className="flex flex-col gap-3">
         {data.items.map((c) => (
           <li key={c.application_id}>
-            <ReadyCard card={c} paused={data.paused} onChanged={load} />
+            <ReadyCard card={c} paused={data.paused} onChanged={changed} />
           </li>
         ))}
       </ul>
-      {clean.length >= 2 && <SendAllCard clean={clean} held={held} paused={data.paused} onChanged={load} />}
+      {clean.length >= 2 && <SendAllCard clean={clean} held={held} paused={data.paused} onChanged={changed} />}
     </section>
   );
 }

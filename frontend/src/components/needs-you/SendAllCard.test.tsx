@@ -12,7 +12,7 @@ vi.mock("@/lib/api", () => ({
   approveSend: (...a: unknown[]) => approveSend(...a),
   declineSend: vi.fn(),
 }));
-vi.mock("@/lib/assistant-state", () => ({ PAUSE_CHANGED_EVENT: "job360:pause-changed" }));
+vi.mock("@/lib/assistant-state", () => ({ PAUSE_CHANGED_EVENT: "job360:pause-changed", READY_CHANGED_EVENT: "job360:ready-changed" }));
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
 vi.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) } }));
@@ -115,5 +115,44 @@ describe("ready-to-send helpers", () => {
     expect(guardSend([a], [a]).go).toEqual([a]);
     expect(guardSend([a], []).skipped).toEqual([a]);
     expect(guardSend([a], [card(1, { flags: missing })]).skipped).toEqual([a]);
+  });
+});
+
+describe("held-out reasons and the morning check refresh", () => {
+  const two = [
+    ...missing,
+    { code: "guessed", text: "An answer was guessed: Visa?" },
+    { code: "no_cv", text: "No CV saved for this application" },
+  ];
+  const heldList = () =>
+    list(false, [card(1), card(2), card(4, { job_company: "DeepL", job_title: "AI Engineer", job_location: "Cologne", flags: two })]);
+
+  it("shows the first reason and 'and 2 more'; expanding lists every reason", async () => {
+    getReadyToSend.mockResolvedValue(heldList());
+    render(<ReadyToSend />);
+    const held = await screen.findByTestId("held-row-4");
+    expect(held).toHaveTextContent("Salary for Germany not saved yet");
+    expect(held).not.toHaveTextContent("An answer was guessed: Visa?");
+    fireEvent.click(screen.getByTestId("held-more-4"));
+    const all = screen.getByTestId("held-reasons-4");
+    expect(all).toHaveTextContent("Salary for Germany not saved yet");
+    expect(all).toHaveTextContent("An answer was guessed: Visa?");
+    expect(all).toHaveTextContent("No CV saved for this application");
+  });
+
+  it("one reason: no 'and N more'", async () => {
+    render(<ReadyToSend />);
+    await screen.findByTestId("held-row-4");
+    expect(screen.queryByTestId("held-more-4")).toBeNull();
+  });
+
+  it("a send tells the morning check strip to re-read, without a reload", async () => {
+    const seen = vi.fn();
+    window.addEventListener("job360:ready-changed", seen);
+    render(<ReadyToSend />);
+    fireEvent.click(await screen.findByTestId("send-all-open"));
+    fireEvent.click(screen.getByTestId("send-all-yes"));
+    await waitFor(() => expect(seen).toHaveBeenCalled());
+    window.removeEventListener("job360:ready-changed", seen);
   });
 });

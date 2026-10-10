@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getMorningCheck } from "@/lib/api";
 import type { MorningCheck as MorningCheckData } from "@/lib/api";
-import { PAUSE_CHANGED_EVENT } from "@/lib/assistant-state";
+import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state";
 import { formatFeedTime, hasStamp, readLastVisit, writeLastVisit } from "@/lib/home";
 import {
   APPLY_MODE_LABEL,
@@ -57,11 +57,15 @@ export function MorningCheck() {
     load();
   }, [load]);
 
-  // A pause or resume from the top bar updates the strip at once.
+  // A pause or resume from the top bar, or a Send / Don't send below, updates the strip at once.
   useEffect(() => {
-    const onPause = () => load();
-    window.addEventListener(PAUSE_CHANGED_EVENT, onPause);
-    return () => window.removeEventListener(PAUSE_CHANGED_EVENT, onPause);
+    const onChange = () => load();
+    window.addEventListener(PAUSE_CHANGED_EVENT, onChange);
+    window.addEventListener(READY_CHANGED_EVENT, onChange);
+    return () => {
+      window.removeEventListener(PAUSE_CHANGED_EVENT, onChange);
+      window.removeEventListener(READY_CHANGED_EVENT, onChange);
+    };
   }, [load]);
 
   // The stamp moves forward only after the tally has been shown.
