@@ -296,6 +296,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/blocked/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Blocked
+         * @description "Mark resolved" - the user sorted out what stopped their assistant: records
+         *     ``unblocked`` {resolution: user_did_it} and closes the blocked ask. 409 when
+         *     nothing is blocked. Session only; assistants use ``record_event``.
+         */
+        post: operations["resolve_blocked_api_applications__application_id__blocked_resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/contacts": {
         parameters: {
             query?: never;
@@ -2421,12 +2443,13 @@ export interface components {
         /**
          * ApplicationControlsOut
          * @description The state behind the four human-in-the-loop buttons on the application
-         *     page, each with who / where / when.
+         *     page, each with who / where / when, plus an open blocked record.
          */
         ApplicationControlsOut: {
             /** Application Id */
             application_id: number;
             autofill: components["schemas"]["ControlsAutofillOut"];
+            blocked?: components["schemas"]["ControlsBlockedOut"] | null;
             cv?: components["schemas"]["ControlsCvOut"] | null;
             declined?: components["schemas"]["KitSeenOut"] | null;
             duplicate: components["schemas"]["KitDuplicateOut"];
@@ -3186,6 +3209,28 @@ export interface components {
             mode: "allow" | "deny" | "unset";
             /** Where */
             where?: string | null;
+        };
+        /**
+         * ControlsBlockedOut
+         * @description S6: the assistant's open ``blocked`` record (no later ``unblocked``).
+         */
+        ControlsBlockedOut: {
+            /** Ask Id */
+            ask_id?: number | null;
+            /** At */
+            at: string;
+            /** By */
+            by: string;
+            /** Detail */
+            detail: string;
+            /** Page Host */
+            page_host: string;
+            /** Reason */
+            reason: string;
+            /** Reason Label */
+            reason_label: string;
+            /** Step */
+            step: string;
         };
         /** ControlsCvOut */
         ControlsCvOut: {
@@ -5736,6 +5781,41 @@ export interface operations {
                 "application/json": components["schemas"]["AutofillRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationControlsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_blocked_api_applications__application_id__blocked_resolve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             201: {

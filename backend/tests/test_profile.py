@@ -199,7 +199,7 @@ class TestPreferences:
         from src.api.routes.profile import _apply_preferences
         from src.services.profile.models import CVData, UserProfile
 
-        record = {"country": "AE", "amount": 25000, "currency": "AED", "period": "month"}
+        record = {"country": "AE", "min": 25000, "max": 30000, "currency": "AED", "period": "month"}
         profile = UserProfile(cv_data=CVData(), preferences=UserPreferences(salary_by_country=[record]))
         _apply_preferences(json.dumps({"target_job_titles": ["AI Engineer"]}), profile)
         assert profile.preferences.salary_by_country == [record]

@@ -54,7 +54,7 @@ _RTW_COUNTRY: dict[str, str] = {
     "visa_type": "line", "visa_expires": "visa_expires",
 }
 _RIGHT_TO_WORK: dict[str, str] = {
-    "countries": "rtw_countries", "citizenship": "iso2_list", "sanctions_country_citizen": "bool",
+    "countries": "rtw_countries", "citizenship": "iso2_list", "sanctions_country_citizen": "bool_or_pns",
 }
 _LOGISTICS_COUNTRY: dict[str, str] = {
     "country": "iso2", "willing_to_relocate": "bool", "relocate_where": "line",
@@ -69,7 +69,9 @@ _EQUALITY: dict[str, str] = {
     "sexual_orientation": "line", "transgender": "line",
 }
 _ANSWER_KEYS = ("question", "answer", "approved", "recorded_at")
-_SALARY_KEYS = ("country", "amount", "currency", "period")
+_SALARY_KEYS = ("country", "min", "max", "currency", "period")
+_SALARY_LEGACY_KEY = "amount"  # old single figure: read as min = max, never stored
+PREFER_NOT_TO_SAY = "Prefer not to say"
 _SALARY_PERIODS = ("year", "month")
 _SALARY_AMOUNT_MAX = 1e12
 
@@ -161,6 +163,12 @@ def _value(where: str, key: str, kind: str, raw: Any) -> Any:
         return _line(at, raw) or None
     if kind == "bool":
         return _bool(at, raw)
+    if kind == "bool_or_pns":
+        if isinstance(raw, str) and " ".join(raw.lower().split()) == PREFER_NOT_TO_SAY.lower():
+            return PREFER_NOT_TO_SAY
+        if not isinstance(raw, bool):
+            raise _fail(f"{at} must be a boolean or \"{PREFER_NOT_TO_SAY}\", got {type(raw).__name__}")
+        return raw
     if kind == "iso2":
         return _iso2(at, raw) or None
     if kind == "email":
@@ -424,12 +432,29 @@ def validate_user_info(path: str, value: Any) -> Any:
     raise _fail(f"{path!r} is not a user-info path")  # pragma: no cover — callers gate on USER_INFO_PATHS
 
 
+def _salary_figure(value: Any) -> bool:
+    """A finite number > 0, not a bool, <= 1e12. The range check runs BEFORE
+    isfinite: a JSON integer with hundreds of digits makes ``math.isfinite``
+    raise OverflowError (a 500), while the int-vs-float comparison is exact and
+    refuses it as a 422. NaN fails the comparison too; isfinite stays for inf."""
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and 0 < value <= _SALARY_AMOUNT_MAX
+        and math.isfinite(value)
+    )
+
+
 def validate_salary_by_country(path: str, value: Any) -> list[dict[str, Any]]:
     """Normalise ``preferences.salary_by_country``: a list (<= 50) of flat
-    records, EXACTLY the keys country (ISO2, unique), amount (finite number
-    > 0), currency (ISO 4217, upper-cased) and period (``year`` | ``month``),
-    all required. Order is kept, nothing is converted; ``[]`` = not set. A
-    minimum-salary key is refused like any unknown key."""
+    records, EXACTLY the keys country (ISO2, unique), min and max (finite
+    numbers > 0, min <= max; equal = one figure), currency (ISO 4217,
+    upper-cased) and period (``year`` | ``month``), all required. The old
+    single ``amount`` is accepted INSTEAD of min/max (never both) and is read
+    as min = max; ``min`` alone is one figure (max = min), ``max`` alone is
+    refused; writes always store min/max. Order is kept, nothing is
+    converted; ``[]`` = not set. A ``minimum`` key is refused like any unknown
+    key."""
     allowed = ", ".join(_SALARY_KEYS)
     if not isinstance(value, list):
         raise _fail(
@@ -441,28 +466,33 @@ def validate_salary_by_country(path: str, value: Any) -> list[dict[str, Any]]:
     for i, raw in enumerate(value):
         where = f"{path}[{i}]"
         need = _fail(
-            f"{where} needs country, amount (a number > 0), currency "
+            f"{where} needs country, min and max (numbers > 0, min not above max), currency "
             "(ISO 4217, 3 letters like 'EUR') and period (year or month)"
         )
         if not isinstance(raw, dict):
             raise _fail(f"{where} must be an object with keys {allowed}, got {type(raw).__name__}")
         for key in raw:
-            if key not in _SALARY_KEYS:
+            if key not in _SALARY_KEYS and key != _SALARY_LEGACY_KEY:
                 raise _unknown_key(where, key, allowed)
         country = raw.get("country")
         if not isinstance(country, str) or not _strip_control(country):
             raise need
         code = _iso2(f"{where}.country", country)
-        amount, currency, period = raw.get("amount"), raw.get("currency"), raw.get("period")
-        # The range check runs BEFORE isfinite: a JSON integer with hundreds of
-        # digits makes math.isfinite raise OverflowError (a 500), while the
-        # int-vs-float comparison is exact and refuses it as a 422. NaN fails
-        # the comparison too; isfinite stays for +/-inf on the float side.
+        if _SALARY_LEGACY_KEY in raw:
+            if "min" in raw or "max" in raw:
+                raise _fail(f"{where}: send min and max, or the old amount — never both")
+            low = high = raw[_SALARY_LEGACY_KEY]
+        else:
+            if "max" in raw and "min" not in raw:
+                raise _fail(f"{where}: max needs a min — send min alone for one figure, or min and max")
+            # min alone = one figure (max = min); the stored record always has both.
+            low = raw.get("min")
+            high = raw["max"] if "max" in raw else low
+        currency, period = raw.get("currency"), raw.get("period")
         if (
-            isinstance(amount, bool)
-            or not isinstance(amount, (int, float))
-            or not 0 < amount <= _SALARY_AMOUNT_MAX
-            or not math.isfinite(amount)
+            not _salary_figure(low)
+            or not _salary_figure(high)
+            or low > high
             or not isinstance(currency, str)
             or not _CURRENCY_RE.match(_strip_control(currency))
             or not isinstance(period, str)
@@ -473,7 +503,7 @@ def validate_salary_by_country(path: str, value: Any) -> list[dict[str, Any]]:
             raise _fail(f"{path}: country '{code}' appears twice — one record per country")
         seen.add(code)
         out.append({
-            "country": code, "amount": amount,
+            "country": code, "min": low, "max": high,
             "currency": _strip_control(currency).upper(), "period": period.strip().lower(),
         })
     return out

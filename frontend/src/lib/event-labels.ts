@@ -59,6 +59,9 @@ export const EVENT_LABEL: Record<string, string> = {
   outreach_sent: "Outreach sent",
   note: "Note",
   lesson: "Lesson",
+  // S6 blocked record.
+  blocked: "Assistant got stuck",
+  unblocked: "Marked resolved",
 };
 
 /** The label for one timeline row. A status event reads "Status → <label>";
