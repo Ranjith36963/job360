@@ -51,16 +51,16 @@ Full rules (kit, gate, events, memory): `get_recipe("rules")`.
    with the `host`. CV file: download `file.url`, upload it (chat app: ask the
    user to attach the PDF; expired link: call the kit again). Show the CV: on
    OK in chat `record_event` `cv_seen`; on yes to submitting THIS application
-   `submit_approved`; after filling (`deny`: once the user says) `form_filled`.
+   `submit_approved`; after filling (`deny`: once the user says) `form_filled`
+   with `answers` (each field typed, `source`, kit `key`; a guess = `guessed`).
    Stop BEFORE the final submit button, show what you entered, then call
-   `check_submit` (`application_id`, `form_url`). `submit`: press submit. `ask`:
+   `check_submit` (`application_id`, `form_url`). `submit`: submit. `ask`:
    submit only after the user says yes to this one application (Indeed and
    LinkedIn always answer `ask`; so does the **practice run**; `cv_not_seen`:
    show the CV first). `stop`: do not submit, tell the user the `detail`.
    Never submit without `check_submit` saying `submit` or the user's yes for
-   this one. A step fails: retry it ONCE, then STOP: record_event `hold_released`
-   {reason: failed} and `ask_user` with the step and the link. Never retry a submit you are not sure failed.
-   **Done when** the form is filled and `check_submit` answered.
+   this one. A step fails: retry it ONCE, then STOP: `hold_released` {reason: failed}
+   and `ask_user` with the step and link. Never retry a submit you are unsure failed. **Done when** the form is filled and `check_submit` answered.
 7. **Record it** only when the user confirms it was sent: `record_application`
    (`channel`: company_site, linkedin_easy_apply, job_board, email, referral,
    recruiter or other; `cv_artifact_id`, `cover_letter_artifact_id`, any proof

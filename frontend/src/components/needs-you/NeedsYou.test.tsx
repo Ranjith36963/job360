@@ -18,6 +18,18 @@ vi.mock("@/lib/api", () => ({
 }));
 // The morning check has its own tests (MorningCheck.test.tsx).
 vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
+// Ready to send has its own tests (ReadyToSend.test.tsx).
+// Ready to send has its own tests; this stand-in only reports its total for the badge.
+const readyMock = vi.hoisted(() => ({ total: 0 }));
+vi.mock("./ReadyToSend", async () => {
+  const { useEffect } = await import("react");
+  return {
+    ReadyToSend: ({ onTotal }: { onTotal?: (n: number) => void }) => {
+      useEffect(() => onTotal?.(readyMock.total), [onTotal]);
+      return null;
+    },
+  };
+});
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const base = {
@@ -120,6 +132,21 @@ describe("NeedsYou", () => {
     fireEvent.click(screen.getByTestId("ask-answer-confirm"));
     await waitFor(() => expect(seen).toEqual([1, 0]));
     window.removeEventListener("job360:asks-changed", on);
+  });
+
+  it("the badge count includes Ready to send, and never announces without it first", async () => {
+    readyMock.total = 2;
+    const seen: number[] = [];
+    const on = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener("job360:asks-changed", on);
+    try {
+      setup([openAsk]);
+      render(<NeedsYou />);
+      await waitFor(() => expect(seen).toEqual([3]));
+    } finally {
+      readyMock.total = 0;
+      window.removeEventListener("job360:asks-changed", on);
+    }
   });
 
   it("a changed answer goes back to the read-only view after saving", async () => {

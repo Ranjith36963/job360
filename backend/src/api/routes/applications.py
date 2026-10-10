@@ -38,6 +38,7 @@ from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
 from src.services.applications import kit as kit_service
 from src.services.applications import lessons as lessons_service
+from src.services.applications import ready as ready_service
 from src.services.applications import spine
 from src.services.applications import stats as stats_service
 from src.services.applications import visa as visa_service
@@ -1838,14 +1839,23 @@ async def mark_cv_seen(
 )
 async def approve_send(
     application_id: int,
+    artifact_id: Optional[int] = Query(None, ge=1),
+    form_filled_event_id: Optional[int] = Query(None, ge=1),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
 ) -> dict[str, Any]:
     """"Send this one" - the user says yes to sending this application with the
     latest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both
     where=web. A CV edited later makes the yes stop matching. Clears an earlier
-    "don't send"."""
+    "don't send". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and
+    the fill the user was looking at; when either is no longer the newest, 409 and
+    nothing is recorded (the yes must name what the user saw)."""
     cv = await _latest_cv_or_409(db, user, application_id)
+    if artifact_id is not None and int(cv["id"]) != artifact_id:
+        raise HTTPException(status_code=409, detail="the CV changed since you looked - look again")
+    if form_filled_event_id is not None:
+        if await ready_service.newest_fill_id(db, user.id, application_id) != form_filled_event_id:
+            raise HTTPException(status_code=409, detail="the filled form changed since you looked - look again")
     payload = {"artifact_id": cv["id"], "sha256": kit_service.sha256_text(cv["text"]), "where": "web"}
     await _web_decision(db, user, application_id, "cv_seen", payload, once_per_version=True)
     await _web_decision(db, user, application_id, "submit_approved", payload)
@@ -1996,7 +2006,9 @@ async def record_event(
 
         spine.validate_event_type(body.event_type)
         detail = body.clamp_detail()
-        payload = spine.validate_payload(body.payload)
+        payload = spine.validate_payload(
+            body.payload, max_bytes=settings.KIT_FORM_PAYLOAD_MAX_BYTES if body.event_type == "form_filled" else None
+        )
         occurred_at = spine.parse_occurred_at(body.occurred_at)
         scheduled_at = spine.parse_scheduled_at(body.scheduled_at, body.event_type)
         follow_up_on_arg: Any = spine.FOLLOW_UP_UNSET
