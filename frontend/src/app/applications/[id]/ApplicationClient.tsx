@@ -5,10 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import {
-  ASKS_CHANGED_EVENT,
   getApplication,
   getApplicationControls,
-  listAsks,
   recordApplicationReceipt,
 } from "@/lib/api";
 import type { ApplicationControls, ApplicationDetail, Ask, VisaShape } from "@/lib/api";
@@ -27,6 +25,7 @@ import { VisaSelect } from "@/components/applications/VisaSelect";
 import { StatusMenu } from "@/components/applications/StatusMenu";
 import { FollowUpField } from "@/components/applications/FollowUpField";
 import { AskCard } from "@/components/needs-you/NeedsYou";
+import { announceOpenCount } from "@/components/layout/useOpenAsks";
 import { STATUS_LABEL, whoLabel } from "@/lib/event-labels";
 import { formatDate, formatDateTime } from "@/lib/format-date";
 import { PageContainer } from "@/components/layout/PageContainer";
@@ -113,12 +112,8 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   // sidebar badge the fresh open count (same as the Needs-you page).
   const reloadAfterAsk = useCallback(async () => {
     await load();
-    try {
-      const r = await listAsks("open");
-      window.dispatchEvent(new CustomEvent(ASKS_CHANGED_EVENT, { detail: r.open_count }));
-    } catch {
-      // The badge corrects itself on its next load.
-    }
+    // Re-count everything the badge counts (questions, waiting changes, ready to send).
+    await announceOpenCount();
   }, [load]);
 
   const markApplied = useCallback(async () => {
@@ -246,7 +241,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             <AlignmentPanel applicationId={detail.id} refreshKey={detail.updated_at} />
           </section>
 
-          <section data-testid="section-documents" className={`order-4 ${SECTION} lg:order-none`}>
+          <section id="section-documents" data-testid="section-documents" className={`order-4 ${SECTION} lg:order-none`}>
             <h2 className={`mb-3 ${LABEL}`}>Documents</h2>
             <ArtifactVersions
               applicationId={detail.id}

@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ASKS_CHANGED_EVENT, listAsks } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, getReadyToSend, listAsks } from "@/lib/api";
 import { fetchSettingsShared } from "@/lib/assistant-state";
 
 /**
  * Count of things waiting on the user (the Needs-you badge): open questions plus
- * the setting changes an assistant asked for that wait for the user's OK (S2).
+ * the setting changes an assistant asked for that wait for the user's OK (S2)
+ * plus the applications ready to send (S5d).
  * The settings read is best-effort: if it fails the badge still counts the asks.
  * A light fetch
  * after mount when signed in, re-fetched on every navigation. It never blocks
@@ -18,6 +19,15 @@ import { fetchSettingsShared } from "@/lib/assistant-state";
  * mounted at once for a signed-in user (the Navbar only hides with CSS), so
  * the request is shared: one call per navigation, not one per caller.
  */
+/** Applications ready to send (S5d). Best-effort: a failed read counts 0. */
+async function readyTotal(): Promise<number> {
+  try {
+    return (await getReadyToSend({ limit: 0 })).total;
+  } catch {
+    return 0;
+  }
+}
+
 let inFlight: { key: string; count: Promise<number> } | null = null;
 
 function fetchOpenCount(key: string): Promise<number> {
@@ -28,7 +38,8 @@ function fetchOpenCount(key: string): Promise<number> {
       (view) => view.waiting.length,
       () => 0,
     ),
-  ]).then(([asks, waiting]) => asks.open_count + waiting);
+    readyTotal(),
+  ]).then(([asks, waiting, ready]) => asks.open_count + waiting + ready);
   const entry = { key, count };
   inFlight = entry;
   const clear = () => {
@@ -36,6 +47,23 @@ function fetchOpenCount(key: string): Promise<number> {
   };
   count.then(clear, clear);
   return count;
+}
+
+let announceSeq = 0;
+
+/**
+ * Re-count everything the badge counts (questions + waiting setting changes +
+ * ready to send) and tell the badge. For pages that change one part of it (an
+ * answer on Home or an application page) so the badge never drops the rest.
+ * Best-effort: a failed count leaves the badge as it is.
+ */
+export async function announceOpenCount(): Promise<void> {
+  try {
+    const count = await fetchOpenCount(`announce:${++announceSeq}`);
+    window.dispatchEvent(new CustomEvent(ASKS_CHANGED_EVENT, { detail: count }));
+  } catch {
+    // The badge corrects itself on the next navigation.
+  }
 }
 
 export function useOpenAsks(signedIn: boolean, pathname: string): number {
