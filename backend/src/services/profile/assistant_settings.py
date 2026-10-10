@@ -374,7 +374,8 @@ class SubmitFacts:
       in chat);
     * ``approved`` - a stored ``submit_approved`` matches the latest CV
       (artifact id + hash); a CV edit makes it stop matching;
-    * ``declined`` - the user's newest word on this application is "don't send".
+    * ``declined`` - the user's newest word on this application is "don't send";
+    * ``blocked`` - the assistant recorded ``blocked`` with no later ``unblocked`` (S6).
     """
 
     status: str
@@ -384,6 +385,7 @@ class SubmitFacts:
     cv_seen: bool = False
     approved: bool = False
     declined: bool = False
+    blocked: bool = False
 
 
 @dataclass(frozen=True)
@@ -400,7 +402,7 @@ class SubmitDecision:
 REASONS: tuple[str, ...] = (
     "paused", "already_applied", "user_declined", "daily_cap_reached", "duplicate_job", "unknown_site",
     "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
-    "user_approved", "auto_when_sure",
+    "user_approved", "auto_when_sure", "blocked",
 )
 
 
@@ -465,6 +467,7 @@ def may_submit(
     4. daily cap reached -> stop ``daily_cap_reached``
     5. same job already applied to -> ``duplicate_job``: STOP when the mode is
        auto (nobody is watching), else ask
+    5b. a ``blocked`` with no later ``unblocked`` -> ask ``blocked`` (S6)
     6. site unknown -> ask ``unknown_site``
     7. Indeed / LinkedIn style site -> ask ``ask_always_site``
     8. the mode (the job's override, else ``submit_mode``) is ``confirm`` -> ask
@@ -474,8 +477,8 @@ def may_submit(
 
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
-    ``user_approved``. Rules 1-4 and the auto-mode duplicate stop are NEVER
-    cleared by a yes.
+    ``user_approved``. Rules 1-4, the auto-mode duplicate stop and the ``blocked``
+    ask (5b) are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
         return SubmitDecision("stop", "paused", "Applications are paused. Do not submit anything.")
@@ -494,6 +497,11 @@ def may_submit(
         return SubmitDecision(
             "stop", "duplicate_job",
             "Needs you: possible duplicate - this job was already applied to. Do not submit; the user decides.",
+        )
+    if application.blocked:
+        return SubmitDecision(
+            "ask", "blocked",
+            "Your assistant got stuck on this application. Do not submit; the user resolves it first.",
         )
     ask = _first_ask(application, site_host, counts, override=override, auto=auto)
     if ask is None:

@@ -461,7 +461,7 @@
         "type": "object"
       },
       "ApplicationControlsOut": {
-        "description": "The state behind the four human-in-the-loop buttons on the application\npage, each with who / where / when.",
+        "description": "The state behind the four human-in-the-loop buttons on the application\npage, each with who / where / when, plus an open blocked record.",
         "properties": {
           "application_id": {
             "title": "Application Id",
@@ -469,6 +469,16 @@
           },
           "autofill": {
             "$ref": "#/components/schemas/ControlsAutofillOut"
+          },
+          "blocked": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ControlsBlockedOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "cv": {
             "anyOf": [
@@ -2511,6 +2521,61 @@
           "mode"
         ],
         "title": "ControlsAutofillOut",
+        "type": "object"
+      },
+      "ControlsBlockedOut": {
+        "description": "S6: the assistant's open ``blocked`` record (no later ``unblocked``).",
+        "properties": {
+          "ask_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ask Id"
+          },
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "page_host": {
+            "title": "Page Host",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "reason_label": {
+            "title": "Reason Label",
+            "type": "string"
+          },
+          "step": {
+            "title": "Step",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "reason_label",
+          "step",
+          "page_host",
+          "detail",
+          "by",
+          "at"
+        ],
+        "title": "ControlsBlockedOut",
         "type": "object"
       },
       "ControlsCvOut": {
@@ -9265,6 +9330,81 @@
           }
         },
         "summary": "Set Autofill",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/blocked/resolve": {
+      "post": {
+        "description": "\"Mark resolved\" - the user sorted out what stopped their assistant: records\n``unblocked`` {resolution: user_did_it} and closes the blocked ask. 409 when\nnothing is blocked. Session only; assistants use ``record_event``.",
+        "operationId": "resolve_blocked_api_applications__application_id__blocked_resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationControlsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Blocked",
         "tags": [
           "applications"
         ]

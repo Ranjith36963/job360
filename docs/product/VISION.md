@@ -76,6 +76,9 @@ assistant may only send `confirm`), and the application-kit trail (S3, all note-
 don't send - `where` is `web` or `chat`), `autofill_set` (`allow` | `deny`; an assistant may
 only send `deny`), `duplicate_cleared` (web only), `form_filled` (host + field count),
 `hold_released`, `site_account` / `account_needed` (a host name only - never a password), and the
+blocked record (S6, note-family): `blocked` (the assistant got stuck - reason, step, host only, short
+detail; opens one Needs-you ask, and `check_submit` asks until) `unblocked` (`retried` | `user_did_it` |
+`skipped`; closes the ask), and the
 proof trail (S7, note-family): `proof_text` (the thank-you page text, <=4,000 chars plain, plus the page
 host; the server fills who/when) and `proof_screenshot` (written by Job360 when a screenshot is stored;
 the image lives in its own table and is erasable). Every event: `type`, `detail`, `occurred_at`,

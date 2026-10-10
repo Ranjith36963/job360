@@ -226,3 +226,31 @@ async def test_the_log_carries_counts_never_values(authenticated_async_context):
     mine = [r for r in records if r.get("event") == "morning_check_read"]
     assert len(mine) == 1 and (mine[0]["waiting"], mine[0]["sent"], mine[0]["result"]) == (1, 0, "ok")
     assert not any("Zebracorpsecret" in str(v) for r in mine for v in r.values())
+
+
+_BLOCKED = {"reason": "captcha", "step": "upload CV", "page_host": "jobs.example.com"}
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_record_counts_in_the_blocked_bucket(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        assert (await _event(client, app_id, "blocked", _BLOCKED)).status_code == 201
+        body = await _check(client)
+        assert _counts(body)["blocked"] == 1 and _counts(body)["failed"] == 0
+        assert body["tally"]["blocked"]["items"][0]["application_id"] == app_id
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_application_is_never_ready_to_send(authenticated_async_context):
+    async def ids(client: AsyncClient) -> set[int]:
+        return {i["application_id"] for i in (await _check(client))["tally"]["waiting"]["items"]}
+
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, 1)
+        await _fill(client, app_id)
+        assert await ids(client) == {app_id}
+        assert (await _event(client, app_id, "blocked", _BLOCKED)).status_code == 201
+        assert await ids(client) == set(), "an open block takes it out"
+        assert (await _event(client, app_id, "unblocked", {"resolution": "user_did_it"})).status_code == 201
+        assert await ids(client) == {app_id}, "unblocked brings it back"

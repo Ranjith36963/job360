@@ -64,7 +64,8 @@ user_declined (the user said don't send), daily_cap_reached, duplicate_job
 (same job already applied to: `stop` in auto mode, else `ask`), unknown_site,
 ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
-(the user said yes to this CV: `submit`), auto_when_sure. Indeed and LinkedIn
+(the user said yes to this CV: `submit`), auto_when_sure, blocked (you
+recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it). Indeed and LinkedIn
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
 `practice_run`). It is read-only: it records nothing - after a real submit,
@@ -281,6 +282,23 @@ wall (never a password anywhere). A CV that changed since you read it is 409:
 get the kit again. `duplicate_cleared` and where="web" need the user's own click
 on the website (403). `kit_read` is written by Job360 itself.
 
+STUCK (the blocked record): when you get stuck on a form, record_event
+`blocked` {reason, step, page_host, detail}, then stop that application and
+move on to the next. `reason` is one of captcha, bot_check, login_needed,
+site_error, upload_failed, unknown_question, safety_block,
+quick_apply_warning, other; `step` is plain text up to 120 characters;
+`page_host` is the host only (jobs.example.com), never a full URL; `detail`
+is up to 300 plain characters. Any other key is 422; never put a password, a
+token or page text in it. Job360 fills in who you are and opens one Needs-you
+ask for the user. Never retry a CAPTCHA or bot check and never bypass one; a
+login page means the user signs in themselves. Until `unblocked`
+{resolution: retried | user_did_it | skipped} is recorded (by you, or the
+user's "Mark resolved" on the website), check_submit answers `ask` with
+reason `blocked`. `unblocked` closes the ask; with nothing blocked it is 409.
+When the user answers a blocked ask, do what they said, then record
+`unblocked`. If Needs-you is full no ask opens (`check_submit` still asks):
+tell the user in chat.
+
 ## Proof
 
 Proof level of an application, best first: `email` (a confirmation email
@@ -373,7 +391,8 @@ means "not answered": ask the user only that, once, then save it with
 in `right_to_work.countries` and `logistics.countries` (also for a remote job).
 The salary is a PREFERENCE: `fields["preferences.salary_by_country"]`, the
 hiring country's record, with its period (year or month); if there is none, ask.
-Never convert currency. A minimum salary is never stored or sent. Equality
+A form asking ONE number gets `min`; a form asking a range gets `min` and `max`.
+Never convert currency. A salary floor is never stored or sent. Equality
 answers are reused as stored ("prefer not to say" is a valid answer); if one is
 skipped, ask on that form. Reuse a saved free-text answer word for word only
 when its `approved` is true.
@@ -389,7 +408,7 @@ legal_last_name, preferred_name}.
 `user_info.right_to_work` = {countries: [ONE record per country {country (ISO2,
 required), work_authorization (citizen | permanent_resident | visa |
 needs_sponsorship), needs_sponsorship (bool), visa_type, visa_expires (YYYY-MM
-or YYYY-MM-DD)}], citizenship: [ISO2], sanctions_country_citizen (bool)}.
+or YYYY-MM-DD)}], citizenship: [ISO2], sanctions_country_citizen (bool, or "Prefer not to say")}.
 `user_info.logistics` = {notice_period, earliest_start, countries: [ONE record
 per country {country (ISO2, required), willing_to_relocate (bool),
 relocate_where, travel_ok_pct (whole number 0-100), driving_licence (bool),
@@ -401,11 +420,11 @@ sexual_orientation, transgender}; "prefer not to say" is valid.
 `user_info.answers` = [{question, answer, approved (bool, default false),
 recorded_at}] — set `approved: true` only after the user agrees to that exact
 wording, and send `recorded_at` back as stored.
-`preferences.salary_by_country` = [{country (ISO2), amount (number > 0),
-currency (3 letters, e.g. EUR), period: year | month}], ONE record per country,
-all four keys required. No "remote" record (a remote job uses the hiring
-country's record) and no salary minimum key; nothing is ever converted between
-currencies.
+`preferences.salary_by_country` = [{country (ISO2), min, max (numbers > 0, min
+not above max; equal = one figure), currency (3 letters, e.g. EUR), period:
+year | month}], ONE record per country (`min` alone = one figure; never `max`
+alone). No "remote" record (a remote job uses the hiring country's
+record); nothing is ever converted between currencies.
 
 A re-extraction (a fresh CV/LinkedIn/GitHub) never undoes your edit — only
 clearing it does.

@@ -342,9 +342,9 @@ def build_server(version: str = "") -> MCPServer:
         `fields["user_info.logistics"]`, `fields["user_info.languages"]`, `fields["user_info.equality"]` and
         `fields["user_info.answers"]`; the salary is `fields["preferences.salary_by_country"]`. Read them before any
         form. A missing key means "not answered": ask only that, once, then save it; never guess. Use the
-        HIRING country's record (also for a remote job). Never convert currency. A minimum salary is never stored or
-        sent. "prefer not to say" is an answer. Reuse a saved free-text answer word for word only when `approved` is
-        true.
+        HIRING country's record (also for a remote job). Never convert currency. A salary floor is never stored or
+        sent; salary has `min` and `max`. "prefer not to say" is an answer. Reuse a saved free-text answer word for
+        word only when `approved` is true.
 
         Other keys: job_titles, experience_level, experience_level_inferred, agent_edits, lessons, assistant_hint.
         Full rules and shapes: get_recipe("rules")."""
@@ -847,7 +847,8 @@ def build_server(version: str = "") -> MCPServer:
 
         Kit events (closed payloads, else 422): cv_seen and submit_approved ONLY after the user said so in chat;
         submit_declined, autofill_set {mode:"deny"}, form_filled, hold_released, site_account {host}, account_needed
-        {host}; submit_mode_set {"submit_mode":"confirm"} only. proof_text {text, page_host}: the pasted confirmation
+        {host}; submit_mode_set {"submit_mode":"confirm"} only. Stuck: blocked {reason, step, page_host, detail},
+        then stop that application; unblocked {resolution}. proof_text {text, page_host}: the pasted confirmation
         text. Payloads, 403/409: get_recipe("rules"), Events."""
         if contact_id is not None:
             # Bug fix (coordinator review, 2026-09-26) — same refusal as the
@@ -1182,7 +1183,8 @@ def build_server(version: str = "") -> MCPServer:
         in auto mode, else `ask`), unknown_site, ask_always_site,
         job_override_confirm, submit_mode_confirm, cv_not_seen (auto mode but the
         user has not seen the latest CV), practice_run, user_approved (the user
-        said yes to this CV: `submit`), auto_when_sure. Indeed and LinkedIn answer
+        said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
+        `blocked`, no `unblocked` yet: `ask`). Indeed and LinkedIn answer
         `ask` unless the user said yes to this CV. The first application after
         the user turns auto-submit on is a practice run (`ask`, reason
         `practice_run`). Read-only:
