@@ -40,8 +40,11 @@ note), then continue. Full rules (Gmail modes, outreach, events):
    ask: one `ask_user` for each.
 7. **Hunt, kits, apply per modes:** `get_recipe("hunt")`, then
    `get_recipe("apply")` per `settings.apply_mode.effective`; submit only when
-   `check_submit` says submit. Indeed or LinkedIn only, pause, duplicate,
-   blocked or a missing tool: `ask_user` (Needs you), continue.
+   `check_submit` says submit. Indeed or LinkedIn only, pause, duplicate or a
+   missing tool: `ask_user` (Needs you), continue. Stuck on a form (CAPTCHA,
+   bot check, login page, site error): `record_event` `blocked`, stop that
+   application, move on; never retry or bypass a CAPTCHA or bot check; a login
+   page means the user signs in. An application still blocked: leave it.
 8. **Still open?** For "considering" applications check the posting exists; if
    gone, `withdrawn` with detail "posting closed". **Deadlines:** outreach with
    no reply after 7 days: suggest one follow-up. No reply after 45 days:

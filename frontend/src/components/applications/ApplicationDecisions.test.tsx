@@ -10,7 +10,9 @@ const approveSend = vi.fn();
 const declineSend = vi.fn();
 const setAutofill = vi.fn();
 const clearDuplicate = vi.fn();
+const resolveBlocked = vi.fn();
 vi.mock("@/lib/api", () => ({
+  resolveBlocked: (...a: unknown[]) => resolveBlocked(...a),
   markCvSeen: (...a: unknown[]) => markCvSeen(...a),
   approveSend: (...a: unknown[]) => approveSend(...a),
   declineSend: (...a: unknown[]) => declineSend(...a),
@@ -208,5 +210,71 @@ describe("Not a duplicate, go ahead", () => {
       />
     );
     expect(screen.getByTestId("duplicate-warning").textContent).toMatch(/2 other applications at this company in the last 30 days/);
+  });
+});
+
+describe("Your assistant got stuck (blocked record)", () => {
+  beforeEach(() => resolveBlocked.mockReset());
+
+  const BLOCKED = {
+    reason: "captcha",
+    reason_label: "a CAPTCHA",
+    step: "the final step",
+    page_host: "jobs.example.com",
+    detail: "",
+    by: "token:claude-code",
+    at: "2026-10-08T10:00:00Z",
+    ask_id: null,
+  };
+
+  it("shows nothing when nothing is blocked", () => {
+    render(<ApplicationDecisions applicationId={7} controls={controls({ blocked: null })} onChanged={() => undefined} />);
+    expect(screen.queryByTestId("blocked-state")).toBeNull();
+    expect(screen.queryByTestId("blocked-resolve-button")).toBeNull();
+  });
+
+  it("names the reason, step, site, who and when", () => {
+    render(<ApplicationDecisions applicationId={7} controls={controls({ blocked: BLOCKED })} onChanged={() => undefined} />);
+    expect(screen.getByTestId("blocked-state").textContent).toMatch(
+      /Your assistant got stuck: a CAPTCHA at the final step on jobs\.example\.com\./
+    );
+    expect(screen.getByTestId("blocked-who").textContent).toMatch(/in chat \(claude-code\) · .*2026/);
+  });
+
+  it("a block recorded on the website reads as you", () => {
+    render(
+      <ApplicationDecisions
+        applicationId={7}
+        controls={controls({ blocked: { ...BLOCKED, by: "web", step: "", page_host: "" } })}
+        onChanged={() => undefined}
+      />
+    );
+    expect(screen.getByTestId("blocked-state").textContent).toMatch(/got stuck: a CAPTCHA\./);
+    expect(screen.getByTestId("blocked-who").textContent).toMatch(/on the website · .*2026/);
+  });
+
+  it("Mark resolved calls the server and hands back the new controls", async () => {
+    const after = controls({ blocked: null });
+    resolveBlocked.mockResolvedValue(after);
+    const onChanged = vi.fn();
+    render(<ApplicationDecisions applicationId={7} controls={controls({ blocked: BLOCKED })} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId("blocked-resolve-button"));
+    await waitFor(() => expect(resolveBlocked).toHaveBeenCalledWith(7));
+    expect(onChanged).toHaveBeenCalledWith(after);
+  });
+
+  it("shows the detail line only when there is detail", () => {
+    const { rerender } = render(
+      <ApplicationDecisions applicationId={7} controls={controls({ blocked: BLOCKED })} onChanged={() => undefined} />
+    );
+    expect(screen.queryByTestId("blocked-detail")).toBeNull();
+    rerender(
+      <ApplicationDecisions
+        applicationId={7}
+        controls={controls({ blocked: { ...BLOCKED, detail: "Needs a puzzle solved" } })}
+        onChanged={() => undefined}
+      />
+    );
+    expect(screen.getByTestId("blocked-detail").textContent).toBe("Needs a puzzle solved");
   });
 });
