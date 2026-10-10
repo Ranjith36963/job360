@@ -22,6 +22,7 @@ export type ProfileResponse = Schemas["ProfileResponse"];
 export type ProfileSummary = Schemas["ProfileSummary"];
 export type ProfileVersionsListResponse = Schemas["ProfileVersionsListResponse"];
 export type Receipt = Schemas["Receipt"];
+export type Proof = Schemas["ProofOut"];
 export type ReceiptListResponse = Schemas["ReceiptListResponse"];
 export type ReceiptSummary = Schemas["ReceiptSummary"];
 export type ProfileVersionSummary = Schemas["ProfileVersionSummary"];

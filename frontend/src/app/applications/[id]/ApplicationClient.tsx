@@ -7,9 +7,11 @@ import { toast } from "sonner";
 import {
   getApplication,
   getApplicationControls,
+  getReadyToSend,
   recordApplicationReceipt,
 } from "@/lib/api";
-import type { ApplicationControls, ApplicationDetail, Ask, VisaShape } from "@/lib/api";
+import type { ApplicationControls, ApplicationDetail, Ask, ReadyCardData, VisaShape } from "@/lib/api";
+import { ReadyCard } from "@/components/needs-you/ReadyCard";
 import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
 import { Timeline } from "@/components/applications/Timeline";
 import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
@@ -88,6 +90,9 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
   // S3: the state behind the four decision buttons. A failed read leaves them
   // hidden (nothing is shown that was not read).
   const [controls, setControls] = useState<ApplicationControls | null>(null);
+  // S5d: this application's "ready to send" card, when the assistant filled the
+  // form and no yes / no has come after it. A failed read shows no card.
+  const [ready, setReady] = useState<{ card: ReadyCardData; paused: boolean } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -101,6 +106,13 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
       setControls(await getApplicationControls(applicationId));
     } catch {
       setControls(null);
+    }
+    try {
+      const r = await getReadyToSend({ applicationId });
+      const card = r.items.find((c) => c.application_id === applicationId);
+      setReady(card ? { card, paused: r.paused } : null);
+    } catch {
+      setReady(null);
     }
   }, [applicationId]);
 
@@ -360,10 +372,16 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
               </a>
             )}
             <FollowUpField applicationId={detail.id} followUpOn={detail.follow_up_on ?? null} onRecorded={load} />
+            {ready && (
+              <div className="w-full">
+                <ReadyCard card={ready.card} paused={ready.paused} onChanged={reloadAfterAsk} />
+              </div>
+            )}
             {controls && (
               <ApplicationDecisions
                 applicationId={detail.id}
                 controls={controls}
+                newFillWaiting={ready !== null}
                 onChanged={(next) => {
                   setControls(next);
                   void load();

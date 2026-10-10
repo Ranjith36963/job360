@@ -156,4 +156,31 @@ describe("/receipts/[id]", () => {
     expect(await screen.findByText("Receipt not found")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /All receipts/ })).toBeInTheDocument();
   });
+  it("shows the Proof line from stored facts; no application means 'No proof yet'", async () => {
+    getReceipt.mockResolvedValue({
+      ...BASE,
+      application_id: 5,
+      confirmation: "MIS-48213",
+      proof: {
+        has_text: true, has_page_text: false, has_confirmation: true, has_email: true,
+        email_seen_at: new Date(2026, 9, 2, 18, 52).toISOString(), screenshots: 0, level: "email",
+      },
+    });
+    const { unmount } = render(<ReceiptDetailPage />);
+    await screen.findByTestId("proof-line");
+    expect(screen.getAllByTestId("proof-chip").map((c) => c.textContent)).toEqual([
+      "Confirmation number saved · MIS-48213",
+      "Confirmation email seen · 02 Oct 18:52",
+    ]);
+    unmount();
+
+    getReceipt.mockResolvedValue({
+      ...BASE,
+      application_id: null,
+      confirmation: "",
+      proof: { has_text: false, has_email: true, screenshots: 0, level: "email" },
+    });
+    render(<ReceiptDetailPage />);
+    expect(await screen.findByTestId("proof-none")).toHaveTextContent("No proof yet");
+  });
 });

@@ -526,7 +526,12 @@ class ProofOut(BaseModel):
     email > text > screenshot_only, else none - the one shape every surface reuses."""
 
     has_text: bool = False
+    # The two halves of ``has_text``: pasted thank-you page text, and a receipt confirmation (ID / reference).
+    has_page_text: bool = False
+    has_confirmation: bool = False
     has_email: bool = False
+    # Earliest email proof: the email's received time, else when it was recorded. None without one.
+    email_seen_at: str | None = None
     screenshots: int = 0
     level: Literal["none", "screenshot_only", "text", "email"] = "none"
 

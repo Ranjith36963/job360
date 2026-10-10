@@ -175,7 +175,8 @@ async def test_the_level_is_the_strongest_proof_and_a_correction_withdraws_text(
         await _ev(client, d, "proof_text", {"text": "also pasted"})  # email beats text
         got = {i: (await _proof(client, i))["proof"] for i in (a, b, c, d)}
         assert [got[i]["level"] for i in (a, b, c, d)] == ["none", "screenshot_only", "text", "email"]
-        assert got[c] == {"has_text": True, "has_email": False, "screenshots": 1, "level": "text"}
+        assert got[c] == {"has_text": True, "has_page_text": True, "has_confirmation": False, "has_email": False,
+                          "email_seen_at": None, "screenshots": 1, "level": "text"}
         listed = {r["id"]: r["proof"]["level"] for r in (await client.get("/api/applications")).json()["applications"]}
         assert listed == {a: "none", b: "screenshot_only", c: "text", d: "email"}
         # a correction supersedes a proof_text: the old text no longer counts
@@ -251,6 +252,27 @@ async def test_a_receipt_confirmation_is_text_proof_and_clears_the_missing_list(
         assert (await _proof(client, blank))["proof"]["level"] == "none"
         missing = (await client.get("/api/whats-new")).json()["proof_missing"]
         assert [m["application_id"] for m in missing] == [blank]
+
+
+@pytest.mark.asyncio
+async def test_page_text_and_confirmation_are_told_apart_and_email_carries_its_time(authenticated_async_context):
+    """S5e: the receipt sheet marks "Thank-you page saved" only from pasted text, never from a confirmation."""
+    async with authenticated_async_context() as client:
+        ref, mail = [await _bring(client, {**AD, "company": c}) for c in ("Ref", "Mail")]
+        made = await client.post(f"/api/applications/{ref}/receipt", json={"confirmation": "REF-9"})
+        assert made.status_code == 201, made.text
+        p = (await _proof(client, ref))["proof"]
+        assert (p["has_text"], p["has_confirmation"], p["has_page_text"]) == (True, True, False)
+        await _ev(client, ref, "proof_text", {"text": "Thanks for applying"})
+        p = (await _proof(client, ref))["proof"]
+        assert (p["has_text"], p["has_confirmation"], p["has_page_text"], p["email_seen_at"]) == (True, True, True, None)
+        later, earlier = _ago(1), _ago(3)
+        await _ev(client, mail, "applied", {}, source={**EMAIL, "received_at": later})
+        await _ev(client, mail, "note", {}, detail="Submission confirmed",
+                  source={**EMAIL, "message_id": "<m2@northwind.example>", "received_at": earlier})
+        p = (await _proof(client, mail))["proof"]
+        assert p["has_email"] is True and p["has_confirmation"] is False and p["has_page_text"] is False
+        assert datetime.fromisoformat(p["email_seen_at"]) == datetime.fromisoformat(earlier)
 
 
 @pytest.mark.asyncio
