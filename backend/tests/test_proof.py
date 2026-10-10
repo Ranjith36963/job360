@@ -1,6 +1,6 @@
 """S7 - PROOF OF APPLICATION (owner decision 2026-10-10).
 
-Screenshots (single-use link), pasted confirmation text, the proof
+Screenshots (web upload + single-use link), pasted confirmation text, the proof
 level, the "no proof after 7 days" ask. Real doors (HTTP + MCP), VALUES asserted
 (rule #21). Helpers are copied, never imported from another test module.
 """
@@ -81,28 +81,9 @@ def _sql(statement: str, params: tuple = ()) -> list[Any]:
 
 
 async def _proof(client: AsyncClient, app_id: int) -> dict[str, Any]:
-    """The proof level off the application detail, plus the screenshot rows straight from the table."""
-    resp = await client.get(f"/api/applications/{app_id}")
+    resp = await client.get(f"/api/applications/{app_id}/proof")
     assert resp.status_code == 200, resp.text
-    rows = _sql(
-        "SELECT id, created_by, sha256, deleted_at FROM application_proof_screenshots WHERE application_id = ? ORDER BY id",
-        (app_id,),
-    )
-    shots = [{"id": r[0], "created_by": r[1], "sha256": r[2], "deleted_at": r[3]} for r in rows]
-    return {"application_id": app_id, "proof": resp.json()["proof"], "screenshots": shots}
-
-
-async def _seed(user_id: str, app_id: int, data: bytes = PNG) -> dict[str, Any]:
-    """Store a screenshot through the service (the upload door is the link route, covered separately)."""
-    from src.repositories.database import JobDatabase
-    from src.services.applications import proof
-
-    db = JobDatabase(str(settings.DB_PATH))
-    await db.connect()
-    try:
-        return await proof.store_screenshot(db, user_id, app_id, data, "web", "link", datetime.now(timezone.utc))
-    finally:
-        await db.close()
+    return resp.json()
 
 
 class _Capture(logging.Handler):
@@ -150,8 +131,11 @@ async def test_link_upload_stores_the_image_and_leaves_a_trail(authenticated_asy
         state = await _proof(client, app_id)
         assert state["proof"] == {"has_text": False, "has_email": False, "screenshots": 1, "level": "screenshot_only"}
         shot = state["screenshots"][0]
-        assert shot["id"] == up.json()["screenshot_id"] and shot["created_by"] == "web"
+        assert shot["id"] == up.json()["screenshot_id"] and shot["created_by"] == "web" and "bytes" not in shot
         assert len(shot["sha256"]) == 64
+        image = await client.get(f"/api/applications/{app_id}/proof/screenshots/{shot['id']}")
+        assert image.content == PNG and image.headers["content-type"] == "image/png"
+        assert image.headers["x-content-type-options"] == "nosniff"
         detail = (await client.get(f"/api/applications/{app_id}")).json()
         trail = [e for e in detail["events"] if e["event_type"] == "proof_screenshot"]
         assert [(e["payload"]["via"], e["payload"]["size"], e["payload"]["mime"]) for e in trail] == [
@@ -209,7 +193,11 @@ async def test_nobody_can_mint_for_or_store_into_another_users_application(
         assert up.json()["application_id"] == mine  # the token names ONE application
         assert (await _proof(client, other))["screenshots"] == []
         assert (await client.post("/api/applications/987654321/proof/link")).status_code == 404
+        assert (await client.get("/api/applications/987654321/proof")).status_code == 404
+        assert (await _post(client, "/api/applications/987654321/proof/screenshots", PNG)).status_code == 404
         sid = up.json()["screenshot_id"]
+        assert (await client.get(f"/api/applications/{other}/proof/screenshots/{sid}")).status_code == 404
+        assert (await client.delete(f"/api/applications/{other}/proof/screenshots/{sid}")).status_code == 404
         assert _sql("SELECT user_id FROM application_proof_screenshots WHERE id = ?", (sid,))[0][0] == fixture_user_id
 
 
@@ -222,34 +210,50 @@ async def test_the_mint_is_capped_per_hour(authenticated_async_context, monkeypa
         assert codes == [201, 201, 429]
 
 
-# ── the count limit, export ─────────────────────────────────────────────────
+# ── the count limit, delete, export ──────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_three_live_screenshots_at_most_through_the_link_route(authenticated_async_context, fixture_user_id):
+async def test_three_live_screenshots_at_most_and_delete_frees_a_slot(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
+        url = f"/api/applications/{app_id}/proof/screenshots"
+        ids = []
         for _ in range(settings.PROOF_SCREENSHOTS_MAX_LIVE):
-            await _seed(fixture_user_id, app_id)
-        path = await _link(client, app_id)  # the link route refuses, and the refusal keeps the link
+            ok = await _post(client, url, PNG)
+            assert ok.status_code == 201 and ok.json()["created_by"] == "web"
+            ids.append(ok.json()["id"])
+        refused = await _post(client, url, PNG)
+        assert refused.status_code == 409 and "PROOF_SCREENSHOTS_MAX_LIVE" in refused.json()["detail"]
+        path = await _link(client, app_id)  # the link route refuses too, and the refusal keeps the link
         async with _anon() as anon:
-            refused = await _post(anon, path, PNG)
-            assert refused.status_code == 409 and "PROOF_SCREENSHOTS_MAX_LIVE" in refused.json()["detail"]
-            _sql("UPDATE application_proof_screenshots SET bytes = NULL, deleted_at = ? WHERE application_id = ? "
-                 "AND id = (SELECT MIN(id) FROM application_proof_screenshots WHERE application_id = ?)",
-                 (_ago(0), app_id, app_id))  # a deleted row frees a slot
+            assert (await _post(anon, path, PNG)).status_code == 409
+            assert (await client.delete(f"{url}/{ids[0]}")).status_code == 200
             assert (await _post(anon, path, PNG)).status_code == 201
+        assert (await _post(client, url, PNG)).status_code == 409
 
 
 @pytest.mark.asyncio
-async def test_the_export_never_has_bytes(authenticated_async_context, fixture_user_id):
+async def test_delete_erases_the_bytes_keeps_the_row_and_the_export_never_has_bytes(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
-        ids = {(await _seed(fixture_user_id, app_id, d))["id"] for d in (PNG, JPEG)}
+        url = f"/api/applications/{app_id}/proof/screenshots"
+        keep, gone = (await _post(client, url, PNG)).json()["id"], (await _post(client, url, JPEG)).json()["id"]
+        await _link(client, app_id)
+        deleted = await client.delete(f"{url}/{gone}")
+        today = datetime.now(timezone.utc).date().isoformat()
+        assert deleted.json()["delete_note"] == f"Deleted by you, {today}" and deleted.json()["deleted_at"]
+        assert _sql("SELECT bytes FROM application_proof_screenshots WHERE id = ?", (gone,))[0][0] is None
+        assert (await client.delete(f"{url}/{gone}")).status_code == 404
+        assert (await client.get(f"{url}/{gone}")).status_code == 410
+        state = await _proof(client, app_id)
+        assert state["proof"]["screenshots"] == 1
+        assert [(s["id"], s["deleted_at"] is None) for s in state["screenshots"]] == [(keep, True), (gone, False)]
         exported = (await client.get("/api/auth/users/me/export")).json()
         rows = exported["application_proof_screenshots"]
-        assert {r["id"] for r in rows} == ids and all("bytes" not in r for r in rows)
+        assert {r["id"] for r in rows} == {keep, gone} and all("bytes" not in r for r in rows)
         assert "proof_upload_links" not in exported and "_incomplete_tables" not in exported
+        assert [r["delete_note"] for r in rows if r["id"] == gone] == [f"Deleted by you, {today}"]
 
 
 def test_both_tables_are_registered_for_erasure_and_only_one_for_export():
@@ -261,6 +265,20 @@ def test_both_tables_are_registered_for_erasure_and_only_one_for_export():
     assert "application_proof_screenshots" in JobDatabase._EXPORT_TABLES
     assert "proof_upload_links" not in JobDatabase._EXPORT_TABLES
     assert "bytes" not in JobDatabase._EXPORT_COLUMNS["application_proof_screenshots"].split(", ")
+
+
+@pytest.mark.asyncio
+async def test_image_routes_are_session_only_but_the_link_and_the_read_take_a_token(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        sid = (await _post(client, f"/api/applications/{app_id}/proof/screenshots", PNG)).json()["id"]
+        url = f"/api/applications/{app_id}/proof/screenshots"
+        async with await _bearer(client) as agent:
+            assert (await _post(agent, url, PNG)).status_code == 403
+            assert (await agent.get(f"{url}/{sid}")).status_code == 403
+            assert (await agent.delete(f"{url}/{sid}")).status_code == 403
+            assert (await agent.post(f"/api/applications/{app_id}/proof/link")).status_code == 201
+            assert (await agent.get(f"/api/applications/{app_id}/proof")).json()["proof"]["screenshots"] == 1
 
 
 # ── pasted text ──────────────────────────────────────────────────────────────
@@ -299,14 +317,12 @@ async def test_proof_screenshot_is_written_by_job360_only(authenticated_async_co
 
 
 @pytest.mark.asyncio
-async def test_the_level_is_the_strongest_proof_and_a_correction_withdraws_text(
-    authenticated_async_context, fixture_user_id
-):
+async def test_the_level_is_the_strongest_proof_and_a_correction_withdraws_text(authenticated_async_context):
     async with authenticated_async_context() as client:
         a, b, c, d = [await _bring(client, {**AD, "company": f"Co{i}"}) for i in range(4)]
-        await _seed(fixture_user_id, b)
+        await _post(client, f"/api/applications/{b}/proof/screenshots", PNG)
         await _ev(client, c, "proof_text", {"text": "Application received"})
-        await _seed(fixture_user_id, c)  # text beats screenshot
+        await _post(client, f"/api/applications/{c}/proof/screenshots", PNG)  # text beats screenshot
         await _ev(client, d, "applied", {}, source=EMAIL)
         await _ev(client, d, "proof_text", {"text": "also pasted"})  # email beats text
         got = {i: (await _proof(client, i))["proof"] for i in (a, b, c, d)}
@@ -431,9 +447,11 @@ async def test_the_audit_log_never_carries_tokens_text_or_bytes(authenticated_as
             await _post(anon, path, PNG)  # 410
             await _post(anon, "/api/proof/" + "z" * 43, PNG)  # 404
         await _ev(client, app_id, "proof_text", {"text": secret_text, "page_host": "northwind.example"})
+        sid = (await _proof(client, app_id))["screenshots"][0]["id"]
+        await client.delete(f"/api/applications/{app_id}/proof/screenshots/{sid}")
     names = {getattr(r, "event", None) for r in logs.records}
     assert {"proof_link_created", "proof_upload", "proof_link_used", "proof_text_recorded",
-            "proof_upload_refused"} <= names
+            "proof_screenshot_deleted", "proof_upload_refused"} <= names
     from hashlib import sha256
 
     blob = " ".join(f"{r.getMessage()} {sorted(r.__dict__.items(), key=str)}" for r in logs.records)
@@ -467,9 +485,10 @@ async def test_a_failed_body_read_never_borrows_a_db_connection(authenticated_as
         entered = _spy_db(monkeypatch)
         big = {"content-type": "multipart/form-data; boundary=x", "content-length": str(MAX + 10**6)}
         async with _anon() as anon:
-            too_big = await anon.post("/api/proof/bad-shape", content=b"x", headers=big)
-            assert too_big.status_code == 413
-            assert (await anon.post("/api/proof/bad-shape", content=b"not multipart")).status_code == 422
+            for c, path in ((anon, "/api/proof/bad-shape"), (client, "/api/applications/1/proof/screenshots")):
+                too_big = await c.post(path, content=b"x", headers=big)
+                assert too_big.status_code == 413
+                assert (await c.post(path, content=b"not multipart")).status_code == 422
         assert entered == [], "the body must be read BEFORE get_request_db is resolved"
         # negative control: a readable body does reach get_request_db (public route: bad shape -> 404)
         async with _anon() as anon:
@@ -488,10 +507,11 @@ async def test_a_slow_upload_times_out_with_408_before_any_db_borrow(authenticat
     monkeypatch.setattr(settings, "PROOF_UPLOAD_READ_SECONDS", 0.05)
     async with authenticated_async_context() as client:
         entered = _spy_db(monkeypatch)
+        resp = await _post(client, "/api/applications/1/proof/screenshots", PNG)
+        assert resp.status_code == 408 and resp.json()["detail"] == "upload took too long"
         async with _anon() as anon:
             slow = await _post(anon, "/api/proof/bad-shape", PNG)
-        assert slow.status_code == 408 and slow.json()["detail"] == "upload took too long"
-        assert slow.headers["cache-control"] == "no-store"
+        assert slow.status_code == 408 and slow.headers["cache-control"] == "no-store"
         assert entered == []
 
 
@@ -503,7 +523,7 @@ async def test_parallel_screenshots_cannot_exceed_the_live_cap(authenticated_asy
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         for _ in range(settings.PROOF_SCREENSHOTS_MAX_LIVE - 1):
-            await _seed(fixture_user_id, app_id)
+            assert (await _post(client, f"/api/applications/{app_id}/proof/screenshots", PNG)).status_code == 201
         dbs = [JobDatabase(str(settings.DB_PATH)) for _ in range(2)]  # one connection each
         try:
             for db in dbs:

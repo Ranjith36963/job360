@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import type { ApplicationControls, ApplicationDetail, Ask, VisaShape } from "@/lib/api";
 import { ApplicationDecisions } from "@/components/applications/ApplicationDecisions";
+import { ProofDropZone } from "@/components/applications/ProofDropZone";
 import { Timeline } from "@/components/applications/Timeline";
 import { ArtifactVersions } from "@/components/applications/ArtifactVersions";
 import { AlignmentPanel } from "@/components/applications/AlignmentPanel";
@@ -390,6 +391,10 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
           <section data-testid="section-visa" className={`order-3 ${SECTION} lg:order-none`}>
             <h2 className={`mb-3 ${LABEL}`}>Visa / sponsorship</h2>
             <VisaSelect applicationId={detail.id} visa={visa} onSaved={load} />
+          </section>
+
+          <section data-testid="section-proof" className={`order-3 ${SECTION} lg:order-none`}>
+            <ProofDropZone applicationId={detail.id} />
           </section>
 
           <section data-testid="section-people" className={`order-6 ${SECTION} lg:order-none`}>

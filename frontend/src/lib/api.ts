@@ -925,7 +925,48 @@ export async function clearDuplicate(applicationId: number): Promise<Application
   return request(`/api/applications/${applicationId}/duplicate/clear`, { method: "POST" });
 }
 
-export type WhatsNewResponse = _Schemas["WhatsNewResponse"];
+// ---- Proof screenshots (S7b) ----
+export interface ApplicationProof {
+  has_text: boolean;
+  has_email: boolean;
+  screenshots: number;
+  level: "email" | "text" | "screenshot_only" | "none";
+}
+export interface ProofScreenshot {
+  id: number;
+  mime: string;
+  size: number;
+  sha256: string;
+  created_by: string;
+  created_at: string;
+  deleted_at: string | null;
+  delete_note: string;
+}
+export interface ProofResponse {
+  application_id: number;
+  proof: ApplicationProof;
+  screenshots: ProofScreenshot[];
+}
+
+export async function getProof(applicationId: number): Promise<ProofResponse> {
+  return request(`/api/applications/${applicationId}/proof`);
+}
+
+export async function uploadProofScreenshot(applicationId: number, file: File): Promise<{ screenshot_id: number }> {
+  const form = new FormData();
+  form.append("file", file);
+  return request(`/api/applications/${applicationId}/proof/screenshots`, { method: "POST", body: form });
+}
+
+export function proofScreenshotUrl(applicationId: number, screenshotId: number): string {
+  return `${API}/api/applications/${applicationId}/proof/screenshots/${screenshotId}`;
+}
+
+export async function deleteProofScreenshot(applicationId: number, screenshotId: number): Promise<ProofScreenshot> {
+  return request(`/api/applications/${applicationId}/proof/screenshots/${screenshotId}`, { method: "DELETE" });
+}
+
+export type WhatsNewResponse =_Schemas["WhatsNewResponse"];
 export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
 export type StatsResponse = _Schemas["StatsResponse"];
 

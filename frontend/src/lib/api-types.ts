@@ -464,6 +464,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/proof": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Proof
+         * @description How well this application is backed up, plus its screenshots (deleted ones as a note).
+         */
+        get: operations["get_proof_api_applications__application_id__proof_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/proof/link": {
         parameters: {
             query?: never;
@@ -479,6 +499,50 @@ export interface paths {
          */
         post: operations["create_proof_link_api_applications__application_id__proof_link_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/proof/screenshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Proof Screenshot
+         * @description The signed-in user adds a screenshot from the website.
+         */
+        post: operations["upload_proof_screenshot_api_applications__application_id__proof_screenshots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/proof/screenshots/{screenshot_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Proof Screenshot
+         * @description The image itself (404 not yours, 410 deleted).
+         */
+        get: operations["get_proof_screenshot_api_applications__application_id__proof_screenshots__screenshot_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Proof Screenshot
+         * @description Erase the image; the row stays with "Deleted by you, <date>".
+         */
+        delete: operations["delete_proof_screenshot_api_applications__application_id__proof_screenshots__screenshot_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4373,6 +4437,36 @@ export interface components {
              */
             screenshots: number;
         };
+        /** ProofScreenshotOut */
+        ProofScreenshotOut: {
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /**
+             * Delete Note
+             * @default
+             */
+            delete_note: string;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Id */
+            id: number;
+            /** Mime */
+            mime: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size */
+            size: number;
+        };
+        /** ProofStateOut */
+        ProofStateOut: {
+            /** Application Id */
+            application_id: number;
+            proof: components["schemas"]["ProofOut"];
+            /** Screenshots */
+            screenshots: components["schemas"]["ProofScreenshotOut"][];
+        };
         /** ProofUploadOut */
         ProofUploadOut: {
             /** Application Id */
@@ -6136,6 +6230,41 @@ export interface operations {
             };
         };
     };
+    get_proof_api_applications__application_id__proof_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProofStateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_proof_link_api_applications__application_id__proof_link_post: {
         parameters: {
             query?: never;
@@ -6158,6 +6287,120 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProofLinkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_proof_screenshot_api_applications__application_id__proof_screenshots_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProofScreenshotOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_proof_screenshot_api_applications__application_id__proof_screenshots__screenshot_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+                screenshot_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_proof_screenshot_api_applications__application_id__proof_screenshots__screenshot_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+                screenshot_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProofScreenshotOut"];
                 };
             };
             /** @description Validation Error */
