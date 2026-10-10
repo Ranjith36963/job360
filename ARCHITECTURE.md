@@ -94,9 +94,8 @@ re-extraction or a version restore cannot wipe it. The assistant's edits ride
 preference, `preferences.salary_by_country`.
 
 A fourth column, `user_profiles.assistant_settings` (owner decision 2026-10-08,
-migration 0051), holds the ASSISTANT SETTINGS (`models.AssistantSettings`: apply
-mode, score line, submit mode, daily cap, pause switch). Same pattern as
-`user_info`: ONE writer, `storage.save_assistant_settings` (only "Clear all"
+migration 0051), holds the ASSISTANT SETTINGS (`models.AssistantSettings`). Same
+pattern as `user_info`: ONE writer, `storage.save_assistant_settings` (only "Clear all"
 resets it), not in a snapshot, values ride `profile_edits` on
 `assistant_settings.*` paths. An assistant's RISKIER change (more freedom;
 `services/profile/assistant_settings.classify_change`) is never written: it is a
@@ -196,9 +195,9 @@ The full table — every method, path and router file, generated from the router
 
 There is no single list, and no grep finds them all — `core.settings._env_list`
 and `validate_required_env` read under variable names. Most knobs are
-`os.getenv` calls in `core/settings.py`; the rest sit where they are used —
-`FRONTEND_ORIGIN` in `api.main`, `REQUIRE_EMAIL_VERIFICATION` in
-`api.auth_deps.require_verified_user`, `SMTP_*` in `services.auth.email_sender`.
+`os.getenv` calls in `core/settings.py`; the rest sit where they are used, and a
+name can be read in more than one place, so search for the name rather than
+trusting a location written here.
 
 - `.env` lives in the repo root (see `.env.example`).
 - Required in production: `core.settings._REQUIRED_PROD_VARS`, enforced at boot

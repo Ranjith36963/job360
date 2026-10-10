@@ -27,7 +27,7 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 ## What is live today
 
 ### For your assistant (MCP server at `/api/mcp`)
-- **Recipes — `run 360` and friends.** Step-by-step playbooks the assistant fetches with `get_recipe`: setup, hunt, research, apply, prep, reach, daily, review (`backend/src/recipes/`).
+- **Recipes — `run 360` and friends.** Step-by-step playbooks the assistant fetches with `get_recipe`; which ones exist, and the order a new user runs them in, is `api/routes/recipes.RECIPE_NAMES` (text in `backend/src/recipes/`).
 - **Profile** — `get_profile` returns the raw CV / LinkedIn / GitHub text plus the structured fields; the assistant writes skills, dated work history, projects, targets and preferences back with `update_profile`. Every agent edit is kept with its author and can be taken back.
 - **Bring a job** — `bring_job` stores the ad (link or pasted text) and births one **Application**, with the job's country, remote flag and where it was found.
 - **Fit and visa** — the assistant's own verdict, stored with `save_fit` (Job360 never computes a score).
