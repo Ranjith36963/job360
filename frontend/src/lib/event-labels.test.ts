@@ -24,6 +24,8 @@ const APPLICATION_NOTE_EVENT_TYPES = [
   "outreach_sent",
   "note",
   "lesson",
+  "blocked",
+  "unblocked",
 ];
 
 describe("STATUS_LABEL", () => {
@@ -65,6 +67,8 @@ describe("eventLabel", () => {
     expect(eventLabel({ event_type: "outreach_sent" })).toBe("Outreach sent");
     expect(eventLabel({ event_type: "note" })).toBe("Note");
     expect(eventLabel({ event_type: "lesson" })).toBe("Lesson");
+    expect(eventLabel({ event_type: "blocked" })).toBe("Assistant got stuck");
+    expect(eventLabel({ event_type: "unblocked" })).toBe("Marked resolved");
   });
 
   it("falls back to the raw event_type string for an unknown type", () => {

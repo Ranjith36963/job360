@@ -276,7 +276,7 @@ def test_profile_tool_docstrings_teach_the_user_info_memory():
     assert "approved" in read and "approved" in write
     assert "replaces the whole value" in write
     assert "not answered" in read
-    assert "minimum salary" in read
+    assert "salary floor" in read
 
 
 @pytest.mark.asyncio

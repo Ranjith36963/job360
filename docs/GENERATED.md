@@ -17,8 +17,8 @@
 | --- | --- | --- |
 | Migration head | **0053** | `backend/migrations/` |
 | Migration files | **54** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 17 route modules (105 endpoints) | `backend/src/api/routes/` |
-| Test files | across 154 `test_*.py` files | `backend/tests/` |
+| FastAPI surface | 17 route modules (106 endpoints) | `backend/src/api/routes/` |
+| Test files | across 155 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 28 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -45,6 +45,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/api/applications/{application_id}/artifacts/{artifact_id}/diff` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/artifacts/{artifact_id}/download` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/autofill` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/blocked/resolve` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/contacts` | `applications.py` |
 | `GET` | `/api/applications/{application_id}/controls` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/cv-seen` | `applications.py` |
@@ -139,5 +140,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**105 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**106 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->

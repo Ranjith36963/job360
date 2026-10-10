@@ -4,7 +4,8 @@ user has not yet answered (S5b).
 An application is READY when the user owns it, it is still ``considering``, it
 has no receipt, its newest ``form_filled`` event is F, and no ``submit_approved``
 or ``submit_declined`` event came after F (a decline then a NEW fill is ready
-again). One SQL, no per-row query. Always scoped by ``user_id`` (rule #12).
+again), and it is not blocked (S6: its newest ``blocked`` / ``unblocked`` event
+is not ``blocked``). One SQL, no per-row query. Always scoped by ``user_id`` (rule #12).
 """
 from __future__ import annotations
 
@@ -27,6 +28,10 @@ _READY_SQL = (
     "AND NOT EXISTS (SELECT 1 FROM application_receipts r WHERE r.application_id = a.id AND r.user_id = a.user_id) "
     "AND NOT EXISTS (SELECT 1 FROM application_events d WHERE d.application_id = a.id AND d.user_id = a.user_id "
     "AND d.event_type IN ('submit_approved', 'submit_declined') AND d.id > f.id) "
+    # S6: an open block (newest blocked/unblocked is `blocked`) is never ready to send.
+    "AND NOT EXISTS (SELECT 1 FROM application_events b WHERE b.application_id = a.id AND b.user_id = a.user_id "
+    "AND b.event_type = 'blocked' AND b.id = (SELECT MAX(y.id) FROM application_events y "
+    "WHERE y.application_id = a.id AND y.user_id = a.user_id AND y.event_type IN ('blocked', 'unblocked'))) "
     "ORDER BY f.id DESC LIMIT ?"
 )
 

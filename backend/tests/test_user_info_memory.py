@@ -50,7 +50,7 @@ def _reject(path: str, value: Any) -> str:
 
 
 def _sal(**kw: Any) -> dict[str, Any]:
-    return {"country": "ae", "amount": 25000, "currency": "aed", "period": "month", **kw}
+    return {"country": "ae", "min": 25000, "max": 30000, "currency": "aed", "period": "month", **kw}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -230,7 +230,6 @@ def test_type_errors():
             LOGI, {"countries": [{"country": "de", "travel_ok_pct": bad}]}
         )
     assert "must be a string, got list" in _reject(EQ, {"gender": ["x"]})
-    assert "must be a boolean" in _reject(RTW, {"sanctions_country_citizen": "no"})
     assert "must be a boolean" in _reject(LOGI, {"countries": [{"country": "de", "driving_licence": 1}]})
 
 
@@ -405,32 +404,58 @@ def test_422_messages_never_echo_the_submitted_value():
 
 def test_salary_by_country_round_trip_keeps_order_and_never_converts():
     out = validate_edit(SALARY, [
-        {"country": "ae", "amount": 25000, "currency": "aed", "period": "month"},
-        {"country": "de", "amount": 85000.5, "currency": "eur", "period": "Year"},
+        {"country": "ae", "min": 25000, "max": 30000, "currency": "aed", "period": "month"},
+        {"country": "de", "min": 85000.5, "max": 85000.5, "currency": "eur", "period": "Year"},
     ])
     assert out == [
-        {"country": "AE", "amount": 25000, "currency": "AED", "period": "month"},
-        {"country": "DE", "amount": 85000.5, "currency": "EUR", "period": "year"},
+        {"country": "AE", "min": 25000, "max": 30000, "currency": "AED", "period": "month"},
+        {"country": "DE", "min": 85000.5, "max": 85000.5, "currency": "EUR", "period": "year"},
     ]
+
+
+def test_salary_by_country_old_amount_is_read_as_min_equals_max():
+    out = validate_edit(SALARY, [{"country": "gb", "amount": 80000, "currency": "gbp", "period": "year"}])
+    assert out == [{"country": "GB", "min": 80000, "max": 80000, "currency": "GBP", "period": "year"}]
+    assert "amount" not in out[0]
+
+
+def test_salary_by_country_amount_and_min_max_together_are_refused():
+    detail = _reject(SALARY, [_sal(amount=5)])
+    assert "never both" in detail
+    assert "never both" in _reject(SALARY, [{"country": "ae", "amount": 5, "max": 6, "currency": "AED", "period": "year"}])
+
+
+def test_salary_by_country_min_alone_is_one_figure_and_max_alone_is_refused():
+    out = validate_edit(SALARY, [{"country": "de", "min": 70000, "currency": "eur", "period": "year"}])
+    assert out == [{"country": "DE", "min": 70000, "max": 70000, "currency": "EUR", "period": "year"}]
+    detail = _reject(SALARY, [{"country": "de", "max": 70000, "currency": "EUR", "period": "year"}])
+    assert "max needs a min" in detail
+    # min alone still goes through the figure checks (no bad value slips in as max = min)
+    assert "needs country, min and max" in _reject(
+        SALARY, [{"country": "de", "min": 0, "currency": "EUR", "period": "year"}]
+    )
 
 
 @pytest.mark.parametrize(
     "record",
     [
         {"country": "de", "currency": "EUR", "period": "year"},
-        {"country": "de", "amount": 1, "period": "year"},
-        {"country": "de", "amount": 1, "currency": "EUR"},
-        {"amount": 1, "currency": "EUR", "period": "year"},
+        {"country": "de", "min": 1, "max": 2, "period": "year"},
+        {"country": "de", "min": 1, "max": 2, "currency": "EUR"},
+        {"min": 1, "max": 2, "currency": "EUR", "period": "year"},
         _sal(period="week"),
         _sal(period=1),
-        _sal(amount=True),
-        _sal(amount="85000"),
-        _sal(amount=float("inf")),
-        _sal(amount=float("nan")),
-        _sal(amount=0),
-        _sal(amount=-5),
-        _sal(amount=1e12 + 1e6),
-        _sal(amount=10**400),  # too big for a float: a 422, never an OverflowError 500
+        _sal(min=True),
+        _sal(max=True),
+        _sal(min="85000"),
+        _sal(min=float("inf")),
+        _sal(max=float("inf")),
+        _sal(min=float("nan")),
+        _sal(min=0),
+        _sal(min=-5),
+        _sal(max=1e12 + 1e6),
+        _sal(max=10**400),  # too big for a float: a 422, never an OverflowError 500
+        _sal(min=40000, max=30000),  # min above max
         _sal(currency="EURO"),
         _sal(currency="E1R"),
         _sal(currency=5),
@@ -438,9 +463,18 @@ def test_salary_by_country_round_trip_keeps_order_and_never_converts():
 )
 def test_salary_by_country_bad_records_are_refused(record):
     assert (
-        "needs country, amount (a number > 0), currency (ISO 4217, 3 letters like 'EUR') "
-        "and period (year or month)"
+        "needs country, min and max (numbers > 0, min not above max), currency "
+        "(ISO 4217, 3 letters like 'EUR') and period (year or month)"
     ) in _reject(SALARY, [record])
+
+
+def test_sanctions_accepts_a_bool_or_prefer_not_to_say():
+    assert validate_edit(RTW, {"sanctions_country_citizen": "prefer NOT to say"}) == {
+        "sanctions_country_citizen": "Prefer not to say"
+    }
+    assert validate_edit(RTW, {"sanctions_country_citizen": False}) == {"sanctions_country_citizen": False}
+    assert "must be a boolean or \"Prefer not to say\"" in _reject(RTW, {"sanctions_country_citizen": "no"})
+    assert "must be a boolean or" in _reject(RTW, {"sanctions_country_citizen": 1})
 
 
 def test_salary_by_country_duplicate_country_is_refused():
@@ -542,7 +576,7 @@ ALL_EDITS = [
     {"path": LANGS, "value": [{"language": "English", "level": "native"}]},
     {"path": EQ, "value": {"gender": "Prefer not to say"}},
     {"path": ANSWERS, "value": [{"question": "Why us?", "answer": "Because.", "approved": True}]},
-    {"path": SALARY, "value": [{"country": "ae", "amount": 25000, "currency": "aed", "period": "month"}]},
+    {"path": SALARY, "value": [{"country": "ae", "min": 25000, "max": 30000, "currency": "aed", "period": "month"}]},
 ]
 
 
@@ -569,7 +603,7 @@ async def test_patch_writes_all_seven_in_one_call_and_get_profile_shows_real_val
     assert info["answers"][0]["approved"] is True
     assert info["answers"][0]["recorded_at"]
     assert body["preferences"]["salary_by_country"] == [
-        {"country": "AE", "amount": 25000, "currency": "AED", "period": "month"}
+        {"country": "AE", "min": 25000, "max": 30000, "currency": "AED", "period": "month"}
     ]
     assert not [k for k in body["preferences"] if k.startswith("user_info")]
     # the overlay rows are provenance, the BASE column is untouched (three stores)
@@ -681,7 +715,7 @@ async def test_web_preferences_save_leaves_the_memory_alone_and_writes_no_memory
 async def test_web_preferences_save_stores_salary_as_a_normal_preference(
     authenticated_async_context, fixture_user_id
 ):
-    record = {"country": "de", "amount": 85000, "currency": "eur", "period": "year"}
+    record = {"country": "de", "min": 85000, "max": 95000, "currency": "eur", "period": "year"}
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         resp = await client.post(
@@ -693,7 +727,7 @@ async def test_web_preferences_save_stores_salary_as_a_normal_preference(
         resp = await client.post(
             "/api/profile/preferences", data={"preferences": json.dumps({"preferred_locations": ["Leeds"]})}
         )
-        assert resp.json()["preferences"]["salary_by_country"][0]["amount"] == 85000
+        assert resp.json()["preferences"]["salary_by_country"][0]["min"] == 85000
         bad = await client.post(
             "/api/profile/preferences",
             data={"preferences": json.dumps({"salary_by_country": [{"country": "de", "amount": 1}]})},
@@ -734,7 +768,7 @@ async def test_clear_memory_clears_only_the_memory_and_takes_no_version(
 
 @pytest.mark.asyncio
 async def test_clear_preferences_keeps_the_memory_and_clears_salary(authenticated_async_context, fixture_user_id):
-    record = {"country": "de", "amount": 85000, "currency": "eur", "period": "year"}
+    record = {"country": "de", "min": 85000, "max": 95000, "currency": "eur", "period": "year"}
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
@@ -805,7 +839,7 @@ async def test_version_restore_keeps_the_memory_and_a_web_daily_check_and_restor
     in the base, so a restore wiped a web-set daily_check (and would wipe the
     memory the same way). Memory is not in a snapshot; salary_by_country IS
     (it lives in preferences) and restores like salary_min."""
-    record = {"country": "de", "amount": 85000, "currency": "eur", "period": "year"}
+    record = {"country": "de", "min": 85000, "max": 95000, "currency": "eur", "period": "year"}
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         _seed_profile(fixture_user_id, source_action="cv_reupload")
@@ -821,7 +855,7 @@ async def test_version_restore_keeps_the_memory_and_a_web_daily_check_and_restor
         assert (await client.post(
             "/api/profile/preferences", data={"preferences": json.dumps({"salary_by_country": [record]})}
         )).status_code == 200
-        assert (await _get(client))["preferences"]["salary_by_country"][0]["amount"] == 85000
+        assert (await _get(client))["preferences"]["salary_by_country"][0]["min"] == 85000
         versions = (await client.get("/api/profile/versions")).json()["versions"]
         assert len(versions) >= 3
         resp = await client.post(f"/api/profile/versions/{versions[-1]['id']}/restore")

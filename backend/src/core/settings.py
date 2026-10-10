@@ -295,6 +295,10 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # write each are checked in the record_event ROUTE (applications._check_kit_event).
     "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
     "form_filled", "hold_released", "site_account", "account_needed",
+    # Owner decision 2026-10-10 (S6, blocked record) - the assistant got stuck
+    # (`blocked`, which opens one Needs-you ask) and the way out (`unblocked`).
+    # Note-family; closed payloads checked in services/applications/blocked.py.
+    "blocked", "unblocked",
     # Owner decision 2026-10-10 (S7, proof of application): the pasted
     # confirmation text, and the server-written trail of an uploaded screenshot.
     "proof_text", "proof_screenshot",

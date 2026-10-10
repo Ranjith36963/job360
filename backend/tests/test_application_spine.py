@@ -447,6 +447,8 @@ async def test_event_types_match_vision_doc(authenticated_async_context):
         # S3 application kit (2026-10-08) - the human-in-the-loop trail.
         "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
         "form_filled", "hold_released", "site_account", "account_needed",
+        # S6 blocked record (2026-10-10).
+        "blocked", "unblocked",
         # S7 proof of application (2026-10-10).
         "proof_text", "proof_screenshot",
     }

@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlsplit
 
 from src.core import settings
+from src.services.applications import blocked as blocked_service
 from src.services.applications import spine
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
@@ -232,7 +233,8 @@ async def controls_state(
 ) -> dict[str, Any]:
     """Every human-in-the-loop decision on this application, each with who /
     where / when: the latest CV's seen + approved marks, a decline, autofill,
-    and the duplicate warning (with whether the user cleared it)."""
+    the duplicate warning (with whether the user cleared it) and an open
+    ``blocked`` record (S6)."""
     application_id = int(app_row["id"])
     cv = await spine.latest_artifact(db, user_id, application_id, "cv")
     events = await _events(
@@ -276,6 +278,7 @@ async def controls_state(
             **(_who(autofill_ev) if autofill_ev else {}),
         },
         "duplicate": {**dup, "cleared": _who(cleared_ev) if cleared_ev else None},
+        "blocked": await blocked_service.open_block(db, user_id, application_id),
     }
 
 
@@ -300,6 +303,7 @@ async def gate_facts(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> 
         cv_seen=bool(cv and cv["seen"] is not None),
         approved=bool(approved),
         declined=state["declined"] is not None,
+        blocked=state["blocked"] is not None,
     )
 
 
@@ -531,10 +535,13 @@ def compute_answers(
     at = when("preferences.salary_by_country")
     for rec in _records(prefs.salary_by_country):
         cc = str(rec.get("country") or "").upper()
-        if cc and _present(rec.get("amount")):
+        # A record saved before ranges has one `amount`: it reads as min = max.
+        low = rec.get("min") if _present(rec.get("min")) else rec.get("amount")
+        high = rec.get("max") if _present(rec.get("max")) else low
+        if cc and _present(low):
             out["salary"].append(_item(
                 f"salary.{cc}",
-                {"amount": rec.get("amount"), "currency": rec.get("currency"), "period": rec.get("period")},
+                {"min": low, "max": high, "currency": rec.get("currency"), "period": rec.get("period")},
                 "memory", at,
             ))
 
