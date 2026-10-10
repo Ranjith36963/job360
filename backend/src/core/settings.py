@@ -295,6 +295,9 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # write each are checked in the record_event ROUTE (applications._check_kit_event).
     "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
     "form_filled", "hold_released", "site_account", "account_needed",
+    # Owner decision 2026-10-10 (S7, proof of application): the pasted
+    # confirmation text, and the server-written trail of an uploaded screenshot.
+    "proof_text", "proof_screenshot",
 )
 # Env-added types are non-status only — a status type also needs an R4
 # mapping entry, which an env var cannot supply.
@@ -645,6 +648,11 @@ ACCOUNT_REQUIRED_HOST_SUFFIXES = _env_list(
 )
 # Most fields a `form_filled` event may claim.
 KIT_FORM_FIELDS_MAX = int(os.getenv("KIT_FORM_FIELDS_MAX", "500"))
+
+# ── S7 proof of application (owner decision 2026-10-10). Every number a parameter. ──
+PROOF_TEXT_MAX_CHARS = int(os.getenv("PROOF_TEXT_MAX_CHARS", "4000"))
+# An applied job with no proof after this many days becomes a "Needs you" ask.
+PROOF_NO_PROOF_AFTER_DAYS = int(os.getenv("PROOF_NO_PROOF_AFTER_DAYS", "7"))
 
 # GET /profile/edits/history — how many rows of one field's history come back
 # (newest first). The export carries the full log.

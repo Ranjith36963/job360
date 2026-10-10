@@ -232,6 +232,7 @@ def _receipt_summary(r: Any) -> dict[str, Any]:
         "has_cover_letter": r.has_cover_letter,
         "channel": r.channel,
         "note": r.note,
+        "proof": r.proof.model_dump(),
         "url": _receipt_url(r.id),
     }
 
@@ -265,6 +266,7 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "possible_duplicate": r.possible_duplicate,
         "kit_event_id": r.kit_event_id,
         "kit_sha256": r.kit_sha256,
+        "proof": r.proof.model_dump(),
         "url": _receipt_url(r.id),
     }
 
@@ -844,7 +846,8 @@ def build_server(version: str = "") -> MCPServer:
 
         Kit events (closed payloads, else 422): cv_seen and submit_approved ONLY after the user said so in chat;
         submit_declined, autofill_set {mode:"deny"}, form_filled, hold_released, site_account {host}, account_needed
-        {host}; submit_mode_set {"submit_mode":"confirm"} only. Payloads, 403/409: get_recipe("rules"), Events."""
+        {host}; submit_mode_set {"submit_mode":"confirm"} only. proof_text {text, page_host}: the pasted confirmation
+        text. Payloads, 403/409: get_recipe("rules"), Events."""
         if contact_id is not None:
             # Bug fix (coordinator review, 2026-09-26) — same refusal as the
             # route: neither the cold outreach door nor the linked branch

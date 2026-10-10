@@ -75,7 +75,10 @@ assistant may only send `confirm`), and the application-kit trail (S3, all note-
 `submit_approved` / `submit_declined` (the user saw the CV, said yes to sending it, or said
 don't send - `where` is `web` or `chat`), `autofill_set` (`allow` | `deny`; an assistant may
 only send `deny`), `duplicate_cleared` (web only), `form_filled` (host + field count),
-`hold_released`, `site_account` / `account_needed` (a host name only - never a password). Every event: `type`, `detail`, `occurred_at`,
+`hold_released`, `site_account` / `account_needed` (a host name only - never a password), and the
+proof trail (S7, note-family): `proof_text` (the thank-you page text, <=4,000 chars plain, plus the page
+host; the server fills who/when) and `proof_screenshot` (written by Job360 when a screenshot is stored;
+the image lives in its own table and is erasable). Every event: `type`, `detail`, `occurred_at`,
 `recorded_by` (which token/agent/web), `recorded_at`. Nothing is deleted.
 
 Today's `applications` (stage) + `application_receipts` (snapshot) +

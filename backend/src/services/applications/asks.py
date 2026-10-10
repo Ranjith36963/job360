@@ -100,6 +100,28 @@ async def count_open_asks(db: JobDatabase, user_id: str) -> int:
     return int(row[0]) if row else 0
 
 
+def _log_no_proof_ask(user_id: str, application_id: Optional[int], result: str) -> None:
+    get_audit_logger().info("no_proof_ask", extra={
+        "event": "no_proof_ask", "user_id": safe_log_value(user_id), "application_id": application_id, "result": result,
+    })
+
+
+async def _first_proof_ask(
+    db: JobDatabase, user_id: str, application_id: Optional[int], proof_ctx: str
+) -> Optional[dict[str, Any]]:
+    """The "no proof yet" ask already recorded for this application (any state), logged as a duplicate."""
+    cur = await db._db.execute(
+        "SELECT id FROM application_asks WHERE user_id = ? AND application_id = ? AND context = ? "
+        "ORDER BY id LIMIT 1",
+        (user_id, application_id, proof_ctx),
+    )
+    first = await cur.fetchone()
+    if not first:
+        return None
+    _log_no_proof_ask(user_id, application_id, "duplicate")
+    return await _get_ask(db, user_id, int(first[0]))
+
+
 async def create_ask(
     db: JobDatabase,
     user_id: str,
@@ -120,12 +142,22 @@ async def create_ask(
         raise SpineError(422, f"context exceeds ASKS_CONTEXT_MAX_CHARS ({settings.ASKS_CONTEXT_MAX_CHARS} chars)")
     if application_id is not None and await get_owned_application(db, user_id, application_id) is None:
         raise SpineError(404, "application not found")
+    # S7 - the "no proof yet" ask is asked ONCE per application, whatever its state:
+    # a repeat (the assistant re-reading whats_new) returns the first one, writes nothing.
+    proof_ctx = f"proof_missing:{application_id}" if application_id is not None else None
+    is_proof = proof_ctx is not None and clean_ctx == proof_ctx
+    if is_proof and (first := await _first_proof_ask(db, user_id, application_id, proof_ctx)):
+        return first
     if await count_open_asks(db, user_id) >= settings.ASKS_MAX_OPEN_PER_USER:
         raise SpineError(
             429, f"too many open asks (ASKS_MAX_OPEN_PER_USER = {settings.ASKS_MAX_OPEN_PER_USER}); answer some first"
         )
     now = datetime.now(timezone.utc).isoformat()
     async with db._db.transaction():
+        if is_proof:  # two parallel callers: the loser waits here, then finds the winner's ask
+            await db._db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (f"{user_id}:{clean_ctx}",))
+            if first := await _first_proof_ask(db, user_id, application_id, proof_ctx):
+                return first
         cur = await db._db.execute(
             "INSERT INTO application_asks (user_id, application_id, question, context, asked_by, asked_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -145,6 +177,8 @@ async def create_ask(
             "has_application": application_id is not None,
         },
     )
+    if is_proof:
+        _log_no_proof_ask(user_id, application_id, "created")
     ask = await _get_ask(db, user_id, ask_id)
     assert ask is not None
     return ask
