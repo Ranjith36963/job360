@@ -210,7 +210,9 @@ async def test_the_log_carries_counts_never_values(authenticated_async_context):
 
     root, audit = logging.getLogger(), logging.getLogger("job360.audit")
     handler, old, old_audit = Capture(), root.level, audit.level
-    root.addHandler(handler)
+    # job360.audit is propagate=False once the app's logging is set up (full suite), so
+    # a root handler misses it; attach to the audit logger only (also avoids double capture).
+    audit.addHandler(handler)
     root.setLevel(logging.DEBUG)
     audit.setLevel(logging.INFO)
     try:
@@ -218,7 +220,7 @@ async def test_the_log_carries_counts_never_values(authenticated_async_context):
             await _fill(client, await _bring(client, 1, company="Zebracorpsecret"))
             await _check(client)
     finally:
-        root.removeHandler(handler)
+        audit.removeHandler(handler)
         root.setLevel(old)
         audit.setLevel(old_audit)
     mine = [r for r in records if r.get("event") == "morning_check_read"]
