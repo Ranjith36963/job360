@@ -14,7 +14,7 @@ vi.mock("@/lib/api", () => ({
   approveSend: (...a: unknown[]) => approveSend(...a),
   declineSend: (...a: unknown[]) => declineSend(...a),
 }));
-vi.mock("@/lib/assistant-state", () => ({ PAUSE_CHANGED_EVENT: "job360:pause-changed" }));
+vi.mock("@/lib/assistant-state", () => ({ PAUSE_CHANGED_EVENT: "job360:pause-changed", READY_CHANGED_EVENT: "job360:ready-changed" }));
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
 vi.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) } }));
