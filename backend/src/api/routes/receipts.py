@@ -235,7 +235,7 @@ async def list_receipts(
 
     proofs = await proof_for(db, user.id, sorted({int(r["application_id"]) for r in rows if r.get("application_id")}))
     return ReceiptListResponse(
-        receipts=[_to_summary(r, proofs.get(r.get("application_id"))) for r in rows], total=total
+        receipts=[_to_summary(r, proofs.get(int(r.get("application_id") or 0))) for r in rows], total=total
     )
 
 

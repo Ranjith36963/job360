@@ -145,8 +145,8 @@ async def create_ask(
         raise SpineError(404, "application not found")
     # S7 - the "no proof yet" ask is asked ONCE per application, whatever its state:
     # a repeat (the assistant re-reading whats_new) returns the first one, writes nothing.
-    proof_ctx = f"proof_missing:{application_id}" if application_id is not None else None
-    is_proof = proof_ctx is not None and clean_ctx == proof_ctx
+    proof_ctx = f"proof_missing:{application_id}" if application_id is not None else ""
+    is_proof = bool(proof_ctx) and clean_ctx == proof_ctx
     if is_proof and (first := await _first_proof_ask(db, user_id, application_id, proof_ctx)):
         return first
     if await count_open_asks(db, user_id) >= settings.ASKS_MAX_OPEN_PER_USER:
