@@ -114,6 +114,9 @@ def init_sentry(*, component: str = "api") -> bool:
         # they carry request.url too (a file-link token rides in the path).
         before_send_transaction=_scrub_pii,
         traces_sample_rate=0.1,
+        # Never read a request body before the handler runs (bodies are
+        # redacted anyway; this also stops the SDK buffering large uploads).
+        max_request_body_size="never",
     )
     sentry_sdk.set_tag("component", component)
     # The positive half. Without it, "Sentry is quiet" is unfalsifiable: you

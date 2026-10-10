@@ -59,6 +59,7 @@
   --color-paper-dim: var(--paper-dim);
   --color-paper-line: var(--paper-line);
   --color-paper-green: var(--paper-green);
+  --color-paper-soft: var(--paper-soft);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
@@ -123,6 +124,7 @@
   --paper-dim: #5d665d;
   --paper-line: #dfe3df;
   --paper-green: #009900;
+  --paper-soft: #e6ffe6;
   --brand: #006600;
   --brand-soft: #e6ffe6;
   --success: #006600;
@@ -178,6 +180,7 @@
   --paper-dim: #5d665d;
   --paper-line: #dfe3df;
   --paper-green: #009900;
+  --paper-soft: #e6ffe6;
   --brand: #00d900;
   --brand-soft: #0b2a0b;
   --success: #00d900;

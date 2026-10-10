@@ -4474,11 +4474,23 @@ export interface components {
          *     email > text > screenshot_only, else none - the one shape every surface reuses.
          */
         ProofOut: {
+            /** Email Seen At */
+            email_seen_at?: string | null;
+            /**
+             * Has Confirmation
+             * @default false
+             */
+            has_confirmation: boolean;
             /**
              * Has Email
              * @default false
              */
             has_email: boolean;
+            /**
+             * Has Page Text
+             * @default false
+             */
+            has_page_text: boolean;
             /**
              * Has Text
              * @default false

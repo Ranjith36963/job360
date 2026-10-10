@@ -5326,9 +5326,30 @@
       "ProofOut": {
         "description": "How well an application is backed up (S7): ``level`` is the strongest of\nemail > text > screenshot_only, else none - the one shape every surface reuses.",
         "properties": {
+          "email_seen_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email Seen At"
+          },
+          "has_confirmation": {
+            "default": false,
+            "title": "Has Confirmation",
+            "type": "boolean"
+          },
           "has_email": {
             "default": false,
             "title": "Has Email",
+            "type": "boolean"
+          },
+          "has_page_text": {
+            "default": false,
+            "title": "Has Page Text",
             "type": "boolean"
           },
           "has_text": {

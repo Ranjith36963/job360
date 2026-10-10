@@ -28,6 +28,9 @@ function stamp(mark: DecisionMark): string {
  *  - Your assistant got stuck (S6) - shown at the top while a block is recorded
  *    (CAPTCHA, sign-in...), with who / when; "Mark resolved" clears it.
  *
+ * `newFillWaiting`: the assistant filled the form AFTER the last yes / no (the
+ * Ready card is showing), so that old answer is not the current one.
+ *
  * ("I've checked this CV" lives next to the CV version itself.) All of these are
  * website-only actions: an assistant cannot press them.
  */
@@ -35,10 +38,12 @@ export function ApplicationDecisions({
   applicationId,
   controls,
   onChanged,
+  newFillWaiting = false,
 }: {
   applicationId: number;
   controls: ApplicationControls;
   onChanged: (next: ApplicationControls) => void;
+  newFillWaiting?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -54,8 +59,10 @@ export function ApplicationDecisions({
   }
 
   const cv = controls.cv ?? null;
-  const approved = cv?.approved ?? null;
-  const declined = controls.declined ?? null;
+  // The newest of {fill, yes, no} is the current one: after a newer fill an old mark is history.
+  const approved = newFillWaiting ? null : (cv?.approved ?? null);
+  const declined = newFillWaiting ? null : (controls.declined ?? null);
+  const earlier = newFillWaiting ? (controls.declined ?? cv?.approved ?? null) : null;
   const autofill = controls.autofill;
   const dup = controls.duplicate;
   const dupOpen = dup.flag !== "" && !dup.cleared;
@@ -113,27 +120,36 @@ export function ApplicationDecisions({
 
       {cv && (
         <div className="flex flex-col gap-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              data-testid="send-approve-button"
-              disabled={busy}
-              onClick={() => void run(() => approveSend(applicationId), "Couldn't save your yes")}
-              className={approved && !declined ? BTN_ON : BTN}
-            >
-              Send this one
-            </button>
-            <button
-              type="button"
-              data-testid="send-decline-button"
-              disabled={busy}
-              onClick={() => void run(() => declineSend(applicationId), "Couldn't save your no")}
-              className={declined ? BTN_ON : BTN}
-            >
-              Don&apos;t send
-            </button>
-          </div>
-          {declined ? (
+          {/* A newer fill is waiting: the Ready card above owns Send / Don't send (it passes the
+              CV + fill ids the guard checks), so no second, unguarded pair of buttons here. */}
+          {!newFillWaiting && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="send-approve-button"
+                disabled={busy}
+                onClick={() => void run(() => approveSend(applicationId), "Couldn't save your yes")}
+                className={approved && !declined ? BTN_ON : BTN}
+              >
+                Send this one
+              </button>
+              <button
+                type="button"
+                data-testid="send-decline-button"
+                disabled={busy}
+                onClick={() => void run(() => declineSend(applicationId), "Couldn't save your no")}
+                className={declined ? BTN_ON : BTN}
+              >
+                Don&apos;t send
+              </button>
+            </div>
+          )}
+          {newFillWaiting ? (
+            <p data-testid="send-state" className={NOTE}>
+              New fill waiting for your yes.
+              {earlier && ` Before it: ${controls.declined ? "Don't send" : `Yes to v${cv.version}`} - ${stamp(earlier)}`}
+            </p>
+          ) : declined ? (
             <p data-testid="send-state" className={NOTE}>
               Don&apos;t send - {stamp(declined)}
             </p>

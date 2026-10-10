@@ -54,4 +54,24 @@ describe("/receipts list", () => {
     expect(screen.getByRole("link", { name: /Jobs in/ })).toHaveAttribute("href", "/bring");
     expect(screen.queryByTestId("receipts-list")).not.toBeInTheDocument();
   });
+  it("marks each row with its stored proof parts; a row with no proof says so", async () => {
+    const none = { has_text: false, has_page_text: false, has_confirmation: false, has_email: false, email_seen_at: null, screenshots: 0, level: "none" };
+    listReceipts.mockResolvedValue({
+      receipts: [
+        { ...ROW, id: 1, proof: { ...none, has_text: true, has_confirmation: true, has_email: true, level: "email" } },
+        { ...ROW, id: 2, proof: { ...none, screenshots: 1, level: "screenshot_only" } },
+        { ...ROW, id: 3 },
+      ],
+    });
+    render(<ReceiptsPage />);
+    await screen.findByTestId("receipts-list");
+    const rows = screen.getAllByTestId("proof-marks").map((r) =>
+      Array.from(r.querySelectorAll('[data-testid="proof-mark"]')).map((m) => m.textContent),
+    );
+    expect(rows).toEqual([
+      ["Confirmation number saved", "Confirmation email seen"],
+      ["Screenshot saved (1)"],
+      ["No proof yet"],
+    ]);
+  });
 });

@@ -32,7 +32,12 @@ SERVER_ONLY_EVENTS = frozenset({"proof_screenshot"})
 MIMES = ("image/png", "image/jpeg", "image/webp")
 MISSING_CAP = 20
 _URL = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
-NO_PROOF: dict[str, Any] = {"has_text": False, "has_email": False, "screenshots": 0, "level": "none"}
+# ``has_text`` = pasted page text OR a receipt confirmation; the two parts are named apart so a
+# surface never claims "thank-you page saved" from a confirmation number alone (S5e).
+NO_PROOF: dict[str, Any] = {
+    "has_text": False, "has_page_text": False, "has_confirmation": False,
+    "has_email": False, "email_seen_at": None, "screenshots": 0, "level": "none",
+}
 _GONE = "upload link used or expired - ask your assistant for a new one"
 PROOF_LOCK_CLASS = 360_007  # int32 class id for pg_advisory_xact_lock(class, application_id); the other lock users
 # in the repo use the one-key or hashtext form (a separate key space), so this pair cannot clash with them.
@@ -266,34 +271,39 @@ async def store_via_link(db: JobDatabase, link: dict[str, Any], data: bytes, now
 
 
 async def proof_for(db: JobDatabase, user_id: str, application_ids: list[int]) -> dict[int, dict[str, Any]]:
-    """``{has_text, has_email, screenshots, level}`` per application, three queries for any number of them."""
+    """``{has_text, has_page_text, has_confirmation, has_email, email_seen_at, screenshots, level}`` per
+    application, three queries for any number of them. ``email_seen_at`` is the earliest email proof's
+    received time (else its recorded time)."""
     out = {i: dict(NO_PROOF) for i in application_ids}
     if not out:
         return out
     marks, ids = ",".join("?" for _ in out), list(out)
     cur = await db._db.execute(
         "SELECT id, application_id, event_type, source_kind, corrects_event_id, "  # noqa: S608 - placeholders only
-        "(LOWER(TRIM(detail)) LIKE ?) FROM application_events "
+        "(LOWER(TRIM(detail)) LIKE ?), COALESCE(NULLIF(source_received_at, ''), recorded_at) FROM application_events "
         f"WHERE user_id = ? AND application_id IN ({marks}) "
         "AND (event_type IN ('proof_text', 'applied', 'note') OR corrects_event_id IS NOT NULL)",
         ["submission confirmed%", user_id, *ids],
     )
     rows = [tuple(r) for r in await cur.fetchall()]
     superseded = {r[4] for r in rows if r[4] is not None}
-    for ev_id, app_id, kind, source, _, confirmed in rows:
+    for ev_id, app_id, kind, source, _, confirmed, seen_at in rows:
         if ev_id in superseded:
             continue
+        p = out[app_id]
         if kind == "proof_text":
-            out[app_id]["has_text"] = True
+            p["has_text"] = p["has_page_text"] = True
         elif (kind == "applied" and source == "email") or (kind == "note" and confirmed):
-            out[app_id]["has_email"] = True
+            p["has_email"] = True
+            if seen_at and (p["email_seen_at"] is None or str(seen_at) < p["email_seen_at"]):
+                p["email_seen_at"] = str(seen_at)
     cur = await db._db.execute(  # a receipt that carries a confirmation (ID / portal reference) is text proof
         "SELECT DISTINCT application_id FROM application_receipts "  # noqa: S608 - placeholders only
         f"WHERE user_id = ? AND application_id IN ({marks}) AND TRIM(COALESCE(confirmation, '')) <> ''",
         [user_id, *ids],
     )
     for (app_id,) in await cur.fetchall():
-        out[app_id]["has_text"] = True
+        out[app_id]["has_text"] = out[app_id]["has_confirmation"] = True
     cur = await db._db.execute(
         "SELECT application_id, COUNT(*) FROM application_proof_screenshots "  # noqa: S608 - placeholders only
         f"WHERE user_id = ? AND application_id IN ({marks}) AND deleted_at IS NULL GROUP BY application_id",
