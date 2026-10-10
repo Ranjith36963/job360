@@ -16,6 +16,8 @@ vi.mock("@/lib/api", () => ({
   confirmSettingRequest: vi.fn(),
   declineSettingRequest: vi.fn(),
 }));
+// The morning check has its own tests (MorningCheck.test.tsx).
+vi.mock("./MorningCheck", () => ({ MorningCheck: () => null }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const base = {

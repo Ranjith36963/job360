@@ -18,6 +18,7 @@ vi.mock("@/lib/api", () => ({
   confirmSettingRequest: (...a: unknown[]) => confirmSettingRequest(...a),
   declineSettingRequest: (...a: unknown[]) => declineSettingRequest(...a),
 }));
+vi.mock("./MorningCheck", () => ({ MorningCheck: () => null })); // has its own tests
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: (...a: unknown[]) => toastError(...a) } }));
 
 const evil = "<img src=x onerror=alert(1)>";
@@ -71,6 +72,22 @@ describe("SettingRequestCard", () => {
     await waitFor(() => expect(confirmSettingRequest).toHaveBeenCalledWith(11));
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
     expect(declineSettingRequest).not.toHaveBeenCalled();
+  });
+
+  it("a confirmed resume tells the top bar and banner at once (S5b)", async () => {
+    const seen: unknown[] = [];
+    const on = (e: Event) => seen.push((e as CustomEvent).detail);
+    window.addEventListener("job360:pause-changed", on);
+    confirmSettingRequest.mockResolvedValue({ paused: false, waiting: [] });
+    render(
+      <SettingRequestCard
+        request={{ ...request, path: "assistant_settings.paused_until", value: "" }}
+        onChanged={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("setting-request-confirm"));
+    await waitFor(() => expect(seen).toEqual([false]));
+    window.removeEventListener("job360:pause-changed", on);
   });
 
   it("Don't change declines it", async () => {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ASKS_CHANGED_EVENT, getAssistantSettings, listAsks } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, listAsks } from "@/lib/api";
+import { fetchSettingsShared } from "@/lib/assistant-state";
 
 /**
  * Count of things waiting on the user (the Needs-you badge): open questions plus
@@ -23,7 +24,7 @@ function fetchOpenCount(key: string): Promise<number> {
   if (inFlight?.key === key) return inFlight.count;
   const count = Promise.all([
     listAsks("open"),
-    getAssistantSettings().then(
+    fetchSettingsShared(key).then(
       (view) => view.waiting.length,
       () => 0,
     ),
