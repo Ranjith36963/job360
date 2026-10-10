@@ -21,6 +21,7 @@ import ProfilePage from "../page";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 // Reject with a real ApiError, not a plain Error carrying a status field.
