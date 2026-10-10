@@ -2,7 +2,7 @@
 
 ``POST /api/proof/{token}`` has NO login: an assistant's file tool posts the image
 there, and the token IS the credential (single use, 5 minutes, only its hash is
-stored). Minting the link is per-user and scoped by ``user.id``. Pasted confirmation text is a
+stored). Everything else is per-user (``user.id``); the web image routes refuse a bearer token. Pasted text is a
 plain ``proof_text`` event through ``record_event``. See ``services/applications/proof.py``.
 """
 from __future__ import annotations
@@ -17,12 +17,14 @@ from pydantic import BaseModel
 from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
 
-from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_user
+from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
 from src.api.dependencies import get_request_db
+from src.api.routes.applications import ProofOut
 from src.api.routes.files import _NO_STORE, _ip_hash
 from src.core import settings
 from src.repositories.database import JobDatabase
-from src.services.applications import proof
+from src.services.applications import proof, spine
+from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 
 router = APIRouter(tags=["proof"])
@@ -47,6 +49,23 @@ class ProofUploadOut(BaseModel):
     application_id: int
     mime: str
     size: int
+
+
+class ProofScreenshotOut(BaseModel):
+    id: int
+    mime: str
+    size: int
+    sha256: str
+    created_by: str
+    created_at: str
+    deleted_at: Optional[str] = None
+    delete_note: str = ""
+
+
+class ProofStateOut(BaseModel):
+    application_id: int
+    proof: ProofOut
+    screenshots: list[ProofScreenshotOut]
 
 
 def _raise(exc: SpineError, headers: Optional[dict[str, str]] = None) -> NoReturn:
@@ -80,7 +99,7 @@ async def _read_file(request: Request) -> bytes:
 
 
 async def _read_body(request: Request) -> bytes:
-    """The upload body, bounded by the size cap and ``PROOF_UPLOAD_READ_SECONDS``; run only once the token is live."""
+    """The upload body, bounded by the size cap and ``PROOF_UPLOAD_READ_SECONDS``; no pooled connection is held."""
     try:
         try:
             return await asyncio.wait_for(_read_file(request), settings.PROOF_UPLOAD_READ_SECONDS)
@@ -130,3 +149,65 @@ async def upload_proof_via_link(token: str, request: Request, response: Response
         "screenshot_id": meta["id"], "application_id": link["application_id"], "mime": meta["mime"],
         "size": meta["size"],
     }
+
+
+@router.get("/applications/{application_id}/proof", response_model=ProofStateOut, dependencies=AUTH_FIRST)
+async def get_proof(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Proof level plus screenshots."""
+    if await spine.get_owned_application(db, user.id, application_id) is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    return {
+        "application_id": application_id,
+        "proof": (await proof.proof_for(db, user.id, [application_id]))[application_id],
+        "screenshots": await proof.screenshot_meta(db, user.id, application_id),
+    }
+
+
+@router.post("/applications/{application_id}/proof/screenshots", status_code=201, response_model=ProofScreenshotOut,
+             dependencies=AUTH_FIRST, openapi_extra=_UPLOAD_BODY)
+async def upload_proof_screenshot(
+    application_id: int,
+    data: bytes = Depends(_read_body),  # noqa: B008 - before db: the body is read without a pooled connection
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008
+) -> dict[str, Any]:
+    try:
+        return await proof.store_screenshot(
+            db, user.id, application_id, data, actor_for(user), "web", datetime.now(timezone.utc)
+        )
+    except SpineError as exc:
+        _raise(exc)
+
+
+@router.get("/applications/{application_id}/proof/screenshots/{screenshot_id}", dependencies=AUTH_FIRST,
+            response_class=Response)
+async def get_proof_screenshot(
+    application_id: int, screenshot_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008
+) -> Response:
+    try:
+        mime, data = await proof.read_screenshot(db, user.id, application_id, screenshot_id)
+    except SpineError as exc:
+        _raise(exc)
+    return Response(content=data, media_type=mime,
+                    headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.delete("/applications/{application_id}/proof/screenshots/{screenshot_id}",
+               response_model=ProofScreenshotOut, dependencies=AUTH_FIRST)
+async def delete_proof_screenshot(
+    application_id: int, screenshot_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008
+) -> dict[str, Any]:
+    try:
+        return await proof.delete_screenshot(
+            db, user.id, application_id, screenshot_id, datetime.now(timezone.utc), actor_for(user)
+        )
+    except SpineError as exc:
+        _raise(exc)

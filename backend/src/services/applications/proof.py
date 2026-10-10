@@ -3,9 +3,9 @@
 Proof backs up "applied": an EMAIL (an ``applied`` event with an email source, or any note starting
 "submission confirmed"), pasted TEXT (a ``proof_text`` event) or a SCREENSHOT (stored here). :func:`proof_for` gives
 the strongest as a ``level``; :func:`proof_missing` lists applied jobs still without any after
-``PROOF_NO_PROOF_AFTER_DAYS`` so the user is asked once. Screenshots arrive by a single-use
+``PROOF_NO_PROOF_AFTER_DAYS`` so the user is asked once. Screenshots arrive by web upload or a single-use
 5-minute link (``proof_upload_links``, token hash only); the image kind is read off the magic bytes, never the
-client. Logs never carry text, bytes or tokens.
+client. Deleting erases the bytes and keeps the row + a note. Logs never carry text, bytes or tokens.
 """
 from __future__ import annotations
 
@@ -154,6 +154,37 @@ async def store_screenshot(
         "proof_upload", user_id=user_id, actor=created_by, via=via, application_id=application_id,
         screenshot_id=sid, mime=mime, size=len(data), result="ok",
     )
+    return (await screenshot_meta(db, user_id, application_id, sid))[0]
+
+
+async def read_screenshot(db: JobDatabase, user_id: str, application_id: int, sid: int) -> tuple[str, bytes]:
+    """(mime, bytes) of one screenshot; 404 unknown, 410 once deleted."""
+    cur = await db._db.execute("SELECT mime, bytes, deleted_at FROM application_proof_screenshots "
+                               "WHERE id = ? AND user_id = ? AND application_id = ?", (sid, user_id, application_id))
+    row = await cur.fetchone()
+    if row is None:
+        raise SpineError(404, "screenshot not found")
+    if row["deleted_at"] or row["bytes"] is None:
+        raise SpineError(410, "this screenshot was deleted")
+    return str(row["mime"]), bytes(row["bytes"])
+
+
+async def delete_screenshot(
+    db: JobDatabase, user_id: str, application_id: int, sid: int, now: datetime, actor: str
+) -> dict[str, Any]:
+    """Erase the image, keep the row + a timeline "note" (one transaction); 404 unknown or already deleted."""
+    async with db._db.transaction():
+        cur = await db._db.execute(
+            "UPDATE application_proof_screenshots SET bytes = NULL, deleted_at = ?, delete_note = ? "
+            "WHERE id = ? AND user_id = ? AND application_id = ? AND deleted_at IS NULL",
+            (now.isoformat(), f"Deleted by you, {now.date().isoformat()}", sid, user_id, application_id),
+        )
+        if not cur.rowcount:
+            raise SpineError(404, "screenshot not found")
+        await spine.append_event(db, user_id=user_id, application_id=application_id, event_type="note",
+                                 detail="Screenshot deleted by you", payload={"screenshot_id": sid},
+                                 occurred_at=now.isoformat(), recorded_by=actor)
+    _audit("proof_screenshot_deleted", user_id=user_id, application_id=application_id, screenshot_id=sid, result="ok")
     return (await screenshot_meta(db, user_id, application_id, sid))[0]
 
 
