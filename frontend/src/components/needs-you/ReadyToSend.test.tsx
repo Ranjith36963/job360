@@ -4,6 +4,7 @@ import { ReadyToSend } from "./ReadyToSend";
 import { ReadyCard } from "./ReadyCard";
 import { card } from "./ready-fixtures";
 import { ApiError } from "@/lib/api-error";
+import { dayMonth } from "@/lib/ready-to-send";
 
 const getReadyToSend = vi.fn();
 const approveSend = vi.fn();
@@ -38,15 +39,15 @@ describe("Ready to send", () => {
     render(<ReadyToSend />);
     const el = await screen.findByTestId("ready-card-64");
     expect(screen.getByText("Ready to send")).toBeInTheDocument();
-    expect(el.textContent).toMatch(/APP-064 · brought by Claude · 08 Oct/);
+    expect(el.textContent).toContain(`APP-064 · brought by Claude · ${dayMonth("2026-10-08T07:00:00+00:00", true)}`);
     expect(el).toHaveTextContent("AI Engineer, Agents");
     expect(el).toHaveTextContent("Poolside · Paris · score 82, set by Claude");
     expect(el.textContent).toMatch(/Claude prepared this \d\d:\d\d/);
-    expect(el.textContent).toMatch(/CV v3 · 08 Oct/);
-    expect(el.textContent).toMatch(/Cover letter v1 · 08 Oct/);
+    expect(el.textContent).toContain(`CV v3 · ${dayMonth("2026-10-08T08:02:00+00:00", true)}`);
+    expect(el.textContent).toContain(`Cover letter v1 · ${dayMonth("2026-10-08T08:05:00+00:00", true)}`);
     expect(screen.getByRole("link", { name: "Open both" })).toHaveAttribute("href", "/applications/64#section-documents");
     expect(el).toHaveTextContent("Every answer that will go out");
-    expect(el.textContent).toMatch(/Memory · saved by Claude, 3 Oct/);
+    expect(el.textContent).toContain(`Memory · saved by Claude, ${dayMonth("2026-10-03T09:00:00+00:00")}`);
     expect(el).toHaveTextContent("Profile");
     expect(el).toHaveTextContent("Written new · by Claude");
     expect(el).toHaveTextContent("Guessed · by Claude");
