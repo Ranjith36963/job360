@@ -1950,8 +1950,8 @@ export interface paths {
         put?: never;
         /**
          * Upload Proof Via Link
-         * @description PUBLIC: the token is the credential. Errors: 404 unknown, 410 used/expired, 413, 415, 409, 429.
-         *     The body is read first (size cap + deadline), so a junk token costs a bounded read before its 404.
+         * @description PUBLIC: the token is the credential. Errors: 404 unknown, 410 used/expired, 413, 415, 409, 429, 408.
+         *     Token first (short connection), then the body read holding none, then a second short one to store.
          */
         post: operations["upload_proof_via_link_api_proof__token__post"];
         delete?: never;

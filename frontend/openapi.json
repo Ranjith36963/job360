@@ -14259,7 +14259,7 @@
     },
     "/api/proof/{token}": {
       "post": {
-        "description": "PUBLIC: the token is the credential. Errors: 404 unknown, 410 used/expired, 413, 415, 409, 429.\nThe body is read first (size cap + deadline), so a junk token costs a bounded read before its 404.",
+        "description": "PUBLIC: the token is the credential. Errors: 404 unknown, 410 used/expired, 413, 415, 409, 429, 408.\nToken first (short connection), then the body read holding none, then a second short one to store.",
         "operationId": "upload_proof_via_link_api_proof__token__post",
         "parameters": [
           {

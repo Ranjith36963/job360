@@ -112,11 +112,11 @@ is filled.
 `record_application` takes a `channel`: one of `company_site`,
 `linkedin_easy_apply`, `job_board`, `email`, `referral`, `recruiter`, `other`,
 the `cv_artifact_id` and `cover_letter_artifact_id` that were sent, and in
-`confirmation` any proof you have now: the application ID or portal
-reference, or "thank-you page seen at <time>". This saves an immutable
-receipt. Proof is one of: a confirmation email, the thank-you page (screenshot
-if you can take one), or the application ID / portal status page; with none
-yet the application is "claimed, unverified".
+`confirmation` the application ID or portal reference ONLY. This saves an
+immutable receipt. Right after, put the thank-you page text in `record_event`
+`proof_text` {text, page_host}, and a screenshot only if you can. Proof is one
+of: a confirmation email, the thank-you page text, or the application ID /
+portal reference; with none yet the application is "claimed, unverified".
 
 An ask can also be answered by the user on the Job360 Needs-you page.
 

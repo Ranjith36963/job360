@@ -8,6 +8,7 @@ plain ``proof_text`` event through ``record_event``. See ``services/applications
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, NoReturn, Optional
 
@@ -25,6 +26,7 @@ from src.services.applications import proof
 from src.services.applications.spine import SpineError
 
 router = APIRouter(tags=["proof"])
+_short_db = asynccontextmanager(get_request_db)  # a connection held for one query batch, never across the body read
 _MULTIPART_SLACK = 64 * 1024  # envelope bytes around the file
 _UPLOAD_BODY = {"requestBody": {"required": True, "content": {"multipart/form-data": {"schema": {
     "type": "object", "required": ["file"], "properties": {"file": {"type": "string", "format": "binary"}},
@@ -77,17 +79,15 @@ async def _read_file(request: Request) -> bytes:
     return await upload.read(settings.PROOF_SCREENSHOT_MAX_BYTES + 1)
 
 
-async def upload_bytes(request: Request) -> bytes:
-    """The upload body, read BEFORE ``get_request_db`` is borrowed (declare it ahead of ``db``): a client that
-    trickles its body then holds no pooled connection. Bounded by the size cap and ``PROOF_UPLOAD_READ_SECONDS``."""
-    public = request.url.path.startswith("/api/proof/")
+async def _read_body(request: Request) -> bytes:
+    """The upload body, bounded by the size cap and ``PROOF_UPLOAD_READ_SECONDS``; run only once the token is live."""
     try:
         try:
             return await asyncio.wait_for(_read_file(request), settings.PROOF_UPLOAD_READ_SECONDS)
         except asyncio.TimeoutError:
             raise SpineError(408, "upload took too long") from None
     except SpineError as exc:
-        _raise(exc, _NO_STORE if public else None)
+        _raise(exc, _NO_STORE)
 
 
 @router.post(
@@ -110,17 +110,20 @@ async def create_proof_link(
 
 
 @router.post("/proof/{token}", status_code=201, response_model=ProofUploadOut, openapi_extra=_UPLOAD_BODY)
-async def upload_proof_via_link(
-    token: str, request: Request, response: Response,
-    data: bytes = Depends(upload_bytes),  # noqa: B008 - before db: the body is read without a pooled connection
-    db: JobDatabase = Depends(get_request_db),  # noqa: B008
-) -> dict[str, Any]:
-    """PUBLIC: the token is the credential. Errors: 404 unknown, 410 used/expired, 413, 415, 409, 429.
-    The body is read first (size cap + deadline), so a junk token costs a bounded read before its 404."""
+async def upload_proof_via_link(token: str, request: Request, response: Response) -> dict[str, Any]:
+    """PUBLIC: the token is the credential. Errors: 404 unknown, 410 used/expired, 413, 415, 409, 429, 408.
+    Token first (short connection), then the body read holding none, then a second short one to store."""
     response.headers.update(_NO_STORE)
+    now = datetime.now(timezone.utc)
     try:
-        link = await proof.find_link(db, token, _ip_hash(request))
-        meta = await proof.store_via_link(db, link, data, datetime.now(timezone.utc))
+        async with _short_db() as db:
+            link = await proof.find_link(db, token, _ip_hash(request), now)
+    except SpineError as exc:
+        _raise(exc, _NO_STORE)
+    data = await _read_body(request)
+    try:
+        async with _short_db() as db:
+            meta = await proof.store_via_link(db, link, data, datetime.now(timezone.utc))
     except SpineError as exc:
         _raise(exc, _NO_STORE)
     return {

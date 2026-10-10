@@ -1,6 +1,6 @@
 """Proof of application (S7, owner decision 2026-10-10).
 
-Proof backs up "applied": an EMAIL (an ``applied``/``note`` event with an email source, or a note saying
+Proof backs up "applied": an EMAIL (an ``applied`` event with an email source, or any note starting
 "submission confirmed"), pasted TEXT (a ``proof_text`` event) or a SCREENSHOT (stored here). :func:`proof_for` gives
 the strongest as a ``level``; :func:`proof_missing` lists applied jobs still without any after
 ``PROOF_NO_PROOF_AFTER_DAYS`` so the user is asked once. Screenshots arrive by a single-use
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import secrets
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Optional
@@ -30,8 +31,11 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 SERVER_ONLY_EVENTS = frozenset({"proof_screenshot"})
 MIMES = ("image/png", "image/jpeg", "image/webp")
 MISSING_CAP = 20
+_URL = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 NO_PROOF: dict[str, Any] = {"has_text": False, "has_email": False, "screenshots": 0, "level": "none"}
 _GONE = "upload link used or expired - ask your assistant for a new one"
+PROOF_LOCK_CLASS = 360_007  # int32 class id for pg_advisory_xact_lock(class, application_id); the other lock users
+# in the repo use the one-key or hashtext form (a separate key space), so this pair cannot clash with them.
 _COLS = "id, mime, size, sha256, created_by, created_at, deleted_at, delete_note"
 
 
@@ -61,6 +65,7 @@ def check_proof_text(user: CurrentUser, payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict) or set(payload) - {"text", "page_host"}:
         raise SpineError(422, 'proof_text takes a JSON object with only "text" and "page_host"')
     text = spine._strip_control_chars(payload["text"]).strip() if isinstance(payload.get("text"), str) else ""
+    text = _URL.sub("[link removed]", text)  # a link can carry a token; the cap counts what is kept
     if not text:
         raise SpineError(422, "proof_text needs non-empty text")
     if len(text) > settings.PROOF_TEXT_MAX_CHARS:
@@ -125,7 +130,7 @@ async def store_screenshot(
     mime = check_image(data)
     await _room(db, user_id, application_id)  # cheap pre-check; the locked recount below is authoritative
     async with db._db.transaction():
-        await db._db.execute("SELECT pg_advisory_xact_lock(?)", (application_id,))
+        await db._db.execute("SELECT pg_advisory_xact_lock(?, ?)", (PROOF_LOCK_CLASS, application_id))
         await _room(db, user_id, application_id)
         cur = await db._db.execute(
             "INSERT INTO application_proof_screenshots "
@@ -176,9 +181,9 @@ async def mint_link(db: JobDatabase, user: CurrentUser, application_id: int, now
     }
 
 
-async def find_link(db: JobDatabase, token: str, client: str) -> dict[str, Any]:
-    """Resolve a token to its link row. Unknown = 404 and counts against a per-IP
-    lockout (consulted only for tokens that do not resolve, as in files.py)."""
+async def find_link(db: JobDatabase, token: str, client: str, now: datetime) -> dict[str, Any]:
+    """Resolve a token to its LIVE link row, before any body is read. Unknown = 404 and counts against a per-IP
+    lockout (consulted only for tokens that do not resolve, as in files.py); used or expired = 410."""
     key = f"proof_bad:{client}"
 
     def _bad(reason: str) -> SpineError:
@@ -199,7 +204,12 @@ async def find_link(db: JobDatabase, token: str, client: str) -> dict[str, Any]:
     found = await cur.fetchone()
     if found is None or not hmac.compare_digest(str(found["token_hash"]), computed):
         raise _bad("unknown_token")
-    return dict(found)
+    link = dict(found)
+    if link["used_at"] or link["expires_at"] <= now.isoformat():
+        reason = "used" if link["used_at"] else "expired"
+        raise _refuse(f"proof_link_{reason}", 410, reason, _GONE, user_id=link["user_id"],
+                      application_id=link["application_id"], via="link")
+    return link
 
 
 async def store_via_link(db: JobDatabase, link: dict[str, Any], data: bytes, now: datetime) -> dict[str, Any]:
@@ -225,17 +235,17 @@ async def store_via_link(db: JobDatabase, link: dict[str, Any], data: bytes, now
 
 
 async def proof_for(db: JobDatabase, user_id: str, application_ids: list[int]) -> dict[int, dict[str, Any]]:
-    """``{has_text, has_email, screenshots, level}`` per application, two queries for any number of them."""
+    """``{has_text, has_email, screenshots, level}`` per application, three queries for any number of them."""
     out = {i: dict(NO_PROOF) for i in application_ids}
     if not out:
         return out
     marks, ids = ",".join("?" for _ in out), list(out)
     cur = await db._db.execute(
         "SELECT id, application_id, event_type, source_kind, corrects_event_id, "  # noqa: S608 - placeholders only
-        "LOWER(detail) LIKE ? FROM application_events "
+        "(LOWER(TRIM(detail)) LIKE ?) FROM application_events "
         f"WHERE user_id = ? AND application_id IN ({marks}) "
         "AND (event_type IN ('proof_text', 'applied', 'note') OR corrects_event_id IS NOT NULL)",
-        ["%submission confirmed%", user_id, *ids],
+        ["submission confirmed%", user_id, *ids],
     )
     rows = [tuple(r) for r in await cur.fetchall()]
     superseded = {r[4] for r in rows if r[4] is not None}
@@ -244,8 +254,15 @@ async def proof_for(db: JobDatabase, user_id: str, application_ids: list[int]) -
             continue
         if kind == "proof_text":
             out[app_id]["has_text"] = True
-        elif (kind in ("applied", "note") and source == "email") or (kind == "note" and confirmed):
+        elif (kind == "applied" and source == "email") or (kind == "note" and confirmed):
             out[app_id]["has_email"] = True
+    cur = await db._db.execute(  # a receipt that carries a confirmation (ID / portal reference) is text proof
+        "SELECT DISTINCT application_id FROM application_receipts "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND application_id IN ({marks}) AND TRIM(COALESCE(confirmation, '')) <> ''",
+        [user_id, *ids],
+    )
+    for (app_id,) in await cur.fetchall():
+        out[app_id]["has_text"] = True
     cur = await db._db.execute(
         "SELECT application_id, COUNT(*) FROM application_proof_screenshots "  # noqa: S608 - placeholders only
         f"WHERE user_id = ? AND application_id IN ({marks}) AND deleted_at IS NULL GROUP BY application_id",
@@ -265,7 +282,8 @@ async def proof_missing(db: JobDatabase, user_id: str, now: datetime) -> list[di
     cur = await db._db.execute(
         "SELECT e.application_id, MIN(e.occurred_at), a.job_company FROM application_events e "
         "JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
-        "WHERE e.user_id = ? AND e.event_type = 'applied' AND e.occurred_at <= ? AND e.id NOT IN "
+        "WHERE e.user_id = ? AND a.status = 'applied' AND e.event_type = 'applied' AND e.occurred_at <= ? "
+        "AND e.id NOT IN "
         "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL) "
         "GROUP BY e.application_id, a.job_company ORDER BY MIN(e.occurred_at), e.application_id",
         (user_id, (now - timedelta(days=days)).isoformat(), user_id),

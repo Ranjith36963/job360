@@ -193,7 +193,7 @@ async def test_a_link_works_once_and_dies_after_five_minutes(authenticated_async
             assert (await _post(anon, "/api/proof/" + "x" * 43, PNG)).status_code == 404
             assert (await _post(anon, "/api/proof/short", PNG)).status_code == 404
             assert (await anon.post(path)).status_code in (404, 410, 422)  # no file at all: never 401/403
-            assert (await anon.post("/api/proof/" + "y" * 43)).status_code == 422  # the body is read before the 404
+            assert (await anon.post("/api/proof/" + "y" * 43)).status_code == 404  # no body needed to refuse
         assert len((await _proof(client, app_id))["screenshots"]) == 1
 
 
@@ -325,7 +325,8 @@ async def test_the_level_is_the_strongest_proof_and_a_correction_withdraws_text(
 @pytest.mark.parametrize(
     "event_type,detail,source,level",
     [("note", "Submission confirmed on the page", None, "email"), ("note", "SUBMISSION CONFIRMED", None, "email"),
-     ("note", "", EMAIL, "email"), ("applied", "", EMAIL, "email"),
+     ("note", "", EMAIL, "none"), ("note", "the portal said submission confirmed", None, "none"),
+     ("note", "Submission confirmed", EMAIL, "email"), ("applied", "", EMAIL, "email"),
      ("applied", "I applied", None, "none"), ("lesson", "submission confirmed", None, "none")],
 )
 async def test_what_counts_as_email_proof(authenticated_async_context, event_type, detail, source, level):
@@ -375,6 +376,62 @@ async def test_receipts_and_mcp_carry_the_proof(authenticated_async_context):
         assert link["single_use"] and "/api/proof/" in link["url"]
         denied = await mcp.call_tool("get_proof_upload_link", {"application_id": 987654321})
         assert denied.is_error and "404" in denied.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_a_receipt_confirmation_is_text_proof_and_clears_the_missing_list(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        with_ref, blank = [await _bring(client, {**AD, "company": c}) for c in ("WithRef", "Blank")]
+        for app_id, conf in ((with_ref, "REF-4471"), (blank, "  ")):
+            made = await client.post(
+                f"/api/applications/{app_id}/receipt", json={"confirmation": conf, "applied_at": _ago(9)}
+            )
+            assert made.status_code == 201, made.text
+        assert (await _proof(client, with_ref))["proof"]["level"] == "text"
+        assert (await _proof(client, blank))["proof"]["level"] == "none"
+        missing = (await client.get("/api/whats-new")).json()["proof_missing"]
+        assert [m["application_id"] for m in missing] == [blank]
+
+
+@pytest.mark.asyncio
+async def test_only_still_applied_jobs_are_listed_as_missing_proof(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        still, rejected, interview = [await _bring(client, {**AD, "company": c}) for c in ("Still", "Rej", "Int")]
+        for app_id in (still, rejected, interview):
+            await _ev(client, app_id, "applied", {}, occurred_at=_ago(8))
+        await _ev(client, rejected, "rejected", {})
+        await _ev(client, interview, "interview_scheduled", {}, scheduled_at=_ago(-3))
+        missing = (await client.get("/api/whats-new")).json()["proof_missing"]
+        assert [m["application_id"] for m in missing] == [still]
+
+
+@pytest.mark.asyncio
+async def test_links_in_proof_text_are_removed_before_storing(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        raw = "Thanks! See HTTPS://x.example/apply?token=SECRET123 or www.x.example/t?k=SECRET456 done"
+        assert (await _ev(client, app_id, "proof_text", {"text": raw})).status_code == 201
+        stored = [e for e in (await client.get(f"/api/applications/{app_id}")).json()["events"]
+                  if e["event_type"] == "proof_text"][-1]["payload"]["text"]
+        assert stored == "Thanks! See [link removed] or [link removed] done"
+        n = settings.PROOF_TEXT_MAX_CHARS  # the cap counts what is kept, not the link
+        assert (await _ev(client, app_id, "proof_text", {"text": "https://x.example/" + "a" * n})).status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_proof_text_takes_no_source_and_corrects_only_its_own_kind(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        a, b = [await _bring(client, {**AD, "company": c}) for c in ("A", "B")]
+        assert (await _ev(client, a, "proof_text", {"text": "t"}, source=EMAIL)).status_code == 422
+        first = (await _ev(client, a, "proof_text", {"text": "wrong page"})).json()["event_id"]
+        note = (await _ev(client, a, "note", {}, detail="n")).json()["event_id"]
+        other_app = (await _ev(client, b, "proof_text", {"text": "b"})).json()["event_id"]
+        for target in (note, other_app, 10**9):
+            resp = await _ev(client, a, "proof_text", {"text": "fix"}, corrects_event_id=target)
+            assert resp.status_code == 422, (target, resp.text)
+        fixed = await _ev(client, a, "proof_text", {"text": "right page"}, corrects_event_id=first)
+        assert fixed.status_code == 201, fixed.text
+        assert (await _proof(client, a))["proof"]["level"] == "text"
 
 
 # ── "no proof after 7 days" ──────────────────────────────────────────────────
@@ -446,53 +503,107 @@ async def test_the_audit_log_never_carries_tokens_text_or_bytes(authenticated_as
 # ── review fixes: the body is read before a pooled DB connection is borrowed; the count and ask are race-proof ──
 
 
-def _spy_db(monkeypatch):
-    """Override ``get_request_db`` with a spy; returns the list of times a handle was borrowed."""
-    from src.api.dependencies import get_request_db
-    from src.api.main import app
+def _spy(monkeypatch, read_ok=True):
+    """Wrap the route's short connection and ``_read_file``: ``log`` gets "open"/"read" (+ how many connections were
+    open at the read) so a test can see the ORDER and that no connection is held during the body read."""
+    from contextlib import asynccontextmanager
 
-    entered: list[str] = []
+    from src.api.routes import proof as route
 
-    async def fake():
-        entered.append("db")
-        yield object()
+    log: list[Any] = []
+    state = {"open": 0}
+    real_short, real_read = route._short_db, route._read_file
 
-    monkeypatch.setitem(app.dependency_overrides, get_request_db, fake)
-    return entered
+    @asynccontextmanager
+    async def short():
+        async with real_short() as db:
+            state["open"] += 1
+            log.append("open")
+            try:
+                yield db
+            finally:
+                state["open"] -= 1
+
+    async def read(request):
+        log.append(("read", state["open"]))
+        return await real_read(request)
+
+    monkeypatch.setattr(route, "_short_db", short)
+    monkeypatch.setattr(route, "_read_file", read)
+    return log
+
+
+MULTIPART = {"content-type": "multipart/form-data; boundary=x"}
 
 
 @pytest.mark.asyncio
-async def test_a_failed_body_read_never_borrows_a_db_connection(authenticated_async_context, monkeypatch):
+async def test_an_unknown_token_is_404_without_reading_the_body(authenticated_async_context, monkeypatch):
+    async with authenticated_async_context():
+        log = _spy(monkeypatch)
+        over_cap = {**MULTIPART, "content-length": str(MAX + 10**6)}
+        async with _anon() as anon:
+            for token in ("bad-shape", "u" * 43):
+                assert (await anon.post(f"/api/proof/{token}", content=b"x", headers=over_cap)).status_code == 404
+
+            async def boom():
+                raise AssertionError("the body stream was consumed")
+                yield b""
+
+            assert (await anon.post("/api/proof/" + "v" * 43, content=boom(), headers=MULTIPART)).status_code == 404
+        assert not [e for e in log if e != "open"], log  # never read
+
+
+@pytest.mark.asyncio
+async def test_a_used_or_expired_link_is_410_without_reading_the_body(authenticated_async_context, monkeypatch):
     async with authenticated_async_context() as client:
-        entered = _spy_db(monkeypatch)
-        big = {"content-type": "multipart/form-data; boundary=x", "content-length": str(MAX + 10**6)}
+        app_id = await _bring(client)
+        used, expired = await _link(client, app_id), await _link(client, app_id)
+        _sql("UPDATE proof_upload_links SET expires_at = ? WHERE token_hash = ?",
+             (_ago(1), __import__("hashlib").sha256(expired.rsplit("/", 1)[1].encode()).hexdigest()))
         async with _anon() as anon:
-            too_big = await anon.post("/api/proof/bad-shape", content=b"x", headers=big)
-            assert too_big.status_code == 413
-            assert (await anon.post("/api/proof/bad-shape", content=b"not multipart")).status_code == 422
-        assert entered == [], "the body must be read BEFORE get_request_db is resolved"
-        # negative control: a readable body does reach get_request_db (public route: bad shape -> 404)
-        async with _anon() as anon:
-            assert (await _post(anon, "/api/proof/bad-shape", PNG)).status_code == 404
-        assert entered == ["db"]
+            assert (await _post(anon, used, PNG)).status_code == 201
+            log = _spy(monkeypatch)
+            over_cap = {**MULTIPART, "content-length": str(MAX + 10**6)}
+            for path in (used, expired):
+                gone = await anon.post(path, content=b"x", headers=over_cap)
+                assert gone.status_code == 410 and gone.headers["cache-control"] == "no-store"
+        assert not [e for e in log if e != "open"], log
 
 
 @pytest.mark.asyncio
-async def test_a_slow_upload_times_out_with_408_before_any_db_borrow(authenticated_async_context, monkeypatch):
+async def test_no_pooled_connection_is_held_while_the_body_is_read(authenticated_async_context, monkeypatch):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        path = await _link(client, app_id)
+        log = _spy(monkeypatch)
+        async with _anon() as anon:
+            big = {**MULTIPART, "content-length": str(MAX + 10**6)}
+            assert (await anon.post(path, content=b"x", headers=big)).status_code == 413
+            assert (await anon.post(path, content=b"not multipart")).status_code == 422
+            assert (await _post(anon, path, PNG)).status_code == 201  # the link survived both failed reads
+        assert ("read", 0) in log and ("read", 1) not in log, log  # every read saw zero open connections
+
+
+@pytest.mark.asyncio
+async def test_a_slow_upload_times_out_with_408_holding_no_connection(authenticated_async_context, monkeypatch):
     from src.api.routes import proof as proof_route
 
-    async def never(_request):
-        await asyncio.Event().wait()
-
-    monkeypatch.setattr(proof_route, "_read_file", never)
-    monkeypatch.setattr(settings, "PROOF_UPLOAD_READ_SECONDS", 0.05)
     async with authenticated_async_context() as client:
-        entered = _spy_db(monkeypatch)
+        app_id = await _bring(client)
+        path = await _link(client, app_id)
+        log = _spy(monkeypatch)
+
+        async def never(request):
+            log.append(("read", 0))  # _spy's wrapper is replaced; the short connection is closed by now
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(proof_route, "_read_file", never)
+        monkeypatch.setattr(settings, "PROOF_UPLOAD_READ_SECONDS", 0.05)
         async with _anon() as anon:
-            slow = await _post(anon, "/api/proof/bad-shape", PNG)
+            slow = await _post(anon, path, PNG)
         assert slow.status_code == 408 and slow.json()["detail"] == "upload took too long"
         assert slow.headers["cache-control"] == "no-store"
-        assert entered == []
+        assert log == ["open", ("read", 0)]
 
 
 @pytest.mark.asyncio
