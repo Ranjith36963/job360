@@ -281,6 +281,18 @@ wall (never a password anywhere). A CV that changed since you read it is 409:
 get the kit again. `duplicate_cleared` and where="web" need the user's own click
 on the website (403). `kit_read` is written by Job360 itself.
 
+## Proof
+
+Proof level of an application, best first: `email` (a confirmation email
+recorded with its `source`) > `text` (a `proof_text` event) > `screenshot_only`
+> `none`. `proof_text` payload is `{text, page_host}`: the thank-you page text,
+plain, at most 4,000 chars; Job360 fills who and when. `proof_screenshot` is
+written by Job360 alone. A screenshot goes in only through the one-time link
+from `get_proof_upload_link` (5 minutes, one use, png/jpeg/webp, 3 MB, 3 per
+application); never paste it anywhere else. Never invent proof: no page text
+and no email means "claimed, unverified". Only the user deletes a screenshot,
+on the website.
+
 ## Profile
 
 `assistant_notes` are the user's standing instructions to you (e.g. "never

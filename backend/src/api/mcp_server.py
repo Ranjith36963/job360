@@ -287,6 +287,7 @@ def build_server(version: str = "") -> MCPServer:
     from src.api.routes import asks as asks_route
     from src.api.routes import bring as bring_route
     from src.api.routes import profile as profile_route
+    from src.api.routes import proof as proof_route
     from src.api.routes import receipts as receipts_route
     from src.api.routes import recipes as recipes_route
     from src.api.routes import tailor as tailor_route
@@ -1225,6 +1226,22 @@ def build_server(version: str = "") -> MCPServer:
             "get_application_kit", "ok", application_id=application_id,
             kit_event_id=resp["kit"]["id"], missing_count=len(resp["missing"]),
         )
+        return resp
+
+    @mcp.tool()
+    async def get_proof_upload_link(application_id: int) -> dict[str, Any]:
+        """A one-time upload link for the proof screenshot of ONE application (the confirmation page after you
+        applied). Valid 5 minutes, works once. POST it as multipart/form-data, field `file` (png, jpeg or webp, up to
+        3 MB, at most 3 per application); you get 201 {screenshot_id, ...}. Use it only if you can upload files; never
+        paste the link into a form or show it to a site. Text proof needs no link: record_event proof_text {text,
+        page_host}. A 410 means the link was used or expired - call this again."""
+        try:
+            async with _request_db() as db:
+                resp = await proof_route.create_proof_link(application_id, Response(), db, _user())
+        except HTTPException as exc:
+            _audit("get_proof_upload_link", "error", application_id=application_id, http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("get_proof_upload_link", "ok", application_id=application_id)
         return resp
 
     @mcp.tool()

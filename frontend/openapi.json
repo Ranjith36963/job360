@@ -5072,6 +5072,47 @@
         "title": "ProfileVersionsListResponse",
         "type": "object"
       },
+      "ProofLinkOut": {
+        "properties": {
+          "accepts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepts",
+            "type": "array"
+          },
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "max_bytes": {
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "single_use": {
+            "default": true,
+            "title": "Single Use",
+            "type": "boolean"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "url",
+          "expires_at",
+          "max_bytes",
+          "accepts"
+        ],
+        "title": "ProofLinkOut",
+        "type": "object"
+      },
       "ProofMissingOut": {
         "description": "An applied job with no proof yet; ``question``/``context`` go straight into ask_user.",
         "properties": {
@@ -5137,6 +5178,34 @@
           }
         },
         "title": "ProofOut",
+        "type": "object"
+      },
+      "ProofUploadOut": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "mime": {
+            "title": "Mime",
+            "type": "string"
+          },
+          "screenshot_id": {
+            "title": "Screenshot Id",
+            "type": "integer"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "screenshot_id",
+          "application_id",
+          "mime",
+          "size"
+        ],
+        "title": "ProofUploadOut",
         "type": "object"
       },
       "ProvenanceSegment": {
@@ -9609,6 +9678,81 @@
         ]
       }
     },
+    "/api/applications/{application_id}/proof/link": {
+      "post": {
+        "description": "Mint a one-time upload link for THIS application's proof screenshot (5 minutes).",
+        "operationId": "create_proof_link_api_applications__application_id__proof_link_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProofLinkOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Proof Link",
+        "tags": [
+          "proof"
+        ]
+      }
+    },
     "/api/applications/{application_id}/receipt": {
       "post": {
         "operationId": "record_application_receipt_api_applications__application_id__receipt_post",
@@ -13716,6 +13860,68 @@
         "summary": "Restore Version",
         "tags": [
           "profile"
+        ]
+      }
+    },
+    "/api/proof/{token}": {
+      "post": {
+        "description": "PUBLIC: the token is the credential. Errors: 404 unknown, 410 used/expired, 413, 415, 409, 429.\nThe body is read first (size cap + deadline), so a junk token costs a bounded read before its 404.",
+        "operationId": "upload_proof_via_link_api_proof__token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "format": "binary",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProofUploadOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Proof Via Link",
+        "tags": [
+          "proof"
         ]
       }
     },

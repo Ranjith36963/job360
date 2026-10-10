@@ -464,6 +464,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/proof/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Proof Link
+         * @description Mint a one-time upload link for THIS application's proof screenshot (5 minutes).
+         */
+        post: operations["create_proof_link_api_applications__application_id__proof_link_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/receipt": {
         parameters: {
             query?: never;
@@ -1871,6 +1891,27 @@ export interface paths {
          *     similar cross-tenant lookups.
          */
         post: operations["restore_version_api_profile_versions__version_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/proof/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Proof Via Link
+         * @description PUBLIC: the token is the credential. Errors: 404 unknown, 410 used/expired, 413, 415, 409, 429.
+         *     The body is read first (size cap + deadline), so a junk token costs a bounded read before its 404.
+         */
+        post: operations["upload_proof_via_link_api_proof__token__post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4217,6 +4258,24 @@ export interface components {
             /** Versions */
             versions: components["schemas"]["ProfileVersionSummary"][];
         };
+        /** ProofLinkOut */
+        ProofLinkOut: {
+            /** Accepts */
+            accepts: string[];
+            /** Application Id */
+            application_id: number;
+            /** Expires At */
+            expires_at: string;
+            /** Max Bytes */
+            max_bytes: number;
+            /**
+             * Single Use
+             * @default true
+             */
+            single_use: boolean;
+            /** Url */
+            url: string;
+        };
         /**
          * ProofMissingOut
          * @description An applied job with no proof yet; ``question``/``context`` go straight into ask_user.
@@ -4260,6 +4319,17 @@ export interface components {
              * @default 0
              */
             screenshots: number;
+        };
+        /** ProofUploadOut */
+        ProofUploadOut: {
+            /** Application Id */
+            application_id: number;
+            /** Mime */
+            mime: string;
+            /** Screenshot Id */
+            screenshot_id: number;
+            /** Size */
+            size: number;
         };
         /** ProvenanceSegment */
         ProvenanceSegment: {
@@ -5980,6 +6050,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationKitOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_proof_link_api_applications__application_id__proof_link_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProofLinkOut"];
                 };
             };
             /** @description Validation Error */
@@ -8125,6 +8230,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_proof_via_link_api_proof__token__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProofUploadOut"];
                 };
             };
             /** @description Validation Error */
