@@ -243,3 +243,73 @@ async def test_audit_lines_carry_reason_and_actor_never_the_detail(authenticated
     assert next(r for r in lines if r["event"] == "unblocked")["resolution"] == "retried"
     for record in log_capture.records:
         assert "hunter2" not in repr(record)
+
+
+# ── review follow-ups: atomicity, isolation, re-block, the ask cap ───────────
+
+
+@pytest.mark.asyncio
+async def test_a_refused_blocked_leaves_no_orphan_ask(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        resp = await _event(client, app_id, "blocked", _blocked(), corrects_event_id=999999)
+        assert resp.status_code == 422, resp.text
+        source = {"kind": "email", "message_id": "m-1", "sender": "a@b.example", "subject": "s",
+                  "received_at": "2026-10-09T10:00:00Z"}
+        assert (await _event(client, app_id, "blocked", _blocked(), source=source)).status_code == 422
+        assert await _open_asks(client, app_id) == []
+        assert (await client.get(f"/api/applications/{app_id}/controls")).json()["blocked"] is None
+
+
+@pytest.mark.asyncio
+async def test_another_users_application_is_404_and_opens_no_ask(authenticated_async_context):
+    async with authenticated_async_context() as owner:
+        app_id = await _bring(owner)
+        token = await _mint_token(owner)
+    # A second account's session cannot touch the owner's application.
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+    from src.core import settings
+    from src.repositories import pgsync
+
+    sync = TestClient(app)
+    email = "intruder-s6@example.com"
+    assert sync.post("/api/auth/register", json={"email": email, "password": "s3cretpassword"}).status_code == 201
+    conn = pgsync.connect(str(settings.DB_PATH))
+    conn.execute("UPDATE users SET email_verified_at = ? WHERE email = ?", ("2026-01-01T00:00:00Z", email))
+    conn.commit()
+    conn.close()
+    login = sync.post("/api/auth/login", json={"email": email, "password": "s3cretpassword"})
+    cookie = str(login.cookies.get("job360_session"))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test",
+                           cookies={"job360_session": cookie}) as intruder:
+        assert (await _event(intruder, app_id, "blocked", _blocked())).status_code == 404
+        assert (await intruder.post(f"/api/applications/{app_id}/blocked/resolve")).status_code == 404
+    async with _bearer_client(token) as agent:
+        assert await _open_asks(agent, app_id) == []
+
+
+@pytest.mark.asyncio
+async def test_blocking_again_after_unblocked_opens_a_new_ask(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        assert (await _event(client, app_id, "blocked", _blocked())).status_code == 201
+        first = (await _open_asks(client, app_id))[0]["id"]
+        assert (await _event(client, app_id, "unblocked", {"resolution": "retried"})).status_code == 201
+        assert (await _event(client, app_id, "blocked", _blocked())).status_code == 201
+        asks = await _open_asks(client, app_id)
+        assert len(asks) == 1 and asks[0]["id"] != first
+
+
+@pytest.mark.asyncio
+async def test_a_full_needs_you_queue_still_records_the_block(authenticated_async_context, monkeypatch):
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "ASKS_MAX_OPEN_PER_USER", 0)
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        assert (await _event(client, app_id, "blocked", _blocked())).status_code == 201
+        assert await _open_asks(client, app_id) == []
+        assert (await client.get(f"/api/applications/{app_id}/controls")).json()["blocked"]["ask_id"] is None
+        assert (await _check(client, app_id))["reason"] == "blocked"

@@ -1929,12 +1929,9 @@ async def resolve_blocked(
         raise HTTPException(status_code=404, detail="application not found")
     try:
         stored = blocked_service.check_payload(user, "unblocked", {"resolution": "user_did_it"}, "")
-        stored = await blocked_service.before_append(db, user, application_id, "unblocked", stored)
-        await spine.append_event(
-            db, user_id=user.id, application_id=application_id, event_type="unblocked",
-            payload=stored, occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by=actor_for(user),
+        await blocked_service.record(
+            db, user, application_id, "unblocked", stored, occurred_at=datetime.now(timezone.utc).isoformat(),
         )
-        await blocked_service.after_append(db, user, application_id, "unblocked", stored)
     except SpineError as exc:
         _raise(exc)
     return await _controls(db, user, application_id)
@@ -2053,9 +2050,15 @@ async def record_event(
             # S3: closed payloads + who may write which (the MCP tool inherits this).
             payload = await kit_service.check_kit_event(db, user, application_id, body.event_type, payload)
         if body.event_type in blocked_service.BLOCKED_EVENT_TYPES:
-            # S6: closed payloads; `blocked` opens one Needs-you ask (the MCP tool inherits this).
-            payload = blocked_service.check_payload(user, body.event_type, payload, detail)
-            payload = await blocked_service.before_append(db, user, application_id, body.event_type, payload)
+            # S6: closed payloads; `blocked` opens one Needs-you ask, `unblocked`
+            # closes it - ask + event in ONE transaction (the MCP tool inherits this).
+            if body.corrects_event_id is not None or source is not None:
+                raise SpineError(422, f"{body.event_type} takes no corrects_event_id or source")
+            stored = blocked_service.check_payload(user, body.event_type, payload, detail)
+            return await blocked_service.record(
+                db, user, application_id, body.event_type, stored,
+                occurred_at=occurred_at, follow_up_on=follow_up_on_arg,
+            )
         # append_event always returns the REAL final follow_up_on — set,
         # cleared, auto-cleared (an overdue date + a status event), replay-
         # derived (a correction), or unchanged — so there is nothing left to
@@ -2068,8 +2071,6 @@ async def record_event(
         )
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
-        if body.event_type in blocked_service.BLOCKED_EVENT_TYPES:
-            await blocked_service.after_append(db, user, application_id, body.event_type, payload)
         return result
     except SpineError as exc:
         _raise(exc)

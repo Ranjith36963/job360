@@ -22,6 +22,7 @@ import re
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.services.applications import asks as asks_service
+from src.services.applications import spine
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
@@ -204,6 +205,23 @@ async def after_append(
             except SpineError:  # pragma: no cover - answered or withdrawn in between
                 pass
     _log(user, application_id, event_type, stored, "ok")
+
+
+async def record(
+    db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, stored: dict[str, Any],
+    *, occurred_at: str, follow_up_on: Any = spine.FOLLOW_UP_UNSET,
+) -> dict[str, Any]:
+    """Append a checked ``blocked`` / ``unblocked`` with its ask work in ONE
+    transaction: a failed append leaves no orphan ask, a failed ask no event.
+    The caller has proven the application is the user's."""
+    async with db._db.transaction():
+        stored = await before_append(db, user, application_id, event_type, stored)
+        result = await spine.append_event(
+            db, user_id=user.id, application_id=application_id, event_type=event_type,
+            payload=stored, occurred_at=occurred_at, recorded_by=actor_for(user), follow_up_on=follow_up_on,
+        )
+        await after_append(db, user, application_id, event_type, stored)
+    return result
 
 
 def _log(user: CurrentUser, application_id: int, event_type: str, stored: dict[str, Any], result: str) -> None:
