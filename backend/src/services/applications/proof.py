@@ -177,7 +177,7 @@ async def delete_screenshot(
         cur = await db._db.execute(
             "UPDATE application_proof_screenshots SET bytes = NULL, deleted_at = ?, delete_note = ? "
             "WHERE id = ? AND user_id = ? AND application_id = ? AND deleted_at IS NULL",
-            (now.isoformat(), f"Deleted by you, {now.date().isoformat()}", sid, user_id, application_id),
+            (now.isoformat(), f"Deleted by you on {now.day} {now:%b %Y}", sid, user_id, application_id),
         )
         if not cur.rowcount:
             raise SpineError(404, "screenshot not found")

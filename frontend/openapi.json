@@ -5437,6 +5437,14 @@
             "title": "Application Id",
             "type": "integer"
           },
+          "max_bytes": {
+            "title": "Max Bytes",
+            "type": "integer"
+          },
+          "max_live": {
+            "title": "Max Live",
+            "type": "integer"
+          },
           "proof": {
             "$ref": "#/components/schemas/ProofOut"
           },
@@ -5451,7 +5459,9 @@
         "required": [
           "application_id",
           "proof",
-          "screenshots"
+          "screenshots",
+          "max_bytes",
+          "max_live"
         ],
         "title": "ProofStateOut",
         "type": "object"

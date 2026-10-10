@@ -66,6 +66,8 @@ class ProofStateOut(BaseModel):
     application_id: int
     proof: ProofOut
     screenshots: list[ProofScreenshotOut]
+    max_bytes: int
+    max_live: int
 
 
 def _raise(exc: SpineError, headers: Optional[dict[str, str]] = None) -> NoReturn:
@@ -164,6 +166,8 @@ async def get_proof(
         "application_id": application_id,
         "proof": (await proof.proof_for(db, user.id, [application_id]))[application_id],
         "screenshots": await proof.screenshot_meta(db, user.id, application_id),
+        "max_bytes": settings.PROOF_SCREENSHOT_MAX_BYTES,
+        "max_live": settings.PROOF_SCREENSHOTS_MAX_LIVE,
     }
 
 
