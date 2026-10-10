@@ -10,6 +10,7 @@ import { ApplicationRows } from "@/components/applications/ApplicationList";
 import { AskCard } from "@/components/needs-you/NeedsYou";
 import { CountsBlock, DueBlock, FeedBlock } from "@/components/home/HomeRail";
 import { HomeWelcome } from "@/components/home/HomeWelcome";
+import { SetupCard } from "@/components/profile/SetupProgress";
 import { fetchAllApplications, fetchWhatsNewPages } from "@/lib/home-fetch";
 import {
   FEED_LIMIT,
@@ -293,6 +294,7 @@ export function Home() {
             data-testid="home-rail"
             className="flex min-w-0 flex-col gap-7 border-t border-border pt-8 min-[1000px]:border-l min-[1000px]:border-t-0 min-[1000px]:pl-8 min-[1000px]:pt-0"
           >
+            <SetupCard />
             {stats.status === "ok" && <CountsBlock overall={stats.value} />}
             <DueBlock due={dueList} />
             <FeedBlock items={feedItems} />

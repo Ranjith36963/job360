@@ -764,6 +764,20 @@ export async function declineSettingRequest(id: number): Promise<AssistantSettin
   });
 }
 
+/** Every change to ONE assistant setting, newest first (both sides). */
+export async function getSettingHistory(path: string): Promise<ProfileEditHistoryRow[]> {
+  const res = await request<_Schemas["ProfileEditHistoryResponse"]>(`/api/assistant-settings/history${qs({ path })}`);
+  return res.rows;
+}
+
+/** "Take back" the newest change to one setting: a new web row with the value before it. */
+export async function takeBackSetting(path: string): Promise<AssistantSettingsView> {
+  return request<AssistantSettingsView>("/api/assistant-settings/take-back", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
 // ---- Lessons (slice 9, docs/plans/2026-09-11-lessons/spec.md) ----
 // "Flag for next time": written through recordApplicationEvent(event_type
 // "lesson"); read back here for the profile's Lessons list. The agent gets

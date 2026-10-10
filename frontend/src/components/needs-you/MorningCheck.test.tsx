@@ -112,3 +112,13 @@ describe("MorningCheck", () => {
     }
   });
 });
+
+describe("MorningCheck refresh", () => {
+  it("re-reads when a send or decline happens below it", async () => {
+    render(<MorningCheck />);
+    await screen.findByTestId("mc-strip");
+    expect(getMorningCheck).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(new CustomEvent("job360:ready-changed"));
+    await waitFor(() => expect(getMorningCheck).toHaveBeenCalledTimes(2));
+  });
+});
