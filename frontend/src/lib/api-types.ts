@@ -1330,6 +1330,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/morning-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Morning Check
+         * @description State + the four-bucket tally since ``since``.
+         */
+        get: operations["morning_check_api_morning_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/oauth/authorize": {
         parameters: {
             query?: never;
@@ -3853,6 +3873,39 @@ export interface components {
             /** Next */
             next?: string | null;
         };
+        /** MorningCheckOut */
+        MorningCheckOut: {
+            /** Now */
+            now: string;
+            /** Since */
+            since: string;
+            state: components["schemas"]["MorningState"];
+            tally: components["schemas"]["MorningTally"];
+        };
+        /** MorningState */
+        MorningState: {
+            /** Applied Today */
+            applied_today: number;
+            /** Apply Mode */
+            apply_mode: string;
+            /** Daily Cap */
+            daily_cap?: number | null;
+            /** Paused */
+            paused: boolean;
+            /** Paused At */
+            paused_at?: string | null;
+            /** Paused By */
+            paused_by?: string | null;
+            /** Submit Mode */
+            submit_mode: string;
+        };
+        /** MorningTally */
+        MorningTally: {
+            blocked: components["schemas"]["TallyBucket"];
+            failed: components["schemas"]["TallyBucket"];
+            sent: components["schemas"]["TallyBucket"];
+            waiting: components["schemas"]["TallyBucket"];
+        };
         /**
          * NextStepOut
          * @description What to do next on this application — a state machine over the stored
@@ -4959,6 +5012,26 @@ export interface components {
         TakeBackRequest: {
             /** Path */
             path: string;
+        };
+        /** TallyBucket */
+        TallyBucket: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["TallyItem"][];
+        };
+        /** TallyItem */
+        TallyItem: {
+            /** Application Id */
+            application_id: number;
+            /** At */
+            at: string;
+            /** Company */
+            company: string;
+            /** Receipt Id */
+            receipt_id?: number | null;
+            /** Title */
+            title: string;
         };
         /** TimezoneRequest */
         TimezoneRequest: {
@@ -7357,6 +7430,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LivezResponse"];
+                };
+            };
+        };
+    };
+    morning_check_api_morning_check_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MorningCheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

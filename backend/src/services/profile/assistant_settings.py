@@ -123,7 +123,10 @@ def parse_iso_with_offset(text: str) -> datetime:
     parsed = datetime.fromisoformat(raw)
     if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
         raise ValueError("no offset")
-    return parsed.astimezone(timezone.utc)
+    try:
+        return parsed.astimezone(timezone.utc)
+    except OverflowError:  # year 1 / 9999 shifted past the calendar edge
+        raise ValueError("out of range") from None
 
 
 def _validate_paused_until(path: str, value: Any, now: datetime) -> str:

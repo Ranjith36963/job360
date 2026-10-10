@@ -234,13 +234,13 @@ async def test_audit_lines_carry_reason_and_actor_never_the_detail(authenticated
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         assert (await _event(client, app_id, "blocked", _blocked(detail=SECRET_DETAIL))).status_code == 201
-        assert (await _event(client, app_id, "unblocked", {"resolution": "retried"})).status_code == 201
+        assert (await _event(client, app_id, "unblocked", {"resolution": "skipped"})).status_code == 201
     lines = [r for r in log_capture.records if r.get("event") in ("blocked", "unblocked")]
     assert {r["event"] for r in lines} == {"blocked", "unblocked"}
     blocked = next(r for r in lines if r["event"] == "blocked")
     assert blocked["reason"] == "captcha" and blocked["actor"] == "web" and blocked["result"] == "ok"
     assert blocked["application_id"] == app_id and blocked["user_id"]
-    assert next(r for r in lines if r["event"] == "unblocked")["resolution"] == "retried"
+    assert next(r for r in lines if r["event"] == "unblocked")["resolution"] == "skipped"
     for record in log_capture.records:
         assert "hunter2" not in repr(record)
 
@@ -249,16 +249,59 @@ async def test_audit_lines_carry_reason_and_actor_never_the_detail(authenticated
 
 
 @pytest.mark.asyncio
-async def test_a_refused_blocked_leaves_no_orphan_ask(authenticated_async_context):
+async def test_a_failed_append_leaves_no_orphan_ask(authenticated_async_context, monkeypatch):
+    from src.services.applications.spine import SpineError
+
+    async def boom(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise SpineError(409, "x")
+
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
-        resp = await _event(client, app_id, "blocked", _blocked(), corrects_event_id=999999)
-        assert resp.status_code == 422, resp.text
+        monkeypatch.setattr(blocked_service.spine, "append_event", boom)
+        resp = await _event(client, app_id, "blocked", _blocked())
+        monkeypatch.undo()
+        assert resp.status_code == 409, resp.text
+        assert await _open_asks(client, app_id) == []
+        events = (await client.get(f"/api/applications/{app_id}")).json().get("events") or []
+        assert not [e for e in events if e["event_type"] in ("asked", "blocked")]
+
+
+@pytest.mark.asyncio
+async def test_blocked_refuses_corrects_event_id_and_source(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        assert (await _event(client, app_id, "blocked", _blocked(), corrects_event_id=1)).status_code == 422
         source = {"kind": "email", "message_id": "m-1", "sender": "a@b.example", "subject": "s",
                   "received_at": "2026-10-09T10:00:00Z"}
         assert (await _event(client, app_id, "blocked", _blocked(), source=source)).status_code == 422
-        assert await _open_asks(client, app_id) == []
-        assert (await client.get(f"/api/applications/{app_id}/controls")).json()["blocked"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["captcha", "bot_check"])
+async def test_a_captcha_or_bot_check_is_never_retried(authenticated_async_context, reason):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        assert (await _event(client, app_id, "blocked", _blocked(reason=reason))).status_code == 201
+        resp = await _event(client, app_id, "unblocked", {"resolution": "retried"})
+        assert resp.status_code == 422 and "never retried" in resp.text
+        assert (await _event(client, app_id, "unblocked", {"resolution": "skipped"})).status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_retried_is_fine_for_other_reasons(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        assert (await _event(client, app_id, "blocked", _blocked(reason="site_error"))).status_code == 201
+        assert (await _event(client, app_id, "unblocked", {"resolution": "retried"})).status_code == 201
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["step", "detail"])
+async def test_no_links_in_step_or_detail(authenticated_async_context, field):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        resp = await _event(client, app_id, "blocked", _blocked(**{field: "see https://jobs.example.com/x"}))
+        assert resp.status_code == 422 and "no links here" in resp.text
 
 
 @pytest.mark.asyncio
@@ -296,7 +339,7 @@ async def test_blocking_again_after_unblocked_opens_a_new_ask(authenticated_asyn
         app_id = await _bring(client)
         assert (await _event(client, app_id, "blocked", _blocked())).status_code == 201
         first = (await _open_asks(client, app_id))[0]["id"]
-        assert (await _event(client, app_id, "unblocked", {"resolution": "retried"})).status_code == 201
+        assert (await _event(client, app_id, "unblocked", {"resolution": "user_did_it"})).status_code == 201
         assert (await _event(client, app_id, "blocked", _blocked())).status_code == 201
         asks = await _open_asks(client, app_id)
         assert len(asks) == 1 and asks[0]["id"] != first
@@ -313,3 +356,4 @@ async def test_a_full_needs_you_queue_still_records_the_block(authenticated_asyn
         assert await _open_asks(client, app_id) == []
         assert (await client.get(f"/api/applications/{app_id}/controls")).json()["blocked"]["ask_id"] is None
         assert (await _check(client, app_id))["reason"] == "blocked"
+

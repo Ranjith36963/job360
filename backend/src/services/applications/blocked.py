@@ -46,6 +46,7 @@ BLOCKED_REASONS: dict[str, str] = {
     "other": "a problem",
 }
 UNBLOCK_RESOLUTIONS = frozenset({"retried", "user_did_it", "skipped"})
+NEVER_RETRIED = frozenset({"captcha", "bot_check"})
 BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail"})
 STEP_MAX_CHARS = 120
 DETAIL_MAX_CHARS = 300
@@ -60,6 +61,8 @@ def _plain(key: str, value: Any, limit: int) -> str:
     if not isinstance(value, str):
         raise SpineError(422, f"blocked {key} must be text")
     text = " ".join(asks_service.clean_text(value).split())
+    if "://" in text:
+        raise SpineError(422, f"blocked {key}: no links here; page_host carries the site")
     if len(text) > limit:
         raise SpineError(422, f"blocked {key} must be at most {limit} characters")
     return text
@@ -177,6 +180,11 @@ async def before_append(
         if not events or events[0]["event_type"] != "blocked":
             _log(user, application_id, event_type, stored, "refused")
             raise SpineError(409, "this application is not blocked")
+        if stored["resolution"] == "retried" and events[0]["payload"].get("reason") in NEVER_RETRIED:
+            _log(user, application_id, event_type, stored, "refused")
+            raise SpineError(
+                422, "a CAPTCHA or bot check is never retried; the user resolves it (user_did_it) or it is skipped"
+            )
         return stored
     open_ids = await _open_ask_ids(db, user.id, _ask_ids(events, stored["reason"]))
     if open_ids:
@@ -215,6 +223,11 @@ async def record(
     transaction: a failed append leaves no orphan ask, a failed ask no event.
     The caller has proven the application is the user's."""
     async with db._db.transaction():
+        # Lock the application row first: two `blocked` calls at once queue here,
+        # so the second sees the first's ask and cannot open another.
+        await db._db.execute(
+            "SELECT id FROM applications WHERE id = ? AND user_id = ? FOR UPDATE", (application_id, user.id)
+        )
         stored = await before_append(db, user, application_id, event_type, stored)
         result = await spine.append_event(
             db, user_id=user.id, application_id=application_id, event_type=event_type,

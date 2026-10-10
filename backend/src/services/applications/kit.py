@@ -50,7 +50,7 @@ KIT_EVENT_TYPES = frozenset({
     "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
     "form_filled", "hold_released", "site_account", "account_needed",
 })
-HOLD_RELEASE_REASONS = frozenset({"done", "blocked", "stopped"})
+HOLD_RELEASE_REASONS = frozenset({"done", "blocked", "stopped", "failed"})
 SEEN_WHERE = frozenset({"web", "chat"})
 EQUALITY_LABEL = "equality / voluntary"
 NO_CV_REASON = "no CV saved for this application"

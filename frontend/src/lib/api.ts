@@ -987,3 +987,10 @@ export async function updateContact(
 ): Promise<Contact> {
   return request(`/api/contacts/${contactId}`, { method: "PATCH", body: JSON.stringify(body) });
 }
+
+// ---- Morning check (S5b) ----
+export type MorningCheck = _Schemas["MorningCheckOut"];
+
+export async function getMorningCheck(since: string): Promise<MorningCheck> {
+  return request<MorningCheck>(`/api/morning-check${qs({ since })}`);
+}
