@@ -111,6 +111,14 @@ print(json.dumps({"modules": modules, "gated": sorted(found)}))
 
 
 def _discover() -> dict:
+    """Run the discovery script and return ``{"modules": int, "gated": [str]}``.
+
+    Deliberately NOT cached, unlike the sibling guard's ``lru_cache``: each call
+    is a fresh interpreter, which is the whole point above, and two subprocess
+    spawns cost a couple of seconds. A non-zero exit is raised as an
+    ``AssertionError`` rather than returning an empty table, so a broken import
+    fails loudly instead of letting every assertion below pass on nothing.
+    """
     proc = subprocess.run(
         [sys.executable, "-c", _DISCOVER],
         cwd=str(BACKEND),
