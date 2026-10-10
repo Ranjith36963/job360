@@ -300,6 +300,18 @@ When the user answers a blocked ask, do what they said, then record
 `unblocked`. If Needs-you is full no ask opens (`check_submit` still asks):
 tell the user in chat.
 
+## Proof
+
+Proof level of an application, best first: `email` (a confirmation email
+recorded with its `source`) > `text` (a `proof_text` event) > `screenshot_only`
+> `none`. `proof_text` payload is `{text, page_host}`: the thank-you page text,
+plain, at most 4,000 chars; Job360 fills who and when. `proof_screenshot` is
+written by Job360 alone. A screenshot goes in only through the one-time link
+from `get_proof_upload_link` (5 minutes, one use, png/jpeg/webp, 3 MB, 3 per
+application); never paste it anywhere else. Never invent proof: no page text
+and no email means "claimed, unverified". Only the user deletes a screenshot,
+on the website.
+
 ## Profile
 
 `assistant_notes` are the user's standing instructions to you (e.g. "never

@@ -1,6 +1,7 @@
-"""S7a - PROOF OF APPLICATION, the read side (owner decision 2026-10-10).
+"""S7 - PROOF OF APPLICATION (owner decision 2026-10-10).
 
-Pasted confirmation text, the proof level, the "no proof after 7 days" ask. Real doors (HTTP + MCP), VALUES asserted
+Screenshots (single-use link), pasted confirmation text, the proof
+level, the "no proof after 7 days" ask. Real doors (HTTP + MCP), VALUES asserted
 (rule #21). Helpers are copied, never imported from another test module.
 """
 from __future__ import annotations
@@ -18,6 +19,8 @@ from src.core import settings
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+WEBP = b"RIFF\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 32
+MAX = settings.PROOF_SCREENSHOT_MAX_BYTES
 AD = {"title": "Data Engineer", "company": "Northwind", "location": "London", "description": "Pipelines. " * 8,
       "apply_url": "https://northwind.example/careers/7"}
 EMAIL = {"kind": "email", "message_id": "<m1@northwind.example>", "sender": "hr@northwind.example", "subject": "Hi"}
@@ -37,6 +40,22 @@ async def _ev(client: AsyncClient, app_id: int, event_type: str, payload: dict |
     return await client.post(
         f"/api/applications/{app_id}/events", json={"event_type": event_type, "payload": payload or {}, **kw}
     )
+
+
+async def _link(client: AsyncClient, app_id: int) -> str:
+    resp = await client.post(f"/api/applications/{app_id}/proof/link")
+    assert resp.status_code == 201, resp.text
+    return "/api/proof/" + resp.json()["url"].rsplit("/", 1)[1]
+
+
+def _post(client: AsyncClient, path: str, data: bytes, name: str = "shot.png"):
+    return client.post(path, files={"file": (name, data, "image/png")})
+
+
+def _anon() -> AsyncClient:
+    from src.api.main import app
+
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
 async def _bearer(client: AsyncClient) -> AsyncClient:
@@ -73,15 +92,17 @@ async def _proof(client: AsyncClient, app_id: int) -> dict[str, Any]:
     return {"application_id": app_id, "proof": resp.json()["proof"], "screenshots": shots}
 
 
-def _seed(user_id: str, app_id: int, data: bytes = PNG) -> int:
-    """One screenshot row by direct SQL (the upload door comes with the next PR); returns its id."""
-    now = datetime.now(timezone.utc).isoformat()
-    _sql(
-        "INSERT INTO application_proof_screenshots (user_id, application_id, mime, bytes, sha256, size, created_by, "
-        "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (user_id, app_id, "image/png", data, "0" * 64, len(data), "web", now),
-    )
-    return int(_sql("SELECT MAX(id) FROM application_proof_screenshots WHERE application_id = ?", (app_id,))[0][0])
+async def _seed(user_id: str, app_id: int, data: bytes = PNG) -> dict[str, Any]:
+    """Store a screenshot through the service (the upload door is the link route, covered separately)."""
+    from src.repositories.database import JobDatabase
+    from src.services.applications import proof
+
+    db = JobDatabase(str(settings.DB_PATH))
+    await db.connect()
+    try:
+        return await proof.store_screenshot(db, user_id, app_id, data, "web", "link", datetime.now(timezone.utc))
+    finally:
+        await db.close()
 
 
 class _Capture(logging.Handler):
@@ -105,11 +126,126 @@ def logs():
     audit.setLevel(level)
 
 
+# ── the link: upload, single use, expiry, ownership ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_link_upload_stores_the_image_and_leaves_a_trail(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        minted = await client.post(f"/api/applications/{app_id}/proof/link")
+        body = minted.json()
+        assert minted.headers["cache-control"] == "no-store"
+        assert (body["application_id"], body["single_use"], body["max_bytes"]) == (app_id, True, MAX)
+        assert body["accepts"] == ["image/png", "image/jpeg", "image/webp"]
+        assert body["url"].startswith(settings.SITE_BASE_URL + "/api/proof/")
+        ttl = datetime.fromisoformat(body["expires_at"]) - datetime.now(timezone.utc)
+        assert timedelta(minutes=settings.PROOF_LINK_TTL_MINUTES - 1) < ttl <= timedelta(minutes=5)
+        path = "/api/proof/" + body["url"].rsplit("/", 1)[1]
+        async with _anon() as anon:
+            up = await _post(anon, path, PNG)
+        assert up.status_code == 201, up.text
+        assert up.headers["cache-control"] == "no-store" and up.headers["referrer-policy"] == "no-referrer"
+        assert (up.json()["application_id"], up.json()["mime"], up.json()["size"]) == (app_id, "image/png", len(PNG))
+        state = await _proof(client, app_id)
+        assert state["proof"] == {"has_text": False, "has_email": False, "screenshots": 1, "level": "screenshot_only"}
+        shot = state["screenshots"][0]
+        assert shot["id"] == up.json()["screenshot_id"] and shot["created_by"] == "web"
+        assert len(shot["sha256"]) == 64
+        detail = (await client.get(f"/api/applications/{app_id}")).json()
+        trail = [e for e in detail["events"] if e["event_type"] == "proof_screenshot"]
+        assert [(e["payload"]["via"], e["payload"]["size"], e["payload"]["mime"]) for e in trail] == [
+            ("link", len(PNG), "image/png")
+        ]
+        assert detail["proof"]["screenshots"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "data,name,status",
+    [(b"", "e.png", 422), (b"not an image at all" * 5, "fake.png", 415), (b"GIF89a" + b"\0" * 40, "a.gif", 415),
+     (PNG + b"\0" * MAX, "big.png", 413), (JPEG, "a.jpg", 201), (WEBP, "a.webp", 201), (PNG, "named.exe", 201)],
+)
+async def test_file_checks_use_the_bytes_not_the_name_and_a_refusal_keeps_the_link(
+    authenticated_async_context, data, name, status
+):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        path = await _link(client, app_id)
+        async with _anon() as anon:
+            assert (await _post(anon, path, data, name)).status_code == status
+            if status != 201:  # the link was not burned: a good file still goes through
+                assert (await _post(anon, path, PNG)).status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_a_link_works_once_and_dies_after_five_minutes(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        path, expired = await _link(client, app_id), await _link(client, app_id)
+        _sql("UPDATE proof_upload_links SET expires_at = ? WHERE token_hash = ?",
+             (_ago(1), __import__("hashlib").sha256(expired.rsplit("/", 1)[1].encode()).hexdigest()))
+        async with _anon() as anon:
+            assert (await _post(anon, path, PNG)).status_code == 201
+            again = await _post(anon, path, PNG)
+            assert again.status_code == 410 and "ask your assistant" in again.json()["detail"]
+            assert (await _post(anon, expired, PNG)).status_code == 410
+            assert (await _post(anon, "/api/proof/" + "x" * 43, PNG)).status_code == 404
+            assert (await _post(anon, "/api/proof/short", PNG)).status_code == 404
+            assert (await anon.post(path)).status_code in (404, 410, 422)  # no file at all: never 401/403
+            assert (await anon.post("/api/proof/" + "y" * 43)).status_code == 404  # no body needed to refuse
+        assert len((await _proof(client, app_id))["screenshots"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_nobody_can_mint_for_or_store_into_another_users_application(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        mine, other = await _bring(client), await _bring(client, {**AD, "company": "Southwind"})
+        path = await _link(client, mine)
+        async with _anon() as anon:
+            up = await _post(anon, path, PNG)
+        assert up.json()["application_id"] == mine  # the token names ONE application
+        assert (await _proof(client, other))["screenshots"] == []
+        assert (await client.post("/api/applications/987654321/proof/link")).status_code == 404
+        sid = up.json()["screenshot_id"]
+        assert _sql("SELECT user_id FROM application_proof_screenshots WHERE id = ?", (sid,))[0][0] == fixture_user_id
+
+
+@pytest.mark.asyncio
+async def test_the_mint_is_capped_per_hour(authenticated_async_context, monkeypatch):
+    monkeypatch.setattr(settings, "PROOF_LINKS_MAX_PER_HOUR", 2)
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        codes = [(await client.post(f"/api/applications/{app_id}/proof/link")).status_code for _ in range(3)]
+        assert codes == [201, 201, 429]
+
+
+# ── the count limit, export ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_three_live_screenshots_at_most_through_the_link_route(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        for _ in range(settings.PROOF_SCREENSHOTS_MAX_LIVE):
+            await _seed(fixture_user_id, app_id)
+        path = await _link(client, app_id)  # the link route refuses, and the refusal keeps the link
+        async with _anon() as anon:
+            refused = await _post(anon, path, PNG)
+            assert refused.status_code == 409 and "PROOF_SCREENSHOTS_MAX_LIVE" in refused.json()["detail"]
+            _sql("UPDATE application_proof_screenshots SET bytes = NULL, deleted_at = ? WHERE application_id = ? "
+                 "AND id = (SELECT MIN(id) FROM application_proof_screenshots WHERE application_id = ?)",
+                 (_ago(0), app_id, app_id))  # a deleted row frees a slot
+            assert (await _post(anon, path, PNG)).status_code == 201
+
+
 @pytest.mark.asyncio
 async def test_the_export_never_has_bytes(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
-        ids = {_seed(fixture_user_id, app_id, d) for d in (PNG, JPEG)}
+        ids = {(await _seed(fixture_user_id, app_id, d))["id"] for d in (PNG, JPEG)}
         exported = (await client.get("/api/auth/users/me/export")).json()
         rows = exported["application_proof_screenshots"]
         assert {r["id"] for r in rows} == ids and all("bytes" not in r for r in rows)
@@ -168,9 +304,9 @@ async def test_the_level_is_the_strongest_proof_and_a_correction_withdraws_text(
 ):
     async with authenticated_async_context() as client:
         a, b, c, d = [await _bring(client, {**AD, "company": f"Co{i}"}) for i in range(4)]
-        _seed(fixture_user_id, b)
+        await _seed(fixture_user_id, b)
         await _ev(client, c, "proof_text", {"text": "Application received"})
-        _seed(fixture_user_id, c)  # text beats screenshot
+        await _seed(fixture_user_id, c)  # text beats screenshot
         await _ev(client, d, "applied", {}, source=EMAIL)
         await _ev(client, d, "proof_text", {"text": "also pasted"})  # email beats text
         got = {i: (await _proof(client, i))["proof"] for i in (a, b, c, d)}
@@ -236,6 +372,10 @@ async def test_receipts_and_mcp_carry_the_proof(authenticated_async_context):
         assert listed[0]["proof"]["has_text"] is True
         assert load(await mcp.call_tool("get_application", {"application_id": app_id}))["proof"]["level"] == "text"
         assert load(await mcp.call_tool("list_applications", {}))["applications"][0]["proof"]["level"] == "text"
+        link = load(await mcp.call_tool("get_proof_upload_link", {"application_id": app_id}))
+        assert link["single_use"] and "/api/proof/" in link["url"]
+        denied = await mcp.call_tool("get_proof_upload_link", {"application_id": 987654321})
+        assert denied.is_error and "404" in denied.content[0].text
 
 
 @pytest.mark.asyncio
@@ -324,19 +464,176 @@ async def test_no_proof_after_seven_days_is_listed_once_and_never_asked_twice(au
         assert other.json()["id"] != first.json()["id"]  # only the proof_missing context is de-duplicated
 
 
-# ── logs ─────────────────────────────────────────────────────────────────────
+# ── masking and logs ─────────────────────────────────────────────────────────
+
+
+def test_the_upload_token_is_masked_in_paths_and_the_proof_routes_are_not():
+    from src.utils.logger import redact_path
+
+    assert redact_path("/api/proof/abc123") == "/api/proof/[redacted]"
+    assert redact_path("http://test/api/proof/abc123?x=1") == "http://test/api/proof/[redacted]"
+    for path in ("/api/applications/5/proof/link", "/api/applications/5/proof", "/api/applications/5/proof/screenshots/2"):
+        assert redact_path(path) == path
 
 
 @pytest.mark.asyncio
-async def test_the_audit_log_never_carries_the_proof_text(authenticated_async_context, logs):
+async def test_the_audit_log_never_carries_tokens_text_or_bytes(authenticated_async_context, logs):
     secret_text = "SECRET-CONFIRMATION-TEXT-7731"
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
+        path = await _link(client, app_id)
+        token = path.rsplit("/", 1)[1]
+        async with _anon() as anon:
+            await _post(anon, path, PNG)
+            await _post(anon, path, PNG)  # 410
+            await _post(anon, "/api/proof/" + "z" * 43, PNG)  # 404
         await _ev(client, app_id, "proof_text", {"text": secret_text, "page_host": "northwind.example"})
+    names = {getattr(r, "event", None) for r in logs.records}
+    assert {"proof_link_created", "proof_upload", "proof_link_used", "proof_text_recorded",
+            "proof_upload_refused"} <= names
+    from hashlib import sha256
+
     blob = " ".join(f"{r.getMessage()} {sorted(r.__dict__.items(), key=str)}" for r in logs.records)
-    assert secret_text not in blob
+    for forbidden in (token, sha256(token.encode()).hexdigest(), secret_text, "PNG", repr(PNG)):
+        assert forbidden not in blob, forbidden
     recorded = [r for r in logs.records if getattr(r, "event", "") == "proof_text_recorded"][0]
     assert (recorded.chars, recorded.page_host, recorded.result) == (str(len(secret_text)), "northwind.example", "ok")
+
+
+# ── review fixes: the body is read before a pooled DB connection is borrowed; the count and ask are race-proof ──
+
+
+def _spy(monkeypatch, read_ok=True):
+    """Wrap the route's short connection and ``_read_file``: ``log`` gets "open"/"read" (+ how many connections were
+    open at the read) so a test can see the ORDER and that no connection is held during the body read."""
+    from contextlib import asynccontextmanager
+
+    from src.api.routes import proof as route
+
+    log: list[Any] = []
+    state = {"open": 0}
+    real_short, real_read = route._short_db, route._read_file
+
+    @asynccontextmanager
+    async def short():
+        async with real_short() as db:
+            state["open"] += 1
+            log.append("open")
+            try:
+                yield db
+            finally:
+                state["open"] -= 1
+
+    async def read(request):
+        log.append(("read", state["open"]))
+        return await real_read(request)
+
+    monkeypatch.setattr(route, "_short_db", short)
+    monkeypatch.setattr(route, "_read_file", read)
+    return log
+
+
+MULTIPART = {"content-type": "multipart/form-data; boundary=x"}
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_token_is_404_without_reading_the_body(authenticated_async_context, monkeypatch):
+    async with authenticated_async_context():
+        log = _spy(monkeypatch)
+        over_cap = {**MULTIPART, "content-length": str(MAX + 10**6)}
+        async with _anon() as anon:
+            for token in ("bad-shape", "u" * 43):
+                assert (await anon.post(f"/api/proof/{token}", content=b"x", headers=over_cap)).status_code == 404
+
+            async def boom():
+                raise AssertionError("the body stream was consumed")
+                yield b""
+
+            assert (await anon.post("/api/proof/" + "v" * 43, content=boom(), headers=MULTIPART)).status_code == 404
+        assert not [e for e in log if e != "open"], log  # never read
+
+
+@pytest.mark.asyncio
+async def test_a_used_or_expired_link_is_410_without_reading_the_body(authenticated_async_context, monkeypatch):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        used, expired = await _link(client, app_id), await _link(client, app_id)
+        _sql("UPDATE proof_upload_links SET expires_at = ? WHERE token_hash = ?",
+             (_ago(1), __import__("hashlib").sha256(expired.rsplit("/", 1)[1].encode()).hexdigest()))
+        async with _anon() as anon:
+            assert (await _post(anon, used, PNG)).status_code == 201
+            log = _spy(monkeypatch)
+            over_cap = {**MULTIPART, "content-length": str(MAX + 10**6)}
+            for path in (used, expired):
+                gone = await anon.post(path, content=b"x", headers=over_cap)
+                assert gone.status_code == 410 and gone.headers["cache-control"] == "no-store"
+        assert not [e for e in log if e != "open"], log
+
+
+@pytest.mark.asyncio
+async def test_no_pooled_connection_is_held_while_the_body_is_read(authenticated_async_context, monkeypatch):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        path = await _link(client, app_id)
+        log = _spy(monkeypatch)
+        async with _anon() as anon:
+            big = {**MULTIPART, "content-length": str(MAX + 10**6)}
+            assert (await anon.post(path, content=b"x", headers=big)).status_code == 413
+            assert (await anon.post(path, content=b"not multipart")).status_code == 422
+            assert (await _post(anon, path, PNG)).status_code == 201  # the link survived both failed reads
+        assert ("read", 0) in log and ("read", 1) not in log, log  # every read saw zero open connections
+
+
+@pytest.mark.asyncio
+async def test_a_slow_upload_times_out_with_408_holding_no_connection(authenticated_async_context, monkeypatch):
+    from src.api.routes import proof as proof_route
+
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        path = await _link(client, app_id)
+        log = _spy(monkeypatch)
+
+        async def never(request):
+            log.append(("read", 0))  # _spy's wrapper is replaced; the short connection is closed by now
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(proof_route, "_read_file", never)
+        monkeypatch.setattr(settings, "PROOF_UPLOAD_READ_SECONDS", 0.05)
+        async with _anon() as anon:
+            slow = await _post(anon, path, PNG)
+        assert slow.status_code == 408 and slow.json()["detail"] == "upload took too long"
+        assert slow.headers["cache-control"] == "no-store"
+        assert log == ["open", ("read", 0)]
+
+
+@pytest.mark.asyncio
+async def test_parallel_screenshots_cannot_exceed_the_live_cap(authenticated_async_context, fixture_user_id):
+    from src.repositories.database import JobDatabase
+    from src.services.applications import proof
+
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        for _ in range(settings.PROOF_SCREENSHOTS_MAX_LIVE - 1):
+            await _seed(fixture_user_id, app_id)
+        dbs = [JobDatabase(str(settings.DB_PATH)) for _ in range(2)]  # one connection each
+        try:
+            for db in dbs:
+                await db.connect()
+            now = datetime.now(timezone.utc)
+            res = await asyncio.gather(
+                *(proof.store_screenshot(db, fixture_user_id, app_id, PNG, "web", "web", now) for db in dbs),
+                return_exceptions=True,
+            )
+        finally:
+            for db in dbs:
+                await db.close()
+        refused = [r for r in res if isinstance(r, proof.SpineError)]
+        assert len(refused) == 1 and refused[0].status_code == 409, res
+        live = _sql(
+            "SELECT COUNT(*) FROM application_proof_screenshots WHERE application_id = ? AND deleted_at IS NULL",
+            (app_id,),
+        )
+        assert live[0][0] == settings.PROOF_SCREENSHOTS_MAX_LIVE
 
 
 @pytest.mark.asyncio

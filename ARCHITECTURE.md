@@ -128,6 +128,16 @@ in the loop is a set of note events (`cv_seen`, `submit_approved`,
 (`/cv-seen`, `/send/approve|decline`, `/autofill`, `/duplicate/clear`);
 `may_submit` reads them through `kit.gate_facts`.
 
+PROOF OF APPLICATION (S7, migration 0053): `application_proof_screenshots` (image
+`bytes` BYTEA, NULL once the user deletes it; the row and a dated note stay; never
+in the export) and `proof_upload_links` (single-use, 5 minutes, only the token's
+SHA-256 stored; credential table, not exported; both erased with the account).
+`proof_text` is a note event; `proof_screenshot` is written only by
+`services/applications/proof.py`. Routes (`api/routes/proof.py`): `POST
+/api/applications/{id}/proof/link` (MCP `get_proof_upload_link`), public `POST
+/api/proof/{token}` (multipart `file`, token masked in logs). `proof.level` (email > text > screenshot_only >
+none) rides on applications and receipts; `whats_new.proof_missing` lists 7-day gaps.
+
 ### Extraction pipelines
 
 One entry point each — read the function and what it calls:

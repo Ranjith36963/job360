@@ -68,6 +68,7 @@ ROUTE_MODULES = [
     "bring",
     "receipts",
     "applications",
+    "proof",
     "oauth",
 ]
 
@@ -102,6 +103,11 @@ PUBLIC_ROUTES: dict[str, str] = {
     # cross-user leak waiting to happen. The replacement,
     # `GET /api/applications/job/{id}`, is `require_user` and is covered by
     # test_api_idor.py.
+    "/api/proof/{token}": (
+        "S7 proof-of-application upload: the unguessable single-use token IS the credential (32 random bytes, "
+        "only its SHA-256 stored, spent by one atomic UPDATE, dead after 5 minutes); no cookie to carry for an "
+        "assistant's file tool. Bad tokens 404 behind a per-IP lockout, like /api/files/{token}"
+    ),
     "/api/client-log": "browser error beacon — fires before or without a session",
     "/api/status": (
         "how many jobs are stored and whether the deployment has a profile at all "

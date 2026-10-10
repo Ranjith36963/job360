@@ -56,6 +56,8 @@ EXPECTED_TOOLS = {
     "check_submit",
     # The application kit (owner decision 2026-10-08, S3) - 24 -> 25.
     "get_application_kit",
+    # Proof of application (owner decision 2026-10-10, S7) - 25 -> 26.
+    "get_proof_upload_link",
 }
 
 JOB = {
