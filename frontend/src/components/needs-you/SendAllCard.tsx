@@ -126,18 +126,52 @@ export function SendAllCard({
       </ul>
 
       {held.map((c) => (
-        <div key={c.application_id} data-testid={`held-row-${c.application_id}`} className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <p className="font-mono text-xs text-faint">
-              Held out · {[c.job_company, c.job_title, c.job_location].filter(Boolean).join(" · ")}
-            </p>
-            <p className="text-sm text-warning">{flagText(c.flags[0])}</p>
-          </div>
-          <Link href={answerHref(c)} data-testid={`held-answer-${c.application_id}`} className={cn(tap, small, "inline-flex items-center")}>
-            Answer
-          </Link>
-        </div>
+        <HeldRow key={c.application_id} c={c} />
       ))}
+    </div>
+  );
+}
+
+/** A held-out row: the company and every reason it was held. The first reason
+ * shows; "and N more" opens the full list. */
+function HeldRow({ c }: { c: ReadyCardData }) {
+  const [open, setOpen] = useState(false);
+  const rest = c.flags.length - 1;
+  return (
+    <div data-testid={`held-row-${c.application_id}`} className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <p className="font-mono text-xs text-faint">
+          Held out · {[c.job_company, c.job_title, c.job_location].filter(Boolean).join(" · ")}
+        </p>
+        {open ? (
+          <ul data-testid={`held-reasons-${c.application_id}`} className="flex flex-col gap-0.5 text-sm text-warning">
+            {c.flags.map((f, i) => (
+              <li key={`${f.code}-${i}`}>{flagText(f)}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-warning">
+            {flagText(c.flags[0])}
+            {rest > 0 && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  data-testid={`held-more-${c.application_id}`}
+                  aria-expanded={false}
+                  onClick={() => setOpen(true)}
+                  className="font-medium underline underline-offset-2"
+                >
+                  and {rest} more
+                </button>
+              </>
+            )}
+          </p>
+        )}
+      </div>
+      <Link href={answerHref(c)} data-testid={`held-answer-${c.application_id}`} className={cn(tap, small, "inline-flex items-center")}>
+        Answer
+      </Link>
     </div>
   );
 }

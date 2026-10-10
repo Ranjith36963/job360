@@ -14,6 +14,8 @@ import type { AssistantSettingsView } from "@/lib/api";
 export const PAUSE_PATH = "assistant_settings.paused_until";
 /** Fired with `detail: boolean` (paused) after a successful pause or resume. */
 export const PAUSE_CHANGED_EVENT = "job360:pause-changed";
+/** Fired after a Send / Send all / Don't send: the morning check strip re-reads. */
+export const READY_CHANGED_EVENT = "job360:ready-changed";
 /** Fired when the user taps the amber button: open the Resume confirm. */
 export const RESUME_ASK_EVENT = "job360:resume-ask";
 
