@@ -29,8 +29,9 @@ memory shapes, Gmail modes): `get_recipe("rules")`.
    `preferences.work_arrangement`, `preferences.needs_visa`,
    `preferences.salary_by_country` (an empty preference means "don't care" -
    never fill one in for them); (6) settings - see below.
-   Ask visa, salary and equality questions **one at a time**. Salary is per
-   country in its own currency and period, never converted. Equality: skipping
+   Ask visa, salary and equality questions **one at a time**. Salary is a
+   range per country (min and max; the same figure twice if they have one) in
+   its own currency and period, never converted. Equality: skipping
    is fine, "prefer not to say" is a real answer, a skip still marks the round
    done; **if the user skips, ask again only on the first form that needs it**.
    **Read back** the answers; on OK **save after each round** (the round's

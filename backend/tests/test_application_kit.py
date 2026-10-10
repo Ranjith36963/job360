@@ -402,7 +402,7 @@ async def test_answers_carry_source_and_saved_at_and_the_equality_label(
                 "question": "Why Northwind?", "answer": "I like pipelines.", "approved": True,
                 "recorded_at": "2026-10-01T09:00:00+00:00"}]),
             _e("preferences.salary_by_country", [
-                {"country": "GB", "amount": 85000, "currency": "GBP", "period": "year"}]),
+                {"country": "GB", "min": 85000, "max": 95000, "currency": "GBP", "period": "year"}]),
         )
         assert edits.status_code == 200, edits.text
         answers = (await _kit(client, app_id)).json()["answers"]
@@ -421,7 +421,7 @@ async def test_answers_carry_source_and_saved_at_and_the_equality_label(
         assert answers["equality"][0]["label"] == "equality / voluntary"
         assert answers["equality"][0]["value"] == "prefer not to say", "'prefer not to say' is a real value"
         assert answers["salary"][0]["key"] == "salary.GB"
-        assert answers["salary"][0]["value"] == {"amount": 85000, "currency": "GBP", "period": "year"}
+        assert answers["salary"][0]["value"] == {"min": 85000, "max": 95000, "currency": "GBP", "period": "year"}
         approved = answers["approved_text"][0]
         assert (approved["key"], approved["value"], approved["source"]) == (
             "Why Northwind?", "I like pipelines.", "approved_text")
@@ -442,7 +442,7 @@ async def test_missing_is_for_the_jobs_country_and_unknown_country_is_missing_to
             _e("user_info.right_to_work", {"countries": [
                 {"country": "GB", "work_authorization": "citizen", "needs_sponsorship": False}]}),
             _e("preferences.salary_by_country", [
-                {"country": "GB", "amount": 85000, "currency": "GBP", "period": "year"}]),
+                {"country": "GB", "min": 85000, "max": 95000, "currency": "GBP", "period": "year"}]),
         )).status_code == 200
         assert (await _kit(client, gb)).json()["missing"] == [], "everything for GB is known"
         german = {m["key"] for m in (await _kit(client, de)).json()["missing"]}
@@ -1441,3 +1441,20 @@ def test_artifact_links_is_the_only_new_table_update_and_history_stays_append_on
         if re.search(r"UPDATE\s+artifact_links", p.read_text(encoding="utf-8"))
     ]
     assert updates == ["files.py"], "only the download route spends the counter"
+
+
+def test_a_salary_saved_before_ranges_reads_as_min_equals_max():
+    """A stored record from before ranges has one `amount` (no min/max): the kit
+    hands the assistant min = max, so a one-number form still gets `min`."""
+    profile = UserProfile(
+        cv_data=CVData(),
+        preferences=UserPreferences(salary_by_country=[
+            {"country": "GB", "amount": 80000, "currency": "GBP", "period": "year"},
+            {"country": "DE", "min": 70000, "max": 90000, "currency": "EUR", "period": "year"},
+        ]),
+    )
+    answers, _missing = kit_service.compute_answers(profile, [], "GB")
+    assert [a["value"] for a in answers["salary"]] == [
+        {"min": 80000, "max": 80000, "currency": "GBP", "period": "year"},
+        {"min": 70000, "max": 90000, "currency": "EUR", "period": "year"},
+    ]

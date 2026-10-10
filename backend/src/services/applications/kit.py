@@ -531,10 +531,13 @@ def compute_answers(
     at = when("preferences.salary_by_country")
     for rec in _records(prefs.salary_by_country):
         cc = str(rec.get("country") or "").upper()
-        if cc and _present(rec.get("amount")):
+        # A record saved before ranges has one `amount`: it reads as min = max.
+        low = rec.get("min") if _present(rec.get("min")) else rec.get("amount")
+        high = rec.get("max") if _present(rec.get("max")) else low
+        if cc and _present(low):
             out["salary"].append(_item(
                 f"salary.{cc}",
-                {"amount": rec.get("amount"), "currency": rec.get("currency"), "period": rec.get("period")},
+                {"min": low, "max": high, "currency": rec.get("currency"), "period": rec.get("period")},
                 "memory", at,
             ))
 
