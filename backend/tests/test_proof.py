@@ -189,7 +189,8 @@ async def test_the_level_is_the_strongest_proof_and_a_correction_withdraws_text(
 @pytest.mark.parametrize(
     "event_type,detail,source,level",
     [("note", "Submission confirmed on the page", None, "email"), ("note", "SUBMISSION CONFIRMED", None, "email"),
-     ("note", "", EMAIL, "email"), ("applied", "", EMAIL, "email"),
+     ("note", "", EMAIL, "none"), ("note", "the portal said submission confirmed", None, "none"),
+     ("note", "Submission confirmed", EMAIL, "email"), ("applied", "", EMAIL, "email"),
      ("applied", "I applied", None, "none"), ("lesson", "submission confirmed", None, "none")],
 )
 async def test_what_counts_as_email_proof(authenticated_async_context, event_type, detail, source, level):
@@ -235,6 +236,62 @@ async def test_receipts_and_mcp_carry_the_proof(authenticated_async_context):
         assert listed[0]["proof"]["has_text"] is True
         assert load(await mcp.call_tool("get_application", {"application_id": app_id}))["proof"]["level"] == "text"
         assert load(await mcp.call_tool("list_applications", {}))["applications"][0]["proof"]["level"] == "text"
+
+
+@pytest.mark.asyncio
+async def test_a_receipt_confirmation_is_text_proof_and_clears_the_missing_list(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        with_ref, blank = [await _bring(client, {**AD, "company": c}) for c in ("WithRef", "Blank")]
+        for app_id, conf in ((with_ref, "REF-4471"), (blank, "  ")):
+            made = await client.post(
+                f"/api/applications/{app_id}/receipt", json={"confirmation": conf, "applied_at": _ago(9)}
+            )
+            assert made.status_code == 201, made.text
+        assert (await _proof(client, with_ref))["proof"]["level"] == "text"
+        assert (await _proof(client, blank))["proof"]["level"] == "none"
+        missing = (await client.get("/api/whats-new")).json()["proof_missing"]
+        assert [m["application_id"] for m in missing] == [blank]
+
+
+@pytest.mark.asyncio
+async def test_only_still_applied_jobs_are_listed_as_missing_proof(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        still, rejected, interview = [await _bring(client, {**AD, "company": c}) for c in ("Still", "Rej", "Int")]
+        for app_id in (still, rejected, interview):
+            await _ev(client, app_id, "applied", {}, occurred_at=_ago(8))
+        await _ev(client, rejected, "rejected", {})
+        await _ev(client, interview, "interview_scheduled", {}, scheduled_at=_ago(-3))
+        missing = (await client.get("/api/whats-new")).json()["proof_missing"]
+        assert [m["application_id"] for m in missing] == [still]
+
+
+@pytest.mark.asyncio
+async def test_links_in_proof_text_are_removed_before_storing(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        raw = "Thanks! See HTTPS://x.example/apply?token=SECRET123 or www.x.example/t?k=SECRET456 done"
+        assert (await _ev(client, app_id, "proof_text", {"text": raw})).status_code == 201
+        stored = [e for e in (await client.get(f"/api/applications/{app_id}")).json()["events"]
+                  if e["event_type"] == "proof_text"][-1]["payload"]["text"]
+        assert stored == "Thanks! See [link removed] or [link removed] done"
+        n = settings.PROOF_TEXT_MAX_CHARS  # the cap counts what is kept, not the link
+        assert (await _ev(client, app_id, "proof_text", {"text": "https://x.example/" + "a" * n})).status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_proof_text_takes_no_source_and_corrects_only_its_own_kind(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        a, b = [await _bring(client, {**AD, "company": c}) for c in ("A", "B")]
+        assert (await _ev(client, a, "proof_text", {"text": "t"}, source=EMAIL)).status_code == 422
+        first = (await _ev(client, a, "proof_text", {"text": "wrong page"})).json()["event_id"]
+        note = (await _ev(client, a, "note", {}, detail="n")).json()["event_id"]
+        other_app = (await _ev(client, b, "proof_text", {"text": "b"})).json()["event_id"]
+        for target in (note, other_app, 10**9):
+            resp = await _ev(client, a, "proof_text", {"text": "fix"}, corrects_event_id=target)
+            assert resp.status_code == 422, (target, resp.text)
+        fixed = await _ev(client, a, "proof_text", {"text": "right page"}, corrects_event_id=first)
+        assert fixed.status_code == 201, fixed.text
+        assert (await _proof(client, a))["proof"]["level"] == "text"
 
 
 # ── "no proof after 7 days" ──────────────────────────────────────────────────

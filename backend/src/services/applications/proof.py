@@ -1,12 +1,13 @@
 """Proof of application (S7, owner decision 2026-10-10).
 
-Proof backs up "applied": an EMAIL (an ``applied``/``note`` event with an email source, or a note saying
+Proof backs up "applied": an EMAIL (an ``applied`` event with an email source, or any note starting
 "submission confirmed"), pasted TEXT (a ``proof_text`` event) or a SCREENSHOT. :func:`proof_for` gives the strongest as
 a ``level`` (screenshots are only counted here; storing them comes with the upload link); :func:`proof_missing` lists
 applied jobs still without any after ``PROOF_NO_PROOF_AFTER_DAYS`` so the user is asked once. Logs never carry text.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +24,7 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 
 SERVER_ONLY_EVENTS = frozenset({"proof_screenshot"})
 MISSING_CAP = 20
+_URL = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 NO_PROOF: dict[str, Any] = {"has_text": False, "has_email": False, "screenshots": 0, "level": "none"}
 
 
@@ -38,6 +40,7 @@ def check_proof_text(user: CurrentUser, payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict) or set(payload) - {"text", "page_host"}:
         raise SpineError(422, 'proof_text takes a JSON object with only "text" and "page_host"')
     text = spine._strip_control_chars(payload["text"]).strip() if isinstance(payload.get("text"), str) else ""
+    text = _URL.sub("[link removed]", text)  # a link can carry a token; the cap counts what is kept
     if not text:
         raise SpineError(422, "proof_text needs non-empty text")
     if len(text) > settings.PROOF_TEXT_MAX_CHARS:
@@ -57,17 +60,17 @@ def log_proof_text(user: CurrentUser, application_id: int, event_id: int, stored
 
 
 async def proof_for(db: JobDatabase, user_id: str, application_ids: list[int]) -> dict[int, dict[str, Any]]:
-    """``{has_text, has_email, screenshots, level}`` per application, two queries for any number of them."""
+    """``{has_text, has_email, screenshots, level}`` per application, three queries for any number of them."""
     out = {i: dict(NO_PROOF) for i in application_ids}
     if not out:
         return out
     marks, ids = ",".join("?" for _ in out), list(out)
     cur = await db._db.execute(
         "SELECT id, application_id, event_type, source_kind, corrects_event_id, "  # noqa: S608 - placeholders only
-        "LOWER(detail) LIKE ? FROM application_events "
+        "(LOWER(TRIM(detail)) LIKE ?) FROM application_events "
         f"WHERE user_id = ? AND application_id IN ({marks}) "
         "AND (event_type IN ('proof_text', 'applied', 'note') OR corrects_event_id IS NOT NULL)",
-        ["%submission confirmed%", user_id, *ids],
+        ["submission confirmed%", user_id, *ids],
     )
     rows = [tuple(r) for r in await cur.fetchall()]
     superseded = {r[4] for r in rows if r[4] is not None}
@@ -76,8 +79,15 @@ async def proof_for(db: JobDatabase, user_id: str, application_ids: list[int]) -
             continue
         if kind == "proof_text":
             out[app_id]["has_text"] = True
-        elif (kind in ("applied", "note") and source == "email") or (kind == "note" and confirmed):
+        elif (kind == "applied" and source == "email") or (kind == "note" and confirmed):
             out[app_id]["has_email"] = True
+    cur = await db._db.execute(  # a receipt that carries a confirmation (ID / portal reference) is text proof
+        "SELECT DISTINCT application_id FROM application_receipts "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND application_id IN ({marks}) AND TRIM(COALESCE(confirmation, '')) <> ''",
+        [user_id, *ids],
+    )
+    for (app_id,) in await cur.fetchall():
+        out[app_id]["has_text"] = True
     cur = await db._db.execute(
         "SELECT application_id, COUNT(*) FROM application_proof_screenshots "  # noqa: S608 - placeholders only
         f"WHERE user_id = ? AND application_id IN ({marks}) AND deleted_at IS NULL GROUP BY application_id",
@@ -97,7 +107,8 @@ async def proof_missing(db: JobDatabase, user_id: str, now: datetime) -> list[di
     cur = await db._db.execute(
         "SELECT e.application_id, MIN(e.occurred_at), a.job_company FROM application_events e "
         "JOIN applications a ON a.id = e.application_id AND a.user_id = e.user_id "
-        "WHERE e.user_id = ? AND e.event_type = 'applied' AND e.occurred_at <= ? AND e.id NOT IN "
+        "WHERE e.user_id = ? AND a.status = 'applied' AND e.event_type = 'applied' AND e.occurred_at <= ? "
+        "AND e.id NOT IN "
         "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL) "
         "GROUP BY e.application_id, a.job_company ORDER BY MIN(e.occurred_at), e.application_id",
         (user_id, (now - timedelta(days=days)).isoformat(), user_id),

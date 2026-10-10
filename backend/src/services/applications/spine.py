@@ -1726,7 +1726,9 @@ async def whats_new(
     event forever. ``(recorded_at, id)`` is a real keyset pair (B4 fix): the
     ``after_id`` half only fires alongside its own ``recorded_at`` boundary,
     never as an independent predicate, so a row from either side of that
-    boundary is never dropped."""
+    boundary is never dropped.
+
+    Also carries open_asks and proof_missing (applied jobs past PROOF_NO_PROOF_AFTER_DAYS with no proof and no ask) whatever `since` says."""  # noqa: E501
     limit = max(1, min(int(limit), settings.WHATS_NEW_MAX_EVENTS))
     now = datetime.now(timezone.utc).isoformat()
     since_val = since or (
