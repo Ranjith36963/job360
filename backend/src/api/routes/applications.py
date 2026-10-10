@@ -34,6 +34,7 @@ from src.api.models import JobResponse, LessonsResponse
 from src.api.routes.bring import job_row_to_response
 from src.core import settings
 from src.repositories.database import JobDatabase
+from src.services.applications import blocked as blocked_service
 from src.services.applications import contacts as contacts_service
 from src.services.applications import diff as diff_service
 from src.services.applications import kit as kit_service
@@ -898,15 +899,29 @@ class ControlsAutofillOut(BaseModel):
     at: Optional[str] = None
 
 
+class ControlsBlockedOut(BaseModel):
+    """S6: the assistant's open ``blocked`` record (no later ``unblocked``)."""
+
+    reason: str
+    reason_label: str
+    step: str
+    page_host: str
+    detail: str
+    by: str
+    at: str
+    ask_id: Optional[int] = None
+
+
 class ApplicationControlsOut(BaseModel):
     """The state behind the four human-in-the-loop buttons on the application
-    page, each with who / where / when."""
+    page, each with who / where / when, plus an open blocked record."""
 
     application_id: int
     cv: Optional[ControlsCvOut] = None
     declined: Optional[KitSeenOut] = None
     autofill: ControlsAutofillOut
     duplicate: KitDuplicateOut
+    blocked: Optional[ControlsBlockedOut] = None
 
 
 class CvSeenRequest(BaseModel):
@@ -1898,6 +1913,33 @@ async def clear_duplicate(
     return await _controls(db, user, application_id)
 
 
+@router.post(
+    "/applications/{application_id}/blocked/resolve", response_model=ApplicationControlsOut, status_code=201,
+    dependencies=AUTH_FIRST,
+)
+async def resolve_blocked(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
+) -> dict[str, Any]:
+    """"Mark resolved" - the user sorted out what stopped their assistant: records
+    ``unblocked`` {resolution: user_did_it} and closes the blocked ask. 409 when
+    nothing is blocked. Session only; assistants use ``record_event``."""
+    if await spine.get_owned_application(db, user.id, application_id) is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    try:
+        stored = blocked_service.check_payload(user, "unblocked", {"resolution": "user_did_it"}, "")
+        stored = await blocked_service.before_append(db, user, application_id, "unblocked", stored)
+        await spine.append_event(
+            db, user_id=user.id, application_id=application_id, event_type="unblocked",
+            payload=stored, occurred_at=datetime.now(timezone.utc).isoformat(), recorded_by=actor_for(user),
+        )
+        await blocked_service.after_append(db, user, application_id, "unblocked", stored)
+    except SpineError as exc:
+        _raise(exc)
+    return await _controls(db, user, application_id)
+
+
 @router.get(
     "/applications/{application_id}/submit-check", response_model=SubmitCheckResponse, dependencies=AUTH_FIRST
 )
@@ -2010,6 +2052,10 @@ async def record_event(
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             # S3: closed payloads + who may write which (the MCP tool inherits this).
             payload = await kit_service.check_kit_event(db, user, application_id, body.event_type, payload)
+        if body.event_type in blocked_service.BLOCKED_EVENT_TYPES:
+            # S6: closed payloads; `blocked` opens one Needs-you ask (the MCP tool inherits this).
+            payload = blocked_service.check_payload(user, body.event_type, payload, detail)
+            payload = await blocked_service.before_append(db, user, application_id, body.event_type, payload)
         # append_event always returns the REAL final follow_up_on — set,
         # cleared, auto-cleared (an overdue date + a status event), replay-
         # derived (a correction), or unchanged — so there is nothing left to
@@ -2022,6 +2068,8 @@ async def record_event(
         )
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
+        if body.event_type in blocked_service.BLOCKED_EVENT_TYPES:
+            await blocked_service.after_append(db, user, application_id, body.event_type, payload)
         return result
     except SpineError as exc:
         _raise(exc)

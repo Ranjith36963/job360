@@ -925,6 +925,11 @@ export async function clearDuplicate(applicationId: number): Promise<Application
   return request(`/api/applications/${applicationId}/duplicate/clear`, { method: "POST" });
 }
 
+/** "Mark resolved" - the user sorted out what stopped their assistant; records `unblocked` {resolution: user_did_it}. */
+export async function resolveBlocked(applicationId: number): Promise<ApplicationControls> {
+  return request(`/api/applications/${applicationId}/blocked/resolve`, { method: "POST" });
+}
+
 export type WhatsNewResponse = _Schemas["WhatsNewResponse"];
 export type WhatsNewEvent = _Schemas["WhatsNewEventOut"];
 export type StatsResponse = _Schemas["StatsResponse"];
