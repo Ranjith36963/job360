@@ -4,6 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { confirmSettingRequest, declineSettingRequest } from "@/lib/api";
 import type { SettingRequest } from "@/lib/api";
+import { PAUSE_CHANGED_EVENT } from "@/lib/assistant-state";
 import { relativeTime } from "@/lib/utils";
 
 // "Waiting for your OK" (S2, owner decision 2026-10-08). An assistant asked for a
@@ -109,7 +110,13 @@ export function SettingRequestCard({
           disabled={busy}
           onClick={() =>
             void run(
-              () => confirmSettingRequest(request.id),
+              () =>
+                confirmSettingRequest(request.id).then((view) => {
+                  // A confirmed pause / resume must reach the top bar, banner and strip at once.
+                  if (typeof view?.paused === "boolean") {
+                    window.dispatchEvent(new CustomEvent(PAUSE_CHANGED_EVENT, { detail: view.paused }));
+                  }
+                }),
               "Could not confirm. It may have expired — ask your assistant to send it again.",
             )
           }
