@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Home } from "@/components/home/Home";
 import { LAST_VISIT_KEY } from "@/lib/home";
 
@@ -10,6 +10,8 @@ const api = vi.hoisted(() => ({
   listAsks: vi.fn(),
   answerAsk: vi.fn(),
   withdrawAsk: vi.fn(),
+  getAssistantSettings: vi.fn(),
+  getReadyToSend: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({ ...api, ASKS_CHANGED_EVENT: "job360:asks-changed" }));
@@ -118,6 +120,28 @@ describe("Home", () => {
     expect(screen.getByTestId("ask-3")).toBeInTheDocument();
     expect(screen.queryByTestId("ask-4")).toBeNull();
     expect(screen.getByRole("link", { name: "See all" })).toHaveAttribute("href", "/needs-you");
+  });
+
+  it("after an answer the badge hears asks + waiting changes + ready to send, never the asks alone", async () => {
+    happy({ asks: [ask(1)] });
+    api.answerAsk.mockResolvedValue({});
+    api.getAssistantSettings.mockResolvedValue({ waiting: [{ id: 1 }], paused: false });
+    api.getReadyToSend.mockResolvedValue({ paused: false, total: 3, unflagged: 3, items: [] });
+    const heard: number[] = [];
+    const onChanged = (e: Event) => heard.push(Number((e as CustomEvent).detail));
+    window.addEventListener("job360:asks-changed", onChanged);
+    try {
+      render(<Home />);
+      await screen.findByTestId("ask-1");
+      api.listAsks.mockResolvedValue({ asks: [], open_count: 1 });
+      fireEvent.change(screen.getByTestId("ask-input-1"), { target: { value: "Yes" } });
+      fireEvent.click(screen.getByTestId("ask-save"));
+      fireEvent.click(screen.getByTestId("ask-answer-confirm"));
+      await waitFor(() => expect(heard).toEqual([5]));
+      expect(api.getReadyToSend).toHaveBeenCalledWith({ limit: 0 });
+    } finally {
+      window.removeEventListener("job360:asks-changed", onChanged);
+    }
   });
 
   it("no asks: the section is silent", async () => {

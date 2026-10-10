@@ -649,6 +649,8 @@ ACCOUNT_REQUIRED_HOST_SUFFIXES = _env_list(
 )
 # Most fields a `form_filled` event may claim.
 KIT_FORM_FIELDS_MAX = int(os.getenv("KIT_FORM_FIELDS_MAX", "500"))
+# S5d - the biggest `form_filled` payload (it may carry the answers the assistant typed).
+KIT_FORM_PAYLOAD_MAX_BYTES = int(os.getenv("KIT_FORM_PAYLOAD_MAX_BYTES", "65536"))
 # S5b - the most "ready to send" applications one read returns (newest first).
 READY_TO_SEND_MAX = int(os.getenv("READY_TO_SEND_MAX", "50"))
 

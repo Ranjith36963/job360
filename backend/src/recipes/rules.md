@@ -85,7 +85,8 @@ apps — ask the user to attach the PDF once for this job; else paste `text`
 if the form allows; else the user uploads by hand. Expired link = call the
 kit again. Show the CV; when the user OKs it in chat record_event cv_seen
 (where chat); when they say yes to submitting, record_event submit_approved.
-After filling, record_event form_filled. `hold` set = another assistant is
+After filling, record_event form_filled with `answers`: every field you typed,
+its `source`, the kit `key` for memory/profile answers; a guess is `guessed`. `hold` set = another assistant is
 on it — tell the user. `duplicate` set = warn before any work. `autofill`
 deny = do not type into the form: give the user the answers to paste.
 Account site: stop, the user signs up and signs in themselves (never a
@@ -275,8 +276,8 @@ APPLY-KIT events (closed payloads, anything else is 422): `cv_seen`
 they said OK in chat; `submit_approved` {artifact_id, sha256, where:"chat"} -
 ONLY when the user typed yes to submitting THIS application; `submit_declined`
 {where:"chat"} - the user said don't send; `autofill_set` {mode:"deny"} - you
-may only send deny; `form_filled` {form_url, fields_count} - after you filled
-the form; `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
+may only send deny; `form_filled` {form_url, fields_count, answers?} - after you filled
+the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
 - the user has an account there; `account_needed` {host} - you hit a sign-up
 wall (never a password anywhere). A CV that changed since you read it is 409:
 get the kit again. `duplicate_cleared` and where="web" need the user's own click

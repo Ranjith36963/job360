@@ -1789,7 +1789,7 @@
       "Body_upload_cv_api_profile_cv_post": {
         "properties": {
           "cv": {
-            "contentMediaType": "application/octet-stream",
+            "format": "binary",
             "title": "Cv",
             "type": "string"
           }
@@ -1816,7 +1816,7 @@
       "Body_upload_linkedin_api_profile_linkedin_post": {
         "properties": {
           "file": {
-            "contentMediaType": "application/octet-stream",
+            "format": "binary",
             "title": "File",
             "type": "string"
           }
@@ -1843,7 +1843,7 @@
       "Body_upsert_profile_api_profile_post": {
         "properties": {
           "cv": {
-            "contentMediaType": "application/octet-stream",
+            "format": "binary",
             "title": "Cv",
             "type": "string"
           },
@@ -5256,6 +5256,295 @@
           "grounded"
         ],
         "title": "ProvenanceSegment",
+        "type": "object"
+      },
+      "ReadyAnswer": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "saved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved At"
+          },
+          "saved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved By"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer",
+          "source"
+        ],
+        "title": "ReadyAnswer",
+        "type": "object"
+      },
+      "ReadyCard": {
+        "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/ReadyAnswer"
+            },
+            "title": "Answers",
+            "type": "array"
+          },
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "brought_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brought At"
+          },
+          "brought_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brought By"
+          },
+          "cover_letter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadyDoc"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cv": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadyDoc"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filled_at": {
+            "title": "Filled At",
+            "type": "string"
+          },
+          "filled_by": {
+            "title": "Filled By",
+            "type": "string"
+          },
+          "fit_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fit By"
+          },
+          "fit_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fit Score"
+          },
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/ReadyFlag"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "form_filled_event_id": {
+            "title": "Form Filled Event Id",
+            "type": "integer"
+          },
+          "job_company": {
+            "title": "Job Company",
+            "type": "string"
+          },
+          "job_country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Country"
+          },
+          "job_location": {
+            "title": "Job Location",
+            "type": "string"
+          },
+          "job_title": {
+            "title": "Job Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "form_filled_event_id",
+          "filled_at",
+          "filled_by",
+          "job_title",
+          "job_company",
+          "job_location",
+          "answers",
+          "flags"
+        ],
+        "title": "ReadyCard",
+        "type": "object"
+      },
+      "ReadyDoc": {
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "integer"
+          },
+          "made_by": {
+            "title": "Made By",
+            "type": "string"
+          },
+          "saved_at": {
+            "title": "Saved At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "version",
+          "saved_at",
+          "made_by"
+        ],
+        "title": "ReadyDoc",
+        "type": "object"
+      },
+      "ReadyFlag": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "text"
+        ],
+        "title": "ReadyFlag",
+        "type": "object"
+      },
+      "ReadyToSendOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReadyCard"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "unflagged": {
+            "title": "Unflagged",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "paused",
+          "total",
+          "unflagged",
+          "items"
+        ],
+        "title": "ReadyToSendOut",
         "type": "object"
       },
       "Receipt": {
@@ -9917,7 +10206,7 @@
     },
     "/api/applications/{application_id}/send/approve": {
       "post": {
-        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching. Clears an earlier\n\"don't send\".",
+        "description": "\"Send this one\" - the user says yes to sending this application with the\nlatest CV. Records ``cv_seen`` (if not already) then ``submit_approved``, both\nwhere=web. A CV edited later makes the yes stop matching. Clears an earlier\n\"don't send\". S5d: ``artifact_id`` / ``form_filled_event_id`` name the CV and\nthe fill the user was looking at; when either is no longer the newest, 409 and\nnothing is recorded (the yes must name what the user saw).",
         "operationId": "approve_send_api_applications__application_id__send_approve_post",
         "parameters": [
           {
@@ -9927,6 +10216,40 @@
             "schema": {
               "title": "Application Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "artifact_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Artifact Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "form_filled_event_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Form Filled Event Id"
             }
           },
           {
@@ -14021,6 +14344,101 @@
         "summary": "Restore Version",
         "tags": [
           "profile"
+        ]
+      }
+    },
+    "/api/ready-to-send": {
+      "get": {
+        "description": "The caller's ready-to-send cards, newest fill first. ``limit=0`` = counts\nonly. ``application_id`` narrows it to one (404 when it is not the caller's).",
+        "operationId": "ready_to_send_api_ready_to_send_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "application_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Application Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 50,
+              "minimum": 0,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyToSendOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ready To Send",
+        "tags": [
+          "ready-to-send"
         ]
       }
     },
