@@ -10359,7 +10359,7 @@
     },
     "/api/applications/{application_id}/proof": {
       "get": {
-        "description": "How well this application is backed up, plus its screenshots (deleted ones as a note).",
+        "description": "Proof level plus screenshots.",
         "operationId": "get_proof_api_applications__application_id__proof_get",
         "parameters": [
           {
@@ -10509,7 +10509,6 @@
     },
     "/api/applications/{application_id}/proof/screenshots": {
       "post": {
-        "description": "The signed-in user adds a screenshot from the website.",
         "operationId": "upload_proof_screenshot_api_applications__application_id__proof_screenshots_post",
         "parameters": [
           {
@@ -10603,7 +10602,6 @@
     },
     "/api/applications/{application_id}/proof/screenshots/{screenshot_id}": {
       "delete": {
-        "description": "Erase the image; the row stays with \"Deleted by you, <date>\".",
         "operationId": "delete_proof_screenshot_api_applications__application_id__proof_screenshots__screenshot_id__delete",
         "parameters": [
           {
@@ -10685,7 +10683,6 @@
         ]
       },
       "get": {
-        "description": "The image itself (404 not yours, 410 deleted).",
         "operationId": "get_proof_screenshot_api_applications__application_id__proof_screenshots__screenshot_id__get",
         "parameters": [
           {
@@ -10741,9 +10738,6 @@
         ],
         "responses": {
           "200": {
-            "content": {
-              "image/*": {}
-            },
             "description": "Successful Response"
           },
           "422": {

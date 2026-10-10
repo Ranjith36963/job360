@@ -935,7 +935,6 @@ export async function clearDuplicate(applicationId: number): Promise<Application
 export type ProofOut = _Schemas["ProofOut"];
 export type ProofScreenshotOut = _Schemas["ProofScreenshotOut"];
 export type ProofStateOut = _Schemas["ProofStateOut"];
-
 export async function getProof(applicationId: number): Promise<ProofStateOut> {
   return request(`/api/applications/${applicationId}/proof`);
 }
@@ -946,12 +945,9 @@ export async function uploadProofScreenshot(applicationId: number, file: File): 
   return request(`/api/applications/${applicationId}/proof/screenshots`, { method: "POST", body: form });
 }
 
-/** The image bytes, fetched with the session cookie (fetch-blob pattern, like the CV downloads) so a
- * thumbnail never depends on a cross-origin <img src>. The caller owns the blob URL and must revoke it. */
+/** Image bytes via the session cookie (fetch-blob, like CV downloads); the caller revokes its blob URL. */
 export async function fetchProofScreenshot(applicationId: number, screenshotId: number): Promise<Blob> {
-  const res = await fetch(`${API}/api/applications/${applicationId}/proof/screenshots/${screenshotId}`, {
-    credentials: "include",
-  });
+  const res = await fetch(`${API}/api/applications/${applicationId}/proof/screenshots/${screenshotId}`, { credentials: "include" });
   if (!res.ok) throw new ApiError(res.status, "Image unavailable");
   return res.blob();
 }

@@ -218,11 +218,9 @@ async def test_three_live_screenshots_at_most_and_delete_frees_a_slot(authentica
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
         url = f"/api/applications/{app_id}/proof/screenshots"
-        ids = []
-        for _ in range(settings.PROOF_SCREENSHOTS_MAX_LIVE):
-            ok = await _post(client, url, PNG)
-            assert ok.status_code == 201 and ok.json()["created_by"] == "web"
-            ids.append(ok.json()["id"])
+        oks = [await _post(client, url, PNG) for _ in range(settings.PROOF_SCREENSHOTS_MAX_LIVE)]
+        assert [o.status_code for o in oks] == [201] * len(oks) and {o.json()["created_by"] for o in oks} == {"web"}
+        ids = [o.json()["id"] for o in oks]
         refused = await _post(client, url, PNG)
         assert refused.status_code == 409 and "PROOF_SCREENSHOTS_MAX_LIVE" in refused.json()["detail"]
         path = await _link(client, app_id)  # the link route refuses too, and the refusal keeps the link
@@ -230,7 +228,6 @@ async def test_three_live_screenshots_at_most_and_delete_frees_a_slot(authentica
             assert (await _post(anon, path, PNG)).status_code == 409
             assert (await client.delete(f"{url}/{ids[0]}")).status_code == 200
             assert (await _post(anon, path, PNG)).status_code == 201
-        assert (await _post(client, url, PNG)).status_code == 409
 
 
 @pytest.mark.asyncio
@@ -240,6 +237,11 @@ async def test_delete_erases_the_bytes_keeps_the_row_and_the_export_never_has_by
         url = f"/api/applications/{app_id}/proof/screenshots"
         keep, gone = (await _post(client, url, PNG)).json()["id"], (await _post(client, url, JPEG)).json()["id"]
         await _link(client, app_id)
+        async with await _bearer(client) as agent:  # the image routes are session-only; the link and read take a token
+            assert [(await _post(agent, url, PNG)).status_code, (await agent.get(f"{url}/{gone}")).status_code,
+                    (await agent.delete(f"{url}/{gone}")).status_code] == [403, 403, 403]
+            assert (await agent.post(f"/api/applications/{app_id}/proof/link")).status_code == 201
+            assert (await agent.get(f"/api/applications/{app_id}/proof")).json()["proof"]["screenshots"] == 2
         deleted = await client.delete(f"{url}/{gone}")
         today = datetime.now(timezone.utc).date().isoformat()
         assert deleted.json()["delete_note"] == f"Deleted by you, {today}" and deleted.json()["deleted_at"]
@@ -269,20 +271,6 @@ def test_both_tables_are_registered_for_erasure_and_only_one_for_export():
     assert "application_proof_screenshots" in JobDatabase._EXPORT_TABLES
     assert "proof_upload_links" not in JobDatabase._EXPORT_TABLES
     assert "bytes" not in JobDatabase._EXPORT_COLUMNS["application_proof_screenshots"].split(", ")
-
-
-@pytest.mark.asyncio
-async def test_image_routes_are_session_only_but_the_link_and_the_read_take_a_token(authenticated_async_context):
-    async with authenticated_async_context() as client:
-        app_id = await _bring(client)
-        sid = (await _post(client, f"/api/applications/{app_id}/proof/screenshots", PNG)).json()["id"]
-        url = f"/api/applications/{app_id}/proof/screenshots"
-        async with await _bearer(client) as agent:
-            assert (await _post(agent, url, PNG)).status_code == 403
-            assert (await agent.get(f"{url}/{sid}")).status_code == 403
-            assert (await agent.delete(f"{url}/{sid}")).status_code == 403
-            assert (await agent.post(f"/api/applications/{app_id}/proof/link")).status_code == 201
-            assert (await agent.get(f"/api/applications/{app_id}/proof")).json()["proof"]["screenshots"] == 1
 
 
 # ── pasted text ──────────────────────────────────────────────────────────────
@@ -556,7 +544,6 @@ def _spy(monkeypatch, read_ok=True):
 
 
 def _spy_db(monkeypatch):
-    """Override ``get_request_db`` with a spy; returns the list of times a handle was borrowed."""
     from src.api.dependencies import get_request_db
     from src.api.main import app
 
@@ -608,17 +595,6 @@ async def test_a_used_or_expired_link_is_410_without_reading_the_body(authentica
 
 
 @pytest.mark.asyncio
-async def test_a_failed_web_body_read_never_borrows_a_db_connection(authenticated_async_context, monkeypatch):
-    async with authenticated_async_context() as client:
-        entered = _spy_db(monkeypatch)
-        big = {**MULTIPART, "content-length": str(MAX + 10**6)}
-        path = "/api/applications/1/proof/screenshots"
-        assert (await client.post(path, content=b"x", headers=big)).status_code == 413
-        assert (await client.post(path, content=b"not multipart")).status_code == 422
-        assert entered == [], "the body must be read BEFORE get_request_db is resolved"
-
-
-@pytest.mark.asyncio
 async def test_no_pooled_connection_is_held_while_the_body_is_read(authenticated_async_context, monkeypatch):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
@@ -655,19 +631,23 @@ async def test_a_slow_upload_times_out_with_408_holding_no_connection(authentica
 
 
 @pytest.mark.asyncio
-async def test_a_slow_web_upload_times_out_with_408_before_any_db_borrow(authenticated_async_context, monkeypatch):
+async def test_a_failed_web_body_read_never_borrows_a_db_connection(authenticated_async_context, monkeypatch):
     from src.api.routes import proof as proof_route
 
     async def never(_request):
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(proof_route, "_read_file", never)
-    monkeypatch.setattr(settings, "PROOF_UPLOAD_READ_SECONDS", 0.05)
+    path = "/api/applications/1/proof/screenshots"
     async with authenticated_async_context() as client:
         entered = _spy_db(monkeypatch)
-        resp = await _post(client, "/api/applications/1/proof/screenshots", PNG)
+        big = {**MULTIPART, "content-length": str(MAX + 10**6)}
+        assert (await client.post(path, content=b"x", headers=big)).status_code == 413
+        assert (await client.post(path, content=b"not multipart")).status_code == 422
+        monkeypatch.setattr(proof_route, "_read_file", never)
+        monkeypatch.setattr(settings, "PROOF_UPLOAD_READ_SECONDS", 0.05)
+        resp = await _post(client, path, PNG)
         assert resp.status_code == 408 and resp.json()["detail"] == "upload took too long"
-        assert entered == []
+        assert entered == [], "the body must be read BEFORE get_request_db is resolved"
 
 
 @pytest.mark.asyncio

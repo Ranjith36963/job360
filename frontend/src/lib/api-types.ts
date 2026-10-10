@@ -495,7 +495,7 @@ export interface paths {
         };
         /**
          * Get Proof
-         * @description How well this application is backed up, plus its screenshots (deleted ones as a note).
+         * @description Proof level plus screenshots.
          */
         get: operations["get_proof_api_applications__application_id__proof_get"];
         put?: never;
@@ -535,10 +535,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Upload Proof Screenshot
-         * @description The signed-in user adds a screenshot from the website.
-         */
+        /** Upload Proof Screenshot */
         post: operations["upload_proof_screenshot_api_applications__application_id__proof_screenshots_post"];
         delete?: never;
         options?: never;
@@ -553,17 +550,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get Proof Screenshot
-         * @description The image itself (404 not yours, 410 deleted).
-         */
+        /** Get Proof Screenshot */
         get: operations["get_proof_screenshot_api_applications__application_id__proof_screenshots__screenshot_id__get"];
         put?: never;
         post?: never;
-        /**
-         * Delete Proof Screenshot
-         * @description Erase the image; the row stays with "Deleted by you, <date>".
-         */
+        /** Delete Proof Screenshot */
         delete: operations["delete_proof_screenshot_api_applications__application_id__proof_screenshots__screenshot_id__delete"];
         options?: never;
         head?: never;
@@ -6547,9 +6538,7 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "image/*": unknown;
-                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

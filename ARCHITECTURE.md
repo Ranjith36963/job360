@@ -135,9 +135,8 @@ SHA-256 stored; credential table, not exported; both erased with the account).
 `proof_text` is a note event; `proof_screenshot` is written only by
 `services/applications/proof.py`. Routes (`api/routes/proof.py`): `POST
 /api/applications/{id}/proof/link` (MCP `get_proof_upload_link`), public `POST
-/api/proof/{token}` (multipart `file`, token masked in logs), `GET
-/api/applications/{id}/proof`, and session-only `POST|GET|DELETE
-.../proof/screenshots[/{sid}]`. `proof.level` (email > text > screenshot_only >
+/api/proof/{token}` (multipart `file`, token masked in logs), `GET .../proof`, session-only
+`POST|GET|DELETE .../proof/screenshots[/{sid}]`. `proof.level` (email > text > screenshot_only >
 none) rides on applications and receipts; `whats_new.proof_missing` lists 7-day gaps.
 
 ### Extraction pipelines

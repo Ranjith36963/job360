@@ -2,8 +2,7 @@
 
 ``POST /api/proof/{token}`` has NO login: an assistant's file tool posts the image
 there, and the token IS the credential (single use, 5 minutes, only its hash is
-stored). Everything else is per-user and scoped by ``user.id``; the web-only routes
-(upload, view, delete an image) refuse a bearer token. Pasted confirmation text is a
+stored). Everything else is per-user (``user.id``); the web image routes refuse a bearer token. Pasted text is a
 plain ``proof_text`` event through ``record_event``. See ``services/applications/proof.py``.
 """
 from __future__ import annotations
@@ -100,8 +99,7 @@ async def _read_file(request: Request) -> bytes:
 
 
 async def _read_body(request: Request) -> bytes:
-    """The upload body, bounded by the size cap and ``PROOF_UPLOAD_READ_SECONDS``; the link route reads it only once
-    the token is live, and neither route holds a pooled connection while reading."""
+    """The upload body, bounded by the size cap and ``PROOF_UPLOAD_READ_SECONDS``; no pooled connection is held."""
     try:
         try:
             return await asyncio.wait_for(_read_file(request), settings.PROOF_UPLOAD_READ_SECONDS)
@@ -159,7 +157,7 @@ async def get_proof(
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """How well this application is backed up, plus its screenshots (deleted ones as a note)."""
+    """Proof level plus screenshots."""
     if await spine.get_owned_application(db, user.id, application_id) is None:
         raise HTTPException(status_code=404, detail="application not found")
     return {
@@ -169,17 +167,14 @@ async def get_proof(
     }
 
 
-@router.post(
-    "/applications/{application_id}/proof/screenshots", status_code=201, response_model=ProofScreenshotOut,
-    dependencies=AUTH_FIRST, openapi_extra=_UPLOAD_BODY,
-)
+@router.post("/applications/{application_id}/proof/screenshots", status_code=201, response_model=ProofScreenshotOut,
+             dependencies=AUTH_FIRST, openapi_extra=_UPLOAD_BODY)
 async def upload_proof_screenshot(
     application_id: int,
     data: bytes = Depends(_read_body),  # noqa: B008 - before db: the body is read without a pooled connection
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_session_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """The signed-in user adds a screenshot from the website."""
     try:
         return await proof.store_screenshot(
             db, user.id, application_id, data, actor_for(user), "web", datetime.now(timezone.utc)
@@ -188,34 +183,28 @@ async def upload_proof_screenshot(
         _raise(exc)
 
 
-@router.get(
-    "/applications/{application_id}/proof/screenshots/{screenshot_id}", dependencies=AUTH_FIRST,
-    response_class=Response, responses={200: {"content": {"image/*": {}}}},
-)
+@router.get("/applications/{application_id}/proof/screenshots/{screenshot_id}", dependencies=AUTH_FIRST,
+            response_class=Response)
 async def get_proof_screenshot(
     application_id: int, screenshot_id: int,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_session_user),  # noqa: B008
 ) -> Response:
-    """The image itself (404 not yours, 410 deleted)."""
     try:
         mime, data = await proof.read_screenshot(db, user.id, application_id, screenshot_id)
     except SpineError as exc:
         _raise(exc)
-    headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
-    return Response(content=data, media_type=mime, headers=headers)
+    return Response(content=data, media_type=mime,
+                    headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
-@router.delete(
-    "/applications/{application_id}/proof/screenshots/{screenshot_id}", response_model=ProofScreenshotOut,
-    dependencies=AUTH_FIRST,
-)
+@router.delete("/applications/{application_id}/proof/screenshots/{screenshot_id}",
+               response_model=ProofScreenshotOut, dependencies=AUTH_FIRST)
 async def delete_proof_screenshot(
     application_id: int, screenshot_id: int,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_session_user),  # noqa: B008
 ) -> dict[str, Any]:
-    """Erase the image; the row stays with "Deleted by you, <date>"."""
     try:
         return await proof.delete_screenshot(
             db, user.id, application_id, screenshot_id, datetime.now(timezone.utc), actor_for(user)

@@ -154,11 +154,8 @@ async def store_screenshot(
 
 async def read_screenshot(db: JobDatabase, user_id: str, application_id: int, sid: int) -> tuple[str, bytes]:
     """(mime, bytes) of one screenshot; 404 unknown, 410 once deleted."""
-    cur = await db._db.execute(
-        "SELECT mime, bytes, deleted_at FROM application_proof_screenshots "
-        "WHERE id = ? AND user_id = ? AND application_id = ?",
-        (sid, user_id, application_id),
-    )
+    cur = await db._db.execute("SELECT mime, bytes, deleted_at FROM application_proof_screenshots "
+                               "WHERE id = ? AND user_id = ? AND application_id = ?", (sid, user_id, application_id))
     row = await cur.fetchone()
     if row is None:
         raise SpineError(404, "screenshot not found")
@@ -170,8 +167,7 @@ async def read_screenshot(db: JobDatabase, user_id: str, application_id: int, si
 async def delete_screenshot(
     db: JobDatabase, user_id: str, application_id: int, sid: int, now: datetime, actor: str
 ) -> dict[str, Any]:
-    """Erase the image, keep the row with a note, and put a "note" on the timeline (same transaction).
-    404 unknown or already deleted."""
+    """Erase the image, keep the row + a timeline "note" (one transaction); 404 unknown or already deleted."""
     async with db._db.transaction():
         cur = await db._db.execute(
             "UPDATE application_proof_screenshots SET bytes = NULL, deleted_at = ?, delete_note = ? "
@@ -180,11 +176,9 @@ async def delete_screenshot(
         )
         if not cur.rowcount:
             raise SpineError(404, "screenshot not found")
-        await spine.append_event(
-            db, user_id=user_id, application_id=application_id, event_type="note",
-            detail="Screenshot deleted by you", payload={"screenshot_id": sid},
-            occurred_at=now.isoformat(), recorded_by=actor,
-        )
+        await spine.append_event(db, user_id=user_id, application_id=application_id, event_type="note",
+                                 detail="Screenshot deleted by you", payload={"screenshot_id": sid},
+                                 occurred_at=now.isoformat(), recorded_by=actor)
     _audit("proof_screenshot_deleted", user_id=user_id, application_id=application_id, screenshot_id=sid, result="ok")
     return (await screenshot_meta(db, user_id, application_id, sid))[0]
 
