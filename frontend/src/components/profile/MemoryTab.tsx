@@ -55,11 +55,14 @@ export function MemoryTab() {
   const latest = useRef<ProfileResponse | null>(null);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
 
-  const loadHistory = useCallback(async (path: string): Promise<[string, HistoryRow[]]> => {
+  /** `null` means the history could NOT be read — which is not the same thing
+   *  as "nothing is saved" (`[]`). Each caller decides what to do with it. */
+  const loadHistory = useCallback(async (path: string): Promise<[string, HistoryRow[] | null]> => {
     try {
       return [path, await getProfileEditHistory(path)];
-    } catch {
-      return [path, []]; // no history = no provenance line, never a broken page
+    } catch (err: unknown) {
+      console.error(`Could not read the edit history for ${path}`, err);
+      return [path, null];
     }
   }, []);
 
@@ -75,7 +78,9 @@ export function MemoryTab() {
       ]);
       latest.current = data;
       setProfile(data);
-      setHistories(Object.fromEntries(lists));
+      // On first load an unreadable history reads as none: no provenance line,
+      // never a broken page.
+      setHistories(Object.fromEntries(lists.map(([p, rows]): [string, HistoryRow[]] => [p, rows ?? []])));
     } catch (err: unknown) {
       setError(apiErrorMessage(err, "Could not load your memory."));
     } finally {
@@ -92,8 +97,10 @@ export function MemoryTab() {
       const updated = await updateProfileFields([{ path: spec.path, value: block }]);
       latest.current = updated;
       setProfile(updated);
+      // The save worked. If the re-read did not, keep the provenance this block
+      // already had rather than blanking every row in it until a reload.
       const [, rows] = await loadHistory(spec.path);
-      setHistories((h) => ({ ...h, [spec.path]: rows }));
+      if (rows) setHistories((h) => ({ ...h, [spec.path]: rows }));
     };
     const done = queue.current.then(run, run);
     queue.current = done.catch(() => undefined);
