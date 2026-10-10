@@ -5,6 +5,7 @@ import { Sidebar } from "./Sidebar";
 
 const listAsks = vi.fn();
 const getAssistantSettings = vi.fn();
+const getReadyToSend = vi.fn();
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 vi.mock("next-themes", () => ({
@@ -17,11 +18,13 @@ vi.mock("@/lib/api", () => ({
   ASKS_CHANGED_EVENT: "job360:asks-changed",
   listAsks: (...a: unknown[]) => listAsks(...a),
   getAssistantSettings: (...a: unknown[]) => getAssistantSettings(...a),
+  getReadyToSend: (...a: unknown[]) => getReadyToSend(...a),
 }));
 
 beforeEach(() => {
   listAsks.mockReset();
   getAssistantSettings.mockReset().mockResolvedValue({ waiting: [] });
+  getReadyToSend.mockReset().mockResolvedValue({ total: 0 });
 });
 
 // Redesign slice 1: on desktop the Sidebar owns the nav, below md the Navbar's
@@ -47,6 +50,15 @@ describe("Navbar drawer — Needs you badge", () => {
     getAssistantSettings.mockResolvedValue({ waiting: [{ id: 1 }, { id: 2 }] });
     render(<Navbar />);
     await waitFor(() => expect(getAssistantSettings).toHaveBeenCalled());
+    openDrawer();
+    expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("4");
+  });
+
+  it("counts the applications ready to send (a counts-only read) with the rest", async () => {
+    listAsks.mockResolvedValue({ asks: [], open_count: 1 });
+    getReadyToSend.mockResolvedValue({ total: 3 });
+    render(<Navbar />);
+    await waitFor(() => expect(getReadyToSend).toHaveBeenCalledWith({ limit: 0 }));
     openDrawer();
     expect(await screen.findByTestId("needs-you-badge")).toHaveTextContent("4");
   });

@@ -17,8 +17,8 @@
 | --- | --- | --- |
 | Migration head | **0053** | `backend/migrations/` |
 | Migration files | **54** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 17 route modules (110 endpoints) | `backend/src/api/routes/` |
-| Test files | across 155 `test_*.py` files | `backend/tests/` |
+| FastAPI surface | 18 route modules (111 endpoints) | `backend/src/api/routes/` |
+| Test files | across 156 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 28 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -127,6 +127,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `DELETE` | `/api/applications/{application_id}/proof/screenshots/{screenshot_id}` | `proof.py` |
 | `GET` | `/api/applications/{application_id}/proof/screenshots/{screenshot_id}` | `proof.py` |
 | `POST` | `/api/proof/{token}` | `proof.py` |
+| `GET` | `/api/ready-to-send` | `ready_to_send.py` |
 | `GET` | `/api/receipts` | `receipts.py` |
 | `POST` | `/api/receipts/{job_id}` | `receipts.py` |
 | `GET` | `/api/receipts/{receipt_id}` | `receipts.py` |
@@ -144,5 +145,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**110 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**111 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->

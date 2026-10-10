@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ASKS_CHANGED_EVENT, getStats, listAsks } from "@/lib/api";
+import { getStats, listAsks } from "@/lib/api";
 import type { ApplicationSummary, Ask, StatsResponse } from "@/lib/api";
 import { PageContainer } from "@/components/layout/PageContainer";
+import { announceOpenCount } from "@/components/layout/useOpenAsks";
 import { ApplicationRows } from "@/components/applications/ApplicationList";
 import { AskCard } from "@/components/needs-you/NeedsYou";
 import { CountsBlock, DueBlock, FeedBlock } from "@/components/home/HomeRail";
@@ -49,10 +50,6 @@ const linkBtn =
   "text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline";
 
 const subscribeNever = () => () => {};
-
-function announce(openCount: number) {
-  window.dispatchEvent(new CustomEvent(ASKS_CHANGED_EVENT, { detail: openCount }));
-}
 
 export function Home() {
   // Client-only: the date and the last-visit stamp belong to this browser, so
@@ -151,7 +148,9 @@ export function Home() {
     try {
       const r = await listAsks("open");
       setAsks({ status: "ok", value: { asks: r.asks, openCount: r.open_count } });
-      announce(r.open_count);
+      // The badge also counts waiting setting changes and Ready to send (S5d):
+      // re-count all of it, never announce the questions alone.
+      void announceOpenCount();
     } catch {
       // Keep what is on screen; the next full load will correct it.
     }

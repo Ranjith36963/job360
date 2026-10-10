@@ -352,6 +352,48 @@ def _where(user: CurrentUser, event_type: str, payload: dict[str, Any]) -> str:
     return str(where)
 
 
+ANSWER_SOURCES = ("memory", "profile", "approved", "written", "guessed")
+ANSWER_QUESTION_MAX = 300
+ANSWER_KEY_MAX = 120
+
+
+def clean_answers(raw: Any) -> list[dict[str, str]]:
+    """S5d: the answers an assistant typed into a form, validated. A list of at
+    most ``KIT_FORM_FIELDS_MAX`` of ``{question, answer, source[, key]}`` - closed
+    keys, control characters removed, sizes capped. ``source`` says where the
+    answer came from (a guess is ``guessed``); ``key`` is the kit key for a
+    memory / profile / approved answer. An answer may be blank (the page flags it)."""
+    if not isinstance(raw, list) or len(raw) > settings.KIT_FORM_FIELDS_MAX:
+        raise SpineError(422, f"answers must be a list of at most {settings.KIT_FORM_FIELDS_MAX} items")
+    out: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict) or not {"question", "answer", "source"} <= set(item) <= {
+            "question", "answer", "source", "key",
+        }:
+            raise SpineError(422, "each answer needs question, answer and source (and optionally key), nothing else")
+        if item["source"] not in ANSWER_SOURCES:
+            raise SpineError(422, "answer source must be one of: " + ", ".join(ANSWER_SOURCES))
+        texts = {k: item[k] for k in ("question", "answer", "key") if k in item}
+        if not all(isinstance(v, str) for v in texts.values()):
+            raise SpineError(422, "answer question, answer and key must be text")
+        # A line break in a question becomes a space (never glues two words); an
+        # answer keeps its line breaks - a written answer may be paragraphs.
+        question = " ".join(spine._strip_control_chars(texts["question"]).split())
+        answer = spine._strip_control_chars(texts["answer"]).strip()
+        if not question or len(question) > ANSWER_QUESTION_MAX:
+            raise SpineError(422, f"answer question must be 1 to {ANSWER_QUESTION_MAX} characters")
+        if len(answer) > settings.USER_INFO_ANSWER_MAX_CHARS:
+            raise SpineError(422, f"an answer is over {settings.USER_INFO_ANSWER_MAX_CHARS} characters")
+        clean = {"question": question, "answer": answer, "source": str(item["source"])}
+        if "key" in texts:
+            key = spine._strip_control_chars(texts["key"], keep="").strip()
+            if not key or len(key) > ANSWER_KEY_MAX:
+                raise SpineError(422, f"answer key must be 1 to {ANSWER_KEY_MAX} characters")
+            clean["key"] = key
+        out.append(clean)
+    return out
+
+
 def _refuse(user: CurrentUser, event_type: str, status: int) -> None:
     get_audit_logger().warning(
         f"{event_type}_refused",
@@ -418,11 +460,16 @@ async def check_kit_event(
             raise SpineError(403, "this needs your click on the Job360 website")
         return {"where": "web", "by": actor}
     if event_type == "form_filled":
-        _closed_payload(event_type, payload, {"form_url", "fields_count"})
+        if not {"form_url", "fields_count"} <= set(payload) <= {"form_url", "fields_count", "answers"}:
+            raise SpineError(422, "form_filled needs payload keys ['fields_count', 'form_url'] (and 'answers')")
         count = payload.get("fields_count")
         if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= settings.KIT_FORM_FIELDS_MAX:
             raise SpineError(422, f"fields_count must be a whole number from 0 to {settings.KIT_FORM_FIELDS_MAX}")
-        return {"host": _host(event_type, payload.get("form_url")), "fields_count": count, "by": actor}
+        host = _host(event_type, payload.get("form_url"))
+        stored: dict[str, Any] = {"host": host, "fields_count": count, "by": actor}
+        if "answers" in payload:
+            stored["answers"] = clean_answers(payload["answers"])
+        return stored
     if event_type == "hold_released":
         _closed_payload(event_type, payload, {"reason"})
         if payload.get("reason") not in HOLD_RELEASE_REASONS:
@@ -445,6 +492,8 @@ def log_kit_event(
     for key in ("where", "version", "mode", "host", "reason", "fields_count"):
         if stored.get(key) is not None:
             extra[key] = safe_log_value(stored[key], max_len=80)
+    if isinstance(stored.get("answers"), list):
+        extra["answers_count"] = len(stored["answers"])  # a count, never the answers
     get_audit_logger().info(event_type, extra=extra)
 
 

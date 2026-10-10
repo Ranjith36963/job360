@@ -902,9 +902,15 @@ export async function markCvSeen(applicationId: number, artifactId?: number): Pr
   });
 }
 
-/** "Send this one" - the user says yes to sending with the latest CV. */
-export async function approveSend(applicationId: number): Promise<ApplicationControls> {
-  return request(`/api/applications/${applicationId}/send/approve`, { method: "POST" });
+/** "Send this one" - the user says yes to sending with the latest CV. `seen`
+ * (S5d) names the CV and the fill on screen: if either is no longer the newest
+ * the server answers 409 and records nothing. */
+export async function approveSend(
+  applicationId: number,
+  seen?: { artifactId?: number | null; formFilledEventId?: number | null },
+): Promise<ApplicationControls> {
+  const q = qs({ artifact_id: seen?.artifactId ?? undefined, form_filled_event_id: seen?.formFilledEventId ?? undefined });
+  return request(`/api/applications/${applicationId}/send/approve${q}`, { method: "POST" });
 }
 
 /** "Don't send" - the gate stops until a later "Send this one". */
@@ -1022,4 +1028,15 @@ export type MorningCheck = _Schemas["MorningCheckOut"];
 
 export async function getMorningCheck(since: string): Promise<MorningCheck> {
   return request<MorningCheck>(`/api/morning-check${qs({ since })}`);
+}
+
+// ---- Ready to send (S5d) ----
+export type ReadyToSend = _Schemas["ReadyToSendOut"];
+export type ReadyCardData = _Schemas["ReadyCard"];
+export type ReadyAnswer = _Schemas["ReadyAnswer"];
+export type ReadyFlag = _Schemas["ReadyFlag"];
+
+/** The approval cards. `limit: 0` = counts only; `applicationId` narrows to one. */
+export async function getReadyToSend(params: { applicationId?: number; limit?: number } = {}): Promise<ReadyToSend> {
+  return request<ReadyToSend>(`/api/ready-to-send${qs({ application_id: params.applicationId, limit: params.limit })}`);
 }
