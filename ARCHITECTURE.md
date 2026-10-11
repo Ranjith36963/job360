@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-09-19 by the daily truth check -->
+<!-- doc: LIVING | last-verified: 2026-10-11 by the daily truth check -->
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
@@ -114,12 +114,11 @@ and the MCP `get_application_kit` call the same route function
 application only, every stored answer with its source (memory / profile /
 approved text), `missing` for the job's country, the duplicate / hold /
 account-site / autofill state and a preview of the gate. Each read writes a
-`kit_read` event and mints one `artifact_links` row per document: a random
-32-byte token, only its SHA-256 stored, 30 minutes, 3 downloads, served by the
-public `GET /api/files/{token}` (`api/routes/files.py`: constant-time compare,
-one atomic counter UPDATE, per-IP limits, `no-store`; the token is rewritten to
-`[redacted]` in the access log, uvicorn's log and Sentry). `artifact_links` is
-erased with the account and not exported. `application_receipts` gained
+`kit_read` event and mints one `artifact_links` row per document, served by the
+public `GET /api/files/{token}`: how that token is minted, compared, counted,
+rate-limited and redacted is `api/routes/files.py` with
+`core.settings.KIT_LINK_TTL_MINUTES` / `KIT_LINK_MAX_DOWNLOADS` /
+`FILE_DOWNLOADS_MAX_PER_MIN` / `FILE_BAD_TOKEN_MAX_PER_MIN`. `application_receipts` gained
 `possible_duplicate`, `kit_event_id`, `kit_sha256`, all set at INSERT. The human
 in the loop is a set of note events (`cv_seen`, `submit_approved`,
 `submit_declined`, `autofill_set`, `duplicate_cleared`, `form_filled`,
@@ -128,16 +127,12 @@ in the loop is a set of note events (`cv_seen`, `submit_approved`,
 (`/cv-seen`, `/send/approve|decline`, `/autofill`, `/duplicate/clear`);
 `may_submit` reads them through `kit.gate_facts`.
 
-PROOF OF APPLICATION (S7, migration 0053): `application_proof_screenshots` (image
-`bytes` BYTEA, NULL once the user deletes it; the row and a dated note stay; never
-in the export) and `proof_upload_links` (single-use, 5 minutes, only the token's
-SHA-256 stored; credential table, not exported; both erased with the account).
-`proof_text` is a note event; `proof_screenshot` is written only by
-`services/applications/proof.py`. Routes (`api/routes/proof.py`): `POST
-/api/applications/{id}/proof/link` (MCP `get_proof_upload_link`), public `POST
-/api/proof/{token}` (multipart `file`, token masked in logs), `GET .../proof`, session-only
-`POST|GET|DELETE .../proof/screenshots[/{sid}]`. `proof.level` (email > text > screenshot_only >
-none) rides on applications and receipts; `whats_new.proof_missing` lists 7-day gaps.
+PROOF OF APPLICATION (S7, migration 0053): the tables and every column are
+`backend/migrations/0053_application_proof.up.sql`; what counts as proof and how
+`proof.level` is derived is `services/applications/proof.py`; the routes are
+`api/routes/proof.py`. Whether a table reaches a GDPR export or an account erasure
+is `repositories.database.JobDatabase._EXPORT_TABLES` / `_EXPORT_COLUMNS` /
+`_PER_USER_TABLES` — a prose copy of those lists was wrong here.
 
 ### Extraction pipelines
 
