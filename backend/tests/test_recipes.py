@@ -99,6 +99,15 @@ def test_setup_is_six_short_rounds_and_forms_ask_only_what_is_missing():
         assert words in setup, words
     assert "how many applications a day" not in setup
     assert "ask everything once, in one message" not in setup
+    # Owner decisions 2026-10-10: setup is an INTERVIEW, targets first, and the
+    # score line is the user's own number - asked, never assumed, no default.
+    assert "interview" in setup and "never answer for them from the cv" in setup
+    assert setup.index("(1) **targets**") < setup.index("(2) **you**")
+    for words in ("preferences.target_job_titles", "preferences.experience_years_min", "preferences.looking_for",
+                  "preferences.dealbreakers", "preferences.avoid_companies", "assistant_settings.apply_min_score",
+                  "never suggest or assume a number", "above and below it separately"):
+        assert words in setup, words
+    assert "75" not in setup and "selective_above_score" not in setup
     apply = flat(load_recipe("apply").text)
     assert "all the missing questions for this form in one message" in apply
     # A lasting answer goes to its user_info path, never to assistant_notes.
@@ -169,11 +178,12 @@ def test_recipes_carry_the_assistant_settings_rules():
         return " ".join(text.lower().split())
 
     setup = flat(load_recipe("setup").text)
-    for word in ("apply_all", "selective_above_score", "auto_when_sure", "no cap by default", "waiting for your ok",
-                 "needs you", "i cannot confirm it for you", "assistant_settings.submit_mode"):
+    for word in ("assistant_settings.above_line", "assistant_settings.below_line", "auto_when_sure",
+                 "no cap by default", "waiting for your ok", "needs you", "i cannot confirm it for you",
+                 "assistant_settings.submit_mode"):
         assert word in setup, word
     apply = flat(load_recipe("apply").text)
-    for word in ("settings.paused", "settings.apply_mode.effective", "check_submit", "practice run",
+    for word in ("settings.paused", "line.switch", "check_submit", "practice run",
                  "indeed and linkedin always answer `ask`", "after the user says yes to this one application"):
         assert word in apply, word
     daily = flat(load_recipe("daily").text)

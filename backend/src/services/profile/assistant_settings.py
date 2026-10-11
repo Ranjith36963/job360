@@ -3,8 +3,12 @@
 Owner decision 2026-10-08 (S2). Job360 never applies to anything itself; these
 are the user's standing rules that the CONNECTED assistant reads and obeys:
 
-* ``apply_mode`` — ``ask_each`` (default) | ``apply_all`` | ``selective_above_score``
-* ``apply_min_score`` — 0-100, default 75, only used by ``selective_above_score``
+* ``apply_min_score`` — the user's OWN score line, 0-100. NO default: unset
+  (``None``) means "not set" and the assistant must ask for it (owner decision
+  2026-10-10).
+* ``above_line`` / ``below_line`` — ``ask`` (default) | ``auto``: two SEPARATE
+  per-user switches, one for jobs at or above the line and one for jobs below it.
+  ``apply_mode`` is RETIRED (the field stays so old stored rows still load).
 * ``submit_mode`` — ``confirm`` (default) | ``auto_when_sure``
 * ``daily_cap`` — most submits per day; ``None`` = no cap (owner: no cap by default)
 * ``paused_until`` — ``""`` | ``"until_resumed"`` | an ISO-8601 time in the future
@@ -44,7 +48,6 @@ from src.core import settings
 from src.repositories import pgsync
 from src.services.profile import edits as profile_edits
 from src.services.profile.models import (
-    VALID_APPLY_MODES,
     VALID_DAILY_CHECK_VALUES,
     VALID_SUBMIT_MODES,
     AssistantSettings,
@@ -55,16 +58,23 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
     from src.repositories.database import JobDatabase
 
 HEAD = "assistant_settings"
-APPLY_MODE_PATH = f"{HEAD}.apply_mode"
+APPLY_MODE_PATH = f"{HEAD}.apply_mode"  # RETIRED 2026-10-10: kept only to name it in the refusal
+APPLY_MODE_RETIRED_MESSAGE = (
+    "assistant_settings.apply_mode is retired: use assistant_settings.above_line "
+    "and assistant_settings.below_line (ask|auto)"
+)
 APPLY_MIN_SCORE_PATH = f"{HEAD}.apply_min_score"
+ABOVE_LINE_PATH = f"{HEAD}.above_line"
+BELOW_LINE_PATH = f"{HEAD}.below_line"
 SUBMIT_MODE_PATH = f"{HEAD}.submit_mode"
 DAILY_CAP_PATH = f"{HEAD}.daily_cap"
 PAUSED_UNTIL_PATH = f"{HEAD}.paused_until"
 PAUSE_REASON_PATH = f"{HEAD}.pause_reason"
 SETTING_PATHS: tuple[str, ...] = (
-    APPLY_MODE_PATH, APPLY_MIN_SCORE_PATH, SUBMIT_MODE_PATH,
+    APPLY_MIN_SCORE_PATH, ABOVE_LINE_PATH, BELOW_LINE_PATH, SUBMIT_MODE_PATH,
     DAILY_CAP_PATH, PAUSED_UNTIL_PATH, PAUSE_REASON_PATH,
 )
+VALID_LINE_SWITCHES: frozenset[str] = frozenset({"ask", "auto"})
 # The inbox/Gmail mode stays at its old path (an ALIAS, not a move: assistants
 # cached instructions that write it). "auto" there is a RISKIER change too
 # (owner answer 1, 2026-10-08), so it goes through the same request flow.
@@ -72,13 +82,12 @@ INBOX_MODE_PATH = "preferences.daily_check"
 # S4 - how far the six-round setup got. NOT in SETTING_PATHS / GATED_PATHS: it is
 # progress the assistant reports, never a freedom, so it is never "riskier".
 SETUP_PROGRESS_PATH = f"{HEAD}.setup_progress"
-SETUP_ROUNDS: tuple[str, ...] = ("you", "visa", "logistics", "equality", "targets", "settings")
+SETUP_ROUNDS: tuple[str, ...] = ("targets", "you", "visa", "logistics", "equality", "settings")
 SETUP_PROGRESS_FUTURE_SLACK = timedelta(minutes=5)
 GATED_PATHS: tuple[str, ...] = SETTING_PATHS + (INBOX_MODE_PATH,)
 
 UNTIL_RESUMED = "until_resumed"
-DEFAULT_APPLY_MODE = "ask_each"
-DEFAULT_APPLY_MIN_SCORE = 75
+DEFAULT_LINE_SWITCH = "ask"
 DEFAULT_SUBMIT_MODE = "confirm"
 AUTO_SUBMIT_MODE = "auto_when_sure"
 PAUSE_MAX_DAYS = 365
@@ -205,8 +214,8 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
     ``ProfileEditError(422)`` naming the PATH. ``None`` (a clear) is handled by
     the caller before this runs, so ``daily_cap: null`` never reaches here."""
     when = now if now is not None else datetime.now(timezone.utc)
-    if path == APPLY_MODE_PATH:
-        return _closed_set(path, value, VALID_APPLY_MODES)
+    if path in (ABOVE_LINE_PATH, BELOW_LINE_PATH):
+        return _closed_set(path, value, VALID_LINE_SWITCHES)
     if path == SUBMIT_MODE_PATH:
         return _closed_set(path, value, VALID_SUBMIT_MODES)
     if path == APPLY_MIN_SCORE_PATH:
@@ -227,8 +236,9 @@ def validate_setting(path: str, value: Any, *, now: Optional[datetime] = None) -
 class EffectiveSettings:
     """The settings with every default filled in — what the gate reads."""
 
-    apply_mode: str
-    apply_min_score: int
+    apply_min_score: Optional[int]  # the user's own line; None = not set (NO default)
+    above_line: str
+    below_line: str
     submit_mode: str
     daily_cap: Optional[int]
     paused_until: str
@@ -236,10 +246,11 @@ class EffectiveSettings:
 
 
 def effective(s: AssistantSettings) -> EffectiveSettings:
-    """Fill the safe defaults: ask each / 75 / confirm / no cap / not paused."""
+    """Fill the safe defaults: no score line / ask / ask / confirm / no cap / not paused."""
     return EffectiveSettings(
-        apply_mode=s.apply_mode or DEFAULT_APPLY_MODE,
-        apply_min_score=DEFAULT_APPLY_MIN_SCORE if s.apply_min_score is None else int(s.apply_min_score),
+        apply_min_score=None if s.apply_min_score is None else int(s.apply_min_score),
+        above_line=s.above_line or DEFAULT_LINE_SWITCH,
+        below_line=s.below_line or DEFAULT_LINE_SWITCH,
         submit_mode=s.submit_mode or DEFAULT_SUBMIT_MODE,
         daily_cap=None if s.daily_cap is None else int(s.daily_cap),
         paused_until=s.paused_until or "",
@@ -267,10 +278,10 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
     An expired ``paused_until`` reads as ``""`` so a stale pause never makes the
     next change look like "moving it earlier"."""
     when = now if now is not None else datetime.now(timezone.utc)
-    if path == APPLY_MODE_PATH:
-        return raw or DEFAULT_APPLY_MODE
+    if path in (ABOVE_LINE_PATH, BELOW_LINE_PATH):
+        return raw or DEFAULT_LINE_SWITCH
     if path == APPLY_MIN_SCORE_PATH:
-        return DEFAULT_APPLY_MIN_SCORE if raw is None else raw
+        return raw  # None stays None: the line has no default
     if path == SUBMIT_MODE_PATH:
         return raw or DEFAULT_SUBMIT_MODE
     if path == DAILY_CAP_PATH:
@@ -285,9 +296,6 @@ def effective_path_value(path: str, raw: Any, now: Optional[datetime] = None) ->
 
 
 # ── Riskier vs safer ─────────────────────────────────────────────────────────
-
-_APPLY_RANK = {"ask_each": 0, "selective_above_score": 1, "apply_all": 2}
-
 
 def _pause_rank(value: str) -> float:
     """How long a pause lasts: not paused = 0, a time = its epoch seconds,
@@ -307,17 +315,26 @@ def _is_auto_inbox(value: Any) -> bool:
     return str(value or "") in ("auto", "scheduled")
 
 
-def classify_change(path: str, before: Any, after: Any) -> Risk:
+def classify_change(
+    path: str, before: Any, after: Any, *, switches: tuple[str, str] = (DEFAULT_LINE_SWITCH, DEFAULT_LINE_SWITCH)
+) -> Risk:
     """``"riskier"`` when the change gives the assistant MORE freedom, else
     ``"safer"``. Pure; ``before`` / ``after`` are EFFECTIVE values (defaults
     filled). An unchanged value is ``"safer"`` (a no-op write).
 
+    ``switches`` is ``(above_line, below_line)``, the EFFECTIVE values at the time
+    of the change; only ``apply_min_score`` reads it (a moved line is riskier only
+    when it moves jobs from an ``ask`` side to an ``auto`` side).
+
     ===================  =============================================  =========================
     path                 riskier                                        safer
     ===================  =============================================  =========================
-    apply_mode           ask_each -> selective/apply_all; selective ->  anything -> ask_each;
-                         apply_all                                      apply_all -> selective
-    apply_min_score      a lower number                                 higher or equal
+    above_line /         ask -> auto                                    auto -> ask
+    below_line
+    apply_min_score      not set -> a number while either switch is     a number -> not set;
+                         auto; a LOWER number when above=auto and       equal; a lower number
+                         below=ask; a HIGHER number when below=auto     otherwise; a higher number
+                         and above=ask                                  otherwise
     submit_mode          confirm -> auto_when_sure                      -> confirm
     daily_cap            raised, or a number -> none (cap removed)      none -> a number, lowered
     paused_until         cleared or moved earlier (resume)              set or extended
@@ -326,10 +343,17 @@ def classify_change(path: str, before: Any, after: Any) -> Risk:
     daily_check          on its own; "scheduled" counts as auto)
     ===================  =============================================  =========================
     """
-    if path == APPLY_MODE_PATH:
-        return "riskier" if _APPLY_RANK.get(after, 0) > _APPLY_RANK.get(before, 0) else "safer"
+    if path in (ABOVE_LINE_PATH, BELOW_LINE_PATH):
+        return "riskier" if (after == "auto" and before != "auto") else "safer"
     if path == APPLY_MIN_SCORE_PATH:
-        return "riskier" if after < before else "safer"
+        above_auto, below_auto = switches[0] == "auto", switches[1] == "auto"
+        if after is None or before == after:
+            return "safer"
+        if before is None:
+            return "riskier" if (above_auto or below_auto) else "safer"
+        if after < before:
+            return "riskier" if (above_auto and not below_auto) else "safer"
+        return "riskier" if (below_auto and not above_auto) else "safer"
     if path == SUBMIT_MODE_PATH:
         return "riskier" if (after == AUTO_SUBMIT_MODE and before != AUTO_SUBMIT_MODE) else "safer"
     if path == DAILY_CAP_PATH:
@@ -343,6 +367,47 @@ def classify_change(path: str, before: Any, after: Any) -> Risk:
     if path == INBOX_MODE_PATH:
         return "riskier" if (_is_auto_inbox(after) and not _is_auto_inbox(before)) else "safer"
     raise ValueError(f"{path!r} is not a gated setting path")
+
+
+LineSide = Literal["above", "below", "unknown"]
+
+
+def line_block(fit_score: Optional[int], cfg: EffectiveSettings) -> dict[str, Any]:
+    """The ``line`` block ``save_fit`` answers with: where this fit lands against
+    the user's own score line, the switch that side uses, and ONE plain sentence
+    telling the assistant what to do next. Pure."""
+    line = cfg.apply_min_score
+    side = line_side(fit_score, line)
+    if line is None:
+        return {
+            "score_line": None, "side": "unknown", "switch": None,
+            "next": "No score line set - ask the user for their score line "
+                    "(update_profile assistant_settings.apply_min_score).",
+        }
+    if side == "unknown":
+        return {
+            "score_line": line, "side": "unknown", "switch": None,
+            "next": f"No fit score saved, so this job cannot be placed against your line ({line}) - "
+                    "save one with save_fit score.",
+        }
+    switch = cfg.above_line if side == "above" else cfg.below_line
+    rule = (
+        "ask the user before applying." if switch == "ask"
+        else "you may apply on your own (still run check_submit before the final submit)."
+    )
+    return {
+        "score_line": line, "side": side, "switch": switch,
+        "next": f"{'Above' if side == 'above' else 'Below'} your line ({line}). Your rule: {switch} - {rule}",
+    }
+
+
+def line_side(fit_score: Optional[int], line: Optional[int]) -> LineSide:
+    """Which side of the user's score line a fit score is on. ``above`` when the
+    score is at or over the line; ``unknown`` when there is no score or no line.
+    Pure; the ONE place the line is compared."""
+    if fit_score is None or line is None:
+        return "unknown"
+    return "above" if fit_score >= line else "below"
 
 
 def effective_inbox_values() -> frozenset[str]:  # pragma: no cover — documentation helper
@@ -386,6 +451,9 @@ class SubmitFacts:
     approved: bool = False
     declined: bool = False
     blocked: bool = False
+    # The latest saved fit score for this application (``None`` = no fit yet).
+    # Compared with the user's score line by :func:`line_side` (rule 5c).
+    fit_score: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -402,7 +470,7 @@ class SubmitDecision:
 REASONS: tuple[str, ...] = (
     "paused", "already_applied", "user_declined", "daily_cap_reached", "duplicate_job", "unknown_site",
     "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
-    "user_approved", "auto_when_sure", "blocked",
+    "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
 )
 
 
@@ -468,6 +536,11 @@ def may_submit(
     5. same job already applied to -> ``duplicate_job``: STOP when the mode is
        auto (nobody is watching), else ask
     5b. a ``blocked`` with no later ``unblocked`` -> ask ``blocked`` (S6)
+    5c. the fit score vs the user's score line (``line_side``): no line or no fit
+        yet -> ask ``score_line_unknown``; the switch for that side
+        (``above_line`` / ``below_line``) is ``ask`` -> ask ``line_ask_above`` /
+        ``line_ask_below``. Checked inside ``_first_ask`` right after the
+        duplicate ask, so a stored yes still clears it.
     6. site unknown -> ask ``unknown_site``
     7. Indeed / LinkedIn style site -> ask ``ask_always_site``
     8. the mode (the job's override, else ``submit_mode``) is ``confirm`` -> ask
@@ -475,7 +548,7 @@ def may_submit(
     10. first application since auto-submit was turned on -> ask ``practice_run``
     11. otherwise -> submit ``auto_when_sure``
 
-    A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (even
+    A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
     ``user_approved``. Rules 1-4, the auto-mode duplicate stop and the ``blocked``
     ask (5b) are NEVER cleared by a yes.
@@ -503,7 +576,7 @@ def may_submit(
             "ask", "blocked",
             "Your assistant got stuck on this application. Do not submit; the user resolves it first.",
         )
-    ask = _first_ask(application, site_host, counts, override=override, auto=auto)
+    ask = _first_ask(cfg, application, site_host, counts, override=override, auto=auto)
     if ask is None:
         return SubmitDecision("submit", "auto_when_sure", "Auto-submit is on and this site allows it. You may submit.")
     if application.approved:
@@ -514,6 +587,7 @@ def may_submit(
 
 
 def _first_ask(
+    cfg: EffectiveSettings,
     application: SubmitFacts,
     site_host: Optional[str],
     counts: SubmitCounts,
@@ -526,6 +600,18 @@ def _first_ask(
         return SubmitDecision(
             "ask", "duplicate_job",
             "Possible duplicate: this job was already applied to. Fill the form, stop before submit and ask yes.",
+        )
+    side = line_side(application.fit_score, cfg.apply_min_score)
+    if side == "unknown":
+        return SubmitDecision(
+            "ask", "score_line_unknown",
+            "No score line or no fit score yet. Fill the form, stop before submit and ask yes.",
+        )
+    if (cfg.above_line if side == "above" else cfg.below_line) == "ask":
+        return SubmitDecision(
+            "ask", f"line_ask_{side}",
+            f"The user asked to be asked for jobs {side} their score line. "
+            "Fill the form, stop before submit and ask yes.",
         )
     kind = host_kind(parse_site_host(site_host))
     if kind == "invalid":
@@ -634,6 +720,30 @@ async def load_submit_counts(db: JobDatabase, user_id: str, now: datetime) -> Su
 # ── The read model ───────────────────────────────────────────────────────────
 
 
+def setup_round_missing(round_name: str, profile: UserProfile) -> list[str]:
+    """The PATHS that must hold an answer before ``round_name`` may be marked
+    done (owner decision 2026-10-10): ``targets`` needs target job titles AND the
+    user's score line; ``settings`` needs the inbox mode. Pure; ``[]`` for every
+    other round. An empty answer is missing (rule #29 stays: we never invent one)."""
+    missing: list[str] = []
+    if round_name == "targets":
+        if not profile.preferences.target_job_titles:
+            missing.append("preferences.target_job_titles")
+        if profile.assistant_settings.apply_min_score is None:
+            missing.append(APPLY_MIN_SCORE_PATH)
+    elif round_name == "settings" and not profile.preferences.daily_check:
+        missing.append(INBOX_MODE_PATH)
+    return missing
+
+
+def setup_round_refusal(round_name: str, missing: list[str]) -> str:
+    """The 422 message for a round marked done before its answers exist."""
+    return (
+        f"setup round {round_name} can't be marked done yet: missing {', '.join(missing)} "
+        "- ask the user, then save them in the same call"
+    )
+
+
 def setup_progress_view(progress: Any) -> dict[str, Any]:
     """``{rounds, done, total, next}`` from the stored progress. ``next`` is the
     first unfinished round in order, ``""`` when all six are done. A malformed
@@ -670,8 +780,9 @@ def build_settings_view(
     eff = effective(raw)
     since, applied_since = practice
     return {
-        "apply_mode": {"value": raw.apply_mode, "effective": eff.apply_mode},
         "apply_min_score": {"value": raw.apply_min_score, "effective": eff.apply_min_score},
+        "above_line": {"value": raw.above_line, "effective": eff.above_line},
+        "below_line": {"value": raw.below_line, "effective": eff.below_line},
         "submit_mode": {"value": raw.submit_mode, "effective": eff.submit_mode},
         "daily_cap": {"value": raw.daily_cap, "effective": eff.daily_cap},
         "paused_until": {

@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { hasStamp, readLastVisit, writeLastVisit } from "@/lib/home";
-import { APPLY_MODE_LABEL, LAST_CHECK_KEY, SUBMIT_MODE_LABEL, pausedByText, quotaText, sinceText } from "./morning-check";
+import { LAST_CHECK_KEY, LINE_SWITCH_LABEL, SUBMIT_MODE_LABEL, lineSwitchText, pausedByText, quotaText, scoreLineText, sinceText } from "./morning-check";
 
 const now = new Date("2026-10-10T12:00:00");
 
 describe("morning-check words", () => {
   it("labels every closed setting value in plain words", () => {
-    expect(APPLY_MODE_LABEL).toEqual({
-      ask_each: "Ask about each job",
-      apply_all: "Apply to all",
-      selective_above_score: "Only above my score line",
-    });
+    expect(LINE_SWITCH_LABEL).toEqual({ ask: "Ask me", auto: "Apply on its own" });
+    expect(scoreLineText(null)).toBe("Score line not set");
+    expect(scoreLineText(80)).toBe("Score line 80");
+    expect(lineSwitchText("auto", "ask")).toBe("Above: apply on its own · Below: ask me");
     expect(SUBMIT_MODE_LABEL).toEqual({ confirm: "Confirm before sending", auto_when_sure: "Send on its own when sure" });
   });
 

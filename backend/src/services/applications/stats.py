@@ -259,6 +259,20 @@ async def _contact_found_via_groups(
     return groups
 
 
+async def _score_line_counts(user_id: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Owner decision 2026-10-10 - how many of the user's applications sit above /
+    below THEIR OWN score line, and how many have no fit score (or there is no
+    line). Counts only (product rule 4): nothing is ranked or recommended."""
+    from src.services.applications.spine import user_score_line  # noqa: PLC0415
+    from src.services.profile.assistant_settings import line_side  # noqa: PLC0415
+
+    line = await user_score_line(user_id)
+    counts = {"above": 0, "below": 0, "unknown": 0}
+    for r in rows:
+        counts[line_side(r.get("fit_score"), line)] += 1
+    return {"line": line, "above": counts["above"], "below": counts["below"], "unscored": counts["unknown"]}
+
+
 async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = None) -> dict[str, Any]:
     """R5-R7 — overall counts + rates, ``by_cv_version``, ``by_role``, all
     scoped to the caller's own applications (S1: ``user_id`` filtered on
@@ -300,6 +314,7 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
             a.visa_country AS visa_country,
             a.job_remote AS job_remote,
             a.job_found_on AS job_found_on,
+            a.fit_score AS fit_score,
             MAX(CASE WHEN e.event_type = ? THEN 1 ELSE 0 END) AS applied,
             MAX(CASE WHEN e.event_type = ? THEN 1 ELSE 0 END) AS replied,
             MAX(CASE WHEN e.event_type IN ({interview_placeholders}) THEN 1 ELSE 0 END) AS interview,
@@ -330,7 +345,8 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
             -- too) — a retracted apply/interview must never be counted.
             AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id)
         WHERE {where_sql}
-        GROUP BY a.id, a.job_title, a.user_id, a.job_country, a.visa_country, a.job_remote, a.job_found_on
+        GROUP BY a.id, a.job_title, a.user_id, a.job_country, a.visa_country, a.job_remote, a.job_found_on,
+                 a.fit_score
         ORDER BY a.id DESC
         LIMIT ?
     """  # noqa: S608 — where_sql/interview_placeholders are built from constants, never user input
@@ -363,6 +379,7 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
     by_job_source, source_truncated = _group_by(rows, lambda r: r.get("job_found_on") or None)
     by_channel, channel_truncated = _group_by(rows, lambda r: receipt_channel_key(r.get("receipt_channel")))
     by_contact_found_via = await _contact_found_via_groups(db, user_id, since_val)
+    score_line = await _score_line_counts(user_id, rows)
 
     return {
         "since": since_val,
@@ -373,6 +390,7 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
         "by_job_source": by_job_source,
         "by_channel": by_channel,
         "by_contact_found_via": by_contact_found_via,
+        "score_line": score_line,
         "groups_truncated": (
             cv_truncated or role_truncated or country_truncated or source_truncated or channel_truncated
         ),

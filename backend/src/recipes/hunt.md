@@ -34,7 +34,9 @@ pastes). Then you bring only the good ones into Job360.
    saved. Blocked (a site will not open, a tool is missing): `ask_user`, a
    Needs-you note, then continue with the next job.
 5. **Skip the rest silently** - do not bring a job just to reject it.
-6. **Report** a short list: company, title, place, your score, visa answer, and
-   the link to the Job360 application page. Inside `run 360 daily`, do not ask
-   which to apply to: apply per `settings.apply_mode.effective` with
-   `get_recipe("apply")` (the kit first). Alone, ask which ones to apply to.
+6. **Report** in two lists - "Above your line (N)" and "Below your line (N)"
+   (`settings.apply_min_score.effective`; null = ask for it first): company,
+   title, place, your score, visa answer, and the link to the Job360
+   application page. Inside `run 360 daily`, apply per each job's
+   `save_fit` `line.switch` with `get_recipe("apply")` (the kit first); `ask`
+   means ask. Alone, ask which ones to apply to.

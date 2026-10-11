@@ -52,7 +52,9 @@ class MorningState(BaseModel):
     paused: bool
     paused_by: Optional[str] = None
     paused_at: Optional[str] = None
-    apply_mode: str
+    apply_min_score: Optional[int] = None
+    above_line: str
+    below_line: str
     submit_mode: str
     daily_cap: Optional[int] = None
     applied_today: int
@@ -168,7 +170,9 @@ async def morning_check(
         now=now.isoformat(), since=start,
         state=MorningState(
             paused=paused, paused_by=by, paused_at=at,
-            apply_mode=view["apply_mode"]["effective"], submit_mode=view["submit_mode"]["effective"],
+            apply_min_score=view["apply_min_score"]["effective"],
+            above_line=view["above_line"]["effective"], below_line=view["below_line"]["effective"],
+            submit_mode=view["submit_mode"]["effective"],
             daily_cap=view["daily_cap"]["effective"], applied_today=counts.submitted_today,
         ),
         tally=tally,

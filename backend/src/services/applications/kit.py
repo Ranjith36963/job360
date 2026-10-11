@@ -304,6 +304,8 @@ async def gate_facts(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> 
         approved=bool(approved),
         declined=state["declined"] is not None,
         blocked=state["blocked"] is not None,
+        # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
+        fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
     )
 
 

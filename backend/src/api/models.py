@@ -241,7 +241,7 @@ class SetupProgressOut(BaseModel):
     rounds: dict[str, dict[str, str]] = {}
     done: int = 0
     total: int = 6
-    next: str = "you"
+    next: str = "targets"
 
 
 class AssistantSettingsView(BaseModel):
@@ -251,8 +251,9 @@ class AssistantSettingsView(BaseModel):
     ``preferences.daily_check`` / ``check_every`` / ``assistant_notes`` — shown
     here, still edited at those paths."""
 
-    apply_mode: SettingFieldOut
     apply_min_score: SettingFieldOut
+    above_line: SettingFieldOut
+    below_line: SettingFieldOut
     submit_mode: SettingFieldOut
     daily_cap: SettingFieldOut
     paused_until: SettingFieldOut

@@ -70,6 +70,19 @@ describe("StatsClient", () => {
     expect(screen.getByText(/Job360 only counts/)).toBeInTheDocument();
   });
 
+  it("shows the score line card with counts only, and 'Not set' when no line", async () => {
+    getStats.mockResolvedValue(stats({ score_line: { line: 75, above: 3, below: 2, unscored: 1 } } as never));
+    const { unmount } = render(<StatsClient />);
+    const card = await screen.findByTestId("stats-score-line");
+    for (const t of ["Your score line", "75", "At or above", "3", "Below", "2", "No score", "1"]) {
+      expect(card).toHaveTextContent(t);
+    }
+    unmount();
+    getStats.mockResolvedValue(stats({ score_line: { line: null, above: 0, below: 0, unscored: 4 } } as never));
+    render(<StatsClient />);
+    expect(await screen.findByTestId("stats-score-line")).toHaveTextContent("Not set");
+  });
+
   it("renders each section with rows, plain labels, rates, dashes and Not set", async () => {
     getStats.mockResolvedValue(stats());
     render(<StatsClient />);

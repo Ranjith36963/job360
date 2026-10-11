@@ -13,11 +13,10 @@ import { relativeTime } from "@/lib/utils";
 // text node, never as HTML. The full settings page is S5 — this card only
 // explains the one change in plain words.
 
-const APPLY_MODES: Record<string, string> = {
-  ask_each: "Ask me about each job",
-  apply_all: "Apply to every job I bring, without asking",
-  selective_above_score: "Apply on its own above the score line",
-};
+/** A waiting request, plus the user's current score line (null = not set) so a
+ *  change to it can read "from X to Y". */
+export type WaitingRequest = SettingRequest & { current_score_line?: number | null };
+
 const SUBMIT_MODES: Record<string, string> = {
   confirm: "I check every application before it is sent",
   auto_when_sure: "Send applications on its own when it is sure",
@@ -29,13 +28,46 @@ const INBOX_MODES: Record<string, string> = {
   paused: "Stop checking my inbox",
 };
 
+/** The current line as the user sees it, so they never confirm blind. */
+function lineShown(line?: number | null): string {
+  return line == null ? "not set yet" : String(line);
+}
+
 /** What a request changes, in plain words: a title and the new value. */
-export function describeSettingRequest(path: string, value: unknown): { title: string; change: string } {
+export function describeSettingRequest(
+  path: string,
+  value: unknown,
+  currentScoreLine?: number | null,
+): { title: string; change: string } {
   switch (path) {
-    case "assistant_settings.apply_mode":
-      return { title: "How it applies", change: APPLY_MODES[String(value)] ?? "Change how it applies" };
-    case "assistant_settings.apply_min_score":
-      return { title: "Score line", change: `Only apply alone at ${String(value)} or above` };
+    case "assistant_settings.above_line": {
+      const shown = lineShown(currentScoreLine);
+      return {
+        title: "Jobs at or above your line",
+        change:
+          value === "auto"
+            ? `Apply on its own for jobs at or above your score line (${shown})`
+            : `Ask me about jobs at or above my score line (${shown})`,
+      };
+    }
+    case "assistant_settings.below_line": {
+      const shown = lineShown(currentScoreLine);
+      return {
+        title: "Jobs below your line",
+        change:
+          value === "auto"
+            ? `Apply on its own for jobs below your score line (${shown})`
+            : `Ask me about jobs below my score line (${shown})`,
+      };
+    }
+    case "assistant_settings.apply_min_score": {
+      if (value === null || value === undefined || value === "") return { title: "Score line", change: "Clear your score line" };
+      const to = Number(value);
+      if (currentScoreLine == null) return { title: "Score line", change: `Set your score line to ${to}` };
+      if (to < currentScoreLine) return { title: "Score line", change: `Lower your score line from ${currentScoreLine} to ${to}` };
+      if (to > currentScoreLine) return { title: "Score line", change: `Raise your score line from ${currentScoreLine} to ${to}` };
+      return { title: "Score line", change: `Keep your score line at ${to}` };
+    }
     case "assistant_settings.submit_mode":
       return { title: "Sending", change: SUBMIT_MODES[String(value)] ?? "Change how it sends" };
     case "assistant_settings.daily_cap":
@@ -67,11 +99,11 @@ export function SettingRequestCard({
   request,
   onChanged,
 }: {
-  request: SettingRequest;
+  request: WaitingRequest;
   onChanged: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
-  const { title, change } = describeSettingRequest(request.path, request.value);
+  const { title, change } = describeSettingRequest(request.path, request.value, request.current_score_line);
 
   async function run(fn: () => Promise<unknown>, failMsg: string) {
     setBusy(true);

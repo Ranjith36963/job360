@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ASKS_CHANGED_EVENT, answerAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
-import type { Ask, SettingRequest } from "@/lib/api";
+import type { Ask } from "@/lib/api";
 import { MorningCheck } from "./MorningCheck";
 import { ReadyToSend } from "./ReadyToSend";
 import { SettingRequestCard } from "./SettingRequestCard";
+import type { WaitingRequest } from "./SettingRequestCard";
+import { settingScore } from "@/lib/assistant-tab";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -220,9 +222,11 @@ export function AskCard({
 
 /** The requests waiting for the user's OK. Best-effort: a failed read just
  *  shows none, it never blocks the questions. */
-async function waitingRequests(): Promise<SettingRequest[]> {
+async function waitingRequests(): Promise<WaitingRequest[]> {
   try {
-    return (await getAssistantSettings()).waiting;
+    const view = await getAssistantSettings();
+    const line = settingScore(view.apply_min_score);
+    return view.waiting.map((r) => ({ ...r, current_score_line: line }));
   } catch {
     return [];
   }
@@ -235,7 +239,7 @@ function announce(openCount: number) {
 export function NeedsYou() {
   const [open, setOpen] = useState<Ask[] | null>(null);
   // Setting changes an assistant asked for, waiting for the user's OK (S2).
-  const [waiting, setWaiting] = useState<SettingRequest[]>([]);
+  const [waiting, setWaiting] = useState<WaitingRequest[]>([]);
   const [answered, setAnswered] = useState<Ask[]>([]);
   const [moreAnswered, setMoreAnswered] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -250,7 +254,7 @@ export function NeedsYou() {
     (
       o: Awaited<ReturnType<typeof listAsks>>,
       a: Awaited<ReturnType<typeof listAsks>>,
-      w: SettingRequest[],
+      w: WaitingRequest[],
     ) => {
       setOpen(o.asks);
       setAnswered(a.asks);

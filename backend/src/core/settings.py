@@ -566,6 +566,11 @@ PROFILE_EDITABLE_PATHS = (
     # Standing instructions for the assistant — one short line each
     # (PROFILE_NOTE_MAX_CHARS), at most PROFILE_EDIT_MAX_LIST_ITEMS lines.
     "preferences.assistant_notes",
+    # Owner decision 2026-10-10 - what the user is looking for (setup interview,
+    # targets round): years of experience (0-60, min <= max), what they look for,
+    # dealbreakers, companies to avoid. Empty = don't care (rule #29).
+    "preferences.experience_years_min", "preferences.experience_years_max",
+    "preferences.looking_for", "preferences.dealbreakers", "preferences.avoid_companies",
     # Owner decision 2026-10-08 — THREE STORES. (1) The salary the user wants,
     # one record per hiring country, is a normal PREFERENCE. (2) USER INFO
     # MEMORY — the facts job forms ask (contact, right to work, logistics,
@@ -582,7 +587,10 @@ PROFILE_EDITABLE_PATHS = (
     # A RISKIER change from an assistant is never written here: it becomes a
     # waiting request the user confirms on the website
     # (services/profile/setting_requests.py). Rules: services/profile/assistant_settings.py.
-    "assistant_settings.apply_mode", "assistant_settings.apply_min_score",
+    # apply_mode is RETIRED (2026-10-10): the user's own score line plus two
+    # separate switches (above / below it) replace it.
+    "assistant_settings.apply_min_score",
+    "assistant_settings.above_line", "assistant_settings.below_line",
     "assistant_settings.submit_mode", "assistant_settings.daily_cap",
     "assistant_settings.paused_until", "assistant_settings.pause_reason",
     # S4 - setup progress (six rounds, each with a done_at). Not a gated setting.

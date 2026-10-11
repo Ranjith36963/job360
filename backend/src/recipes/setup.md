@@ -2,66 +2,69 @@
 <!-- doc: REFERENCE — a run 360 recipe the connected assistant reads; served by routes/recipes.py -->
 
 Print this checklist and tick each step:
-[ ] 0 Resume  [ ] 1 Fix profile  [ ] 2 Six rounds (you, visa, logistics,
-equality, targets, settings)  [ ] 3 Connect  [ ] 4 Watched daily run
+[ ] 0 Resume  [ ] 1 Six rounds (targets, you, visa, logistics, equality,
+settings)  [ ] 2 Fix profile  [ ] 3 Connect  [ ] 4 Watched daily run
 [ ] 5 Schedule  [ ] 6 Finish
 
-You are setting up this user's job hunt. Job360 is the record; you do the
-work. Plain words, one line on what you are doing. Full rules (settings,
-memory shapes, Gmail modes): `get_recipe("rules")`.
+This is an INTERVIEW: you ask, the user answers, you save their words. Never
+answer for them from the CV. Job360 is the record. Plain words. Full rules:
+`get_recipe("rules")`.
 
-0. **Resume.** `get_profile`: read `assistant_notes`, `fields` and
-   `settings.setup_progress`. Rounds done: say "N of 6 done" and **resume** at
-   the first unfinished round. Never ask what `fields` holds - show it and ask
-   "still right?". **Done when** you know the first unfinished round.
-   All six done: jump to step 4.
-1. **Fix the profile from `raw` (CV, LinkedIn, GitHub), no questions.** Write
-   titles, `cv_data.cv_positions`, `cv_data.cv_projects`, links and summary with
-   `update_profile` when missing or wrong. Never invent a fact; anything truly
-   unclear is asked in round 1. **Done when** the profile matches `raw`.
-2. **Six rounds**, one topic each, 3-5 questions per round, follow-ups until
-   clear: (1) you - `user_info.contact`; (2) visa - `user_info.right_to_work`
-   per country, citizenship, and the sanctions question (ask it once; "prefer
-   not to say" is allowed; store `sanctions_country_citizen`; reuse it only
-   when a form asks); (3) logistics - notice, start, per-country relocate,
-   travel, licence, `user_info.languages`; (4) equality - `user_info.equality`;
-   (5) targets - titles, `preferences.preferred_locations`,
-   `preferences.work_arrangement`, `preferences.needs_visa`,
-   `preferences.salary_by_country` (an empty preference means "don't care" -
-   never fill one in for them); (6) settings - see below.
-   Ask visa, salary and equality questions **one at a time**. Salary is a
-   range per country (min and max; the same figure twice if they have one) in
-   its own currency and period, never converted. Equality: skipping
-   is fine, "prefer not to say" is a real answer, a skip still marks the round
-   done; **if the user skips, ask again only on the first form that needs it**.
-   **Read back** the answers; on OK **save after each round** (the round's
-   paths plus `assistant_settings.setup_progress` with that round's `done_at`),
-   then print "N of 6 done". The user may stop any time: "type run 360 to
-   continue". **Done when** the round is saved. STOP if the user stops.
-   Round 6 asks: *Applying* - `ask_each` (default) / `apply_all` /
-   `selective_above_score` (a score line; `settings.apply_min_score.effective`,
-   default 75). *Submitting* - `confirm` (default) / `auto_when_sure` (you submit
-   when `check_submit` says go; Indeed and LinkedIn always ask; the first one is
-   a practice run). *A daily limit* - optional: a number or none (no cap by
-   default; never assume a number). *Gmail* - the offer and `check_every` from
-   rules (only if `preferences.daily_check` is empty). And: "turn on form
-   filling (browser control) in your own app". Save with
-   `assistant_settings.apply_mode`, `assistant_settings.apply_min_score`,
-   `assistant_settings.submit_mode`, `assistant_settings.daily_cap`,
-   `preferences.daily_check`, `preferences.check_every`.
-   **Waiting for your OK:** a choice that gives you MORE freedom (`apply_all`, a
-   lower score line, `auto_when_sure`, a higher or removed limit, Gmail `auto`)
-   is NOT applied: it comes back in `waiting`. Tell the user: "Open Job360,
-   Needs you, and click Confirm once. I cannot confirm it for you; until then
-   the safe setting stands." Safer choices apply at once.
-3. **Tell the user what to connect in their app:** Gmail (to read replies), a
-   job-search connector (for example Indeed), browser control. Job360 does not
-   connect to these - you do. Say what you cannot do without them (no browser
-   control = the user submits). **Done when** you said it.
-4. **Watched first daily run.** Follow `get_recipe("daily")` now with the user
-   watching; they approve each tool once. **Done when** it printed its report.
-5. **Schedule.** Claude Code: a routine. ChatGPT: a Task. claude.ai: tell the
-   user to type "run 360 daily". Hour rule: `get_recipe("rules")`, Gmail.
+0. **Resume.** `get_profile`: read `assistant_notes`, `fields`, `settings.setup_progress`.
+   Say "N of 6 done", **resume** at `setup_progress.next`; a field already set:
+   show it, ask "still right?". All six done: jump to step 3.
+1. **Six rounds, in this order.** 3-5 questions a round; visa, salary and equality
+   one at a time; follow up until clear. An empty preference means "don't care" -
+   never fill one in for them.
+   (1) **targets** - ask EVERY one: a. roles -> `preferences.target_job_titles`
+   (REQUIRED); b. level and years -> `preferences.experience_level` (entry|mid|
+   senior|lead|executive) + `preferences.experience_years_min`/`_max` (their exact
+   range, e.g. 1 and 3); c. countries/cities -> `preferences.preferred_locations`;
+   d. remote/hybrid/on-site, per country if it differs ("remote anywhere, on-site
+   only if sponsored") -> `preferences.work_arrangement` + `user_info.right_to_work`
+   notes; e. salary -> `preferences.salary_by_country`, a min-max range in its own
+   currency and period, never converted; f. what they look for in a job ->
+   `preferences.looking_for`; g. dealbreakers -> `preferences.dealbreakers`;
+   h. companies to avoid -> `preferences.avoid_companies`; i. **score line**: "I give
+   each job a fit score from 0 to 100. Which score is your line? I will show you
+   jobs above and below it separately." -> `assistant_settings.apply_min_score`
+   (REQUIRED; never suggest or assume a number).
+   (2) **you** - `user_info.contact`. (3) **visa** - `user_info.right_to_work` per
+   country, citizenship, the sanctions question once ("prefer not to say" is
+   allowed; store `sanctions_country_citizen`; reuse it only when a form asks).
+   (4) **logistics** - notice, start, per-country relocate, travel, licence,
+   `user_info.languages`. (5) **equality** - `user_info.equality`; a skip still
+   marks the round done; if the user skips, ask again only on the first form that
+   needs it. (6) **settings** - one at a time: *Jobs at or above your line* - ask me
+   / apply on its own (`assistant_settings.above_line` = ask | auto); *jobs below
+   your line* - the same (`assistant_settings.below_line`); not chosen = ask.
+   *Submitting* - `confirm` (default) / `auto_when_sure` (you submit when
+   `check_submit` says go; Indeed and LinkedIn always ask; the first is a practice
+   run) -> `assistant_settings.submit_mode`. *A daily limit* - a number or none, no
+   cap by default, never assume a number -> `assistant_settings.daily_cap`.
+   *Gmail* - the offer and `check_every` from rules -> `preferences.daily_check`
+   (REQUIRED; "not now" = `paused`, a real answer), `preferences.check_every`. And: "turn on
+   form filling (browser control) in your own app".
+   **Read back**, then on OK save after each round in ONE `update_profile` call:
+   its paths plus `assistant_settings.setup_progress` with that round's `done_at`.
+   Job360 refuses `targets` done without roles and a score line, and `settings`
+   done without a Gmail answer: ask what is missing. A refused save saved NOTHING:
+   fix the named path, resend ALL paths. Print "N of 6 done". The user may stop:
+   "type run 360 to continue". **Done when** the round is saved. STOP if they stop.
+   **Waiting for your OK:** more freedom for you (a side set to `auto`, a score line
+   that moves jobs onto an `auto` side, `auto_when_sure`, a higher or removed limit,
+   Gmail `auto`) is NOT applied; it comes back in `waiting`. Say: "Open Job360,
+   Needs you, and click Confirm once. I cannot confirm it for you; until then the
+   safe setting stands." Safer choices apply at once.
+2. **Fix the profile from `raw` (CV, LinkedIn, GitHub).** Write `cv_data.cv_positions`,
+   `cv_data.cv_projects` (one per real GitHub project), links, summary when missing
+   or wrong. Never invent a fact; never overwrite a target the user gave.
+3. **Tell the user what to connect in their app:** Gmail, a job-search connector
+   (for example Indeed), browser control. Job360 does not connect to these - you
+   do. No browser control = the user submits. **Done when** you said it.
+4. **Watched first daily run.** Follow `get_recipe("daily")` with the user
+   watching. **Done when** it printed its report.
+5. **Schedule.** Claude Code: a routine. ChatGPT: a Task. claude.ai: tell the user
+   to type "run 360 daily". Hour rule: `get_recipe("rules")`, Gmail.
 6. **Finish** with three lines: what changed, what is missing, next "run 360
-   hunt". Every `bring_job` carries the job's `country` (ISO code), `remote` and
-   `found_on` - they power the user's stats.
+   hunt". Every `bring_job` carries `country` (ISO code), `remote`, `found_on`.

@@ -23,8 +23,9 @@ vi.mock("sonner", () => ({ toast: { success: (m: string) => toastSuccess(m), err
 
 const field = (value: unknown, effective: unknown = value) => ({ value, effective });
 const view = (over: Record<string, unknown> = {}) => ({
-  apply_mode: field("", "ask_each"),
-  apply_min_score: field(null, 75),
+  apply_min_score: field(null, null),
+  above_line: field("", "ask"),
+  below_line: field("", "ask"),
   submit_mode: field("", "confirm"),
   daily_cap: field(null, null),
   inbox_mode: "auto",
@@ -64,9 +65,8 @@ describe("AssistantTab", () => {
     await ready();
     const tab = screen.getByTestId("assistant-tab");
     for (const t of [
-      "Apply mode", "When may your assistant apply?",
-      "Ask about each job", "Apply to all", "Only above my score line",
-      "Before any work, it shows you the fit and asks: apply or skip?",
+      "Your score line", "Score line", "Jobs at or above your line", "Jobs below your line",
+      "Ask me", "Apply on its own",
       "Submit mode", "The last click on the form", "Confirm before sending", "Send on its own when sure",
       "It stops at Submit and shows you Ready to send.",
       "Limits & inbox", "Daily limit", "Most applications per day. Leave blank for no limit.",
@@ -75,17 +75,23 @@ describe("AssistantTab", () => {
     ]) {
       expect(tab).toHaveTextContent(t);
     }
-    expect(screen.getByTestId("apply-mode-ask_each")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("above-line-ask")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("below-line-ask")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("submit-mode-confirm")).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("inbox-auto")).toHaveAttribute("aria-checked", "true");
     expect((screen.getByTestId("check-every") as HTMLSelectElement).value).toBe("6h");
-    expect(screen.queryByTestId("score-input")).toBeNull();
+    // No default line: unset shows the plain "not set" words, and the input is empty.
+    expect(screen.getByTestId("score-line-unset")).toHaveTextContent("Not set — your assistant will ask you");
+    expect((screen.getByTestId("score-input") as HTMLInputElement).value).toBe("");
+    expect(tab.textContent).not.toMatch(/\b75\b/);
   });
 
   it("each control sends its own PATCH body as the web user, then re-reads", async () => {
     await ready();
-    fireEvent.click(screen.getByTestId("apply-mode-apply_all"));
-    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.apply_mode", value: "apply_all" }]));
+    fireEvent.click(screen.getByTestId("above-line-auto"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.above_line", value: "auto" }]));
+    fireEvent.click(screen.getByTestId("below-line-auto"));
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.below_line", value: "auto" }]));
     fireEvent.click(screen.getByTestId("submit-mode-auto_when_sure"));
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.submit_mode", value: "auto_when_sure" }]));
     fireEvent.click(screen.getByTestId("inbox-ask"));
@@ -110,8 +116,8 @@ describe("AssistantTab", () => {
     await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.daily_cap", value: null }]));
   });
 
-  it("the score line shows only for 'Only above my score line' and saves 0-100", async () => {
-    getAssistantSettings.mockResolvedValue(view({ apply_mode: field("selective_above_score"), apply_min_score: field(70) }));
+  it("the score line saves 0-100 and rejects bad numbers", async () => {
+    getAssistantSettings.mockResolvedValue(view({ apply_min_score: field(70) }));
     await ready();
     const n = screen.getByTestId("score-input") as HTMLInputElement;
     expect(n.value).toBe("70");
@@ -124,6 +130,16 @@ describe("AssistantTab", () => {
     expect(updateProfileFields).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith("Score line must be a whole number from 0 to 100. Not saved.");
     expect(n.value).toBe("70");
+  });
+
+  it("clearing a saved score line sends null (back to not set)", async () => {
+    getAssistantSettings.mockResolvedValue(view({ apply_min_score: field(70) }));
+    await ready();
+    expect(screen.queryByTestId("score-line-unset")).toBeNull();
+    const n = screen.getByTestId("score-input") as HTMLInputElement;
+    fireEvent.change(n, { target: { value: "" } });
+    fireEvent.blur(n);
+    await waitFor(() => expect(updateProfileFields).toHaveBeenCalledWith([{ path: "assistant_settings.apply_min_score", value: null }]));
   });
 
   it("an out-of-range daily limit says so and is not sent", async () => {
@@ -151,7 +167,7 @@ describe("AssistantTab", () => {
   });
 
   it("Enter commits the score line like blur", async () => {
-    getAssistantSettings.mockResolvedValue(view({ apply_mode: field("selective_above_score"), apply_min_score: field(70) }));
+    getAssistantSettings.mockResolvedValue(view({ apply_min_score: field(70) }));
     await ready();
     const n = screen.getByTestId("score-input") as HTMLInputElement;
     fireEvent.change(n, { target: { value: "150" } });
@@ -168,10 +184,10 @@ describe("AssistantTab", () => {
   it("a refused save shows the error and never 'Saved.'", async () => {
     updateProfileFields.mockRejectedValueOnce(new Error("422"));
     await ready();
-    fireEvent.click(screen.getByTestId("apply-mode-apply_all"));
+    fireEvent.click(screen.getByTestId("above-line-auto"));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("Could not save. Try again."));
     expect(toastSuccess).not.toHaveBeenCalled();
-    expect(screen.getByTestId("apply-mode-ask_each")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("above-line-ask")).toHaveAttribute("aria-checked", "true");
   });
 
   it("hard stops are read-only text with no control", async () => {
@@ -209,7 +225,7 @@ describe("AssistantTab", () => {
   it("right rail: Right now, today's count, and the note", async () => {
     await ready();
     const rail = screen.getByTestId("assistant-rail");
-    for (const t of ["Right now", "Ask about each job", "Confirm before sending", "Today4 of 10", "Take back adds a new row; nothing is erased."]) {
+    for (const t of ["Right now", "Score line", "At or above", "Ask me", "Confirm before sending", "Today4 of 10", "Take back adds a new row; nothing is erased."]) {
       expect(rail).toHaveTextContent(t);
     }
   });

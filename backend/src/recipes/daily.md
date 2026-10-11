@@ -43,7 +43,7 @@ note), then continue. Full rules (Gmail modes, outreach, events):
    context=<row.context verbatim>, application_id=<row.application_id>)`.
    Job360 de-duplicates by that context, so never rephrase it.
 7. **Hunt, kits, apply per modes:** `get_recipe("hunt")`, then
-   `get_recipe("apply")` per `settings.apply_mode.effective`; submit only when
+   `get_recipe("apply")` per each job's `save_fit` `line.switch`; submit only when
    `check_submit` says submit. Indeed or LinkedIn only, pause, duplicate or a
    missing tool: `ask_user` (Needs you), continue. Stuck on a form (CAPTCHA,
    bot check, login page, site error): `record_event` `blocked`, stop that

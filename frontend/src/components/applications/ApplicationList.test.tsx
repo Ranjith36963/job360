@@ -285,4 +285,21 @@ describe("ApplicationList — fit display (redesign slice 2)", () => {
     expect(screen.queryByTestId("row-fit")).toBeNull();
     expect(screen.getByTestId("row-next-step")).toHaveTextContent("No fit judged yet");
   });
+
+  it("labels the score against the user's own line; unknown shows nothing", async () => {
+    listApplications.mockResolvedValue({
+      applications: [
+        summary({ id: 1, fit_score: 80, line_side: "above" } as never),
+        summary({ id: 2, fit_score: 40, line_side: "below" } as never),
+        summary({ id: 3, fit_score: 55, line_side: "unknown" } as never),
+      ],
+      total: 3,
+    });
+    render(<ApplicationList />);
+    await screen.findAllByTestId("row-fit");
+    const labels = screen.getAllByTestId("row-line-side");
+    expect(labels).toHaveLength(2);
+    expect(labels[0]).toHaveTextContent("Above your line");
+    expect(labels[1]).toHaveTextContent("Below your line");
+  });
 });

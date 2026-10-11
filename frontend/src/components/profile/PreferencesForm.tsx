@@ -368,6 +368,11 @@ function prefsFromRaw(raw: Record<string, unknown>): PreferencesRequest {
     experience_level:
       typeof raw.experience_level === "string" ? raw.experience_level : "",
     negative_keywords: asArr(raw.negative_keywords),
+    experience_years_min: raw.experience_years_min != null ? Number(raw.experience_years_min) : null,
+    experience_years_max: raw.experience_years_max != null ? Number(raw.experience_years_max) : null,
+    looking_for: asArr(raw.looking_for),
+    dealbreakers: asArr(raw.dealbreakers),
+    avoid_companies: asArr(raw.avoid_companies),
     about_me: typeof raw.about_me === "string" ? raw.about_me : "",
     needs_visa: raw.needs_visa === true,
     work_authorization_countries: asArr(raw.work_authorization_countries),
@@ -389,6 +394,11 @@ function serializePrefs(p: PreferencesRequest): string {
     p.work_arrangement,
     p.experience_level,
     p.negative_keywords,
+    p.experience_years_min,
+    p.experience_years_max,
+    p.looking_for,
+    p.dealbreakers,
+    p.avoid_companies,
     p.about_me,
     p.needs_visa,
     p.work_authorization_countries,
@@ -416,6 +426,11 @@ const ALL_PREFERENCE_FIELDS: { field: string; label: string }[] = [
   { field: "needs_visa", label: "Visa sponsorship" },
   { field: "work_authorization_countries", label: "Countries where I can already work" },
   { field: "negative_keywords", label: "Words to avoid in job titles" },
+  { field: "experience_years_min", label: "Years of experience (from)" },
+  { field: "experience_years_max", label: "Years of experience (to)" },
+  { field: "looking_for", label: "What you look for in a job" },
+  { field: "dealbreakers", label: "Dealbreakers" },
+  { field: "avoid_companies", label: "Companies to avoid" },
   { field: "about_me", label: "About Me" },
   { field: "assistant_notes", label: "Things your assistant should know" },
 ];
@@ -448,6 +463,11 @@ export function PreferencesForm({
   const [workArrangement, setWorkArrangement] = useState("any");
   const [experienceLevel, setExperienceLevel] = useState(EXPERIENCE_UNSET);
   const [negativeKeywords, setNegativeKeywords] = useState<string[]>([]);
+  const [yearsMin, setYearsMin] = useState("");
+  const [yearsMax, setYearsMax] = useState("");
+  const [lookingFor, setLookingFor] = useState<string[]>([]);
+  const [dealbreakers, setDealbreakers] = useState<string[]>([]);
+  const [avoidCompanies, setAvoidCompanies] = useState<string[]>([]);
   const [aboutMe, setAboutMe] = useState("");
   const [needsVisa, setNeedsVisa] = useState(false);
   const [workAuthorizationCountries, setWorkAuthorizationCountries] = useState<string[]>([]);
@@ -491,6 +511,11 @@ export function PreferencesForm({
     setNeedsVisa(p.needs_visa === true);
     setWorkAuthorizationCountries(p.work_authorization_countries ?? []);
     setNegativeKeywords(p.negative_keywords ?? []);
+    setYearsMin(p.experience_years_min != null ? String(p.experience_years_min) : "");
+    setYearsMax(p.experience_years_max != null ? String(p.experience_years_max) : "");
+    setLookingFor(p.looking_for ?? []);
+    setDealbreakers(p.dealbreakers ?? []);
+    setAvoidCompanies(p.avoid_companies ?? []);
     setAboutMe(p.about_me ?? "");
     setAssistantNotes(p.assistant_notes ?? []);
     baselineRef.current = serializePrefs(p);
@@ -515,6 +540,12 @@ export function PreferencesForm({
       experience_level:
         experienceLevel === EXPERIENCE_UNSET ? "" : experienceLevel,
       negative_keywords: negativeKeywords,
+      // Empty box = null = "don't care" (rule #29); never a 0 the user did not type.
+      experience_years_min: yearsMin.trim() === "" ? null : Number(yearsMin),
+      experience_years_max: yearsMax.trim() === "" ? null : Number(yearsMax),
+      looking_for: lookingFor,
+      dealbreakers: dealbreakers,
+      avoid_companies: avoidCompanies,
       about_me: aboutMe,
       needs_visa: needsVisa,
       work_authorization_countries: workAuthorizationCountries,
@@ -531,6 +562,11 @@ export function PreferencesForm({
       workArrangement,
       experienceLevel,
       negativeKeywords,
+      yearsMin,
+      yearsMax,
+      lookingFor,
+      dealbreakers,
+      avoidCompanies,
       aboutMe,
       needsVisa,
       workAuthorizationCountries,
@@ -815,6 +851,84 @@ export function PreferencesForm({
           variant="destructive"
           trailing={markOf("negative_keywords")}
         />
+
+        <Separator />
+
+        {/* ── What you're looking for (owner decision 2026-10-10) ──
+            Stored on the profile; the user's assistant reads it when it
+            judges a job. Every field is optional: empty = "don't care"
+            (rule #29), never a default. */}
+        <section aria-labelledby="looking-for-heading" data-testid="looking-for" className="space-y-6">
+          <h4
+            id="looking-for-heading"
+            className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint"
+          >
+            What you&apos;re looking for
+          </h4>
+          <div className="space-y-2">
+            <Label className="font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint">
+              Years of experience in the job
+              <EditedMark
+                edit={editOf("experience_years_min") ?? editOf("experience_years_max")}
+                onTakeBack={onTakeBack}
+                onKeep={onKeep}
+              />
+            </Label>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                type="number"
+                min={0}
+                max={60}
+                aria-label="Years of experience, from"
+                data-testid="years-min"
+                value={yearsMin}
+                onChange={(e) => setYearsMin(e.target.value)}
+                placeholder="From"
+              />
+              <Input
+                type="number"
+                min={0}
+                max={60}
+                aria-label="Years of experience, to"
+                data-testid="years-max"
+                value={yearsMax}
+                onChange={(e) => setYearsMax(e.target.value)}
+                placeholder="To"
+              />
+            </div>
+          </div>
+          <TagInput
+            label="What you look for in a job"
+            tags={lookingFor}
+            onChange={setLookingFor}
+            placeholder="e.g. small team, ships often"
+            description="Things that make a job a good one for you."
+            trailing={markOf("looking_for")}
+            testId="looking-for-list"
+          />
+          <TagInput
+            label="Dealbreakers"
+            tags={dealbreakers}
+            onChange={setDealbreakers}
+            placeholder="e.g. on-call, relocation"
+            description="Anything that rules a job out."
+            variant="destructive"
+            trailing={markOf("dealbreakers")}
+            testId="dealbreakers-list"
+          />
+          <TagInput
+            label="Companies to avoid"
+            tags={avoidCompanies}
+            onChange={setAvoidCompanies}
+            placeholder="e.g. a company name"
+            description="Your assistant reads this when it judges a job."
+            variant="destructive"
+            trailing={markOf("avoid_companies")}
+            testId="avoid-companies-list"
+          />
+        </section>
+
+        <Separator />
 
         {/* ── About Me ───────────────────────────── */}
         <div className="space-y-2">

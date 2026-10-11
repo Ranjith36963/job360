@@ -98,6 +98,33 @@ function Overall({ overall }: { overall: StatsResponse["overall"] }) {
   );
 }
 
+type ScoreLine = StatsResponse["score_line"];
+
+/** Counts only: how the user's applications sit against the user's own line. */
+export function ScoreLineCard({ data }: { data: ScoreLine }) {
+  const items: [string, number | string][] = [
+    ["Score line", data.line == null ? "Not set" : data.line],
+    ["At or above", data.above],
+    ["Below", data.below],
+    ["No score", data.unscored],
+  ];
+  return (
+    <section aria-labelledby="stats-score-line" data-testid="stats-score-line">
+      <h2 id="stats-score-line" className={`${LABEL} mb-2`}>
+        Your score line
+      </h2>
+      <ul className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+        {items.map(([label, n]) => (
+          <li key={label}>
+            <span className="block font-heading text-3xl leading-none">{n}</span>
+            <span className="mt-1 block text-[12.5px] text-muted-foreground">{label}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function JobTable({ section }: { section: Section }) {
   return (
     <section aria-labelledby={`stats-${section.id}`} data-testid={`stats-section-${section.id}`}>
@@ -192,6 +219,7 @@ export function StatsClient() {
 
   const sections = stats ? buildSections(stats) : [];
   const people = stats?.by_contact_found_via ?? [];
+  const scoreLine = stats?.score_line;
 
   return (
     <PageContainer className="flex flex-col gap-8 py-8">
@@ -214,6 +242,7 @@ export function StatsClient() {
       ) : (
         <>
           <Overall overall={stats.overall} />
+          {scoreLine && <ScoreLineCard data={scoreLine} />}
           {sections.map((s) => (
             <JobTable key={s.id} section={s} />
           ))}

@@ -19,7 +19,7 @@ const payload = (state: Record<string, unknown> = {}) => ({
   now: NOW,
   since: "2026-10-09T09:00:00+00:00",
   state: {
-    paused: false, paused_by: null, paused_at: null, apply_mode: "ask_each",
+    paused: false, paused_by: null, paused_at: null, apply_min_score: 75, above_line: "ask", below_line: "auto",
     submit_mode: "confirm", daily_cap: 10, applied_today: 4, ...state,
   },
   tally: {
@@ -40,11 +40,20 @@ describe("MorningCheck", () => {
   it("running: word, both mode labels, quota with a limit", async () => {
     render(<MorningCheck />);
     const strip = await screen.findByTestId("mc-strip");
-    for (const t of ["Running", "Ask about each job", "Confirm before sending", "4 of 10 today"]) {
+    for (const t of ["Running", "Score line 75", "Above: ask me · Below: apply on its own", "Confirm before sending", "4 of 10 today"]) {
       expect(strip).toHaveTextContent(t);
     }
     expect(screen.getByText("Morning check")).toBeInTheDocument();
     expect(screen.queryByTestId("mc-paused-by")).toBeNull();
+  });
+
+  it("score line not set: says so and links to Profile -> Assistant", async () => {
+    getMorningCheck.mockResolvedValue(payload({ apply_min_score: null }));
+    render(<MorningCheck />);
+    const strip = await screen.findByTestId("mc-strip");
+    expect(strip).toHaveTextContent("Score line not set");
+    expect(screen.getByTestId("mc-score-line-link")).toHaveAttribute("href", "/profile?tab=assistant");
+    expect(screen.queryByTestId("mc-line-switches")).toBeNull();
   });
 
   it("paused with no limit: '4 today', who and when", async () => {

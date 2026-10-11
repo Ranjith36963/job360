@@ -161,6 +161,7 @@ async def ready_cards(
     versions, every answer the assistant typed with where it came from, and the
     flags that keep a card out of "Send all". A flag never blocks the one-by-one
     Send. ``answers`` come only from the stored ``form_filled`` event."""
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
@@ -202,6 +203,7 @@ async def ready_cards(
             "job_location": r["job_location"] or "", "job_country": country,
             "brought_by": b["recorded_by"] if b else None, "brought_at": b["occurred_at"] if b else None,
             "fit_score": score, "fit_by": r.get("fit_recorded_by") if score is not None else None,
+            "line_side": settings_rules.line_side(score, profile.assistant_settings.apply_min_score),
             "cv": cv, "cover_letter": letter, "answers": answers, "flags": flags,
         })
     return cards

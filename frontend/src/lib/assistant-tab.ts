@@ -1,15 +1,11 @@
 // Pure words behind Profile -> Assistant and Setup. No React, no fetching.
 import { formatFeedTime } from "@/lib/home";
 import { whoLabel } from "@/lib/event-labels";
-import { APPLY_MODE_LABEL, SUBMIT_MODE_LABEL } from "@/lib/morning-check";
+import { LINE_SWITCH_LABEL, SUBMIT_MODE_LABEL } from "@/lib/morning-check";
 
-export const APPLY_MODES: { value: string; sub: string }[] = [
-  { value: "ask_each", sub: "Before any work, it shows you the fit and asks: apply or skip?" },
-  { value: "apply_all", sub: "It applies to every job it brings, under your other settings." },
-  {
-    value: "selective_above_score",
-    sub: "It applies on its own when its fit score is at or above the line; below, it asks.",
-  },
+export const LINE_SWITCHES: { value: "ask" | "auto"; label: string }[] = [
+  { value: "ask", label: "Ask me" },
+  { value: "auto", label: "Apply on its own" },
 ];
 export const SUBMIT_MODES: { value: string; sub: string }[] = [
   { value: "confirm", sub: "It stops at Submit and shows you Ready to send." },
@@ -32,20 +28,40 @@ export const HARD_STOPS = [
   "The first application after you turn on sending on its own: a practice run, it stops for you to check.",
 ];
 
-export const P_APPLY = "assistant_settings.apply_mode";
+/** Typed reads of a generated SettingFieldOut (its value/effective are `unknown`). */
+export function settingEffective(f: { effective?: unknown; value?: unknown } | undefined): unknown {
+  return f?.effective ?? f?.value;
+}
+
+/** The score line as a number, or null when unset / not numeric. */
+export function settingScore(f: { effective?: unknown; value?: unknown } | undefined): number | null {
+  const v = settingEffective(f);
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** A line switch, narrowed to "ask" | "auto" (anything else is "ask"). */
+export function settingSwitch(f: { effective?: unknown; value?: unknown } | undefined): "ask" | "auto" {
+  return settingEffective(f) === "auto" ? "auto" : "ask";
+}
+
+export const P_ABOVE = "assistant_settings.above_line";
+export const P_BELOW = "assistant_settings.below_line";
 export const P_SCORE = "assistant_settings.apply_min_score";
 export const P_SUBMIT = "assistant_settings.submit_mode";
 export const P_CAP = "assistant_settings.daily_cap";
 export const P_INBOX = "preferences.daily_check";
 export const P_EVERY = "preferences.check_every";
 /** Paths whose history rides `/assistant-settings/history` (the rest use the profile history). */
-export const SETTING_HISTORY_PATHS = [P_APPLY, P_SCORE, P_SUBMIT, P_CAP] as const;
+export const SETTING_HISTORY_PATHS = [P_SCORE, P_ABOVE, P_BELOW, P_SUBMIT, P_CAP] as const;
 export const PREF_HISTORY_PATHS = [P_INBOX, P_EVERY] as const;
 export const HISTORY_PATHS: string[] = [...SETTING_HISTORY_PATHS, ...PREF_HISTORY_PATHS];
 
 const KEY_LABEL: Record<string, string> = {
-  [P_APPLY]: "Apply mode",
   [P_SCORE]: "Score line",
+  [P_ABOVE]: "Jobs at or above your line",
+  [P_BELOW]: "Jobs below your line",
   [P_SUBMIT]: "Submit mode",
   [P_CAP]: "Daily limit",
   [P_INBOX]: "Gmail check",
@@ -68,7 +84,7 @@ export function valueText(path: string, v: unknown): string {
   const empty = v === null || v === undefined || v === "";
   if (path === P_CAP) return empty ? "no limit" : String(v);
   if (empty) return "not set";
-  if (path === P_APPLY) return APPLY_MODE_LABEL[String(v)] ?? String(v);
+  if (path === P_ABOVE || path === P_BELOW) return LINE_SWITCH_LABEL[String(v)] ?? String(v);
   if (path === P_SUBMIT) return SUBMIT_MODE_LABEL[String(v)] ?? String(v);
   if (path === P_INBOX) return INBOX_MODES.find((m) => m.value === inboxKey(v))?.label ?? String(v);
   if (path === P_EVERY) return everyText(v) || String(v);
@@ -122,11 +138,11 @@ export function mergeHistory(byPath: Record<string, HistRow[]>): ChangeRow[] {
 
 // ---- Setup (the six rounds) ----
 export const ROUNDS: { id: string; label: string }[] = [
+  { id: "targets", label: "Job targets" },
   { id: "you", label: "About you" },
   { id: "visa", label: "Right to work" },
   { id: "logistics", label: "Logistics" },
   { id: "equality", label: "Equality (voluntary)" },
-  { id: "targets", label: "Job targets" },
   { id: "settings", label: "Assistant settings" },
 ];
 export const RESUME_LINE = "Ask your assistant: run 360";

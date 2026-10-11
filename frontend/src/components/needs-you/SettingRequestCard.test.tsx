@@ -35,8 +35,8 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: (...a: unknown[]) =
 const evil = "<img src=x onerror=alert(1)>";
 const request = {
   id: 11,
-  path: "assistant_settings.apply_mode",
-  value: "apply_all",
+  path: "assistant_settings.above_line",
+  value: "auto",
   requested_by: evil,
   requested_at: new Date().toISOString(),
   expires_at: new Date(Date.now() + 86_400_000).toISOString(),
@@ -53,10 +53,27 @@ beforeEach(() => {
 
 describe("describeSettingRequest", () => {
   it("explains each gated path in plain words", () => {
-    expect(describeSettingRequest("assistant_settings.apply_mode", "apply_all").change).toMatch(/every job/);
+    expect(describeSettingRequest("assistant_settings.above_line", "auto", 80).change).toBe(
+      "Apply on its own for jobs at or above your score line (80)",
+    );
+    expect(describeSettingRequest("assistant_settings.above_line", "auto", null).change).toBe(
+      "Apply on its own for jobs at or above your score line (not set yet)",
+    );
+    expect(describeSettingRequest("assistant_settings.below_line", "auto", 80).change).toBe(
+      "Apply on its own for jobs below your score line (80)",
+    );
+    expect(describeSettingRequest("assistant_settings.below_line", "auto").change).toBe(
+      "Apply on its own for jobs below your score line (not set yet)",
+    );
     expect(describeSettingRequest("assistant_settings.submit_mode", "auto_when_sure").change).toMatch(/on its own/);
-    expect(describeSettingRequest("assistant_settings.apply_min_score", 60).change).toBe(
-      "Only apply alone at 60 or above",
+    expect(describeSettingRequest("assistant_settings.apply_min_score", 60, 75).change).toBe(
+      "Lower your score line from 75 to 60",
+    );
+    expect(describeSettingRequest("assistant_settings.apply_min_score", 80, 75).change).toBe(
+      "Raise your score line from 75 to 80",
+    );
+    expect(describeSettingRequest("assistant_settings.apply_min_score", 60, null).change).toBe(
+      "Set your score line to 60",
     );
     expect(describeSettingRequest("assistant_settings.daily_cap", null).change).toBe("No daily limit");
     expect(describeSettingRequest("assistant_settings.daily_cap", 5).change).toBe("Up to 5 applications a day");
@@ -67,9 +84,11 @@ describe("describeSettingRequest", () => {
 
 describe("SettingRequestCard", () => {
   it("shows the change as literal text and says nothing happens until Confirm", () => {
-    const { container } = render(<SettingRequestCard request={request} onChanged={async () => {}} />);
+    const { container } = render(
+      <SettingRequestCard request={{ ...request, current_score_line: 80 }} onChanged={async () => {}} />,
+    );
     expect(screen.getByTestId("setting-request-change")).toHaveTextContent(
-      "Apply to every job I bring, without asking",
+      "Apply on its own for jobs at or above your score line (80)",
     );
     expect(screen.getByText(/Nothing changes until you confirm/)).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull(); // the actor name is text, never HTML

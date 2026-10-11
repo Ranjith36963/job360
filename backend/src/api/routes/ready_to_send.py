@@ -8,7 +8,7 @@ unflagged". No MCP twin: the assistant holds the kit and the gate. Scoped by
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -64,6 +64,8 @@ class ReadyCard(BaseModel):
     brought_at: Optional[str] = None
     fit_score: Optional[int] = None
     fit_by: Optional[str] = None
+    # Owner decision 2026-10-10 - which side of the user's own score line.
+    line_side: Literal["above", "below", "unknown"] = "unknown"
     cv: Optional[ReadyDoc] = None
     cover_letter: Optional[ReadyDoc] = None
     answers: list[ReadyAnswer]

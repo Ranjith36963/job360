@@ -60,6 +60,12 @@ def _seed_profile(user_id: str) -> None:
         ),
         user_id, source_action="cv_upload",
     )
+    # The user's own score line (50) with both switches auto, so the gate tests below exercise the OTHER rules.
+    from src.services.profile.storage import save_assistant_settings
+
+    save_assistant_settings(
+        user_id, AssistantSettings(apply_min_score=50, above_line="auto", below_line="auto"), "test_seed"
+    )
 
 
 def _e(path: str, value: Any) -> dict[str, Any]:
@@ -93,7 +99,11 @@ def _anon_client() -> AsyncClient:
 async def _bring(client: AsyncClient, ad: dict[str, Any] = _AD) -> int:
     resp = await client.post("/api/jobs/bring", json=ad)
     assert resp.status_code == 200, resp.text
-    return int(resp.json()["application_id"])
+    app_id = int(resp.json()["application_id"])
+    # The gate also reads a fit score (rule 5c): 80 sits above the seeded line of 50.
+    fit = await client.put(f"/api/applications/{app_id}/fit", json={"score": 80})
+    assert fit.status_code == 200, fit.text
+    return app_id
 
 
 async def _save(client: AsyncClient, app_id: int, kind: str, text: str) -> dict[str, Any]:
@@ -195,11 +205,17 @@ def _sql(statement: str, params: tuple = ()) -> list[Any]:
 
 
 def _cfg(**kw: Any) -> rules.EffectiveSettings:
+    """These tests are about the OTHER gate rules: the user has a line (50) and both switches auto."""
+    kw.setdefault("apply_min_score", 50)
+    kw.setdefault("above_line", "auto")
+    kw.setdefault("below_line", "auto")
     return rules.effective(AssistantSettings(**kw))
 
 
 def _facts(**kw: Any) -> rules.SubmitFacts:
-    base: dict[str, Any] = {"status": "considering", "has_receipt": False, "submit_override": None}
+    base: dict[str, Any] = {
+        "status": "considering", "has_receipt": False, "submit_override": None, "fit_score": 80,
+    }
     base.update(kw)
     return rules.SubmitFacts(**base)
 
