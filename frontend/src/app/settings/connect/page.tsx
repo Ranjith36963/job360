@@ -254,11 +254,12 @@ const MODE_OPTIONS: { value: InboxMode; label: string }[] = [
 
 /** Values `preferences.check_every` can hold (backend
  *  `VALID_CHECK_EVERY_VALUES`; "" = not set = once a day — 2026-10-03). */
-export type CheckEveryState = "" | "3h" | "6h" | "12h" | "24h";
+export type CheckEveryState = "" | "1h" | "3h" | "6h" | "12h" | "24h";
 
-type EveryValue = "3h" | "6h" | "12h" | "24h";
+type EveryValue = "1h" | "3h" | "6h" | "12h" | "24h";
 
 const CHECK_EVERY_OPTIONS: { value: EveryValue; label: string }[] = [
+  { value: "1h", label: "Every hour" },
   { value: "3h", label: "Every 3 hours" },
   { value: "6h", label: "Every 6 hours" },
   { value: "12h", label: "Every 12 hours" },
@@ -816,6 +817,7 @@ export default function ConnectAgentPage() {
       );
       const every = profile.preferences?.check_every;
       setCheckEvery(
+        every === "1h" ||
         every === "3h" || every === "6h" || every === "12h" || every === "24h"
           ? every
           : ""

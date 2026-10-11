@@ -558,7 +558,8 @@ def compute_answers(
         ("contact.linkedin_url", next((u for u in cvd.links or [] if _link_on(u, "linkedin.com")), "")),
         ("contact.github_url", next((u for u in cvd.links or [] if _link_on(u, "github.com")), "")),
     ):
-        if _present(value):
+        # A saved `contact.linkedin_url` (memory) wins over the one read off the profile links.
+        if _present(value) and not any(i.get("key") == key for i in out["contact"]):
             out["contact"].append(_item(key, value, "profile", None))
 
     at = when("user_info.right_to_work")
@@ -613,6 +614,18 @@ def compute_answers(
             )
 
     have = {i["key"] for block in out.values() for i in block}
+    # No record for the job's country: the user's "ANY" record (every other country) answers it, so the
+    # assistant is not asked again. Its facts ride along as right_to_work.<country>.<field> items.
+    if country:
+        any_items = [i for i in out["right_to_work"] if i["key"].startswith("right_to_work.ANY.")]
+        if any_items and not any(k.startswith(f"right_to_work.{country}.") for k in have):
+            for item in any_items:
+                field = item["key"].rsplit(".", 1)[1]
+                out["right_to_work"].append(
+                    _item(f"right_to_work.{country}.{field}", item["value"], "memory", item["saved_at"],
+                          applies_via="ANY")
+                )
+            have = {i["key"] for block in out.values() for i in block}
     missing: list[dict[str, str]] = []
     if country:
         for key, why in (

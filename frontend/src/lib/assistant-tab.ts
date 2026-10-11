@@ -19,7 +19,7 @@ export const INBOX_MODES: { value: string; label: string }[] = [
   { value: "ask", label: "Ask first" },
   { value: "paused", label: "Off" },
 ];
-export const CHECK_EVERY = ["3h", "6h", "12h", "24h"] as const;
+export const CHECK_EVERY = ["1h", "3h", "6h", "12h", "24h"] as const;
 /** The backend's ASSISTANT_DAILY_CAP_MAX default (core/settings.py); the server re-checks. */
 export const DAILY_CAP_MAX = 500;
 export const HARD_STOPS = [
@@ -76,7 +76,7 @@ export function inboxKey(v: unknown): string {
 /** "6h" -> "every 6 hours". */
 export function everyText(v: unknown): string {
   const n = typeof v === "string" ? /^(\d+)h$/.exec(v)?.[1] : undefined;
-  return n ? `every ${n} hours` : "";
+  return n === "1" ? "every hour" : n ? `every ${n} hours` : "";
 }
 
 /** A stored value in words. An empty one is "not set" ("no limit" for the daily limit). */

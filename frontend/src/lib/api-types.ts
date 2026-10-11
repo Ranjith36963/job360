@@ -4060,6 +4060,17 @@ export interface components {
             /** Label */
             label: string;
         };
+        /**
+         * NormalizedOut
+         * @description One forgiving-input normalisation ``update_profile`` applied (owner decision 2026-10-10):
+         *     where it happened and a CLOSED rule code (``services/profile/forgiving.py``) - never a value.
+         */
+        NormalizedOut: {
+            /** Path */
+            path: string;
+            /** Rule */
+            rule: string;
+        };
         /** OAuthGrantOut */
         OAuthGrantOut: {
             /** Client Name */
@@ -5518,6 +5529,11 @@ export interface components {
         UpdateProfileResponse: {
             /** Applied */
             applied: components["schemas"]["ProfileEditOut"][];
+            /**
+             * Normalized
+             * @default []
+             */
+            normalized: components["schemas"]["NormalizedOut"][];
             profile: components["schemas"]["ProfileResponse"];
             /**
              * Waiting

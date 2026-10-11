@@ -35,6 +35,7 @@ from src.core import settings
 from src.core.settings import DB_PATH
 from src.repositories import pgsync
 from src.services.auth import rate_limit
+from src.services.profile import forgiving
 from src.services.profile.models import (
     VALID_CHECK_EVERY_VALUES,
     VALID_DAILY_CHECK_VALUES,
@@ -57,10 +58,12 @@ class ProfileEditError(Exception):
     the caller.
     """
 
-    def __init__(self, status_code: int, detail: str) -> None:
+    def __init__(self, status_code: int, detail: str, reason: str = "") -> None:
         super().__init__(detail)
         self.status_code = status_code
         self.detail = detail
+        # Closed refusal code for the audit trail (services/profile/refusals.py); "" = classify from the text.
+        self.reason = reason
 
 
 # The closed-set preference paths (R10). The first two share vocabulary with
@@ -170,6 +173,15 @@ def _validate_string(path: str, value: Any) -> str:
     return text
 
 
+_CLOSED_ALIASES: dict[str, tuple[Any, str]] = {
+    "preferences.experience_level": (lambda text, _allowed: forgiving.level_alias(text), forgiving.RULE_LEVEL),
+    "preferences.work_arrangement": (
+        lambda text, _allowed: forgiving.arrangement_alias(text), forgiving.RULE_ARRANGEMENT
+    ),
+    "preferences.check_every": (forgiving.every_alias, forgiving.RULE_EVERY),
+}
+
+
 def _validate_closed_set(path: str, value: Any, allowed: frozenset[str]) -> str:
     if not isinstance(value, str):
         raise ProfileEditError(422, f"{path} must be a string, got {type(value).__name__}")
@@ -177,9 +189,14 @@ def _validate_closed_set(path: str, value: Any, allowed: frozenset[str]) -> str:
     # An empty string is the explicit "unset" (R10) — never checked against
     # the allowlist, always accepted.
     if text and text not in allowed:
+        alias = _CLOSED_ALIASES.get(path)
+        mapped = alias[0](text, allowed) if alias else None
+        if alias and mapped in allowed:
+            # Owner decision 2026-10-10: a spelling that means an allowed value is stored as it, and reported.
+            forgiving.note(alias[1], at=path)
+            return str(mapped)
         raise ProfileEditError(
-            422,
-            f"{path}: {value!r} is not one of the allowed values: {', '.join(sorted(allowed))}",
+            422, f"{path} is not one of the allowed values: {', '.join(sorted(allowed))}", "bad_value"
         )
     return text
 
@@ -509,6 +526,8 @@ def _validate_notes(path: str, value: Any) -> list[str]:
     return out
 
 
+WORK_AUTH_COUNTRIES_PATH = "preferences.work_authorization_countries"
+
 # Owner decision 2026-10-10 - years of experience the user is looking for.
 YEARS_MIN_PATH = "preferences.experience_years_min"
 YEARS_MAX_PATH = "preferences.experience_years_max"
@@ -537,15 +556,16 @@ def validate_edit(path: str, value: Any) -> Any:
     (R9); a value of the wrong shape is a 422 naming the path (R10).
     """
     paths = editable_paths()
+    forgiving.set_path(path)
     if path not in paths:
         from src.services.profile import assistant_settings as _retired  # noqa: PLC0415 — imports this module
 
         if path == _retired.APPLY_MODE_PATH:
             # Retired 2026-10-10: name the replacement so a cached assistant
             # instruction fixes itself instead of guessing.
-            raise ProfileEditError(422, _retired.APPLY_MODE_RETIRED_MESSAGE)
+            raise ProfileEditError(422, _retired.APPLY_MODE_RETIRED_MESSAGE, "retired_path")
         raise ProfileEditError(
-            422, f"{path!r} is not an editable path. Editable paths: {', '.join(paths)}"
+            422, f"{path!r} is not an editable path. Editable paths: {', '.join(paths)}", "unknown_key"
         )
     if value is None:
         return None
@@ -576,6 +596,9 @@ def validate_edit(path: str, value: Any) -> Any:
         )
     if path in _CLOSED_SET_PATHS:
         return _validate_closed_set(path, value, _CLOSED_SET_PATHS[path])
+    if path == WORK_AUTH_COUNTRIES_PATH:
+        # ISO alpha-2 codes; a country name or "UK" is converted (and reported), a lone string becomes a list.
+        return _bound_encoded_size(path, user_info.validate_country_list(path, value))
     if path in NOTE_PATHS:
         # Bounded by shape alone: PROFILE_NOTE_MAX_CHARS x PROFILE_EDIT_MAX_LIST_ITEMS.
         # The generic encoded cap (PROFILE_EDIT_MAX_CHARS) would quietly allow

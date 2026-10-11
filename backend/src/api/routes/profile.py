@@ -26,6 +26,7 @@ from src.api.models import (
     JsonResumeResponse,
     LessonOut,
     LinkedInResponse,
+    NormalizedOut,
     ProfileEditHistoryResponse,
     ProfileEditHistoryRow,
     ProfileEditOut,
@@ -42,7 +43,7 @@ from src.services.applications.authorship import actor_for
 from src.services.auth import rate_limit as auth_rate_limit
 from src.services.profile import assistant_settings as settings_rules
 from src.services.profile import edits as profile_edits
-from src.services.profile import setting_requests, user_info
+from src.services.profile import forgiving, refusals, setting_requests, user_info
 from src.services.profile.cv_parser import extract_text
 from src.services.profile.github_enricher import (
     enrich_cv_from_github,
@@ -488,11 +489,23 @@ class UpdateProfileResponse(BaseModel):
     # for. NOT applied: the user confirms each one on the Job360 website
     # ("Waiting for your OK"). Empty when nothing was held back.
     waiting: list[SettingRequestOut] = []
+    # Owner decision 2026-10-10 - what was normalised on the way in (a country name read as its
+    # ISO code, "junior" read as "entry", ...). Path + closed rule code only, never a value.
+    normalized: list[NormalizedOut] = []
+
+
+class EditRefused(HTTPException):
+    """A refused ``update_profile``: 422 whose body says "Nothing was saved." plus the fix, and
+    carrying the closed ``reason`` code so the MCP audit row can log it."""
+
+    def __init__(self, status_code: int, detail: str, reason: str) -> None:
+        super().__init__(status_code=status_code, detail=detail)
+        self.reason = reason
 
 
 def _log_edit_rejected(
     user_id: str, actor: str, pairs: list[tuple[str, Any]], failed_path: str, status: int,
-    reason: str = "invalid_edit",
+    reason: str = "validation_error",
 ) -> None:
     """Audit a refused ``update_profile`` call: who, which paths, which one
     failed, the status and a CLOSED reason code. NEVER the detail — a message
@@ -500,8 +513,8 @@ def _log_edit_rejected(
     get_audit_logger().warning(
         "profile_edit_rejected",
         extra={
-            "event": "profile_edit_rejected", "user_id": safe_log_value(user_id),
-            "actor": safe_log_value(actor),
+            "event": "profile_edit_rejected", "tool": "update_profile", "user_id": safe_log_value(user_id),
+            "actor": safe_log_value(actor), "http_status": status,
             "paths": [safe_log_value(path, max_len=100) for path, _ in pairs],
             "failed_path": safe_log_value(failed_path, max_len=100),
             "status": status, "reason": safe_log_value(reason, max_len=40), "result": "rejected",
@@ -696,17 +709,19 @@ async def update_profile(
     """
     # Cap check FIRST — no side effect (no profile row created) on a call
     # that is going to be rejected outright.
-    if len(body.edits) > settings.PROFILE_EDIT_MAX_PATHS_PER_CALL:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"at most {settings.PROFILE_EDIT_MAX_PATHS_PER_CALL} edits per call "
-                f"(PROFILE_EDIT_MAX_PATHS_PER_CALL); {len(body.edits)} given"
-            ),
-        )
-
     actor = actor_for(user)
     pairs = [(edit.path, edit.value) for edit in body.edits]
+    if len(body.edits) > settings.PROFILE_EDIT_MAX_PATHS_PER_CALL:
+        _log_edit_rejected(user.id, actor, pairs, "", 422, "too_long")
+        raise EditRefused(
+            422,
+            (
+                f"Nothing was saved. At most {settings.PROFILE_EDIT_MAX_PATHS_PER_CALL} edits per call "
+                f"(PROFILE_EDIT_MAX_PATHS_PER_CALL); {len(body.edits)} given. Split them into calls "
+                "under the limit and send every path."
+            ),
+            "too_long",
+        )
 
     # VALIDATE BEFORE BOOTSTRAPPING. The blank-profile creation below is a
     # WRITE — it inserts a `user_profiles` row and a `user_profile_versions`
@@ -715,26 +730,36 @@ async def update_profile(
     # /profile` then answered 200-with-nothing instead of 404, and the user's
     # own first CV upload started from a profile they never made. A 422 must
     # change nothing.
-    failed_path = ""
-    try:
+    # EVERY bad path is collected (not just the first) so one refusal can name them all and the
+    # assistant fixes the whole call at once. Normalisations that fire are recorded for the reply.
+    failures: list[tuple[str, profile_edits.ProfileEditError]] = []
+    with forgiving.recording() as normalized_rows:
         for path, value in pairs:
-            failed_path = path
-            profile_edits.validate_edit(path, value)
-    except profile_edits.ProfileEditError as exc:
-        _log_edit_rejected(
-            user.id, actor, pairs, failed_path, exc.status_code,
-            "setting_retired" if failed_path == settings_rules.APPLY_MODE_PATH else "invalid_edit",
-        )
-        if failed_path in settings_rules.GATED_PATHS:
-            get_audit_logger().warning(
-                "assistant_setting_request_rejected",
-                extra={
-                    "event": "assistant_setting_request_rejected", "user_id": safe_log_value(user.id),
-                    "actor": safe_log_value(actor), "path": safe_log_value(failed_path, max_len=100),
-                    "status": exc.status_code, "result": "rejected",
-                },
-            )
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+            try:
+                profile_edits.validate_edit(path, value)
+            except profile_edits.ProfileEditError as exc:
+                failures.append((path, exc))
+    if failures:
+        failed_path, first = failures[0]
+        reason = refusals.reason_for_http(first.detail, first.reason)
+        _log_edit_rejected(user.id, actor, pairs, failed_path, first.status_code, reason)
+        for bad_path, bad_exc in failures:
+            if bad_path in settings_rules.GATED_PATHS:
+                get_audit_logger().warning(
+                    "assistant_setting_request_rejected",
+                    extra={
+                        "event": "assistant_setting_request_rejected", "user_id": safe_log_value(user.id),
+                        "actor": safe_log_value(actor), "path": safe_log_value(bad_path, max_len=100),
+                        "status": bad_exc.status_code, "result": "rejected",
+                    },
+                )
+        raise EditRefused(
+            first.status_code,
+            refusals.self_correcting_message(
+                [p for p, _ in pairs], [(p, e.detail) for p, e in failures]
+            ),
+            reason,
+        ) from first
 
     # S2 — a RISKIER setting change from an assistant is held, not written. The
     # hourly budget for held requests is checked HERE, before any write of the
@@ -747,7 +772,11 @@ async def update_profile(
     if reject is not None:
         reject_path, reject_reason, reject_detail = reject
         _log_edit_rejected(user.id, actor, pairs, reject_path, 422, reject_reason)
-        raise HTTPException(status_code=422, detail=reject_detail)
+        raise EditRefused(
+            422,
+            refusals.self_correcting_message([p for p, _ in pairs], [(reject_path, reject_detail)]),
+            reject_reason,
+        )
     try:
         setting_requests.check_capacity(user.id, actor, len(hold))
     except profile_edits.ProfileEditError as exc:
@@ -769,7 +798,9 @@ async def update_profile(
             user.id, actor, write_now, enforce_rate_limit=actor != profile_edits.WEB_ACTOR
         )
     except profile_edits.ProfileEditError as exc:
-        _log_edit_rejected(user.id, actor, pairs, "", exc.status_code)
+        _log_edit_rejected(
+            user.id, actor, pairs, "", exc.status_code, "rate_limited" if exc.status_code == 429 else "validation_error"
+        )
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     # S3 — audit line names PATHS and the ACTOR only, never a value. Goes to
@@ -806,6 +837,7 @@ async def update_profile(
         applied=[ProfileEditOut(**row) for row in applied],
         profile=rendered,
         waiting=[SettingRequestOut(**setting_requests.waiting_out(r)) for r in created],
+        normalized=[NormalizedOut(**row) for row in normalized_rows],
     )
 
 

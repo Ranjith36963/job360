@@ -2,13 +2,11 @@
 <!-- doc: REFERENCE — a run 360 recipe the connected assistant reads; served by routes/recipes.py -->
 
 Print this checklist and tick each step:
-[ ] 0 Resume  [ ] 1 Six rounds (targets, you, visa, logistics, equality,
-settings)  [ ] 2 Fix profile  [ ] 3 Connect  [ ] 4 Watched daily run
-[ ] 5 Schedule  [ ] 6 Finish
+[ ] 0 Resume  [ ] 1 Six rounds (targets, you, visa, logistics, equality, settings)
+[ ] 2 Fix profile  [ ] 3 Connect  [ ] 4 Watched daily run  [ ] 5 Schedule  [ ] 6 Finish
 
-This is an INTERVIEW: you ask, the user answers, you save their words. Never
-answer for them from the CV. Job360 is the record. Plain words. Full rules:
-`get_recipe("rules")`.
+This is an INTERVIEW: you ask, the user answers, you save their words. Never answer
+for them from the CV. Job360 is the record. Plain words. Rules: `get_recipe("rules")`.
 
 0. **Resume.** `get_profile`: read `assistant_notes`, `fields`, `settings.setup_progress`.
    Say "N of 6 done", **resume** at `setup_progress.next`; a field already set:
@@ -22,8 +20,9 @@ answer for them from the CV. Job360 is the record. Plain words. Full rules:
    range, e.g. 1 and 3); c. countries/cities -> `preferences.preferred_locations`;
    d. remote/hybrid/on-site, per country if it differs ("remote anywhere, on-site
    only if sponsored") -> `preferences.work_arrangement` + `user_info.right_to_work`
-   notes; e. salary -> `preferences.salary_by_country`, a min-max range in its own
-   currency and period, never converted; f. what they look for in a job ->
+   records (`remote_ok`, `onsite`: yes|only_if_sponsored|no, `note`; country "ANY"
+   = everywhere else); e. salary -> `preferences.salary_by_country`, a min-max
+   range in its own currency and period, never converted; f. what they look for ->
    `preferences.looking_for`; g. dealbreakers -> `preferences.dealbreakers`;
    h. companies to avoid -> `preferences.avoid_companies`; i. **score line**: "I give
    each job a fit score from 0 to 100. Which score is your line? I will show you
@@ -56,9 +55,10 @@ answer for them from the CV. Job360 is the record. Plain words. Full rules:
    Gmail `auto`) is NOT applied; it comes back in `waiting`. Say: "Open Job360,
    Needs you, and click Confirm once. I cannot confirm it for you; until then the
    safe setting stands." Safer choices apply at once.
-2. **Fix the profile from `raw` (CV, LinkedIn, GitHub).** Write `cv_data.cv_positions`,
-   `cv_data.cv_projects` (one per real GitHub project), links, summary when missing
-   or wrong. Never invent a fact; never overwrite a target the user gave.
+2. **Fix the profile from `raw`** (`get_profile(include_raw=true)`: CV, LinkedIn,
+   GitHub). Write `cv_data.cv_positions`, `cv_data.cv_projects` (one per real
+   GitHub project), links, summary when missing or wrong. Never invent a fact;
+   never overwrite a target the user gave.
 3. **Tell the user what to connect in their app:** Gmail, a job-search connector
    (for example Indeed), browser control. Job360 does not connect to these - you
    do. No browser control = the user submits. **Done when** you said it.

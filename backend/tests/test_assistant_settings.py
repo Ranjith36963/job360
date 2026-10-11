@@ -1372,7 +1372,8 @@ async def test_setup_targets_is_refused_without_titles_and_line_and_nothing_is_s
         resp = await _patch(client, _e("preferences.about_me", "hello"), _e(PROGRESS, done))
         assert resp.status_code == 422, resp.text
         detail = resp.json()["detail"]
-        assert detail.startswith("setup round targets can't be marked done yet: missing ")
+        assert "setup round targets can't be marked done yet: missing " in detail
+        assert detail.startswith("Nothing was saved.")
         assert TITLES in detail and SCORE in detail and "same call" in detail
         view = await _view(client)
         assert view["setup_progress"]["done"] == 0
@@ -1406,7 +1407,7 @@ async def test_setup_settings_round_needs_the_inbox_mode(authenticated_async_con
         done = _done("settings", at=at)
         refused = await _patch(client, _e(PROGRESS, done))
         assert refused.status_code == 422
-        assert refused.json()["detail"].startswith("setup round settings can't be marked done yet: missing ")
+        assert "setup round settings can't be marked done yet: missing " in refused.json()["detail"]
         assert DAILY in refused.json()["detail"]
         assert (await _patch(client, _e(PROGRESS, done), _e(DAILY, "ask"))).status_code == 200
         # other rounds have no required answers

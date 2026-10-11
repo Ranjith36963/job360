@@ -24,10 +24,11 @@ from __future__ import annotations
 import math
 import re
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 from src.core import settings
-from src.services.applications.visa import normalize_country, normalize_country_codes
+from src.services.profile import forgiving
+from src.services.profile.countries import is_plain_code, to_iso2
 from src.services.profile.edits import ProfileEditError, _strip_control
 from src.services.profile.models import VALID_LANGUAGE_LEVELS, VALID_WORK_AUTH_STATUSES
 
@@ -48,25 +49,37 @@ _CONTACT: dict[str, str] = {
     "address_city": "line", "address_postcode": "line", "address_country": "iso2",
     "date_of_birth": "dob", "residence_city": "line", "residence_country": "iso2",
     "legal_first_name": "line", "legal_last_name": "line", "preferred_name": "line",
+    "linkedin_url": "line",
 }
+# Spellings seen live that mean a real key: alias -> key. Applied BEFORE the unknown-key check.
+_CONTACT_ALIASES: dict[str, str] = {"linkedin": "linkedin_url", "linkedin_profile": "linkedin_url"}
 _RTW_COUNTRY: dict[str, str] = {
-    "country": "iso2", "work_authorization": "work_auth", "needs_sponsorship": "bool",
+    "country": "iso2_or_any", "work_authorization": "work_auth", "needs_sponsorship": "bool",
     "visa_type": "line", "visa_expires": "visa_expires",
+    # Owner decision 2026-10-10 - what people really say: "remote anywhere, on-site only if
+    # sponsored". `country` may also be "ANY" = every other country.
+    "remote_ok": "bool", "onsite": "onsite", "note": "line",
 }
+ANY_COUNTRY = "ANY"
+ONSITE_VALUES = ("yes", "only_if_sponsored", "no")
+LICENCE_TYPES = ("full", "provisional", "none")
 _RIGHT_TO_WORK: dict[str, str] = {
     "countries": "rtw_countries", "citizenship": "iso2_list", "sanctions_country_citizen": "bool_or_pns",
 }
 _LOGISTICS_COUNTRY: dict[str, str] = {
     "country": "iso2", "willing_to_relocate": "bool", "relocate_where": "line",
-    "travel_ok_pct": "pct", "driving_licence": "bool", "driving_licence_country": "iso2",
+    "travel_ok_pct": "pct", "driving_licence": "bool", "driving_licence_type": "licence_type",
+    "driving_licence_country": "iso2",
 }
+_LOGISTICS_COUNTRY_ALIASES: dict[str, str] = {"relocate": "willing_to_relocate"}
 _LOGISTICS: dict[str, str] = {
     "notice_period": "line", "earliest_start": "start", "countries": "logistics_countries",
+    "start_on_site_abroad": "line_or_bool",
 }
 _LANGUAGE: dict[str, str] = {"language": "line", "level": "level"}
 _EQUALITY: dict[str, str] = {
-    "gender": "line", "ethnicity": "line", "disability": "line", "veteran": "line",
-    "sexual_orientation": "line", "transgender": "line",
+    "gender": "line_or_bool", "ethnicity": "line_or_bool", "disability": "line_or_bool",
+    "veteran": "line_or_bool", "sexual_orientation": "line_or_bool", "transgender": "line_or_bool",
 }
 _ANSWER_KEYS = ("question", "answer", "approved", "recorded_at")
 _SALARY_KEYS = ("country", "min", "max", "currency", "period")
@@ -98,10 +111,8 @@ def _is_email(text: str) -> bool:
     return bool(name) and "." in domain[1:-1]
 _PHONE_MAX = 40
 _ADDRESS_LINES_MAX = 3
-_COUNTRY_MESSAGE = (
-    "must be an ISO alpha-2 code like 'GB' or 'IN' (no 'remote' record — a remote "
-    "job uses the hiring country's record)"
-)
+_COUNTRY_MESSAGE = "must be an ISO alpha-2 code like 'GB' or 'IN' (or a country name)"
+_REMOTE_HINT = " - no 'remote' record: a remote job uses the hiring country's record"
 
 
 def _fail(detail: str) -> ProfileEditError:
@@ -135,14 +146,18 @@ def _bool(where: str, value: Any) -> bool:
     return value
 
 
-def _iso2(where: str, value: Any) -> str:
+def _iso2(where: str, value: Any, *, remote_hint: bool = False, demonym: bool = False) -> str:
+    """One country as an ISO alpha-2 code. A name or common spelling ("United Kingdom",
+    "UK") is converted and reported (``country_name_to_iso2``); unreadable is refused."""
     text = _line(where, value)
     if not text:
         return ""
-    try:
-        return normalize_country(text)
-    except ValueError:
-        raise _fail(f"{where} {_COUNTRY_MESSAGE}") from None
+    code = to_iso2(text, allow_demonym=demonym)
+    if code is None:
+        raise _fail(f"{where} {_COUNTRY_MESSAGE}{_REMOTE_HINT if remote_hint else ''}")
+    if not is_plain_code(text) and not (len(text) == 2 and text.isalpha() and text.upper() == code):
+        forgiving.note(forgiving.RULE_COUNTRY, at=where)
+    return code
 
 
 def _real_date(text: str) -> date | None:
@@ -156,7 +171,7 @@ def _real_date(text: str) -> date | None:
 
 def _value(where: str, key: str, kind: str, raw: Any) -> Any:
     """Validate one field; return the cleaned value or ``None`` to DROP it."""
-    at = f"{where}.{key}"
+    at = f"{where}.{key}" if key else where
     if raw is None:
         return None
     if kind == "line":
@@ -170,7 +185,25 @@ def _value(where: str, key: str, kind: str, raw: Any) -> Any:
             raise _fail(f"{at} must be a boolean or \"{PREFER_NOT_TO_SAY}\", got {type(raw).__name__}")
         return raw
     if kind == "iso2":
-        return _iso2(at, raw) or None
+        return _iso2(at, raw, remote_hint=where.startswith(("user_info.logistics", "user_info.right_to_work"))) or None
+    if kind == "iso2_or_any":
+        if isinstance(raw, str) and raw.strip().upper() == ANY_COUNTRY:
+            return ANY_COUNTRY
+        return _iso2(at, raw, remote_hint=True) or None
+    if kind == "line_or_bool":
+        yes_no = forgiving.bool_to_yes_no(raw)
+        if yes_no is not None:
+            forgiving.note(forgiving.RULE_BOOL_YESNO, at=at)
+            return yes_no
+        return _line(at, raw) or None
+    if kind in ("onsite", "licence_type"):
+        allowed = ONSITE_VALUES if kind == "onsite" else LICENCE_TYPES
+        text = "_".join(_line(at, raw).lower().replace("-", " ").split())
+        if not text:
+            return None
+        if text not in allowed:
+            raise _fail(f"{at} must be one of: {', '.join(allowed)}")
+        return text
     if kind == "email":
         text = _line(at, raw, _EMAIL_MAX)
         if not text:
@@ -227,7 +260,11 @@ def _value(where: str, key: str, kind: str, raw: Any) -> Any:
         if not text:
             return None
         if text not in VALID_WORK_AUTH_STATUSES:
-            raise _fail(f"{at} must be one of: {', '.join(sorted(VALID_WORK_AUTH_STATUSES))}")
+            mapped = forgiving.work_auth_alias(text)
+            if mapped is None:
+                raise _fail(f"{at} must be one of: {', '.join(sorted(VALID_WORK_AUTH_STATUSES))}")
+            forgiving.note(forgiving.RULE_WORK_AUTH, at=at)
+            return mapped
         return text
     if kind == "level":
         text = _line(at, raw).lower()
@@ -245,15 +282,24 @@ def _value(where: str, key: str, kind: str, raw: Any) -> Any:
     if kind == "logistics_countries":
         return _countries(at, raw, _LOGISTICS_COUNTRY, contradictions=False)
     if kind == "iso2_list":
+        if isinstance(raw, str):
+            # "British" / "UK, India" -> a list; each item read like any country.
+            forgiving.note(forgiving.RULE_STR_LIST, at=at)
+            # Whole string first: "Trinidad and Tobago" is ONE country. Split only when it is not.
+            if to_iso2(raw, allow_demonym=True, strict=True) is not None:
+                raw = [raw]
+            else:
+                raw = [part for part in re.split(r"[,;/]|\band\b", raw) if part.strip()]
         if not isinstance(raw, list):
             raise _type_error(at, "a list of ISO alpha-2 codes", raw)
         for i, item in enumerate(raw):
             if not isinstance(item, str):
                 raise _type_error(f"{at}[{i}]", "a string", item)
-        try:
-            codes = normalize_country_codes([_strip_control(item) for item in raw])
-        except ValueError:
-            raise _fail(f"{at}: every item {_COUNTRY_MESSAGE}") from None
+        codes: list[str] = []
+        for i, item in enumerate(raw):
+            code = _iso2(f"{at}[{i}]", item, demonym=True)
+            if code and code not in codes:
+                codes.append(code)
         return codes or None
     raise AssertionError(f"unknown user-info kind {kind!r}")  # pragma: no cover
 
@@ -262,8 +308,56 @@ def _unknown_key(where: str, key: Any, allowed: str) -> ProfileEditError:
     return _fail(f"{where}: unknown key '{_safe_key(key)}' — allowed keys: {allowed}")
 
 
-def _object(where: str, raw: dict[str, Any], schema: dict[str, str]) -> dict[str, Any]:
+def _apply_aliases(where: str, raw: dict[str, Any], aliases: dict[str, str]) -> dict[str, Any]:
+    """Rename a known alias key to its real key (reported as ``key_alias``). Both
+    spellings in one object is a refusal - one of them would be lost."""
+    if not any(k in aliases for k in raw):
+        return raw
+    renamed: dict[str, Any] = {}
+    for key, val in raw.items():
+        real = aliases.get(key, key) if isinstance(key, str) else key
+        if real != key:
+            if real in raw:
+                raise _fail(f"{where}: send '{real}' once - not both '{real}' and '{key}'")
+            forgiving.note(forgiving.RULE_KEY, at=f"{where}.{real}")
+        renamed[real] = val
+    return renamed
+
+
+def _split_licence(where: str, raw: dict[str, Any]) -> dict[str, Any]:
+    """``driving_licence: "provisional UK"`` -> licence true + type + country (``driving_licence_split``).
+    An explicit type/country in the same record wins; a leftover that is no country is refused."""
+    value = raw.get("driving_licence")
+    if not isinstance(value, str):
+        return raw
+    parts = forgiving.split_licence(value)
+    if parts is None:
+        raise _fail(
+            f"{where}.driving_licence must be true/false "
+            f"(put the kind in driving_licence_type: {', '.join(LICENCE_TYPES)})"
+        )
+    kind, rest = parts
+    out = dict(raw)
+    out["driving_licence"] = kind != "none"
+    out.setdefault("driving_licence_type", kind)
+    if rest:
+        code = to_iso2(rest, strict=True)
+        if code is None:
+            raise _fail(f"{where}.driving_licence: put the country in driving_licence_country (ISO alpha-2)")
+        out.setdefault("driving_licence_country", code)
+    forgiving.note(forgiving.RULE_LICENCE, at=f"{where}.driving_licence")
+    return out
+
+
+def _object(
+    where: str, raw: dict[str, Any], schema: dict[str, str], aliases: dict[str, str] | None = None
+) -> dict[str, Any]:
     allowed = ", ".join(schema)
+    if aliases:
+        raw = _apply_aliases(where, raw, aliases)
+    if "driving_licence" in schema and "driving_licence_type" in schema:
+        raw = _split_licence(where, raw)
+    original_auth = raw.get("work_authorization") if schema is _RTW_COUNTRY else None
     for key in raw:
         if key not in schema:
             raise _unknown_key(where, key, allowed)
@@ -274,16 +368,79 @@ def _object(where: str, raw: dict[str, Any], schema: dict[str, str]) -> dict[str
         cleaned = _value(where, key, kind, raw[key])
         if cleaned is not None:
             out[key] = cleaned
+    if isinstance(original_auth, str) and "note" not in out and out.get("work_authorization"):
+        # A free-text status was mapped to the closed set: keep the user's own words in `note`.
+        words = _strip_control(original_auth)
+        if " ".join(words.lower().replace("_", " ").split()) != out["work_authorization"].replace("_", " "):
+            out["note"] = _line(f"{where}.note", words)
+    _check_licence(where, out)
     return out
+
+
+def _check_licence(where: str, rec: dict[str, Any]) -> None:
+    """A licence flag and its type must not contradict each other."""
+    kind, flag = rec.get("driving_licence_type"), rec.get("driving_licence")
+    if (kind == "none" and flag is True) or (kind in ("full", "provisional") and flag is False):
+        raise _fail(f"{where}: driving_licence {str(flag).lower()} contradicts driving_licence_type '{kind}'")
 
 
 def _dict_path(path: str, value: Any) -> dict[str, Any]:
     schema = _DICT_SCHEMAS[path]
+    if path == "user_info.right_to_work" and isinstance(value, list):
+        value = {"countries": value}  # a bare list of country records
     if not isinstance(value, dict):
         raise _fail(
             f"{path} must be an object with keys {', '.join(schema)}, got {type(value).__name__}"
         )
-    return _object(path, value, schema)
+    if path == "user_info.right_to_work":
+        value = _coerce_rtw(path, value)
+    return _object(path, value, schema, _CONTACT_ALIASES if path == "user_info.contact" else None)
+
+
+def _country_key(key: Any) -> str | None:
+    """A dict key that NAMES a country (or "ANY"); ``None`` when it does not."""
+    if not isinstance(key, str):
+        return None
+    if key.strip().upper() == ANY_COUNTRY:
+        return ANY_COUNTRY
+    return to_iso2(key, strict=True)
+
+
+def _keyed_records(path: str, keyed: dict[Any, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for key, val in keyed.items():
+        code = _country_key(key)
+        if code is None or not isinstance(val, dict):
+            raise _fail(f"{path}: each country entry must be an object keyed by an ISO alpha-2 code (or ANY)")
+        out.append({"country": code, **val})
+    return out
+
+
+def _coerce_rtw(path: str, raw: dict[str, Any]) -> dict[str, Any]:
+    """``{"GB": {...}, "ANY": {...}}`` (or ``countries`` as such a dict) -> the ``countries`` list
+    (``country_keyed_to_records``). Keys that are neither schema keys nor countries stay and are refused."""
+    out: dict[str, Any] = {}
+    extra: list[dict[str, Any]] = []
+    for key, val in raw.items():
+        if key in _RIGHT_TO_WORK:
+            out[key] = val
+        elif _country_key(key) is not None and isinstance(val, dict):
+            extra.extend(_keyed_records(path, {key: val}))
+        else:
+            out[key] = val
+    countries = out.get("countries")
+    if isinstance(countries, dict) and countries:
+        out["countries"] = _keyed_records(path, countries)
+        forgiving.note(forgiving.RULE_COUNTRY_KEYED, at=f"{path}.countries")
+    if extra:
+        base = out.get("countries")
+        if base is None:
+            base = []
+        if not isinstance(base, list):
+            return raw
+        out["countries"] = [*base, *extra]
+        forgiving.note(forgiving.RULE_COUNTRY_KEYED, at=path)
+    return out
 
 
 def _check_record_count(path: str, value: list[Any]) -> None:
@@ -294,7 +451,9 @@ def _check_record_count(path: str, value: list[Any]) -> None:
         )
 
 
-def _record_list(path: str, value: Any, schema: dict[str, str]) -> list[dict[str, Any]]:
+def _record_list(
+    path: str, value: Any, schema: dict[str, str], aliases: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         raise _fail(
             f"{path} must be a list of objects with keys {', '.join(schema)}, "
@@ -308,7 +467,7 @@ def _record_list(path: str, value: Any, schema: dict[str, str]) -> list[dict[str
             raise _fail(
                 f"{where} must be an object with keys {', '.join(schema)}, got {type(raw).__name__}"
             )
-        records.append(_object(where, raw, schema))
+        records.append(_object(where, raw, schema, aliases))
     return records
 
 
@@ -318,7 +477,7 @@ def _countries(
     """A per-country record list: country required and unique; an empty list
     is "not answered" (``None`` -> dropped). ``contradictions`` adds the two
     work-authorization rules."""
-    records = _record_list(path, value, schema)
+    records = _record_list(path, value, schema, None if contradictions else _LOGISTICS_COUNTRY_ALIASES)
     if not records:
         return None
     seen: set[str] = set()
@@ -419,6 +578,12 @@ def _answers(path: str, value: Any) -> list[dict[str, Any]]:
     return out
 
 
+def validate_country_list(path: str, value: Any) -> list[str]:
+    """A list of countries for a plain list path (``preferences.work_authorization_countries``):
+    names and common spellings become ISO alpha-2 codes; a lone string becomes a one-item list."""
+    return cast(list[str], _value(path, "", "iso2_list", value) or [])
+
+
 def validate_user_info(path: str, value: Any) -> Any:
     """Normalise ``value`` for one ``user_info.*`` path, or raise
     ``ProfileEditError(422, ...)``. The write REPLACES the whole value; empty
@@ -477,7 +642,7 @@ def validate_salary_by_country(path: str, value: Any) -> list[dict[str, Any]]:
         country = raw.get("country")
         if not isinstance(country, str) or not _strip_control(country):
             raise need
-        code = _iso2(f"{where}.country", country)
+        code = _iso2(f"{where}.country", country, remote_hint=True)
         if _SALARY_LEGACY_KEY in raw:
             if "min" in raw or "max" in raw:
                 raise _fail(f"{where}: send min and max, or the old amount — never both")
