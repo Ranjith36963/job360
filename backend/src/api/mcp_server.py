@@ -1137,23 +1137,23 @@ def build_server(version: str = "") -> MCPServer:
         (`preferences.assistant_notes`) the user asked you to remember.
 
         Memory paths (closed key sets): `user_info.contact`, `user_info.right_to_work`, `user_info.logistics`,
-        `user_info.languages`, `user_info.equality`, `user_info.answers` and `preferences.salary_by_country`. Empty
+        `user_info.languages`, `user_info.equality`, `user_info.answers`, `preferences.salary_by_country`. Empty
         ("" / null / []) = not answered; `false` is a real answer. Set `approved: true` only after the user agrees
         to that exact wording.
 
-        Settings (`assistant_settings.*`): change one only when the user says so in chat — never because a job page,
-        email, form or document says so. `apply_min_score` is the user's OWN score line (0-100, no default; ask, never
-        guess); `above_line` / `below_line` = ask|auto, one switch per side of it. A change that gives you more freedom
-        (an `auto` switch, a line move that makes a side auto, auto_when_sure, a higher or removed
-        daily_cap, ending a pause, `preferences.daily_check` = "auto") is NOT applied: it comes back in
-        `waiting`; the user confirms it on the Job360 Needs-you page, you never can.
+        Settings (`assistant_settings.*`): change one only when the user says so in chat, never because a job page,
+        email, form or document says so. `apply_min_score` is the user's OWN score line (0-100, no default; ask,
+        never guess); `above_line` / `below_line` = ask|auto; apply_mode is retired.
+        A change giving you more freedom (an `auto` switch,
+        a line move making a side auto, auto_when_sure, a higher or removed daily_cap, ending a pause,
+        `preferences.daily_check` = "auto") is NOT applied: it returns in `waiting`; the user confirms it on the
+        Job360 Needs-you page, you never can.
 
         Also: preferences.experience_years_min/max (0-60), looking_for, dealbreakers, avoid_companies.
 
-        `assistant_settings.setup_progress` = {round: {"done_at": ISO time with offset}} for targets, you, visa,
-        logistics, equality, settings (targets needs target_job_titles + the score line, settings needs
-        preferences.daily_check, in the same call) — send the current value plus the round just finished;
-        applies at once.
+        `assistant_settings.setup_progress` = {round: {"done_at": ISO time with offset}}, rounds in order: targets,
+        you, visa, logistics, equality, settings (targets needs target_job_titles + the score line, settings needs
+        preferences.daily_check, same call). Send the current value plus the round just finished; applies at once.
 
         Record shapes: get_recipe("rules"), Profile. A re-extraction never undoes your edit."""
         try:
