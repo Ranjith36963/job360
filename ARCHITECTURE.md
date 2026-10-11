@@ -114,10 +114,11 @@ and the MCP `get_application_kit` call the same route function
 application only, every stored answer with its source (memory / profile /
 approved text), `missing` for the job's country, the duplicate / hold /
 account-site / autofill state and a preview of the gate. Each read writes a
-`kit_read` event and mints one `artifact_links` row per document, served by the
-public `GET /api/files/{token}`: how that token is minted, compared, counted,
-rate-limited and redacted is `api/routes/files.py` with
-`core.settings.KIT_LINK_TTL_MINUTES` / `KIT_LINK_MAX_DOWNLOADS` /
+`kit_read` event and mints one `artifact_links` row per document
+(`services/applications/kit._mint_link`); the public `GET /api/files/{token}`
+compares, counts down and rate-limits it (`api/routes/files.py`), and
+`utils.logger.redact_path` keeps the token out of every log and Sentry event.
+Caps: `core.settings.KIT_LINK_TTL_MINUTES` / `KIT_LINK_MAX_DOWNLOADS` /
 `FILE_DOWNLOADS_MAX_PER_MIN` / `FILE_BAD_TOKEN_MAX_PER_MIN`. `application_receipts` gained
 `possible_duplicate`, `kit_event_id`, `kit_sha256`, all set at INSERT. The human
 in the loop is a set of note events (`cv_seen`, `submit_approved`,
