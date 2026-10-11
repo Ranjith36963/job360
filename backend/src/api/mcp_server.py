@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import inspect
 import json
 from contextlib import AbstractAsyncContextManager
 from contextvars import ContextVar
@@ -269,6 +270,20 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "proof": r.proof.model_dump(),
         "url": _receipt_url(r.id),
     }
+
+
+def clean_tool_descriptions(server: MCPServer) -> None:
+    """Strip docstring indentation from every tool description, on any Python.
+
+    Python 3.13 dedents docstrings at compile time; 3.12 (CI and prod) does not,
+    so the SDK (which serves ``fn.__doc__`` raw) sent indented text there. The
+    indent is real tokens a client pays for and it broke the 2,000-char budget
+    on 3.12 only. ``inspect.cleandoc`` is idempotent, so running it everywhere
+    makes the served text identical on every interpreter.
+    """
+    for tool in server._tool_manager.list_tools():  # noqa: SLF001 — no public hook for this
+        if tool.description:
+            tool.description = inspect.cleandoc(tool.description)
 
 
 def build_server(version: str = "") -> MCPServer:
@@ -1326,6 +1341,7 @@ def build_server(version: str = "") -> MCPServer:
     for _name in recipes_route.RECIPE_NAMES:
         _register_recipe_prompt(_name)
 
+    clean_tool_descriptions(mcp)
     return mcp
 
 

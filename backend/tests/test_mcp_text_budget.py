@@ -10,6 +10,7 @@ it can still go red.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import subprocess
 import sys
 from pathlib import Path
@@ -87,3 +88,28 @@ def test_the_drill_goes_red_when_the_checker_is_blinded():
         capture_output=True, text=True, check=False,
     )
     assert blind.returncode == 1, "a blinded limit check must make the drill fail"
+
+
+@pytest.mark.asyncio
+async def test_served_descriptions_have_no_docstring_indent_on_any_python():
+    """Python 3.13 dedents docstrings at compile time, 3.12 (CI and prod) does not.
+    The server must serve the dedented text either way, so the budget measured
+    locally equals what prod sends."""
+    pytest.importorskip("mcp")
+    from mcp.server import MCPServer
+
+    from src.api.mcp_server import build_server, clean_tool_descriptions
+
+    server = MCPServer("t")
+
+    @server.tool()
+    def indented() -> str:
+        pass
+
+    # What 3.12 compiles for a docstring: continuation lines keep their indent.
+    server._tool_manager.list_tools()[0].description = "First line.\n        Second line.\n            Nested."
+    clean_tool_descriptions(server)
+    assert (await server.list_tools())[0].description == "First line.\nSecond line.\n    Nested."
+
+    for tool in await build_server().list_tools():
+        assert tool.description == inspect.cleandoc(tool.description or ""), tool.name
