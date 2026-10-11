@@ -7,16 +7,18 @@ import type { MorningCheck as MorningCheckData } from "@/lib/api";
 import { PAUSE_CHANGED_EVENT, READY_CHANGED_EVENT } from "@/lib/assistant-state";
 import { formatFeedTime, hasStamp, readLastVisit, writeLastVisit } from "@/lib/home";
 import {
-  APPLY_MODE_LABEL,
   BUCKETS,
   BUCKET_LABEL,
   CHECK_LOOKBACK_DAYS,
   LAST_CHECK_KEY,
   SUBMIT_MODE_LABEL,
+  lineSwitchText,
   pausedByText,
   quotaText,
+  scoreLineText,
   sinceText,
 } from "@/lib/morning-check";
+import { asLineSwitch } from "@/lib/morning-check";
 import type { Bucket } from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
 
@@ -101,6 +103,7 @@ export function MorningCheck() {
   }
 
   const { state, tally } = data;
+  const lineSet = state.apply_min_score != null;
   const sep = <span aria-hidden="true" className="text-faint">·</span>;
   return (
     <section aria-labelledby="morning-check" data-testid="morning-check" className="flex flex-col gap-2.5">
@@ -120,7 +123,18 @@ export function MorningCheck() {
           {state.paused ? "Paused" : "Running"}
         </span>
         {sep}
-        <span className="text-[13.5px] text-muted-foreground">{APPLY_MODE_LABEL[state.apply_mode] ?? state.apply_mode}</span>
+        <span data-testid="mc-score-line" className="text-[13.5px] text-muted-foreground">
+          {scoreLineText(state.apply_min_score)}
+        </span>
+        {lineSet ? (
+          <span data-testid="mc-line-switches" className="text-[13.5px] text-muted-foreground">
+            {lineSwitchText(asLineSwitch(state.above_line), asLineSwitch(state.below_line))}
+          </span>
+        ) : (
+          <Link href="/profile?tab=assistant" data-testid="mc-score-line-link" className={linkBtn}>
+            Set it in Profile → Assistant
+          </Link>
+        )}
         {sep}
         <span className="text-[13.5px] text-muted-foreground">{SUBMIT_MODE_LABEL[state.submit_mode] ?? state.submit_mode}</span>
         <span className="ml-auto font-mono text-[12.5px] font-medium">{quotaText(state.applied_today, state.daily_cap)}</span>

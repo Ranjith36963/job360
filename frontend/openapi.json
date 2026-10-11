@@ -1300,6 +1300,16 @@
             ],
             "title": "Last Receipt At"
           },
+          "line_side": {
+            "default": "unknown",
+            "enum": [
+              "above",
+              "below",
+              "unknown"
+            ],
+            "title": "Line Side",
+            "type": "string"
+          },
           "needs_sponsorship": {
             "anyOf": [
               {
@@ -1689,10 +1699,13 @@
       "AssistantSettingsView": {
         "description": "The assistant settings, as the web and MCP ``get_profile`` read them.\n\n``inbox_mode`` / ``check_every`` / ``notes`` are an ALIAS of\n``preferences.daily_check`` / ``check_every`` / ``assistant_notes`` \u2014 shown\nhere, still edited at those paths.",
         "properties": {
+          "above_line": {
+            "$ref": "#/components/schemas/SettingFieldOut"
+          },
           "apply_min_score": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
-          "apply_mode": {
+          "below_line": {
             "$ref": "#/components/schemas/SettingFieldOut"
           },
           "check_every": {
@@ -1733,7 +1746,7 @@
             "$ref": "#/components/schemas/SetupProgressOut",
             "default": {
               "done": 0,
-              "next": "you",
+              "next": "targets",
               "rounds": {},
               "total": 6
             }
@@ -1751,8 +1764,9 @@
           }
         },
         "required": [
-          "apply_mode",
           "apply_min_score",
+          "above_line",
+          "below_line",
           "submit_mode",
           "daily_cap",
           "paused_until",
@@ -4333,12 +4347,27 @@
       },
       "MorningState": {
         "properties": {
+          "above_line": {
+            "title": "Above Line",
+            "type": "string"
+          },
           "applied_today": {
             "title": "Applied Today",
             "type": "integer"
           },
-          "apply_mode": {
-            "title": "Apply Mode",
+          "apply_min_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apply Min Score"
+          },
+          "below_line": {
+            "title": "Below Line",
             "type": "string"
           },
           "daily_cap": {
@@ -4385,7 +4414,8 @@
         },
         "required": [
           "paused",
-          "apply_mode",
+          "above_line",
+          "below_line",
           "submit_mode",
           "applied_today"
         ],
@@ -5686,6 +5716,16 @@
           "job_title": {
             "title": "Job Title",
             "type": "string"
+          },
+          "line_side": {
+            "default": "unknown",
+            "enum": [
+              "above",
+              "below",
+              "unknown"
+            ],
+            "title": "Line Side",
+            "type": "string"
           }
         },
         "required": [
@@ -6844,6 +6884,56 @@
         "title": "SaveArtifactResponse",
         "type": "object"
       },
+      "SaveFitLineOut": {
+        "description": "Where the saved fit lands against the USER's own score line (owner\ndecision 2026-10-10): the line (null = not set), the side, the switch that\nside uses (null when the side is unknown) and one plain next-step sentence.",
+        "properties": {
+          "next": {
+            "title": "Next",
+            "type": "string"
+          },
+          "score_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Line"
+          },
+          "side": {
+            "enum": [
+              "above",
+              "below",
+              "unknown"
+            ],
+            "title": "Side",
+            "type": "string"
+          },
+          "switch": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ask",
+                  "auto"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Switch"
+          }
+        },
+        "required": [
+          "side",
+          "next"
+        ],
+        "title": "SaveFitLineOut",
+        "type": "object"
+      },
       "SaveFitRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6966,6 +7056,9 @@
           "fit": {
             "$ref": "#/components/schemas/ApplicationFitOut"
           },
+          "line": {
+            "$ref": "#/components/schemas/SaveFitLineOut"
+          },
           "visa": {
             "anyOf": [
               {
@@ -6980,6 +7073,7 @@
         "required": [
           "application_id",
           "fit",
+          "line",
           "event_id"
         ],
         "title": "SaveFitResponse",
@@ -7181,7 +7275,7 @@
             "type": "integer"
           },
           "next": {
-            "default": "you",
+            "default": "targets",
             "title": "Next",
             "type": "string"
           },
@@ -7589,6 +7683,9 @@
           "overall": {
             "$ref": "#/components/schemas/StatsOverallOut"
           },
+          "score_line": {
+            "$ref": "#/components/schemas/StatsScoreLineOut"
+          },
           "since": {
             "anyOf": [
               {
@@ -7610,6 +7707,7 @@
           "by_job_source",
           "by_channel",
           "by_contact_found_via",
+          "score_line",
           "groups_truncated",
           "applications_truncated",
           "computed_at"
@@ -7713,6 +7811,41 @@
           "offer_rate"
         ],
         "title": "StatsRoleGroupOut",
+        "type": "object"
+      },
+      "StatsScoreLineOut": {
+        "description": "Owner decision 2026-10-10 - counts of the user's applications above /\nbelow THEIR OWN score line (``line`` null = not set) and how many have no\nfit score to place (or there is no line). Counts only.",
+        "properties": {
+          "above": {
+            "title": "Above",
+            "type": "integer"
+          },
+          "below": {
+            "title": "Below",
+            "type": "integer"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "unscored": {
+            "title": "Unscored",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "above",
+          "below",
+          "unscored"
+        ],
+        "title": "StatsScoreLineOut",
         "type": "object"
       },
       "StatusResponse": {

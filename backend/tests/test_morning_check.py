@@ -150,7 +150,8 @@ async def test_state_running_then_paused_by_web_then_by_an_assistant(authenticat
     async with authenticated_async_context() as client:
         running = (await _check(client))["state"]
         assert (running["paused"], running["paused_by"], running["paused_at"]) == (False, None, None)
-        assert (running["apply_mode"], running["submit_mode"], running["daily_cap"]) == ("ask_each", "confirm", None)
+        assert (running["apply_min_score"], running["above_line"], running["below_line"]) == (None, "ask", "ask")
+        assert (running["submit_mode"], running["daily_cap"]) == ("confirm", None)
         assert running["applied_today"] == 0
 
         edits = [{"path": PAUSE, "value": "until_resumed"}, {"path": CAP, "value": 10}]

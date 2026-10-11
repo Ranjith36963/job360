@@ -26,14 +26,16 @@ from src.services.profile import edits
 from src.services.profile.edits import ProfileEditError, validate_edit
 from src.services.profile.models import AssistantSettings, UserPreferences
 
-APPLY = "assistant_settings.apply_mode"
+APPLY = "assistant_settings.above_line"  # the retired apply_mode's successor in these tests
+BELOW = "assistant_settings.below_line"
+OLD_APPLY_MODE = "assistant_settings.apply_mode"
 SCORE = "assistant_settings.apply_min_score"
 SUBMIT = "assistant_settings.submit_mode"
 CAP = "assistant_settings.daily_cap"
 PAUSE = "assistant_settings.paused_until"
 REASON = "assistant_settings.pause_reason"
 INBOX = "preferences.daily_check"
-SIX = (APPLY, SCORE, SUBMIT, CAP, PAUSE, REASON)
+SIX = (APPLY, BELOW, SCORE, SUBMIT, CAP, PAUSE, REASON)
 PROGRESS = "assistant_settings.setup_progress"
 
 NOW = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
@@ -58,6 +60,11 @@ def _reject(path: str, value: Any) -> str:
 
 
 def _eff(**kw: Any) -> rules.EffectiveSettings:
+    """The S2 rule tests are about the OTHER rules, so by default the user has a
+    line (50) and both switches on auto; the score-line tests pass their own."""
+    kw.setdefault("apply_min_score", 50)
+    kw.setdefault("above_line", "auto")
+    kw.setdefault("below_line", "auto")
     return rules.effective(AssistantSettings(**kw))
 
 
@@ -69,6 +76,7 @@ def _facts(
     status: str = "considering", receipt: bool = False, override: str | None = None, *, seen: bool = True, **kit: Any
 ) -> rules.SubmitFacts:
     """S3: auto-submit only sends a CV the user has seen, so the S2 rule tests default to seen."""
+    kit.setdefault("fit_score", 80)  # above the default test line of 50
     return rules.SubmitFacts(status=status, has_receipt=receipt, submit_override=override, cv_seen=seen, **kit)
 
 
@@ -80,10 +88,56 @@ AUTO = {"submit_mode": "auto_when_sure"}
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+def test_apply_mode_is_retired_and_names_its_replacement():
+    assert OLD_APPLY_MODE not in edits.editable_paths()
+    assert OLD_APPLY_MODE not in rules.SETTING_PATHS and OLD_APPLY_MODE not in rules.GATED_PATHS
+    detail = _reject(OLD_APPLY_MODE, "auto")
+    assert "retired" in detail and "above_line" in detail and "below_line" in detail
+    assert AssistantSettings(apply_mode="apply_all").apply_mode == "apply_all", "old stored rows still load"
+
+
+@pytest.mark.parametrize(
+    ("above", "below", "before", "after", "expected"),
+    [
+        ("ask", "ask", None, 70, "safer"),
+        ("auto", "ask", None, 70, "riskier"),
+        ("ask", "auto", None, 70, "riskier"),
+        ("auto", "auto", 70, None, "safer"),
+        ("auto", "ask", 70, 70, "safer"),
+        ("auto", "ask", 70, 60, "riskier"),
+        ("ask", "auto", 70, 60, "safer"),
+        ("ask", "ask", 70, 60, "safer"),
+        ("auto", "auto", 70, 60, "safer"),
+        ("ask", "auto", 70, 80, "riskier"),
+        ("auto", "ask", 70, 80, "safer"),
+        ("ask", "ask", 70, 80, "safer"),
+        ("auto", "auto", 70, 80, "safer"),
+    ],
+)
+def test_score_line_change_is_judged_against_the_two_switches(above, below, before, after, expected):
+    assert rules.classify_change(SCORE, before, after, switches=(above, below)) == expected
+
+
+def test_score_line_default_switches_are_ask_ask():
+    assert rules.classify_change(SCORE, 70, 10) == "safer"
+
+
+@pytest.mark.parametrize(
+    ("fit", "line", "expected"),
+    [(80, 75, "above"), (75, 75, "above"), (74, 75, "below"), (0, 0, "above"), (None, 75, "unknown"),
+     (80, None, "unknown"), (None, None, "unknown")],
+)
+def test_line_side(fit, line, expected):
+    assert rules.line_side(fit, line) == expected
+
+
 def test_the_six_paths_are_editable_and_the_head_matches_the_dataclass():
     assert set(SIX) <= set(edits.editable_paths())
     # S4: the six settings plus the setup progress (not a setting: never gated).
-    assert set(SIX) | {PROGRESS} == {f"assistant_settings.{f.name}" for f in dataclasses.fields(AssistantSettings)}
+    # apply_mode is the RETIRED field: it stays on the dataclass but is no longer editable.
+    assert set(SIX) | {PROGRESS, OLD_APPLY_MODE} == {
+        f"assistant_settings.{f.name}" for f in dataclasses.fields(AssistantSettings)
+    }
     assert PROGRESS in edits.editable_paths() and PROGRESS not in rules.GATED_PATHS
     assert set(rules.SETTING_PATHS) == set(SIX)
     assert rules.GATED_PATHS == (*rules.SETTING_PATHS, INBOX)
@@ -100,9 +154,10 @@ def test_declared_fields_include_the_head_and_a_bad_path_still_refuses_to_boot(m
 
 def test_defaults_are_the_safe_ones_and_empty_is_not_chosen():
     eff = rules.effective(AssistantSettings())
-    assert (eff.apply_mode, eff.apply_min_score, eff.submit_mode, eff.daily_cap) == (
-        "ask_each", 75, "confirm", None,
-    )
+    assert (eff.apply_min_score, eff.above_line, eff.below_line, eff.submit_mode, eff.daily_cap) == (
+        None, "ask", "ask", "confirm", None,
+    ), "the score line has NO default: unset stays None"
+    assert not hasattr(rules, "DEFAULT_APPLY_MIN_SCORE")
     assert eff.paused_until == "" and eff.pause_reason == ""
     assert not rules.is_paused(eff.paused_until, NOW)
     assert rules.effective(AssistantSettings(apply_min_score=0)).apply_min_score == 0, "0 is a real score line"
@@ -116,7 +171,7 @@ def test_defaults_are_the_safe_ones_and_empty_is_not_chosen():
 @pytest.mark.parametrize(
     ("path", "value"),
     [
-        (APPLY, "yolo"), (APPLY, 5), (APPLY, ["ask_each"]),
+        (APPLY, "yolo"), (APPLY, 5), (APPLY, ["ask"]),
         (SUBMIT, "always"), (SUBMIT, True),
         (SCORE, 101), (SCORE, -1), (SCORE, True), (SCORE, "75"), (SCORE, 75.5),
         (CAP, 0), (CAP, -3), (CAP, settings.ASSISTANT_DAILY_CAP_MAX + 1), (CAP, True), (CAP, "5"),
@@ -135,7 +190,7 @@ def test_bad_values_are_refused_naming_the_path(path, value):
 
 
 def test_good_values_are_normalised():
-    assert validate_edit(APPLY, " Apply_All ") == "apply_all"
+    assert validate_edit(APPLY, " AUTO ") == "auto"
     assert validate_edit(APPLY, "") == ""
     assert validate_edit(SUBMIT, "AUTO_WHEN_SURE") == "auto_when_sure"
     assert validate_edit(SCORE, 0) == 0 and validate_edit(SCORE, 100) == 100
@@ -160,18 +215,12 @@ LATEST = (NOW + timedelta(days=9)).isoformat()
 @pytest.mark.parametrize(
     ("path", "before", "after", "expected"),
     [
-        (APPLY, "ask_each", "selective_above_score", "riskier"),
-        (APPLY, "ask_each", "apply_all", "riskier"),
-        (APPLY, "selective_above_score", "apply_all", "riskier"),
-        (APPLY, "apply_all", "ask_each", "safer"),
-        (APPLY, "selective_above_score", "ask_each", "safer"),
-        (APPLY, "apply_all", "selective_above_score", "safer"),
-        (APPLY, "ask_each", "ask_each", "safer"),
-        (APPLY, "apply_all", "apply_all", "safer"),
-        (SCORE, 75, 60, "riskier"),
-        (SCORE, 75, 0, "riskier"),
-        (SCORE, 75, 90, "safer"),
-        (SCORE, 75, 75, "safer"),
+        (APPLY, "ask", "auto", "riskier"),
+        (BELOW, "ask", "auto", "riskier"),
+        (APPLY, "auto", "ask", "safer"),
+        (BELOW, "auto", "ask", "safer"),
+        (APPLY, "ask", "ask", "safer"),
+        (BELOW, "auto", "auto", "safer"),
         (SUBMIT, "confirm", "auto_when_sure", "riskier"),
         (SUBMIT, "auto_when_sure", "confirm", "safer"),
         (SUBMIT, "confirm", "confirm", "safer"),
@@ -349,7 +398,42 @@ def test_order_of_the_rules():
     assert set(rules.REASONS) >= {
         "paused", "already_applied", "daily_cap_reached", "unknown_site", "ask_always_site",
         "job_override_confirm", "submit_mode_confirm", "practice_run", "auto_when_sure",
+        "score_line_unknown", "line_ask_above", "line_ask_below",
     }
+
+
+def test_rule_5c_no_line_or_no_fit_asks_score_line_unknown():
+    no_line = _eff(submit_mode="auto_when_sure", apply_min_score=None)
+    d = rules.may_submit(no_line, _facts(), FORM, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "score_line_unknown")
+    no_fit = rules.may_submit(AUTO_CFG, _facts(fit_score=None), FORM, _counts(), now=NOW)
+    assert (no_fit.decision, no_fit.reason) == ("ask", "score_line_unknown")
+
+
+def test_rule_5c_each_side_has_its_own_switch():
+    above_ask = _eff(submit_mode="auto_when_sure", above_line="ask")
+    d = rules.may_submit(above_ask, _facts(fit_score=80), FORM, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "line_ask_above")
+    # the same config does NOT ask for a job below the line: that side is auto
+    assert rules.may_submit(above_ask, _facts(fit_score=20), FORM, _counts(), now=NOW).decision == "submit"
+    below_ask = _eff(submit_mode="auto_when_sure", below_line="ask")
+    d = rules.may_submit(below_ask, _facts(fit_score=20), FORM, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "line_ask_below")
+    assert rules.may_submit(below_ask, _facts(fit_score=80), FORM, _counts(), now=NOW).decision == "submit"
+
+
+def test_rule_5c_both_auto_passes_through_and_the_default_switches_ask():
+    assert rules.may_submit(AUTO_CFG, _facts(fit_score=50), FORM, _counts(), now=NOW).decision == "submit"
+    default_switches = rules.effective(AssistantSettings(apply_min_score=50, submit_mode="auto_when_sure"))
+    assert rules.may_submit(default_switches, _facts(fit_score=80), FORM, _counts(), now=NOW).reason == "line_ask_above"
+    assert rules.may_submit(default_switches, _facts(fit_score=10), FORM, _counts(), now=NOW).reason == "line_ask_below"
+
+
+def test_rule_5c_a_stored_yes_clears_it_but_paused_and_declined_still_stop():
+    cfg = _eff(submit_mode="auto_when_sure", above_line="ask", below_line="ask")
+    d = rules.may_submit(cfg, _facts(approved=True), FORM, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("submit", "user_approved")
+    assert rules.may_submit(cfg, _facts(approved=True, declined=True), FORM, _counts(), now=NOW).decision == "stop"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -418,6 +502,12 @@ async def _seen(client: AsyncClient, app_id: int) -> None:
     assert saved.status_code == 201, saved.text
     marked = await client.post(f"/api/applications/{app_id}/cv-seen", json={})
     assert marked.status_code == 201, marked.text
+    # Owner decision 2026-10-10: the gate also needs the user's line and a fit
+    # score. These tests are about the OTHER rules, so put the job above a line
+    # whose two switches are auto (the user's own web clicks apply at once).
+    assert (await _patch(client, _e(SCORE, 50), _e(APPLY, "auto"), _e(BELOW, "auto"))).status_code == 200
+    fit = await client.put(f"/api/applications/{app_id}/fit", json={"score": 80})
+    assert fit.status_code == 200, fit.text
 
 
 async def _apply(client: AsyncClient, app_id: int) -> None:
@@ -501,7 +591,7 @@ async def test_bad_value_is_422_per_path_and_changes_nothing(authenticated_async
             assert resp.status_code == 422, (path, resp.text)
             assert path in resp.json()["detail"]
         view = await _view(client)
-        assert view["apply_mode"] == {"value": "", "effective": "ask_each"}
+        assert view["above_line"] == {"value": "", "effective": "ask"}
         assert view["waiting"] == []
 
 
@@ -510,29 +600,31 @@ async def test_injection_guard_a_token_cannot_loosen_anything(authenticated_asyn
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
+        # the user's own line, with ONLY the above-line switch auto: lowering the line is then riskier
+        assert (await _patch(client, _e(SCORE, 75), _e(APPLY, "auto"))).status_code == 200
     async with _bearer_client(token) as agent:
         resp = await _patch(
-            agent, _e(APPLY, "apply_all"), _e(SUBMIT, "auto_when_sure"), _e(SCORE, 10), _e(CAP, None), _e(INBOX, "auto"),
+            agent, _e(BELOW, "auto"), _e(SUBMIT, "auto_when_sure"), _e(SCORE, 10), _e(CAP, None), _e(INBOX, "auto"),
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert [r["path"] for r in body["applied"]] == [CAP], "only the no-op cap clear was written"
         held = {w["path"]: w for w in body["waiting"]}
-        # apply_all, auto_when_sure, score 75->10 and the daily check "auto" are riskier; the daily_cap
-        # clear is a no-op (there was no cap) so it is safer and not held.
-        assert set(held) == {APPLY, SUBMIT, SCORE, INBOX}
-        assert held[APPLY]["value"] == "apply_all" and held[SUBMIT]["value"] == "auto_when_sure"
+        # below=auto, auto_when_sure, a LOWER line (above is auto, below is ask) and the daily check "auto" are
+        # riskier; the daily_cap clear is a no-op (there was no cap) so it is safer and not held.
+        assert set(held) == {BELOW, SUBMIT, SCORE, INBOX}
+        assert held[BELOW]["value"] == "auto" and held[SUBMIT]["value"] == "auto_when_sure"
         assert held[SCORE]["value"] == 10 and held[INBOX]["value"] == "auto"
         assert all(w["status"] == "waiting" and w["requested_by"] == "token:claude-code" for w in held.values())
         assert all(w["expires_at"] > w["requested_at"] for w in held.values())
         profile = body["profile"]
-        assert profile["assistant_settings"]["apply_mode"]["effective"] == "ask_each"
+        assert profile["assistant_settings"]["above_line"]["effective"] == "auto"
         assert profile["assistant_settings"]["submit_mode"]["effective"] == "confirm"
         assert profile["assistant_settings"]["apply_min_score"]["effective"] == 75
         assert profile["preferences"]["daily_check"] == ""
         assert {w["path"] for w in profile["assistant_settings"]["waiting"]} == set(held)
         # An unrelated edit in the same call still applies.
-        mixed = await _patch(agent, _e("preferences.about_me", "hello"), _e(APPLY, "apply_all"))
+        mixed = await _patch(agent, _e("preferences.about_me", "hello"), _e(BELOW, "auto"))
         assert [r["path"] for r in mixed.json()["applied"]] == ["preferences.about_me"]
         # No path exists for an assistant to confirm or decline.
         for suffix in ("confirm", "decline"):
@@ -541,13 +633,13 @@ async def test_injection_guard_a_token_cannot_loosen_anything(authenticated_asyn
         assert (await agent.post("/api/assistant-settings/take-back", json={"path": APPLY})).status_code == 403
     async with authenticated_async_context() as client:
         view = await _view(client)
-        assert view["apply_mode"]["effective"] == "ask_each"
+        assert view["above_line"]["effective"] == "auto"
         waiting = {w["path"]: w for w in view["waiting"]}
-        assert waiting[APPLY]["value"] == "apply_all", "Needs-you shows the waiting item with its value"
+        assert waiting[BELOW]["value"] == "auto", "Needs-you shows the waiting item with its value"
         assert waiting[SCORE]["value"] == 10
         # the profile response carries it too
         prof = (await client.get("/api/profile")).json()
-        assert {w["path"] for w in prof["assistant_settings"]["waiting"]} == {APPLY, SUBMIT, SCORE, INBOX}
+        assert {w["path"] for w in prof["assistant_settings"]["waiting"]} == {BELOW, SUBMIT, SCORE, INBOX}
 
 
 @pytest.mark.asyncio
@@ -568,25 +660,25 @@ async def test_safer_from_a_token_applies_at_once_and_riskier_from_the_web_appli
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
         # web: every direction applies at once - the click IS the confirmation
-        resp = await _patch(client, _e(APPLY, "apply_all"), _e(SUBMIT, "auto_when_sure"), _e(SCORE, 60), _e(CAP, 20), _e(INBOX, "auto"))
+        resp = await _patch(client, _e(APPLY, "auto"), _e(SUBMIT, "auto_when_sure"), _e(SCORE, 60), _e(CAP, 20), _e(INBOX, "auto"))
         assert resp.status_code == 200, resp.text
         assert resp.json()["waiting"] == []
         view = await _view(client)
-        assert view["apply_mode"] == {"value": "apply_all", "effective": "apply_all"}
+        assert view["above_line"] == {"value": "auto", "effective": "auto"}
         assert view["submit_mode"]["effective"] == "auto_when_sure" and view["apply_min_score"]["effective"] == 60
         assert view["daily_cap"]["effective"] == 20 and view["inbox_mode"] == "auto"
     until = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
     async with _bearer_client(token) as agent:
         # every one of these is SAFER than where the web put things
         resp = await _patch(
-            agent, _e(APPLY, "ask_each"), _e(SUBMIT, "confirm"), _e(SCORE, 90), _e(CAP, 5), _e(PAUSE, until),
+            agent, _e(APPLY, "ask"), _e(SUBMIT, "confirm"), _e(SCORE, 90), _e(CAP, 5), _e(PAUSE, until),
             _e(REASON, "on holiday"), _e(INBOX, "ask"),
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["waiting"] == []
         assert len(resp.json()["applied"]) == 7
         a = resp.json()["profile"]["assistant_settings"]
-        assert a["apply_mode"]["effective"] == "ask_each" and a["submit_mode"]["effective"] == "confirm"
+        assert a["above_line"]["effective"] == "ask" and a["submit_mode"]["effective"] == "confirm"
         assert a["daily_cap"]["effective"] == 5 and a["paused"] is True
         assert a["pause_reason"]["effective"] == "on holiday"
         # ending the pause early is RISKIER
@@ -633,25 +725,25 @@ async def test_the_inbox_mode_alias_auto_waits_and_the_three_preference_paths_st
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-async def _wait_for_apply_all(authenticated_async_context, fixture_user_id) -> tuple[str, int]:
+async def _wait_for_auto_above(authenticated_async_context, fixture_user_id) -> tuple[str, int]:
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
     async with _bearer_client(token) as agent:
-        resp = await _patch(agent, _e(APPLY, "apply_all"))
+        resp = await _patch(agent, _e(APPLY, "auto"))
         return token, int(resp.json()["waiting"][0]["id"])
 
 
 @pytest.mark.asyncio
 async def test_the_user_confirms_and_it_applies_as_a_web_row(authenticated_async_context, fixture_user_id):
-    _token, rid = await _wait_for_apply_all(authenticated_async_context, fixture_user_id)
+    _token, rid = await _wait_for_auto_above(authenticated_async_context, fixture_user_id)
     async with authenticated_async_context() as client:
         resp = await client.post(f"/api/assistant-settings/requests/{rid}/confirm")
         assert resp.status_code == 200, resp.text
         view = resp.json()
-        assert view["apply_mode"]["effective"] == "apply_all" and view["waiting"] == []
+        assert view["above_line"]["effective"] == "auto" and view["waiting"] == []
         rows = (await client.get("/api/assistant-settings/history", params={"path": APPLY})).json()["rows"]
-        assert [(r["value"], r["set_by"]) for r in rows] == [("apply_all", "web")]
+        assert [(r["value"], r["set_by"]) for r in rows] == [("auto", "web")]
         again = await client.post(f"/api/assistant-settings/requests/{rid}/confirm")
         assert again.status_code == 409, "a decision is set once"
         assert (await client.post(f"/api/assistant-settings/requests/{rid}/decline")).status_code == 409
@@ -659,28 +751,28 @@ async def test_the_user_confirms_and_it_applies_as_a_web_row(authenticated_async
 
 @pytest.mark.asyncio
 async def test_the_user_declines_and_nothing_changes(authenticated_async_context, fixture_user_id):
-    _token, rid = await _wait_for_apply_all(authenticated_async_context, fixture_user_id)
+    _token, rid = await _wait_for_auto_above(authenticated_async_context, fixture_user_id)
     async with authenticated_async_context() as client:
         resp = await client.post(f"/api/assistant-settings/requests/{rid}/decline")
         assert resp.status_code == 200, resp.text
-        assert resp.json()["apply_mode"]["effective"] == "ask_each" and resp.json()["waiting"] == []
+        assert resp.json()["above_line"]["effective"] == "ask" and resp.json()["waiting"] == []
         assert (await client.post(f"/api/assistant-settings/requests/{rid}/confirm")).status_code == 409
         assert (await client.get("/api/assistant-settings/history", params={"path": APPLY})).json()["rows"] == []
 
 
 @pytest.mark.asyncio
 async def test_a_second_request_supersedes_the_first(authenticated_async_context, fixture_user_id):
-    token, first = await _wait_for_apply_all(authenticated_async_context, fixture_user_id)
+    token, first = await _wait_for_auto_above(authenticated_async_context, fixture_user_id)
     async with _bearer_client(token) as agent:
-        resp = await _patch(agent, _e(APPLY, "selective_above_score"))
+        resp = await _patch(agent, _e(APPLY, "auto"))
         second = int(resp.json()["waiting"][0]["id"])
     assert second != first
     async with authenticated_async_context() as client:
         view = await _view(client)
-        assert [(w["id"], w["value"]) for w in view["waiting"]] == [(second, "selective_above_score")]
+        assert [(w["id"], w["value"]) for w in view["waiting"]] == [(second, "auto")]
         assert (await client.post(f"/api/assistant-settings/requests/{first}/confirm")).status_code == 409
         got = (await client.post(f"/api/assistant-settings/requests/{second}/confirm")).json()
-        assert got["apply_mode"]["effective"] == "selective_above_score"
+        assert got["above_line"]["effective"] == "auto"
     from src.repositories import pgsync
 
     with pgsync.connect(str(settings.DB_PATH)) as conn:
@@ -692,19 +784,19 @@ async def test_a_second_request_supersedes_the_first(authenticated_async_context
 async def test_an_expired_request_cannot_be_confirmed_and_is_not_shown(
     authenticated_async_context, fixture_user_id, monkeypatch
 ):
-    _token, rid = await _wait_for_apply_all(authenticated_async_context, fixture_user_id)
+    _token, rid = await _wait_for_auto_above(authenticated_async_context, fixture_user_id)
     monkeypatch.setattr(settings, "ASSISTANT_SETTING_REQUEST_TTL_DAYS", 0)
     async with authenticated_async_context() as client:
         assert (await _view(client))["waiting"] == []
         resp = await client.post(f"/api/assistant-settings/requests/{rid}/confirm")
         assert resp.status_code == 409 and "expired" in resp.json()["detail"]
         assert (await client.post(f"/api/assistant-settings/requests/{rid}/decline")).status_code == 409
-        assert (await _view(client))["apply_mode"]["effective"] == "ask_each"
+        assert (await _view(client))["above_line"]["effective"] == "ask"
 
 
 @pytest.mark.asyncio
 async def test_another_users_request_is_404(authenticated_async_context, fixture_user_id):
-    _token, rid = await _wait_for_apply_all(authenticated_async_context, fixture_user_id)
+    _token, rid = await _wait_for_auto_above(authenticated_async_context, fixture_user_id)
     cookie = await _second_user_session_cookie()
     from src.api.main import app
 
@@ -728,7 +820,7 @@ async def test_the_hourly_request_cap_is_429_and_writes_nothing(
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
     async with _bearer_client(token) as agent:
-        assert (await _patch(agent, _e(APPLY, "apply_all"))).status_code == 200
+        assert (await _patch(agent, _e(APPLY, "auto"))).status_code == 200
         resp = await _patch(agent, _e("preferences.about_me", "hi there"), _e(SUBMIT, "auto_when_sure"))
         assert resp.status_code == 429, resp.text
         prof = (await agent.get("/api/profile")).json()
@@ -780,8 +872,12 @@ async def test_submit_check_defaults_to_ask_and_unknown_application_is_404(
         _seed_profile(fixture_user_id)
         app_id = await _bring(client)
         body = (await _check(client, app_id)).json()
-        assert (body["decision"], body["reason"], body["application_id"]) == ("ask", "submit_mode_confirm", app_id)
+        # no score line and no fit yet: the first thing to ask is the line
+        assert (body["decision"], body["reason"], body["application_id"]) == ("ask", "score_line_unknown", app_id)
         assert body["detail"]
+        assert (await _patch(client, _e(SCORE, 50), _e(APPLY, "auto"), _e(BELOW, "auto"))).status_code == 200
+        assert (await client.put(f"/api/applications/{app_id}/fit", json={"score": 80})).status_code == 200
+        assert (await _check(client, app_id)).json()["reason"] == "submit_mode_confirm"
         assert (await _check(client, app_id, "")).json()["reason"] == "unknown_site"
         assert (await _check(client, 987654321)).status_code == 404
 
@@ -896,18 +992,18 @@ async def test_clear_all_resets_and_cancels_waiting_but_other_scopes_leave_setti
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
-        assert (await _patch(client, _e(APPLY, "apply_all"), _e(CAP, 9))).status_code == 200
+        assert (await _patch(client, _e(APPLY, "auto"), _e(CAP, 9))).status_code == 200
     async with _bearer_client(token) as agent:
         assert (await _patch(agent, _e(SUBMIT, "auto_when_sure"))).json()["waiting"]
     async with authenticated_async_context() as client:
         for scope in ("preferences", "memory", "cv", "linkedin", "github"):
             assert (await client.post("/api/profile/clear", data={"section": scope})).status_code == 200, scope
         view = await _view(client)
-        assert view["apply_mode"]["effective"] == "apply_all" and view["daily_cap"]["effective"] == 9
+        assert view["above_line"]["effective"] == "auto" and view["daily_cap"]["effective"] == 9
         assert len(view["waiting"]) == 1, "no scope but 'all' cancels the queue"
         assert (await client.post("/api/profile/clear", data={"section": "all"})).status_code == 200
         view = await _view(client)
-        assert view["apply_mode"] == {"value": "", "effective": "ask_each"}
+        assert view["above_line"] == {"value": "", "effective": "ask"}
         assert view["daily_cap"] == {"value": None, "effective": None} and view["waiting"] == []
         rows = (await client.get("/api/assistant-settings/history", params={"path": APPLY})).json()["rows"]
         assert rows[0]["value"] is None and len(rows) == 2, "the clear is a row; history is kept"
@@ -932,7 +1028,7 @@ async def test_a_token_clear_all_cannot_end_a_pause_or_remove_a_cap(authenticate
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
         resp = await _patch(
-            client, _e(PAUSE, rules.UNTIL_RESUMED), _e(CAP, 3), _e(APPLY, "apply_all"), _e(SUBMIT, "auto_when_sure")
+            client, _e(PAUSE, rules.UNTIL_RESUMED), _e(CAP, 3), _e(APPLY, "auto"), _e(SUBMIT, "auto_when_sure")
         )
         assert resp.status_code == 200, resp.text
     async with _bearer_client(token) as agent:
@@ -942,7 +1038,7 @@ async def test_a_token_clear_all_cannot_end_a_pause_or_remove_a_cap(authenticate
         assert view["paused"] is True and view["paused_until"]["effective"] == rules.UNTIL_RESUMED
         assert view["daily_cap"]["effective"] == 3
         # Resetting the looser ones to the safe default is safer, so those reset.
-        assert view["apply_mode"]["effective"] == "ask_each" and view["submit_mode"]["effective"] == "confirm"
+        assert view["above_line"]["effective"] == "ask" and view["submit_mode"]["effective"] == "confirm"
         assert (await client.post("/api/profile/clear", data={"section": "all"})).status_code == 200
         view = await _view(client)
         assert view["paused"] is False and view["daily_cap"]["effective"] is None
@@ -973,10 +1069,10 @@ async def test_account_delete_erases_settings_and_requests_and_export_includes_t
         token = await _mint_token(client)
         assert (await _patch(client, _e(CAP, 4))).status_code == 200
     async with _bearer_client(token) as agent:
-        assert (await _patch(agent, _e(APPLY, "apply_all"))).json()["waiting"]
+        assert (await _patch(agent, _e(APPLY, "auto"))).json()["waiting"]
         exported = (await agent.get("/api/applications/export")).json()
         reqs = exported["assistant_setting_requests"]
-        assert [(r["path"], r["value"], r["status"]) for r in reqs] == [(APPLY, "apply_all", "waiting")]
+        assert [(r["path"], r["value"], r["status"]) for r in reqs] == [(APPLY, "auto", "waiting")]
 
     async def _count(table: str) -> int:
         from src.repositories import pg
@@ -1012,6 +1108,8 @@ async def test_mcp_has_check_submit_and_no_confirm_decline_or_take_back_tool(
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
+        # the user's own line, with the below-line switch auto (a job scored under it passes rule 5c)
+        assert (await _patch(client, _e(SCORE, 50), _e(BELOW, "auto"))).status_code == 200
     async with mcp_runtime():
         async with _mcp_client(token) as mcp:
             names = {t.name for t in (await mcp.list_tools()).tools}
@@ -1019,17 +1117,21 @@ async def test_mcp_has_check_submit_and_no_confirm_decline_or_take_back_tool(
             for word in ("confirm", "decline", "take_back", "keep", "approve", "setting_request", "assistant_settings"):
                 assert not [n for n in names if word in n], f"no MCP twin for the website's {word}"
             # a riskier update through MCP: held, shown in the tool result and in get_profile.settings
-            result = _payload(await mcp.call_tool("update_profile", {"edits": [_e(APPLY, "apply_all")]}))
-            assert [w["path"] for w in result["waiting"]] == [APPLY] and result["waiting"][0]["value"] == "apply_all"
+            result = _payload(await mcp.call_tool("update_profile", {"edits": [_e(APPLY, "auto")]}))
+            assert [w["path"] for w in result["waiting"]] == [APPLY] and result["waiting"][0]["value"] == "auto"
             assert result["applied"] == []
             prof = _payload(await mcp.call_tool("get_profile", {}))
             s = prof["settings"]
-            assert s["apply_mode"] == {"value": "", "effective": "ask_each"}
+            assert s["above_line"] == {"value": "", "effective": "ask"}
             assert s["paused"] is False and s["practice_run"] == {"needed": False, "auto_on_since": None}
-            assert [w["value"] for w in s["waiting"]] == ["apply_all"]
+            assert [w["value"] for w in s["waiting"]] == ["auto"]
             assert APPLY in prof["editable_paths"] and prof["fields"][APPLY] == ""
             # the gate over MCP
             app_id = _payload(await mcp.call_tool("bring_job", {**_AD}))["application_id"]
+            verdict = _payload(await mcp.call_tool("check_submit", {"application_id": app_id, "form_url": FORM}))
+            assert (verdict["decision"], verdict["reason"]) == ("ask", "score_line_unknown"), "no fit saved yet"
+            fit = _payload(await mcp.call_tool("save_fit", {"application_id": app_id, "score": 10}))
+            assert (fit["line"]["score_line"], fit["line"]["side"], fit["line"]["switch"]) == (50, "below", "auto")
             verdict = _payload(await mcp.call_tool("check_submit", {"application_id": app_id, "form_url": FORM}))
             assert (verdict["decision"], verdict["reason"]) == ("ask", "submit_mode_confirm")
             # per-job override over MCP: auto is refused, confirm is fine
@@ -1083,8 +1185,11 @@ async def test_logs_name_the_user_and_never_carry_free_text(
     async with _bearer_client(token) as agent:
         resp = await _patch(
             agent, _e(PAUSE, until), _e(REASON, secret_reason), _e("preferences.assistant_notes", [secret_note]),
-            _e(SCORE, 80), _e(APPLY, "apply_all"),
+            _e(SCORE, 80),
         )
+        assert resp.status_code == 200, resp.text
+        # the switch is asked in its own call: asked together with the line it would hold the line too
+        resp = await _patch(agent, _e(APPLY, "auto"))
         assert resp.status_code == 200, resp.text
         waiting_id = resp.json()["waiting"][0]["id"]
         bad = await _patch(agent, _e(CAP, 0))
@@ -1139,7 +1244,7 @@ async def test_the_request_cap_rejection_is_logged(authenticated_async_context, 
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
     async with _bearer_client(token) as agent:
-        assert (await _patch(agent, _e(APPLY, "apply_all"))).status_code == 200
+        assert (await _patch(agent, _e(APPLY, "auto"))).status_code == 200
         assert (await _patch(agent, _e(SUBMIT, "auto_when_sure"))).status_code == 429
     rejected = _events(audit_capture, "assistant_setting_request_rejected")
     assert [(r["status"], r["user_id"]) for r in rejected] == [(429, fixture_user_id)]
@@ -1187,9 +1292,9 @@ def test_setup_progress_refusals_name_the_path_and_never_the_value(value):
 
 
 def test_setup_progress_view_names_the_next_round():
-    assert rules.setup_progress_view({}) == {"rounds": {}, "done": 0, "total": 6, "next": "you"}
-    two = rules.setup_progress_view(_done("you", "visa"))
-    assert (two["done"], two["total"], two["next"]) == (2, 6, "logistics")
+    assert rules.setup_progress_view({}) == {"rounds": {}, "done": 0, "total": 6, "next": "targets"}
+    two = rules.setup_progress_view(_done("targets", "you"))
+    assert (two["done"], two["total"], two["next"]) == (2, 6, "visa")
     allsix = rules.setup_progress_view(_done(*rules.SETUP_ROUNDS))
     assert (allsix["done"], allsix["next"]) == (6, "")
     assert rules.setup_progress_view("garbage")["done"] == 0
@@ -1214,7 +1319,7 @@ async def test_setup_progress_applies_at_once_from_a_token_and_is_in_settings_an
             assert [a["path"] for a in result["applied"]] == [PROGRESS]
             prof = _payload(await mcp.call_tool("get_profile", {}))
             progress = prof["settings"]["setup_progress"]
-            assert (progress["done"], progress["total"], progress["next"]) == (2, 6, "logistics")
+            assert (progress["done"], progress["total"], progress["next"]) == (2, 6, "targets")
             assert set(progress["rounds"]) == {"you", "visa"}
             assert set(prof["fields"][PROGRESS]) == {"you", "visa"}
             assert PROGRESS in prof["editable_paths"]
@@ -1227,6 +1332,170 @@ async def test_setup_progress_applies_at_once_from_a_token_and_is_in_settings_an
             assert again["settings"]["setup_progress"]["done"] == 2
     async with authenticated_async_context() as client:
         view = await _view(client)
-        assert view["setup_progress"]["done"] == 2 and view["setup_progress"]["next"] == "logistics"
+        assert view["setup_progress"]["done"] == 2 and view["setup_progress"]["next"] == "targets"
         rows = (await client.get("/api/profile/edits/history", params={"path": PROGRESS})).json()["rows"]
         assert rows and rows[0]["set_by"] == "token:claude-code", "who wrote it is in the history"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Owner decision 2026-10-10: the score line is the user's own, the interview
+# is targets-first, and the new "looking for" preferences
+# ═══════════════════════════════════════════════════════════════════════════
+
+TITLES = "preferences.target_job_titles"
+DAILY = "preferences.daily_check"
+Y_MIN = "preferences.experience_years_min"
+Y_MAX = "preferences.experience_years_max"
+
+
+def test_setup_rounds_are_targets_first():
+    assert rules.SETUP_ROUNDS == ("targets", "you", "visa", "logistics", "equality", "settings")
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_write_is_refused_naming_the_replacement(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        resp = await _patch(client, _e(OLD_APPLY_MODE, "auto"))
+        assert resp.status_code == 422
+        assert "retired" in resp.json()["detail"] and "above_line" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_setup_targets_is_refused_without_titles_and_line_and_nothing_is_saved(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        await client.post("/api/profile/clear", data={"section": "preferences"})  # no titles, no line
+        done = _done("targets", at=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())
+        resp = await _patch(client, _e("preferences.about_me", "hello"), _e(PROGRESS, done))
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert detail.startswith("setup round targets can't be marked done yet: missing ")
+        assert TITLES in detail and SCORE in detail and "same call" in detail
+        view = await _view(client)
+        assert view["setup_progress"]["done"] == 0
+        assert view["apply_min_score"] == {"value": None, "effective": None}
+        # the whole batch was refused: the other edit was NOT saved either
+        profile = (await client.get("/api/profile")).json()
+        assert (profile["preferences"].get("about_me") or "") == ""
+
+
+@pytest.mark.asyncio
+async def test_setup_targets_passes_when_the_same_batch_brings_the_answers(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        done = _done("targets", at=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())
+        resp = await _patch(client, _e(PROGRESS, done), _e(TITLES, ["AI Engineer"]), _e(SCORE, 70))
+        assert resp.status_code == 200, resp.text
+        view = await _view(client)
+        assert view["setup_progress"]["next"] == "you" and view["apply_min_score"]["effective"] == 70
+        # an already-done round is not re-checked when a later call re-sends it
+        later = _done("targets", at=done["targets"]["done_at"])
+        assert (await _patch(client, _e(PROGRESS, later))).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_setup_settings_round_needs_the_inbox_mode(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        done = _done("settings", at=at)
+        refused = await _patch(client, _e(PROGRESS, done))
+        assert refused.status_code == 422
+        assert refused.json()["detail"].startswith("setup round settings can't be marked done yet: missing ")
+        assert DAILY in refused.json()["detail"]
+        assert (await _patch(client, _e(PROGRESS, done), _e(DAILY, "ask"))).status_code == 200
+        # other rounds have no required answers
+        assert (await _patch(client, _e(PROGRESS, {**done, **_done("you", at=at)}))).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_looking_for_preferences_validate_and_show_in_the_profile(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        ok = await _patch(
+            client, _e(Y_MIN, 3), _e(Y_MAX, 8), _e("preferences.looking_for", ["real ownership"]),
+            _e("preferences.dealbreakers", ["on-call rota"]), _e("preferences.avoid_companies", ["Acme"]),
+        )
+        assert ok.status_code == 200, ok.text
+        prefs = (await client.get("/api/profile")).json()["preferences"]
+        assert (prefs["experience_years_min"], prefs["experience_years_max"]) == (3, 8)
+        assert prefs["looking_for"] == ["real ownership"] and prefs["avoid_companies"] == ["Acme"]
+        for path, value in [(Y_MIN, -1), (Y_MAX, 61), (Y_MIN, True), (Y_MIN, 2.5), (Y_MAX, "5")]:
+            bad = await _patch(client, _e(path, value))
+            assert bad.status_code == 422 and path in bad.json()["detail"], (path, value)
+        # min above the STORED max is refused on a write of either side; nothing is saved
+        assert (await _patch(client, _e(Y_MIN, 9))).status_code == 422
+        assert (await _patch(client, _e(Y_MAX, 2))).status_code == 422
+        assert (await _patch(client, _e(Y_MIN, 9), _e(Y_MAX, 12))).status_code == 200
+        prefs = (await client.get("/api/profile")).json()["preferences"]
+        assert (prefs["experience_years_min"], prefs["experience_years_max"]) == (9, 12)
+
+
+@pytest.mark.asyncio
+async def test_save_fit_answers_with_the_line_and_the_list_and_stats_carry_it(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        a1, a2, a3 = await _bring(client), await _bring(client, _AD_2), await _bring(client, _AD_3)
+        no_line = (await client.put(f"/api/applications/{a1}/fit", json={"score": 80})).json()["line"]
+        assert no_line["score_line"] is None and no_line["side"] == "unknown" and no_line["switch"] is None
+        assert "No score line set" in no_line["next"] and "apply_min_score" in no_line["next"]
+        assert (await _patch(client, _e(SCORE, 75), _e(BELOW, "auto"))).status_code == 200
+        above = (await client.put(f"/api/applications/{a1}/fit", json={"score": 80})).json()["line"]
+        assert (above["score_line"], above["side"], above["switch"]) == (75, "above", "ask")
+        assert above["next"].startswith("Above your line (75). Your rule: ask - ")
+        below = (await client.put(f"/api/applications/{a2}/fit", json={"score": 40})).json()["line"]
+        assert (below["side"], below["switch"]) == ("below", "auto")
+        listing = {a["id"]: a for a in (await client.get("/api/applications")).json()["applications"]}
+        assert [listing[a]["line_side"] for a in (a1, a2, a3)] == ["above", "below", "unknown"]
+        stats = (await client.get("/api/applications/stats")).json()
+        assert stats["score_line"] == {"line": 75, "above": 1, "below": 1, "unscored": 1}
+
+
+@pytest.mark.asyncio
+async def test_a_line_move_is_held_when_the_same_batch_asks_for_auto(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (await _patch(client, _e(SCORE, 80))).status_code == 200
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        body = (await _patch(agent, _e(SCORE, 0), _e(APPLY, "auto"))).json()
+        assert body["applied"] == []
+        assert {w["path"] for w in body["waiting"]} == {SCORE, APPLY}
+    async with authenticated_async_context() as client:
+        assert (await _view(client))["apply_min_score"]["effective"] == 80
+
+
+@pytest.mark.asyncio
+async def test_a_line_move_is_held_when_an_auto_switch_request_is_already_waiting(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (await _patch(client, _e(SCORE, 80))).status_code == 200
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        assert [w["path"] for w in (await _patch(agent, _e(APPLY, "auto"))).json()["waiting"]] == [APPLY]
+        later = (await _patch(agent, _e(SCORE, 10))).json()
+        assert later["applied"] == [] and [w["path"] for w in later["waiting"]] == [SCORE]
+
+
+@pytest.mark.asyncio
+async def test_a_held_required_answer_counts_for_the_setup_round(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    async with _bearer_client(token) as agent:
+        resp = await _patch(agent, _e(DAILY, "auto"), _e(PROGRESS, _done("settings", at=at)))
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [w["path"] for w in body["waiting"]] == [DAILY]
+        assert [a["path"] for a in body["applied"]] == [PROGRESS]
+        assert body["profile"]["preferences"]["daily_check"] == ""

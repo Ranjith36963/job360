@@ -7,10 +7,10 @@ export const LAST_CHECK_KEY = "job360-last-check";
 /** A first visit (no stamp) looks back this far. */
 export const CHECK_LOOKBACK_DAYS = 1;
 
-export const APPLY_MODE_LABEL: Record<string, string> = {
-  ask_each: "Ask about each job",
-  apply_all: "Apply to all",
-  selective_above_score: "Only above my score line",
+/** The two per-user switches (above / below the score line). */
+export const LINE_SWITCH_LABEL: Record<string, string> = {
+  ask: "Ask me",
+  auto: "Apply on its own",
 };
 export const SUBMIT_MODE_LABEL: Record<string, string> = {
   confirm: "Confirm before sending",
@@ -41,4 +41,22 @@ export function pausedByText(by: string, at: string, now: Date = new Date()): st
   const name = by === "web" ? "you" : by.replace(/^(token|agent):/, "");
   const when = formatFeedTime(at, now);
   return when ? `Paused by ${name}, ${when}` : `Paused by ${name}`;
+}
+
+/** The strip's score-line words. null / undefined = never set. */
+export type LineSwitch = "ask" | "auto";
+
+/** Narrow a backend string to a known switch; anything else reads as "ask". */
+export function asLineSwitch(v: unknown): LineSwitch {
+  return v === "auto" ? "auto" : "ask";
+}
+
+export function scoreLineText(line: number | null | undefined): string {
+  return line == null ? "Score line not set" : `Score line ${line}`;
+}
+
+/** "Above: ask me · Below: ask me" for the strip. */
+export function lineSwitchText(above: string | undefined, below: string | undefined): string {
+  const w = (v: string | undefined) => (LINE_SWITCH_LABEL[v ?? "ask"] ?? "Ask me").toLowerCase();
+  return `Above: ${w(above)} · Below: ${w(below)}`;
 }

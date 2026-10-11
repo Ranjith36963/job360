@@ -67,6 +67,8 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
         const hasCoverLetter = (app.artifacts?.cover_letter ?? 0) > 0;
         const showVisa = app.visa_signal === "sponsors" || app.visa_signal === "no_sponsorship";
         const hasFit = typeof app.fit_score === "number";
+        // "unknown" shows nothing.
+        const lineSide = app.line_side;
         const fitScore = hasFit ? Math.max(0, Math.min(100, app.fit_score as number)) : 0;
 
         return (
@@ -131,6 +133,16 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
                   <div data-testid="row-fit" className="flex items-baseline gap-2 text-sm">
                     {app.fit_verdict && <span className="min-w-0 truncate">{app.fit_verdict}</span>}
                     <span className="shrink-0 font-mono text-xs text-muted-foreground">{fitScore}/100</span>
+                    {lineSide === "above" && (
+                      <span data-testid="row-line-side" className="shrink-0 text-xs text-muted-foreground">
+                        Above your line
+                      </span>
+                    )}
+                    {lineSide === "below" && (
+                      <span data-testid="row-line-side" className="shrink-0 text-xs text-muted-foreground">
+                        Below your line
+                      </span>
+                    )}
                   </div>
                 )}
 

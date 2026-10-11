@@ -43,7 +43,9 @@ VALID_WORK_AUTH_STATUSES: frozenset[str] = frozenset(
 VALID_LANGUAGE_LEVELS: frozenset[str] = frozenset({"native", "fluent", "professional", "basic"})
 # Owner decision 2026-10-08 (S2) — assistant settings. Closed sets. "" / None on
 # the dataclass = "not chosen" (rule #29); the SAFE default applies:
-# ask_each / 75 / confirm / no cap / not paused (services/profile/assistant_settings.py).
+# no score line / ask / ask / confirm / no cap / not paused (services/profile/assistant_settings.py).
+# VALID_APPLY_MODES is RETIRED (2026-10-10, replaced by above_line / below_line) and only
+# kept so old tests and stored rows still import.
 VALID_APPLY_MODES: frozenset[str] = frozenset({"ask_each", "apply_all", "selective_above_score"})
 VALID_SUBMIT_MODES: frozenset[str] = frozenset({"confirm", "auto_when_sure"})
 
@@ -584,6 +586,14 @@ class UserPreferences:
     # on the web or by the agent through update_profile; the agent reads them
     # first on every get_profile. Empty = nothing to say (rule #29).
     assistant_notes: list[str] = field(default_factory=list)
+    # Owner decision 2026-10-10 - what the user is looking for, told in the setup
+    # interview. Years are whole numbers 0-60 (min <= max when both are set).
+    # Empty / None = "don't care" (rule #29): never a default, never a penalty.
+    experience_years_min: Optional[int] = None
+    experience_years_max: Optional[int] = None
+    looking_for: list[str] = field(default_factory=list)
+    dealbreakers: list[str] = field(default_factory=list)
+    avoid_companies: list[str] = field(default_factory=list)
 
     # Owner decision 2026-09-25 — "" (not asked yet, rule #29: empty is
     # silent), "scheduled" (user said yes and confirmed it in their app), or
@@ -674,8 +684,15 @@ class AssistantSettings:
     are only SHOWN here (an alias, not a move).
     """
 
+    # RETIRED 2026-10-10 (replaced by above_line / below_line): kept so old stored
+    # rows still load. Never read by the gate, never written.
     apply_mode: str = ""
+    # The user's own score line (0-100). None = not set; there is NO default.
     apply_min_score: Optional[int] = None
+    # Two separate switches, "ask" (default) | "auto": jobs at or above the line,
+    # and jobs below it. "" = not chosen = ask.
+    above_line: str = ""
+    below_line: str = ""
     submit_mode: str = ""
     daily_cap: Optional[int] = None
     paused_until: str = ""

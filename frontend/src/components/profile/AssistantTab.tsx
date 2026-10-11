@@ -12,13 +12,14 @@ import {
 } from "@/lib/api";
 import type { AssistantSettingsView, MorningCheck } from "@/lib/api";
 import {
-  APPLY_MODES,
   CHECK_EVERY,
   DAILY_CAP_MAX,
   HARD_STOPS,
   HISTORY_PATHS,
   INBOX_MODES,
-  P_APPLY,
+  LINE_SWITCHES,
+  P_ABOVE,
+  P_BELOW,
   P_CAP,
   P_EVERY,
   P_INBOX,
@@ -30,9 +31,11 @@ import {
   historyWhen,
   inboxKey,
   mergeHistory,
+  settingScore,
+  settingSwitch,
 } from "@/lib/assistant-tab";
 import type { ChangeRow, HistRow } from "@/lib/assistant-tab";
-import { APPLY_MODE_LABEL, SUBMIT_MODE_LABEL, quotaText } from "@/lib/morning-check";
+import { LINE_SWITCH_LABEL, SUBMIT_MODE_LABEL, quotaText, scoreLineText } from "@/lib/morning-check";
 import { cn } from "@/lib/utils";
 
 const LABEL = "font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-faint";
@@ -99,9 +102,48 @@ function Option({
   );
 }
 
+function LineSwitch({
+  title,
+  testPrefix,
+  current,
+  busy,
+  onPick,
+}: {
+  title: string;
+  testPrefix: string;
+  current: string;
+  busy: boolean;
+  onPick: (v: "ask" | "auto") => void;
+}) {
+  return (
+    <Row title={title} sub={current === "auto" ? "Your assistant applies on its own." : "Your assistant asks you first."}>
+      <div role="radiogroup" aria-label={title} className="inline-flex overflow-hidden rounded-lg border border-border">
+        {LINE_SWITCHES.map((m, i) => (
+          <button
+            key={m.value}
+            type="button"
+            role="radio"
+            aria-checked={current === m.value}
+            data-testid={`${testPrefix}-${m.value}`}
+            disabled={busy}
+            onClick={() => current !== m.value && onPick(m.value)}
+            className={cn(
+              "min-h-11 px-3.5 text-sm font-medium md:min-h-9",
+              i > 0 && "border-l border-border",
+              current === m.value ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted",
+            )}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+    </Row>
+  );
+}
+
 const eff = (f: { effective?: unknown; value?: unknown } | undefined) => f?.effective ?? f?.value;
 
-/** Profile -> Assistant: when the assistant may apply, how it submits, its limits
+/** Profile -> Assistant: the score line, how it submits, its limits
  *  and inbox, the hard stops that cannot change, and every change with Take back.
  *  Every control is a PATCH as the web user and applies at once. */
 export function AssistantTab() {
@@ -110,7 +152,7 @@ export function AssistantTab() {
   const [today, setToday] = useState<MorningCheck | null>(null);
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [score, setScore] = useState("75");
+  const [score, setScore] = useState("");
   const [cap, setCap] = useState("");
   const enterDone = useRef(false);
 
@@ -130,7 +172,7 @@ export function AssistantTab() {
 
   const apply = useCallback((v: AssistantSettingsView) => {
     setView(v);
-    setScore(String(eff(v.apply_min_score) ?? 75));
+    setScore(settingScore(v.apply_min_score) == null ? "" : String(settingScore(v.apply_min_score)));
     setCap(v.daily_cap.value == null ? "" : String(v.daily_cap.value));
   }, []);
 
@@ -195,18 +237,25 @@ export function AssistantTab() {
   }
   if (!view) return <p className="pt-6 text-sm text-muted-foreground">Loading…</p>;
 
-  const apply_mode = String(eff(view.apply_mode) ?? "ask_each");
+  const aboveLine = settingSwitch(view.above_line);
+  const belowLine = settingSwitch(view.below_line);
   const submit_mode = String(eff(view.submit_mode) ?? "confirm");
   const inbox = inboxKey(view.inbox_mode);
   const every = view.check_every ?? "";
-  const savedScore = Number(eff(view.apply_min_score) ?? 75);
+  const savedScore: number | null = settingScore(view.apply_min_score);
   const savedCap = view.daily_cap.value == null ? "" : String(view.daily_cap.value);
 
   function commitScore() {
-    const n = Number(score);
-    if (score.trim() === "" || !Number.isInteger(n) || n < 0 || n > 100) {
+    const t = score.trim();
+    if (t === "") {
+      // Cleared: the line goes back to "not set" (no default is ever written).
+      if (savedScore !== null) void save(P_SCORE, null);
+      return;
+    }
+    const n = Number(t);
+    if (!Number.isInteger(n) || n < 0 || n > 100) {
       toast.error("Score line must be a whole number from 0 to 100. Not saved.");
-      setScore(String(savedScore));
+      setScore(savedScore === null ? "" : String(savedScore));
       return;
     }
     if (n !== savedScore) void save(P_SCORE, n);
@@ -240,54 +289,46 @@ export function AssistantTab() {
   return (
     <div className="grid gap-8 pt-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="flex min-w-0 flex-col gap-8" data-testid="assistant-tab">
-        <Section title="Apply mode" hint="When may your assistant apply?">
-          <div role="radiogroup" aria-label="Apply mode" className="grid gap-2 md:grid-cols-3">
-            {APPLY_MODES.map((m) => (
-              <Option
-                key={m.value}
-                id={`apply-mode-${m.value}`}
-                title={APPLY_MODE_LABEL[m.value]}
-                sub={m.sub}
-                on={apply_mode === m.value}
-                disabled={busy}
-                onPick={() => apply_mode !== m.value && void save(P_APPLY, m.value)}
-              />
-            ))}
-          </div>
-          {apply_mode === "selective_above_score" && (
-            <Row title="Score line" sub="Your assistant scores each job. Below the line, it skips.">
-              <input
-                type="range"
-                min={0}
-                max={100}
-                aria-label="Score line slider"
-                data-testid="score-range"
-                value={Number(score) || 0}
-                disabled={busy}
-                onChange={(e) => setScore(e.target.value)}
-                onPointerUp={commitScore}
-                onKeyUp={commitScore}
-                className="min-h-11 min-w-36 flex-1 accent-[var(--primary)]"
-              />
-              <input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                max={100}
-                aria-label="Score line"
-                data-testid="score-input"
-                value={score}
-                disabled={busy}
-                onChange={(e) => {
-                  enterDone.current = false;
-                  setScore(e.target.value);
-                }}
-                onBlur={onBlurCommit(commitScore)}
-                onKeyDown={onEnter(commitScore)}
-                className={NUMBOX}
-              />
-            </Row>
-          )}
+        <Section title="Your score line" hint="Your assistant scores each job. You choose what happens on each side of your line.">
+          <Row title="Score line" sub="A whole number from 0 to 100. It is yours; nothing is set for you.">
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={100}
+              aria-label="Score line"
+              data-testid="score-input"
+              placeholder="Not set"
+              value={score}
+              disabled={busy}
+              onChange={(e) => {
+                enterDone.current = false;
+                setScore(e.target.value);
+              }}
+              onBlur={onBlurCommit(commitScore)}
+              onKeyDown={onEnter(commitScore)}
+              className={NUMBOX}
+            />
+            {savedScore === null && (
+              <span data-testid="score-line-unset" className="basis-full text-[12.5px] text-muted-foreground">
+                Not set — your assistant will ask you
+              </span>
+            )}
+          </Row>
+          <LineSwitch
+            title="Jobs at or above your line"
+            testPrefix="above-line"
+            current={aboveLine}
+            busy={busy}
+            onPick={(v) => void save(P_ABOVE, v)}
+          />
+          <LineSwitch
+            title="Jobs below your line"
+            testPrefix="below-line"
+            current={belowLine}
+            busy={busy}
+            onPick={(v) => void save(P_BELOW, v)}
+          />
         </Section>
 
         <Section title="Submit mode" hint="The last click on the form">
@@ -415,7 +456,9 @@ export function AssistantTab() {
           <dl className="flex flex-col gap-1.5 text-[13px]">
             {(
               [
-                ["Apply mode", APPLY_MODE_LABEL[apply_mode] ?? apply_mode],
+                ["Score line", scoreLineText(savedScore).replace(/^Score line /, "")],
+                ["At or above", LINE_SWITCH_LABEL[aboveLine] ?? aboveLine],
+                ["Below", LINE_SWITCH_LABEL[belowLine] ?? belowLine],
                 ["Submit", SUBMIT_MODE_LABEL[submit_mode] ?? submit_mode],
                 ...(today ? [["Today", quotaText(today.state.applied_today, today.state.daily_cap).replace(/ today$/, "")]] : []),
                 ...(inbox ? [["Gmail check", [INBOX_MODES.find((m) => m.value === inbox)?.label, everyText(every)].filter(Boolean).join(", ")]] : []),

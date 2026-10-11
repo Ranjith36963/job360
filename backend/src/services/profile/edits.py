@@ -509,6 +509,26 @@ def _validate_notes(path: str, value: Any) -> list[str]:
     return out
 
 
+# Owner decision 2026-10-10 - years of experience the user is looking for.
+YEARS_MIN_PATH = "preferences.experience_years_min"
+YEARS_MAX_PATH = "preferences.experience_years_max"
+YEARS_PATHS: frozenset[str] = frozenset({YEARS_MIN_PATH, YEARS_MAX_PATH})
+YEARS_LIMIT = 60
+
+
+def _validate_years(path: str, value: Any) -> int:
+    """A whole number 0..60. ``bool`` is refused (it is an ``int`` subclass)."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= YEARS_LIMIT:
+        raise ProfileEditError(422, f"{path} must be a whole number from 0 to {YEARS_LIMIT}")
+    return value
+
+
+def check_years_order(low: Any, high: Any) -> None:
+    """422 when both years bounds are set and min is above max. ``None`` = don't care."""
+    if low is not None and high is not None and low > high:
+        raise ProfileEditError(422, f"{YEARS_MIN_PATH} must not be above {YEARS_MAX_PATH}")
+
+
 def validate_edit(path: str, value: Any) -> Any:
     """Normalise ``value`` for ``path``, or raise ``ProfileEditError(422, ...)``.
 
@@ -518,6 +538,12 @@ def validate_edit(path: str, value: Any) -> Any:
     """
     paths = editable_paths()
     if path not in paths:
+        from src.services.profile import assistant_settings as _retired  # noqa: PLC0415 — imports this module
+
+        if path == _retired.APPLY_MODE_PATH:
+            # Retired 2026-10-10: name the replacement so a cached assistant
+            # instruction fixes itself instead of guessing.
+            raise ProfileEditError(422, _retired.APPLY_MODE_RETIRED_MESSAGE)
         raise ProfileEditError(
             422, f"{path!r} is not an editable path. Editable paths: {', '.join(paths)}"
         )
@@ -525,6 +551,8 @@ def validate_edit(path: str, value: Any) -> Any:
         return None
     from src.services.profile import assistant_settings, user_info  # noqa: PLC0415 — both import this module
 
+    if path in YEARS_PATHS:
+        return _validate_years(path, value)
     if path == assistant_settings.SETUP_PROGRESS_PATH:
         return _bound_encoded_size(path, assistant_settings.validate_setup_progress(path, value))
     if path in assistant_settings.SETTING_PATHS:

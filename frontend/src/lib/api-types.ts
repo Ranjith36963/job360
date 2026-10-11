@@ -2823,6 +2823,12 @@ export interface components {
             last_event_at: string | null;
             /** Last Receipt At */
             last_receipt_at?: string | null;
+            /**
+             * Line Side
+             * @default unknown
+             * @enum {string}
+             */
+            line_side: "above" | "below" | "unknown";
             /** Needs Sponsorship */
             needs_sponsorship?: boolean | null;
             next_step: components["schemas"]["NextStepOut"];
@@ -2964,8 +2970,9 @@ export interface components {
          *     here, still edited at those paths.
          */
         AssistantSettingsView: {
+            above_line: components["schemas"]["SettingFieldOut"];
             apply_min_score: components["schemas"]["SettingFieldOut"];
-            apply_mode: components["schemas"]["SettingFieldOut"];
+            below_line: components["schemas"]["SettingFieldOut"];
             /**
              * Check Every
              * @default
@@ -2990,7 +2997,7 @@ export interface components {
             /**
              * @default {
              *       "done": 0,
-             *       "next": "you",
+             *       "next": "targets",
              *       "rounds": {},
              *       "total": 6
              *     }
@@ -4014,10 +4021,14 @@ export interface components {
         };
         /** MorningState */
         MorningState: {
+            /** Above Line */
+            above_line: string;
             /** Applied Today */
             applied_today: number;
-            /** Apply Mode */
-            apply_mode: string;
+            /** Apply Min Score */
+            apply_min_score?: number | null;
+            /** Below Line */
+            below_line: string;
             /** Daily Cap */
             daily_cap?: number | null;
             /** Paused */
@@ -4607,6 +4618,12 @@ export interface components {
             job_location: string;
             /** Job Title */
             job_title: string;
+            /**
+             * Line Side
+             * @default unknown
+             * @enum {string}
+             */
+            line_side: "above" | "below" | "unknown";
         };
         /** ReadyDoc */
         ReadyDoc: {
@@ -4986,6 +5003,25 @@ export interface components {
             /** Version No */
             version_no: number;
         };
+        /**
+         * SaveFitLineOut
+         * @description Where the saved fit lands against the USER's own score line (owner
+         *     decision 2026-10-10): the line (null = not set), the side, the switch that
+         *     side uses (null when the side is unknown) and one plain next-step sentence.
+         */
+        SaveFitLineOut: {
+            /** Next */
+            next: string;
+            /** Score Line */
+            score_line?: number | null;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "above" | "below" | "unknown";
+            /** Switch */
+            switch?: ("ask" | "auto") | null;
+        };
         /** SaveFitRequest */
         SaveFitRequest: {
             /** Axes */
@@ -5012,6 +5048,7 @@ export interface components {
             /** Event Id */
             event_id: number;
             fit: components["schemas"]["ApplicationFitOut"];
+            line: components["schemas"]["SaveFitLineOut"];
             visa?: components["schemas"]["ApplicationVisaOut"] | null;
         };
         /**
@@ -5109,7 +5146,7 @@ export interface components {
             done: number;
             /**
              * Next
-             * @default you
+             * @default targets
              */
             next: string;
             /**
@@ -5248,6 +5285,7 @@ export interface components {
             /** Groups Truncated */
             groups_truncated: boolean;
             overall: components["schemas"]["StatsOverallOut"];
+            score_line: components["schemas"]["StatsScoreLineOut"];
             /** Since */
             since: string | null;
         };
@@ -5275,6 +5313,22 @@ export interface components {
             reply_rate: number | null;
             /** Role */
             role: string | null;
+        };
+        /**
+         * StatsScoreLineOut
+         * @description Owner decision 2026-10-10 - counts of the user's applications above /
+         *     below THEIR OWN score line (``line`` null = not set) and how many have no
+         *     fit score to place (or there is no line). Counts only.
+         */
+        StatsScoreLineOut: {
+            /** Above */
+            above: number;
+            /** Below */
+            below: number;
+            /** Line */
+            line?: number | null;
+            /** Unscored */
+            unscored: number;
         };
         /** StatusResponse */
         StatusResponse: {

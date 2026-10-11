@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { P_APPLY, P_CAP, P_EVERY, P_INBOX, historyWhen, mergeHistory, valueText } from "./assistant-tab";
+import { P_ABOVE, P_BELOW, P_CAP, P_SCORE, P_EVERY, P_INBOX, ROUNDS, historyWhen, mergeHistory, valueText } from "./assistant-tab";
 import { formatFeedTime } from "./home";
 
 describe("valueText", () => {
   it("maps stored values to the labels on screen", () => {
-    expect(valueText(P_APPLY, "selective_above_score")).toBe("Only above my score line");
+    expect(valueText(P_ABOVE, "auto")).toBe("Apply on its own");
+    expect(valueText(P_BELOW, "ask")).toBe("Ask me");
     expect(valueText(P_INBOX, "scheduled")).toBe("Auto");
     expect(valueText(P_INBOX, "declined")).toBe("Off");
     expect(valueText(P_EVERY, "6h")).toBe("every 6 hours");
   });
   it("empty is 'no limit' for the daily limit and 'not set' elsewhere", () => {
     expect(valueText(P_CAP, null)).toBe("no limit");
-    expect(valueText(P_APPLY, "")).toBe("not set");
+    expect(valueText(P_SCORE, null)).toBe("not set");
   });
 });
 
@@ -52,5 +53,11 @@ describe("historyWhen", () => {
     expect(historyWhen(today, now)).toBe(`Today ${formatFeedTime(today, now)}`);
     expect(historyWhen(older, now)).toBe(formatFeedTime(older, now));
     expect(historyWhen("nope", now)).toBe("");
+  });
+});
+
+describe("setup rounds", () => {
+  it("targets come first", () => {
+    expect(ROUNDS.map((r) => r.id)).toEqual(["targets", "you", "visa", "logistics", "equality", "settings"]);
   });
 });

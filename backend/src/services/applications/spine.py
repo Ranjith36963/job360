@@ -1620,8 +1620,10 @@ async def list_applications(
     # Slice 7 — fact 2 once per request, so every card can carry its badge.
     from src.services.applications import visa as visa_service  # noqa: PLC0415
     from src.services.applications.next_step import next_step  # noqa: PLC0415
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415 — profile ↔ spine cycle
 
     countries = await visa_service.user_work_countries(db, user_id)
+    score_line = await user_score_line(user_id)
 
     # 2026-09-24 — the list's "Next:" line needs interview_at and has_lesson,
     # both read off application_events. One query for the whole page (never
@@ -1698,6 +1700,7 @@ async def list_applications(
                 "interview_at": interview_at_by_app.get(app_id),
                 "fit_score": r.get("fit_score"),
                 "fit_verdict": r.get("fit_verdict") or "",
+                "line_side": settings_rules.line_side(r.get("fit_score"), score_line),
                 "follow_up_on": follow_up_on,
                 "follow_up_due": follow_up_due,
                 "proof": proofs[app_id],
@@ -1896,6 +1899,19 @@ async def _current_assistant_notes(user_id: str) -> list[str]:
     if profile is None:
         return []
     return list(profile.preferences.assistant_notes or [])
+
+
+async def user_score_line(user_id: str) -> Optional[int]:
+    """The user's OWN score line (``assistant_settings.apply_min_score``) as the
+    profile reads it now, or ``None`` when they have not set one (no default)."""
+    import asyncio  # noqa: PLC0415 — stdlib, only this reader needs it
+
+    from src.services.profile.storage import load_profile  # noqa: PLC0415 — profile ↔ spine import cycle
+
+    profile = await asyncio.to_thread(load_profile, user_id)
+    if profile is None or profile.assistant_settings.apply_min_score is None:
+        return None
+    return int(profile.assistant_settings.apply_min_score)
 
 
 async def export_history(

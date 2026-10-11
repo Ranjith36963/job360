@@ -11,7 +11,7 @@ import os
 import re
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
@@ -353,6 +353,34 @@ def _salary_by_country_or_422(value: Any) -> list[dict[str, Any]]:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
 
+def _pref_or_422(path: str, value: Any) -> Any:
+    """A preference through the SAME validator ``update_profile`` uses, or a 422
+    naming the path - never a silent cut. ``None`` keeps meaning "not set"."""
+    try:
+        return profile_edits.validate_edit(path, value)
+    except profile_edits.ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+def _list_pref_or_422(path: str, value: Any) -> list[str]:
+    return cast(list[str], _pref_or_422(path, value if value is not None else []))
+
+
+def _years_or_422(pref_dict: dict[str, Any], existing: UserPreferences) -> tuple[Optional[int], Optional[int]]:
+    """Owner decision 2026-10-10 - years of experience the user is looking for.
+    Partial-save shape: an OMITTED key keeps the stored value, an explicit null
+    clears it. Both bounds validated like ``update_profile`` (0-60, min <= max)."""
+    low = pref_dict.get("experience_years_min", existing.experience_years_min)
+    high = pref_dict.get("experience_years_max", existing.experience_years_max)
+    low = _pref_or_422(profile_edits.YEARS_MIN_PATH, low)
+    high = _pref_or_422(profile_edits.YEARS_MAX_PATH, high)
+    try:
+        profile_edits.check_years_order(low, high)
+    except profile_edits.ProfileEditError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+    return low, high
+
+
 def _recent_lessons(user_id: str) -> list[LessonOut]:
     """The last ``PROFILE_LESSONS_MAX`` lessons — one bounded read."""
     from src.services.applications.lessons import list_lessons  # noqa: PLC0415
@@ -463,11 +491,12 @@ class UpdateProfileResponse(BaseModel):
 
 
 def _log_edit_rejected(
-    user_id: str, actor: str, pairs: list[tuple[str, Any]], failed_path: str, status: int
+    user_id: str, actor: str, pairs: list[tuple[str, Any]], failed_path: str, status: int,
+    reason: str = "invalid_edit",
 ) -> None:
     """Audit a refused ``update_profile`` call: who, which paths, which one
-    failed, the status. NEVER the detail — a message can quote a rule about a
-    value, and no submitted value belongs in a log line."""
+    failed, the status and a CLOSED reason code. NEVER the detail — a message
+    can quote a rule about a value, and no submitted value belongs in a log line."""
     get_audit_logger().warning(
         "profile_edit_rejected",
         extra={
@@ -475,14 +504,14 @@ def _log_edit_rejected(
             "actor": safe_log_value(actor),
             "paths": [safe_log_value(path, max_len=100) for path, _ in pairs],
             "failed_path": safe_log_value(failed_path, max_len=100),
-            "status": status, "result": "rejected",
+            "status": status, "reason": safe_log_value(reason, max_len=40), "result": "rejected",
         },
     )
 
 
 _SETTING_LOG_VALUE_PATHS = frozenset(
     {
-        settings_rules.APPLY_MODE_PATH, settings_rules.SUBMIT_MODE_PATH,
+        settings_rules.ABOVE_LINE_PATH, settings_rules.BELOW_LINE_PATH, settings_rules.SUBMIT_MODE_PATH,
         settings_rules.APPLY_MIN_SCORE_PATH, settings_rules.DAILY_CAP_PATH,
     }
 )
@@ -512,6 +541,25 @@ def _split_gated(
     write_now: list[tuple[str, Any]] = []
     hold: list[tuple[str, Any]] = []
     risk: dict[str, str] = {}
+    # The two line switches, as the user has them right now (RAW values; carried
+    # across the call as pairs on them are written). A moved score line is
+    # judged against these, never against a product-wide rule.
+    switch_raw: dict[str, Any] = {
+        settings_rules.ABOVE_LINE_PATH: current.assistant_settings.above_line,
+        settings_rules.BELOW_LINE_PATH: current.assistant_settings.below_line,
+    }
+    # A side also counts as "auto" for judging a moved line when this same batch
+    # asks for auto on it (held or written), or a request for auto on it is
+    # already waiting - otherwise [line -> 0, above_line -> auto] would slip the
+    # line change through as "safer" while the switch change waits.
+    pending_auto: set[str] = {
+        str(r["path"]) for r in setting_requests.list_waiting(user_id)
+        if r["path"] in switch_raw and str(r["value"]).strip().lower() == "auto"
+    }
+    pending_auto |= {
+        path for path, value in pairs
+        if path in switch_raw and isinstance(value, str) and value.strip().lower() == "auto"
+    }
     for path, value in pairs:
         if path not in settings_rules.GATED_PATHS:
             write_now.append((path, value))
@@ -527,14 +575,82 @@ def _split_gated(
             after_raw = profile_edits.validate_edit(path, value)
         before = settings_rules.effective_path_value(path, running[path], now)
         after = settings_rules.effective_path_value(path, after_raw, now)
-        verdict = settings_rules.classify_change(path, before, after)
+        # Judged twice: against the switches as they are now AND with the pending
+        # autos applied. Either one riskier = riskier (if the pending switch is
+        # never confirmed, the "now" view is the one that stands).
+        now_sw = tuple(
+            settings_rules.effective_path_value(p, switch_raw[p])
+            for p in (settings_rules.ABOVE_LINE_PATH, settings_rules.BELOW_LINE_PATH)
+        )
+        pend_sw = tuple(
+            "auto" if p in pending_auto else sw
+            for p, sw in zip((settings_rules.ABOVE_LINE_PATH, settings_rules.BELOW_LINE_PATH), now_sw)
+        )
+        verdicts = {
+            settings_rules.classify_change(path, before, after, switches=(sw[0], sw[1]))
+            for sw in (now_sw, pend_sw)
+        }
+        verdict = "riskier" if "riskier" in verdicts else "safer"
         risk[path] = verdict
         if verdict == "riskier" and actor != profile_edits.WEB_ACTOR:
             hold.append((path, profile_edits.validate_edit(path, value) if value is not None else None))
         else:
             write_now.append((path, value))
             running[path] = after_raw
+            if path in switch_raw:
+                switch_raw[path] = after_raw
     return write_now, hold, risk
+
+
+def _batch_state_rejection(
+    user_id: str, write_now: list[tuple[str, Any]]
+) -> tuple[str, str, str] | None:
+    """``(path, closed reason code, message)`` when the profile AS IT WILL BE after
+    ``write_now`` breaks a cross-field rule, else ``None``. Pure on the inputs it
+    reads (no write). Rules: ``experience_years_min`` <= ``experience_years_max``;
+    a setup round newly marked done needs its answers (``setup_round_missing``).
+    Applying the batch in memory first is what lets ONE call carry the answers AND
+    the ``done_at``."""
+    years_touched = any(path in profile_edits.YEARS_PATHS for path, _ in write_now)
+    progress_pairs = [
+        (path, value) for path, value in write_now
+        if path == settings_rules.SETUP_PROGRESS_PATH and value is not None
+    ]
+    if not years_touched and not progress_pairs:
+        return None
+    before = load_profile(user_id) or UserProfile()
+    after = copy.deepcopy(before)
+    base: UserProfile | None = None
+    for path, value in write_now:
+        head, _, field_name = path.partition(".")
+        if value is None:  # a clear falls back to the BASE value
+            if base is None:
+                base = load_profile(user_id, with_overlay=False) or UserProfile()
+            new_value = getattr(profile_edits.profile_section(base, head), field_name)
+        else:
+            new_value = profile_edits.validate_edit(path, value)
+        setattr(profile_edits.profile_section(after, head), field_name, copy.deepcopy(new_value))
+    if years_touched:
+        try:
+            profile_edits.check_years_order(
+                after.preferences.experience_years_min, after.preferences.experience_years_max
+            )
+        except profile_edits.ProfileEditError as exc:
+            return profile_edits.YEARS_MIN_PATH, "years_order", exc.detail
+    stored_raw = before.assistant_settings.setup_progress
+    written_raw = after.assistant_settings.setup_progress
+    stored = stored_raw if isinstance(stored_raw, dict) else {}
+    written = written_raw if isinstance(written_raw, dict) else {}
+    for round_name in settings_rules.SETUP_ROUNDS:
+        if round_name not in written or written[round_name] == stored.get(round_name):
+            continue  # not newly marked done by this call
+        missing = settings_rules.setup_round_missing(round_name, after)
+        if missing:
+            return (
+                settings_rules.SETUP_PROGRESS_PATH, "setup_round_missing_answers",
+                settings_rules.setup_round_refusal(round_name, missing),
+            )
+    return None
 
 
 def _log_settings_saved(user_id: str, actor: str, applied: list[dict[str, Any]], risk: dict[str, str]) -> None:
@@ -605,7 +721,10 @@ async def update_profile(
             failed_path = path
             profile_edits.validate_edit(path, value)
     except profile_edits.ProfileEditError as exc:
-        _log_edit_rejected(user.id, actor, pairs, failed_path, exc.status_code)
+        _log_edit_rejected(
+            user.id, actor, pairs, failed_path, exc.status_code,
+            "setting_retired" if failed_path == settings_rules.APPLY_MODE_PATH else "invalid_edit",
+        )
         if failed_path in settings_rules.GATED_PATHS:
             get_audit_logger().warning(
                 "assistant_setting_request_rejected",
@@ -621,6 +740,14 @@ async def update_profile(
     # hourly budget for held requests is checked HERE, before any write of the
     # call, so a 429 changes nothing.
     write_now, hold, risk = _split_gated(user.id, actor, pairs)
+    # Owner decision 2026-10-10 - checks that need the state AFTER this batch:
+    # years min <= max, and a setup round only counts as done once its answers
+    # are saved (in this call or before). A refusal writes nothing.
+    reject = _batch_state_rejection(user.id, write_now + hold)
+    if reject is not None:
+        reject_path, reject_reason, reject_detail = reject
+        _log_edit_rejected(user.id, actor, pairs, reject_path, 422, reject_reason)
+        raise HTTPException(status_code=422, detail=reject_detail)
     try:
         setting_requests.check_capacity(user.id, actor, len(hold))
     except profile_edits.ProfileEditError as exc:
@@ -1002,6 +1129,7 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
     # that entry point produced a divergent profile from the day it was written.
     # preferred_workplace is now a derived @property on UserPreferences, so
     # there is exactly one stored answer and the two cannot disagree.
+    years = _years_or_422(pref_dict, existing)
     profile.preferences = UserPreferences(
         target_job_titles=pref_dict.get("target_job_titles", []),
         additional_skills=pref_dict.get("additional_skills", []),
@@ -1062,6 +1190,19 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         # update_profile so the two doors can never store different shapes.
         salary_by_country=_salary_by_country_or_422(
             pref_dict.get("salary_by_country", existing.salary_by_country)
+        ),
+        # Owner decision 2026-10-10 - what the user is looking for. Same
+        # partial-save shape: OMITTED keeps the stored value, [] / null clears.
+        experience_years_min=years[0],
+        experience_years_max=years[1],
+        looking_for=_list_pref_or_422(
+            "preferences.looking_for", pref_dict.get("looking_for", existing.looking_for)
+        ),
+        dealbreakers=_list_pref_or_422(
+            "preferences.dealbreakers", pref_dict.get("dealbreakers", existing.dealbreakers)
+        ),
+        avoid_companies=_list_pref_or_422(
+            "preferences.avoid_companies", pref_dict.get("avoid_companies", existing.avoid_companies)
         ),
     )
     # Overlay-only fields (daily_check, check_every): the

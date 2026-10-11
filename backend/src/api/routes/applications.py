@@ -605,6 +605,9 @@ class ApplicationSummaryOut(BaseModel):
     # never default).
     fit_score: Optional[int] = None
     fit_verdict: str = ""
+    # Owner decision 2026-10-10 - which side of the USER's own score line the fit
+    # score is on; "unknown" when there is no line or no fit yet.
+    line_side: Literal["above", "below", "unknown"] = "unknown"
     # 2026-09-24 — the list card's "Next:" line; same state machine and same
     # fields `get_application`'s `next_step` reads, batched for the page.
     next_step: NextStepOut
@@ -644,9 +647,21 @@ class SaveArtifactResponse(BaseModel):
     ats_notes: Optional[str] = None
 
 
+class SaveFitLineOut(BaseModel):
+    """Where the saved fit lands against the USER's own score line (owner
+    decision 2026-10-10): the line (null = not set), the side, the switch that
+    side uses (null when the side is unknown) and one plain next-step sentence."""
+
+    score_line: Optional[int] = None
+    side: Literal["above", "below", "unknown"]
+    switch: Optional[Literal["ask", "auto"]] = None
+    next: str
+
+
 class SaveFitResponse(BaseModel):
     application_id: int
     fit: ApplicationFitOut
+    line: SaveFitLineOut
     # Slice 7 — present only when the call carried a visa reading.
     visa: Optional[ApplicationVisaOut] = None
     event_id: int
@@ -1195,6 +1210,17 @@ class StatsContactFoundViaGroupOut(BaseModel):
     reply_rate: Optional[float]
 
 
+class StatsScoreLineOut(BaseModel):
+    """Owner decision 2026-10-10 - counts of the user's applications above /
+    below THEIR OWN score line (``line`` null = not set) and how many have no
+    fit score to place (or there is no line). Counts only."""
+
+    line: Optional[int] = None
+    above: int
+    below: int
+    unscored: int
+
+
 class StatsResponse(BaseModel):
     since: Optional[str]
     overall: StatsOverallOut
@@ -1204,6 +1230,7 @@ class StatsResponse(BaseModel):
     by_job_source: list[StatsKeyedGroupOut]
     by_channel: list[StatsKeyedGroupOut]
     by_contact_found_via: list[StatsContactFoundViaGroupOut]
+    score_line: StatsScoreLineOut
     groups_truncated: bool
     # S6 — true when only the newest STATS_MAX_APPLICATIONS applications were
     # counted; the numbers describe that window, not the whole history.
@@ -1698,12 +1725,14 @@ async def save_fit(
 ) -> dict[str, Any]:
     try:
         reasoning = body.clamp_reasoning()
-        return await spine.save_fit(
+        saved = await spine.save_fit(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
             score=body.score, verdict=body.verdict, gaps=body.gaps, reasoning=reasoning,
             visa_signal=body.visa_signal, visa_detail=body.visa_detail, visa_country=body.visa_country,
             axes=[a.model_dump() for a in body.axes] if body.axes is not None else None,
         )
+        cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
+        return {**saved, "line": settings_rules.line_block(body.score, cfg)}
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
