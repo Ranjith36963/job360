@@ -200,7 +200,7 @@ async def test_update_profile_can_set_the_countries(authenticated_async_context,
         profile = await client.get("/api/profile")
         app_id = await _bring(client, visa_signal="no_sponsorship", visa_country="IN")
         detail = await _detail(client, app_id)
-    assert profile.json()["preferences"]["work_authorization_countries"] == ["gb", "IN"]
+    assert profile.json()["preferences"]["work_authorization_countries"] == ["GB", "IN"]
     assert detail["visa"]["needs_sponsorship"] is False
 
 
