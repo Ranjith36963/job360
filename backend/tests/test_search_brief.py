@@ -83,12 +83,20 @@ def test_the_live_profile_of_2026_10_12_has_no_place_and_asks_once():
 
 
 def test_a_half_answer_is_asked_never_guessed():
-    brief = build_search_brief(_rtw({"country": "FR", "remote_ok": True}, {"country": "NL", "onsite": "yes"}))
+    brief = build_search_brief(_rtw(
+        {"country": "FR", "remote_ok": True},
+        {"country": "NL", "onsite": "yes"},
+        {"country": "GB", "work_authorization": "citizen", "onsite": "no"},
+    ))
     asks = [g["ask"] for g in brief["gaps"]]
     assert asks == [
         "On-site in FR: yes, only if they sponsor your visa, or no?",
+        "Remote jobs with an employer in NL: OK or not?",
         "Do you need visa sponsorship to work in NL?",
+        # on-site "no" with remote unanswered is not a refusal of remote work
+        "Remote jobs with an employer in GB: OK or not?",
     ]
+    assert _places(brief) == ["FR", "NL"]
 
 
 def test_a_country_they_will_not_work_in_is_never_searched():

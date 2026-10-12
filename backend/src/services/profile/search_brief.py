@@ -70,6 +70,8 @@ def build_search_brief(right_to_work: Any) -> dict[str, Any]:
     ``work_from`` = the countries where the user needs no sponsorship - where a
     remote job must let them work from. A gap = one question to ask the user
     once, then save to ``user_info.right_to_work``; never filled in for them.
+    A record with only visa facts (neither ``remote_ok`` nor ``onsite``) is not
+    a place; a record with one of the two gets the other asked.
     """
     records = right_to_work.get("countries") if isinstance(right_to_work, dict) else None
     records = [r for r in (records or []) if isinstance(r, dict) and isinstance(r.get("country"), str)]
@@ -80,6 +82,12 @@ def build_search_brief(right_to_work: Any) -> dict[str, Any]:
     gaps: list[dict[str, Any]] = []
     for rec in records:
         country, remote, onsite = rec["country"], rec.get("remote_ok"), rec.get("onsite")
+        if not isinstance(remote, bool) and onsite in ONSITE_VALUES:
+            # half answered: a missing remote_ok is a question, never a "no"
+            gaps.append({
+                "path": RIGHT_TO_WORK_PATH, "country": country,
+                "ask": f"Remote jobs with an employer in {_name(country)}: OK or not?",
+            })
         if remote is not True and onsite not in ("yes", "only_if_sponsored"):
             continue  # not a place they said they would work: never searched
         needs = _needs_sponsorship(rec)
