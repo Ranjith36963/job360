@@ -76,7 +76,7 @@ cd job360
 docker compose -f docker-compose.dev.yml up -d postgres
 
 # Config
-cp .env.example .env          # DATABASE_URL, FRONTEND_ORIGIN, SITE_BASE_URL, RESEND_API_KEY
+cp .env.example .env          # then fill it in
 
 # Backend — FastAPI on :8000, MCP at /api/mcp
 cd backend
