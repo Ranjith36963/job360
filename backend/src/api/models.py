@@ -137,6 +137,14 @@ class CVDetail(BaseModel):
     extraction_score: dict[str, Any] = {}
 
 
+class NormalizedOut(BaseModel):
+    """One forgiving-input normalisation ``update_profile`` applied (owner decision 2026-10-10):
+    where it happened and a CLOSED rule code (``services/profile/forgiving.py``) - never a value."""
+
+    path: str
+    rule: str
+
+
 class ProfileEditOut(BaseModel):
     """One row of the agent-edit overlay (slice 4, spec R8/R11).
 

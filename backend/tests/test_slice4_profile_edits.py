@@ -294,10 +294,10 @@ async def test_wrong_type_is_422(authenticated_async_context, fixture_user_id):
 async def test_closed_set_preference_lists_allowed_values(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
-        resp = await _patch(client, {"path": "preferences.work_arrangement", "value": "office"})
+        resp = await _patch(client, {"path": "preferences.work_arrangement", "value": "moon"})
         assert resp.status_code == 422, resp.text
         assert "remote" in resp.text and "hybrid" in resp.text and "onsite" in resp.text
-        resp = await _patch(client, {"path": "preferences.experience_level", "value": "graduate"})
+        resp = await _patch(client, {"path": "preferences.experience_level", "value": "wizard"})
         assert resp.status_code == 422, resp.text
         assert "entry" in resp.text and "executive" in resp.text
         ok = await _patch(client, {"path": "preferences.work_arrangement", "value": " Hybrid "})

@@ -32,7 +32,7 @@ VALID_DAILY_CHECK_VALUES: frozenset[str] = frozenset(
 )
 # Owner decision 2026-10-03 — how often the assistant's inbox check runs.
 # "" = not set = once a day (24h; rule #29: empty is silent).
-VALID_CHECK_EVERY_VALUES: frozenset[str] = frozenset({"3h", "6h", "12h", "24h"})
+VALID_CHECK_EVERY_VALUES: frozenset[str] = frozenset({"1h", "3h", "6h", "12h", "24h"})
 # Preference fields the web preferences form does not own: written only through
 # the agent-edit overlay, carried forward by a web save, kept by a "Clear
 # preferences" (only "Clear all" resets them).

@@ -280,7 +280,8 @@ def test_remote_is_not_a_country_record():
     ):
         detail = _reject(path, value)
         assert "ISO alpha-2" in detail and "no 'remote' record" in detail, path
-    assert "ISO alpha-2" in _reject(CONTACT, {"residence_country": "Germany"})
+    narnia = _reject(CONTACT, {"residence_country": "Narnia"})
+    assert "ISO alpha-2" in narnia and "remote" not in narnia.lower()  # the remote hint only where it applies
     assert "ISO alpha-2" in _reject(RTW, {"citizenship": ["GBR"]})
 
 
