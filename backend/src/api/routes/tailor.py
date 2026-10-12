@@ -36,9 +36,9 @@ from src.services.applications import spine as applications_spine
 from src.services.applications.spine import SpineError
 from src.services.profile.storage import load_profile
 from src.services.tailoring import DOC_KINDS
+from src.services.tailoring.cv_render import render_document_pdf
 from src.services.tailoring.docx import render_docx
 from src.services.tailoring.patterns import derive_patterns
-from src.services.tailoring.pdf import render_pdf
 from src.services.tailoring.provenance import annotate_provenance
 from src.utils.logger import get_audit_logger, get_logger, safe_log_value
 
@@ -266,7 +266,7 @@ async def download(
         content = await asyncio.to_thread(render_docx, text, title=title)
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     else:
-        content = await asyncio.to_thread(render_pdf, text, title=title)
+        content = await render_document_pdf(user.id, doc_kind, text)
         media_type = "application/pdf"
 
     # Downloading counts as 'used' → learn from it (§5).

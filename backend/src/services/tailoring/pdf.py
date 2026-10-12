@@ -53,7 +53,14 @@ def _to_latin1(text: str) -> str:
 
 
 @cpu_bound
-def render_pdf(text: str, title: str = "") -> bytes:
+def render_pdf(
+    text: str,
+    title: str = "",
+    *,
+    font_family: str = "Helvetica",
+    body_size: float = 11.0,
+    color: tuple[int, int, int] = (0, 0, 0),
+) -> bytes:
     """Render plain text to a clean, single-column, machine-readable PDF (bytes)."""
     from fpdf import FPDF  # lazy import
     from fpdf.enums import XPos, YPos
@@ -70,14 +77,16 @@ def render_pdf(text: str, title: str = "") -> bytes:
     # new_x=LMARGIN, new_y=NEXT after every cell so the next line starts back at the
     # left margin (otherwise fpdf2 leaves x at the right edge → 0-width next cell).
     if title:
-        pdf.set_font("Helvetica", style="B", size=14)
+        pdf.set_font(font_family, style="B", size=14)
+        pdf.set_text_color(*color)
         pdf.multi_cell(0, 8, _safe(title), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
-    pdf.set_font("Helvetica", size=11)
+    pdf.set_font(font_family, size=body_size)
+    pdf.set_text_color(*color)
     for line in _safe(text).split("\n"):
         # Blank lines still need height so paragraph spacing survives.
-        pdf.multi_cell(0, 6, line if line.strip() else " ",
+        pdf.multi_cell(0, body_size * 0.5455, line if line.strip() else " ",
                        new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     out = pdf.output()  # fpdf2 v2 returns a bytearray

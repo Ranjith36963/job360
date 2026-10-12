@@ -130,8 +130,8 @@ async def download_file(
     if artifact is None or latest is None or latest["id"] != artifact["id"]:
         raise _refuse(request, 410, "cv_changed", user_id, CHANGED_DETAIL)
 
+    from src.services.tailoring.cv_render import render_document_pdf  # noqa: PLC0415
     from src.services.tailoring.docx import render_docx  # noqa: PLC0415 - heavy, lazy (rule #16)
-    from src.services.tailoring.pdf import render_pdf  # noqa: PLC0415
 
     kind = str(artifact["kind"])
     title = "Curriculum Vitae" if kind == "cv" else "Cover Letter"
@@ -140,7 +140,7 @@ async def download_file(
         content = await asyncio.to_thread(render_docx, artifact["text"], title=title)
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     else:
-        content = await asyncio.to_thread(render_pdf, artifact["text"], title=title)
+        content = await render_document_pdf(user_id, kind, artifact["text"])
         media_type = "application/pdf"
     app_row = await spine.get_owned_application(db, user_id, int(row["application_id"])) or {}
     stem = kit.file_stem(str(app_row.get("job_company") or ""), kind, int(artifact["version_no"]))

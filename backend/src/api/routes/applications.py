@@ -1385,8 +1385,8 @@ async def download_application_artifact(
     Origin-checked; it writes nothing. Foreign application/artifact -> 404."""
     import asyncio
 
+    from src.services.tailoring.cv_render import render_document_pdf
     from src.services.tailoring.docx import render_docx
-    from src.services.tailoring.pdf import render_pdf
 
     if fmt not in ("pdf", "docx"):
         raise HTTPException(status_code=400, detail="format must be 'pdf' or 'docx'")
@@ -1404,7 +1404,7 @@ async def download_application_artifact(
         content = await asyncio.to_thread(render_docx, text, title=title)
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     else:
-        content = await asyncio.to_thread(render_pdf, text, title=title)
+        content = await render_document_pdf(user.id, kind, text)
         media_type = "application/pdf"
     stem = kit_service.file_stem(str(app_row.get("job_company") or ""), kind, int(row["version_no"]))
     # S3 - the user's own download is "the user saw this CV" (one mark per version).

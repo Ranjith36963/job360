@@ -246,6 +246,10 @@ class CVData:
     # Timestamps are ISO-8601 UTC strings, matching the rest of storage.
     cv_filename: str = ""
     cv_uploaded_at: str = ""
+    # Visual fingerprint of the uploaded CV PDF (services/profile/cv_style.py):
+    # generated CVs follow this design. Empty = use DEFAULT_STYLE. CV-owned, so
+    # a new upload / clear resets it; old rows without the key load as {}.
+    cv_style: dict[str, Any] = field(default_factory=dict)
     linkedin_filename: str = ""
     linkedin_uploaded_at: str = ""
     # GitHub has no file — the handle IS the receipt, alongside when it was

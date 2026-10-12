@@ -24,7 +24,6 @@ token, a link, CV text or an answer value.
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import re
@@ -677,11 +676,10 @@ async def _document(
     row = await spine.latest_artifact(db, user.id, int(app_row["id"]), kind)
     if row is None:
         return None
-    from src.services.tailoring.pdf import render_pdf  # noqa: PLC0415 - heavy, lazy (rule #16)
+    from src.services.tailoring.cv_render import render_document_pdf  # noqa: PLC0415 - heavy, lazy (rule #16)
 
     sha = sha256_text(row["text"])
-    title = "Curriculum Vitae" if kind == "cv" else "Cover Letter"
-    size = len(await asyncio.to_thread(render_pdf, row["text"], title=title))
+    size = len(await render_document_pdf(user.id, kind, row["text"]))
     seen = approved = None
     for ev in events:
         p = ev["payload"]

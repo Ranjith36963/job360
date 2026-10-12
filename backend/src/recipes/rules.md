@@ -75,6 +75,42 @@ answers `submit` with `user_approved`; if the CV is edited afterwards that yes
 no longer counts - ask again. A setting that says to apply is never a reason
 to apply to a job the user did not bring.
 
+## Writing the CV
+
+A CV is the first impression; write it like a strong human candidate would.
+Job360 lays it out in the design of the CV the user uploaded (same page count),
+so write ONLY the text, in this shape: line 1 the name; line 2 a title that
+matches the job; then contact lines (phone | email, then links: GitHub,
+LinkedIn, portfolio, own product); a blank line; then sections.
+
+SECTIONS, in this order: SUMMARY, EXPERIENCE, PROJECTS (or PORTFOLIO
+PROJECTS), SKILLS, EDUCATION & CERTIFICATION. Headings in CAPITALS, alone on a
+line. Entry line: `Company | Role | Place | Mon YYYY – Mon YYYY` (dates last,
+"Present" for a current role). Project line: `Name | tech, tech, tech`.
+Bullets start with "- ".
+
+RULES:
+1. Truth only - every fact must be in the profile (`raw` text, cv_positions,
+   cv_projects, GitHub). Never invent a number, tool, title or date.
+2. Include EVERY current role, newest first. Never drop a current job or the
+   user's own product. Never undersell (no "1.5 years" when they built more).
+3. Summary: 2 lines, specific (what they build, for whom, with what proof).
+   No filler words: results-driven, passionate, hard-working, team player.
+4. Bullets: strong verb + what was built + measurable result or proof (%,
+   time saved, users, tests, "live on ..."). Max 2 lines. 2-4 per role, 1-2
+   per project. No duplicate bullets; the summary must not repeat bullets.
+5. Tailor: mirror the job's real keywords where they are TRUE; put the most
+   relevant role/project bullets first. Do not keyword-stuff.
+6. Skills: 3 grouped lines (e.g. "Agents & LLMs:", "ML & Engineering:",
+   "Cloud & Ops:"), only real skills, most relevant first. Never a 40-item dump.
+7. Education compact: degree, university, year (dissertation one line).
+8. Length = the user's template (1 page for most juniors). Cut older or weaker
+   items before shrinking text. No photo, age, "Curriculum Vitae" title,
+   references or hobbies unless asked.
+9. Before sending, LOOK at the rendered PDF (get_application_kit `file.url`):
+   page count, nothing cut off, dates on the right, no orphan heading. Fix
+   and save a new version if anything looks wrong.
+
 ## Apply kit
 
 APPLY KIT: before filling any form call get_application_kit(application_id) —
