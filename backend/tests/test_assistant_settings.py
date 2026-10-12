@@ -1566,3 +1566,21 @@ async def test_submit_check_stops_form_not_recorded_until_form_filled_and_a_yes_
         assert (body["decision"], body["reason"]) == ("stop", "form_not_recorded")
         body = (await _check(client, app_id)).json()
         assert body["reason"] != "form_not_recorded"
+
+
+@pytest.mark.asyncio
+async def test_a_fill_from_before_a_new_cv_does_not_count(authenticated_async_context, fixture_user_id):
+    """The record must describe the form being sent NOW: a new CV version after
+    the fill makes the gate ask for a fresh form_filled."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _fill(client, app_id)
+        body = (await _check(client, app_id, fill=False)).json()
+        assert body["reason"] != "form_not_recorded"
+        new_cv = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada v2."})
+        assert new_cv.status_code == 201, new_cv.text
+        body = (await _check(client, app_id, fill=False)).json()
+        assert (body["decision"], body["reason"]) == ("stop", "form_not_recorded")
+        body = (await _check(client, app_id)).json()
+        assert body["reason"] != "form_not_recorded"

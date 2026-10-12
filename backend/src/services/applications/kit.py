@@ -283,6 +283,18 @@ async def controls_state(
     }
 
 
+async def _filled_with_latest_cv(db: JobDatabase, user_id: str, application_id: int) -> bool:
+    """A ``form_filled`` is on record AND it is newer than the latest CV saved for
+    this application. A fill from an earlier attempt (before a new CV version)
+    does not count: the record must describe the form being sent now."""
+    events = await _events(db, user_id, application_id, ("form_filled", "artifact_saved"))
+    fills = [e["id"] for e in events if e["event_type"] == "form_filled"]
+    if not fills:
+        return False
+    cvs = [e["id"] for e in events if e["event_type"] == "artifact_saved" and e["payload"].get("kind") == "cv"]
+    return not cvs or max(fills) > max(cvs)
+
+
 async def gate_facts(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> settings_rules.SubmitFacts:
     """The facts :func:`settings_rules.may_submit` reads for this application."""
     application_id = int(app_row["id"])
@@ -305,7 +317,7 @@ async def gate_facts(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> 
         approved=bool(approved),
         declined=state["declined"] is not None,
         blocked=state["blocked"] is not None,
-        form_filled=bool(await _events(db, user_id, application_id, ("form_filled",))),
+        form_filled=await _filled_with_latest_cv(db, user_id, application_id),
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
     )

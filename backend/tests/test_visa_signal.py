@@ -266,7 +266,19 @@ async def test_a_country_needing_sponsorship_is_not_counted_as_free(authenticate
     async with authenticated_async_context() as client:
         app_id = await _bring(client, visa_signal="no_sponsorship", visa_country="GB", visa_detail="No sponsorship.")
         detail = await _detail(client, app_id)
-    # No sponsorship-free country -> nothing to compare against -> silent (rule #29).
+    # The user SAID GB needs sponsorship: that is an answer, not silence.
+    assert detail["visa"]["needs_sponsorship"] is True
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_country_stays_silent(authenticated_async_context, fixture_user_id):
+    _seed_right_to_work(fixture_user_id, [
+        {"country": "GB", "work_authorization": "needs_sponsorship", "needs_sponsorship": True},
+    ])
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client, visa_signal="no_sponsorship", visa_country="FR", visa_detail="No sponsorship.")
+        detail = await _detail(client, app_id)
+    # Nothing known about FR and no sponsorship-free country to compare with (rule #29).
     assert detail["visa"]["needs_sponsorship"] is None
 
 
