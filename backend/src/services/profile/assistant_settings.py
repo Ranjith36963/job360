@@ -440,7 +440,9 @@ class SubmitFacts:
     * ``approved`` - a stored ``submit_approved`` matches the latest CV
       (artifact id + hash); a CV edit makes it stop matching;
     * ``declined`` - the user's newest word on this application is "don't send";
-    * ``blocked`` - the assistant recorded ``blocked`` with no later ``unblocked`` (S6).
+    * ``blocked`` - the assistant recorded ``blocked`` with no later ``unblocked`` (S6);
+    * ``form_filled`` - at least one ``form_filled`` event is recorded (the store
+      must hold what was typed before any submit/ask answer).
     """
 
     status: str
@@ -451,6 +453,7 @@ class SubmitFacts:
     approved: bool = False
     declined: bool = False
     blocked: bool = False
+    form_filled: bool = False
     # The latest saved fit score for this application (``None`` = no fit yet).
     # Compared with the user's score line by :func:`line_side` (rule 5c).
     fit_score: Optional[int] = None
@@ -471,6 +474,7 @@ REASONS: tuple[str, ...] = (
     "paused", "already_applied", "user_declined", "daily_cap_reached", "duplicate_job", "unknown_site",
     "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
+    "form_not_recorded",
 )
 
 
@@ -533,6 +537,8 @@ def may_submit(
     2. receipt exists, or status is not ``considering`` -> stop ``already_applied``
     3. the user said "don't send" (newer than any yes) -> stop ``user_declined``
     4. daily cap reached -> stop ``daily_cap_reached``
+    4b. no ``form_filled`` event recorded -> stop ``form_not_recorded`` (a stored
+        yes does NOT clear it: the record of what was typed is needed either way)
     5. same job already applied to -> ``duplicate_job``: STOP when the mode is
        auto (nobody is watching), else ask
     5b. a ``blocked`` with no later ``unblocked`` -> ask ``blocked`` (S6)
@@ -550,7 +556,7 @@ def may_submit(
 
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
-    ``user_approved``. Rules 1-4, the auto-mode duplicate stop and the ``blocked``
+    ``user_approved``. Rules 1-4b, the auto-mode duplicate stop and the ``blocked``
     ask (5b) are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
@@ -563,6 +569,12 @@ def may_submit(
         )
     if cfg.daily_cap is not None and counts.submitted_today >= cfg.daily_cap:
         return SubmitDecision("stop", "daily_cap_reached", "The daily limit of applications is reached. Try tomorrow.")
+    if not application.form_filled:
+        return SubmitDecision(
+            "stop", "form_not_recorded",
+            "Fill the form first, then record_event form_filled with the answers you typed, "
+            "then call check_submit again. Do not submit yet.",
+        )
     override = application.submit_override if application.submit_override in VALID_SUBMIT_MODES else None
     mode = override or cfg.submit_mode
     auto = mode == AUTO_SUBMIT_MODE

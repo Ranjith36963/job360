@@ -93,7 +93,40 @@ async def user_work_countries(db: JobDatabase, user_id: str) -> list[str]:
     if profile is None:
         return []
     raw = getattr(profile.preferences, "work_authorization_countries", None)
-    return [c for c in raw if isinstance(c, str)] if isinstance(raw, list) else []
+    out = [c.upper() for c in raw if isinstance(c, str)] if isinstance(raw, list) else []
+    # The setup interview saves right to work in user_info.right_to_work (one record
+    # per country). A country whose record says no sponsorship is needed counts too,
+    # so the two places never disagree about the same fact.
+    for code in _no_sponsorship_countries(getattr(profile.user_info, "right_to_work", None)):
+        if code not in out:
+            out.append(code)
+    return out
+
+
+def _no_sponsorship_countries(right_to_work: Any) -> list[str]:
+    """ISO2 codes the user can work in without sponsorship, from
+    ``user_info.right_to_work``: a country record saying ``needs_sponsorship``
+    false, or saying citizen / permanent resident (unless it says sponsorship
+    true), plus the ``citizenship`` list. A record with neither answer is
+    skipped (rule #29)."""
+    if not isinstance(right_to_work, dict):
+        return []
+    out: list[str] = []
+
+    def _add(code: Any) -> None:
+        if isinstance(code, str) and code.strip() and code.strip().upper() not in out:
+            out.append(code.strip().upper())
+
+    records = right_to_work.get("countries")
+    for rec in records if isinstance(records, list) else []:
+        if not isinstance(rec, dict) or rec.get("needs_sponsorship") is True:
+            continue
+        if rec.get("needs_sponsorship") is False or rec.get("work_authorization") in ("citizen", "permanent_resident"):
+            _add(rec.get("country"))
+    citizenship = right_to_work.get("citizenship")
+    for code in citizenship if isinstance(citizenship, list) else []:
+        _add(code)
+    return out
 
 
 def visa_view(app_row: dict[str, Any], countries: list[str]) -> dict[str, Any]:
