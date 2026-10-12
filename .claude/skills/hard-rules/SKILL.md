@@ -23,13 +23,6 @@ Nothing here is weaker for being a skill. It loads when the work touches it.
 - **M4. Free, pull, consent-first** (product rule 6). No credits, no paywall, no push. Agents connect over MCP with OAuth 2.1; personal `j360_…` tokens stay as the fallback.
 - **M5. Every MCP tool = the same per-user route the web uses** (#12/#25 apply) and every new route gate must be re-applied in `backend/src/api/mcp_server.py` — parity is by hand, there is no shared gate.
 
-The sourcing-era pipeline (search, scoring, dedup, enrichment, embeddings) was
-deleted 2026-09-05 (slice 5, #483) along with the rules that only guarded it.
-Two of those rules guarded facts that outlived the deletion and moved up into
-the index below unchanged: dedup-key normalization (still used by a brought
-job) and the digest notification path (dead code, kept only so nobody
-resurrects it by accident).
-
 ## Still binding
 
 An index of the 14 hard rules, one line each. Where a test guards a rule, the test is named — that is the real enforcement.
