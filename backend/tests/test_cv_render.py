@@ -10,7 +10,7 @@ import pytest
 from src.services.tailoring.cv_render import render_cv_pdf
 
 NAME = "RANJITH MALIGA GURUPRAKASH"
-DATE = "June 2025 - September 2025"
+DATE = "June 2025 – September 2025"
 CV = (
     "RANJITH MALIGA GURUPRAKASH\nAI Engineer | Agentic Systems\n"
     "United Kingdom | +44 7442 564327 | rahulranjith369@gmail.com\n"
@@ -90,18 +90,18 @@ def test_heading_navy_with_rule_below(pdf_bytes: bytes) -> None:
 def test_date_is_right_aligned(pdf_bytes: bytes) -> None:
     with _open(pdf_bytes) as pdf:
         page = pdf.pages[0]
-        # The date was transliterated: en dash -> "-".
+        # The real en dash is kept (Unicode font).
         row = next(r for r in _rows(page) if r[0].endswith(DATE))
         last = max(c["x1"] for c in row[1])
         right_margin = page.width - 15 * 72 / 25.4
         assert abs(last - right_margin) < 2 * 72 / 25.4
 
 
-def test_bullets_are_shapes_not_dashes(pdf_bytes: bytes) -> None:
+def test_bullets_are_round_glyphs_not_dashes(pdf_bytes: bytes) -> None:
     with _open(pdf_bytes) as pdf:
-        page = pdf.pages[0]
-        assert not any(t.startswith(("- ", "•")) for t, _ in _rows(page))
-        assert len(page.curves) + len(page.rects) >= 2
+        rows = [t for t, _ in _rows(pdf.pages[0])]
+        assert not any(t.startswith("- ") for t in rows)
+        assert sum(t.startswith("•") for t in rows) == 2
 
 
 def test_links_are_clickable(pdf_bytes: bytes) -> None:
@@ -134,7 +134,7 @@ def test_serif_uses_times() -> None:
     style["font"]["family"] = "serif"
     with _open(render_cv_pdf(CV, style)) as pdf:
         fonts = {c["fontname"] for c in pdf.pages[0].chars}
-    assert all("Times" in f for f in fonts)
+    assert all("LiberationSerif" in f for f in fonts)
 
 
 def test_partial_style_still_renders() -> None:
@@ -229,3 +229,130 @@ def test_wide_date_does_not_overlap_entry_text() -> None:
                 ox = min(a["x1"], b["x1"]) - max(a["x0"], b["x0"])
                 oy = min(a["bottom"], b["bottom"]) - max(a["top"], b["top"])
                 assert not (ox > 0.5 * min(a["x1"] - a["x0"], b["x1"] - b["x0"]) and oy > 2)
+
+
+# ── Owner-style details: weights, project colour, skills labels, left align, glyphs ──
+
+CV2 = (
+    "RANJITH MALIGA GURUPRAKASH\nAI Engineer | Agentic Systems\n"
+    "United Kingdom | rahulranjith369@gmail.com\n\n"
+    "EXPERIENCE\nCalnex Solutions | AI Solutions Engineer, R&D | June 2025 – September 2025\n"
+    "- Built a containerised multimodal assistant in Docker, at 95% response accuracy, "
+    "then wrapped it with a RAG pipeline and a long tail of words so that it wraps onto a second line here.\n\n"
+    "PORTFOLIO PROJECTS\nDataPilot | Next.js, FastAPI\n"
+    "- Natural language data analysis app that routes questions to 34 analysis skills.\n\n"
+    "SKILLS\nAgents & LLMs: LangGraph, LangChain, MCP, RAG\n"
+    "A very long label that is clearly not a skills label at all, so it stays regular: x\n"
+)
+
+
+@pytest.fixture(scope="module")
+def pdf2() -> bytes:
+    st = copy.deepcopy(STYLE)
+    st["entry"]["first_bold"] = True
+    st["skills"] = {"label_bold": True}
+    st["project_name_color"] = "#1F3864"
+    return render_cv_pdf(CV2, st)
+
+
+def _run_of(chars, start: str):
+    """The non-space chars of the row's text beginning at ``start`` (up to its length)."""
+    text = "".join(c["text"] for c in chars)
+    i = text.index(start.replace(" ", ""))
+    return chars[i : i + len(start.replace(" ", ""))]
+
+
+def _is_b(c) -> bool:
+    return "bold" in c["fontname"].lower()
+
+
+def _nospace(chars):
+    return [c for c in chars if c["text"].strip()]
+
+
+def test_entry_company_bold_role_regular(pdf2: bytes) -> None:
+    with _open(pdf2) as pdf:
+        row = next(r for r in _rows(pdf.pages[0]) if r[0].startswith("Calnex Solutions"))
+        chars = _nospace(row[1])
+        company = _run_of(chars, "Calnex Solutions")
+        role = _run_of(chars, "AI Solutions Engineer")
+        assert company and all(_is_b(c) for c in company)
+        assert role and not any(_is_b(c) for c in role)
+
+
+def test_entry_all_bold_when_first_bold_false() -> None:
+    st = copy.deepcopy(STYLE)
+    st["entry"]["first_bold"] = False
+    with _open(render_cv_pdf(CV2, st)) as pdf:
+        row = next(r for r in _rows(pdf.pages[0]) if r[0].startswith("Calnex Solutions"))
+        assert all(_is_b(c) for c in _run_of(_nospace(row[1]), "AI Solutions Engineer"))
+
+
+def test_project_name_is_navy_rest_regular(pdf2: bytes) -> None:
+    with _open(pdf2) as pdf:
+        row = next(r for r in _rows(pdf.pages[0]) if r[0].startswith("DataPilot"))
+        chars = _nospace(row[1])
+        name = _run_of(chars, "DataPilot")
+        tech = _run_of(chars, "Next.js, FastAPI")
+        assert name and all(_close(c["non_stroking_color"], NAVY) for c in name)
+        assert tech and not any(_close(c["non_stroking_color"], NAVY) for c in tech)
+        assert not any(_is_b(c) for c in tech)
+
+
+def test_project_name_color_empty_means_body_colour() -> None:
+    st = copy.deepcopy(STYLE)
+    st["project_name_color"] = ""
+    with _open(render_cv_pdf(CV2, st)) as pdf:
+        row = next(r for r in _rows(pdf.pages[0]) if r[0].startswith("DataPilot"))
+        assert not any(_close(c["non_stroking_color"], NAVY) for c in _run_of(_nospace(row[1]), "DataPilot"))
+
+
+def test_skills_label_bold_rest_regular(pdf2: bytes) -> None:
+    with _open(pdf2) as pdf:
+        rows = _rows(pdf.pages[0])
+        row = next(r for r in rows if r[0].startswith("Agents & LLMs:"))
+        chars = _nospace(row[1])
+        assert all(_is_b(c) for c in _run_of(chars, "Agents & LLMs:"))
+        assert not any(_is_b(c) for c in _run_of(chars, "LangGraph, LangChain"))
+        long = next(r for r in rows if r[0].startswith("A very long label"))
+        assert not any(_is_b(c) for c in long[1])  # prefix over 30 chars: not a label
+
+
+def test_skills_label_bold_off() -> None:
+    st = copy.deepcopy(STYLE)
+    st["skills"] = {"label_bold": False}
+    with _open(render_cv_pdf(CV2, st)) as pdf:
+        row = next(r for r in _rows(pdf.pages[0]) if r[0].startswith("Agents & LLMs:"))
+        assert not any(_is_b(c) for c in row[1])
+
+
+def test_wrapped_bullet_is_left_aligned_not_justified(pdf2: bytes) -> None:
+    with _open(pdf2) as pdf:
+        rows = _rows(pdf.pages[0])
+        i = next(k for k, r in enumerate(rows) if r[0].startswith("•"))
+        assert not rows[i + 1][0].startswith("•")  # the bullet really wrapped
+        chars = rows[i][1]
+        xs = sorted(chars, key=lambda c: c["x0"])
+        gaps = [b["x0"] - a["x1"] for a, b in zip(xs, xs[1:]) if b["x0"] - a["x1"] > 1.0]
+        # Justification stretches word gaps; left aligned keeps one normal space width.
+        gaps = gaps[1:]  # the first gap is bullet -> text
+        assert gaps and max(gaps) - min(gaps) < 0.5
+        assert max(gaps) < 0.35 * 9.5  # a Helvetica space is ~0.278 em
+
+
+def test_real_en_dash_and_round_bullet_glyphs(pdf2: bytes) -> None:
+    with _open(pdf2) as pdf:
+        text = pdf.pages[0].extract_text()
+        assert "June 2025 – September 2025" in text
+        assert "•" in text
+        assert all("Liberation" in c["fontname"] for c in pdf.pages[0].chars)
+
+
+def test_fallback_to_core_fonts_when_ttfs_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.services.tailoring import cv_render
+
+    monkeypatch.setattr(cv_render, "_font_files", lambda family: None)
+    with _open(render_cv_pdf(CV2, copy.deepcopy(STYLE))) as pdf:
+        assert len(pdf.pages) == 1
+        assert "?" not in pdf.pages[0].extract_text()
+        assert all("Helvetica" in c["fontname"] for c in pdf.pages[0].chars)

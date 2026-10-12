@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
+import pytest
+
 from src.services.profile.cv_style import DEFAULT_STYLE, extract_cv_style, normalize_style
 from tests.test_profile_upload import _register_and_login, _stub_extraction, api  # noqa: F401
 
@@ -126,3 +130,48 @@ def test_normalize_fills_defaults_and_clamps() -> None:
     assert s["page"]["pages"] <= 4
     assert s["bullet"] == "•"
     assert s["link_color"] == "#ABCDEF"
+
+
+OWNER_PDF = (
+    "C:/Users/Ranjith/.claude/uploads/8b9c4a11-8507-4603-9903-fb3bb4341734/"
+    "e7373fa0-Ranjith_Guruprakash_CV.pdf"
+)
+
+
+def test_new_keys_default_and_normalise() -> None:
+    n = normalize_style({})
+    assert n["entry"]["first_bold"] is True
+    assert n["skills"] == {"label_bold": True}
+    assert n["project_name_color"] == n["heading"]["color"]
+    assert normalize_style({"project_name_color": ""})["project_name_color"] == ""
+    assert normalize_style({"project_name_color": "#abcdef"})["project_name_color"] == "#ABCDEF"
+    assert normalize_style({"heading": {"color": "#112233"}})["project_name_color"] == "#112233"
+    assert normalize_style({"project_name_color": "red"})["project_name_color"] == DEFAULT_STYLE["heading"]["color"]
+
+
+def test_render_then_extract_roundtrips_new_keys(tmp_path) -> None:
+    from src.services.tailoring.cv_render import render_cv_pdf
+
+    cv = (
+        "JANE DOE\nEngineer | Things\njane@example.com\n\n"
+        "EXPERIENCE\nAcme | Engineer | June 2024 – May 2025\n- Did a thing well here.\n"
+        "Beta | Dev | 2023 – 2024\n- Did another thing here.\n\n"
+        "PROJECTS\nAlpha | Python\n- Built alpha.\nBeta2 | Rust\n- Built beta.\n\n"
+        "SKILLS\nLanguages: Python, Rust\nTools: Docker, Make\n"
+    )
+    path = tmp_path / "cv.pdf"
+    path.write_bytes(render_cv_pdf(cv, dict(DEFAULT_STYLE)))
+    got = extract_cv_style(str(path))
+    assert got is not None
+    assert got["entry"]["bold"] is True and got["entry"]["first_bold"] is True
+    assert got["skills"]["label_bold"] is True
+    assert got["project_name_color"] == got["heading"]["color"]
+
+
+@pytest.mark.skipif(not os.path.exists(OWNER_PDF), reason="owner's real CV is not on this machine")
+def test_owner_real_pdf_fingerprint() -> None:
+    got = extract_cv_style(OWNER_PDF)
+    assert got is not None
+    assert got["entry"]["first_bold"] is True
+    assert got["skills"]["label_bold"] is True
+    assert got["project_name_color"] == got["heading"]["color"] != ""

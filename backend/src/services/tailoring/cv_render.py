@@ -12,9 +12,12 @@ fpdf2 is lazy-imported (heavy-dep discipline, root rules #11/#16).
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+import unicodedata
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Callable, Optional
 
-from src.services.tailoring.pdf import _to_latin1
+from src.services.tailoring.pdf import _TRANSLIT, _to_latin1
 from src.utils.loop_guard import cpu_bound
 
 # Built-in fallback so this module works even when the style dict is partial.
@@ -28,9 +31,19 @@ _FALLBACK: dict[str, Any] = {
     "heading": {"size": 11.5, "bold": True, "color": "#1F3864", "upper": True, "rule": True,
                 "rule_color": "#1F3864"},
     "body": {"size": 9.5, "color": "#000000"},
-    "entry": {"bold": True, "dates_align": "right"},
+    "entry": {"bold": True, "first_bold": True, "dates_align": "right"},
+    "skills": {"label_bold": True},
     "bullet": "•",
     "link_color": "#1F3864",
+}
+
+_FONT_DIR = Path(__file__).resolve().parent / "fonts"
+# family key -> (fpdf family name, {style: file}). Liberation = metric-compatible with
+# Helvetica / Times, SIL OFL 1.1 (see fonts/LICENSE), real Unicode glyphs (en dash, bullet).
+_TTF = {
+    "sans": ("LiberationSans", {"": "LiberationSans-Regular.ttf", "B": "LiberationSans-Bold.ttf",
+                                "I": "LiberationSans-Italic.ttf", "BI": "LiberationSans-BoldItalic.ttf"}),
+    "serif": ("LiberationSerif", {"": "LiberationSerif-Regular.ttf", "B": "LiberationSerif-Bold.ttf"}),
 }
 
 _PT = 0.3528  # mm per point
@@ -65,7 +78,43 @@ def _merged(style: Optional[dict[str, Any]]) -> dict[str, Any]:
             out[key] = merged
         else:
             out[key] = val if val else default
+    pnc = style.get("project_name_color")
+    # "" = project names in the body colour; missing = same colour as the headings.
+    out["project_name_color"] = pnc if isinstance(pnc, str) else out["heading"]["color"]
     return out
+
+
+@lru_cache(maxsize=8)
+def _glyphs(path: str) -> frozenset[int]:
+    """Code points the TTF at ``path`` can draw (so we never emit a missing glyph)."""
+    from fontTools.ttLib import TTFont  # noqa: PLC0415 - lazy, comes with fpdf2
+
+    font = TTFont(path, lazy=True)
+    try:
+        return frozenset(font.getBestCmap() or ())
+    finally:
+        font.close()
+
+
+def _font_files(family: str) -> Optional[tuple[str, dict[str, str]]]:
+    """(fpdf family name, {style: path}) when the bundled TTFs are all present, else None."""
+    name, files = _TTF["serif" if family == "serif" else "sans"]
+    paths = {k: str(_FONT_DIR / f) for k, f in files.items()}
+    return (name, paths) if all(Path(p).is_file() for p in paths.values()) else None
+
+
+def _unicode_clean(text: str, cmap: frozenset[int]) -> str:
+    """Keep every character the font can draw; map the rest to a faithful latin-1 form."""
+    out: list[str] = []
+    for ch in text or "":
+        rep = _TRANSLIT.get(ch)
+        if rep is not None and rep in ("", " "):
+            out.append(rep)  # zero-width / odd spaces always normalised
+        elif ord(ch) in cmap and not unicodedata.category(ch).startswith("C"):
+            out.append(ch)
+        else:
+            out.append(_to_latin1(ch))
+    return "".join(out)
 
 
 def _rgb(color: Any, fallback: tuple[int, int, int] = (0, 0, 0)) -> tuple[int, int, int]:
@@ -84,7 +133,7 @@ def _is_date(seg: str) -> bool:
     if not low or not re.search(r"\d{4}|present|current|\bnow\b", low):
         return False
     rest = re.sub(rf"\b(?:{_MONTHS}|present|current|now|to|until)\b\.?", " ", low)
-    rest = re.sub(r"[\d\s\-/,.()']", "", rest)
+    rest = re.sub(r"[\d\s\-–—/,.()']", "", rest)
     return rest == ""
 
 
@@ -129,9 +178,11 @@ def _is_contact(s: str) -> bool:
     return len(parts) >= 2 and all(len(p) <= 40 for p in parts)
 
 
-def _parse(text: str) -> tuple[list[str], list[tuple[str, Any]]]:
+def _parse(
+    text: str, clean: Callable[[str], str] = _to_latin1
+) -> tuple[list[str], list[tuple[str, Any]]]:
     """Return (header_lines, blocks). Block kinds: heading, entry, bullet, para, gap."""
-    lines = _to_latin1(text or "").replace("\r", "").split("\n")
+    lines = clean(text or "").replace("\r", "").split("\n")
     header: list[str] = []
     i = 0
     while i < len(lines) and not lines[i].strip():
@@ -245,13 +296,25 @@ def _render_once(text: str, st: dict[str, Any], step: int) -> tuple[bytes, int]:
     mt = max(min(float(page["margin_top"]), 10.0), float(page["margin_top"]) - 0.8 * step)
     mb = 12.0
 
-    fam = "Times" if st["font"]["family"] == "serif" else "Helvetica"
+    ttf = _font_files(st["font"]["family"])
+    if ttf:
+        fam = ttf[0]
+        cmap = _glyphs(ttf[1][""])
+
+        def clean(t: str) -> str:
+            return _unicode_clean(t, cmap)
+    else:  # bundled fonts missing: core fonts, latin-1 only
+        fam = "Times" if st["font"]["family"] == "serif" else "Helvetica"
+        clean = _to_latin1
     body_pt = max(_MIN_BODY, float(st["body"]["size"]) - d)
 
     def sz(v: Any, floor: float) -> float:
         return max(floor, float(v) - d)
 
     pdf = FPDF(format=fmt)
+    if ttf:
+        for sty, path in ttf[1].items():
+            pdf.add_font(fam, sty, path)
     pdf.set_auto_page_break(auto=False)
     pdf.set_margins(left=ml, top=mt, right=mr)
     pdf.add_page()
@@ -275,6 +338,7 @@ def _render_once(text: str, st: dict[str, Any], step: int) -> tuple[bytes, int]:
 
     def flow(w: float, h: float, txt: str, **kw: Any) -> None:
         """multi_cell that splits across pages when the block is taller than a page."""
+        kw.setdefault("align", "L")  # never justified
         total = nlines(w, h, txt) * h
         if total > limit - mt:
             ensure(h)
@@ -288,7 +352,7 @@ def _render_once(text: str, st: dict[str, Any], step: int) -> tuple[bytes, int]:
             pdf.multi_cell(w, h, txt, new_x=XPos.LMARGIN, new_y=YPos.NEXT, **kw)
 
     def line_cell(txt: str, size: float, style: str, color: Any, align: str, upper: bool) -> None:
-        txt = _to_latin1(txt.upper()) if upper else txt
+        txt = clean(txt.upper()) if upper else txt
         txt = txt[:600]  # a longer line can never fit; keeps the shrink loop cheap
         s = size
         font(style, s, color)
@@ -302,7 +366,7 @@ def _render_once(text: str, st: dict[str, Any], step: int) -> tuple[bytes, int]:
         pdf.cell(tw, h, txt, align="C" if align == "center" else "L",
                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-    header, blocks = _parse(text)
+    header, blocks = _parse(text, clean)
 
     # Header: name, headline, contact lines.
     nm, hl, ct = st["name"], st["headline"], st["contact"]
@@ -319,8 +383,36 @@ def _render_once(text: str, st: dict[str, Any], step: int) -> tuple[bytes, int]:
     pdf.ln(2.2 * g)
 
     hd, en = st["heading"], st["entry"]
-    entry_style = "B" if en["bold"] else ""
-    bullet = str(st["bullet"])
+    first_only = bool(en["bold"] and en.get("first_bold", True))
+    bullet = str(st["bullet"]) if ttf else {"▪": "-", "•": "-"}.get(str(st["bullet"]), "-")
+    proj_col = st["project_name_color"] or st["body"]["color"]
+    label_bold = bool(st["skills"].get("label_bold", True))
+    section = ""
+
+    def runs(h: float, parts: list[tuple[str, str, Any]], left: float, right_extra: float = 0.0) -> None:
+        """Write mixed-weight/colour runs as one wrapped paragraph (left aligned)."""
+        whole = "".join(t for t, _, _ in parts)
+        font("B", body_pt, st["body"]["color"])  # widest weight: safe line-count estimate
+        total = nlines(tw - (left - ml) - right_extra, h, whole) * h
+        ensure(min(total, limit - mt))
+        pdf.set_left_margin(left)
+        pdf.set_right_margin(mr + right_extra)
+        long_block = total > limit - mt
+        if long_block:
+            pdf.set_auto_page_break(auto=True, margin=mb)
+        try:
+            pdf.set_x(left)
+            for t, sty, col in parts:
+                pdf.set_font(fam, style=sty, size=body_pt)
+                pdf.set_text_color(*_rgb(col))
+                pdf.write(h, t)
+            pdf.ln(h)
+        finally:
+            pdf.set_auto_page_break(auto=False)
+            pdf.set_left_margin(ml)
+            pdf.set_right_margin(mr)
+            pdf.set_x(ml)
+
     first_in_section = False
     prev_gap = False
 
@@ -335,7 +427,8 @@ def _render_once(text: str, st: dict[str, Any], step: int) -> tuple[bytes, int]:
             pdf.ln(2.6 * g)
             font("B" if hd["bold"] else "", hs, hd["color"])
             pdf.set_x(ml)
-            pdf.cell(tw, h, _to_latin1(val.upper()) if hd["upper"] else val, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.cell(tw, h, clean(val.upper()) if hd["upper"] else val, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            section = val.lower()
             if hd["rule"]:
                 y = pdf.get_y() + 0.2
                 pdf.set_draw_color(*_rgb(hd["rule_color"]))
@@ -351,59 +444,77 @@ def _render_once(text: str, st: dict[str, Any], step: int) -> tuple[bytes, int]:
             if not first_in_section:
                 pdf.ln(1.3 * g)
             first_in_section = False
-            font("", body_pt, st["body"]["color"])
+            body_col = st["body"]["color"]
+            first, sep, rest = left.partition(" | ")
+            name_col = proj_col if "project" in section else body_col
+            if not en["bold"]:
+                parts = [(left, "", body_col)]
+            elif first_only:
+                parts = [(first, "B", name_col)] + ([(sep + rest, "", body_col)] if sep else [])
+            else:
+                parts = [(first, "B", name_col)] + ([(sep + rest, "B", body_col)] if sep else [])
+            font("", body_pt, body_col)
             dw = pdf.get_string_width(date) + 1.0 if date else 0.0
-            font(entry_style, body_pt, st["body"]["color"])
             if date and en["dates_align"] == "right" and dw <= tw / 2:
                 lw = max(20.0, tw - dw - 2.0)
-                ensure(nlines(lw, h, left) * h)
+                font("B" if en["bold"] else "", body_pt, body_col)
+                ensure(min(nlines(lw, h, left) * h, limit - mt))
                 y0 = pdf.get_y()
-                font("", body_pt, st["body"]["color"])
+                font("", body_pt, body_col)
                 pdf.set_xy(right_edge - dw, y0)
                 pdf.cell(dw, h, date, align="R")
-                font(entry_style, body_pt, st["body"]["color"])
                 pdf.set_xy(ml, y0)
-                flow(lw, h, left)
+                runs(h, parts, ml, right_extra=tw - lw)
             else:
-                full = f"{left} | {date}" if date else left
-                pdf.set_x(ml)
-                flow(tw, h, full)
+                if date:
+                    parts.append((f" | {date}", "B" if (en["bold"] and not first_only) else "", body_col))
+                runs(h, parts, ml)
             prev_gap = False
             continue
         if kind == "bullet":
             h = lh(body_pt, 1.28)
             indent = 4.6
-            font("", body_pt, st["body"]["color"])
+            body_col = st["body"]["color"]
+            font("", body_pt, body_col)
             bw = tw - indent
             ensure(min(nlines(bw, h, val) * h, limit - mt))
             y0 = pdf.get_y()
-            cy = y0 + h / 2
-            pdf.set_fill_color(*_rgb(st["body"]["color"]))
-            pdf.set_draw_color(*_rgb(st["body"]["color"]))
-            bx = ml + 1.4
-            if bullet == "-":
-                pdf.rect(bx, cy - 0.15, 1.5, 0.3, style="F")
-            elif bullet == "▪":
-                pdf.rect(bx, cy - 0.5, 1.0, 1.0, style="F")
-            else:
-                pdf.ellipse(bx, cy - 0.55, 1.1, 1.1, style="F")
+            pdf.set_xy(ml + 1.0, y0)
+            pdf.cell(indent - 1.0, h, bullet)
             pdf.set_xy(ml + indent, y0)
-            flow(bw, h, val)
+            label, tail = _skills_label(val) if "skill" in section else ("", val)
+            if label and label_bold:
+                runs(h, [(label, "B", body_col), (tail, "", body_col)], ml + indent)
+            else:
+                flow(bw, h, val)
             first_in_section = False
             prev_gap = False
             continue
         # paragraph
         h = lh(body_pt, 1.3)
-        font("", body_pt, st["body"]["color"])
+        body_col = st["body"]["color"]
+        font("", body_pt, body_col)
         if prev_gap and not first_in_section:
             pdf.ln(1.0 * g)
         pdf.set_x(ml)
-        flow(tw, h, val, align="L")
+        label, tail = _skills_label(val) if "skill" in section else ("", val)
+        if label and label_bold:
+            runs(h, [(label, "B", body_col), (tail, "", body_col)], ml)
+        else:
+            flow(tw, h, val, align="L")
         first_in_section = False
         prev_gap = False
 
     pages = pdf.page
     return bytes(pdf.output()), pages
+
+
+def _skills_label(txt: str) -> tuple[str, str]:
+    """Split ``"Agents & LLMs: LangGraph, ..."`` into ("Agents & LLMs:", " LangGraph, ...")."""
+    idx = txt.find(":")
+    if 0 < idx <= 29 and idx < len(txt) - 1:  # label (with the colon) is at most 30 chars
+        return txt[: idx + 1], txt[idx + 1 :]
+    return "", txt
 
 
 def _contact_line(

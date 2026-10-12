@@ -146,6 +146,8 @@ include = ["src*"]
 [tool.setuptools.package-data]
 src = [
     "data/job_signals/*.txt",
+    "services/tailoring/fonts/*.ttf",
+    "services/tailoring/fonts/LICENSE",
 ]
 
 [tool.pytest.ini_options]

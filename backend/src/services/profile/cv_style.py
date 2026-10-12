@@ -38,7 +38,9 @@ DEFAULT_STYLE: dict[str, Any] = {
         "rule_color": NAVY,
     },
     "body": {"size": 9.5, "color": "#000000"},
-    "entry": {"bold": True, "dates_align": "right"},
+    "entry": {"bold": True, "first_bold": True, "dates_align": "right"},
+    "skills": {"label_bold": True},
+    "project_name_color": NAVY,  # "" = project names in the body colour
     "bullet": "•",
     "link_color": NAVY,
 }
@@ -139,8 +141,12 @@ def normalize_style(d: Optional[dict[str, Any]]) -> dict[str, Any]:
     e = _section(d, "entry")
     out["entry"] = {
         "bold": _flag(e.get("bold"), base["entry"]["bold"]),
+        "first_bold": _flag(e.get("first_bold"), base["entry"]["first_bold"]),
         "dates_align": _enum(e.get("dates_align"), ("right", "inline"), base["entry"]["dates_align"]),
     }
+    out["skills"] = {"label_bold": _flag(_section(d, "skills").get("label_bold"), True)}
+    pnc = d.get("project_name_color")
+    out["project_name_color"] = "" if pnc == "" else _color(pnc, out["heading"]["color"])
     out["bullet"] = _enum(d.get("bullet"), _BULLETS, base["bullet"])
     out["link_color"] = _color(d.get("link_color"), base["link_color"])
     return out
@@ -250,6 +256,77 @@ def _find_rule(page: Any, line: _Line, text_w: float) -> Optional[str]:
                 col = obj.get("non_stroking_color")
             return _to_hex(col)
     return None
+
+
+def _split_chars(ln: _Line, sep: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Visible chars of ``ln`` before / after the first ``sep`` char (sep itself dropped)."""
+    for i, c in enumerate(ln.chars):
+        if c["text"] == sep:
+            return ln.chars[:i], ln.chars[i + 1 :]
+    return ln.chars, []
+
+
+def _share_bold(chars: list[dict[str, Any]]) -> float:
+    return sum(1 for c in chars if _is_bold(c.get("fontname", ""))) / len(chars) if chars else 0.0
+
+
+def _entry_weight(lines: list[_Line], body_size: float) -> tuple[bool, bool]:
+    """(entry.bold, entry.first_bold) from ``Company | Role`` lines.
+
+    Bold first segment + regular rest -> (True, True); whole line bold -> (True, False);
+    nothing bold -> (False, False). No entry lines at all -> the default (True, True).
+    """
+    votes: list[str] = []
+    for ln in lines:
+        # Headline / contact rows also hold "|" but are not body-sized: skip them.
+        if "|" not in ln.text or abs(ln.size - body_size) > 0.3:
+            continue
+        head, rest = _split_chars(ln, "|")
+        # Right-aligned dates are never bold; judge the role part only up to its last char.
+        if not head or not rest:
+            continue
+        # The first glyph decides the first segment ("Job360 (job360.uk)" is only part-bold).
+        first = _is_bold(head[0].get("fontname", ""))
+        rest_bold = _share_bold(rest)
+        if first and rest_bold < 0.5:
+            votes.append("first")
+        elif first and rest_bold >= 0.5:
+            votes.append("all")
+        elif _share_bold(head) < 0.5 and rest_bold < 0.5:
+            votes.append("none")
+    if not votes:
+        return True, True
+    top = _mode(votes, "first")
+    return top != "none", top == "first"
+
+
+def _section_styles(
+    style: dict[str, Any], lines: list[_Line], heading: Optional[dict[str, Any]], body_color: str
+) -> None:
+    """Project-name colour and skills-label weight, read from the PROJECTS / SKILLS sections."""
+    if not heading:
+        return
+    key = (heading["size"], heading["color"], heading["bold"])
+    section = ""
+    proj_cols: list[str] = []
+    label_votes: list[bool] = []
+    for ln in lines:
+        if (ln.size, ln.color, ln.bold) == key and 2 <= len(ln.text) <= 40 and " | " not in ln.text:
+            section = ln.text.lower()
+            continue
+        if "project" in section and "|" in ln.text and ln.text[0] not in _BULLET_GLYPHS:
+            head, _ = _split_chars(ln, "|")
+            if head:
+                proj_cols.append(_mode([_to_hex(c.get("non_stroking_color")) for c in head], body_color))
+        elif "skill" in section and ":" in ln.text[:31]:
+            head, rest = _split_chars(ln, ":")
+            if head and rest:
+                label_votes.append(_share_bold(head) >= 0.5 and _share_bold(rest) < 0.5)
+    if proj_cols:
+        col = _mode(proj_cols, body_color)
+        style["project_name_color"] = "" if col == body_color else col
+    if label_votes:
+        style["skills"] = {"label_bold": _mode(label_votes, True)}
 
 
 def _extract(pdf_path: str) -> Optional[dict[str, Any]]:
@@ -370,7 +447,13 @@ def _extract(pdf_path: str) -> Optional[dict[str, Any]]:
             and ln.x0 <= left + 0.05 * text_w
             and ln.max_gap() > 2.5 * max(ln.size, 1.0)
         )
-        style["entry"] = {"bold": True, "dates_align": "right" if right_dates >= 2 else "inline"}
+        entry_bold, first_bold = _entry_weight(lines, body_size)
+        style["entry"] = {
+            "bold": entry_bold,
+            "first_bold": first_bold,
+            "dates_align": "right" if right_dates >= 2 else "inline",
+        }
+        _section_styles(style, lines, style.get("heading"), body_color)
 
         # Bullet glyph most common at line starts.
         glyph = _mode([ln.text[0] for ln in lines if ln.text[0] in _BULLET_GLYPHS], "•")
