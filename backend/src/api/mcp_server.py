@@ -411,6 +411,9 @@ def build_server(version: str = "") -> MCPServer:
         sent; salary has `min` and `max`. "prefer not to say" is an answer. Reuse a saved free-text answer word for
         word only when `approved` is true.
 
+        HUNT: `search_brief.rows` = the ONLY places to search, each with its `counts_if` lines;
+        `search_brief.gaps` = ask each once, save to user_info.right_to_work, then search.
+
         Other keys: job_titles, experience_level, experience_level_inferred, agent_edits, lessons, assistant_hint.
         Full rules and shapes: get_recipe("rules")."""
         # ONE profile read for the whole tool call. `load_profile_response` is
@@ -420,6 +423,7 @@ def build_server(version: str = "") -> MCPServer:
         # nothing extra. Calling the route and then re-loading the profile
         # meant four connections to answer one tool call.
         from src.services.profile import edits as profile_edits  # noqa: PLC0415
+        from src.services.profile.search_brief import build_search_brief  # noqa: PLC0415
         from src.services.profile.skill_tiering import profile_skills  # noqa: PLC0415
 
         user_id = _user().id
@@ -475,6 +479,10 @@ def build_server(version: str = "") -> MCPServer:
             # The user's standing instructions to the agent — read first (the
             # docstring says so). [] when there are none (rule #29).
             "assistant_notes": list(profile.preferences.assistant_notes or []),
+            # Owner decision 2026-10-12 - WHERE this user's hunt searches: one row
+            # per place from their own right_to_work answers, each with a plain
+            # "counts if" line, plus the gaps to ask once. Never our own list.
+            "search_brief": build_search_brief(profile.user_info.right_to_work),
             # Owner decision 2026-10-08 (S2) - the assistant settings with the
             # safe defaults filled in, the practice-run state and the riskier
             # changes still waiting for the user's click. Read before ANY apply.
