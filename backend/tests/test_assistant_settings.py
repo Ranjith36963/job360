@@ -76,6 +76,7 @@ def _facts(
     status: str = "considering", receipt: bool = False, override: str | None = None, *, seen: bool = True, **kit: Any
 ) -> rules.SubmitFacts:
     """S3: auto-submit only sends a CV the user has seen, so the S2 rule tests default to seen."""
+    kit.setdefault("form_filled", True)  # rule 4b: the form fill is on record
     kit.setdefault("fit_score", 80)  # above the default test line of 50
     return rules.SubmitFacts(status=status, has_receipt=receipt, submit_override=override, cv_seen=seen, **kit)
 
@@ -489,7 +490,18 @@ async def _bring(client: AsyncClient, ad: dict[str, Any] = _AD) -> int:
     return int(resp.json()["application_id"])
 
 
-async def _check(client: AsyncClient, app_id: int, url: str = FORM):
+async def _fill(client: AsyncClient, app_id: int) -> None:
+    """Rule 4b: the gate stops with form_not_recorded until a form_filled is on record."""
+    resp = await client.post(
+        f"/api/applications/{app_id}/events",
+        json={"event_type": "form_filled", "payload": {"form_url": FORM, "fields_count": 1}},
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def _check(client: AsyncClient, app_id: int, url: str = FORM, *, fill: bool = True):
+    if fill:
+        await _fill(client, app_id)
     return await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": url})
 
 
@@ -879,7 +891,7 @@ async def test_submit_check_defaults_to_ask_and_unknown_application_is_404(
         assert (await client.put(f"/api/applications/{app_id}/fit", json={"score": 80})).status_code == 200
         assert (await _check(client, app_id)).json()["reason"] == "submit_mode_confirm"
         assert (await _check(client, app_id, "")).json()["reason"] == "unknown_site"
-        assert (await _check(client, 987654321)).status_code == 404
+        assert (await _check(client, 987654321, fill=False)).status_code == 404
 
 
 @pytest.mark.asyncio
@@ -952,9 +964,7 @@ async def test_per_job_override_an_assistant_may_only_send_confirm(authenticated
         assert extra.status_code == 422
         ok = await agent.post(url, json={"event_type": "submit_mode_set", "payload": {"submit_mode": "confirm"}})
         assert ok.status_code == 201, ok.text
-        assert (await agent.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})).json()[
-            "reason"
-        ] == "job_override_confirm"
+        assert (await _check(agent, app_id)).json()["reason"] == "job_override_confirm"
     async with authenticated_async_context() as client:
         assert (await client.post(url, json={"event_type": "submit_mode_set", "payload": AUTO})).status_code == 201
         assert (await _check(client, app_id)).json()["decision"] == "submit", "the latest override wins"
@@ -1129,6 +1139,13 @@ async def test_mcp_has_check_submit_and_no_confirm_decline_or_take_back_tool(
             # the gate over MCP
             app_id = _payload(await mcp.call_tool("bring_job", {**_AD}))["application_id"]
             verdict = _payload(await mcp.call_tool("check_submit", {"application_id": app_id, "form_url": FORM}))
+            assert (verdict["decision"], verdict["reason"]) == ("stop", "form_not_recorded")
+            await mcp.call_tool(
+                "record_event",
+                {"application_id": app_id, "event_type": "form_filled",
+                 "payload": {"form_url": FORM, "fields_count": 1}},
+            )
+            verdict = _payload(await mcp.call_tool("check_submit", {"application_id": app_id, "form_url": FORM}))
             assert (verdict["decision"], verdict["reason"]) == ("ask", "score_line_unknown"), "no fit saved yet"
             fit = _payload(await mcp.call_tool("save_fit", {"application_id": app_id, "score": 10}))
             assert (fit["line"]["score_line"], fit["line"]["side"], fit["line"]["switch"]) == (50, "below", "auto")
@@ -1198,7 +1215,7 @@ async def test_logs_name_the_user_and_never_carry_free_text(
             f"/api/applications/{app_id}/events", json={"event_type": "submit_mode_set", "payload": AUTO}
         )
         assert refused.status_code == 403
-        await agent.get(f"/api/applications/{app_id}/submit-check", params={"form_url": "https://uk.indeed.com/x"})
+        await _check(agent, app_id, "https://uk.indeed.com/x")
     async with authenticated_async_context() as client:
         assert (await client.get("/api/assistant-settings")).status_code == 200
         assert (await client.post(f"/api/assistant-settings/requests/{waiting_id}/confirm")).status_code == 200
@@ -1500,3 +1517,71 @@ async def test_a_held_required_answer_counts_for_the_setup_round(authenticated_a
         assert [w["path"] for w in body["waiting"]] == [DAILY]
         assert [a["path"] for a in body["applied"]] == [PROGRESS]
         assert body["profile"]["preferences"]["daily_check"] == ""
+
+
+def test_form_not_recorded_stops_before_anything_else_but_the_four_stops():
+    """Rule 4b: no form_filled on record -> stop, even with a stored yes."""
+    cfg = _eff(submit_mode="auto_when_sure")
+    for kw in ({}, {"approved": True}, {"approved": True, "seen": True}):
+        v = rules.may_submit(cfg, _facts(form_filled=False, **kw), FORM, _counts(), now=NOW)
+        assert (v.decision, v.reason) == ("stop", "form_not_recorded"), kw
+    assert "form_not_recorded" in rules.REASONS
+    assert "record_event form_filled" in v.detail
+
+
+def test_form_recorded_gives_the_old_answers():
+    cfg = _eff(submit_mode="auto_when_sure")
+    v = rules.may_submit(cfg, _facts(form_filled=True), FORM, _counts(), now=NOW)
+    assert (v.decision, v.reason) == ("submit", "auto_when_sure")
+    v = rules.may_submit(_eff(), _facts(form_filled=True, approved=True), FORM, _counts(), now=NOW)
+    assert (v.decision, v.reason) == ("submit", "user_approved")
+
+
+def test_the_four_stops_win_over_form_not_recorded():
+    f = _facts(form_filled=False)
+    v = rules.may_submit(_eff(paused_until="until_resumed"), f, FORM, _counts(), now=NOW)
+    assert v.reason == "paused"
+    v = rules.may_submit(_eff(), _facts("applied", form_filled=False), FORM, _counts(), now=NOW)
+    assert v.reason == "already_applied"
+    v = rules.may_submit(_eff(), _facts(form_filled=False, declined=True), FORM, _counts(), now=NOW)
+    assert v.reason == "user_declined"
+    v = rules.may_submit(_eff(daily_cap=1), f, FORM, _counts(today=1), now=NOW)
+    assert v.reason == "daily_cap_reached"
+
+
+@pytest.mark.asyncio
+async def test_submit_check_stops_form_not_recorded_until_form_filled_and_a_yes_does_not_clear_it(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        body = (await _check(client, app_id, fill=False)).json()
+        assert (body["decision"], body["reason"]) == ("stop", "form_not_recorded")
+        yes = await client.post(
+            f"/api/applications/{app_id}/events",
+            json={"event_type": "submit_approved", "payload": {"artifact_id": None, "sha256": "", "where": "web"}},
+        )
+        assert yes.status_code == 201, yes.text
+        body = (await _check(client, app_id, fill=False)).json()
+        assert (body["decision"], body["reason"]) == ("stop", "form_not_recorded")
+        body = (await _check(client, app_id)).json()
+        assert body["reason"] != "form_not_recorded"
+
+
+@pytest.mark.asyncio
+async def test_a_fill_from_before_a_new_cv_does_not_count(authenticated_async_context, fixture_user_id):
+    """The record must describe the form being sent NOW: a new CV version after
+    the fill makes the gate ask for a fresh form_filled."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _fill(client, app_id)
+        body = (await _check(client, app_id, fill=False)).json()
+        assert body["reason"] != "form_not_recorded"
+        new_cv = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "cv", "text": "Ada v2."})
+        assert new_cv.status_code == 201, new_cv.text
+        body = (await _check(client, app_id, fill=False)).json()
+        assert (body["decision"], body["reason"]) == ("stop", "form_not_recorded")
+        body = (await _check(client, app_id)).json()
+        assert body["reason"] != "form_not_recorded"

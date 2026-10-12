@@ -128,7 +128,9 @@ async def _controls(client: AsyncClient, app_id: int) -> dict[str, Any]:
     return resp.json()
 
 
-async def _check(client: AsyncClient, app_id: int, url: str = FORM) -> dict[str, Any]:
+async def _check(client: AsyncClient, app_id: int, url: str = FORM, *, fill: bool = True) -> dict[str, Any]:
+    if fill:  # rule 4b: the gate stops with form_not_recorded until a form_filled is on record
+        assert (await _event(client, app_id, "form_filled", {"form_url": url or FORM, "fields_count": 1})).status_code == 201
     resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": url})
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -214,7 +216,7 @@ def _cfg(**kw: Any) -> rules.EffectiveSettings:
 
 def _facts(**kw: Any) -> rules.SubmitFacts:
     base: dict[str, Any] = {
-        "status": "considering", "has_receipt": False, "submit_override": None, "fit_score": 80,
+        "status": "considering", "has_receipt": False, "submit_override": None, "fit_score": 80, "form_filled": True,
     }
     base.update(kw)
     return rules.SubmitFacts(**base)
@@ -364,7 +366,10 @@ async def test_the_kit_carries_the_cv_letter_job_and_hashes(authenticated_async_
         assert kit["cv"]["seen"] is None and kit["cv"]["approved"] is None
         assert kit["autofill"] == "unset" and kit["hold"] is None
         assert kit["duplicate"]["flag"] == "" and kit["duplicate"]["same_job"] is None
+        # The preview shows the answer AFTER the fill (never form_not_recorded:
+        # the kit is read before the form is filled, a "stop" would read as "do not apply").
         assert kit["settings"]["submit_preview"]["decision"] == "ask"
+        assert kit["settings"]["submit_preview"]["reason"] != "form_not_recorded"
         assert any("missing" in line for line in kit["instructions"])
 
 

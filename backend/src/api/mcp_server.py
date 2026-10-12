@@ -1272,7 +1272,8 @@ def build_server(version: str = "") -> MCPServer:
         already applied, or the daily limit is reached). `reason` is a short
         code and `detail` one plain sentence you can show the user. Reasons:
         paused, already_applied, user_declined (the user said don't send),
-        daily_cap_reached, duplicate_job (same job already applied to: `stop`
+        daily_cap_reached, form_not_recorded (`stop`: no `form_filled` recorded yet -
+        fill the form, record it, call again), duplicate_job (same job already applied to: `stop`
         in auto mode, else `ask`), unknown_site, ask_always_site,
         job_override_confirm, submit_mode_confirm, cv_not_seen (auto mode but the
         user has not seen the latest CV), practice_run, user_approved (the user
@@ -1310,7 +1311,7 @@ def build_server(version: str = "") -> MCPServer:
         (including `submit_preview`, what check_submit would say). Each call
         mints fresh links and records a `kit_read` on the timeline; an expired
         link means call it again. After filling the form, record_event
-        form_filled {form_url, fields_count}."""
+        form_filled {form_url, fields_count}; check_submit says stop until you do."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.get_application_kit(application_id, Response(), db, _user())

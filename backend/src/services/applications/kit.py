@@ -65,7 +65,8 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "Show the CV to the user. When the user says it is OK in chat, record_event cv_seen with where=chat. "
     "When the user says yes to submitting, record_event submit_approved with where=chat.",
     "`autofill` deny: do not type into the form - give the user the kit answers to paste. Still record form_filled.",
-    "After filling the form, record_event form_filled {form_url, fields_count}. Then call check_submit.",
+    "After filling the form, record_event form_filled {form_url, fields_count}. "
+    "Then call check_submit (it says stop until that is recorded).",
     "`hold` set: another assistant is on this application - tell the user. `duplicate` flagged: warn before any work.",
     "Account site: stop. The user signs up and signs in themselves (never ask for or store a password), "
     "then record_event site_account {host} and continue. Hit a sign-in wall on any other site: "
@@ -282,6 +283,18 @@ async def controls_state(
     }
 
 
+async def _filled_with_latest_cv(db: JobDatabase, user_id: str, application_id: int) -> bool:
+    """A ``form_filled`` is on record AND it is newer than the latest CV saved for
+    this application. A fill from an earlier attempt (before a new CV version)
+    does not count: the record must describe the form being sent now."""
+    events = await _events(db, user_id, application_id, ("form_filled", "artifact_saved"))
+    fills = [e["id"] for e in events if e["event_type"] == "form_filled"]
+    if not fills:
+        return False
+    cvs = [e["id"] for e in events if e["event_type"] == "artifact_saved" and e["payload"].get("kind") == "cv"]
+    return not cvs or max(fills) > max(cvs)
+
+
 async def gate_facts(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> settings_rules.SubmitFacts:
     """The facts :func:`settings_rules.may_submit` reads for this application."""
     application_id = int(app_row["id"])
@@ -304,6 +317,7 @@ async def gate_facts(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> 
         approved=bool(approved),
         declined=state["declined"] is not None,
         blocked=state["blocked"] is not None,
+        form_filled=await _filled_with_latest_cv(db, user_id, application_id),
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
     )
@@ -318,16 +332,24 @@ async def _approved_without_cv(db: JobDatabase, user_id: str, application_id: in
 
 
 async def submit_verdict(
-    db: JobDatabase, user_id: str, app_row: dict[str, Any], form_url: str, now: datetime
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], form_url: str, now: datetime,
+    *, assume_filled: bool = False,
 ) -> settings_rules.SubmitDecision:
     """The ONE gate, evaluated for one application (the submit-check route and
-    the kit's ``settings.submit_preview`` both call this)."""
+    the kit's ``settings.submit_preview`` both call this). The kit is read BEFORE
+    the form is filled, so its preview passes ``assume_filled=True``: it shows what
+    the gate will say once ``form_filled`` is recorded, not a "stop" the assistant
+    could misread as "do not apply"."""
+    from dataclasses import replace  # noqa: PLC0415
+
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile  # noqa: PLC0415
 
     cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
     counts = await settings_rules.load_submit_counts(db, user_id, now)
     facts = await gate_facts(db, user_id, app_row)
+    if assume_filled:
+        facts = replace(facts, form_filled=True)
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
 
@@ -818,7 +840,7 @@ async def build_kit(db: JobDatabase, user: CurrentUser, application_id: int, *, 
     ).hexdigest()
 
     settings_block = settings_view(profile, user.id)
-    verdict = await submit_verdict(db, user.id, app_row, apply_url, now)
+    verdict = await submit_verdict(db, user.id, app_row, apply_url, now, assume_filled=True)
     preview = {"decision": verdict.decision, "reason": verdict.reason, "detail": verdict.detail}
     settings_block = {**settings_block, "submit_preview": preview}
 
