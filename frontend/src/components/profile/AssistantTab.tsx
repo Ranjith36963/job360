@@ -406,7 +406,7 @@ export function AssistantTab() {
                   </option>
                 ))}
               </select>
-              hours
+              {every === "1h" ? "hour" : "hours"}
             </label>
           </Row>
         </Section>

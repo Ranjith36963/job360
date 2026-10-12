@@ -4465,6 +4465,25 @@
         "title": "NextStepOut",
         "type": "object"
       },
+      "NormalizedOut": {
+        "description": "One forgiving-input normalisation ``update_profile`` applied (owner decision 2026-10-10):\nwhere it happened and a CLOSED rule code (``services/profile/forgiving.py``) - never a value.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "rule": {
+            "title": "Rule",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "rule"
+        ],
+        "title": "NormalizedOut",
+        "type": "object"
+      },
       "OAuthGrantOut": {
         "properties": {
           "client_name": {
@@ -8332,6 +8351,14 @@
               "$ref": "#/components/schemas/ProfileEditOut"
             },
             "title": "Applied",
+            "type": "array"
+          },
+          "normalized": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NormalizedOut"
+            },
+            "title": "Normalized",
             "type": "array"
           },
           "profile": {

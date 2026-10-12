@@ -9,6 +9,7 @@ describe("valueText", () => {
     expect(valueText(P_INBOX, "scheduled")).toBe("Auto");
     expect(valueText(P_INBOX, "declined")).toBe("Off");
     expect(valueText(P_EVERY, "6h")).toBe("every 6 hours");
+    expect(valueText(P_EVERY, "1h")).toBe("every hour");
   });
   it("empty is 'no limit' for the daily limit and 'not set' elsewhere", () => {
     expect(valueText(P_CAP, null)).toBe("no limit");

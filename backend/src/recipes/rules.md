@@ -137,10 +137,10 @@ your app can run scheduled tasks, offer once — in plain words: "Can I
 read your Gmail for your job applications? Auto (I read it, record
 what happened, and send the outreach emails I write for you) / Ask me
 first (I ask before each check and only draft messages) / Not now"
-— and ask how often: every 3, 6, 12 hours or once a day. Store the
+— and ask how often: every hour, every 3, 6, 12 hours or once a day. Store the
 answers with update_profile: preferences.daily_check = "auto",
 "ask" or "paused" ("Not now" = "paused"), and
-preferences.check_every = "3h", "6h", "12h" or "24h". Create the
+preferences.check_every = "1h", "3h", "6h", "12h" or "24h". Create the
 scheduled task only after the user says yes and confirms it in your
 app. Do not offer again once preferences.daily_check is not "" (this
 user answered before, possibly through a different assistant); the
@@ -167,7 +167,7 @@ PAUSED: every run stops at once, reads nothing, records nothing, does
 not ask.
 
 SCHEDULE: if your app offers only hourly or daily schedules, then for
-3h, 6h or 12h create an HOURLY task that does the work only at hours
+1h, 3h, 6h or 12h create an HOURLY task (1h runs every hour) that does the work only at hours
 00, 03, 06, 09, 12, 15, 18 and 21 (3h), 00, 06, 12 and 18 (6h) or 08
 and 20 (12h) in the user's timezone (ask them if you do not know it),
 and otherwise ends at once without writing anything. For 24h, run once
@@ -326,7 +326,8 @@ preference (salary, locations, workplace, experience level) means "don't
 care" - never fill one in for the user and never guess one.
 
 `raw` (and `raw.truncated`) is the CV, LinkedIn and GitHub text Job360
-extracted. Job360 extracts TEXT and stores the structure it can prove (the
+extracted; it is sent only when you call `get_profile(include_raw=true)`
+(`raw_available` says it exists). Job360 extracts TEXT and stores the structure it can prove (the
 skills listed under a Skills heading, the summary, the contact block). It does
 not read the document for meaning — that is YOUR job. Read `raw.cv`,
 `raw.linkedin`, `raw.github_bio`, `raw.github_profile_readme` and
@@ -400,21 +401,29 @@ skipped, ask on that form. Reuse a saved free-text answer word for word only
 when its `approved` is true.
 
 Memory is six `user_info.*` paths plus one preference, each with a CLOSED key
-set — an unknown key is refused. A write REPLACES the whole value: send the
+set — an unknown key is refused. `get_profile` returns `shapes`: an example
+value for every structured path - copy its shape. A refused save says
+"Nothing was saved", names each bad path with an Example, and lists ALL the
+paths to resend in ONE call - never resend only some, never drop an answer
+to make a save pass. The reply's `normalized` lists what Job360 tidied
+(a country name to its code, "hourly" to 1h). A write REPLACES the whole value: send the
 current `fields[...]` with your change. Empty ("" / null / []) means not
 answered and is dropped; `false` is a real answer.
 `user_info.contact` = {email, phone, address_lines: [up to 3 str],
 address_city, address_postcode, address_country (ISO2), date_of_birth
 (YYYY-MM-DD), residence_city, residence_country (ISO2), legal_first_name,
-legal_last_name, preferred_name}.
+legal_last_name, preferred_name, linkedin_url}.
 `user_info.right_to_work` = {countries: [ONE record per country {country (ISO2,
 required), work_authorization (citizen | permanent_resident | visa |
 needs_sponsorship), needs_sponsorship (bool), visa_type, visa_expires (YYYY-MM
-or YYYY-MM-DD)}], citizenship: [ISO2], sanctions_country_citizen (bool, or "Prefer not to say")}.
+or YYYY-MM-DD), remote_ok (bool), onsite (yes | only_if_sponsored | no), note
+(one line, the user's own words)}] - country "ANY" = every other country
+(e.g. remote anywhere, on-site only if sponsored), citizenship: [ISO2], sanctions_country_citizen (bool, or "Prefer not to say")}.
 `user_info.logistics` = {notice_period, earliest_start, countries: [ONE record
 per country {country (ISO2, required), willing_to_relocate (bool),
 relocate_where, travel_ok_pct (whole number 0-100), driving_licence (bool),
-driving_licence_country (ISO2)}]}.
+driving_licence_country (ISO2), driving_licence_type (full | provisional |
+none)}], start_on_site_abroad (one line)}.
 `user_info.languages` = [{language, level: native | fluent | professional |
 basic}].
 `user_info.equality` = {gender, ethnicity, disability, veteran,
@@ -440,7 +449,7 @@ only records a fact the user states. If you fill an application form for the
 user, stop before the final submit and submit only when check_submit says submit
 or after the user says yes to that one application.
 
-Two flows without our website: (1) build the profile — read `raw`, then write
+Two flows without our website: (1) build the profile — read `raw` (`get_profile(include_raw=true)`), then write
 the structured fields with update_profile, including dated work history
 (cv_data.cv_positions) and projects (cv_data.cv_projects). (2) apply to a job —
 bring_job (always pass the job's `country` as an ISO alpha-2 code, `remote`

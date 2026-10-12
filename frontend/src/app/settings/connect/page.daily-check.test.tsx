@@ -125,6 +125,15 @@ describe("ConnectAgentPage — daily check status", () => {
     expect((screen.getByTestId("inbox-check-every") as HTMLSelectElement).value).toBe("3h");
   });
 
+  it("frequency select shows a stored 1h as Every hour, not blank", async () => {
+    listTokens.mockResolvedValue(connectedTokens);
+    getProfile.mockResolvedValue({ preferences: { check_every: "1h" } });
+    render(<ConnectAgentPage />);
+    const select = (await screen.findByTestId("inbox-check-every")) as HTMLSelectElement;
+    expect(select.value).toBe("1h");
+    expect(select.selectedOptions[0].textContent).toBe("Every hour");
+  });
+
   it("frequency select reverts when the save fails", async () => {
     listTokens.mockResolvedValue(connectedTokens);
     getProfile.mockResolvedValue({ preferences: { check_every: "12h" } });

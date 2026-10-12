@@ -15,7 +15,7 @@ note), then continue. Full rules (Gmail modes, outreach, events):
    `declined` or empty: STOP, read no email, record nothing, do not ask. `ask`:
    ask in chat "Can I check your Gmail now?" and STOP unless they say yes.
    `auto` (or `scheduled`): go on. Hourly task and `preferences.check_every`
-   is `3h`, `6h` or `12h`, not a run hour (00, 03, 06, 09, 12, 15, 18, 21 for
+   is `3h`, `6h` or `12h` (`1h` runs every hour), not a run hour (00, 03, 06, 09, 12, 15, 18, 21 for
    3h; 00, 06, 12, 18 for 6h; 08, 20 for 12h, user's timezone): STOP.
 0b. **Check the pause.** Read `settings`. If `settings.paused` is true, do ALL
    apply work as stopped: fill no forms, submit nothing, start no application
