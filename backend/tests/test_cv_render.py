@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import io
+from urllib.parse import urlparse
 
 import pytest
 
@@ -107,8 +108,9 @@ def test_bullets_are_round_glyphs_not_dashes(pdf_bytes: bytes) -> None:
 def test_links_are_clickable(pdf_bytes: bytes) -> None:
     with _open(pdf_bytes) as pdf:
         uris = [h.get("uri") or "" for h in pdf.pages[0].hyperlinks]
-    assert any("linkedin.com" in u for u in uris)
-    assert any("github.com" in u for u in uris)
+    hosts = {urlparse(u).hostname for u in uris}
+    assert "linkedin.com" in hosts or "www.linkedin.com" in hosts
+    assert "github.com" in hosts or "www.github.com" in hosts
     assert any(u.startswith("mailto:") for u in uris)
 
 

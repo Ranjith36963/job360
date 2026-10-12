@@ -21,6 +21,7 @@ dependencies = [
     "pdfplumber>=0.10.0",
     "python-docx>=1.1.0",
     "fpdf2>=2.7.0",  # tailored CV/cover-letter PDF render (services/tailoring/pdf.py) — runtime, not dev
+    "fonttools>=4.34.0",  # glyph coverage check for the bundled CV fonts (services/tailoring/cv_render.py); fpdf2 needs it too
     "rich>=13.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
