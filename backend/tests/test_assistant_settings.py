@@ -1392,6 +1392,7 @@ async def test_setup_targets_is_refused_without_titles_and_line_and_nothing_is_s
         assert "setup round targets can't be marked done yet: missing " in detail
         assert detail.startswith("Nothing was saved.")
         assert TITLES in detail and SCORE in detail and "same call" in detail
+        assert "user_info.right_to_work" in detail  # 2026-10-12: no place to search yet
         view = await _view(client)
         assert view["setup_progress"]["done"] == 0
         assert view["apply_min_score"] == {"value": None, "effective": None}
@@ -1407,7 +1408,11 @@ async def test_setup_targets_passes_when_the_same_batch_brings_the_answers(
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         done = _done("targets", at=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())
-        resp = await _patch(client, _e(PROGRESS, done), _e(TITLES, ["AI Engineer"]), _e(SCORE, 70))
+        where = {"countries": [{"country": "GB", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes"}]}
+        resp = await _patch(
+            client, _e(PROGRESS, done), _e(TITLES, ["AI Engineer"]), _e(SCORE, 70),
+            _e("user_info.right_to_work", where),
+        )
         assert resp.status_code == 200, resp.text
         view = await _view(client)
         assert view["setup_progress"]["next"] == "you" and view["apply_min_score"]["effective"] == 70

@@ -18,11 +18,11 @@ for them from the CV. Job360 is the record. Plain words. Rules: `get_recipe("rul
    (REQUIRED); b. level and years -> `preferences.experience_level` (entry|mid|
    senior|lead|executive) + `preferences.experience_years_min`/`_max` (their exact
    range, e.g. 1 and 3); c. countries/cities -> `preferences.preferred_locations`;
-   d. remote/hybrid/on-site, per country if it differs ("remote anywhere, on-site
-   only if sponsored") -> `preferences.work_arrangement` + `user_info.right_to_work`
-   records (`remote_ok`, `onsite`: yes|only_if_sponsored|no, `note`; country "ANY"
-   = everywhere else); e. salary -> `preferences.salary_by_country`, a min-max
-   range in its own currency and period, never converted; f. what they look for ->
+   d. WHERE to search, per country ("ANY" = every other country): remote OK
+   (`remote_ok`)? on-site (`onsite`: yes|only_if_sponsored|no)? -> `user_info.right_to_work`
+   + `preferences.work_arrangement`; "anywhere" is not a place: ask which, or ANY;
+   e. salary -> `preferences.salary_by_country`, a min-max range in its own
+   currency and period, never converted; f. what they look for ->
    `preferences.looking_for`; g. dealbreakers -> `preferences.dealbreakers`;
    h. companies to avoid -> `preferences.avoid_companies`; i. **score line**: "I give
    each job a fit score from 0 to 100. Which score is your line? I will show you
@@ -46,7 +46,7 @@ for them from the CV. Job360 is the record. Plain words. Rules: `get_recipe("rul
    form filling (browser control) in your own app".
    **Read back**, then on OK save after each round in ONE `update_profile` call:
    its paths plus `assistant_settings.setup_progress` with that round's `done_at`.
-   Job360 refuses `targets` done without roles and a score line, and `settings`
+   Job360 refuses `targets` done without roles, a score line and a place to search, and `settings`
    done without a Gmail answer: ask what is missing. A refused save saved NOTHING:
    fix the named path, resend ALL paths. Print "N of 6 done". The user may stop:
    "type run 360 to continue". **Done when** the round is saved. STOP if they stop.

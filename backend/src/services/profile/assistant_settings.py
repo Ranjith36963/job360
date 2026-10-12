@@ -734,15 +734,22 @@ async def load_submit_counts(db: JobDatabase, user_id: str, now: datetime) -> Su
 
 def setup_round_missing(round_name: str, profile: UserProfile) -> list[str]:
     """The PATHS that must hold an answer before ``round_name`` may be marked
-    done (owner decision 2026-10-10): ``targets`` needs target job titles AND the
-    user's score line; ``settings`` needs the inbox mode. Pure; ``[]`` for every
-    other round. An empty answer is missing (rule #29 stays: we never invent one)."""
+    done (owner decision 2026-10-10): ``targets`` needs target job titles, the
+    user's score line AND (2026-10-12) at least one place to search - a
+    ``user_info.right_to_work`` record with ``remote_ok`` or ``onsite``, so the
+    hunt never falls back to where the user lives; ``settings`` needs the inbox
+    mode. Pure; ``[]`` for every other round. An empty answer is missing (rule
+    #29 stays: we never invent one)."""
+    from src.services.profile.search_brief import RIGHT_TO_WORK_PATH, build_search_brief  # noqa: PLC0415
+
     missing: list[str] = []
     if round_name == "targets":
         if not profile.preferences.target_job_titles:
             missing.append("preferences.target_job_titles")
         if profile.assistant_settings.apply_min_score is None:
             missing.append(APPLY_MIN_SCORE_PATH)
+        if not build_search_brief(profile.user_info.right_to_work)["rows"]:
+            missing.append(RIGHT_TO_WORK_PATH)
     elif round_name == "settings" and not profile.preferences.daily_check:
         missing.append(INBOX_MODE_PATH)
     return missing
