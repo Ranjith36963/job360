@@ -87,7 +87,7 @@ def _merged(style: Optional[dict[str, Any]]) -> dict[str, Any]:
 @lru_cache(maxsize=8)
 def _glyphs(path: str) -> frozenset[int]:
     """Code points the TTF at ``path`` can draw (so we never emit a missing glyph)."""
-    from fontTools.ttLib import TTFont  # noqa: PLC0415 - lazy, comes with fpdf2
+    from fontTools.ttLib import TTFont  # noqa: PLC0415 - lazy (no stubs: see pyproject mypy overrides)
 
     font = TTFont(path, lazy=True)
     try:
@@ -297,12 +297,15 @@ def _render_once(text: str, st: dict[str, Any], step: int) -> tuple[bytes, int]:
     mb = 12.0
 
     ttf = _font_files(st["font"]["family"])
+    clean: Callable[[str], str]
     if ttf:
         fam = ttf[0]
         cmap = _glyphs(ttf[1][""])
 
-        def clean(t: str) -> str:
+        def _clean_unicode(t: str) -> str:
             return _unicode_clean(t, cmap)
+
+        clean = _clean_unicode
     else:  # bundled fonts missing: core fonts, latin-1 only
         fam = "Times" if st["font"]["family"] == "serif" else "Helvetica"
         clean = _to_latin1

@@ -108,9 +108,9 @@ def test_bullets_are_round_glyphs_not_dashes(pdf_bytes: bytes) -> None:
 def test_links_are_clickable(pdf_bytes: bytes) -> None:
     with _open(pdf_bytes) as pdf:
         uris = [h.get("uri") or "" for h in pdf.pages[0].hyperlinks]
-    hosts = {urlparse(u).hostname for u in uris}
-    assert "linkedin.com" in hosts or "www.linkedin.com" in hosts
-    assert "github.com" in hosts or "www.github.com" in hosts
+    hosts = [urlparse(u).hostname for u in uris]
+    assert any(h == "linkedin.com" or h == "www.linkedin.com" for h in hosts)
+    assert any(h == "github.com" or h == "www.github.com" for h in hosts)
     assert any(u.startswith("mailto:") for u in uris)
 
 

@@ -285,6 +285,8 @@ module = [
     "fpdf",
     "pdfplumber.*",
     "pdfplumber",
+    "fontTools.*",
+    "fontTools",
     "docx.*",
     "docx",
     "argon2.*",

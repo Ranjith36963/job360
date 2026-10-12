@@ -1059,7 +1059,8 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
         # event loop (pdfplumber is sync); {} = keep the default style. A DOCX
         # has no PDF fingerprint, and the reset above already cleared the old one.
         if suffix == ".pdf":
-            profile.cv_data.cv_style = await asyncio.to_thread(extract_cv_style, tmp_path) or {}
+            extracted: Optional[dict[str, Any]] = await asyncio.to_thread(extract_cv_style, tmp_path)
+            profile.cv_data.cv_style = extracted or {}
     finally:
         try:
             os.unlink(tmp_path)
