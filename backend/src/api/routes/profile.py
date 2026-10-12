@@ -45,6 +45,7 @@ from src.services.profile import assistant_settings as settings_rules
 from src.services.profile import edits as profile_edits
 from src.services.profile import forgiving, refusals, setting_requests, user_info
 from src.services.profile.cv_parser import extract_text
+from src.services.profile.cv_style import extract_cv_style
 from src.services.profile.github_enricher import (
     enrich_cv_from_github,
     fetch_github_profile,
@@ -1054,6 +1055,11 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
         # path-ish value, and the directory part is neither useful nor ours.
         profile.cv_data.cv_filename = os.path.basename(filename or "")[:255]
         profile.cv_data.cv_uploaded_at = datetime.now(timezone.utc).isoformat()
+        # Remember the PDF's own design so generated CVs follow it. Off the
+        # event loop (pdfplumber is sync); {} = keep the default style. A DOCX
+        # has no PDF fingerprint, and the reset above already cleared the old one.
+        if suffix == ".pdf":
+            profile.cv_data.cv_style = await asyncio.to_thread(extract_cv_style, tmp_path) or {}
     finally:
         try:
             os.unlink(tmp_path)
@@ -1801,6 +1807,7 @@ def _clear_cv(cv: CVData) -> None:
     cv.raw_text = ""
     cv.cv_filename = ""
     cv.cv_uploaded_at = ""
+    cv.cv_style = {}
     cv.extraction_score = {}
 
 
