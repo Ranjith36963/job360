@@ -415,7 +415,8 @@ def build_server(version: str = "") -> MCPServer:
         word only when `approved` is true.
 
         HUNT: `search_brief.rows` = the ONLY places to search, each with its `counts_if` lines;
-        `search_brief.gaps` = ask each once, save to user_info.right_to_work, then search.
+        `search_brief.gaps` = ask each once, save to the gap's `path`
+        (user_info.answers: {question: ask text, answer: Yes|No, approved: true}), then search.
 
         Other keys: job_titles, experience_level, experience_level_inferred, agent_edits, lessons, assistant_hint.
         Full rules and shapes: get_recipe("rules")."""

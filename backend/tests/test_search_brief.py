@@ -178,3 +178,35 @@ def test_lives_in_the_same_country_asks_nothing():
 
 def test_no_residence_means_no_question():
     assert build_search_brief(_rtw(_IN_CITIZEN_REMOTE))["gaps"] == []
+
+
+def test_yes_variants_keep_the_country():
+    for word in ("Yes", "yes ", "Y", "true"):
+        ans = [{"question": _Q, "answer": word, "approved": True}]
+        brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)
+        assert brief["gaps"] == [] and brief["work_from"] == ["IN"], word
+
+
+def test_unclear_approved_answer_stays_a_gap_with_same_wording():
+    for word in ("maybe", "only if paid in GBP", "Not sure"):
+        ans = [{"question": _Q, "answer": word, "approved": True}]
+        brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)
+        assert [g["ask"] for g in brief["gaps"]] == [_Q] and brief["work_from"] == ["IN"], word
+
+
+def test_no_variants_drop_the_country():
+    for word in ("No", "n", "false"):
+        ans = [{"question": _Q, "answer": word, "approved": True}]
+        assert build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)["work_from"] == [], word
+
+
+def test_only_remote_ok_rows_get_the_residence_question():
+    in_onsite = {"country": "IN", "work_authorization": "citizen", "remote_ok": False, "onsite": "yes"}
+    us_remote = {"country": "US", "work_authorization": "citizen", "remote_ok": True, "onsite": "no"}
+    brief = build_search_brief(_rtw(in_onsite, us_remote), "GB", [])
+    assert [g["country"] for g in brief["gaps"] if g["path"] == "user_info.answers"] == ["US"]
+
+
+def test_no_remote_row_means_no_residence_question():
+    in_onsite = {"country": "IN", "work_authorization": "citizen", "remote_ok": False, "onsite": "yes"}
+    assert build_search_brief(_rtw(in_onsite), "GB", [])["gaps"] == []

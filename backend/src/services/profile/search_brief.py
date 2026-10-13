@@ -67,6 +67,10 @@ def work_from_question(residence: str, country: str) -> str:
     return f"You live in {residence}. Would you work from {country} for a remote job there?"
 
 
+_YES = frozenset({"yes", "y", "true"})
+_NO = frozenset({"no", "n", "false"})
+
+
 def _approved_answer(answers: Any, question: str) -> str:
     """The user's approved answer to ``question`` (matched on the question text,
     case and spacing ignored), lower-cased; ``""`` when none (never a guess)."""
@@ -108,15 +112,16 @@ def build_search_brief(
 
     rows: list[dict[str, Any]] = []
     gaps: list[dict[str, Any]] = []
-    if residence and any(r.get("remote_ok") is True for r in records):
+    remote_countries = {r["country"] for r in records if r.get("remote_ok") is True}
+    if residence:
         for country in list(work_from):
-            if country == residence:
+            if country == residence or country not in remote_countries:
                 continue
             question = work_from_question(residence, country)
             reply = _approved_answer(answers, question)
-            if reply == "no":
+            if reply in _NO:
                 work_from.remove(country)
-            elif not reply:
+            elif reply not in _YES:  # no answer, or an unclear one: ask again, never infer consent
                 gaps.append({"path": USER_INFO_ANSWERS_PATH, "country": country, "ask": question})
     for rec in records:
         country, remote, onsite = rec["country"], rec.get("remote_ok"), rec.get("onsite")
