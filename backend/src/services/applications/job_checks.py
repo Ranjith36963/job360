@@ -65,6 +65,24 @@ def canonical_url(url: str) -> str:
     return urlunsplit(("https", netloc, parts.path.rstrip("/"), urlencode(kept), ""))
 
 
+# A link names ONE job when it carries a job id: a long number, a UUID-like
+# token, or a known job-id query key. Board roots and careers home pages do not.
+_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+_JOB_ID_SEGMENT = re.compile(rf"(?:^|[/_-])(?:\d{{4,}}|{_UUID})(?:$|[/_-])", re.I)
+_JOB_ID_KEYS = frozenset({"jk", "vjk", "gh_jid", "currentjobid", "jobid", "job_id", "jid", "id", "req", "reqid"})
+
+
+def is_job_specific_url(url: str) -> bool:
+    """True when ``url`` identifies a single job (see the two patterns above)."""
+    try:
+        parts = urlsplit((url or "").strip())
+    except ValueError:
+        return False
+    if _JOB_ID_SEGMENT.search(parts.path or ""):
+        return True
+    return any(k.lower() in _JOB_ID_KEYS and v.strip() for k, v in parse_qsl(parts.query))
+
+
 def apply_host(url: str) -> str:
     """The real host of ``url`` ('' when it is not an http(s) link). ``urlsplit``
     takes everything after the LAST ``@`` as the host, so

@@ -153,7 +153,7 @@ def test_canonical_url_folds_tracking_and_noise():
 
 _AD = {
     "title": "ML Engineer", "company": "Parisien", "location": "Paris",
-    "apply_url": "https://boards.greenhouse.io/parisien/jobs/1",
+    "apply_url": "https://boards.greenhouse.io/parisien/jobs/4501234",
     "description": "Train and ship models. Python, PyTorch. Salary 70000 EUR. Visa sponsorship offered.",
 }
 
@@ -217,15 +217,38 @@ async def test_same_link_with_tracking_params_is_the_same_job(authenticated_asyn
         assert first["existing"] is False
         retitled = {
             **_AD, "title": "Machine Learning Engineer (Remote)", "company": "Parisien SAS",
-            "apply_url": "https://Boards.Greenhouse.io/parisien/jobs/1/?utm_source=linkedin&gclid=zz#apply",
+            "apply_url": "https://Boards.Greenhouse.io/parisien/jobs/4501234/?utm_source=linkedin&gclid=zz#apply",
         }
         second = (await _bring(client, retitled)).json()
         assert second["existing"] is True
         assert second["job"]["id"] == first["job"]["id"]
         assert second["application_id"] == first["application_id"]
-        other = (await _bring(client, {**_AD, "title": "Other", "apply_url": "https://boards.greenhouse.io/parisien/jobs/2"})).json()
+        other = (await _bring(client, {**_AD, "title": "Other", "apply_url": "https://boards.greenhouse.io/parisien/jobs/4501299"})).json()
         assert other["existing"] is False and other["application_id"] != first["application_id"]
         assert len((await client.get("/api/applications")).json()["applications"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_shared_careers_link_never_merges_two_jobs(authenticated_async_context):
+    """A board root / careers home page is shared by many jobs: two different
+    titles there are two applications (CI 2026-10-13 caught the merge)."""
+    async with authenticated_async_context() as client:
+        shared = "https://northwind.example/careers/7"
+        a = (await _bring(client, {**_AD, "title": "Data Engineer", "apply_url": shared})).json()
+        b = (await _bring(client, {**_AD, "title": "ML Engineer", "apply_url": shared})).json()
+        assert a["existing"] is False and b["existing"] is False
+        assert a["application_id"] != b["application_id"]
+
+
+def test_job_specific_url():
+    from src.services.applications.job_checks import is_job_specific_url
+
+    assert is_job_specific_url("https://boards.greenhouse.io/acme/jobs/4501234")
+    assert is_job_specific_url("https://jobs.ashbyhq.com/rifa/bd6366c8-893a-49fd-9b9a-31cb75a397d0/application")
+    assert is_job_specific_url("https://in.indeed.com/viewjob?jk=d56bf1dbda3ddc79")
+    assert not is_job_specific_url("https://northwind.example/careers/7")
+    assert not is_job_specific_url("https://jobs.lever.co/acme")
+    assert not is_job_specific_url("https://acme.com/careers")
 
 
 @pytest.mark.asyncio

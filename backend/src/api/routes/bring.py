@@ -170,20 +170,28 @@ class BringJobResponse(BaseModel):
     checks: list[dict[str, Any]] = Field(default_factory=list)
 
 
-async def _job_id_for_same_link(db: JobDatabase, user_id: str, apply_url: str) -> Optional[int]:
-    """The caller's own job whose stored apply link canonicalises the same as
-    ``apply_url`` (None when there is none or the link is blank). Per user,
-    so another user's paste is never matched (rule #10 / S2)."""
-    from src.services.applications.job_checks import canonical_url  # noqa: PLC0415
+async def _job_id_for_same_link(db: JobDatabase, user_id: str, apply_url: str, company: str) -> Optional[int]:
+    """The caller's own job at the SAME company whose stored apply link
+    canonicalises the same as ``apply_url`` - the re-titled repost the
+    title+company key cannot see. Only a job-specific link counts (it carries a
+    job id); a careers home page or board root is shared by many jobs and never
+    merges two of them. None when nothing matches. Per user, so another user's
+    paste is never matched (rule #10 / S2)."""
+    from src.services.applications.job_checks import canonical_url, is_job_specific_url  # noqa: PLC0415
 
     wanted = canonical_url(apply_url)
-    if not wanted:
+    if not wanted or not is_job_specific_url(apply_url):
         return None
+    want_company = " ".join(company.lower().split())
     cur = await db._db.execute(
-        "SELECT job_id, job_url FROM applications WHERE user_id = ? AND job_url <> '' ORDER BY id", (user_id,)
+        "SELECT job_id, job_url, job_company FROM applications WHERE user_id = ? AND job_url <> '' ORDER BY id",
+        (user_id,),
     )
     for r in await cur.fetchall():
-        if canonical_url(str(r["job_url"] or "")) == wanted:
+        have = " ".join(str(r["job_company"] or "").lower().split())
+        # "Parisien" and "Parisien SAS" are the same employer; two blanks never match.
+        same_company = bool(have and want_company) and (have.startswith(want_company) or want_company.startswith(have))
+        if same_company and canonical_url(str(r["job_url"] or "")) == wanted:
             return int(r["job_id"])
     return None
 
@@ -244,7 +252,12 @@ async def bring_job(
     # Same ad link already brought by THIS user (tracking params, www, fragment
     # and a trailing slash ignored)? Reuse that job - the title+company key
     # cannot see a re-titled repost. Pattern: Gsync/jobsync src/lib/jobs/jobDedupe.ts (MIT).
-    same_link_job_id = await _job_id_for_same_link(db, user.id, body.apply_url)
+    # Only when the title+company key is NEW: an exact re-bring keeps the old
+    # path (it also clears a stale ghost-sweep mark via update_last_seen).
+    same_link_job_id = (
+        None if await db.get_job_id_by_key(job.normalized_key()) is not None
+        else await _job_id_for_same_link(db, user.id, body.apply_url, body.company)
+    )
     inserted = False if same_link_job_id is not None else await db.insert_job(job)
     await db.commit()
     if same_link_job_id is None and not inserted:
