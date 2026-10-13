@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
+from typing import Any, cast
 
 _FORBIDDEN = re.compile(r"<!\s*(DOCTYPE|ENTITY)", re.I)
 
@@ -22,12 +24,13 @@ def safe_fromstring(data: str | bytes) -> ET.Element | None:
         return None
     # A pull parser fed only text whose DOCTYPE/ENTITY declarations were rejected
     # above: no entity expansion, no external entity, ever.
-    parser = ET.XMLPullParser(events=("start",))
+    parser: ET.XMLPullParser[ET.Element] = ET.XMLPullParser(events=("start",))
     root: ET.Element | None = None
     try:
         parser.feed(text)
-        for _event, elem in parser.read_events():
-            if root is None:
+        events = cast("Iterator[tuple[str, Any]]", parser.read_events())
+        for _event, elem in events:
+            if root is None and isinstance(elem, ET.Element):
                 root = elem
         parser.close()
     except ET.ParseError:

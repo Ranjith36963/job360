@@ -29,6 +29,7 @@ import unicodedata
 import urllib.parse
 import zipfile
 from pathlib import Path
+from typing import Any
 
 CODES_URL = "https://raw.githubusercontent.com/datasets/country-codes/main/data/country-codes.csv"
 CITIES_URL = "https://download.geonames.org/export/dump/cities15000.zip"
@@ -132,10 +133,10 @@ def _fetch(url: str, _hops: int = 5) -> bytes:
         conn.close()
 
 
-def build(codes_csv: bytes, cities_zip: bytes, admin1_txt: bytes = b"") -> dict:
+def build(codes_csv: bytes, cities_zip: bytes, admin1_txt: bytes = b"") -> dict[str, Any]:
     """Combine the two datasets into the places.json structure."""
     rows = list(csv.DictReader(io.StringIO(codes_csv.decode("utf-8"))))
-    countries: dict[str, dict] = {}
+    countries: dict[str, dict[str, Any]] = {}
     for r in rows:
         cc = (r["ISO3166-1-Alpha-2"] or "").strip()
         if len(cc) != 2:
@@ -146,9 +147,9 @@ def build(codes_csv: bytes, cities_zip: bytes, admin1_txt: bytes = b"") -> dict:
             if not v:
                 continue
             for cand in (v, re.sub(r"\s*\(.*?\)", "", v)):
-                f = fold(cand)
-                if len(f) >= 4:
-                    names.add(f)
+                folded = fold(cand)
+                if len(folded) >= 4:
+                    names.add(folded)
         for a in EXTRA_COUNTRY_ALIASES.get(cc, []):
             names.add(fold(a))
         countries[cc] = {

@@ -54,7 +54,7 @@ def _s(value: Any) -> str:
     return "" if text.lower() in ("nan", "nat", "none") else text.strip()
 
 
-def _records(result: Any) -> list[dict]:
+def _records(result: Any) -> list[dict[str, Any]]:
     """DataFrame (or list of dicts) -> list of plain dicts."""
     if result is None:
         return []
@@ -78,7 +78,7 @@ def _bool_or_none(value: Any) -> bool | None:
     return None
 
 
-def _to_job(row: dict, site: str) -> dict | None:
+def _to_job(row: dict[str, Any], site: str) -> dict[str, Any] | None:
     """Map one JobSpy row to a kit Job dict. Prefers the direct employer URL."""
     url = _s(row.get("job_url_direct")) or _s(row.get("job_url"))
     title = _s(row.get("title"))
@@ -105,7 +105,7 @@ def _to_job(row: dict, site: str) -> dict | None:
 
 def run_boards(sites: list[str], queries: list[str], *, days: int, remote: bool,
                countries: list[str], results_wanted: int, full_text: bool,
-               stats: dict) -> list[dict]:
+               stats: dict[str, Any]) -> list[dict[str, Any]]:
     """Search the chosen big boards via python-jobspy. Never raises.
 
     stats gets "tried", "ok", "jobs" plus per-site keys "<site>_tried/_ok/_jobs"
@@ -119,7 +119,7 @@ def run_boards(sites: list[str], queries: list[str], *, days: int, remote: bool,
     print(WARNING, file=sys.stderr)
     for key in ("tried", "ok", "jobs"):
         stats.setdefault(key, 0)
-    notes: list[str] = stats.setdefault("notes", [])  # type: ignore[assignment]
+    notes: list[str] = stats.setdefault("notes", [])
 
     chosen: list[str] = []
     for s in sites or []:
@@ -138,7 +138,7 @@ def run_boards(sites: list[str], queries: list[str], *, days: int, remote: bool,
     wanted = max(1, min(int(results_wanted or 15), MAX_RESULTS))
     hours = max(1, int(days) * 24) if days else None
 
-    jobs: list[dict] = []
+    jobs: list[dict[str, Any]] = []
     seen: set[str] = set()
     for site in chosen:
         st = {"tried": 0, "ok": 0, "jobs": 0}

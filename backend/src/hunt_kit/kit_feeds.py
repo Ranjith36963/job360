@@ -27,12 +27,14 @@ import os
 import re
 
 try:  # shared safe-XML helper (same folder)
-    from kit_xml import safe_fromstring
+    from kit_xml import safe_fromstring  # type: ignore[import-not-found]  # sibling file, not a package module
 except ImportError:  # loaded by file path: find the sibling file
     import importlib.util as _ilu
     from pathlib import Path as _Path
 
     _spec = _ilu.spec_from_file_location("kit_xml", _Path(__file__).with_name("kit_xml.py"))
+    if _spec is None or _spec.loader is None:
+        raise ImportError("kit_xml.py not found next to this file")
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     safe_fromstring = _mod.safe_fromstring
@@ -42,9 +44,9 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 from urllib.parse import quote, urlencode
 
-Job = dict
-Stats = dict
-HttpFn = Callable[..., tuple]
+Job = dict[str, Any]
+Stats = dict[str, Any]
+HttpFn = Callable[..., "tuple[int, Any]"]
 
 MAX_PAGES = 5          # hard cap: pages per feed per query
 MAX_QUERIES = 5        # hard cap: queries sent to a feed that searches server-side
@@ -104,7 +106,7 @@ def _date(value: Any) -> str:
 def _job(
     *, title: Any, company: Any, url: Any, location: Any = "", posted: str = "",
     description: Any = "", source: str, board: str = "", remote: bool | None = None,
-    visa_flag: bool | None = None, extra: dict | None = None,
+    visa_flag: bool | None = None, extra: dict[str, Any] | None = None,
 ) -> Job:
     """Build a Job dict with every contract key present."""
     return {
@@ -137,7 +139,7 @@ def _recent(job: Job, days: int) -> bool:
     if not days or days <= 0 or not job["posted"]:
         return True
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
-    return job["posted"] >= cutoff
+    return bool(job["posted"] >= cutoff)
 
 
 def _keep(jobs: list[Job], queries: list[str], days: int, *, search: bool = True) -> list[Job]:
@@ -248,7 +250,7 @@ def parse_hn_comment(raw_html: str, comment_id: Any, created_at: str = "") -> Jo
     )
 
 
-def parse_hn_thread(item: dict) -> list[Job]:
+def parse_hn_thread(item: dict[str, Any]) -> list[Job]:
     """All top-level comments of a thread item (Algolia ``/items/{id}`` shape) as Jobs."""
     jobs: list[Job] = []
     for c in (item or {}).get("children") or []:
@@ -261,7 +263,7 @@ def parse_hn_thread(item: dict) -> list[Job]:
 
 
 @_feed
-def fetch_hn(queries, http, stats, *, days, countries):
+def fetch_hn(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """Latest Hacker News 'Ask HN: Who is hiring?' thread, keyword-matched on each comment."""
     search = _get(http, stats,
                   "https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring"
@@ -275,9 +277,9 @@ def fetch_hn(queries, http, stats, *, days, countries):
 
 
 # ------------------------------------------------------------------------------- Jobicy
-def parse_jobicy(payload: dict) -> list[Job]:
+def parse_jobicy(payload: dict[str, Any]) -> list[Job]:
     """Parse a Jobicy v2 response."""
-    out = []
+    out: list[Job] = []
     for r in (payload or {}).get("jobs") or []:
         geo = re.sub(r"\s*,\s*", ", ", str(r.get("jobGeo") or "")).strip()
         out.append(_job(
@@ -291,7 +293,7 @@ def parse_jobicy(payload: dict) -> list[Job]:
 
 
 @_feed
-def fetch_jobicy(queries, http, stats, *, days, countries):
+def fetch_jobicy(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """Jobicy remote jobs; one request per query (as ``tag``) or one unfiltered request."""
     jobs: list[Job] = []
     for q in (_queries(queries) or [""]):
@@ -303,9 +305,9 @@ def fetch_jobicy(queries, http, stats, *, days, countries):
 
 
 # -------------------------------------------------------------------------- Working Nomads
-def parse_workingnomads(payload: list) -> list[Job]:
+def parse_workingnomads(payload: list[Any]) -> list[Job]:
     """Parse the Working Nomads exposed_jobs array."""
-    out = []
+    out: list[Job] = []
     for r in payload or []:
         tags = [t.strip() for t in str(r.get("tags") or "").split(",") if t.strip()]
         out.append(_job(
@@ -318,7 +320,9 @@ def parse_workingnomads(payload: list) -> list[Job]:
 
 
 @_feed
-def fetch_workingnomads(queries, http, stats, *, days, countries):
+def fetch_workingnomads(
+    queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]
+) -> list[Job]:
     """Working Nomads (one request, whole feed, keyword-matched locally)."""
     body = _get(http, stats, "https://www.workingnomads.com/api/exposed_jobs/")
     return _keep(parse_workingnomads(body if isinstance(body, list) else []), queries, days)
@@ -336,7 +340,7 @@ def parse_wwr(xml_text: str) -> list[Job]:
     root = safe_fromstring(xml_text)
     if root is None:
         return []  # empty, malformed, or declares DOCTYPE/ENTITY
-    out = []
+    out: list[Job] = []
     for it in root.iter("item"):
         raw_title = (it.findtext("title") or "").strip()
         company, _, title = raw_title.partition(": ")
@@ -353,21 +357,25 @@ def parse_wwr(xml_text: str) -> list[Job]:
 
 
 @_feed
-def fetch_wwr(queries, http, stats, *, days, countries):
+def fetch_wwr(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """We Work Remotely: four programming-related category feeds, keyword-matched locally."""
     jobs: list[Job] = []
     for cat in WWR_CATEGORIES:
         body = _get(http, stats, f"https://weworkremotely.com/categories/{cat}.rss", as_json=False)
         jobs += parse_wwr(body if isinstance(body, str) else "")
     seen: set[str] = set()
-    uniq = [j for j in jobs if not (j["url"] in seen or seen.add(j["url"]))]
+    uniq: list[Job] = []
+    for j in jobs:
+        if j["url"] not in seen:
+            seen.add(j["url"])
+            uniq.append(j)
     return _keep(uniq, queries, days)
 
 
 # ------------------------------------------------------------------------------ The Muse
-def parse_themuse(payload: dict) -> list[Job]:
+def parse_themuse(payload: dict[str, Any]) -> list[Job]:
     """Parse a The Muse public jobs page."""
-    out = []
+    out: list[Job] = []
     for r in (payload or {}).get("results") or []:
         locs = [str(x.get("name", "")) for x in r.get("locations") or [] if x.get("name")]
         loc = ", ".join(locs)
@@ -384,7 +392,7 @@ def parse_themuse(payload: dict) -> list[Job]:
 
 
 @_feed
-def fetch_themuse(queries, http, stats, *, days, countries):
+def fetch_themuse(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """The Muse: first MAX_PAGES pages, keyword-matched locally."""
     jobs: list[Job] = []
     for page in range(1, MAX_PAGES + 1):
@@ -398,9 +406,9 @@ def fetch_themuse(queries, http, stats, *, days, countries):
 
 
 # ---------------------------------------------------------------------------- Arbeitnow
-def parse_arbeitnow(payload: dict) -> list[Job]:
+def parse_arbeitnow(payload: dict[str, Any]) -> list[Job]:
     """Parse an Arbeitnow job-board page (maps ``remote`` and ``visa_sponsorship``)."""
-    out = []
+    out: list[Job] = []
     for r in (payload or {}).get("data") or []:
         visa = r.get("visa_sponsorship")
         out.append(_job(
@@ -415,7 +423,7 @@ def parse_arbeitnow(payload: dict) -> list[Job]:
 
 
 @_feed
-def fetch_arbeitnow(queries, http, stats, *, days, countries):
+def fetch_arbeitnow(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """Arbeitnow (mostly Germany/EU): first MAX_PAGES pages, keyword-matched locally."""
     jobs: list[Job] = []
     for page in range(1, MAX_PAGES + 1):
@@ -428,9 +436,9 @@ def fetch_arbeitnow(queries, http, stats, *, days, countries):
 
 
 # --------------------------------------------------------------------------- Himalayas
-def parse_himalayas(payload: dict) -> list[Job]:
+def parse_himalayas(payload: dict[str, Any]) -> list[Job]:
     """Parse a Himalayas jobs API page (``locationRestrictions`` becomes location)."""
-    out = []
+    out: list[Job] = []
     for r in (payload or {}).get("jobs") or []:
         restr = [str(x) for x in r.get("locationRestrictions") or []]
         out.append(_job(
@@ -447,7 +455,7 @@ def parse_himalayas(payload: dict) -> list[Job]:
 
 
 @_feed
-def fetch_himalayas(queries, http, stats, *, days, countries):
+def fetch_himalayas(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """Himalayas remote jobs: up to MAX_PAGES pages of 100, keyword-matched locally."""
     jobs: list[Job] = []
     for page in range(MAX_PAGES):
@@ -462,9 +470,9 @@ def fetch_himalayas(queries, http, stats, *, days, countries):
 
 
 # ---------------------------------------------------------------------------- Remotive
-def parse_remotive(payload: dict) -> list[Job]:
+def parse_remotive(payload: dict[str, Any]) -> list[Job]:
     """Parse a Remotive API response."""
-    out = []
+    out: list[Job] = []
     for r in (payload or {}).get("jobs") or []:
         out.append(_job(
             title=r.get("title"), company=(r.get("company_name") or "").strip(),
@@ -477,7 +485,7 @@ def parse_remotive(payload: dict) -> list[Job]:
 
 
 @_feed
-def fetch_remotive(queries, http, stats, *, days, countries):
+def fetch_remotive(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """Remotive: server-side ``search`` per query (or one unfiltered request)."""
     jobs: list[Job] = []
     for q in (_queries(queries) or [""]):
@@ -487,9 +495,9 @@ def fetch_remotive(queries, http, stats, *, days, countries):
 
 
 # ---------------------------------------------------------------------------- RemoteOK
-def parse_remoteok(payload: list) -> list[Job]:
+def parse_remoteok(payload: list[Any]) -> list[Job]:
     """Parse RemoteOK's array; the first row is a legal notice and is skipped."""
-    out = []
+    out: list[Job] = []
     for r in payload or []:
         if not isinstance(r, dict) or not r.get("position"):
             continue  # legal row / junk
@@ -504,16 +512,16 @@ def parse_remoteok(payload: list) -> list[Job]:
 
 
 @_feed
-def fetch_remoteok(queries, http, stats, *, days, countries):
+def fetch_remoteok(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """RemoteOK (one request, keyword-matched locally). Link back to remoteok.com when showing."""
     body = _get(http, stats, "https://remoteok.com/api")
     return _keep(parse_remoteok(body if isinstance(body, list) else []), queries, days)
 
 
 # ------------------------------------------------------------------------------ Adzuna
-def parse_adzuna(payload: dict, country: str = "") -> list[Job]:
+def parse_adzuna(payload: dict[str, Any], country: str = "") -> list[Job]:
     """Parse an Adzuna search response (descriptions are API-truncated snippets)."""
-    out = []
+    out: list[Job] = []
     for r in (payload or {}).get("results") or []:
         out.append(_job(
             title=r.get("title"), company=(r.get("company") or {}).get("display_name"),
@@ -527,7 +535,7 @@ def parse_adzuna(payload: dict, country: str = "") -> list[Job]:
 
 
 @_feed
-def fetch_adzuna(queries, http, stats, *, days, countries):
+def fetch_adzuna(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """Adzuna official API. Needs env ADZUNA_APP_ID + ADZUNA_APP_KEY; only supported countries."""
     app_id, app_key = os.environ.get("ADZUNA_APP_ID", ""), os.environ.get("ADZUNA_APP_KEY", "")
     if not app_id or not app_key:
@@ -554,9 +562,9 @@ def fetch_adzuna(queries, http, stats, *, days, countries):
 
 
 # ------------------------------------------------------------------------------ Jooble
-def parse_jooble(payload: dict) -> list[Job]:
+def parse_jooble(payload: dict[str, Any]) -> list[Job]:
     """Parse a Jooble search response (snippets, not full descriptions)."""
-    out = []
+    out: list[Job] = []
     for r in (payload or {}).get("jobs") or []:
         out.append(_job(
             title=r.get("title"), company=r.get("company"), url=r.get("link"),
@@ -568,7 +576,7 @@ def parse_jooble(payload: dict) -> list[Job]:
 
 
 @_feed
-def fetch_jooble(queries, http, stats, *, days, countries):
+def fetch_jooble(queries: list[str], http: HttpFn, stats: Stats, *, days: int, countries: list[str]) -> list[Job]:
     """Jooble official API (POST). Needs env JOOBLE_KEY. Locations come from ``countries``."""
     key = os.environ.get("JOOBLE_KEY", "")
     if not key:

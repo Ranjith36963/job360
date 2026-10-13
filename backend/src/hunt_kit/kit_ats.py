@@ -19,19 +19,21 @@ import re
 import xml.etree.ElementTree as ET
 
 try:  # shared safe-XML helper (same folder)
-    from kit_xml import safe_fromstring
+    from kit_xml import safe_fromstring  # type: ignore[import-not-found]  # sibling file, not a package module
 except ImportError:  # loaded by file path: find the sibling file
     import importlib.util as _ilu
     from pathlib import Path as _Path
 
     _spec = _ilu.spec_from_file_location("kit_xml", _Path(__file__).with_name("kit_xml.py"))
+    if _spec is None or _spec.loader is None:
+        raise ImportError("kit_xml.py not found next to this file")
     _mod = _ilu.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     safe_fromstring = _mod.safe_fromstring
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
-Job = dict
+Job = dict[str, Any]
 Http = Callable[..., "tuple[int, Any]"]
 
 MAX_PAGES = 10  # hard cap on pages per board
@@ -105,9 +107,9 @@ def _join(*parts: Any) -> str:
     return ", ".join(out)
 
 
-def _job(row: dict, source: str, *, title: str, url: str, location: str = "", posted: str = "",
+def _job(row: dict[str, Any], source: str, *, title: str, url: str, location: str = "", posted: str = "",
          description: str = "", remote: bool | None = None, visa_flag: bool | None = None,
-         extra: dict | None = None) -> Job:
+         extra: dict[str, Any] | None = None) -> Job:
     """Build a Job dict in the shared shape."""
     return {
         "title": (title or "").strip(),
@@ -140,7 +142,7 @@ def _get(http: Http, url: str, *, as_json: bool = True, **kw: Any) -> tuple[int,
         return 0, None
 
 
-def _count(stats: dict, *, ok: bool, jobs: int = 0) -> None:
+def _count(stats: dict[str, Any], *, ok: bool, jobs: int = 0) -> None:
     """Update the shared tried/ok/jobs counters."""
     stats["tried"] = stats.get("tried", 0) + 1
     if ok:
@@ -149,7 +151,7 @@ def _count(stats: dict, *, ok: bool, jobs: int = 0) -> None:
 
 
 # --------------------------------------------------------------------------- Workday
-def _workday_base(row: dict) -> tuple[str, str, str]:
+def _workday_base(row: dict[str, Any]) -> tuple[str, str, str]:
     """(origin, tenant, site) for a Workday row; tenant defaults to token, wd to 'wd1'."""
     tenant = str(row.get("tenant") or row.get("token") or "")
     wd = str(row.get("wd") or "wd1")
@@ -159,7 +161,7 @@ def _workday_base(row: dict) -> tuple[str, str, str]:
     return f"https://{tenant}.{wd}.myworkdayjobs.com", tenant, site
 
 
-def fetch_workday(row: dict, http: Http, stats: dict) -> list[Job]:
+def fetch_workday(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """Workday CXS: POST list (20/page, max 10 pages) then GET each posting's detail."""
     try:
         origin, tenant, site = _workday_base(row)
@@ -168,7 +170,7 @@ def fetch_workday(row: dict, http: Http, stats: dict) -> list[Job]:
             return []
         api = f"{origin}/wday/cxs/{tenant}/{site}/jobs"
         hdrs = {"Content-Type": "application/json", "Accept": "application/json"}
-        postings: list[dict] = []
+        postings: list[dict[str, Any]] = []
         ok = False
         for page in range(MAX_PAGES):
             body = json.dumps({"appliedFacets": {}, "limit": WORKDAY_PAGE,
@@ -209,7 +211,7 @@ def fetch_workday(row: dict, http: Http, stats: dict) -> list[Job]:
 
 
 # --------------------------------------------------------------------------- Workable
-def fetch_workable(row: dict, http: Http, stats: dict) -> list[Job]:
+def fetch_workable(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """Workable public widget API (one response, details=true gives descriptions)."""
     token = str(row.get("token") or "")
     try:
@@ -244,7 +246,7 @@ def fetch_workable(row: dict, http: Http, stats: dict) -> list[Job]:
 
 
 # --------------------------------------------------------------------------- Recruitee
-def fetch_recruitee(row: dict, http: Http, stats: dict) -> list[Job]:
+def fetch_recruitee(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """Recruitee public offers API."""
     token = str(row.get("token") or "")
     try:
@@ -280,7 +282,7 @@ def _parse_xml(data: Any) -> ET.Element:
     root = safe_fromstring(data)
     if root is None:
         raise ET.ParseError("refused or malformed XML")
-    return root
+    return cast(ET.Element, root)
 
 
 def _child(el: ET.Element, name: str) -> str:
@@ -289,7 +291,7 @@ def _child(el: ET.Element, name: str) -> str:
     return (c.text or "").strip() if c is not None and c.text else ""
 
 
-def fetch_personio(row: dict, http: Http, stats: dict) -> list[Job]:
+def fetch_personio(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """Personio XML feed (https://{token}.jobs.personio.de/xml)."""
     token = str(row.get("token") or "")
     try:
@@ -326,7 +328,7 @@ def fetch_personio(row: dict, http: Http, stats: dict) -> list[Job]:
 _TT_NS = {"tt": "https://teamtailor.com/locations"}
 
 
-def fetch_teamtailor(row: dict, http: Http, stats: dict) -> list[Job]:
+def fetch_teamtailor(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """Teamtailor RSS feed (https://{token}.teamtailor.com/jobs.rss)."""
     token = str(row.get("token") or "")
     try:
@@ -373,7 +375,7 @@ def _bamboo_loc(loc: Any) -> str:
                  loc.get("country") or loc.get("addressCountry"))
 
 
-def fetch_bamboohr(row: dict, http: Http, stats: dict) -> list[Job]:
+def fetch_bamboohr(row: dict[str, Any], http: Http, stats: dict[str, Any]) -> list[Job]:
     """BambooHR careers list + per-posting detail (descriptions live in the detail)."""
     token = str(row.get("token") or "")
     try:
@@ -410,7 +412,7 @@ def fetch_bamboohr(row: dict, http: Http, stats: dict) -> list[Job]:
         return []
 
 
-ATS_FETCHERS: dict[str, Callable[[dict, Http, dict], list[Job]]] = {
+ATS_FETCHERS: dict[str, Callable[[dict[str, Any], Http, dict[str, Any]], list[Job]]] = {
     "workday": fetch_workday,
     "workable": fetch_workable,
     "recruitee": fetch_recruitee,

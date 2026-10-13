@@ -27,6 +27,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 _PAREN_CODE = re.compile(r"\(\s*([A-Z]{2})\s*\)")
 _REMOTE_CODE = re.compile(r"(?i:remote|hybrid|onsite|on-site)\s*[-\u2013\u2014:/,|]*\s*([A-Z]{2})\b")
@@ -46,7 +47,7 @@ def fold(s: str) -> str:
 class Places:
     """Country / city / region lookup built from places.json."""
 
-    countries: dict[str, dict]
+    countries: dict[str, dict[str, Any]]
     regions: dict[str, list[str]]
     cities: dict[str, list[str]]
     admin1: dict[str, list[str]]

@@ -29,7 +29,6 @@ import concurrent.futures
 import datetime as _dt
 import functools
 import html
-import http.client
 import importlib
 import ipaddress
 import json
@@ -45,7 +44,7 @@ import urllib.request
 from dataclasses import dataclass
 from http.client import HTTPException
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, cast
 
 USER_AGENT = "job360-hunt-kit/1.0 (+https://job360.uk)"
 MAX_WORKERS = 8
@@ -279,7 +278,7 @@ def parse_country_list(value: str | Iterable[str] | None) -> frozenset[str]:
 
 def country_name(cc: str) -> str:
     """A readable English name for an ISO2 code (for API parameters)."""
-    return get_places().name(cc)
+    return str(get_places().name(cc))
 
 
 @dataclass(frozen=True)
@@ -669,7 +668,7 @@ def http_get_text(url: str, params: Any = None, retries: int = RETRIES_429) -> t
 
 # ============================================================= adapters
 # Each adapter has a pure parse_* function (offline testable) and a fetch wrapper.
-def parse_greenhouse(d: dict, b: dict) -> list[dict]:
+def parse_greenhouse(d: dict[str, Any], b: dict[str, Any]) -> list[dict[str, Any]]:
     """Greenhouse boards-api payload to raw jobs."""
     return [
         dict(
@@ -685,7 +684,7 @@ def parse_greenhouse(d: dict, b: dict) -> list[dict]:
     ]
 
 
-def parse_lever(d: list, b: dict) -> list[dict]:
+def parse_lever(d: list[Any], b: dict[str, Any]) -> list[dict[str, Any]]:
     """Lever postings payload to raw jobs."""
     out = []
     for j in d:
@@ -721,7 +720,7 @@ def parse_lever(d: list, b: dict) -> list[dict]:
     return out
 
 
-def parse_ashby(d: dict, b: dict) -> list[dict]:
+def parse_ashby(d: dict[str, Any], b: dict[str, Any]) -> list[dict[str, Any]]:
     """Ashby posting-api payload to raw jobs."""
     out = []
     for j in d.get("jobs", []):
@@ -748,7 +747,8 @@ def parse_ashby(d: dict, b: dict) -> list[dict]:
     return out
 
 
-def parse_smartrecruiters_list(d: dict, b: dict, detail: Callable[[str], dict] | None = None) -> list[dict]:
+def parse_smartrecruiters_list(d: dict[str, Any], b: dict[str, Any],
+        detail: Callable[[str], dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """SmartRecruiters postings payload to raw jobs."""
     out = []
     for j in d.get("content", []):
@@ -889,13 +889,15 @@ class Collector:
 
 
 # ================================================================= sources
-def _offer_all(col: Collector, source: str, raws: Iterable[dict]) -> None:
+def _offer_all(col: Collector, source: str, raws: Iterable[dict[str, Any]]) -> None:
     for r in raws:
         col.offer(source, r)
 
 
 def _board_json(
-    col: Collector, source: str, b: dict, url: str, parse: Callable[[Any, dict], list[dict]], kind: type = dict
+    col: Collector, source: str, b: dict[str, Any], url: str,
+    parse: Callable[[Any, dict[str, Any]], list[dict[str, Any]]],
+    kind: type = dict
 ) -> None:
     col.bump(source, "boards_tried")
     st, d = http_get_json(url)
@@ -905,7 +907,7 @@ def _board_json(
     _offer_all(col, source, parse(d, b))
 
 
-def _gh(col: Collector, b: dict) -> None:
+def _gh(col: Collector, b: dict[str, Any]) -> None:
     _board_json(
         col,
         "greenhouse",
@@ -915,7 +917,7 @@ def _gh(col: Collector, b: dict) -> None:
     )
 
 
-def _lever(col: Collector, b: dict) -> None:
+def _lever(col: Collector, b: dict[str, Any]) -> None:
     col.bump("lever", "boards_tried")
     for base in ("https://api.lever.co", "https://api.eu.lever.co"):
         st, d = http_get_json("%s/v0/postings/%s?mode=json" % (base, b["token"]), retries=1)
@@ -925,7 +927,7 @@ def _lever(col: Collector, b: dict) -> None:
             return
 
 
-def _ashby(col: Collector, b: dict) -> None:
+def _ashby(col: Collector, b: dict[str, Any]) -> None:
     _board_json(
         col,
         "ashby",
@@ -935,10 +937,10 @@ def _ashby(col: Collector, b: dict) -> None:
     )
 
 
-def _smartrecruiters(col: Collector, b: dict) -> None:
+def _smartrecruiters(col: Collector, b: dict[str, Any]) -> None:
     t = b["token"]
 
-    def detail(pid: str) -> dict:
+    def detail(pid: str) -> dict[str, Any]:
         st, dd = http_get_json("https://api.smartrecruiters.com/v1/companies/%s/postings/%s" % (t, pid))
         if st != 200 or not isinstance(dd, dict):
             return {}
@@ -1019,7 +1021,7 @@ def _freehire(col: Collector, queries: list[str]) -> None:
 
 
 # ============================================================ run / output
-_BOARD_FN: dict[str, Callable[[Collector, dict], None]] = {
+_BOARD_FN: dict[str, Callable[[Collector, dict[str, Any]], None]] = {
     "greenhouse": _gh,
     "lever": _lever,
     "ashby": _ashby,
@@ -1160,7 +1162,7 @@ def _merge_stats(col: Collector, label: str, st: dict[str, Any]) -> None:
 
 
 def _module_task(
-    col: Collector, label: str, call: Callable[[dict[str, int]], list[dict]], by_job_source: bool = False
+    col: Collector, label: str, call: Callable[[dict[str, int]], list[dict[str, Any]]], by_job_source: bool = False
 ) -> None:
     """Run one module call, merge its tried/ok stats, and offer every Job it returns."""
     st: dict[str, int] = {"tried": 0, "ok": 0, "jobs": 0}
@@ -1172,6 +1174,18 @@ def _module_task(
     _merge_stats(col, label, st)
     for j in jobs:
         col.offer_job(j.get("source") or label if by_job_source else label, j)
+
+
+def _ats_call(fetch: Callable[..., list[dict[str, Any]]], board: dict[str, Any],
+              st: dict[str, int]) -> list[dict[str, Any]]:
+    """Call one ATS fetcher with the kit's http function."""
+    return fetch(board, http, st)
+
+
+def _feed_call(fetch: Callable[..., list[dict[str, Any]]], queries: list[str], days: int,
+               countries: list[str], st: dict[str, int]) -> list[dict[str, Any]]:
+    """Call one open-feed fetcher with the kit's http function."""
+    return fetch(queries, http, st, days=days, countries=countries)
 
 
 def run(args: argparse.Namespace) -> Collector:
@@ -1205,9 +1219,10 @@ def run(args: argparse.Namespace) -> Collector:
     ats_fetchers = getattr(kit_ats, "ATS_FETCHERS", {}) if kit_ats else {}
     for b in boards:
         if b["ats"] in _BOARD_FN:
-            tasks.append(lambda b=b: _BOARD_FN[b["ats"]](col, b))
+            tasks.append(functools.partial(_BOARD_FN[b["ats"]], col, b))
         elif b["ats"] in ats_fetchers:
-            tasks.append(lambda b=b: _module_task(col, b["ats"], lambda st, b=b: ats_fetchers[b["ats"]](b, http, st)))
+            call = functools.partial(_ats_call, ats_fetchers[b["ats"]], b)
+            tasks.append(functools.partial(_module_task, col, b["ats"], call))
     if "freehire" in sources:
         tasks.append(lambda: _freehire(col, queries))
     wanted_feeds = [s for s in sources if s in FEED_SOURCES and s != "freehire"]
@@ -1216,13 +1231,10 @@ def run(args: argparse.Namespace) -> Collector:
         feeds = getattr(kit_feeds, "FEEDS", {}) if kit_feeds else {}
         for name in wanted_feeds:
             if name in feeds:
-                tasks.append(
-                    lambda name=name: _module_task(
-                        col,
-                        name,
-                        lambda st, name=name: feeds[name](queries, http, st, days=args.days, countries=countries),
-                    )
-                )
+                tasks.append(functools.partial(
+                    _module_task, col, name,
+                    functools.partial(_feed_call, feeds[name], queries, args.days, countries),
+                ))
             elif kit_feeds is not None:
                 print("note: feed %s not provided by kit_feeds; skipped" % name, file=sys.stderr)
     boards_opt = [s for s in split_csv(args.boards) if s in JOBSPY_SITES]
@@ -1256,16 +1268,16 @@ def run(args: argparse.Namespace) -> Collector:
     return col
 
 
-def sort_newest(results: list[dict]) -> list[dict]:
+def sort_newest(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Newest posted first; unknown dates last. No scoring, no ranking by fit."""
     out = sorted(results, key=lambda r: (r["company"].lower(), r["title"].lower()))
     return sorted(out, key=lambda r: r.get("posted") or "0000-00-00", reverse=True)
 
 
 # -------------------------------------------------------------- history
-def job_key(rec: dict) -> str:
+def job_key(rec: dict[str, Any]) -> str:
     """'company|title' key, used only to flag possible duplicates."""
-    return (rec.get("company", "") + "|" + rec.get("title", "")).lower()
+    return str(rec.get("company", "") + "|" + rec.get("title", "")).lower()
 
 
 def load_history(path: str | None) -> tuple[set[str], set[str]]:
@@ -1280,13 +1292,13 @@ def load_history(path: str | None) -> tuple[set[str], set[str]]:
         return set(), set()
 
 
-def filter_new(results: list[dict], urls: set[str], keys: set[str]) -> tuple[list[dict], int]:
+def filter_new(results: list[dict[str, Any]], urls: set[str], keys: set[str]) -> tuple[list[dict[str, Any]], int]:
     """Drop jobs already seen. Returns (new_results, skipped_count)."""
     new = [r for r in results if r["url"] not in urls]  # URL is the identity; keys are informational
     return new, len(results) - len(new)
 
 
-def save_history(path: str | None, urls: set[str], keys: set[str], results: list[dict]) -> None:
+def save_history(path: str | None, urls: set[str], keys: set[str], results: list[dict[str, Any]]) -> None:
     """Add this run's output to the history file."""
     if not path or path.lower() == "none":
         return
@@ -1308,10 +1320,10 @@ def is_dead_page(status: int, final_url: str, text: str) -> bool:
     return bool(DEAD_PAGE.search(text[:200_000]))
 
 
-def check_live(col: Collector, results: list[dict]) -> list[dict]:
+def check_live(col: Collector, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Re-fetch each kept job once and drop the ones that are gone."""
 
-    def one(rec: dict) -> bool:
+    def one(rec: dict[str, Any]) -> bool:
         try:
             st, final, body = http_request(rec["url"], retries=1, max_bytes=300_000)
             dead = is_dead_page(st, final, body.decode("utf-8", "replace"))
@@ -1343,7 +1355,7 @@ def slug_variants(name: str) -> list[str]:
 
 def _titles_of(d: Any, key: str, tkey: str) -> list[str]:
     rows = d.get(key, []) if isinstance(d, dict) else (d if isinstance(d, list) else [])
-    return [j.get(tkey) for j in rows if isinstance(j, dict) and j.get(tkey)]
+    return cast("list[str]", [j.get(tkey) for j in rows if isinstance(j, dict) and j.get(tkey)])
 
 
 def discover(names: list[str]) -> list[dict[str, Any]]:
