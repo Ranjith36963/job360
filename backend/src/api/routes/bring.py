@@ -122,6 +122,11 @@ class BringJobRequest(BaseModel):
     country: Optional[str] = Field(None, max_length=8)
     remote: Optional[bool] = Field(None, strict=True)
     found_on: Optional[str] = Field(None, max_length=40)
+    # Ad dates (migration 0054): YYYY-MM-DD the listing says it was posted, and
+    # the date on the employer's own posting. Facts the assistant reads off the
+    # ad; checked by job_facts.normalize_ad_date (ISO, not in the future).
+    posted_at: Optional[str] = Field(None, max_length=10)
+    employer_published_at: Optional[str] = Field(None, max_length=10)
 
     @field_validator("title", "company", "location", "apply_url")
     @classmethod
@@ -158,6 +163,29 @@ class BringJobResponse(BaseModel):
     country: Optional[str] = None
     remote: Optional[bool] = None
     found_on: Optional[str] = None
+    # The two ad dates as stored (null when unset), and the deterministic
+    # job checks (services/applications/job_checks.py) - facts about THIS ad.
+    ad_posted_at: Optional[str] = None
+    employer_published_at: Optional[str] = None
+    checks: list[dict[str, Any]] = Field(default_factory=list)
+
+
+async def _job_id_for_same_link(db: JobDatabase, user_id: str, apply_url: str) -> Optional[int]:
+    """The caller's own job whose stored apply link canonicalises the same as
+    ``apply_url`` (None when there is none or the link is blank). Per user,
+    so another user's paste is never matched (rule #10 / S2)."""
+    from src.services.applications.job_checks import canonical_url  # noqa: PLC0415
+
+    wanted = canonical_url(apply_url)
+    if not wanted:
+        return None
+    cur = await db._db.execute(
+        "SELECT job_id, job_url FROM applications WHERE user_id = ? AND job_url <> '' ORDER BY id", (user_id,)
+    )
+    for r in await cur.fetchall():
+        if canonical_url(str(r["job_url"] or "")) == wanted:
+            return int(r["job_id"])
+    return None
 
 
 @router.post("/jobs/bring", response_model=BringJobResponse, dependencies=AUTH_FIRST)
@@ -183,7 +211,11 @@ async def bring_job(
     # Validate the job facts BEFORE anything is written — a bad country or
     # found_on must not leave a half-brought job behind.
     given_facts = {
-        k: v for k, v in (("country", body.country), ("remote", body.remote), ("found_on", body.found_on))
+        k: v
+        for k, v in (
+            ("country", body.country), ("remote", body.remote), ("found_on", body.found_on),
+            ("posted_at", body.posted_at), ("employer_published_at", body.employer_published_at),
+        )
         # '' is "not said" on the bring door: a re-bring never clears an
         # earlier value (clearing is PATCH /applications/{id}/job's job).
         if v is not None and v != ""
@@ -209,15 +241,19 @@ async def bring_job(
         first_seen_at=now,
         last_seen_at=now,
     )
-    inserted = await db.insert_job(job)
+    # Same ad link already brought by THIS user (tracking params, www, fragment
+    # and a trailing slash ignored)? Reuse that job - the title+company key
+    # cannot see a re-titled repost. Pattern: Gsync/jobsync src/lib/jobs/jobDedupe.ts (MIT).
+    same_link_job_id = await _job_id_for_same_link(db, user.id, body.apply_url)
+    inserted = False if same_link_job_id is not None else await db.insert_job(job)
     await db.commit()
-    if not inserted:
+    if same_link_job_id is None and not inserted:
         # Same key already in the catalog (a legacy scrape, or an earlier
         # paste). The user is reading this ad right now, so it is LIVE: clear
         # the stale mark a long-dead ghost sweep may have left on the row,
         # otherwise `POST /pipeline/{job_id}` still refuses it as expired.
         await db.update_last_seen(job.normalized_key())
-    job_id = await db.get_job_id_by_key(job.normalized_key())
+    job_id = same_link_job_id if same_link_job_id is not None else await db.get_job_id_by_key(job.normalized_key())
     if job_id is None:
         # insert_job reports "inserted or not", never WHY not; a swallowed
         # insert failure lands here. Say so instead of dying on an assert.
@@ -260,6 +296,10 @@ async def bring_job(
     except SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
     facts: dict[str, Any] = {k: stored[k] for k in job_facts.JOB_FACT_FIELDS}
+    from src.services.applications.job_checks import checks_for_application  # noqa: PLC0415
+
+    app_now = await applications_spine.get_owned_application(db, user.id, birth["application_id"]) or {}
+    checks = checks_for_application(app_now, description=str(row.get("description") or body.description))
 
     get_audit_logger().info(
         "job_brought",
@@ -289,6 +329,9 @@ async def bring_job(
         existing=not inserted,
         application_id=birth["application_id"],
         status=birth["status"],
+        ad_posted_at=stored.get("ad_posted_at"),
+        employer_published_at=stored.get("employer_published_at"),
+        checks=checks,
         **facts,
     )
 

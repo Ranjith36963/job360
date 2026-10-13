@@ -258,6 +258,8 @@ class ApplicationJobOut(BaseModel):
     country: Optional[str] = None
     remote: Optional[bool] = None
     found_on: Optional[str] = None
+    ad_posted_at: Optional[str] = None
+    employer_published_at: Optional[str] = None
 
 
 class FitAxisOut(BaseModel):
@@ -1784,6 +1786,9 @@ class UpdateJobFactsRequest(BaseModel):
     country: Optional[str] = Field(None, max_length=8)
     remote: Optional[bool] = Field(None, strict=True)
     found_on: Optional[str] = Field(None, max_length=40)
+    # Ad dates, YYYY-MM-DD, not in the future ("" / null clears one).
+    posted_at: Optional[str] = Field(None, max_length=10)
+    employer_published_at: Optional[str] = Field(None, max_length=10)
 
 
 class JobFactsOut(BaseModel):
@@ -1791,6 +1796,8 @@ class JobFactsOut(BaseModel):
     country: Optional[str]
     remote: Optional[bool]
     found_on: Optional[str]
+    ad_posted_at: Optional[str] = None
+    employer_published_at: Optional[str] = None
 
 
 @router.patch("/applications/{application_id}/job", response_model=JobFactsOut, dependencies=AUTH_FIRST)
