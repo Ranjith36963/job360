@@ -46,3 +46,10 @@ e495463b43859d3678d3807dbbdf59be208e449e:backend/tests/test_credentials_are_stri
 # 3. False positive: a Python import line naming `LinkedInResponse, GitHubResponse`
 #    matched the linkedin-client-id rule. No id of any kind; file deleted (d364e9d).
 e0db04e8f28b908a7e3e96e704b35baaca96c5fa:docs/superpowers/plans/2026-04-07-fastapi-backend.md:linkedin-client-id:1076
+# 4. False positive: public company job-board slugs in the hunt kit company list,
+#    written as "token": "<slug>" in commit 01b064c ("4dmoleculartherapeutics",
+#    "cscgeneration-2", "safetyculture-2" - company names, not credentials). The
+#    next commit renamed the field to "board" so the rule no longer matches.
+01b064c6db16f30a1d60d26399cf80d42c096446:backend/src/hunt_kit/companies.json:generic-api-key:1884
+01b064c6db16f30a1d60d26399cf80d42c096446:backend/src/hunt_kit/companies.json:generic-api-key:2839
+01b064c6db16f30a1d60d26399cf80d42c096446:backend/src/hunt_kit/companies.json:generic-api-key:3642
