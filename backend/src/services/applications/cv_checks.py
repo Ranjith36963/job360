@@ -27,7 +27,23 @@ MAX_LISTED = 12  # items named in one detail line
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+|\b[\w.-]+\.(?:com|io|uk|dev|org|net|ai|co)(?:/\S*)?", re.I)
-_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_WS_SPLIT_RE = re.compile(r"(\s+)")
+
+
+def _is_email_token(tok: str) -> bool:
+    """A whitespace-free token that looks like ``name@host.tld`` (linear, no regex scan)."""
+    local, sep, host = tok.partition("@")
+    return bool(sep and local and "." in host.strip(".") and host[:1] not in ".-")
+
+
+def _drop_emails(text: str) -> str:
+    """Blank out email tokens. Token-wise instead of one regex over the whole text, so
+    the work is linear in the text size however it is shaped (CodeQL py/polynomial-redos)."""
+    return "".join(
+        " " if (i % 2 == 0 and _is_email_token(part)) else part for i, part in enumerate(_WS_SPLIT_RE.split(text))
+    )
+
+
 _PHONE_RE = re.compile(r"(?<![\w.])\+?\(?\d[\d\s().-]{7,}\d(?![\w])")
 _MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
 _DATE_RES = (
@@ -38,7 +54,7 @@ _DATE_RES = (
 )
 # Adapted from Resume-Matcher's _NUMBER_RE: optional currency, number, optional unit.
 _NUMBER_RE = re.compile(
-    r"(?<![\w.])(?P<cur>[$€£])?(?P<num>\d[\d,]*(?:\.\d+)?)"
+    r"(?<![\w.])(?P<cur>[$€£])?(?P<num>(?=(?P<d0>\d+))(?P=d0)(?:,\d+)*(?:\.\d+)?)"
     r"(?:\s*(?P<unit>thousand|million|billion|percent|times|ms|gb|mb|tb|[kmb%x]))?"
     r"(?![A-Za-z\d])",
     re.I,
@@ -55,7 +71,7 @@ def _core(num: str) -> str:
 
 def _scrub(text: str) -> str:
     """Remove what must never count as a claimed number: URLs, emails, phones, dates."""
-    t = _EMAIL_RE.sub(" ", text)
+    t = _drop_emails(text)
     t = _URL_RE.sub(" ", t)
     t = _PHONE_RE.sub(" ", t)
     for rx in _DATE_RES:
@@ -107,13 +123,37 @@ def _flat(value: Any) -> list[str]:
 
 
 _SOURCE_FIELDS = (
-    "raw_text", "linkedin_raw_text", "cv_positions", "cv_projects", "education",
-    "cv_education_details", "certifications", "skills", "job_titles", "companies",
-    "summary", "experience_text", "achievements", "linkedin_positions", "linkedin_skills",
-    "linkedin_projects", "linkedin_summary", "linkedin_headline", "linkedin_honors",
-    "linkedin_courses", "linkedin_publications", "github_languages", "github_topics",
-    "github_frameworks", "github_skills_inferred", "github_llm_skills", "github_repos_brief",
-    "github_bio", "github_profile_readme", "about_me_inferred_skills", "cv_languages",
+    "raw_text",
+    "linkedin_raw_text",
+    "cv_positions",
+    "cv_projects",
+    "education",
+    "cv_education_details",
+    "certifications",
+    "skills",
+    "job_titles",
+    "companies",
+    "summary",
+    "experience_text",
+    "achievements",
+    "linkedin_positions",
+    "linkedin_skills",
+    "linkedin_projects",
+    "linkedin_summary",
+    "linkedin_headline",
+    "linkedin_honors",
+    "linkedin_courses",
+    "linkedin_publications",
+    "github_languages",
+    "github_topics",
+    "github_frameworks",
+    "github_skills_inferred",
+    "github_llm_skills",
+    "github_repos_brief",
+    "github_bio",
+    "github_profile_readme",
+    "about_me_inferred_skills",
+    "cv_languages",
 )
 
 
@@ -156,14 +196,33 @@ def unsupported_numbers(text: str, source: str) -> Optional[dict[str, str]]:
     if not bad:
         return None
     return _issue(
-        "unsupported_numbers", "warn",
+        "unsupported_numbers",
+        "warn",
         f"Not found anywhere in the profile: {_listed(bad)}. Confirm with the user or remove.",
     )
 
 
 # ── (b) terms ───────────────────────────────────────────────────────────────
 
-_SKILL_LINE_RE = re.compile(r"^\s*(?P<label>[A-Za-z][A-Za-z &/+-]{1,30}):\s*(?P<body>.+)$")
+_SKILL_LINE_RE = re.compile(r"^\s*(?P<label>[A-Za-z][A-Za-z &/+-]{1,30}):\s*(?P<body>\S.*)$")
+
+
+def _paren_parts(raw: str) -> tuple[list[str], list[str]]:
+    """``"a (b) c"`` -> ``(["b"], ["a ", " c"])``. Same result as a
+    parenthesis-group regex pair, but linear (find-based), so many open parens stay cheap."""
+    inner: list[str] = []
+    outer: list[str] = []
+    pos = 0
+    while True:
+        i = raw.find("(", pos)
+        j = raw.find(")", i + 1) if i >= 0 else -1
+        if j < 0:
+            break
+        outer.append(raw[pos:i])
+        inner.append(raw[i + 1 : j])
+        pos = j + 1
+    outer.append(raw[pos:])
+    return inner, outer
 
 
 def _split_items(body: str) -> list[str]:
@@ -171,8 +230,8 @@ def _split_items(body: str) -> list[str]:
     for raw in re.split(r"[,;•|]", body):
         raw = raw.strip(" .\t")
         # "Python (FastAPI, aiohttp)" -> Python, FastAPI, aiohttp
-        inner = re.findall(r"\(([^)]*)\)", raw)
-        outer = re.sub(r"\([^)]*\)", "", raw).strip(" .")
+        inner, outer_parts = _paren_parts(raw)
+        outer = "".join(outer_parts).strip(" .")
         for piece in [outer] + [p for grp in inner for p in grp.split(",")]:
             piece = piece.strip(" .")
             if piece:
@@ -194,6 +253,7 @@ def terms_to_check(text: str) -> list[str]:
                     continue
                 if "," in seg:
                     out.extend(_split_items(seg))
+
     def _plausible(i: str) -> bool:
         return 1 < len(i) <= 40 and len(i.split()) <= 4 and "@" not in i and not re.search(r"\d{4,}", i)
 
@@ -206,7 +266,8 @@ def unsupported_terms(text: str, source: str) -> Optional[dict[str, str]]:
     if not bad:
         return None
     return _issue(
-        "unsupported_terms", "warn",
+        "unsupported_terms",
+        "warn",
         f"Skills/tools in the CV that the profile never mentions: {_listed(bad)}.",
     )
 
@@ -234,9 +295,20 @@ def missing_current_roles(text: str, profile: Any) -> Optional[dict[str, str]]:
 # ── (d) leaked chatter ──────────────────────────────────────────────────────
 
 _CHATTER_ANYWHERE = (
-    "as requested", "i hope this", "as an ai", "as a language model", "revised version",
-    "updated version", "let me know", "feel free to", "i've tailored", "i have tailored",
-    "i've updated", "i have updated", "happy to adjust", "hope this helps",
+    "as requested",
+    "i hope this",
+    "as an ai",
+    "as a language model",
+    "revised version",
+    "updated version",
+    "let me know",
+    "feel free to",
+    "i've tailored",
+    "i have tailored",
+    "i've updated",
+    "i have updated",
+    "happy to adjust",
+    "hope this helps",
 )
 _CHATTER_LINE_START = ("here is", "here's", "here are", "certainly", "sure,", "sure!", "of course", "below is")
 
@@ -304,14 +376,19 @@ def check_pdf(pdf_bytes: bytes, cv_text: str, template_pages: Optional[int] = No
     if not full.strip():
         return [_issue("pdf_no_text", "warn", "The rendered PDF has no text layer; hiring software would see nothing.")]
     if garbled(full):
-        out.append(_issue(
-            "pdf_garbled", "warn",
-            "Unreadable glyphs ((cid:N) or U+FFFD) in the PDF text; some characters will not "
-            "parse."))
+        out.append(
+            _issue(
+                "pdf_garbled",
+                "warn",
+                "Unreadable glyphs ((cid:N) or U+FFFD) in the PDF text; some characters will not parse.",
+            )
+        )
     squashed = re.sub(r"\s+", "", full).casefold()
     digits = re.sub(r"\D", "", full)
     missing: list[str] = []
-    for email in dict.fromkeys(_EMAIL_RE.findall(cv_text)):
+    _trim = ".,;:()<>\"'"
+    cands = (t.strip(_trim) for t in cv_text.split())
+    for email in dict.fromkeys(c for c in cands if _is_email_token(c)):
         if re.sub(r"\s+", "", email).casefold() not in squashed:
             missing.append(email)
     for phone in dict.fromkeys(_PHONE_RE.findall(cv_text)):
@@ -319,11 +396,21 @@ def check_pdf(pdf_bytes: bytes, cv_text: str, template_pages: Optional[int] = No
         if len(d) >= 8 and d not in digits:
             missing.append(phone.strip())
     if missing:
-        out.append(_issue("pdf_contact", "warn", f"Contact details in the CV text are not readable in the PDF: "
-            f"{_listed(missing)}."))
+        out.append(
+            _issue(
+                "pdf_contact",
+                "warn",
+                f"Contact details in the CV text are not readable in the PDF: {_listed(missing)}.",
+            )
+        )
     if template_pages and n_pages > template_pages:
-        out.append(_issue("pdf_pages", "warn", f"The PDF is {n_pages} pages; the CV design asks for {template_pages}. "
-            "Shorten the text."))
+        out.append(
+            _issue(
+                "pdf_pages",
+                "warn",
+                f"The PDF is {n_pages} pages; the CV design asks for {template_pages}. Shorten the text.",
+            )
+        )
     if last_height and last_bottom < 0.70 * last_height:
         room = int(max(0.0, 0.90 * last_height - last_bottom) // line_h)
         if room >= 1:
