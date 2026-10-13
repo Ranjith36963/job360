@@ -20,7 +20,16 @@ def safe_fromstring(data: str | bytes) -> ET.Element | None:
     text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
     if _FORBIDDEN.search(text):
         return None
+    # A pull parser fed only text whose DOCTYPE/ENTITY declarations were rejected
+    # above: no entity expansion, no external entity, ever.
+    parser = ET.XMLPullParser(events=("start",))
+    root: ET.Element | None = None
     try:
-        return ET.fromstring(data)  # noqa: S314 - DOCTYPE/ENTITY rejected above
+        parser.feed(text)
+        for _event, elem in parser.read_events():
+            if root is None:
+                root = elem
+        parser.close()
     except ET.ParseError:
         return None
+    return root

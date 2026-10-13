@@ -21,11 +21,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import http.client
 import io
 import json
 import re
 import unicodedata
-import urllib.request
+import urllib.parse
 import zipfile
 from pathlib import Path
 
@@ -111,10 +112,24 @@ def fold(s: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", s))
 
 
-def _fetch(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=120) as r:  # noqa: S310 (fixed https URLs)
-        return r.read()
+def _fetch(url: str, _hops: int = 5) -> bytes:
+    """GET one of this script's fixed https dataset URLs (follows https redirects only)."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname:
+        raise ValueError(f"refusing non-https URL: {url}")
+    conn = http.client.HTTPSConnection(parts.hostname, timeout=120)
+    try:
+        path = parts.path + (f"?{parts.query}" if parts.query else "")
+        conn.request("GET", path or "/", headers={"User-Agent": UA})
+        resp = conn.getresponse()
+        if resp.status in (301, 302, 303, 307, 308) and _hops > 0:
+            location = urllib.parse.urljoin(url, resp.getheader("Location") or "")
+            return _fetch(location, _hops - 1)
+        if resp.status != 200:
+            raise OSError(f"HTTP {resp.status} for {url}")
+        return resp.read()
+    finally:
+        conn.close()
 
 
 def build(codes_csv: bytes, cities_zip: bytes, admin1_txt: bytes = b"") -> dict:

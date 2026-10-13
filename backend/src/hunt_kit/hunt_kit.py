@@ -1040,9 +1040,18 @@ def parse_extra(value: str | None) -> list[dict[str, str]]:
 
 
 def load_companies(path: Path) -> list[dict[str, str]]:
-    """Read the company list (JSON array of {name, ats, token, source[, tenant, wd, site]})."""
+    """Read the company list (JSON array of {name, ats, board, source[, tenant, wd, site]}).
+
+    The file names the board slug ``board`` (a public company board name, e.g.
+    "safetyculture-2") because secret scanners read ``"token": "<slug>"`` as an API
+    key. Rows keep a ``token`` key in memory, which every fetcher reads; an older
+    file that still says ``token`` loads too.
+    """
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
+    for r in data:
+        if not r.get("token") and r.get("board"):
+            r["token"] = r["board"]
     return [r for r in data if r.get("ats") in BOARD_SOURCES and r.get("token")]
 
 

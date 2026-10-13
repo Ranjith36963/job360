@@ -393,7 +393,8 @@ def test_boards_flag_wiring_and_missing_module(monkeypatch: pytest.MonkeyPatch, 
 
 
 def test_companies_json_valid() -> None:
-    rows = json.loads((KIT_DIR / "companies.json").read_text(encoding="utf-8"))
+    # load_companies maps the file's `board` key to the `token` key every fetcher reads.
+    rows = hk.load_companies(KIT_DIR / "companies.json")
     assert len(rows) > 100
     ok = {
         "greenhouse",
