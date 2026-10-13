@@ -132,6 +132,7 @@ async def test_link_upload_stores_the_image_and_leaves_a_trail(authenticated_asy
         assert state["proof"] == {
             "has_text": False, "has_page_text": False, "has_confirmation": False, "has_email": False,
             "email_seen_at": None, "screenshots": 1, "level": "screenshot_only",
+            "proof_label": "screenshot, no application id",
         }
         shot = state["screenshots"][0]
         assert shot["id"] == up.json()["screenshot_id"] and shot["created_by"] == "web" and "bytes" not in shot

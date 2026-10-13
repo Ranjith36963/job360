@@ -74,8 +74,9 @@ _LOGISTICS_COUNTRY: dict[str, str] = {
 _LOGISTICS_COUNTRY_ALIASES: dict[str, str] = {"relocate": "willing_to_relocate"}
 _LOGISTICS: dict[str, str] = {
     "notice_period": "line", "earliest_start": "start", "countries": "logistics_countries",
-    "start_on_site_abroad": "line_or_bool",
+    "start_on_site_abroad": "line_or_bool", "current_salary": "current_salary",
 }
+_CURRENT_SALARY_KEYS = ("amount", "currency", "period")
 _LANGUAGE: dict[str, str] = {"language": "line", "level": "level"}
 _EQUALITY: dict[str, str] = {
     "gender": "line_or_bool", "ethnicity": "line_or_bool", "disability": "line_or_bool",
@@ -277,6 +278,8 @@ def _value(where: str, key: str, kind: str, raw: Any) -> Any:
         if isinstance(raw, bool) or not isinstance(raw, int) or not 0 <= raw <= 100:
             raise _fail(f"{at} must be a whole number 0-100")
         return raw
+    if kind == "current_salary":
+        return _current_salary(at, raw)
     if kind == "rtw_countries":
         return _countries(at, raw, _RTW_COUNTRY, contradictions=True)
     if kind == "logistics_countries":
@@ -302,6 +305,29 @@ def _value(where: str, key: str, kind: str, raw: Any) -> Any:
                 codes.append(code)
         return codes or None
     raise AssertionError(f"unknown user-info kind {kind!r}")  # pragma: no cover
+
+
+def _current_salary(at: str, raw: Any) -> dict[str, Any] | None:
+    """``{amount, currency, period}`` - what the user earns now, as they said it. Never converted;
+    ``{}`` = not answered. Same figure/currency/period rules as ``preferences.salary_by_country``."""
+    allowed = ", ".join(_CURRENT_SALARY_KEYS)
+    if not isinstance(raw, dict):
+        raise _fail(f"{at} must be an object with keys {allowed}, got {type(raw).__name__}")
+    if not raw:
+        return None
+    for key in raw:
+        if key not in _CURRENT_SALARY_KEYS:
+            raise _unknown_key(at, key, allowed)
+    amount, currency, period = raw.get("amount"), raw.get("currency"), raw.get("period")
+    if (
+        not _salary_figure(amount)
+        or not isinstance(currency, str)
+        or not _CURRENCY_RE.match(_strip_control(currency))
+        or not isinstance(period, str)
+        or period.strip().lower() not in _SALARY_PERIODS
+    ):
+        raise _fail(f"{at} needs amount (a number > 0), currency (ISO 4217, 3 letters) and period (year or month)")
+    return {"amount": amount, "currency": _strip_control(currency).upper(), "period": period.strip().lower()}
 
 
 def _unknown_key(where: str, key: Any, allowed: str) -> ProfileEditError:

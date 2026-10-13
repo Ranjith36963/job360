@@ -83,7 +83,7 @@ export function ProofMarks({
   const marks = proofMarks(proof, confirmation, true);
 
   return (
-    <div data-testid="proof-line" className="mt-5 flex flex-wrap items-center gap-x-2.5 gap-y-2">
+    <div data-testid="proof-line" title={proof?.proof_label} className="mt-5 flex flex-wrap items-center gap-x-2.5 gap-y-2">
       <span className="mr-1 text-paper-dim">Proof</span>
       {marks.length === 0 ? (
         <span

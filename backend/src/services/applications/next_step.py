@@ -8,12 +8,12 @@ the record sees the same next step the human does.
 
 ``code`` values: judge_fit, write_cv, apply, record_receipt, wait, respond,
 schedule, interview, record_outcome, await_outcome, decide, lesson, closed,
-follow_up, none.
+follow_up, confirm_submit, submit_now, none.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional
 
 _CLOSED = ("rejected", "withdrawn", "ghosted")
 
@@ -40,6 +40,8 @@ def next_step(
     interview_at: Optional[str],
     has_lesson: bool,
     follow_up_due: bool = False,
+    form_filled: bool = False,
+    submit_approved: bool = False,
     now: datetime | None = None,
 ) -> dict[str, str]:
     """``{"code": …, "label": …}`` — ``code`` is a closed vocabulary an agent
@@ -53,7 +55,12 @@ def next_step(
     ``get_application_detail``) already excludes
     ``APPLICATION_FOLLOW_UP_CLOSED_STATUSES`` from ``follow_up_due`` itself,
     and the check here is a second, explicit guard against a closed status
-    ever showing "follow up" instead of its own "closed"/"lesson" code."""
+    ever showing "follow up" instead of its own "closed"/"lesson" code.
+
+    ``form_filled`` / ``submit_approved`` (owner ask 2026-10-13, "waiting for your yes"): on a
+    not-yet-applied application, a recorded form fill that the user has not yet approved reads
+    ``confirm_submit``; once approved (and still not applied) it reads ``submit_now``. The caller
+    passes ``False`` when the user declined after the fill (see :func:`kit_flags`)."""
     if now is None:
         now = datetime.now(timezone.utc)
     if follow_up_due and status not in _CLOSED:
@@ -63,6 +70,10 @@ def next_step(
             return {"code": "judge_fit", "label": "No fit judged yet — ask your assistant to judge it"}
         if cv_versions == 0:
             return {"code": "write_cv", "label": "Fit judged — no CV for this job yet"}
+        if form_filled and submit_approved:
+            return {"code": "submit_now", "label": "You said yes — submit, then it is recorded"}
+        if form_filled:
+            return {"code": "confirm_submit", "label": "Form filled — waiting for your yes to submit"}
         return {"code": "apply", "label": "CV ready — apply, then mark it applied"}
     if status == "applied":
         if receipts == 0:
@@ -88,10 +99,28 @@ def next_step(
     return {"code": "none", "label": ""}
 
 
+def kit_flags(events: Iterable[tuple[int, str]]) -> tuple[bool, bool]:
+    """``(form_filled, submit_approved)`` from (event id, event type) pairs, newest wins: a
+    ``submit_declined`` newer than the fill clears both (a later yes counts again); an approval
+    counts only when it is newer than the latest fill (a new fill needs a new yes)."""
+    last: dict[str, int] = {}
+    for ev_id, ev_type in events:
+        if ev_type in ("form_filled", "submit_approved", "submit_declined"):
+            last[ev_type] = max(last.get(ev_type, 0), int(ev_id))
+    fill = last.get("form_filled", 0)
+    approved, declined = last.get("submit_approved", 0), last.get("submit_declined", 0)
+    if not fill or (declined > fill and declined > approved):
+        return False, False
+    return True, approved > fill
+
+
 def next_step_for_detail(detail: Mapping[str, Any]) -> dict[str, str]:
     """Derive the inputs from the ``get_application`` shape."""
     events = detail.get("events") or []
     artifacts = detail.get("artifacts") or []
+    filled, approved = kit_flags(
+        (int(e.get("id") or 0), str(e.get("event_type"))) for e in events if not e.get("superseded")
+    )
     return next_step(
         status=str(detail.get("status") or ""),
         has_fit=detail.get("fit") is not None,
@@ -100,4 +129,6 @@ def next_step_for_detail(detail: Mapping[str, Any]) -> dict[str, str]:
         interview_at=detail.get("interview_at"),
         has_lesson=any(e.get("event_type") == "lesson" and not e.get("superseded") for e in events),
         follow_up_due=bool(detail.get("follow_up_due")),
+        form_filled=filled,
+        submit_approved=approved,
     )

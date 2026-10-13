@@ -4525,6 +4525,11 @@ export interface components {
              */
             level: "none" | "screenshot_only" | "text" | "email";
             /**
+             * Proof Label
+             * @default claimed, unverified
+             */
+            proof_label: string;
+            /**
              * Screenshots
              * @default 0
              */
