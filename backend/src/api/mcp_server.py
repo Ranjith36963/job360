@@ -1234,10 +1234,10 @@ def build_server(version: str = "") -> MCPServer:
     async def update_profile(edits: list[dict[str, Any]]) -> dict[str, Any]:
         """Write the profile. Each edit = {"path": one of get_profile's editable_paths, "value": the value, or null to
         clear}; send several per call.
-        ALL OR NOTHING: if any edit is refused NOTHING is saved; path left out = lost. Resend ALL with
-        fixes, see `get_profile`.
+        ALL OR NOTHING: if any edit is refused NOTHING is saved; fix it and resend ALL paths in one
+        call (a path left out is lost). `get_profile` `shapes` = an example per path.
         Reply: {applied, waiting, normalized, profile_version}; call get_profile to re-read.
-        Names/aliases/equality convert (see `normalized`).
+        Country names and aliases (junior, on-site) are converted and listed in `normalized`.
 
         A write REPLACES THE WHOLE VALUE of its path: send the current `fields[...]` plus your change
         (lists too: preferences.assistant_notes, preferences.excluded_skills,
