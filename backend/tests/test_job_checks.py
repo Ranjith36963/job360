@@ -328,3 +328,21 @@ def test_migration_0054_adds_and_drops_exactly_the_two_columns():
         assert f"ADD COLUMN IF NOT EXISTS {col} TEXT" in up
         assert f"DROP COLUMN IF EXISTS {col}" in down
     assert up.count("ADD COLUMN") == 2 and down.count("DROP COLUMN") == 2
+
+
+@pytest.mark.asyncio
+async def test_list_and_detail_and_export_return_the_same_two_ad_dates(authenticated_async_context):
+    """Live bug 2026-10-13: the list SELECT skipped the two 0054 columns, so list_applications said null."""
+    async with authenticated_async_context() as client:
+        body = (await _bring(client, posted_at="2026-10-08", employer_published_at="2026-08-11")).json()
+        want = ("2026-10-08", "2026-08-11")
+
+        job = (await client.get(f"/api/applications/{body['application_id']}")).json()["job"]
+        assert (job["ad_posted_at"], job["employer_published_at"]) == want
+
+        (row,) = (await client.get("/api/applications")).json()["applications"]
+        assert (row["ad_posted_at"], row["employer_published_at"]) == want
+
+        exported = (await client.get("/api/applications/export")).json()
+        (blob,) = exported["applications"]
+        assert (blob["ad_posted_at"], blob["employer_published_at"]) == want

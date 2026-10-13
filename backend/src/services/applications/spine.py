@@ -1657,7 +1657,7 @@ async def list_applications(
     cur = await db._db.execute(
         f"SELECT id, job_id, job_title, job_company, job_url, job_location, status, last_event_at, "  # noqa: S608
         f"visa_signal, visa_country, fit_recorded_at, fit_score, fit_verdict, follow_up_on, "
-        f"job_country, job_remote, job_found_on "
+        f"job_country, job_remote, job_found_on, ad_posted_at, employer_published_at "
         f"FROM applications WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
         [*params, limit, offset],
     )
@@ -2006,7 +2006,7 @@ async def export_history(
 
     cur = await db._db.execute(
         f"SELECT id, job_id, status, job_title, job_company, created_at, updated_at, last_event_at, "  # noqa: S608
-        f"job_country, job_remote, job_found_on "
+        f"job_country, job_remote, job_found_on, ad_posted_at, employer_published_at "
         f"FROM applications WHERE {where_sql} ORDER BY updated_at ASC, id ASC",
         params,
     )
