@@ -1233,7 +1233,9 @@ async def record_receipt(
     # Both are set HERE, at INSERT (M3): a flag never blocks the receipt.
     from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
 
-    dup = await kit_service.duplicate_facts(db, user_id, app_row, datetime.now(timezone.utc))
+    dup = await kit_service.duplicate_facts(
+        db, user_id, app_row, datetime.now(timezone.utc), include_self=True
+    )
     possible_duplicate = dup["flag"]
     cur = await db._db.execute(
         "SELECT id, payload FROM application_events WHERE application_id = ? AND user_id = ? "

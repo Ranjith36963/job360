@@ -1079,6 +1079,26 @@ async def test_duplicate_same_job_stops_in_auto_asks_in_confirm_and_the_button_c
 
 
 @pytest.mark.asyncio
+async def test_an_applied_application_is_never_a_duplicate_of_itself(
+    authenticated_async_context, fixture_user_id
+):
+    """Seen live on app 63: the kit of an already-applied application flagged itself."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _save(client, app_id, "cv", CV_TEXT)
+        assert (await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "company_site"})).status_code == 201
+        own = (await _kit(client, app_id)).json()["duplicate"]
+        assert own["flag"] == "" and own["same_job"] is None
+        # a DIFFERENT application of the same job still flags, pointing at the first
+        twin = await _bring(client, {**_AD, "title": "Data Engineer (Contract)"})
+        dup = (await _kit(client, twin)).json()["duplicate"]
+        assert dup["flag"] == "same_job" and dup["same_job"]["application_id"] == app_id
+        # and the first one stays clean
+        assert (await _kit(client, app_id)).json()["duplicate"]["flag"] == ""
+
+
+@pytest.mark.asyncio
 async def test_duplicate_clear_is_web_only(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
@@ -1314,8 +1334,7 @@ async def test_a_company_application_31_days_ago_is_not_a_duplicate(authenticate
         receipt = await _apply(client, second)
         assert receipt["possible_duplicate"] == ""
         assert (await _kit(client, second)).json()["duplicate"] == {
-            "same_job": {"application_id": second, "status": "applied", "applied_at": receipt["sent_at"]},
-            "same_company_30d": 0, "flag": "same_job", "cleared": None,
+            "same_job": None, "same_company_30d": 0, "flag": "", "cleared": None,
         }
 
 
@@ -1330,9 +1349,9 @@ async def test_a_second_receipt_for_the_same_application_is_same_job_and_never_4
         assert first["possible_duplicate"] == ""
         second = await _apply(client, app_id)
         assert second["possible_duplicate"] == "same_job"
+        # the flag lives on the second receipt; a kit READ never flags an app as its own duplicate
         kit = (await _kit(client, app_id)).json()
-        assert kit["duplicate"]["flag"] == "same_job" and kit["duplicate"]["same_job"]["application_id"] == app_id
-        assert kit["duplicate"]["same_job"]["status"] == "applied"
+        assert kit["duplicate"]["flag"] == "" and kit["duplicate"]["same_job"] is None
 
 
 @pytest.mark.asyncio
