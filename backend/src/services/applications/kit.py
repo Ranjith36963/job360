@@ -49,7 +49,7 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 SERVER_ONLY_EVENTS = frozenset({"kit_read"})
 KIT_EVENT_TYPES = frozenset({
     "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
-    "form_filled", "hold_released", "site_account", "account_needed",
+    "form_filled", "form_swept", "hold_released", "site_account", "account_needed",
 })
 HOLD_RELEASE_REASONS = frozenset({"done", "blocked", "stopped", "failed"})
 SEEN_WHERE = frozenset({"web", "chat"})
@@ -67,7 +67,8 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "When the user says yes to submitting, record_event submit_approved with where=chat.",
     "`autofill` deny: do not type into the form - give the user the kit answers to paste. Still record form_filled.",
     "After filling the form, record_event form_filled {form_url, fields_count}. "
-    "Then call check_submit (it says stop until that is recorded).",
+    "Then re-read EVERY field on the page, fix what is wrong, and record_event form_swept "
+    "{fields_checked, fixed}. Then call check_submit (it says stop until both are recorded).",
     "`hold` set: another assistant is on this application - tell the user. `duplicate` flagged: warn before any work.",
     "Account site: stop. The user signs up and signs in themselves (never ask for or store a password), "
     "then record_event site_account {host} and continue. Hit a sign-in wall on any other site: "
@@ -340,6 +341,15 @@ async def _filled_with_latest_cv(db: JobDatabase, user_id: str, application_id: 
     return not cvs or max(fills) > max(cvs)
 
 
+async def _swept_after_fill(db: JobDatabase, user_id: str, application_id: int) -> bool:
+    """A ``form_swept`` is on record AND it is newer than the latest ``form_filled``:
+    the pre-submit re-read must describe the form being sent now."""
+    events = await _events(db, user_id, application_id, ("form_filled", "form_swept"))
+    fills = [e["id"] for e in events if e["event_type"] == "form_filled"]
+    sweeps = [e["id"] for e in events if e["event_type"] == "form_swept"]
+    return bool(fills and sweeps and max(sweeps) > max(fills))
+
+
 async def gate_facts(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> settings_rules.SubmitFacts:
     """The facts :func:`settings_rules.may_submit` reads for this application."""
     application_id = int(app_row["id"])
@@ -363,6 +373,7 @@ async def gate_facts(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> 
         declined=state["declined"] is not None,
         blocked=state["blocked"] is not None,
         form_filled=await _filled_with_latest_cv(db, user_id, application_id),
+        form_swept=await _swept_after_fill(db, user_id, application_id),
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
     )
@@ -394,7 +405,7 @@ async def submit_verdict(
     counts = await settings_rules.load_submit_counts(db, user_id, now)
     facts = await gate_facts(db, user_id, app_row)
     if assume_filled:
-        facts = replace(facts, form_filled=True)
+        facts = replace(facts, form_filled=True, form_swept=True)
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
 
@@ -428,12 +439,15 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "submit_approved": frozenset({"artifact_id", "sha256", "where"}),
     "submit_declined": frozenset({"where"}),
     "autofill_set": frozenset({"mode"}),
+    "form_swept": frozenset({"fields_checked", "fixed", "notes"}),
     "hold_released": frozenset({"reason"}),
     "site_account": frozenset({"host"}),
     "account_needed": frozenset({"host"}),
 }
 FORM_FILLED_REQUIRED = frozenset({"form_url", "fields_count"})
 FORM_FILLED_OPTIONAL = frozenset({"answers"})
+FORM_SWEPT_REQUIRED = frozenset({"fields_checked", "fixed"})
+FORM_SWEPT_NOTES_MAX = 300
 ANSWER_SOURCES = ("memory", "profile", "approved", "written", "guessed")
 ANSWER_QUESTION_MAX = 300
 ANSWER_KEY_MAX = 120
@@ -552,6 +566,30 @@ async def check_kit_event(
         if "answers" in payload:
             stored["answers"] = clean_answers(payload["answers"])
         return stored
+    if event_type == "form_swept":
+        keys = EVENT_PAYLOAD_KEYS[event_type]
+        if not FORM_SWEPT_REQUIRED <= set(payload) <= keys:
+            raise SpineError(422, "form_swept needs payload keys ['fields_checked', 'fixed'] (and 'notes')")
+        counts: dict[str, int] = {}
+        for name in ("fields_checked", "fixed"):
+            value = payload.get(name)
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= settings.KIT_FORM_FIELDS_MAX:
+                raise SpineError(422, f"{name} must be a whole number from 0 to {settings.KIT_FORM_FIELDS_MAX}")
+            counts[name] = value
+        checked, fixed = counts["fields_checked"], counts["fixed"]
+        if fixed > checked:
+            raise SpineError(422, "fixed cannot be more than fields_checked")
+        swept: dict[str, Any] = {"fields_checked": checked, "fixed": fixed, "by": actor}
+        if "notes" in payload:
+            raw_notes = payload["notes"]
+            if not isinstance(raw_notes, str):
+                raise SpineError(422, "notes must be text")
+            notes = " ".join(spine._strip_control_chars(raw_notes).split())
+            if len(notes) > FORM_SWEPT_NOTES_MAX:
+                raise SpineError(422, f"notes must be at most {FORM_SWEPT_NOTES_MAX} characters")
+            if notes:
+                swept["notes"] = notes
+        return swept
     if event_type == "hold_released":
         _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])
         if payload.get("reason") not in HOLD_RELEASE_REASONS:
@@ -728,6 +766,53 @@ def compute_answers(
 # ── The kit ──────────────────────────────────────────────────────────────────
 
 
+def _stored_checks(raw: Any) -> list[dict[str, Any]]:
+    """``application_artifacts.checks_json`` as a list; ``[]`` when NULL or unreadable."""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return []
+    return [c for c in data if isinstance(c, dict)] if isinstance(data, list) else []
+
+
+def _num(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else str(value)
+
+
+def pay_warnings(profile: Any, country: Optional[str]) -> list[dict[str, str]]:
+    """Pay sanity (2026-10-13): the hiring country's expected range tops out BELOW what
+    the user earns now, in the SAME currency and period. Different currency or period:
+    nothing - Job360 never converts. Plain fact for the assistant to check, never a block."""
+    current = (profile.user_info.logistics or {}).get("current_salary")
+    if not country or not isinstance(current, dict):
+        return []
+    amount = current.get("amount")
+    if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+        return []
+    for rec in _records(profile.preferences.salary_by_country):
+        if str(rec.get("country") or "").upper() != country:
+            continue
+        high = next((rec[k] for k in ("max", "min", "amount") if _present(rec.get(k))), None)
+        if isinstance(high, bool) or not isinstance(high, (int, float)):
+            continue
+        same = (
+            str(rec.get("currency") or "").upper() == str(current.get("currency") or "").upper()
+            and str(rec.get("period") or "").lower() == str(current.get("period") or "").lower()
+            and _present(rec.get("currency")) and _present(rec.get("period"))
+        )
+        if same and high < amount:
+            return [{
+                "code": "expected_below_current",
+                "detail": (
+                    f"Expected max {_num(high)} is below current {_num(amount)} "
+                    "(same currency) - check with the user"
+                ),
+            }]
+    return []
+
+
 async def _document(
     db: JobDatabase, user: CurrentUser, app_row: dict[str, Any], kind: str,
     events: list[dict[str, Any]], mint: list[dict[str, Any]],
@@ -742,6 +827,10 @@ async def _document(
     stem = await download_stem(
         user.id, str(app_row.get("job_company") or ""), kind, int(row["version_no"])
     )
+    cur = await db._db.execute(
+        "SELECT checks_json FROM application_artifacts WHERE id = ? AND user_id = ?", (row["id"], user.id)
+    )
+    got = await cur.fetchone()
     seen = approved = None
     for ev in events:
         p = ev["payload"]
@@ -754,6 +843,8 @@ async def _document(
         "artifact_id": row["id"], "version": row["version_no"], "label": row.get("label") or "",
         "text": row["text"], "sha256": sha, "chars": len(row["text"]),
         "seen": seen, "approved": approved,
+        # Plain facts found when this version was saved (cv_checks.py); [] = none / not stored.
+        "checks": _stored_checks(got[0] if got else None),
         "file": {
             "url": "", "expires_at": "", "downloads_left": settings.KIT_LINK_MAX_DOWNLOADS,
             "filename": f"{stem}.pdf",
@@ -937,6 +1028,7 @@ async def build_kit(db: JobDatabase, user: CurrentUser, application_id: int, *, 
         "duplicate": dup,
         "hold": hold, "account_site": account_site,
         "autofill": state["autofill"]["mode"],
+        "warnings": pay_warnings(profile, country),
         "instructions": list(KIT_INSTRUCTIONS),
     }
     if cv is None:

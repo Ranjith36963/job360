@@ -128,9 +128,19 @@ async def _controls(client: AsyncClient, app_id: int) -> dict[str, Any]:
     return resp.json()
 
 
-async def _check(client: AsyncClient, app_id: int, url: str = FORM, *, fill: bool = True) -> dict[str, Any]:
+async def _sweep(client: AsyncClient, app_id: int) -> None:
+    """The pre-submit sweep (2026-10-13): the gate stops with form_not_swept until it is on record."""
+    resp = await _event(client, app_id, "form_swept", {"fields_checked": 12, "fixed": 1})
+    assert resp.status_code == 201, resp.text
+
+
+async def _check(
+    client: AsyncClient, app_id: int, url: str = FORM, *, fill: bool = True, sweep: bool = True
+) -> dict[str, Any]:
     if fill:  # rule 4b: the gate stops with form_not_recorded until a form_filled is on record
         assert (await _event(client, app_id, "form_filled", {"form_url": url or FORM, "fields_count": 1})).status_code == 201
+        if sweep:
+            await _sweep(client, app_id)
     resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": url})
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -217,6 +227,7 @@ def _cfg(**kw: Any) -> rules.EffectiveSettings:
 def _facts(**kw: Any) -> rules.SubmitFacts:
     base: dict[str, Any] = {
         "status": "considering", "has_receipt": False, "submit_override": None, "fit_score": 80, "form_filled": True,
+        "form_swept": True,
     }
     base.update(kw)
     return rules.SubmitFacts(**base)
@@ -1498,3 +1509,172 @@ def test_a_salary_saved_before_ranges_reads_as_min_equals_max():
         {"min": 80000, "max": 80000, "currency": "GBP", "period": "year"},
         {"min": 70000, "max": 90000, "currency": "EUR", "period": "year"},
     ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 2026-10-13 sweep gaps: form_swept gate (G2), kit cv.checks (G6), pay sanity (G4)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def test_gate_form_not_swept_follows_form_not_recorded_and_keeps_the_rest_intact():
+    auto = _cfg(submit_mode="auto_when_sure")
+    out = rules.may_submit(auto, _facts(form_swept=False, cv_seen=True), FORM, COUNTS, now=NOW)
+    assert (out.decision, out.reason) == ("stop", "form_not_swept")
+    assert "form_swept" in out.detail and "check_submit again" in out.detail
+    assert "form_not_swept" in rules.REASONS
+    # not filled still wins; the four stops still win over the sweep
+    assert _gate(auto, _facts(form_filled=False, form_swept=False)) == ("stop", "form_not_recorded")
+    assert _gate(_cfg(paused_until="until_resumed"), _facts(form_swept=False)) == ("stop", "paused")
+    # a yes never clears it
+    assert _gate(_cfg(), _facts(form_swept=False, approved=True)) == ("stop", "form_not_swept")
+    assert _gate(_cfg(), _facts(approved=True)) == ("submit", "user_approved")
+
+
+def test_form_swept_payload_keys_are_closed_and_pinned():
+    assert kit_service.EVENT_PAYLOAD_KEYS["form_swept"] == frozenset({"fields_checked", "fixed", "notes"})
+    assert "form_swept" in kit_service.KIT_EVENT_TYPES
+
+
+@pytest.mark.asyncio
+async def test_submit_check_stops_form_not_swept_then_submits_after_the_sweep(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        body = await _check(client, app_id, sweep=False)
+        assert (body["decision"], body["reason"]) == ("stop", "form_not_swept")
+        assert "form_swept" in body["detail"]
+        # bad payloads are 422 (closed keys, whole numbers, fixed <= fields_checked)
+        for bad in (
+            {"fields_checked": 3},
+            {"fields_checked": 3, "fixed": 0, "extra": 1},
+            {"fields_checked": -1, "fixed": 0},
+            {"fields_checked": True, "fixed": 0},
+            {"fields_checked": 2, "fixed": 3},
+            {"fields_checked": 2, "fixed": 0, "notes": 5},
+        ):
+            assert (await _event(client, app_id, "form_swept", bad)).status_code == 422, bad
+        ok = await _event(client, app_id, "form_swept", {"fields_checked": 12, "fixed": 2, "notes": "phone was empty"})
+        assert ok.status_code == 201, ok.text
+        resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        body = resp.json()
+        assert body["reason"] not in ("form_not_swept", "form_not_recorded")
+        assert body["decision"] in ("ask", "submit")
+
+
+@pytest.mark.asyncio
+async def test_a_sweep_older_than_the_latest_fill_does_not_count(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        body = await _check(client, app_id)
+        assert body["reason"] != "form_not_swept"
+        # the form is filled again: the old sweep no longer describes it
+        assert (await _event(client, app_id, "form_filled", {"form_url": FORM, "fields_count": 2})).status_code == 201
+        resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
+        assert (resp.json()["decision"], resp.json()["reason"]) == ("stop", "form_not_swept")
+
+
+@pytest.mark.asyncio
+async def test_the_kit_preview_never_says_form_not_swept(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        kit = (await _kit(client, app_id)).json()
+        assert kit["settings"]["submit_preview"]["reason"] not in ("form_not_recorded", "form_not_swept")
+        assert any("form_swept" in line for line in kit["instructions"])
+
+
+@pytest.mark.asyncio
+async def test_the_kit_documents_carry_the_saved_checks(authenticated_async_context, fixture_user_id):
+    from tests.test_cv_checks import TINY
+
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        cv = await _save(client, app_id, "cv", "Here is the revised CV\n" + TINY)
+        letter = await _save(client, app_id, "cover_letter", LETTER_TEXT)
+        assert cv["checks"], "the save found something to check"
+        kit = (await _kit(client, app_id)).json()
+        assert kit["cv"]["checks"] == cv["checks"]
+        assert {"leaked_chatter", "pdf_space"} <= {c["code"] for c in kit["cv"]["checks"]}
+        assert kit["cover_letter"]["checks"] == letter["checks"] == []
+        # a newer version carries ITS OWN checks - never the old version's
+        v2 = await _save(client, app_id, "cv", CV_TEXT)
+        assert v2["checks"] != cv["checks"]
+        assert (await _kit(client, app_id)).json()["cv"]["checks"] == v2["checks"]
+
+
+def test_stored_checks_read_as_a_list_and_null_or_junk_is_empty():
+    assert kit_service._stored_checks(None) == [] and kit_service._stored_checks("") == []
+    assert kit_service._stored_checks("not json") == [] and kit_service._stored_checks('{"a": 1}') == []
+    assert kit_service._stored_checks('[{"code": "pdf_space", "detail": "x"}, 5]') == [
+        {"code": "pdf_space", "detail": "x"}
+    ]
+
+
+async def _pay_kit(
+    client: AsyncClient, app_id: int, current: dict[str, Any], expected: dict[str, Any]
+) -> dict[str, Any]:
+    edits = await _patch(
+        client,
+        _e("user_info.logistics", {"current_salary": current}),
+        _e("preferences.salary_by_country", [{"country": "GB", **expected}]),
+    )
+    assert edits.status_code == 200, edits.text
+    return (await _kit(client, app_id)).json()
+
+
+@pytest.mark.asyncio
+async def test_pay_sanity_warns_only_when_expected_max_is_below_current_in_the_same_currency(
+    authenticated_async_context, fixture_user_id
+):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)  # GB ad
+        kit = await _pay_kit(
+            client, app_id,
+            {"amount": 90000, "currency": "GBP", "period": "year"},
+            {"min": 60000, "max": 80000, "currency": "GBP", "period": "year"},
+        )
+        assert kit["warnings"] == [{
+            "code": "expected_below_current",
+            "detail": "Expected max 80000 is below current 90000 (same currency) - check with the user",
+        }]
+        # at or above current: quiet
+        kit = await _pay_kit(
+            client, app_id,
+            {"amount": 80000, "currency": "GBP", "period": "year"},
+            {"min": 60000, "max": 80000, "currency": "GBP", "period": "year"},
+        )
+        assert kit["warnings"] == []
+        # different currency: never converted, never a warning
+        kit = await _pay_kit(
+            client, app_id,
+            {"amount": 90000, "currency": "GBP", "period": "year"},
+            {"min": 1000, "max": 2000, "currency": "EUR", "period": "year"},
+        )
+        assert kit["warnings"] == []
+        # different period: no warning either
+        kit = await _pay_kit(
+            client, app_id,
+            {"amount": 90000, "currency": "GBP", "period": "year"},
+            {"min": 3000, "max": 4000, "currency": "GBP", "period": "month"},
+        )
+        assert kit["warnings"] == []
+
+
+@pytest.mark.asyncio
+async def test_pay_sanity_reads_the_hiring_countrys_record_only(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)  # GB ad; the only salary record is for DE
+        edits = await _patch(
+            client,
+            _e("user_info.logistics", {"current_salary": {"amount": 90000, "currency": "EUR", "period": "year"}}),
+            _e("preferences.salary_by_country", [
+                {"country": "DE", "min": 1000, "max": 2000, "currency": "EUR", "period": "year"}]),
+        )
+        assert edits.status_code == 200, edits.text
+        assert (await _kit(client, app_id)).json()["warnings"] == []

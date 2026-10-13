@@ -454,6 +454,9 @@ class SubmitFacts:
     declined: bool = False
     blocked: bool = False
     form_filled: bool = False
+    # ``form_swept`` - a ``form_swept`` event is newer than the latest ``form_filled``
+    # (the assistant re-read every field right before submit; 2026-10-13).
+    form_swept: bool = False
     # The latest saved fit score for this application (``None`` = no fit yet).
     # Compared with the user's score line by :func:`line_side` (rule 5c).
     fit_score: Optional[int] = None
@@ -474,7 +477,7 @@ REASONS: tuple[str, ...] = (
     "paused", "already_applied", "user_declined", "daily_cap_reached", "duplicate_job", "unknown_site",
     "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
-    "form_not_recorded",
+    "form_not_recorded", "form_not_swept",
 )
 
 
@@ -539,6 +542,8 @@ def may_submit(
     4. daily cap reached -> stop ``daily_cap_reached``
     4b. no ``form_filled`` event recorded -> stop ``form_not_recorded`` (a stored
         yes does NOT clear it: the record of what was typed is needed either way)
+    4c. no ``form_swept`` newer than the latest ``form_filled`` -> stop
+        ``form_not_swept`` (the pre-submit re-read; a yes does not clear it)
     5. same job already applied to -> ``duplicate_job``: STOP when the mode is
        auto (nobody is watching), else ask
     5b. a ``blocked`` with no later ``unblocked`` -> ask ``blocked`` (S6)
@@ -556,7 +561,7 @@ def may_submit(
 
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
-    ``user_approved``. Rules 1-4b, the auto-mode duplicate stop and the ``blocked``
+    ``user_approved``. Rules 1-4c, the auto-mode duplicate stop and the ``blocked``
     ask (5b) are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
@@ -574,6 +579,12 @@ def may_submit(
             "stop", "form_not_recorded",
             "Fill the form first, then record_event form_filled with the answers you typed, "
             "then call check_submit again. Do not submit yet.",
+        )
+    if not application.form_swept:
+        return SubmitDecision(
+            "stop", "form_not_swept",
+            "Re-read every field on the page right before submit, fix what is wrong, "
+            "then record_event form_swept and call check_submit again.",
         )
     override = application.submit_override if application.submit_override in VALID_SUBMIT_MODES else None
     mode = override or cfg.submit_mode

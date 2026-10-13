@@ -67,6 +67,11 @@ async def _check(client: AsyncClient, app_id: int) -> dict[str, Any]:
         json={"event_type": "form_filled", "payload": {"form_url": FORM, "fields_count": 1}},
     )
     assert fill.status_code == 201, fill.text
+    sweep = await client.post(
+        f"/api/applications/{app_id}/events",
+        json={"event_type": "form_swept", "payload": {"fields_checked": 1, "fixed": 0}},
+    )
+    assert sweep.status_code == 201, sweep.text
     resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": FORM})
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -111,7 +116,7 @@ def test_gate_asks_blocked_and_a_yes_does_not_clear_it():
 
     now = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
     facts = rules.SubmitFacts(status="considering", has_receipt=False, submit_override=None,
-                              cv_seen=True, approved=True, blocked=True, form_filled=True)
+                              cv_seen=True, approved=True, blocked=True, form_filled=True, form_swept=True)
     verdict = rules.may_submit(cfg, facts, FORM, counts, now=now)
     assert (verdict.decision, verdict.reason) == ("ask", "blocked")
     assert "blocked" in rules.REASONS

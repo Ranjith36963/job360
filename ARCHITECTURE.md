@@ -122,7 +122,7 @@ Caps: `core.settings.KIT_LINK_TTL_MINUTES` / `KIT_LINK_MAX_DOWNLOADS` /
 `FILE_DOWNLOADS_MAX_PER_MIN` / `FILE_BAD_TOKEN_MAX_PER_MIN`. `application_receipts` gained
 `possible_duplicate`, `kit_event_id`, `kit_sha256`, all set at INSERT. The human
 in the loop is a set of note events (`cv_seen`, `submit_approved`,
-`submit_declined`, `autofill_set`, `duplicate_cleared`, `form_filled`,
+`submit_declined`, `autofill_set`, `duplicate_cleared`, `form_filled`, `form_swept`,
 `hold_released`, `site_account`, `account_needed`) validated in the
 `record_event` route (`kit.check_kit_event`), plus four website-only buttons
 (`/cv-seen`, `/send/approve|decline`, `/autofill`, `/duplicate/clear`);
