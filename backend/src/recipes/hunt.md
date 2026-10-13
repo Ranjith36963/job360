@@ -22,7 +22,7 @@ pastes). Then you bring only the good ones into Job360.
    company's public job board - Greenhouse
    `boards-api.greenhouse.io/v1/boards/<co>/jobs`, Lever
    `api.lever.co/v0/postings/<co>`, Ashby
-   `api.ashbyhq.com/posting-api/job-board/<co>`). **Where** comes ONLY from those rows: a place that is not
+   `api.ashbyhq.com/posting-api/job-board/<co>`; `<co>` is the employer's board token, not its display name: read it off the careers page link, e.g. boards.greenhouse.io/<token>, jobs.lever.co/<site>, jobs.ashbyhq.com/<name>). **Where** comes ONLY from those rows: a place that is not
    on that list is out, even if it is where the user lives today. A job counts
    only if one of its row's `counts_if` lines is true. **Done when** every row
    has a line.
