@@ -175,11 +175,19 @@ def job_checks(
     if posted and employer:
         gap = abs((posted - employer).days)
         reposted = gap > settings.JOB_CHECK_REPOST_GAP_DAYS
-        why = (
-            f"The listing says {posted.isoformat()} but the employer's posting says "
-            f"{employer.isoformat()} ({gap} days apart): reposted."
-            if reposted else f"Listing {posted.isoformat()} and employer {employer.isoformat()} agree."
-        )
+        if reposted:
+            why = (
+                f"The listing says {posted.isoformat()} but the employer's posting says "
+                f"{employer.isoformat()} ({gap} days apart): reposted."
+            )
+        elif gap == 0:
+            why = f"Listing and employer dates match ({posted.isoformat()})."
+        else:
+            side = "after" if posted > employer else "before"
+            why = (
+                f"Listing {posted.isoformat()} is {gap} days {side} the employer's "
+                f"{employer.isoformat()} (normal indexing lag)."
+            )
         out.append({"code": "reposted", "ok": not reposted, "value": reposted, "reason": why})
 
     pay = bool(_PAY_RE.search(description or ""))

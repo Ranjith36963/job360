@@ -418,7 +418,7 @@ OFFICIAL_ATS_HOSTS = (
 JOB_BOARD_HOSTS = ("linkedin.com",)  # plus indeed.<tld>, handled in job_checks
 JOB_CHECK_PARTIAL_MIN_WORDS = 40   # below this the "ad" is a title or a teaser
 JOB_CHECK_FULL_MIN_WORDS = 150     # at or above this the ad is treated as complete
-JOB_CHECK_REPOST_GAP_DAYS = 14     # listing date vs employer date further apart than this = reposted
+JOB_CHECK_REPOST_GAP_DAYS = 3      # listing date vs employer date further apart than this = reposted
 
 # R6 — the fit verdict is stored, never computed.
 APPLICATION_FIT_REASONING_MAX_CHARS = int(os.getenv("APPLICATION_FIT_REASONING_MAX_CHARS", "4000"))
