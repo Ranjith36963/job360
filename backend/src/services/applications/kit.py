@@ -28,6 +28,7 @@ import hashlib
 import json
 import re
 import secrets
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlsplit
@@ -85,6 +86,48 @@ def sha256_text(text: str) -> str:
 def hash_token(token: str) -> str:
     """What is stored for a file-link token (the token itself never is)."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _ascii_part(value: Any) -> str:
+    """One name part as ASCII letters/digits only (accents folded, spaces -> ``-``)."""
+    folded = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^A-Za-z0-9]+", "-", folded).strip("-")
+
+
+_NAMED_KINDS = {"cv": "CV", "cover_letter": "Cover_Letter"}
+
+
+def legal_file_stem(profile: Any, kind: str) -> Optional[str]:
+    """``Ada_Lovelace_CV`` / ``Ada_Lovelace_Cover_Letter`` from the user's legal names
+    (``user_info.contact``), else ``cv_data.name``; ``None`` when no name is known."""
+    suffix = _NAMED_KINDS.get(kind)
+    if suffix is None or profile is None:
+        return None
+    contact = getattr(getattr(profile, "user_info", None), "contact", None) or {}
+    first = _ascii_part(contact.get("legal_first_name"))
+    last = _ascii_part(contact.get("legal_last_name"))
+    if not (first and last):
+        words = str(getattr(getattr(profile, "cv_data", None), "name", "") or "").split()
+        if len(words) >= 2:
+            first, last = _ascii_part(words[0]), _ascii_part("-".join(words[1:]))
+        else:
+            return None
+    if not (first and last):
+        return None
+    return f"{first}_{last}_{suffix}"
+
+
+async def download_stem(user_id: str, company: str, kind: str, version_no: int) -> str:
+    """The one download/kit file-name stem: the user's legal name, else ``file_stem``."""
+    import asyncio  # noqa: PLC0415
+
+    try:
+        from src.services.profile.storage import load_profile  # noqa: PLC0415 - rule #16
+
+        profile = await asyncio.to_thread(load_profile, user_id)
+    except Exception:  # noqa: BLE001 - a name lookup must never break a download
+        profile = None
+    return legal_file_stem(profile, kind) or file_stem(company, kind, version_no)
 
 
 def file_stem(company: str, kind: str, version_no: int) -> str:
@@ -694,6 +737,9 @@ async def _document(
 
     sha = sha256_text(row["text"])
     size = len(await render_document_pdf(user.id, kind, row["text"]))
+    stem = await download_stem(
+        user.id, str(app_row.get("job_company") or ""), kind, int(row["version_no"])
+    )
     seen = approved = None
     for ev in events:
         p = ev["payload"]
@@ -708,7 +754,7 @@ async def _document(
         "seen": seen, "approved": approved,
         "file": {
             "url": "", "expires_at": "", "downloads_left": settings.KIT_LINK_MAX_DOWNLOADS,
-            "filename": f"{file_stem(str(app_row.get('job_company') or ''), kind, int(row['version_no']))}.pdf",
+            "filename": f"{stem}.pdf",
             "mime": "application/pdf", "size": size,
         },
     }

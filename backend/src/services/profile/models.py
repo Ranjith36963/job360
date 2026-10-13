@@ -246,6 +246,10 @@ class CVData:
     # Timestamps are ISO-8601 UTC strings, matching the rest of storage.
     cv_filename: str = ""
     cv_uploaded_at: str = ""
+    # "cv_file_garbled" when the uploaded PDF's text came out with (cid:N) /
+    # U+FFFD debris - hiring software cannot read such a file either. CV-owned:
+    # a new upload / clear resets it, then the route sets it for the new file.
+    cv_file_warning: str = ""
     # Visual fingerprint of the uploaded CV PDF (services/profile/cv_style.py):
     # generated CVs follow this design. Empty = use DEFAULT_STYLE. CV-owned, so
     # a new upload / clear resets it; old rows without the key load as {}.

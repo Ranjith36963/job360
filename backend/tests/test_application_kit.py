@@ -360,7 +360,7 @@ async def test_the_kit_carries_the_cv_letter_job_and_hashes(authenticated_async_
             "id": app_id, "status": "considering", "follow_up_on": None, "submit_override": None,
         }
         file = kit["cv"]["file"]
-        assert file["filename"] == "northwind-cv-v1.pdf" and file["mime"] == "application/pdf"
+        assert file["filename"] == "Ada_Lovelace_CV.pdf" and file["mime"] == "application/pdf"
         assert file["downloads_left"] == 3 and file["size"] > 100
         assert file["url"].startswith(settings.SITE_BASE_URL + "/api/files/")
         assert kit["cv"]["seen"] is None and kit["cv"]["approved"] is None
@@ -401,7 +401,7 @@ async def test_the_kit_returns_the_newest_cv_version(authenticated_async_context
         kit = (await _kit(client, app_id)).json()
         assert kit["cv"]["text"] == "new cv" and kit["cv"]["version"] == 2
         assert kit["cv"]["artifact_id"] == newest["artifact_id"]
-        assert kit["cv"]["file"]["filename"] == "northwind-cv-v2.pdf"
+        assert kit["cv"]["file"]["filename"] == "Ada_Lovelace_CV.pdf"
 
 
 @pytest.mark.asyncio
@@ -575,7 +575,7 @@ async def test_the_link_downloads_three_times_then_410(authenticated_async_conte
             assert resp.status_code == 200, resp.text
             assert resp.content[:5] == b"%PDF-"
             assert resp.headers["cache-control"] == "no-store"
-            assert resp.headers["content-disposition"] == 'attachment; filename="northwind-cv-v1.pdf"'
+            assert resp.headers["content-disposition"] == 'attachment; filename="Ada_Lovelace_CV.pdf"'
             assert resp.headers["referrer-policy"] == "no-referrer" and "noindex" in resp.headers["x-robots-tag"]
             assert resp.headers["content-type"] == "application/pdf"
         gone = await anon.get(f"/api/files/{token}")
