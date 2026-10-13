@@ -61,6 +61,23 @@ def test_description_payload_per_event_matches_exactly():
         assert any(f == set(keys) or f == {f"{k}" for k in keys} for f in found), (event, found)
 
 
+def test_description_lists_every_closed_value_set():
+    """Live 2026-10-13: 'browser_frozen' was refused and the description never listed the allowed blocked reasons.
+    Every value the validators accept must appear in the record_event description."""
+    from src.api.mcp_server import build_server
+    from src.services.applications import blocked as blocked_service
+
+    tools = {t.name: t for t in build_server()._tool_manager.list_tools()}
+    text = _flat(tools["record_event"].description or "")
+    assert len(text) <= 2000
+    for reason in blocked_service.BLOCKED_REASONS:
+        assert re.search(rf"(?<![\w]){reason}(?![\w])", text), f"blocked reason {reason!r} missing from the description"
+    for resolution in blocked_service.UNBLOCK_RESOLUTIONS:
+        assert resolution in text, f"unblocked resolution {resolution!r} missing from the description"
+    for reason in kit_service.HOLD_RELEASE_REASONS:
+        assert re.search(rf"(?<![\w]){reason}(?![\w])", text), f"hold_released reason {reason!r} missing"
+
+
 # -- #19 waiting for your yes ----------------------------------------------------------------------
 
 
