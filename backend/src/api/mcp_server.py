@@ -473,6 +473,9 @@ def build_server(version: str = "") -> MCPServer:
             "experience_level_inferred": resp.preferences.get("experience_level_inferred", "") or "",
             "education": s.education,
             "has_cv": s.cv_length > 0,
+            # "cv_file_garbled" = the uploaded CV file's bullets cannot be read by hiring software; tell the
+            # user to send a Job360-rendered copy. Absent when the file is fine (rule #29).
+            **({"cv_file_warning": s.cv_file_warning} if s.cv_file_warning else {}),
             "has_linkedin": s.has_linkedin,
             "has_github": s.has_github,
             "top_skills": resp.skill_tiers.get("primary", [])[:15],
@@ -786,6 +789,10 @@ def build_server(version: str = "") -> MCPServer:
         applicant-tracking parser, what you fixed). It is your opinion, stored
         on this version — Job360 never computes or markets one. Allowed for
         kind "cv" and "cover_letter" only. A re-check = save a new version.
+
+        The reply's `checks` lists claims not found in the profile and PDF problems
+        (each `{code, severity, detail}`); fix them and save a new version, or tell
+        the user. They warn only - the save always succeeds.
 
         Give `contact_id` (a person from add_contact/list_people) to draft a
         message VERSION for them instead — `kind` must be "outreach" and

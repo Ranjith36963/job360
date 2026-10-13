@@ -39,6 +39,7 @@ from src.api.models import (
 )
 from src.core import settings
 from src.core.settings import PROFILE_EXTRACT_MAX_PER_HOUR
+from src.services.applications import cv_checks
 from src.services.applications.authorship import actor_for
 from src.services.auth import rate_limit as auth_rate_limit
 from src.services.profile import assistant_settings as settings_rules
@@ -136,6 +137,7 @@ def _build_profile_response(
         # saved before these fields existed still renders.
         cv_filename=getattr(profile.cv_data, "cv_filename", "") or "",
         cv_uploaded_at=getattr(profile.cv_data, "cv_uploaded_at", "") or "",
+        cv_file_warning=getattr(profile.cv_data, "cv_file_warning", "") or "",
         linkedin_filename=getattr(profile.cv_data, "linkedin_filename", "") or "",
         linkedin_uploaded_at=getattr(profile.cv_data, "linkedin_uploaded_at", "") or "",
         github_username=profile.preferences.github_username or "",
@@ -1048,6 +1050,9 @@ async def _capture_cv_raw(content: bytes, filename: str | None, profile: UserPro
         # extraction below refills it only if the remaining history says so.
         _reinfer_level_from_what_remains(profile)
         profile.cv_data.raw_text = raw_text
+        # A file whose text layer is (cid:N) / U+FFFD debris reads as noise to hiring
+        # software too: warn the user to send a Job360-rendered copy instead.
+        profile.cv_data.cv_file_warning = "cv_file_garbled" if cv_checks.garbled(raw_text) else ""
         # Upload receipt — WHAT was uploaded and WHEN. Set here, right where the
         # new CV replaces the old one, so a re-upload always names the CURRENT
         # file (a stale name would be worse than none: it would confirm the

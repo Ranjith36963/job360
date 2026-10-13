@@ -4370,6 +4370,11 @@ export interface components {
         /** ProfileSummary */
         ProfileSummary: {
             /**
+             * Cv File Warning
+             * @default
+             */
+            cv_file_warning: string;
+            /**
              * Cv Filename
              * @default
              */
@@ -4997,6 +5002,13 @@ export interface components {
             ats_score?: number | null;
             /** Chars */
             chars: number;
+            /**
+             * Checks
+             * @default []
+             */
+            checks: {
+                [key: string]: string;
+            }[];
             /** Contact Id */
             contact_id?: number | null;
             /** Created At */

@@ -143,7 +143,9 @@ async def download_file(
         content = await render_document_pdf(user_id, kind, artifact["text"])
         media_type = "application/pdf"
     app_row = await spine.get_owned_application(db, user_id, int(row["application_id"])) or {}
-    stem = kit.file_stem(str(app_row.get("job_company") or ""), kind, int(artifact["version_no"]))
+    stem = await kit.download_stem(
+        user_id, str(app_row.get("job_company") or ""), kind, int(artifact["version_no"])
+    )
     get_audit_logger().info(
         "file_download",
         extra={
