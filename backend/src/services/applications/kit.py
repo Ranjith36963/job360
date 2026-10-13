@@ -579,6 +579,14 @@ async def check_kit_event(
         checked, fixed = counts["fields_checked"], counts["fixed"]
         if fixed > checked:
             raise SpineError(422, "fixed cannot be more than fields_checked")
+        fills = await _events(db, user.id, application_id, ("form_filled",))
+        filled = fills[0]["payload"].get("fields_count") if fills else None
+        if isinstance(filled, int) and not isinstance(filled, bool) and checked < filled:
+            raise SpineError(
+                422,
+                f"fields_checked must be at least {filled} (the fields_count of the latest form_filled): "
+                "re-read every field on the page, then record the sweep",
+            )
         swept: dict[str, Any] = {"fields_checked": checked, "fixed": fixed, "by": actor}
         if "notes" in payload:
             raw_notes = payload["notes"]

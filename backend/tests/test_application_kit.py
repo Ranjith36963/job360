@@ -1678,3 +1678,21 @@ async def test_pay_sanity_reads_the_hiring_countrys_record_only(authenticated_as
         )
         assert edits.status_code == 200, edits.text
         assert (await _kit(client, app_id)).json()["warnings"] == []
+
+
+@pytest.mark.asyncio
+async def test_an_empty_or_short_sweep_of_a_filled_form_is_refused(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        assert (await _event(client, app_id, "form_filled", {"form_url": FORM, "fields_count": 23})).status_code == 201
+        for checked in (0, 22):
+            resp = await _event(client, app_id, "form_swept", {"fields_checked": checked, "fixed": 0})
+            assert resp.status_code == 422, checked
+            assert "at least 23" in resp.text
+        body = await _check(client, app_id, fill=False)
+        assert (body["decision"], body["reason"]) == ("stop", "form_not_swept")
+        ok = await _event(client, app_id, "form_swept", {"fields_checked": 23, "fixed": 2})
+        assert ok.status_code == 201, ok.text
+        body = await _check(client, app_id, fill=False)
+        assert body["reason"] not in ("form_not_swept", "form_not_recorded")
