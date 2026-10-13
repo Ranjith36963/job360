@@ -37,6 +37,7 @@ _URL = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 NO_PROOF: dict[str, Any] = {
     "has_text": False, "has_page_text": False, "has_confirmation": False,
     "has_email": False, "email_seen_at": None, "screenshots": 0, "level": "none",
+    "proof_label": "claimed, unverified",
 }
 _GONE = "upload link used or expired - ask your assistant for a new one"
 PROOF_LOCK_CLASS = 360_007  # int32 class id for pg_advisory_xact_lock(class, application_id); the other lock users
@@ -314,7 +315,23 @@ async def proof_for(db: JobDatabase, user_id: str, application_ids: list[int]) -
     for p in out.values():
         weakest = "screenshot_only" if p["screenshots"] else "none"
         p["level"] = "email" if p["has_email"] else "text" if p["has_text"] else weakest
+        p["proof_label"] = proof_label(p)
     return out
+
+
+def proof_label(p: dict[str, Any]) -> str:
+    """Plain words for what is stored as proof (2026-10-13): the parts present joined with " + ";
+    ", no application id" when there is no confirmation id; nothing stored = "claimed, unverified"."""
+    parts = [
+        text for present, text in (
+            (p.get("has_confirmation"), "confirmation id"), (p.get("has_email"), "email"),
+            (p.get("has_page_text"), "page text"), (p.get("screenshots"), "screenshot"),
+        ) if present
+    ]
+    if not parts:
+        return "claimed, unverified"
+    label = " + ".join(parts)
+    return label if p.get("has_confirmation") else f"{label}, no application id"
 
 
 async def proof_missing(db: JobDatabase, user_id: str, now: datetime) -> list[dict[str, Any]]:

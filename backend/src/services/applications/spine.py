@@ -1665,7 +1665,7 @@ async def list_applications(
 
     # Slice 7 — fact 2 once per request, so every card can carry its badge.
     from src.services.applications import visa as visa_service  # noqa: PLC0415
-    from src.services.applications.next_step import next_step  # noqa: PLC0415
+    from src.services.applications.next_step import kit_flags, next_step  # noqa: PLC0415
     from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415 — profile ↔ spine cycle
 
     countries = await visa_service.user_work_countries(db, user_id)
@@ -1679,12 +1679,14 @@ async def list_applications(
     app_ids = [r["id"] for r in rows]
     interview_at_by_app: dict[int, str] = {}
     has_lesson_by_app: dict[int, bool] = {}
+    kit_events_by_app: dict[int, list[tuple[int, str]]] = {}
     if app_ids:
         placeholders = ",".join("?" for _ in app_ids)
         ev_cur = await db._db.execute(
             f"SELECT id, application_id, event_type, scheduled_at, corrects_event_id "  # noqa: S608 — placeholders, not values
             f"FROM application_events WHERE application_id IN ({placeholders}) "
-            f"AND (event_type = 'lesson' OR scheduled_at IS NOT NULL OR corrects_event_id IS NOT NULL) "
+            f"AND (event_type IN ('lesson', 'form_filled', 'submit_approved', 'submit_declined') "
+            f"OR scheduled_at IS NOT NULL OR corrects_event_id IS NOT NULL) "
             f"ORDER BY occurred_at ASC, id ASC",
             app_ids,
         )
@@ -1698,6 +1700,7 @@ async def list_applications(
                 interview_at_by_app[app_id] = r["scheduled_at"]  # rows are occurred_at ASC — last write wins
             if r["event_type"] == "lesson":
                 has_lesson_by_app[app_id] = True
+            kit_events_by_app.setdefault(app_id, []).append((int(r["id"]), r["event_type"]))
 
     # Owner decision, 2026-09-25 — the list row now shows a "Sent <date>" tag,
     # which needs the LATEST receipt per application. One batched query for
@@ -1761,6 +1764,8 @@ async def list_applications(
                     interview_at=interview_at_by_app.get(app_id),
                     has_lesson=has_lesson_by_app.get(app_id, False),
                     follow_up_due=follow_up_due,
+                    form_filled=kit_flags(kit_events_by_app.get(app_id, []))[0],
+                    submit_approved=kit_flags(kit_events_by_app.get(app_id, []))[1],
                 ),
             }
         )

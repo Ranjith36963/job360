@@ -68,6 +68,7 @@ SHAPES: dict[str, dict[str, Any]] = {
                 "driving_licence_type": "provisional", "driving_licence_country": "GB",
             }],
             "start_on_site_abroad": "yes, after sponsorship is agreed",
+            "current_salary": {"amount": 45000, "currency": "GBP", "period": "year"},
         },
         "allowed_keys": list(_ui._LOGISTICS),
         "record_keys": list(_ui._LOGISTICS_COUNTRY),

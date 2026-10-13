@@ -132,6 +132,7 @@ async def test_link_upload_stores_the_image_and_leaves_a_trail(authenticated_asy
         assert state["proof"] == {
             "has_text": False, "has_page_text": False, "has_confirmation": False, "has_email": False,
             "email_seen_at": None, "screenshots": 1, "level": "screenshot_only",
+            "proof_label": "screenshot, no application id",
         }
         shot = state["screenshots"][0]
         assert shot["id"] == up.json()["screenshot_id"] and shot["created_by"] == "web" and "bytes" not in shot
@@ -338,7 +339,8 @@ async def test_the_level_is_the_strongest_proof_and_a_correction_withdraws_text(
         got = {i: (await _proof(client, i))["proof"] for i in (a, b, c, d)}
         assert [got[i]["level"] for i in (a, b, c, d)] == ["none", "screenshot_only", "text", "email"]
         assert got[c] == {"has_text": True, "has_page_text": True, "has_confirmation": False, "has_email": False,
-                          "email_seen_at": None, "screenshots": 1, "level": "text"}
+                          "email_seen_at": None, "screenshots": 1, "level": "text",
+                          "proof_label": "page text + screenshot, no application id"}
         listed = {r["id"]: r["proof"]["level"] for r in (await client.get("/api/applications")).json()["applications"]}
         assert listed == {a: "none", b: "screenshot_only", c: "text", d: "email"}
         # a correction supersedes a proof_text: the old text no longer counts

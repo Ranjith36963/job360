@@ -5520,6 +5520,11 @@
             "title": "Level",
             "type": "string"
           },
+          "proof_label": {
+            "default": "claimed, unverified",
+            "title": "Proof Label",
+            "type": "string"
+          },
           "screenshots": {
             "default": 0,
             "title": "Screenshots",

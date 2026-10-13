@@ -11,6 +11,7 @@ const NONE: Proof = {
   email_seen_at: null,
   screenshots: 0,
   level: "none",
+  proof_label: "claimed, unverified",
 };
 // A local wall-clock time, so the expected text holds in any time zone.
 const SEEN = new Date(2026, 9, 2, 18, 52).toISOString();

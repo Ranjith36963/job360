@@ -399,7 +399,7 @@ async def submit_verdict(
 # ── Who may write which S3 event ─────────────────────────────────────────────
 
 
-def _closed_payload(event_type: str, payload: dict[str, Any], keys: set[str]) -> None:
+def _closed_payload(event_type: str, payload: dict[str, Any], keys: frozenset[str] | set[str]) -> None:
     if set(payload) != keys:
         raise SpineError(422, f"{event_type} needs payload keys {sorted(keys)} and nothing else")
 
@@ -419,6 +419,19 @@ def _where(user: CurrentUser, event_type: str, payload: dict[str, Any]) -> str:
     return str(where)
 
 
+# The closed payload keys of each kit event - the validator below reads these, and a test pins the
+# record_event tool description against them so the two can never drift apart (2026-10-13).
+EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
+    "cv_seen": frozenset({"artifact_id", "sha256", "where"}),
+    "submit_approved": frozenset({"artifact_id", "sha256", "where"}),
+    "submit_declined": frozenset({"where"}),
+    "autofill_set": frozenset({"mode"}),
+    "hold_released": frozenset({"reason"}),
+    "site_account": frozenset({"host"}),
+    "account_needed": frozenset({"host"}),
+}
+FORM_FILLED_REQUIRED = frozenset({"form_url", "fields_count"})
+FORM_FILLED_OPTIONAL = frozenset({"answers"})
 ANSWER_SOURCES = ("memory", "profile", "approved", "written", "guessed")
 ANSWER_QUESTION_MAX = 300
 ANSWER_KEY_MAX = 120
@@ -489,7 +502,7 @@ async def check_kit_event(
     if event_type in SERVER_ONLY_EVENTS:
         raise SpineError(422, f"{event_type} is written by Job360 itself (get_application_kit), not by a caller")
     if event_type in ("cv_seen", "submit_approved"):
-        _closed_payload(event_type, payload, {"artifact_id", "sha256", "where"})
+        _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])
         where = _where(user, event_type, payload)
         kinds = ("cv", "cover_letter") if event_type == "cv_seen" else ("cv",)
         artifact_id, sha = payload.get("artifact_id"), payload.get("sha256")
@@ -507,10 +520,10 @@ async def check_kit_event(
             raise SpineError(409, "this CV changed - show the new version")
         return {"artifact_id": row["id"], "sha256": sha, "where": where, "version": row["version_no"], "by": actor}
     if event_type == "submit_declined":
-        _closed_payload(event_type, payload, {"where"})
+        _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])
         return {"where": _where(user, event_type, payload), "by": actor}
     if event_type == "autofill_set":
-        _closed_payload(event_type, payload, {"mode"})
+        _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])
         mode = payload.get("mode")
         if mode not in ("allow", "deny"):
             raise SpineError(422, 'autofill_set needs payload {"mode": "allow" | "deny"} and nothing else')
@@ -527,7 +540,7 @@ async def check_kit_event(
             raise SpineError(403, "this needs your click on the Job360 website")
         return {"where": "web", "by": actor}
     if event_type == "form_filled":
-        if not {"form_url", "fields_count"} <= set(payload) <= {"form_url", "fields_count", "answers"}:
+        if not FORM_FILLED_REQUIRED <= set(payload) <= FORM_FILLED_REQUIRED | FORM_FILLED_OPTIONAL:
             raise SpineError(422, "form_filled needs payload keys ['fields_count', 'form_url'] (and 'answers')")
         count = payload.get("fields_count")
         if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= settings.KIT_FORM_FIELDS_MAX:
@@ -538,12 +551,12 @@ async def check_kit_event(
             stored["answers"] = clean_answers(payload["answers"])
         return stored
     if event_type == "hold_released":
-        _closed_payload(event_type, payload, {"reason"})
+        _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])
         if payload.get("reason") not in HOLD_RELEASE_REASONS:
             raise SpineError(422, "hold_released reason must be one of: " + ", ".join(sorted(HOLD_RELEASE_REASONS)))
         return {"reason": payload["reason"], "by": actor}
     if event_type in ("site_account", "account_needed"):
-        _closed_payload(event_type, payload, {"host"})  # a password key can never fit here
+        _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])  # a password key can never fit here
         return {"host": _host(event_type, payload.get("host")), "by": actor}
     raise SpineError(422, f"{event_type} is not a kit event")  # pragma: no cover
 
@@ -640,7 +653,7 @@ def compute_answers(
 
     at = when("user_info.logistics")
     lg = info.logistics or {}
-    for k in ("notice_period", "earliest_start"):
+    for k in ("notice_period", "earliest_start", "current_salary"):
         if _present(lg.get(k)):
             out["logistics"].append(_item(f"logistics.{k}", lg[k], "memory", at))
     for rec in _records(lg.get("countries")):

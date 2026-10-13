@@ -536,6 +536,8 @@ class ProofOut(BaseModel):
     email_seen_at: str | None = None
     screenshots: int = 0
     level: Literal["none", "screenshot_only", "text", "email"] = "none"
+    # Plain words for what is stored, e.g. "confirmation id + email" or "claimed, unverified".
+    proof_label: str = "claimed, unverified"
 
 
 class ProofMissingOut(BaseModel):

@@ -459,7 +459,8 @@ or YYYY-MM-DD), remote_ok (bool), onsite (yes | only_if_sponsored | no), note
 per country {country (ISO2, required), willing_to_relocate (bool),
 relocate_where, travel_ok_pct (whole number 0-100), driving_licence (bool),
 driving_licence_country (ISO2), driving_licence_type (full | provisional |
-none)}], start_on_site_abroad (one line)}.
+none)}], start_on_site_abroad (one line), current_salary {amount, currency, period: year | month}
+(what they earn now, never converted)}.
 `user_info.languages` = [{language, level: native | fluent | professional |
 basic}].
 `user_info.equality` = {gender, ethnicity, disability, veteran,
