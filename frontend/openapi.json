@@ -810,6 +810,17 @@
       },
       "ApplicationJobOut": {
         "properties": {
+          "ad_posted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ad Posted At"
+          },
           "catalog_present": {
             "title": "Catalog Present",
             "type": "boolean"
@@ -824,6 +835,17 @@
               }
             ],
             "title": "Country"
+          },
+          "employer_published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employer Published At"
           },
           "found_on": {
             "anyOf": [
@@ -1909,6 +1931,18 @@
             "title": "Description",
             "type": "string"
           },
+          "employer_published_at": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employer Published At"
+          },
           "found_on": {
             "anyOf": [
               {
@@ -1926,6 +1960,18 @@
             "maxLength": 300,
             "title": "Location",
             "type": "string"
+          },
+          "posted_at": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posted At"
           },
           "remote": {
             "anyOf": [
@@ -1991,9 +2037,28 @@
       },
       "BringJobResponse": {
         "properties": {
+          "ad_posted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ad Posted At"
+          },
           "application_id": {
             "title": "Application Id",
             "type": "integer"
+          },
+          "checks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Checks",
+            "type": "array"
           },
           "country": {
             "anyOf": [
@@ -2005,6 +2070,17 @@
               }
             ],
             "title": "Country"
+          },
+          "employer_published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employer Published At"
           },
           "existing": {
             "title": "Existing",
@@ -3357,6 +3433,17 @@
       },
       "JobFactsOut": {
         "properties": {
+          "ad_posted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ad Posted At"
+          },
           "application_id": {
             "title": "Application Id",
             "type": "integer"
@@ -3371,6 +3458,17 @@
               }
             ],
             "title": "Country"
+          },
+          "employer_published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employer Published At"
           },
           "found_on": {
             "anyOf": [
@@ -8298,6 +8396,18 @@
             ],
             "title": "Country"
           },
+          "employer_published_at": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employer Published At"
+          },
           "found_on": {
             "anyOf": [
               {
@@ -8309,6 +8419,18 @@
               }
             ],
             "title": "Found On"
+          },
+          "posted_at": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Posted At"
           },
           "remote": {
             "anyOf": [

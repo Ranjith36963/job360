@@ -18,12 +18,19 @@ pastes). Then you bring only the good ones into Job360.
    `counts_if` lines, the titles, and the sources you will try there (official
    job connectors and employers' own job boards first; then that country's own
    job sites, public pages, no login; sites the user named in
-   `assistant_notes`). **Where** comes ONLY from those rows: a place that is not
+   `assistant_notes`; the user's `preferences.target_companies`: read each
+   company's public job board - Greenhouse
+   `boards-api.greenhouse.io/v1/boards/<co>/jobs`, Lever
+   `api.lever.co/v0/postings/<co>`, Ashby
+   `api.ashbyhq.com/posting-api/job-board/<co>`). **Where** comes ONLY from those rows: a place that is not
    on that list is out, even if it is where the user lives today. A job counts
    only if one of its row's `counts_if` lines is true. **Done when** every row
    has a line.
-3. **Search** row by row. Prefer the employer's own posting over a re-post; a
-   job on Indeed or LinkedIn: bring the employer's own posting instead. Never
+3. **Search** row by row. Use an official job connector first (e.g. Indeed's
+   connector in Claude). Prefer the employer's own posting over a re-post; from
+   a LinkedIn or Indeed ad follow "Apply on company site" and read the
+   employer's posting. A page reader that returns nothing: use the employer's
+   page instead. Never
    log in to LinkedIn or Indeed to search unless the user said yes to that site
    in this chat, after you told them "the site may restrict your account":
    then only read, at most 10 pages, stop at the first CAPTCHA, and never on a
@@ -31,12 +38,15 @@ pastes). Then you bring only the good ones into Job360.
    `search_brief` word for word plus one line naming its rows, never your own
    summary; check every job it returns against the rows before you bring it.
    **Done when** every row was searched.
-4. **Judge each ad yourself.** Read the whole ad. Does it fit the profile? Visa:
+4. **Judge each ad yourself.** Read the whole ad, and the `checks` that
+   `bring_job` / `get_job` return: `title_only` or `partial` text - fetch the
+   full ad first; unknown apply host - tell the user; `reposted` - say so. Does it fit the profile? Visa:
    does the ad offer sponsorship, refuse it, or not say? Never guess - "not
    mentioned" is an answer. Duplicate hard stop: a job already in
    `list_applications`, or with the kit's `duplicate.flag`, is not brought again.
 5. **Bring only the fits.** For each one: `bring_job` (title, company,
-   location, full description, apply URL) and ALWAYS the job facts you know:
+   location, full description, apply URL, and `posted_at` / `employer_published_at`
+   as YYYY-MM-DD when the ad shows them) and ALWAYS the job facts you know:
    `country` (ISO code, e.g. `FR`), `remote` (true/false) and `found_on`
    (`indeed`, `linkedin`, `company_careers`, `job_board`, `referral`,
    `visa_sponsor_list`, `pasted_by_user` or `other`). Leave out only what you

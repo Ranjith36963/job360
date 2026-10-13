@@ -34,6 +34,7 @@ _AD_REMOTE = {
     "apply_url": "https://anywhere.example/jobs/2",
     "description": "Build agents. Fully remote across the US.",
 }
+_NO_DATES = {"ad_posted_at": None, "employer_published_at": None}  # the two ad dates (0054), unset
 _AD_BARE = {
     "title": "Data Scientist",
     "company": "Quiet Ltd",
@@ -237,11 +238,11 @@ async def test_job_facts_can_be_fixed_later(authenticated_async_context):
 
         resp = await client.patch(f"/api/applications/{app_id}/job", json={"country": "de", "remote": True})
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"application_id": app_id, "country": "DE", "remote": True, "found_on": "linkedin"}
+        assert resp.json() == {"application_id": app_id, "country": "DE", "remote": True, "found_on": "linkedin", **_NO_DATES}
 
         # An explicit null clears one field; the others are left alone.
         resp = await client.patch(f"/api/applications/{app_id}/job", json={"found_on": None})
-        assert resp.json() == {"application_id": app_id, "country": "DE", "remote": True, "found_on": None}
+        assert resp.json() == {"application_id": app_id, "country": "DE", "remote": True, "found_on": None, **_NO_DATES}
 
         job = (await _detail(client, app_id))["job"]
         assert (job["country"], job["remote"], job["found_on"]) == ("DE", True, None)
