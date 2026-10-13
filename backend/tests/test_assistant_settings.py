@@ -77,6 +77,7 @@ def _facts(
 ) -> rules.SubmitFacts:
     """S3: auto-submit only sends a CV the user has seen, so the S2 rule tests default to seen."""
     kit.setdefault("form_filled", True)  # rule 4b: the form fill is on record
+    kit.setdefault("form_swept", True)  # rule 4c: the pre-submit sweep is on record
     kit.setdefault("fit_score", 80)  # above the default test line of 50
     return rules.SubmitFacts(status=status, has_receipt=receipt, submit_override=override, cv_seen=seen, **kit)
 
@@ -497,6 +498,12 @@ async def _fill(client: AsyncClient, app_id: int) -> None:
         json={"event_type": "form_filled", "payload": {"form_url": FORM, "fields_count": 1}},
     )
     assert resp.status_code == 201, resp.text
+    # ... and with form_not_swept until a form_swept newer than the fill is on record (2026-10-13).
+    swept = await client.post(
+        f"/api/applications/{app_id}/events",
+        json={"event_type": "form_swept", "payload": {"fields_checked": 1, "fixed": 0}},
+    )
+    assert swept.status_code == 201, swept.text
 
 
 async def _check(client: AsyncClient, app_id: int, url: str = FORM, *, fill: bool = True):
@@ -1144,6 +1151,13 @@ async def test_mcp_has_check_submit_and_no_confirm_decline_or_take_back_tool(
                 "record_event",
                 {"application_id": app_id, "event_type": "form_filled",
                  "payload": {"form_url": FORM, "fields_count": 1}},
+            )
+            verdict = _payload(await mcp.call_tool("check_submit", {"application_id": app_id, "form_url": FORM}))
+            assert (verdict["decision"], verdict["reason"]) == ("stop", "form_not_swept")
+            await mcp.call_tool(
+                "record_event",
+                {"application_id": app_id, "event_type": "form_swept",
+                 "payload": {"fields_checked": 1, "fixed": 0}},
             )
             verdict = _payload(await mcp.call_tool("check_submit", {"application_id": app_id, "form_url": FORM}))
             assert (verdict["decision"], verdict["reason"]) == ("ask", "score_line_unknown"), "no fit saved yet"

@@ -841,6 +841,8 @@ class KitDocumentOut(BaseModel):
     chars: int
     seen: Optional[KitSeenOut] = None
     approved: Optional[KitSeenOut] = None
+    # Plain facts found when this version was saved (cv_checks.py); [] = none.
+    checks: list[dict[str, str]] = []
     file: KitFileOut
 
 
@@ -939,6 +941,8 @@ class ApplicationKitOut(BaseModel):
     hold: Optional[KitHoldOut] = None
     account_site: KitAccountSiteOut
     autofill: Literal["allow", "deny", "unset"]
+    # Plain facts to check with the user (e.g. expected_below_current) - never a block.
+    warnings: list[dict[str, str]] = []
     instructions: list[str]
 
 
