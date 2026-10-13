@@ -415,7 +415,8 @@ def build_server(version: str = "") -> MCPServer:
         word only when `approved` is true.
 
         HUNT: `search_brief.rows` = the ONLY places to search, each with its `counts_if` lines;
-        `search_brief.gaps` = ask each once, save to user_info.right_to_work, then search.
+        `search_brief.gaps` = ask each once, save to the gap's `path`
+        (user_info.answers: {question: ask text, answer: Yes|No, approved: true}), then search.
 
         Other keys: job_titles, experience_level, experience_level_inferred, agent_edits, lessons, assistant_hint.
         Full rules and shapes: get_recipe("rules")."""
@@ -488,7 +489,11 @@ def build_server(version: str = "") -> MCPServer:
             # Owner decision 2026-10-12 - WHERE this user's hunt searches: one row
             # per place from their own right_to_work answers, each with a plain
             # "counts if" line, plus the gaps to ask once. Never our own list.
-            "search_brief": build_search_brief(profile.user_info.right_to_work),
+            "search_brief": build_search_brief(
+                profile.user_info.right_to_work,
+                profile.user_info.contact.get("residence_country"),
+                profile.user_info.answers,
+            ),
             # Owner decision 2026-10-08 (S2) - the assistant settings with the
             # safe defaults filled in, the practice-run state and the riskier
             # changes still waiting for the user's click. Read before ANY apply.

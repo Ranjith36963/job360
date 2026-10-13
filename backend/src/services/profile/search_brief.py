@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from src.services.profile.user_info import ANY_COUNTRY, ONSITE_VALUES
+from src.services.profile.user_info import ANY_COUNTRY, ONSITE_VALUES, USER_INFO_ANSWERS_PATH
 
 RIGHT_TO_WORK_PATH = "user_info.right_to_work"
 _NO_SPONSORSHIP_AUTH = ("citizen", "permanent_resident")
@@ -61,9 +61,39 @@ def _onsite_line(country: str, onsite: str, needs: bool) -> str:
     return place
 
 
-def build_search_brief(right_to_work: Any) -> dict[str, Any]:
-    """``{"rows": [...], "work_from": [...], "gaps": [...]}`` from the stored
-    ``user_info.right_to_work`` value.
+def work_from_question(residence: str, country: str) -> str:
+    """The one question asked when a remote job would mean working from a country
+    the user does not live in. The wording is the key an approved answer is matched on."""
+    return f"You live in {residence}. Would you work from {country} for a remote job there?"
+
+
+_YES = frozenset({"yes", "y", "true"})
+_NO = frozenset({"no", "n", "false"})
+
+
+def _approved_answer(answers: Any, question: str) -> str:
+    """The user's approved answer to ``question`` (matched on the question text,
+    case and spacing ignored), lower-cased; ``""`` when none (never a guess)."""
+    want = " ".join(question.lower().split())
+    for rec in answers if isinstance(answers, list) else []:
+        if not isinstance(rec, dict) or rec.get("approved") is not True:
+            continue
+        if " ".join(str(rec.get("question") or "").lower().split()) == want:
+            return str(rec.get("answer") or "").strip().lower().rstrip(".!")
+    return ""
+
+
+def build_search_brief(
+    right_to_work: Any, residence_country: Any = None, answers: Any = None,
+) -> dict[str, Any]:
+    """``{"rows": [...], "work_from": [...], "residence_country": ..., "gaps": [...]}``
+    from the stored ``user_info.right_to_work`` value.
+
+    ``residence_country`` (``user_info.contact``) and ``answers``
+    (``user_info.answers``) catch a remote job in a country the user does not
+    live in: an ad that lets you work from IN means working from IN. For each
+    ``work_from`` country other than where they live, ask once; an approved
+    "no" drops that country from ``work_from``; no approved answer = a gap.
 
     A row = one place the user said they would work (``remote_ok`` true, or
     ``onsite`` yes / only_if_sponsored); real countries first, ``ANY`` last.
@@ -78,8 +108,21 @@ def build_search_brief(right_to_work: Any) -> dict[str, Any]:
     records.sort(key=lambda r: r["country"] == ANY_COUNTRY)
     work_from = [r["country"] for r in records if r["country"] != ANY_COUNTRY and _needs_sponsorship(r) is False]
 
+    residence = residence_country.strip().upper() if isinstance(residence_country, str) else ""
+
     rows: list[dict[str, Any]] = []
     gaps: list[dict[str, Any]] = []
+    remote_countries = {r["country"] for r in records if r.get("remote_ok") is True}
+    if residence:
+        for country in list(work_from):
+            if country == residence or country not in remote_countries:
+                continue
+            question = work_from_question(residence, country)
+            reply = _approved_answer(answers, question)
+            if reply in _NO:
+                work_from.remove(country)
+            elif reply not in _YES:  # no answer, or an unclear one: ask again, never infer consent
+                gaps.append({"path": USER_INFO_ANSWERS_PATH, "country": country, "ask": question})
     for rec in records:
         country, remote, onsite = rec["country"], rec.get("remote_ok"), rec.get("onsite")
         if not isinstance(remote, bool) and onsite in ONSITE_VALUES:
@@ -112,4 +155,4 @@ def build_search_brief(right_to_work: Any) -> dict[str, Any]:
         })
     if not rows:
         gaps.append({"path": RIGHT_TO_WORK_PATH, "country": None, "ask": WHERE_TO_SEARCH_ASK})
-    return {"rows": rows, "work_from": work_from, "gaps": gaps}
+    return {"rows": rows, "work_from": work_from, "residence_country": residence or None, "gaps": gaps}
