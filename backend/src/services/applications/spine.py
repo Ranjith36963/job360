@@ -838,6 +838,47 @@ async def _artifact_version_count_and_max(db: JobDatabase, application_id: int, 
     return int(row[0]), int(row[1])
 
 
+async def _run_save_checks(user_id: str, kind: str, text: str) -> list[dict[str, str]]:
+    """The deterministic checks (``cv_checks``) for a CV / cover letter being saved.
+
+    Never raises and never blocks a save: any failure just yields fewer checks.
+    The PDF is rendered here (CV only) so what the checks read is exactly what the
+    kit and the download will hand out.
+    """
+    if kind not in ("cv", "cover_letter"):
+        return []
+    import asyncio  # noqa: PLC0415
+
+    from src.services.applications import cv_checks  # noqa: PLC0415
+
+    profile: Any = None
+    try:
+        from src.services.profile.storage import load_profile  # noqa: PLC0415 - rule #16
+
+        profile = await asyncio.to_thread(load_profile, user_id)
+    except Exception:  # noqa: BLE001 - checks are advisory; a profile read must not break a save
+        profile = None
+    checks = cv_checks.check_text(kind, text, profile)
+    if kind == "cv":
+        try:
+            from src.services.tailoring.cv_render import (  # noqa: PLC0415 - heavy, lazy
+                render_document_pdf,
+                style_for_profile,
+            )
+
+            pdf = await render_document_pdf(user_id, kind, text)
+            pages: Optional[int] = None
+            if profile is not None:
+                try:
+                    pages = int(style_for_profile(profile).get("page", {}).get("pages") or 0) or None
+                except (TypeError, ValueError):
+                    pages = None
+            checks.extend(await asyncio.to_thread(cv_checks.check_pdf, pdf, text, pages))
+        except Exception:  # noqa: BLE001 - a render failure must not block the save
+            pass
+    return checks
+
+
 async def save_artifact(
     db: JobDatabase,
     *,
@@ -870,6 +911,8 @@ async def save_artifact(
     # Owner decision 2026-10-04 — the assistant's ATS opinion rides on THIS
     # version; a re-check is a new version, never an UPDATE of an old row.
     ats_score, ats_notes = validate_ats(kind, ats_score, ats_notes)
+    checks = await _run_save_checks(user_id, kind, text)
+    checks_json = json.dumps(checks) if checks else None
 
     # Lazy: profile storage pulls the scoring stack transitively (rule #16).
     from src.services.profile.storage import current_profile_version_id  # noqa: PLC0415
@@ -892,10 +935,11 @@ async def save_artifact(
             ins = await db._db.execute(
                 "INSERT INTO application_artifacts "
                 "(user_id, application_id, kind, version_no, text, made_by, model, profile_version, "
-                " label, chars, created_at, ats_score, ats_notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " label, chars, created_at, ats_score, ats_notes, checks_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     user_id, application_id, kind, version_no, text, made_by, model,
-                    profile_version, label or "", len(text), now, ats_score, ats_notes,
+                    profile_version, label or "", len(text), now, ats_score, ats_notes, checks_json,
                 ),
             )
         except pg.IntegrityError:
@@ -931,6 +975,7 @@ async def save_artifact(
         "artifact_id": artifact_id, "kind": kind, "version_no": version_no, "chars": len(text),
         "made_by": made_by, "model": model, "profile_version": profile_version, "created_at": now,
         "event_id": event["event_id"], "ats_score": ats_score, "ats_notes": ats_notes,
+        "checks": checks,
     }
 
 

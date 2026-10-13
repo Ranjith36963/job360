@@ -5239,6 +5239,11 @@
       },
       "ProfileSummary": {
         "properties": {
+          "cv_file_warning": {
+            "default": "",
+            "title": "Cv File Warning",
+            "type": "string"
+          },
           "cv_filename": {
             "default": "",
             "title": "Cv Filename",
@@ -6925,6 +6930,17 @@
           "chars": {
             "title": "Chars",
             "type": "integer"
+          },
+          "checks": {
+            "default": [],
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Checks",
+            "type": "array"
           },
           "contact_id": {
             "anyOf": [

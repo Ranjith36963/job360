@@ -647,6 +647,9 @@ class SaveArtifactResponse(BaseModel):
     contact_id: Optional[int] = None
     ats_score: Optional[int] = None
     ats_notes: Optional[str] = None
+    # Deterministic save-time checks (services/applications/cv_checks.py): claims
+    # not found in the profile + PDF problems. Advisory - a save is never refused.
+    checks: list[dict[str, str]] = []
 
 
 class SaveFitLineOut(BaseModel):
@@ -1408,7 +1411,9 @@ async def download_application_artifact(
     else:
         content = await render_document_pdf(user.id, kind, text)
         media_type = "application/pdf"
-    stem = kit_service.file_stem(str(app_row.get("job_company") or ""), kind, int(row["version_no"]))
+    stem = await kit_service.download_stem(
+        user.id, str(app_row.get("job_company") or ""), kind, int(row["version_no"])
+    )
     # S3 - the user's own download is "the user saw this CV" (one mark per version).
     # Only a signed-in web session counts; a bearer call writes nothing, and a stale
     # version (not the latest) is simply not marked - the download still works.

@@ -1299,3 +1299,22 @@ class TestAFailedLinkedInReuploadKeepsTheOldData:
             "the restore-on-failure path also fired on success -- re-upload "
             "has become a no-op"
         )
+
+
+def test_garbled_cv_upload_sets_cv_file_warning(api, monkeypatch):
+    """A PDF whose text has (cid:N) debris stores cv_file_garbled; a clean re-upload clears it."""
+    import src.api.routes.profile as profile_route
+
+    _patch_extractor(monkeypatch)
+    _register_and_login(api)
+    pdf = b"%PDF-1.4\n%%EOF"
+
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "Built (cid:123)(cid:45) pipelines")
+    r = api.post("/api/profile", files={"cv": ("cv.pdf", io.BytesIO(pdf), "application/pdf")})
+    assert r.status_code == 200, r.text
+    assert api.get("/api/profile").json()["summary"]["cv_file_warning"] == "cv_file_garbled"
+
+    monkeypatch.setattr(profile_route, "extract_text", lambda path: "Built clean pipelines")
+    r = api.post("/api/profile", files={"cv": ("cv.pdf", io.BytesIO(pdf), "application/pdf")})
+    assert r.status_code == 200, r.text
+    assert api.get("/api/profile").json()["summary"]["cv_file_warning"] == ""

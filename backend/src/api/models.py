@@ -83,6 +83,8 @@ class ProfileSummary(BaseModel):
     # filename: proof of what we actually read.
     cv_filename: str = ""
     cv_uploaded_at: str = ""
+    # "cv_file_garbled" = the uploaded PDF has unreadable glyphs; "" = fine.
+    cv_file_warning: str = ""
     linkedin_filename: str = ""
     linkedin_uploaded_at: str = ""
     github_username: str = ""
