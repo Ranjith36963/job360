@@ -2779,12 +2779,16 @@ export interface components {
         };
         /** ApplicationSummaryOut */
         ApplicationSummaryOut: {
+            /** Ad Posted At */
+            ad_posted_at?: string | null;
             /** Artifacts */
             artifacts: {
                 [key: string]: number;
             };
             /** Country */
             country?: string | null;
+            /** Employer Published At */
+            employer_published_at?: string | null;
             /** Events */
             events: number;
             /** Fit Score */
@@ -3482,6 +3486,8 @@ export interface components {
         };
         /** ExportApplicationOut */
         ExportApplicationOut: {
+            /** Ad Posted At */
+            ad_posted_at?: string | null;
             /** Artifacts */
             artifacts: components["schemas"]["ExportArtifactOut"][];
             /** Contacts */
@@ -3490,6 +3496,8 @@ export interface components {
             country?: string | null;
             /** Created At */
             created_at: string;
+            /** Employer Published At */
+            employer_published_at?: string | null;
             /** Events */
             events: components["schemas"]["ApplicationEventOut"][];
             /** Found On */

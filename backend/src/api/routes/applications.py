@@ -623,6 +623,8 @@ class ApplicationSummaryOut(BaseModel):
     country: Optional[str] = None
     remote: Optional[bool] = None
     found_on: Optional[str] = None
+    ad_posted_at: Optional[str] = None
+    employer_published_at: Optional[str] = None
     proof: ProofOut
 
 
@@ -777,6 +779,8 @@ class ExportApplicationOut(BaseModel):
     country: Optional[str] = None
     remote: Optional[bool] = None
     found_on: Optional[str] = None
+    ad_posted_at: Optional[str] = None
+    employer_published_at: Optional[str] = None
     events: list[ApplicationEventOut]
     artifacts: list[ExportArtifactOut]
     receipts: list[ApplicationReceiptExportOut]

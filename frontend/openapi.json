@@ -1198,6 +1198,17 @@
       },
       "ApplicationSummaryOut": {
         "properties": {
+          "ad_posted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ad Posted At"
+          },
           "artifacts": {
             "additionalProperties": {
               "type": "integer"
@@ -1215,6 +1226,17 @@
               }
             ],
             "title": "Country"
+          },
+          "employer_published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employer Published At"
           },
           "events": {
             "title": "Events",
@@ -2910,6 +2932,17 @@
       },
       "ExportApplicationOut": {
         "properties": {
+          "ad_posted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ad Posted At"
+          },
           "artifacts": {
             "items": {
               "$ref": "#/components/schemas/ExportArtifactOut"
@@ -2938,6 +2971,17 @@
           "created_at": {
             "title": "Created At",
             "type": "string"
+          },
+          "employer_published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Employer Published At"
           },
           "events": {
             "items": {
