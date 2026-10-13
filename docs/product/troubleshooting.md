@@ -1,4 +1,4 @@
-<!-- doc: LIVING | last-verified: 2026-09-11 by /sync -->
+<!-- doc: LIVING | last-verified: 2026-10-13 by the daily truth check -->
 # Job360 Troubleshooting
 
 Common **developer-environment** issues and fixes (ports, locks, env-var gotchas, install hiccups). Each entry: **Symptom → Cause → Fix**.
@@ -89,9 +89,6 @@ any MCP client at `/api/mcp` (see `docs/product/VISION.md`), then ask it to:
    history (`cv_data.cv_positions`) and the projects (`cv_data.cv_projects`).
    The two lists take records with a closed key set — the `update_profile`
    tool description gives the shape — and a write replaces the whole list.
-   A record with an unknown key, a wrong type, an over-long field or a date
-   that is not a range like `Jan 2020 – Present` is refused with a 422 that
-   names the problem.
 
 What the agent writes survives every later re-upload — nothing in the extractor
 clears a field the agent set.
