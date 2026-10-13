@@ -439,7 +439,8 @@ async def get_application_by_job(db: JobDatabase, user_id: str, job_id: int) -> 
     write-through helper (legacy receipts, MCP ``record_application``) use to
     find the row a raw ``job_id`` maps to."""
     cur = await db._db.execute(
-        "SELECT id, status, job_country, job_remote, job_found_on FROM applications "
+        "SELECT id, status, job_country, job_remote, job_found_on, job_url, ad_posted_at, employer_published_at "
+        "FROM applications "
         "WHERE user_id = ? AND job_id = ?",
         (user_id, job_id),
     )

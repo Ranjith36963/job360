@@ -1248,6 +1248,9 @@ def _apply_preferences(preferences_json: str, profile: UserProfile) -> None:
         avoid_companies=_list_pref_or_422(
             "preferences.avoid_companies", pref_dict.get("avoid_companies", existing.avoid_companies)
         ),
+        target_companies=_list_pref_or_422(
+            "preferences.target_companies", pref_dict.get("target_companies", existing.target_companies)
+        ),
     )
     # Overlay-only fields (daily_check, check_every): the
     # preferences form never sends them — they are written only by the

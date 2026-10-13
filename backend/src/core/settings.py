@@ -407,6 +407,19 @@ JOB_FOUND_ON = (
     "pasted_by_user", "other",
 )
 
+# Job checks (deterministic facts about ONE brought job, never used to sort).
+# Closed TECHNICAL lists of ATS vendors / big job boards - NOT job sources
+# (rule 4: Job360 never searches). A host is "official" only on an exact match
+# or a real subdomain (`x.greenhouse.io`); see job_checks.classify_host.
+OFFICIAL_ATS_HOSTS = (
+    "greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com", "smartrecruiters.com",
+    "workable.com", "bamboohr.com", "recruitee.com", "teamtailor.com", "personio.de", "personio.com",
+)
+JOB_BOARD_HOSTS = ("linkedin.com",)  # plus indeed.<tld>, handled in job_checks
+JOB_CHECK_PARTIAL_MIN_WORDS = 40   # below this the "ad" is a title or a teaser
+JOB_CHECK_FULL_MIN_WORDS = 150     # at or above this the ad is treated as complete
+JOB_CHECK_REPOST_GAP_DAYS = 14     # listing date vs employer date further apart than this = reposted
+
 # R6 — the fit verdict is stored, never computed.
 APPLICATION_FIT_REASONING_MAX_CHARS = int(os.getenv("APPLICATION_FIT_REASONING_MAX_CHARS", "4000"))
 # The fit picture's axes (2026-09-20): the AGENT names 3..MAX dimensions and
@@ -571,6 +584,7 @@ PROFILE_EDITABLE_PATHS = (
     # dealbreakers, companies to avoid. Empty = don't care (rule #29).
     "preferences.experience_years_min", "preferences.experience_years_max",
     "preferences.looking_for", "preferences.dealbreakers", "preferences.avoid_companies",
+    "preferences.target_companies",
     # Owner decision 2026-10-08 — THREE STORES. (1) The salary the user wants,
     # one record per hiring country, is a normal PREFERENCE. (2) USER INFO
     # MEMORY — the facts job forms ask (contact, right to work, logistics,

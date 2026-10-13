@@ -37,6 +37,7 @@ from src.core import settings
 from src.services.applications import blocked as blocked_service
 from src.services.applications import spine
 from src.services.applications.authorship import actor_for
+from src.services.applications.job_checks import checks_for_application
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
 from src.utils.logger import get_audit_logger, safe_log_value
@@ -858,6 +859,10 @@ async def build_kit(db: JobDatabase, user: CurrentUser, application_id: int, *, 
         "company": app_row.get("job_company") or "", "location": app_row.get("job_location") or "",
         "country": country, "remote": None if remote is None else bool(remote),
         "apply_url": apply_url, "found_on": app_row.get("job_found_on"),
+        "ad_posted_at": app_row.get("ad_posted_at") or None,
+        "employer_published_at": app_row.get("employer_published_at") or None,
+        # Plain facts about this ad (job_checks.py) - never a verdict, never a sort key.
+        "checks": checks_for_application(app_row),
     }
     application = {
         "id": application_id, "status": app_row["status"], "follow_up_on": app_row.get("follow_up_on"),
