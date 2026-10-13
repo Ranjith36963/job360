@@ -970,17 +970,20 @@ def build_server(version: str = "") -> MCPServer:
         interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase on any event; ""
         clears it.
 
-        Outreach: `contact_id` + `channel` with outreach_sent — record it only when the Gmail Sent folder shows it
-        (its message id as `source`) or the user says it went — or outreach_replied; `application_id` is optional
-        for a cold contact; a reply never changes the job status.
+        Outreach: `contact_id` + `channel` with outreach_sent (only when Gmail Sent shows it, message id as `source`,
+        or the user says it went) or outreach_replied; `application_id` is optional for a cold contact; a reply
+        never changes the job status.
 
         Kit events (closed payloads, else 422; only these keys):
         form_filled {form_url, fields_count, answers?: [{question, answer, source, key?}]}, source = memory | profile |
         approved | written | guessed (key = the kit key, for memory/profile/approved);
         cv_seen and submit_approved {artifact_id, sha256, where} ONLY after the user said so in chat (where = chat);
-        submit_declined {where}; autofill_set {mode:"deny"}; hold_released {reason}; site_account {host};
+        submit_declined {where}; autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
+        site_account {host};
         account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
-        Stuck: blocked {reason, step, page_host, detail}, then stop that application; unblocked {resolution}.
+        Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
+        quick_apply_warning|other, step, page_host, detail}, then stop that application; unblocked {resolution:
+        retried|user_did_it|skipped}.
         proof_text {text, page_host}: the pasted confirmation text. Payloads, 403/409: get_recipe("rules"), Events."""
         if contact_id is not None:
             # Bug fix (coordinator review, 2026-09-26) — same refusal as the
