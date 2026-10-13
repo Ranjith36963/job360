@@ -1,5 +1,5 @@
 # Job360 Architecture
-<!-- doc: LIVING | last-verified: 2026-10-11 by the daily truth check -->
+<!-- doc: LIVING | last-verified: 2026-10-13 by the daily truth check -->
 
 > **Mission (2026-09-03, [`docs/product/VISION.md`](docs/product/VISION.md)):** Job360 is the memory and context layer for the seeker's own AI agent. The agent finds the job, judges fit, writes the CV, reads Gmail, does outreach; Job360 stores the profile, every artifact version, every typed event and the receipt. **We never source, rank or recommend jobs.**
 >
@@ -39,7 +39,7 @@ job360/
 │   │   │   ├── fetch/                # the URL-fetch web fallback (extract, fetcher, ssrf guard.py, outcomes)
 │   │   │   ├── tailoring/            # render + check a saved CV (no LLM since decision 28) — `ls` the folder for the module list
 │   │   │   └── profile/              # deterministic extraction + storage — `ls` the folder for the module list
-│   │   ├── repositories/             # (post-Phase-4 rename from storage/) — `ls` it; `repositories.pg` is the single Postgres door, `repositories.database.JobDatabase` the legacy baseline that goes through it
+│   │   ├── repositories/             # (post-Phase-4 rename from storage/) — `ls` it; `repositories.database.JobDatabase` is the legacy baseline that goes through `repositories.pg`
 │   │   └── utils/
 │   │       ├── logger.py             # Rotating file + console logging
 │   │       ├── audit_trail.py        # who-did-what rows for account changes

@@ -60,7 +60,7 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 
 Two deployables on one Postgres database:
 
-- **`backend/`** — FastAPI (Python 3.12 in prod). Product path: `POST /api/jobs/bring` (`api/routes/bring.py`) → the application spine (`services/applications/spine.py`: one Application, append-only events, versioned artifacts, frozen receipts) → the MCP server (`api/mcp_server.py`), with `services/profile/` feeding every step. `src/repositories/pg.py` is the single database door. Migrations apply automatically on boot.
+- **`backend/`** — FastAPI (Python 3.12 in prod). Product path: `POST /api/jobs/bring` (`api/routes/bring.py`) → the application spine (`services/applications/spine.py`: one Application, append-only events, versioned artifacts, frozen receipts) → the MCP server (`api/mcp_server.py`), with `services/profile/` feeding every step. Migrations apply automatically on boot.
 - **`frontend/`** — Next.js 16 + React 19 + Tailwind 4, a thin screen over the same routes.
 
 The deep reference (directory tree, schema, dependencies) is [`ARCHITECTURE.md`](./ARCHITECTURE.md). Code-verified counts (routes, migrations, workflows) live in [`docs/GENERATED.md`](./docs/GENERATED.md) — never copy a count from prose. Interactive API docs: `http://localhost:8000/docs` when the backend runs.

@@ -1,5 +1,5 @@
 # backend/ — Claude Code pointer
-<!-- doc: LIVING | last-verified: 2026-09-03 by the mission sweep -->
+<!-- doc: LIVING | last-verified: 2026-10-13 by the daily truth check -->
 
 > **This is a thin pointer, not the source of truth.** The mission is
 > [`../docs/product/VISION.md`](../docs/product/VISION.md) (agent thinks, Job360
@@ -56,7 +56,7 @@ python -m migrations.runner up                        # apply migrations (non-AP
 - `src/api/routes/bring.py`, `receipts.py`, `tailor.py`, `src/api/mcp_server.py` — the product path
 - `src/services/applications/spine.py` — the Application object + append-only event/artifact log · `src/services/profile/` — extraction
 - `src/cli.py` — Click CLI (`api`, `setup-profile`) · `src/api/` — FastAPI app + routes
-- `src/repositories/pg.py` — the single Postgres door (psycopg3 behind an aiosqlite-shaped API) · `migrations/` — forward/reverse SQL pairs
+- `src/repositories/pg.py` — psycopg3 behind an aiosqlite-shaped API · `migrations/` — forward/reverse SQL pairs
 - `scripts/` — backend Python helpers (run `python scripts/X.py`); see root `CONTRIBUTING.md`
 
 See root [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for the deep technical reference.
