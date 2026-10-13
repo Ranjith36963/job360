@@ -220,11 +220,13 @@ def _who(event: dict[str, Any]) -> dict[str, Any]:
 
 
 async def duplicate_facts(
-    db: JobDatabase, user_id: str, app_row: dict[str, Any], now: datetime
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], now: datetime, *, include_self: bool = False
 ) -> dict[str, Any]:
-    """The duplicate picture for one application. ``same_job``: this application
-    already has a receipt, or another application of the user's whose receipt has
-    the same job id or the same normalised URL. ``same_company_30d``: OTHER
+    """The duplicate picture for one application. ``same_job``: ANOTHER
+    application of the user's (never this one) whose receipt has the same job id
+    or the same normalised URL. ``include_self`` is only for the moment a receipt is
+    about to be written: an existing receipt on this very application then means a
+    second receipt, a real duplicate. Every read leaves it False. ``same_company_30d``: OTHER
     applications of the user's with an ``applied`` event inside the window at the
     same company (the rule-1 ``normalized_company`` key; blank / ``unknown`` skipped).
     Flag: same_job beats same_company beats ''. Never blocks anything."""
@@ -238,10 +240,10 @@ async def duplicate_facts(
     mine = norm_url(str(app_row.get("job_url") or ""))
     same_job: Optional[dict[str, Any]] = None
     for r in (dict(x) for x in await cur.fetchall()):
-        hit = (
-            r["application_id"] == application_id
-            or r["job_id"] == app_row.get("job_id")
-            or (mine and norm_url(str(r["job_apply_url"] or "")) == mine)
+        if r["application_id"] == application_id and not include_self:
+            continue  # an application is never a duplicate of itself
+        hit = r["job_id"] == app_row.get("job_id") or (
+            mine and norm_url(str(r["job_apply_url"] or "")) == mine
         )
         if hit:
             same_job = {
