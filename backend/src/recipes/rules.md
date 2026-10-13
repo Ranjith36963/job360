@@ -314,7 +314,7 @@ they said OK in chat; `submit_approved` {artifact_id, sha256, where:"chat"} -
 ONLY when the user typed yes to submitting THIS application; `submit_declined`
 {where:"chat"} - the user said don't send; `autofill_set` {mode:"deny"} - you
 may only send deny; `form_filled` {form_url, fields_count, answers?} - after you filled
-the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
+the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `form_swept` {fields_checked, fixed, notes?} - after you re-read every field and fixed what was wrong (check_submit stops until it is newer than the fill); `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
 - the user has an account there; `account_needed` {host} - you hit a sign-up
 wall (never a password anywhere). A CV that changed since you read it is 409:
 get the kit again. `duplicate_cleared` and where="web" need the user's own click

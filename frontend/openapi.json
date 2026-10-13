@@ -1018,6 +1018,17 @@
             "additionalProperties": true,
             "title": "Settings",
             "type": "object"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
@@ -3901,6 +3912,17 @@
           "chars": {
             "title": "Chars",
             "type": "integer"
+          },
+          "checks": {
+            "default": [],
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Checks",
+            "type": "array"
           },
           "file": {
             "$ref": "#/components/schemas/KitFileOut"

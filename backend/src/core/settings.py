@@ -294,7 +294,7 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # trail. All note-family, none moves the status. Payload shapes and who may
     # write each are checked in the record_event ROUTE (applications._check_kit_event).
     "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
-    "form_filled", "hold_released", "site_account", "account_needed",
+    "form_filled", "form_swept", "hold_released", "site_account", "account_needed",
     # Owner decision 2026-10-10 (S6, blocked record) - the assistant got stuck
     # (`blocked`, which opens one Needs-you ask) and the way out (`unblocked`).
     # Note-family; closed payloads checked in services/applications/blocked.py.

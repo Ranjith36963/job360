@@ -2761,6 +2761,13 @@ export interface components {
             settings: {
                 [key: string]: unknown;
             };
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: {
+                [key: string]: string;
+            }[];
         };
         /** ApplicationReceiptExportOut */
         ApplicationReceiptExportOut: {
@@ -3879,6 +3886,13 @@ export interface components {
             artifact_id: number;
             /** Chars */
             chars: number;
+            /**
+             * Checks
+             * @default []
+             */
+            checks: {
+                [key: string]: string;
+            }[];
             file: components["schemas"]["KitFileOut"];
             /** Label */
             label: string;
