@@ -822,7 +822,7 @@ def build_server(version: str = "") -> MCPServer:
         on this version — Job360 never computes or markets one. Allowed for
         kind "cv" and "cover_letter" only. A re-check = save a new version.
 
-        The reply's `checks` lists claims not found in the profile and PDF problems
+        For a cv or cover_letter, the reply's `checks` lists claims not found in the profile and PDF problems
         (each `{code, severity, detail}`); fix them and save a new version, or tell
         the user. They warn only - the save always succeeds.
 
