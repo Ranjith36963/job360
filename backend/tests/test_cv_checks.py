@@ -59,6 +59,22 @@ def test_unsupported_number_flags_37_percent_but_not_dates_phones_versions_years
         assert ok not in rest
 
 
+def _num_detail(text: str, source_extra: str = "") -> str:
+    prof = _profile()
+    prof.cv_data.raw_text += " Managed 2 teams over 2 years. " + source_extra
+    checks = cc.check_text("cv", CLEAN + text, prof)
+    return next((c["detail"] for c in checks if c["code"] == "unsupported_numbers"), "")
+
+
+def test_data_size_units_are_claims_even_when_bare_number_is_in_profile():
+    # "2" appears in the profile ("2 teams"), but "2TB" does not.
+    assert "2TB" in _num_detail("- Processed 2TB of audio data.\n")
+    assert "2 TB" in _num_detail("- Processed 2 TB of audio data.\n")
+    assert "5PB" in _num_detail("- Indexed 5PB of logs.\n")
+    assert _num_detail("- Processed 2TB of audio data.\n", "Handled 2TB of audio.") == ""
+    assert _num_detail("- Processed 2 TB of audio data.\n", "Handled 2TB of audio.") == ""
+
+
 def test_unsupported_terms_flags_items_missing_from_profile():
     text = CLEAN + "Platform: Python, versioned recipes, async\nJob360 | Python, Rust | 2025\n"
     checks = cc.check_text("cv", text, _profile())

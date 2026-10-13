@@ -55,7 +55,7 @@ _DATE_RES = (
 # Adapted from Resume-Matcher's _NUMBER_RE: optional currency, number, optional unit.
 _NUMBER_RE = re.compile(
     r"(?<![\w.])(?P<cur>[$€£])?(?P<num>(?=(?P<d0>\d+))(?P=d0)(?:,\d+)*(?:\.\d+)?)"
-    r"(?:\s*(?P<unit>thousand|million|billion|percent|times|ms|gb|mb|tb|[kmb%x]))?"
+    r"(?:\s*(?P<unit>thousand|million|billion|percent|times|ms|gb|mb|tb|pb|kb|[kmb%x]))?"
     r"(?![A-Za-z\d])",
     re.I,
 )
@@ -103,6 +103,20 @@ def number_tokens(text: str) -> list[tuple[str, str]]:
 
 def _all_cores(text: str) -> set[str]:
     return {_core(m.group(0)) for m in re.finditer(r"\d[\d,]*(?:\.\d+)?", text)}
+
+
+_SIZE_UNITS = frozenset({"kb", "mb", "gb", "tb", "pb"})
+
+
+def _size_claims(text: str) -> set[tuple[str, str]]:
+    """``(core, unit)`` for each data-size number (``2TB``, ``2 TB``) in ``text``. A bare
+    ``2`` elsewhere in the profile must not vouch for ``2TB``."""
+    t = _scrub(text)
+    return {
+        (_core(m.group("num")), m.group("unit").lower())
+        for m in _NUMBER_RE.finditer(t)
+        if (m.group("unit") or "").lower() in _SIZE_UNITS
+    }
 
 
 def _norm(s: str) -> str:
@@ -189,10 +203,21 @@ def _listed(items: list[str]) -> str:
 # ── (a) numbers ─────────────────────────────────────────────────────────────
 
 
+def _size_unit_missing(shown: str, core: str, have_sizes: set[tuple[str, str]]) -> bool:
+    """True when ``shown`` is a data-size claim whose number+unit pair is not in the profile."""
+    unit = "".join(ch for ch in shown if ch.isalpha()).lower()
+    return unit in _SIZE_UNITS and (core, unit) not in have_sizes
+
+
 def unsupported_numbers(text: str, source: str) -> Optional[dict[str, str]]:
     """Numbers in ``text`` whose value appears nowhere in the profile source."""
     have = _all_cores(source)
-    bad = [shown for shown, core in number_tokens(text) if core not in have]
+    have_sizes = _size_claims(source)
+    bad = [
+        shown
+        for shown, core in number_tokens(text)
+        if core not in have or _size_unit_missing(shown, core, have_sizes)
+    ]
     if not bad:
         return None
     return _issue(

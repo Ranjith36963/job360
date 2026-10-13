@@ -100,6 +100,18 @@ def test_job_boards_unknown_and_missing():
 # ── age and repost ──────────────────────────────────────────────────────────
 
 
+def test_repost_wording_is_honest_about_dates():
+    week = _run(posted="2026-10-13", employer="2026-10-06")  # the live Weave case
+    assert week["reposted"]["value"] is True and week["reposted"]["ok"] is False
+    assert "agree" not in week["reposted"]["reason"]
+    assert "7 days" in week["reposted"]["reason"] and "reposted" in week["reposted"]["reason"]
+    lag = _run(posted="2026-10-13", employer="2026-10-12")["reposted"]
+    assert lag["value"] is False and "lag" in lag["reason"] and "agree" not in lag["reason"]
+    assert "Listing 2026-10-13 is 1 days after the employer's 2026-10-12" in lag["reason"]
+    same = _run(posted="2026-10-13", employer="2026-10-13")["reposted"]
+    assert same["value"] is False and "match (2026-10-13)" in same["reason"]
+
+
 def test_ad_age_and_repost():
     assert _run()["ad_age_days"]["value"] is None
     assert "reposted" not in _run(posted="2026-10-01")  # one date alone cannot show a repost
@@ -108,9 +120,9 @@ def test_ad_age_and_repost():
     assert both["ad_age_days"]["value"] == 3  # newest date given
     assert both["reposted"]["value"] is True and both["reposted"]["ok"] is False
     assert "2026-10-10" in both["reposted"]["reason"] and "2026-08-01" in both["reposted"]["reason"]
-    near = _run(posted="2026-10-10", employer="2026-09-26")  # exactly 14 days apart
+    near = _run(posted="2026-10-10", employer="2026-10-07")  # exactly 3 days apart
     assert near["reposted"]["value"] is False and near["reposted"]["ok"] is True
-    assert _run(posted="2026-10-10", employer="2026-09-25")["reposted"]["value"] is True  # 15 days
+    assert _run(posted="2026-10-10", employer="2026-10-06")["reposted"]["value"] is True  # 4 days
     assert _run(posted="not-a-date")["ad_age_days"]["value"] is None  # never raises
 
 
