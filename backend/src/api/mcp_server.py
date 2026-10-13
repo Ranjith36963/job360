@@ -1240,7 +1240,7 @@ def build_server(version: str = "") -> MCPServer:
         Country names, aliases (junior, on-site, hourly) and true/false equality are converted, listed in `normalized`.
 
         A write REPLACES THE WHOLE VALUE of its path: send the current `fields[...]` plus your change
-        (lists too: notes, excluded_skills,
+        (lists too: preferences.assistant_notes, preferences.excluded_skills,
         cv_positions, cv_projects). Add a note
         (`preferences.assistant_notes`) only if the user asked.
 
