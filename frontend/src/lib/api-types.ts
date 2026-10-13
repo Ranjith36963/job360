@@ -1332,6 +1332,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/hunt-kit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Hunt Kit Index
+         * @description The kit's files with size and SHA-256, so the assistant can check what it ran.
+         */
+        get: operations["hunt_kit_index_api_hunt_kit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hunt-kit/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Hunt Kit File
+         * @description One kit file. Unknown names are 404 and never touch the filesystem.
+         */
+        get: operations["hunt_kit_file_api_hunt_kit__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/bring": {
         parameters: {
             query?: never;
@@ -3859,6 +3899,17 @@ export interface components {
             same_company_30d: number;
             same_job?: components["schemas"]["KitSameJobOut"] | null;
         };
+        /** KitFile */
+        KitFile: {
+            /** Bytes */
+            bytes: number;
+            /** Name */
+            name: string;
+            /** Sha256 */
+            sha256: string;
+            /** Url */
+            url: string;
+        };
         /**
          * KitFileOut
          * @description A short-lived download link. The token is in ``url`` and exists nowhere else.
@@ -3894,6 +3945,13 @@ export interface components {
             id: number;
             /** Sha256 */
             sha256: string;
+        };
+        /** KitIndex */
+        KitIndex: {
+            /** Files */
+            files: components["schemas"]["KitFile"][];
+            /** How To */
+            how_to: string;
         };
         /** KitJobOut */
         KitJobOut: {
@@ -7974,6 +8032,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    hunt_kit_index_api_hunt_kit_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KitIndex"];
+                };
+            };
+        };
+    };
+    hunt_kit_file_api_hunt_kit__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

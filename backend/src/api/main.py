@@ -37,6 +37,7 @@ from src.api.routes import (
     client_log,
     files,
     health,
+    hunt_kit,
     morning_check,
     oauth,
     profile,
@@ -227,6 +228,8 @@ app.include_router(proof.router, prefix="/api")  # S7: PUBLIC token upload + per
 app.include_router(files.router, prefix="/api")  # PUBLIC token download for application-kit file links (S3)
 # run 360 recipes — the playbooks a connected assistant follows (owner plan 2026-10-01)
 app.include_router(recipes.router, prefix="/api")
+# PUBLIC static hunt kit the user's own assistant runs (owner 2026-10-13; Job360 still never searches)
+app.include_router(hunt_kit.router, prefix="/api")
 app.include_router(asks.router, prefix="/api")  # "Needs you" queue (owner plan 2026-10-01)
 app.include_router(assistant_settings.router, prefix="/api")  # assistant settings + waiting requests (S2, 2026-10-08)
 app.include_router(morning_check.router, prefix="/api")  # state strip + since-last-visit tally (S5b)
