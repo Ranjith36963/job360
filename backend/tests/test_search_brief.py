@@ -137,3 +137,44 @@ def test_hunt_recipe_reads_the_brief_and_names_no_country():
     # universal: the recipe itself never names a country (an ISO code in an example is fine)
     for country in ("United Kingdom", "Germany", "India", " UK ", "London"):
         assert country not in text, country
+
+
+# --- residence vs work_from (2026-10-13): a remote job in IN means working from IN ---
+_Q = "You live in GB. Would you work from IN for a remote job there?"
+_IN_CITIZEN_REMOTE = {"country": "IN", "work_authorization": "citizen", "remote_ok": True, "onsite": "no"}
+
+
+def test_lives_in_gb_indian_citizen_remote_row_asks_would_you_work_from_in():
+    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", [])
+    asks = [g for g in brief["gaps"] if g["path"] == "user_info.answers"]
+    assert len(asks) == 1 and asks[0]["country"] == "IN"
+    assert asks[0]["ask"].startswith("You live in GB. Would you work from IN")
+    assert brief["residence_country"] == "GB" and brief["work_from"] == ["IN"]
+
+
+def test_approved_yes_answer_means_no_gap_and_in_stays():
+    ans = [{"question": _Q, "answer": "Yes", "approved": True}]
+    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)
+    assert brief["gaps"] == [] and brief["work_from"] == ["IN"]
+
+
+def test_unapproved_answer_is_still_a_gap():
+    ans = [{"question": _Q, "answer": "No", "approved": False}]
+    assert build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)["gaps"]
+
+
+def test_approved_no_drops_in_from_work_from_and_row_says_anywhere_only():
+    ans = [{"question": _Q, "answer": "No", "approved": True}]
+    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "GB", ans)
+    assert brief["gaps"] == [] and brief["work_from"] == []
+    line = brief["rows"][0]["counts_if"][0]
+    assert line.endswith("work from anywhere") and "IN or" not in line
+
+
+def test_lives_in_the_same_country_asks_nothing():
+    brief = build_search_brief(_rtw(_IN_CITIZEN_REMOTE), "IN", [])
+    assert brief["gaps"] == [] and brief["work_from"] == ["IN"]
+
+
+def test_no_residence_means_no_question():
+    assert build_search_brief(_rtw(_IN_CITIZEN_REMOTE))["gaps"] == []

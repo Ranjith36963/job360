@@ -10,8 +10,9 @@ pastes). Then you bring only the good ones into Job360.
 
 1. **Read the targets.** Call `get_profile`: target titles, level,
    `search_brief`, `assistant_notes`. Call `list_applications` so you never
-   bring a job twice. `search_brief.gaps` not empty: ask each `ask` once, save
-   the answer to `user_info.right_to_work` with `update_profile`, read again.
+   bring a job twice. `search_brief.gaps` not empty: ask each `ask` once (any
+   "would you work from" question too), save the answer to its `path` with
+   `update_profile` (an approved `answers` record), read again.
    **Done when** you hold titles, the brief with no gaps, and the list. STOP if
    `search_brief.rows` is empty: ask the user before you search.
 2. **Plan.** Print one line per `search_brief.rows` row: the place, its
