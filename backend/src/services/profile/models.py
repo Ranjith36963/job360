@@ -598,6 +598,10 @@ class UserPreferences:
     looking_for: list[str] = field(default_factory=list)
     dealbreakers: list[str] = field(default_factory=list)
     avoid_companies: list[str] = field(default_factory=list)
+    # Companies the user wants the assistant to check first (owner decision
+    # 2026-10-13): the hunt reads each one's public job board. Empty = no list
+    # (rule #29); Job360 itself never searches (rule 4).
+    target_companies: list[str] = field(default_factory=list)
 
     # Owner decision 2026-09-25 — "" (not asked yet, rule #29: empty is
     # silent), "scheduled" (user said yes and confirmed it in their app), or

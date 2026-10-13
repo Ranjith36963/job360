@@ -532,6 +532,8 @@ def build_server(version: str = "") -> MCPServer:
         country: Optional[str] = None,
         remote: Optional[bool] = None,
         found_on: Optional[str] = None,
+        posted_at: Optional[str] = None,
+        employer_published_at: Optional[str] = None,
     ) -> dict[str, Any]:
         """Bring a job ad the user found (paste the full ad text as `description`).
         Job360 stores it and starts an application for it, then returns the job id and
@@ -552,12 +554,24 @@ def build_server(version: str = "") -> MCPServer:
         `remote` = true/false, `found_on` = where the ad was found — one of
         "indeed", "linkedin", "company_careers", "job_board", "referral",
         "visa_sponsor_list", "pasted_by_user", "other". Leave out what you do
-        not know — Job360 never guesses. Fix them later with update_job."""
+        not know — Job360 never guesses. Fix them later with update_job.
+
+        Ad dates (pass them when the ad shows them, YYYY-MM-DD): `posted_at` =
+        the date the listing says it was posted, `employer_published_at` = the
+        date on the employer's own posting. The same link brought twice (tracking
+        parameters ignored) returns the existing job (existing=true).
+
+        The reply carries `checks`: plain facts about this ad (is the text the
+        full ad or only a title/teaser, which kind of site the apply link is on,
+        how old the ad is, whether it was reposted, whether pay or sponsorship
+        is mentioned). Read them: if the text is title_only or partial, fetch the
+        full ad first; if the host is unknown, tell the user. They never block a bring."""
         try:
             body = bring_route.BringJobRequest(
                 title=title, company=company, description=description, location=location, apply_url=apply_url,
                 visa_signal=visa_signal, visa_detail=visa_detail, visa_country=visa_country,
                 country=country, remote=remote, found_on=found_on,
+                posted_at=posted_at, employer_published_at=employer_published_at,
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
@@ -573,6 +587,8 @@ def build_server(version: str = "") -> MCPServer:
             {
                 "existing": resp.existing, "status": resp.status,
                 "country": resp.country, "remote": resp.remote, "found_on": resp.found_on,
+                "ad_posted_at": resp.ad_posted_at, "employer_published_at": resp.employer_published_at,
+                "checks": resp.checks,
                 "assistant_hint": ASSISTANT_HINT,
             }
         )
@@ -599,6 +615,12 @@ def build_server(version: str = "") -> MCPServer:
         # Owner decision 2026-10-04 — the caller's OWN facts about this job
         # (null when unset), read off their application, never the catalog.
         out.update(job_facts_view(app_row or {}))
+        from src.services.applications.job_checks import checks_for_application  # noqa: PLC0415
+
+        out["checks"] = checks_for_application(
+            {**(app_row or {}), "job_url": resp.apply_url or (app_row or {}).get("job_url")},
+            description=resp.description or "",
+        )
         return out
 
     @mcp.tool()
@@ -1208,14 +1230,22 @@ def build_server(version: str = "") -> MCPServer:
         country: Optional[str] = None,
         remote: Optional[bool] = None,
         found_on: Optional[str] = None,
+        posted_at: Optional[str] = None,
+        employer_published_at: Optional[str] = None,
     ) -> dict[str, Any]:
         """Set or fix the job facts on one application after bring_job:
         `country` (ISO alpha-2, e.g. "FR"; "" clears it), `remote`
-        (true/false), `found_on` (same closed set as bring_job; "" clears it).
+        (true/false), `found_on` (same closed set as bring_job; "" clears it),
+        `posted_at` / `employer_published_at` (YYYY-MM-DD from the ad; "" clears).
         Only what you pass changes. These are the user's own facts about the
         job — they feed stats (by_country, by_job_source)."""
         given: dict[str, Any] = {
-            k: v for k, v in (("country", country), ("remote", remote), ("found_on", found_on)) if v is not None
+            k: v
+            for k, v in (
+                ("country", country), ("remote", remote), ("found_on", found_on),
+                ("posted_at", posted_at), ("employer_published_at", employer_published_at),
+            )
+            if v is not None
         }
         try:
             body = applications_route.UpdateJobFactsRequest(**given)

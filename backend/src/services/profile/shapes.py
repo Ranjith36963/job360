@@ -108,6 +108,9 @@ SHAPES: dict[str, dict[str, Any]] = {
     "preferences.work_authorization_countries": {
         "example": ["GB", "IE"], "note": "ISO alpha-2 codes where no sponsorship is needed",
     },
+    "preferences.target_companies": {
+        "example": ["Mistral AI", "Hugging Face"], "note": "companies to check first; short names, empty = no list",
+    },
     "preferences.assistant_notes": {"example": ["Never apply to agencies."], "note": "one short line per note"},
     "cv_data.cv_positions": {
         "example": [{

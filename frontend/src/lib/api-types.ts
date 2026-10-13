@@ -2662,10 +2662,14 @@ export interface components {
         };
         /** ApplicationJobOut */
         ApplicationJobOut: {
+            /** Ad Posted At */
+            ad_posted_at?: string | null;
             /** Catalog Present */
             catalog_present: boolean;
             /** Country */
             country?: string | null;
+            /** Employer Published At */
+            employer_published_at?: string | null;
             /** Found On */
             found_on?: string | null;
             /** Job Company */
@@ -3072,6 +3076,8 @@ export interface components {
             country?: string | null;
             /** Description */
             description: string;
+            /** Employer Published At */
+            employer_published_at?: string | null;
             /** Found On */
             found_on?: string | null;
             /**
@@ -3079,6 +3085,8 @@ export interface components {
              * @default
              */
             location: string;
+            /** Posted At */
+            posted_at?: string | null;
             /** Remote */
             remote?: boolean | null;
             /** Title */
@@ -3092,10 +3100,18 @@ export interface components {
         };
         /** BringJobResponse */
         BringJobResponse: {
+            /** Ad Posted At */
+            ad_posted_at?: string | null;
             /** Application Id */
             application_id: number;
+            /** Checks */
+            checks?: {
+                [key: string]: unknown;
+            }[];
             /** Country */
             country?: string | null;
+            /** Employer Published At */
+            employer_published_at?: string | null;
             /** Existing */
             existing: boolean;
             /** Found On */
@@ -3680,10 +3696,14 @@ export interface components {
         };
         /** JobFactsOut */
         JobFactsOut: {
+            /** Ad Posted At */
+            ad_posted_at?: string | null;
             /** Application Id */
             application_id: number;
             /** Country */
             country: string | null;
+            /** Employer Published At */
+            employer_published_at?: string | null;
             /** Found On */
             found_on: string | null;
             /** Remote */
@@ -5511,8 +5531,12 @@ export interface components {
         UpdateJobFactsRequest: {
             /** Country */
             country?: string | null;
+            /** Employer Published At */
+            employer_published_at?: string | null;
             /** Found On */
             found_on?: string | null;
+            /** Posted At */
+            posted_at?: string | null;
             /** Remote */
             remote?: boolean | null;
         };
