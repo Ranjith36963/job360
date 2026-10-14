@@ -350,7 +350,7 @@ def _bootstrap_async_db(db_path: str) -> None:
     """Initialize the full JobDatabase schema + apply ALL migrations (0000..latest).
 
     Uses ``JobDatabase.init_db()`` rather than a hand-written executescript
-    so the schema stays in sync with production (incl. match_score,
+    so the schema stays in sync with production (incl.
     salary_min/max, description columns, etc.), then runs the whole
     migration set so migration-created tables (users, job_enrichment, user_feed,
     audit_log, …) exist too.

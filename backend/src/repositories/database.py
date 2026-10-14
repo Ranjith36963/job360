@@ -90,7 +90,6 @@ class JobDatabase:
                 apply_url TEXT NOT NULL,
                 source TEXT NOT NULL,
                 date_found TEXT NOT NULL,
-                match_score INTEGER DEFAULT 0,
                 experience_level TEXT DEFAULT '',
                 normalized_company TEXT NOT NULL,
                 normalized_title TEXT NOT NULL,
@@ -109,7 +108,6 @@ class JobDatabase:
             );
             CREATE INDEX IF NOT EXISTS idx_jobs_date_found ON jobs(date_found);
             CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen);
-            CREATE INDEX IF NOT EXISTS idx_jobs_match_score ON jobs(match_score);
             CREATE INDEX IF NOT EXISTS idx_jobs_staleness_state ON jobs(staleness_state);
             CREATE INDEX IF NOT EXISTS idx_jobs_last_seen_at ON jobs(last_seen_at);
             -- `user_actions` is dropped by migration 0040 (mission sweep) — no
@@ -161,16 +159,10 @@ class JobDatabase:
             ("date_posted_raw", "TEXT"),
             ("consecutive_misses", "INTEGER DEFAULT 0"),
             ("staleness_state", "TEXT DEFAULT 'active'"),
-            # Step-1.5 S1.1 — per-dim score columns (migration 0011 mirror).
-            ("role", "INTEGER DEFAULT 0"),
-            ("skill", "INTEGER DEFAULT 0"),
-            ("seniority_score", "INTEGER DEFAULT 0"),
-            ("experience", "INTEGER DEFAULT 0"),
-            ("credentials", "INTEGER DEFAULT 0"),
-            ("location_score", "INTEGER DEFAULT 0"),
-            ("recency", "INTEGER DEFAULT 0"),
-            ("semantic", "INTEGER DEFAULT 0"),
-            ("penalty", "INTEGER DEFAULT 0"),
+            # (The Step-1.5 per-dim score columns — migration 0011 — and
+            # `match_score` are NOT mirrored any more: migration 0059 drops
+            # them. Re-adding them here would resurrect them on every boot,
+            # because this runs BEFORE the runner and 0059 runs only once.)
             # Migration 0020 — application deadline columns.
             ("deadline", "TEXT"),
             ("deadline_source", "TEXT"),
@@ -194,8 +186,7 @@ class JobDatabase:
             ("salary_currency", "TEXT"),
             ("salary_period", "TEXT"),
             ("salary_is_estimated", "BOOLEAN"),
-            ("salary_min_gbp_annual", "REAL"),
-            ("salary_max_gbp_annual", "REAL"),
+            # salary_min/max_gbp_annual: dropped by migration 0059 — see above.
             ("shelf_provenance", "JSONB NOT NULL DEFAULT '{}'"),
         ]
         applications_migrations = [
