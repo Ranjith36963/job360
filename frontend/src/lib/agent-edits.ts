@@ -16,6 +16,14 @@ import type { AgentEdit } from "./api";
 
 export type { AgentEdit };
 
+/** Feature 9: true only when the user stands behind the value (a web write or
+ *  an assistant write marked `user_said`). A legacy row (no source) is not. */
+export function isUnconfirmed(edit: AgentEdit | undefined): boolean {
+  if (!edit || !isAssistantActor(edit.set_by)) return false;
+  const e = edit as AgentEdit & { confirmed?: boolean };
+  return e.confirmed === false;
+}
+
 /** The actor a signed-in human at the browser writes as (backend `actor_for`). */
 export const WEB_ACTOR = "web";
 

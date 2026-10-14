@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CountryCard } from "@/components/profile/CountryCard";
 import { CountryPicker } from "@/components/profile/CountryPicker";
 import { MemoryRow } from "@/components/profile/MemoryRow";
-import { getProfile, getProfileEditHistory, updateProfileFields } from "@/lib/api";
+import { getProfile, getProfileEditHistory, keepProfileEdit, updateProfileFields } from "@/lib/api";
 import { ApiError, apiErrorMessage } from "@/lib/api-error";
 import type { ProfileResponse } from "@/lib/types";
 import {
@@ -107,6 +107,15 @@ export function MemoryTab() {
     return done;
   }, [loadHistory]);
 
+  /** Confirm an inferred fact: Keep writes a web row marked user_said, then re-read. */
+  const confirm = useCallback(async (spec: RowSpec): Promise<void> => {
+    const updated = await keepProfileEdit(spec.path);
+    latest.current = updated;
+    setProfile(updated);
+    const [, rows] = await loadHistory(spec.path);
+    if (rows) setHistories((h) => ({ ...h, [spec.path]: rows }));
+  }, [loadHistory]);
+
   const countries = useMemo(() => {
     const prefs = (profile?.preferences ?? {}) as Record<string, unknown>;
     const rtw = blockOf(profile, RTW) as Record<string, unknown> | undefined;
@@ -133,7 +142,7 @@ export function MemoryTab() {
   };
   const row = (spec: RowSpec, opts: { emptyNote?: string; compact?: boolean; amberEmpty?: boolean } = {}) => {
     const { value, prov } = state(spec);
-    return <MemoryRow key={spec.id} spec={spec} value={value} provenance={prov} onSave={(n) => save(spec, n)} {...opts} />;
+    return <MemoryRow key={spec.id} spec={spec} value={value} provenance={prov} onSave={(n) => save(spec, n)} onConfirm={() => confirm(spec)} {...opts} />;
   };
 
   const countrySummary = (code: string) => {

@@ -25,7 +25,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from src.core import settings
 from src.repositories import pg
-from src.services.applications.status import replay_status, stage_for_status, status_for_event
+from src.services.applications.status import (
+    PROGRESS_RANK,
+    progress_rank,
+    replay_status,
+    stage_for_status,
+    status_for_event,
+)
 from src.services.auth import rate_limit
 from src.utils.logger import get_audit_logger, safe_log_value
 
@@ -473,7 +479,7 @@ async def get_owned_application(db: JobDatabase, user_id: str, application_id: i
 
 async def _events_for_replay(db: JobDatabase, application_id: int) -> list[dict[str, Any]]:
     cur = await db._db.execute(
-        "SELECT id, event_type, corrects_event_id, recorded_at FROM application_events "
+        "SELECT id, event_type, corrects_event_id, recorded_at, occurred_at FROM application_events "
         "WHERE application_id = ?",
         (application_id,),
     )
@@ -651,6 +657,29 @@ async def _replay_follow_up_on(db: JobDatabase, application_id: int) -> Optional
         if "follow_up_on" in row_payload:
             value = row_payload["follow_up_on"]
     return None if value is FOLLOW_UP_UNSET else value
+
+
+NO_APPLIED_WARNING = (
+    "no applied event recorded for this application — ask the user when they applied, then record_application"
+)
+
+
+async def missing_applied_warnings(db: JobDatabase, application_id: int, event_type: str) -> list[str]:
+    """Owner decision 2026-10-14 — a stage ABOVE ``applied`` (replied,
+    interview_*, offer) recorded on an application with no surviving
+    ``applied`` event is accepted (it is still a fact) but answered with a
+    warning. Job360 never writes the missing ``applied`` itself: that would
+    invent a fact (rule 4) — the agent asks the user, then records it."""
+    mapped = status_for_event(event_type)
+    rank = progress_rank(mapped) if mapped else None
+    if rank is None or rank <= PROGRESS_RANK["applied"]:
+        return []
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_events e WHERE e.application_id = ? AND e.event_type = 'applied' "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) LIMIT 1",
+        (application_id,),
+    )
+    return [] if await cur.fetchone() is not None else [NO_APPLIED_WARNING]
 
 
 async def append_event(

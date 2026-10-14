@@ -79,6 +79,8 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     # missing (coordinator review, 2026-09-26): a per-user table nobody
     # registers here is one this layer silently cannot see.
     ("contact_outreach", "user_id"),
+    # Feature 7: what the assistant reports missing (migration 0056_missing_tool_reports).
+    ("missing_tool_reports", "user_id"),
     ("contact_edits", "user_id"),
 )
 

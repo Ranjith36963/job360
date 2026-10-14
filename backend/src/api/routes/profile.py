@@ -11,7 +11,7 @@ import os
 import re
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, Optional, cast
+from typing import Any, Literal, Optional, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
@@ -420,7 +420,11 @@ def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
     # only an ASSISTANT's row is an "assistant changed this" — a field whose
     # newest row is the human's own save carries no mark and is not listed.
     rows = [
-        AgentEditOut(**row) for row in overlay if profile_edits.is_assistant_actor(str(row["set_by"]))
+        AgentEditOut(
+            **row, confirmed=profile_edits.is_confirmed(str(row["set_by"]), str(row.get("source") or ""))
+        )
+        for row in overlay
+        if profile_edits.is_assistant_actor(str(row["set_by"]))
     ]
     return profile, _build_profile_response(
         profile, user_id, rows, lessons=_recent_lessons(user_id),
@@ -462,6 +466,9 @@ class ProfileEditIn(BaseModel):
 
     path: str
     value: Any = None
+    # Feature 9: did the user SAY this, or did you work it out? Omitted = "agent_inferred"
+    # for an assistant (the safe default); the web always stores "user_said".
+    source: Optional[Literal["user_said", "agent_inferred"]] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -492,6 +499,9 @@ class UpdateProfileResponse(BaseModel):
     # for. NOT applied: the user confirms each one on the Job360 website
     # ("Waiting for your OK"). Empty when nothing was held back.
     waiting: list[SettingRequestOut] = []
+    # Owner decision 2026-10-14 - one plain sentence per path in `waiting`, so an
+    # assistant can never tell the user a parked value was saved.
+    not_saved: list[str] = []
     # Owner decision 2026-10-10 - what was normalised on the way in (a country name read as its
     # ISO code, "junior" read as "entry", ...). Path + closed rule code only, never a value.
     normalized: list[NormalizedOut] = []
@@ -602,9 +612,14 @@ def _split_gated(
             "auto" if p in pending_auto else sw
             for p, sw in zip((settings_rules.ABOVE_LINE_PATH, settings_rules.BELOW_LINE_PATH), now_sw)
         )
+        # Owner decision 2026-10-14 — a FIRST-EVER score line (no line yet) is
+        # judged only against the switches IN EFFECT: a waiting `auto` request
+        # is not in effect, and parking the user's first line behind it left
+        # the setup interview stuck with nothing saved.
+        first_line = path == settings_rules.APPLY_MIN_SCORE_PATH and running[path] is None
         verdicts = {
             settings_rules.classify_change(path, before, after, switches=(sw[0], sw[1]))
-            for sw in (now_sw, pend_sw)
+            for sw in ((now_sw,) if first_line else (now_sw, pend_sw))
         }
         verdict = "riskier" if "riskier" in verdicts else "safer"
         risk[path] = verdict
@@ -619,14 +634,21 @@ def _split_gated(
 
 
 def _batch_state_rejection(
-    user_id: str, write_now: list[tuple[str, Any]]
+    user_id: str,
+    write_now: list[tuple[str, Any]],
+    waiting_paths: frozenset[str] = frozenset(),
+    held_now: frozenset[str] = frozenset(),
 ) -> tuple[str, str, str] | None:
     """``(path, closed reason code, message)`` when the profile AS IT WILL BE after
     ``write_now`` breaks a cross-field rule, else ``None``. Pure on the inputs it
     reads (no write). Rules: ``experience_years_min`` <= ``experience_years_max``;
     a setup round newly marked done needs its answers (``setup_round_missing``).
     Applying the batch in memory first is what lets ONE call carry the answers AND
-    the ``done_at``."""
+    the ``done_at``. Only what is written NOW counts: a value that is only waiting
+    for the user's Confirm (``waiting_paths`` — a request from an earlier call) or
+    that THIS call would park (``held_now`` — no request exists yet, and none will:
+    the refusal writes nothing) is not saved, so a round that needs it is refused,
+    naming that path (owner decision 2026-10-14)."""
     years_touched = any(path in profile_edits.YEARS_PATHS for path, _ in write_now)
     progress_pairs = [
         (path, value) for path, value in write_now
@@ -662,10 +684,16 @@ def _batch_state_rejection(
             continue  # not newly marked done by this call
         missing = settings_rules.setup_round_missing(round_name, after)
         if missing:
-            return (
-                settings_rules.SETUP_PROGRESS_PATH, "setup_round_missing_answers",
-                settings_rules.setup_round_refusal(round_name, missing),
+            held = [m for m in missing if m in held_now]
+            parked = [m for m in missing if m in waiting_paths and m not in held_now]
+            other = [m for m in missing if m not in held and m not in parked]
+            detail = (
+                settings_rules.setup_round_waiting_refusal(
+                    round_name, parked, settings.SITE_BASE_URL, held_now=held, other=other
+                )
+                if parked or held else settings_rules.setup_round_refusal(round_name, missing)
             )
+            return settings_rules.SETUP_PROGRESS_PATH, "setup_round_missing_answers", detail
     return None
 
 
@@ -714,6 +742,14 @@ async def update_profile(
     # that is going to be rejected outright.
     actor = actor_for(user)
     pairs = [(edit.path, edit.value) for edit in body.edits]
+    # Feature 9 - who said it. A web write is the user speaking: always user_said, and it may not
+    # claim "agent_inferred". An assistant that names no source gets the safe default (hard line 4).
+    if actor == profile_edits.WEB_ACTOR:
+        if any(edit.source == profile_edits.SOURCE_AGENT_INFERRED for edit in body.edits):
+            raise HTTPException(status_code=422, detail="source 'agent_inferred' is not allowed on a web write")
+        sources = {edit.path: profile_edits.SOURCE_USER_SAID for edit in body.edits}
+    else:
+        sources = {edit.path: edit.source or profile_edits.SOURCE_AGENT_INFERRED for edit in body.edits}
     if len(body.edits) > settings.PROFILE_EDIT_MAX_PATHS_PER_CALL:
         _log_edit_rejected(user.id, actor, pairs, "", 422, "too_long")
         raise EditRefused(
@@ -771,7 +807,11 @@ async def update_profile(
     # Owner decision 2026-10-10 - checks that need the state AFTER this batch:
     # years min <= max, and a setup round only counts as done once its answers
     # are saved (in this call or before). A refusal writes nothing.
-    reject = _batch_state_rejection(user.id, write_now + hold)
+    # A path THIS call holds has no request yet (create_requests runs after the
+    # checks), so it is named apart from paths already waiting for Confirm.
+    held_now = frozenset(path for path, _ in hold)
+    waiting_paths = frozenset(str(r["path"]) for r in setting_requests.list_waiting(user.id))
+    reject = _batch_state_rejection(user.id, write_now, waiting_paths, held_now)
     if reject is not None:
         reject_path, reject_reason, reject_detail = reject
         _log_edit_rejected(user.id, actor, pairs, reject_path, 422, reject_reason)
@@ -798,7 +838,7 @@ async def update_profile(
         # including every MCP update_profile call (/api/mcp is bearer-only),
         # are never WEB_ACTOR and stay limited.
         applied = profile_edits.record_edits(
-            user.id, actor, write_now, enforce_rate_limit=actor != profile_edits.WEB_ACTOR
+            user.id, actor, write_now, enforce_rate_limit=actor != profile_edits.WEB_ACTOR, source=sources
         )
     except profile_edits.ProfileEditError as exc:
         _log_edit_rejected(
@@ -814,6 +854,7 @@ async def update_profile(
         "profile_edit",
         extra={
             "event": "profile_edit", "paths": [path for path, _ in write_now],
+            "sources": sorted({sources.get(path, "") for path, _ in write_now}),
             "actor": safe_log_value(actor), "user_id": safe_log_value(user.id), "result": "ok",
         },
     )
@@ -840,6 +881,7 @@ async def update_profile(
         applied=[ProfileEditOut(**row) for row in applied],
         profile=rendered,
         waiting=[SettingRequestOut(**setting_requests.waiting_out(r)) for r in created],
+        not_saved=[settings_rules.parked_line(str(r["path"]), settings.SITE_BASE_URL) for r in created],
         normalized=[NormalizedOut(**row) for row in normalized_rows],
     )
 
@@ -973,7 +1015,8 @@ async def keep_edit(
     else:
         save_profile(base, user.id, source_action="keep_edit")
     profile_edits.record_edits(
-        user.id, actor_for(user), [(path, value)], enforce_rate_limit=False, store_as_given=True
+        user.id, actor_for(user), [(path, value)], enforce_rate_limit=False, store_as_given=True,
+        source=profile_edits.SOURCE_USER_SAID,
     )
     get_audit_logger().info(
         "profile_edit_kept",

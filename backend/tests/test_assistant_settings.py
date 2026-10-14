@@ -1592,18 +1592,136 @@ async def test_a_line_move_is_held_when_an_auto_switch_request_is_already_waitin
 
 
 @pytest.mark.asyncio
-async def test_a_held_required_answer_counts_for_the_setup_round(authenticated_async_context, fixture_user_id):
+async def test_setup_round_refused_while_value_waiting(authenticated_async_context, fixture_user_id):
+    """Owner decision 2026-10-14 (replaces "a held required answer counts"): a value
+    that is only WAITING for the user's Confirm is not saved, so a round that needs
+    it cannot be marked done - a 422 naming the path, and nothing is saved."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    async with _bearer_client(token) as agent:
+        # parked on its own first: a request now waits from an earlier call
+        parked = (await _patch(agent, _e(DAILY, "auto"))).json()
+        assert [w["path"] for w in parked["waiting"]] == [DAILY]
+        again = await _patch(agent, _e(PROGRESS, _done("settings", at=at)))
+        assert again.status_code == 422, again.text
+        detail = again.json()["detail"]
+        assert detail.startswith("Nothing was saved.")
+        assert DAILY in detail and "waiting for the user's Confirm" in detail and "/needs-you" in detail
+    async with authenticated_async_context() as client:
+        view = await _view(client)
+        assert view["setup_progress"]["done"] == 0 and view["inbox_mode"] == ""
+
+
+@pytest.mark.asyncio
+async def test_setup_round_same_call_parked_value_message(authenticated_async_context, fixture_user_id):
+    """A path THIS call would park has no request yet - the whole call is refused,
+    so nothing waits. The 422 must not say "waiting for Confirm"; it says to resend
+    without setup_progress, and no request is created."""
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
     at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
     async with _bearer_client(token) as agent:
         resp = await _patch(agent, _e(DAILY, "auto"), _e(PROGRESS, _done("settings", at=at)))
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert detail.startswith("Nothing was saved.")
+        assert (
+            f"{DAILY} needs the user's OK: resend this call WITHOUT setup_progress (the change will be "
+            "parked for the user's Confirm), then mark the round done after they Confirm"
+        ) in detail
+        assert "waiting for the user's Confirm" not in detail and "/needs-you" not in detail
+    async with authenticated_async_context() as client:
+        view = await _view(client)
+        assert view["setup_progress"]["done"] == 0 and view["waiting"] == []
+
+
+def test_setup_round_waiting_refusal_names_other_missing_paths():
+    """Held/waiting paths keep their wording; required paths simply not sent are
+    named too, so the caller resends everything in one call. Default: unchanged."""
+    rtw = "user_info.right_to_work"
+    base = rules.setup_round_waiting_refusal("targets", [SCORE], "https://x.example")
+    assert "also missing" not in base
+    msg = rules.setup_round_waiting_refusal("targets", [SCORE], "https://x.example", other=[TITLES, rtw])
+    assert msg.startswith(base)
+    assert msg.endswith(f"; also missing {TITLES}, {rtw} - ask the user, then save them in the same call")
+    held = rules.setup_round_waiting_refusal("targets", [], "https://x.example", held_now=[SCORE], other=[rtw])
+    assert f"{SCORE} needs the user's OK" in held and f"also missing {rtw}" in held
+
+
+@pytest.mark.asyncio
+async def test_setup_round_waiting_refusal_also_names_unsent_paths(authenticated_async_context, fixture_user_id):
+    """A required path waiting for Confirm AND another required path never sent:
+    the 422 names both."""
+    rtw = "user_info.right_to_work"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (await _patch(client, _e(BELOW, "auto"))).status_code == 200
+        token = await _mint_token(client)
+    at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    async with _bearer_client(token) as agent:
+        parked = (await _patch(agent, _e(SCORE, 0))).json()
+        assert [w["path"] for w in parked["waiting"]] == [SCORE], parked
+        resp = await _patch(agent, _e(PROGRESS, _done("targets", at=at)))
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert f"{SCORE} is waiting for the user's Confirm" in detail
+        assert f"also missing {rtw} - ask the user, then save them in the same call" in detail
+        assert TITLES not in detail, "a saved answer is not named"
+
+
+@pytest.mark.asyncio
+async def test_first_score_line_never_parks(authenticated_async_context, fixture_user_id):
+    """The real setup-interview run: auto switches requested (parked) first, THEN the
+    user's first-ever score line with the targets round. Pending autos are not in
+    effect, so the first line is saved at once and the round is marked done."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    where = {"countries": [{"country": "GB", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes"}]}
+    async with _bearer_client(token) as agent:
+        first = (await _patch(agent, _e(SUBMIT, "auto_when_sure"), _e(APPLY, "auto"))).json()
+        assert {w["path"] for w in first["waiting"]} == {SUBMIT, APPLY}
+        resp = await _patch(
+            agent, _e(SCORE, 70), _e(PROGRESS, _done("targets", at=at)), _e("user_info.right_to_work", where)
+        )
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert [w["path"] for w in body["waiting"]] == [DAILY]
-        assert [a["path"] for a in body["applied"]] == [PROGRESS]
-        assert body["profile"]["preferences"]["daily_check"] == ""
+        assert SCORE in [a["path"] for a in body["applied"]] and body["waiting"] == [] and body["not_saved"] == []
+        # a MOVED line is still judged against the pending auto (the old guard stands)
+        moved = (await _patch(agent, _e(SCORE, 10))).json()
+        assert [w["path"] for w in moved["waiting"]] == [SCORE]
+    async with authenticated_async_context() as client:
+        view = await _view(client)
+        assert view["apply_min_score"]["effective"] == 70 and view["setup_progress"]["next"] == "you"
+
+
+@pytest.mark.asyncio
+async def test_parked_change_reply_says_not_saved(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        body = (await _patch(agent, _e(SUBMIT, "auto_when_sure"), _e(APPLY, "auto"))).json()
+        assert sorted(body["not_saved"]) == sorted(
+            f"{p}: NOT saved yet — the user must tap Confirm on Needs you at {settings.SITE_BASE_URL}/needs-you"
+            for p in (SUBMIT, APPLY)
+        )
+        safe = (await _patch(agent, _e(CAP, 3))).json()
+        assert safe["not_saved"] == [] and safe["waiting"] == []
+    # the MCP reply carries the same lines
+    pytest.importorskip("mcp")
+    from src.api.mcp_server import mcp_runtime
+
+    async with mcp_runtime(), _mcp_client(token) as mcp:
+        result = _payload(await mcp.call_tool("update_profile", {"edits": [_e(BELOW, "auto")]}))
+        assert [w["path"] for w in result["waiting"]] == [BELOW]
+        assert result["not_saved"] == [
+            f"{BELOW}: NOT saved yet — the user must tap Confirm on Needs you at {settings.SITE_BASE_URL}/needs-you"
+        ]
 
 
 def test_form_not_recorded_stops_before_anything_else_but_the_four_stops():

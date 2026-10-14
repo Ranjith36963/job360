@@ -731,7 +731,8 @@ class RecordEventResponse(BaseModel):
     status: str
     already_existed: bool
     scheduled_at: Optional[str]
-    # Non-fatal notes, e.g. a deduped message_id that was recorded as another type.
+    # Non-fatal notes: a deduped message_id recorded as another type, or (owner
+    # decision 2026-10-14) a reply/interview/offer with no `applied` event yet.
     warnings: list[str] = Field(default_factory=list)
     # Owner decision, 2026-09-25 — the CURRENT slot value after this call:
     # the new value when this call set/cleared it, the unchanged value when
@@ -1059,6 +1060,19 @@ class SubmitCheckResponse(BaseModel):
     detail: str
 
 
+class OutreachCheckResponse(BaseModel):
+    """The answer to "may I press Send on this outreach email?" - one gate
+    (``settings_rules.may_send_outreach``). ``send``: press Send in Gmail, then
+    record ``outreach_sent``; ``ask``: save a Gmail draft and ask_user; ``stop``:
+    do not send. ``sent_today`` / ``daily_max``: recorded sends today vs the cap."""
+
+    decision: Literal["send", "ask", "stop"]
+    reason: str
+    detail: str
+    sent_today: int
+    daily_max: int
+
+
 class ExportHistoryResponse(BaseModel):
     applications: list[ExportApplicationOut]
     truncated: bool
@@ -1207,6 +1221,10 @@ class StatsOverallOut(BaseModel):
     reply_rate: Optional[float]
     interview_rate: Optional[float]
     offer_rate: Optional[float]
+    # Owner decision 2026-10-14 — replied/interview/offer above count only
+    # applications that ALSO have an `applied` event (so no rate exceeds 1);
+    # this is how many reached a later stage with no `applied` recorded.
+    replies_without_applied: int = 0
 
 
 class StatsCvVersionGroupOut(BaseModel):
@@ -1720,6 +1738,53 @@ async def record_outreach(
         raise AssertionError("unreachable")  # pragma: no cover
     response.status_code = 200 if result["already_existed"] else 201
     return result
+
+
+@router.get(
+    "/contacts/{contact_id}/outreach-check", response_model=OutreachCheckResponse, dependencies=AUTH_FIRST
+)
+async def outreach_check(
+    contact_id: int,
+    message_id: int = Query(...),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """THE one gate before pressing Send on an outreach email (feature 10).
+
+    Reads the user's settings, this contact's facts and the saved message
+    version ``message_id`` (the ``contact_outreach`` row ``save_artifact
+    kind="outreach"`` created), plus today's recorded sends, then answers
+    through ``settings_rules.may_send_outreach`` - the same function for this
+    route and the MCP ``check_outreach`` tool. Read-only: it records nothing
+    except one audit line. 404 for a contact that is not the caller's (rule #12)."""
+    try:
+        contact = await contacts_service.get_owned_contact(db, user.id, contact_id)
+        if contact is None:
+            raise SpineError(404, "contact not found")
+        now = datetime.now(timezone.utc)
+        profile = load_profile(user.id) or UserProfile()
+        cfg = settings_rules.effective(profile.assistant_settings)
+        facts = await contacts_service.outreach_gate_facts(db, user.id, contact, message_id)
+        counts = await settings_rules.load_outreach_counts(db, user.id, now, facts.company or None)
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+    verdict = settings_rules.may_send_outreach(
+        cfg, facts, counts, now, inbox_mode=profile.preferences.daily_check or ""
+    )
+    # Never the email address, the message text or the company name: ids and closed codes only.
+    get_audit_logger().info(
+        "outreach_check",
+        extra={
+            "event": "outreach_check", "user_id": safe_log_value(user.id),
+            "actor": safe_log_value(actor_for(user)), "contact_id": contact_id, "message_id": message_id,
+            "decision": verdict.decision, "reason": verdict.reason, "result": "ok",
+        },
+    )
+    return {
+        "decision": verdict.decision, "reason": verdict.reason, "detail": verdict.detail,
+        "sent_today": counts.sent_today, "daily_max": settings.OUTREACH_AUTO_SENDS_MAX_PER_DAY,
+    }
 
 
 @router.get("/people", response_model=ListPeopleResponse, dependencies=AUTH_FIRST)
@@ -2244,11 +2309,23 @@ async def record_event(
             corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
             follow_up_on=follow_up_on_arg,
         )
+        if body.event_type == "replied" and source and source.get("sender"):
+            # The sender is a person we sent outreach to on this job: mark them
+            # replied too (a new outreach_replied entry; old events untouched).
+            await contacts_service.mark_reply_from_sender(
+                db, user.id, application_id, actor_for(user),
+                sender=source["sender"], message_id=source["message_id"], occurred_at=body.occurred_at,
+            )
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
         if body.event_type == "proof_text":
             proof_service.log_proof_text(user, application_id, int(result["event_id"]), payload)
-        return result
+        # Keep append_event's own warnings (a duplicate message_id recorded as another type)
+        # and add the reply-before-applied one; never replace one list with the other.
+        # Judge the STORED type: a duplicate message_id returns the existing event.
+        stored_type = str(result.get("event_type") or body.event_type)
+        missing = await spine.missing_applied_warnings(db, application_id, stored_type)
+        return {**result, "warnings": [*result.get("warnings", []), *missing]}
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

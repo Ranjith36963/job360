@@ -33,7 +33,9 @@ function lineShown(line?: number | null): string {
   return line == null ? "not set yet" : String(line);
 }
 
-/** What a request changes, in plain words: a title and the new value. */
+/** What a request changes, in plain words: a title and the new value. A side set
+ *  to auto that covers every job (above the line at 0, below it at 100) says so
+ *  plainly, so the user never confirms "every job" by accident. */
 export function describeSettingRequest(
   path: string,
   value: unknown,
@@ -46,7 +48,9 @@ export function describeSettingRequest(
         title: "Jobs at or above your line",
         change:
           value === "auto"
-            ? `Apply on its own for jobs at or above your score line (${shown})`
+            ? currentScoreLine === 0
+              ? "Apply on its own for EVERY job (your score line is 0)"
+              : `Apply on its own for jobs at or above your score line (${shown})`
             : `Ask me about jobs at or above my score line (${shown})`,
       };
     }
@@ -56,7 +60,9 @@ export function describeSettingRequest(
         title: "Jobs below your line",
         change:
           value === "auto"
-            ? `Apply on its own for jobs below your score line (${shown})`
+            ? currentScoreLine === 100
+              ? "Apply on its own for EVERY job (your score line is 100)"
+              : `Apply on its own for jobs below your score line (${shown})`
             : `Ask me about jobs below my score line (${shown})`,
       };
     }
