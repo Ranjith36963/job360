@@ -1751,8 +1751,8 @@ async def mcp_runtime() -> AsyncIterator[None]:
 
     # serverInfo.version is a fingerprint of the tool surface, and the tools
     # only exist once a server is built — so build a throwaway one to read the
-    # list, then the real one(s) stamped with it. Registering seventeen
-    # decorated functions is microseconds; the lazy imports are already warm.
+    # list, then the real one(s) stamped with it. Registering the
+    # decorated tool functions is microseconds; the lazy imports are already warm.
     fingerprint = tools_fingerprint(await build_server().list_tools())
     announce = settings.MCP_ANNOUNCE_TOOLS_CHANGED
 
