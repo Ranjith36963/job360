@@ -492,6 +492,34 @@ def _display_payload(event_type: str, raw: Optional[str]) -> dict[str, Any]:
     return payload
 
 
+async def _attach_contact_names(
+    db: JobDatabase, user_id: Optional[str], events: list[dict[str, Any]]
+) -> None:
+    """Add ``contact_name`` to the payload of every event that names a
+    ``contact_id`` (outreach_sent / outreach_replied / contact_added), so the
+    UI can say who without a second call. Only the CALLER's own contacts are
+    read (``user_id`` match); an unknown or foreign id adds nothing. Payload
+    is a free-form dict, so the response model is unchanged."""
+    if not user_id:
+        return
+    ids = sorted({
+        int(e["payload"]["contact_id"]) for e in events
+        if isinstance(e["payload"].get("contact_id"), int) and not isinstance(e["payload"].get("contact_id"), bool)
+    })
+    if not ids:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    cur = await db._db.execute(
+        f"SELECT id, name FROM application_contacts WHERE user_id = ? AND id IN ({placeholders})",  # noqa: S608
+        [user_id, *ids],
+    )
+    names = {int(r["id"]): r["name"] for r in await cur.fetchall()}
+    for e in events:
+        cid = e["payload"].get("contact_id")
+        if isinstance(cid, int) and cid in names:
+            e["payload"]["contact_name"] = names[cid]
+
+
 async def list_events_for_display(db: JobDatabase, application_id: int) -> list[dict[str, Any]]:
     """Timeline order — ``occurred_at`` (backdated events included), NOT the
     ``recorded_at`` order the status recompute uses."""
@@ -520,6 +548,9 @@ async def list_events_for_display(db: JobDatabase, application_id: int) -> list[
                 "scheduled_at": r["scheduled_at"] or None,
             }
         )
+    owner = await db._db.execute("SELECT user_id FROM applications WHERE id = ?", (application_id,))
+    owner_row = await owner.fetchone()
+    await _attach_contact_names(db, owner_row["user_id"] if owner_row else None, out)
     return out
 
 
@@ -1408,12 +1439,18 @@ async def _list_receipts_for_application(
 def _receipt_answers(raw: Any) -> list[dict[str, str]]:
     """Only well-formed {question, answer} pairs survive — the response model
     is strict (extra="forbid"), so a malformed legacy entry would otherwise
-    turn a read into a 500."""
-    return [
-        {"question": str(a["question"]), "answer": str(a["answer"])}
-        for a in _receipt_json(raw, list)
-        if isinstance(a, dict) and "question" in a and "answer" in a
-    ]
+    turn a read into a 500. ``source`` / ``key`` come back when stored (text
+    only); a receipt recorded before they existed simply has neither."""
+    out: list[dict[str, str]] = []
+    for a in _receipt_json(raw, list):
+        if not (isinstance(a, dict) and "question" in a and "answer" in a):
+            continue
+        item = {"question": str(a["question"]), "answer": str(a["answer"])}
+        for extra in ("source", "key"):
+            if isinstance(a.get(extra), str) and a[extra]:
+                item[extra] = a[extra]
+        out.append(item)
+    return out
 
 
 async def _artifact_version_no(
@@ -1863,6 +1900,8 @@ async def whats_new(
         if r["application_id"] not in seen:
             seen.add(r["application_id"])
             app_ids.append(r["application_id"])
+
+    await _attach_contact_names(db, user_id, events)
 
     applications: list[dict[str, Any]] = []
     if app_ids:

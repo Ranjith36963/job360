@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 
 from src.core import settings
 from src.services.applications import blocked as blocked_service
-from src.services.applications import spine
+from src.services.applications import event_examples, spine
 from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application
 from src.services.applications.spine import SpineError
@@ -453,41 +453,57 @@ ANSWER_QUESTION_MAX = 300
 ANSWER_KEY_MAX = 120
 
 
+def _clean_answer(item: Any) -> dict[str, str]:
+    """One answer, validated and cleaned; raises ``SpineError`` 422 on the first problem."""
+    if not isinstance(item, dict) or not {"question", "answer", "source"} <= set(item) <= {
+        "question", "answer", "source", "key",
+    }:
+        raise SpineError(422, "each answer needs question, answer and source (and optionally key), nothing else")
+    if item["source"] not in ANSWER_SOURCES:
+        raise SpineError(422, "answer source must be one of: " + ", ".join(ANSWER_SOURCES))
+    texts = {k: item[k] for k in ("question", "answer", "key") if k in item}
+    if not all(isinstance(v, str) for v in texts.values()):
+        raise SpineError(422, "answer question, answer and key must be text")
+    # A line break in a question becomes a space (never glues two words); an
+    # answer keeps its line breaks - a written answer may be paragraphs.
+    question = " ".join(spine._strip_control_chars(texts["question"]).split())
+    answer = spine._strip_control_chars(texts["answer"]).strip()
+    if not question or len(question) > ANSWER_QUESTION_MAX:
+        raise SpineError(422, f"answer question must be 1 to {ANSWER_QUESTION_MAX} characters")
+    if len(answer) > settings.USER_INFO_ANSWER_MAX_CHARS:
+        raise SpineError(422, f"an answer is over {settings.USER_INFO_ANSWER_MAX_CHARS} characters")
+    clean = {"question": question, "answer": answer, "source": str(item["source"])}
+    if "key" in texts:
+        key = spine._strip_control_chars(texts["key"], keep="").strip()
+        if not key or len(key) > ANSWER_KEY_MAX:
+            raise SpineError(422, f"answer key must be 1 to {ANSWER_KEY_MAX} characters")
+        clean["key"] = key
+    return clean
+
+
+def _answers_list(raw: Any) -> list[Any]:
+    if not isinstance(raw, list) or len(raw) > settings.KIT_FORM_FIELDS_MAX:
+        raise SpineError(422, f"answers must be a list of at most {settings.KIT_FORM_FIELDS_MAX} items")
+    return raw
+
+
 def clean_answers(raw: Any) -> list[dict[str, str]]:
     """S5d: the answers an assistant typed into a form, validated. A list of at
     most ``KIT_FORM_FIELDS_MAX`` of ``{question, answer, source[, key]}`` - closed
     keys, control characters removed, sizes capped. ``source`` says where the
     answer came from (a guess is ``guessed``); ``key`` is the kit key for a
-    memory / profile / approved answer. An answer may be blank (the page flags it)."""
-    if not isinstance(raw, list) or len(raw) > settings.KIT_FORM_FIELDS_MAX:
-        raise SpineError(422, f"answers must be a list of at most {settings.KIT_FORM_FIELDS_MAX} items")
-    out: list[dict[str, str]] = []
-    for item in raw:
-        if not isinstance(item, dict) or not {"question", "answer", "source"} <= set(item) <= {
-            "question", "answer", "source", "key",
-        }:
-            raise SpineError(422, "each answer needs question, answer and source (and optionally key), nothing else")
-        if item["source"] not in ANSWER_SOURCES:
-            raise SpineError(422, "answer source must be one of: " + ", ".join(ANSWER_SOURCES))
-        texts = {k: item[k] for k in ("question", "answer", "key") if k in item}
-        if not all(isinstance(v, str) for v in texts.values()):
-            raise SpineError(422, "answer question, answer and key must be text")
-        # A line break in a question becomes a space (never glues two words); an
-        # answer keeps its line breaks - a written answer may be paragraphs.
-        question = " ".join(spine._strip_control_chars(texts["question"]).split())
-        answer = spine._strip_control_chars(texts["answer"]).strip()
-        if not question or len(question) > ANSWER_QUESTION_MAX:
-            raise SpineError(422, f"answer question must be 1 to {ANSWER_QUESTION_MAX} characters")
-        if len(answer) > settings.USER_INFO_ANSWER_MAX_CHARS:
-            raise SpineError(422, f"an answer is over {settings.USER_INFO_ANSWER_MAX_CHARS} characters")
-        clean = {"question": question, "answer": answer, "source": str(item["source"])}
-        if "key" in texts:
-            key = spine._strip_control_chars(texts["key"], keep="").strip()
-            if not key or len(key) > ANSWER_KEY_MAX:
-                raise SpineError(422, f"answer key must be 1 to {ANSWER_KEY_MAX} characters")
-            clean["key"] = key
-        out.append(clean)
-    return out
+    memory / profile / approved answer. An answer may be blank (the page flags it).
+    A receipt's answers take the same ``source`` list and ``key`` (both optional there)."""
+    return [_clean_answer(item) for item in _answers_list(raw)]
+
+
+def answer_problems(raw: Any) -> list[str]:
+    """Every problem in an ``answers`` value (same rules as :func:`clean_answers`), not just the first."""
+    problems: list[str] = []
+    items = event_examples.collect(problems, _answers_list, raw)
+    for i, item in enumerate(items or []):
+        event_examples.collect(problems, _clean_answer, item, prefix=f"answers[{i}]: ")
+    return problems
 
 
 def _refuse(user: CurrentUser, event_type: str, status: int) -> None:
@@ -507,13 +523,103 @@ def _host(event_type: str, value: Any) -> str:
     return host
 
 
+def _keys_problem(
+    payload: dict[str, Any], required: frozenset[str] | set[str], allowed: frozenset[str] | set[str]
+) -> list[str]:
+    missing, unknown = sorted(set(required) - set(payload)), sorted(set(payload) - set(allowed))
+    out: list[str] = []
+    if missing:
+        out.append(f"missing payload keys: {missing}")
+    if unknown:
+        out.append(f"unknown payload keys: {unknown} (allowed: {sorted(allowed)})")
+    return out
+
+
+def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
+    """EVERY problem in a kit event's payload that needs no database and no
+    caller identity (shape, types, ranges, closed sets) - the same rules the
+    validators in :func:`check_kit_event` apply, reported together instead of one
+    per call. Empty list = the payload is well formed (who may write it, and the
+    rules that read the application's history, are checked after)."""
+    problems: list[str] = []
+    if event_type in ("cv_seen", "submit_approved"):
+        problems += _keys_problem(payload, EVENT_PAYLOAD_KEYS[event_type], EVENT_PAYLOAD_KEYS[event_type])
+        if payload.get("where") not in SEEN_WHERE:
+            problems.append("where must be 'web' or 'chat'")
+        artifact_id, sha = payload.get("artifact_id"), payload.get("sha256")
+        no_cv = event_type == "submit_approved" and artifact_id is None and sha in ("", None)
+        bad_id = isinstance(artifact_id, bool) or not isinstance(artifact_id, int)
+        if not no_cv and (bad_id or not isinstance(sha, str)):
+            problems.append("needs artifact_id (a whole number) and sha256 (text)")
+    elif event_type == "submit_declined":
+        problems += _keys_problem(payload, EVENT_PAYLOAD_KEYS[event_type], EVENT_PAYLOAD_KEYS[event_type])
+        if payload.get("where") not in SEEN_WHERE:
+            problems.append("where must be 'web' or 'chat'")
+    elif event_type == "autofill_set":
+        problems += _keys_problem(payload, EVENT_PAYLOAD_KEYS[event_type], EVENT_PAYLOAD_KEYS[event_type])
+        if payload.get("mode") not in ("allow", "deny"):
+            problems.append('mode must be "allow" or "deny"')
+    elif event_type == "hold_released":
+        problems += _keys_problem(payload, EVENT_PAYLOAD_KEYS[event_type], EVENT_PAYLOAD_KEYS[event_type])
+        if payload.get("reason") not in HOLD_RELEASE_REASONS:
+            problems.append("reason must be one of: " + ", ".join(sorted(HOLD_RELEASE_REASONS)))
+    elif event_type in ("site_account", "account_needed"):
+        problems += _keys_problem(payload, EVENT_PAYLOAD_KEYS[event_type], EVENT_PAYLOAD_KEYS[event_type])
+        host = payload.get("host")
+        if settings_rules.parse_site_host(host if isinstance(host, str) else None) is None:
+            problems.append("host could not be read (a host name such as jobs.example.com)")
+    elif event_type == "form_filled":
+        problems += _keys_problem(payload, FORM_FILLED_REQUIRED, FORM_FILLED_REQUIRED | FORM_FILLED_OPTIONAL)
+        count = payload.get("fields_count")
+        if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= settings.KIT_FORM_FIELDS_MAX:
+            problems.append(f"fields_count must be a whole number from 0 to {settings.KIT_FORM_FIELDS_MAX}")
+        url = payload.get("form_url")
+        if settings_rules.parse_site_host(url if isinstance(url, str) else None) is None:
+            problems.append("form_url host could not be read (the full address of the application form)")
+        if "answers" in payload:
+            problems += answer_problems(payload["answers"])
+    elif event_type == "form_swept":
+        problems += _keys_problem(payload, FORM_SWEPT_REQUIRED, EVENT_PAYLOAD_KEYS[event_type])
+        ints: dict[str, int] = {}
+        for name in ("fields_checked", "fixed"):
+            value = payload.get(name)
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= settings.KIT_FORM_FIELDS_MAX:
+                problems.append(f"{name} must be a whole number from 0 to {settings.KIT_FORM_FIELDS_MAX}")
+            else:
+                ints[name] = value
+        if len(ints) == 2 and ints["fixed"] > ints["fields_checked"]:
+            problems.append("fixed cannot be more than fields_checked")
+        if "notes" in payload:
+            notes = payload["notes"]
+            if not isinstance(notes, str):
+                problems.append("notes must be text")
+            elif len(" ".join(spine._strip_control_chars(notes).split())) > FORM_SWEPT_NOTES_MAX:
+                problems.append(f"notes must be at most {FORM_SWEPT_NOTES_MAX} characters")
+    return problems
+
+
 async def check_kit_event(
     db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, payload: dict[str, Any]
 ) -> dict[str, Any]:
     """Validate an S3 event's payload and who may write it; return the payload to
     STORE (server adds ``by``, and ``version`` where a CV is named). Raises
     ``SpineError``. Lives here, called by the ``record_event`` ROUTE, so the MCP
-    tool inherits it."""
+    tool inherits it. A malformed payload is refused ONCE with every problem and a
+    valid example (:func:`payload_problems`); the rules below only ever see a
+    well-formed one."""
+    if event_type not in SERVER_ONLY_EVENTS:
+        problems = payload_problems(event_type, payload)
+        if problems:
+            raise event_examples.refusal(event_type, problems)
+    try:
+        return await _check_kit_event(db, user, application_id, event_type, payload)
+    except SpineError as exc:
+        raise event_examples.with_example(event_type, exc) from None
+
+
+async def _check_kit_event(
+    db: JobDatabase, user: CurrentUser, application_id: int, event_type: str, payload: dict[str, Any]
+) -> dict[str, Any]:
     actor = actor_for(user)
     if event_type in SERVER_ONLY_EVENTS:
         raise SpineError(422, f"{event_type} is written by Job360 itself (get_application_kit), not by a caller")

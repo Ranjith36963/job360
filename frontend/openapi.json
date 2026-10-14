@@ -6299,16 +6299,41 @@
       },
       "ReceiptAnswer": {
         "additionalProperties": false,
+        "description": "One answer on a receipt. The SAME shape the ``form_filled`` event takes\n(``kit.ANSWER_SOURCES`` is the one source list); ``source`` and ``key`` are\noptional here, stored when given and returned on read.",
         "properties": {
           "answer": {
             "maxLength": 2000,
             "title": "Answer",
             "type": "string"
           },
+          "key": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
           "question": {
             "maxLength": 500,
             "title": "Question",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           }
         },
         "required": [
@@ -6319,15 +6344,37 @@
         "type": "object"
       },
       "ReceiptAnswerOut": {
-        "description": "The READ shape of an answer \u2014 deliberately without the request caps.\nA receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS\nis ever lowered, older rows must still read back, not 500 the page.",
+        "description": "The READ shape of an answer \u2014 deliberately without the request caps.\nA receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS\nis ever lowered, older rows must still read back, not 500 the page.\n``source`` / ``key`` are absent on receipts recorded before they existed.",
         "properties": {
           "answer": {
             "title": "Answer",
             "type": "string"
           },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
           "question": {
             "title": "Question",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           }
         },
         "required": [
