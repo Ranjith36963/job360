@@ -1300,6 +1300,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contacts/{contact_id}/outreach-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Outreach Check
+         * @description THE one gate before pressing Send on an outreach email (feature 10).
+         *
+         *     Reads the user's settings, this contact's facts and the saved message
+         *     version ``message_id`` (the ``contact_outreach`` row ``save_artifact
+         *     kind="outreach"`` created), plus today's recorded sends, then answers
+         *     through ``settings_rules.may_send_outreach`` - the same function for this
+         *     route and the MCP ``check_outreach`` tool. Read-only: it records nothing
+         *     except one audit line. 404 for a contact that is not the caller's (rule #12).
+         */
+        get: operations["outreach_check_api_contacts__contact_id__outreach_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/doctor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Doctor
+         * @description The account's state in one read, plus ONE closed ``next_step``:
+         *     ``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.
+         *     Read-only; email verification is NOT required (an unverified user is told
+         *     to verify). No 404 when there is no profile (``profile_exists: false``).
+         */
+        get: operations["doctor_api_doctor_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/files/{token}": {
         parameters: {
             query?: never;
@@ -1446,6 +1496,29 @@ export interface paths {
         get: operations["livez_api_livez_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missing-tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Missing Tool
+         * @description Store "a tool I needed does not exist" for the owner. It only stores.
+         *     422 when ``name`` is not ``^[a-z][a-z0-9_]{1,59}$`` or ``why`` is over 280
+         *     characters (the message names the rule, never the value); 429 past
+         *     ``MISSING_TOOL_REPORTS_MAX_PER_DAY`` reports in the last 24 hours.
+         */
+        post: operations["report_missing_tool_api_missing_tools_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3479,6 +3552,85 @@ export interface components {
             /** Artifact Id */
             artifact_id?: number | null;
         };
+        /**
+         * DoctorAuth
+         * @description How this caller is signed in: ``session`` (browser), ``token`` (personal
+         *     ``j360_…`` token) or ``oauth`` (an OAuth-connected assistant), and the
+         *     actor string every event it records will carry.
+         */
+        DoctorAuth: {
+            /** Actor */
+            actor: string;
+            /** Kind */
+            kind: string;
+        };
+        /**
+         * DoctorMissingItem
+         * @description One thing the profile lacks: a path-like ``key`` and a plain ``why``.
+         */
+        DoctorMissingItem: {
+            /** Key */
+            key: string;
+            /** Why */
+            why: string;
+        };
+        /**
+         * DoctorOutreach
+         * @description Today's outreach (the user's own day): ``sent_today`` recorded sends,
+         *     ``daily_max`` the cap check_outreach applies, ``blocked_today`` how many
+         *     check_outreach answers today were ``stop``.
+         */
+        DoctorOutreach: {
+            /** Blocked Today */
+            blocked_today: number;
+            /** Daily Max */
+            daily_max: number;
+            /** Sent Today */
+            sent_today: number;
+        };
+        /**
+         * DoctorResponse
+         * @description ``GET /api/doctor`` - one read of "what state is this account in, and
+         *     what should the assistant do next?". Every field is built defensively: a
+         *     user with no profile gets ``profile_exists: false``, never a 404.
+         */
+        DoctorResponse: {
+            auth: components["schemas"]["DoctorAuth"];
+            /** Email Verified */
+            email_verified: boolean;
+            /** Latest Event Recorded At */
+            latest_event_recorded_at?: string | null;
+            /** Missing */
+            missing: components["schemas"]["DoctorMissingItem"][];
+            /** Next Step */
+            next_step: string;
+            /** Open Asks */
+            open_asks: number;
+            outreach: components["schemas"]["DoctorOutreach"];
+            /** Paused */
+            paused: boolean;
+            /** Paused Until */
+            paused_until: string;
+            /** Profile Exists */
+            profile_exists: boolean;
+            setup: components["schemas"]["DoctorSetup"];
+            /** Waiting Settings */
+            waiting_settings: number;
+            /** Whats New Hint */
+            whats_new_hint: string;
+        };
+        /**
+         * DoctorSetup
+         * @description The six-round setup: rounds done, of ``total``; ``next`` = first unfinished ("" when all done).
+         */
+        DoctorSetup: {
+            /** Done */
+            done: number;
+            /** Next */
+            next: string;
+            /** Total */
+            total: number;
+        };
         /** EmailChangeRequest */
         EmailChangeRequest: {
             /** Current Password */
@@ -4118,6 +4270,25 @@ export interface components {
             /** Next */
             next?: string | null;
         };
+        /**
+         * MissingToolRequest
+         * @description ``POST /api/missing-tools`` body. ``name`` must match
+         *     ``^[a-z][a-z0-9_]{1,59}$``; ``why`` is at most 280 characters.
+         */
+        MissingToolRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Why
+             * @default
+             */
+            why: string;
+        };
+        /** MissingToolResponse */
+        MissingToolResponse: {
+            /** Id */
+            id: number;
+        };
         /** MorningCheckOut */
         MorningCheckOut: {
             /** Now */
@@ -4193,6 +4364,28 @@ export interface components {
             redirect_uri: string;
             /** Scope */
             scope: string;
+        };
+        /**
+         * OutreachCheckResponse
+         * @description The answer to "may I press Send on this outreach email?" - one gate
+         *     (``settings_rules.may_send_outreach``). ``send``: press Send in Gmail, then
+         *     record ``outreach_sent``; ``ask``: save a Gmail draft and ask_user; ``stop``:
+         *     do not send. ``sent_today`` / ``daily_max``: recorded sends today vs the cap.
+         */
+        OutreachCheckResponse: {
+            /** Daily Max */
+            daily_max: number;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "send" | "ask" | "stop";
+            /** Detail */
+            detail: string;
+            /** Reason */
+            reason: string;
+            /** Sent Today */
+            sent_today: number;
         };
         /**
          * OutreachEntryOut
@@ -8041,6 +8234,76 @@ export interface operations {
             };
         };
     };
+    outreach_check_api_contacts__contact_id__outreach_check_get: {
+        parameters: {
+            query: {
+                message_id: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                contact_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutreachCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    doctor_api_doctor_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DoctorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_file_api_files__token__get: {
         parameters: {
             query?: never;
@@ -8233,6 +8496,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LivezResponse"];
+                };
+            };
+        };
+    };
+    report_missing_tool_api_missing_tools_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MissingToolRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissingToolResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -1060,6 +1060,19 @@ class SubmitCheckResponse(BaseModel):
     detail: str
 
 
+class OutreachCheckResponse(BaseModel):
+    """The answer to "may I press Send on this outreach email?" - one gate
+    (``settings_rules.may_send_outreach``). ``send``: press Send in Gmail, then
+    record ``outreach_sent``; ``ask``: save a Gmail draft and ask_user; ``stop``:
+    do not send. ``sent_today`` / ``daily_max``: recorded sends today vs the cap."""
+
+    decision: Literal["send", "ask", "stop"]
+    reason: str
+    detail: str
+    sent_today: int
+    daily_max: int
+
+
 class ExportHistoryResponse(BaseModel):
     applications: list[ExportApplicationOut]
     truncated: bool
@@ -1725,6 +1738,53 @@ async def record_outreach(
         raise AssertionError("unreachable")  # pragma: no cover
     response.status_code = 200 if result["already_existed"] else 201
     return result
+
+
+@router.get(
+    "/contacts/{contact_id}/outreach-check", response_model=OutreachCheckResponse, dependencies=AUTH_FIRST
+)
+async def outreach_check(
+    contact_id: int,
+    message_id: int = Query(...),
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """THE one gate before pressing Send on an outreach email (feature 10).
+
+    Reads the user's settings, this contact's facts and the saved message
+    version ``message_id`` (the ``contact_outreach`` row ``save_artifact
+    kind="outreach"`` created), plus today's recorded sends, then answers
+    through ``settings_rules.may_send_outreach`` - the same function for this
+    route and the MCP ``check_outreach`` tool. Read-only: it records nothing
+    except one audit line. 404 for a contact that is not the caller's (rule #12)."""
+    try:
+        contact = await contacts_service.get_owned_contact(db, user.id, contact_id)
+        if contact is None:
+            raise SpineError(404, "contact not found")
+        now = datetime.now(timezone.utc)
+        profile = load_profile(user.id) or UserProfile()
+        cfg = settings_rules.effective(profile.assistant_settings)
+        facts = await contacts_service.outreach_gate_facts(db, user.id, contact, message_id)
+        counts = await settings_rules.load_outreach_counts(db, user.id, now, facts.company or None)
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+    verdict = settings_rules.may_send_outreach(
+        cfg, facts, counts, now, inbox_mode=profile.preferences.daily_check or ""
+    )
+    # Never the email address, the message text or the company name: ids and closed codes only.
+    get_audit_logger().info(
+        "outreach_check",
+        extra={
+            "event": "outreach_check", "user_id": safe_log_value(user.id),
+            "actor": safe_log_value(actor_for(user)), "contact_id": contact_id, "message_id": message_id,
+            "decision": verdict.decision, "reason": verdict.reason, "result": "ok",
+        },
+    )
+    return {
+        "decision": verdict.decision, "reason": verdict.reason, "detail": verdict.detail,
+        "sent_today": counts.sent_today, "daily_max": settings.OUTREACH_AUTO_SENDS_MAX_PER_DAY,
+    }
 
 
 @router.get("/people", response_model=ListPeopleResponse, dependencies=AUTH_FIRST)

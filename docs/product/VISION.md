@@ -104,6 +104,9 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 | `get_recipe` | the "run 360" playbooks: numbered steps for the agent to follow (no name = the list) |
 | `ask_user` | raise a question the user must answer when the agent is stuck or would have to guess |
 | `answer_ask` | record the answer the user gave in chat to an ask |
+| `check_outreach` | the send gate: right before pressing Send on an outreach email, `send` / `ask` (Gmail draft + `ask_user`) / `stop`; read-only, counts only recorded sends |
+| `doctor` | one read of the account's state (auth kind, what the profile lacks, asks, waiting settings, pause, today's outreach) and one closed `next_step` |
+| `report_missing_tool` | stores "a tool I needed does not exist" for the owner; does nothing else |
 | `get_tailored_documents` | the newest saved CV / cover letter — **we write neither** (decision 28); the agent writes them and saves them with `save_artifact`, the web renders DOCX / PDF from the saved text |
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
