@@ -44,6 +44,7 @@ import {
   DANGER_BTN_CLASS,
   DANGER_CONFIRM_BTN_CLASS,
 } from "@/components/connect/ConnectSteps";
+import { CalendarFeedSection } from "@/components/settings/CalendarFeedSection";
 
 // ---------------------------------------------------------------------------
 // Zod schemas
@@ -600,6 +601,7 @@ export default function AccountSettingsPage() {
       </div>
       <VerifyEmailCard />
       <TimezoneCard />
+      <CalendarFeedSection />
       <ChangePasswordCard />
       <ChangeEmailCard />
       <YourDataCard />

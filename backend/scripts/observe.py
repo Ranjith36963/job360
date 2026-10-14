@@ -42,6 +42,7 @@ PER_USER_TABLES: tuple[tuple[str, str], ...] = (
     ("user_profile_versions", "user_id"),
     ("user_feed", "user_id"),
     ("user_actions", "user_id"),
+    ("calendar_feeds", "user_id"),  # 0058: the private .ics feed token hash, one per user
     ("applications", "user_id"),
     ("application_stage_history", "user_id"),
     ("user_channels", "user_id"),

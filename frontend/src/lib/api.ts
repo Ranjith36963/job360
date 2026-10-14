@@ -412,6 +412,25 @@ export async function deleteAccount(currentPassword: string): Promise<void> {
   });
 }
 
+// ---- Calendar feed (migration 0056) ----
+
+export type CalendarFeedStatus = components["schemas"]["CalendarFeedStatus"];
+export type CalendarFeedCreated = components["schemas"]["CalendarFeedCreated"];
+
+export async function getCalendarFeed(): Promise<CalendarFeedStatus> {
+  return request<CalendarFeedStatus>("/api/calendar-feed");
+}
+
+/** Creates the feed or rotates it (the old URL dies). The plain URL is in this
+ * response ONLY - the server keeps a hash. */
+export async function createCalendarFeed(): Promise<CalendarFeedCreated> {
+  return request<CalendarFeedCreated>("/api/calendar-feed", { method: "POST" });
+}
+
+export async function revokeCalendarFeed(): Promise<void> {
+  await request<void>("/api/calendar-feed", { method: "DELETE" });
+}
+
 /** Download everything we hold on the signed-in user as one JSON file
  * (GDPR Article 20). GET, fetched into a blob and saved by an anchor click,
  * like the CV downloads. Rate limited server-side (429). */

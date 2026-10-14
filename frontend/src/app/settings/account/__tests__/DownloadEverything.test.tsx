@@ -19,6 +19,9 @@ vi.mock("@/lib/api", () => ({
   setTimezone: vi.fn(),
   resendVerificationEmail: vi.fn(),
   downloadMyData: (...args: unknown[]) => mockDownloadMyData(...args),
+  getCalendarFeed: () => Promise.resolve({ exists: false, created_at: null }),
+  createCalendarFeed: vi.fn(),
+  revokeCalendarFeed: vi.fn(),
 }));
 
 describe("Download everything", () => {
