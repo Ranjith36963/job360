@@ -5049,11 +5049,8 @@ export interface components {
             scheduled_at: string | null;
             /** Status */
             status: string;
-            /**
-             * Warnings
-             * @default []
-             */
-            warnings: string[];
+            /** Warnings */
+            warnings?: string[];
         };
         /**
          * RecordOutreachRequest

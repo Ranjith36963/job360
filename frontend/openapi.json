@@ -6841,7 +6841,6 @@
             "type": "string"
           },
           "warnings": {
-            "default": [],
             "items": {
               "type": "string"
             },
