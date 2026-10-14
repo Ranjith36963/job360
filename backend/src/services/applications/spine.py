@@ -1408,12 +1408,18 @@ async def _list_receipts_for_application(
 def _receipt_answers(raw: Any) -> list[dict[str, str]]:
     """Only well-formed {question, answer} pairs survive — the response model
     is strict (extra="forbid"), so a malformed legacy entry would otherwise
-    turn a read into a 500."""
-    return [
-        {"question": str(a["question"]), "answer": str(a["answer"])}
-        for a in _receipt_json(raw, list)
-        if isinstance(a, dict) and "question" in a and "answer" in a
-    ]
+    turn a read into a 500. ``source`` / ``key`` come back when stored (text
+    only); a receipt recorded before they existed simply has neither."""
+    out: list[dict[str, str]] = []
+    for a in _receipt_json(raw, list):
+        if not (isinstance(a, dict) and "question" in a and "answer" in a):
+            continue
+        item = {"question": str(a["question"]), "answer": str(a["answer"])}
+        for extra in ("source", "key"):
+            if isinstance(a.get(extra), str) and a[extra]:
+                item[extra] = a[extra]
+        out.append(item)
+    return out
 
 
 async def _artifact_version_no(
