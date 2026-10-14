@@ -278,7 +278,7 @@ note-family event never does.
 `source` names the email an event came from (kind/message_id/sender/subject/
 received_at) — the same message_id on the same application is the same event,
 so you get the first one back with already_existed=true and nothing is written;
-re-reading an inbox is safe. `scheduled_at` is the real interview datetime
+re-reading an inbox is safe. If the same message_id arrives with a different event_type the reply carries `warnings` naming the old type; reclassify with `corrects_event_id`. `scheduled_at` is the real interview datetime
 (ISO-8601 with a timezone) and is only accepted on interview_requested/
 interview_scheduled. `follow_up_on` (YYYY-MM-DD) sets when to chase this
 application next — works on ANY event_type, so a plain `note` can carry it; omit

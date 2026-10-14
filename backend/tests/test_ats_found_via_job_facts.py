@@ -120,7 +120,9 @@ async def test_ats_is_only_for_cv_and_cover_letter(authenticated_async_context):
         app_id = (await _bring(client, _AD_FR))["application_id"]
         ok = await _save(client, app_id, kind="cover_letter", text="Dear team", ats_score=70)
         assert ok.status_code == 201, ok.text
-        for kind in ("answers", "outreach"):
+        # "outreach" without a contact_id now refuses earlier (test_lifecycle_mcp_fixes.py); the ATS refusal
+        # for outreach WITH a contact lives in spine.validate_ats, shared by both branches.
+        for kind in ("answers",):
             resp = await _save(client, app_id, kind=kind, text="x", ats_notes="n/a")
             assert resp.status_code == 422, (kind, resp.text)
             assert "ats_score/ats_notes are only allowed" in resp.json()["detail"]

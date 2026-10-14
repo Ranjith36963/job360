@@ -648,7 +648,7 @@ def build_server(version: str = "") -> MCPServer:
 
     @mcp.tool()
     async def record_application(
-        job_id: int,
+        job_id: Optional[int] = None,
         channel: str = "",
         note: str = "",
         confirmation: str = "",
@@ -657,8 +657,11 @@ def build_server(version: str = "") -> MCPServer:
         cv_artifact_id: Optional[int] = None,
         cover_letter_artifact_id: Optional[int] = None,
         applied_at: Optional[str] = None,
+        application_id: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Record that the user has applied to this job — ONLY after they say so. Freezes
+        """Record that the user has applied to this job — ONLY after they say so. Pass
+        `application_id` (the same id every other tool takes); `job_id` still works
+        but is the older form — if you give both they must belong together. Freezes
         the named CV / cover-letter version (or the newest saved one, if none named) and
         any answers/fields into an immutable receipt, and appends an `applied` event to
         the application's history. Sends nothing anywhere. `channel` is where they
@@ -682,26 +685,45 @@ def build_server(version: str = "") -> MCPServer:
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
+        if job_id is None and application_id is None:
+            raise _refuse("record_application", 422, "give application_id (the id every other tool takes)")
         try:
             async with _request_db() as db:
-                job = await db.get_job_by_id(job_id)
-                if job is None:
-                    raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-                # Upsert-by-read, same as the legacy `/receipts/{job_id}` route
-                # (receipts.py:126-128): a job the caller never explicitly
-                # `bring_job`-ed still gets an application row here, so
-                # "record I applied" never 404s on a job that plainly exists.
-                await db.create_application(job_id, _user().id)
-                application = await applications_spine.get_application_by_job(db, _user().id, job_id)
-                if application is None:  # pragma: no cover — create_application always upserts one
-                    raise HTTPException(status_code=404, detail="application not found")
+                if application_id is not None:
+                    application = await applications_spine.get_owned_application(db, _user().id, application_id)
+                    if application is None:
+                        raise HTTPException(status_code=404, detail=f"Application {application_id} not found")
+                    if job_id is not None and job_id != application["job_id"]:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"application_id {application_id} and job_id {job_id} do not belong together; "
+                                   "pass application_id alone",
+                        )
+                    job_id = application["job_id"]
+                else:
+                    job = await db.get_job_by_id(job_id)
+                    if job is None:
+                        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+                    # Upsert-by-read, same as the legacy `/receipts/{job_id}` route
+                    # (receipts.py:126-128): a job the caller never explicitly
+                    # `bring_job`-ed still gets an application row here, so
+                    # "record I applied" never 404s on a job that plainly exists.
+                    await db.create_application(job_id, _user().id)
+                    application = await applications_spine.get_application_by_job(db, _user().id, job_id)
+                    if application is None:  # pragma: no cover — create_application always upserts one
+                        raise HTTPException(status_code=404, detail="application not found")
                 resp = await applications_route.record_application_receipt(
                     application["id"], body, db, _user()
                 )
         except HTTPException as exc:
-            _audit("record_application", "error", job_id=job_id, http_status=exc.status_code)
+            _audit(
+                "record_application", "error", job_id=job_id, application_id=application_id,
+                http_status=exc.status_code,
+            )
             raise _tool_error(exc) from None
         _audit("record_application", "ok", job_id=job_id, receipt_id=resp["receipt_id"])
+        # The spine's url is site-relative; every other tool hands out the absolute one.
+        resp = {**resp, "url": _application_url(application["id"])}
         reply: dict[str, Any] = {"job_id": job_id, **resp}
         try:
             daily_check = profile_route.load_profile_response(_user().id)[0].preferences.daily_check
@@ -874,6 +896,9 @@ def build_server(version: str = "") -> MCPServer:
                 "profile_version": None, "created_at": outreach["recorded_at"], "event_id": resp["event_id"],
                 "contact_id": contact_id,
             }
+        if contact_id is None and kind == "outreach":
+            _audit("save_artifact", "error", application_id=application_id, http_status=422)
+            raise _tool_error(HTTPException(422, applications_route.OUTREACH_NEEDS_CONTACT))
         if application_id is None:
             raise _tool_error(
                 HTTPException(422, "application_id is required unless contact_id names a cold contact")
@@ -1047,6 +1072,8 @@ def build_server(version: str = "") -> MCPServer:
                     "already_existed": resp["already_existed"], "scheduled_at": None,
                     "follow_up_on": resp["follow_up_on"],
                 }
+        if contact_id is None and event_type in ("outreach_sent", "outreach_replied"):
+            raise _refuse("record_event", 422, applications_route.OUTREACH_NEEDS_CONTACT, application_id=application_id)
         if application_id is None:
             raise _refuse(
                 "record_event", 422, "application_id is required unless contact_id names a cold contact"
