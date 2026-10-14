@@ -5,6 +5,7 @@ import { Logo } from "@/components/brand/Logo";
 // Legal link slots — content (privacy policy, terms) populated in Batch 4 launch readiness
 const LEGAL_LINKS: { label: string; href: string }[] = [
   { label: "Privacy", href: "/privacy" },
+  { label: "Trust", href: "/trust" },
   { label: "Terms", href: "/terms" },
   { label: "Contact", href: "/contact" },
 ];

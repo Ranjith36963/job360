@@ -83,3 +83,48 @@ async def test_export_never_includes_the_shared_catalog(migrated_db_path):
             assert shared not in out, f"shared catalog table {shared} must not be exported"
     finally:
         await db.close()
+
+
+# ── Feature 4 — "Download everything": per-user rate limit + audit line ─────
+
+
+@pytest.mark.asyncio
+async def test_user_export_rate_limited(authenticated_async_context, monkeypatch):
+    from src.core import settings
+
+    monkeypatch.setattr(settings, "USER_EXPORT_MAX_PER_HOUR", 2)
+    async with authenticated_async_context() as client:
+        for _ in range(2):
+            ok = await client.get("/api/auth/users/me/export")
+            assert ok.status_code == 200, ok.text
+        blocked = await client.get("/api/auth/users/me/export")
+    assert blocked.status_code == 429
+    assert "USER_EXPORT_MAX_PER_HOUR" in blocked.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_user_export_logs_ids_only(authenticated_async_context, fixture_user_id, caplog):
+    import logging
+
+    audit_logger = logging.getLogger("job360.audit")
+    audit_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.INFO, logger="job360.audit"):
+            async with authenticated_async_context() as client:
+                r = await client.get("/api/auth/users/me/export")
+    finally:
+        audit_logger.removeHandler(caplog.handler)
+    assert r.status_code == 200, r.text
+    recs = [rec for rec in caplog.records if getattr(rec, "event", None) == "user_data_exported"]
+    # >=1, not ==1: when the audit logger still propagates, the handler attached
+    # above and caplog's root handler both capture the one emission.
+    assert recs
+    assert len({id(rec) for rec in recs}) >= 1
+    rec = recs[0]
+    assert rec.user_id == fixture_user_id
+    assert isinstance(rec.tables, int) and rec.tables > 0
+    assert rec.incomplete in (True, False)
+    # ids and counts only: no email, no exported content
+    user_row = r.json().get("user") or {}
+    if user_row.get("email"):
+        assert user_row["email"] not in str(rec.__dict__)
