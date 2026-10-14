@@ -80,7 +80,7 @@ export function MorningCheck() {
 
   const heading = (
     <h2 id="morning-check" className={sectionLabel}>
-      Morning check
+      Morning check (run by your assistant)
     </h2>
   );
 
@@ -120,7 +120,7 @@ export function MorningCheck() {
               state.paused ? "bg-warning" : "bg-primary shadow-[0_0_0_3px_var(--brand-soft)]",
             )}
           />
-          {state.paused ? "Paused" : "Running"}
+          {state.paused ? "Paused" : "On"}
         </span>
         {sep}
         <span data-testid="mc-score-line" className="text-[13.5px] text-muted-foreground">
