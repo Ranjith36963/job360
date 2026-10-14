@@ -5,7 +5,8 @@
 // plain string here; the components render it as a React text node only.
 // ---------------------------------------------------------------------------
 
-import { eventLabel, whoLabel } from "@/lib/event-labels";
+import { eventTitle } from "@/lib/event-detail";
+import { whoLabel } from "@/lib/event-labels";
 import type { WhatsNewEvent, WhatsNewResponse } from "@/lib/api";
 
 type WhatsNewApplication = WhatsNewResponse["applications"][number];
@@ -136,8 +137,9 @@ export function buildSentence(args: {
     const count = `${n}${args.truncated ? "+" : ""}`;
     const noun = n === 1 && !args.truncated ? "record" : "records";
     // Owner decision (2026-10-04): name every assistant exactly as it signed
-    // its records — never a vague "Your assistants". Transparency.
-    const who = joinNames(names);
+    // its records. 2026-10-14: say plainly it is the user's own assistant and
+    // keep the token name in brackets — "Your assistant (lc) wrote ...".
+    const who = names.length === 1 ? `Your assistant (${names[0]})` : `Your assistants (${joinNames(names)})`;
     parts.push({ text: `${who} wrote ` });
     parts.push({ text: `${count} ${noun}`, em: true });
     parts.push({ text: " since you were last here." });
@@ -181,8 +183,8 @@ export type FeedItem = {
 
 /** The label + detail line for one event. Reuses event-labels wording and
  * never invents a claim — an unknown type falls back to its raw name. */
-export function feedLine(e: { event_type: string; detail: string }): string {
-  const label = eventLabel(e);
+export function feedLine(e: { event_type: string; detail: string; payload?: unknown }): string {
+  const label = eventTitle(e);
   const detail = (e.detail ?? "").trim();
   return detail ? `${label}: ${detail}` : label;
 }

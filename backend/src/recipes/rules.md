@@ -62,14 +62,18 @@ this one application; `stop` - do not submit (paused, already applied, or the
 daily limit is reached). `reason` is a short code and `detail` one plain
 sentence you can show the user. Reasons: paused, already_applied,
 user_declined (the user said don't send), daily_cap_reached, duplicate_job
-(same job already applied to: `stop` in auto mode, else `ask`), unknown_site,
-ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
+(same job already applied to: `stop` in auto mode, else `ask`), unknown_site
+(`form_url` is not one plain http(s) address - no user@, % or backslash before
+the path, ASCII host), form_host_mismatch (`form_url` is not the site of your
+latest `form_filled`), email_not_verified (the user has not confirmed their
+email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
 (the user said yes to this CV: `submit`), auto_when_sure, blocked (you
 recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it). Indeed and LinkedIn
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
-`practice_run`). It is read-only: it records nothing - after a real submit,
+`practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
+email_not_verified or blocked: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
 record it with `record_application`. A yes the user gave for this exact CV
 answers `submit` with `user_approved`; if the CV is edited afterwards that yes
 no longer counts - ask again. A setting that says to apply is never a reason
@@ -278,7 +282,7 @@ note-family event never does.
 `source` names the email an event came from (kind/message_id/sender/subject/
 received_at) — the same message_id on the same application is the same event,
 so you get the first one back with already_existed=true and nothing is written;
-re-reading an inbox is safe. `scheduled_at` is the real interview datetime
+re-reading an inbox is safe. If the same message_id arrives with a different event_type the reply carries `warnings` naming the old type; reclassify with `corrects_event_id` and leave `source` out (the original event keeps it; repeating the message_id is a no-op). `scheduled_at` is the real interview datetime
 (ISO-8601 with a timezone) and is only accepted on interview_requested/
 interview_scheduled. `follow_up_on` (YYYY-MM-DD) sets when to chase this
 application next — works on ANY event_type, so a plain `note` can carry it; omit
@@ -316,7 +320,17 @@ ONLY when the user typed yes to submitting THIS application; `submit_declined`
 may only send deny; `form_filled` {form_url, fields_count, answers?} - after you filled
 the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `form_swept` {fields_checked, fixed, notes?} - after you re-read every field and fixed what was wrong (check_submit stops until it is newer than the fill); `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
 - the user has an account there; `account_needed` {host} - you hit a sign-up
-wall (never a password anywhere). A CV that changed since you read it is 409:
+wall (never a password anywhere). A payload that is wrong is refused ONCE (422) with every
+problem listed and one complete valid example for that event; fix them all and
+resend. `record_application` answers take the same shape as `form_filled`
+answers: {question, answer, source?, key?} (source: memory|profile|approved|written|guessed),
+and `source`/`key` are returned when you read the receipt. Examples:
+`form_filled` {"form_url":"https://jobs.example.com/apply/1","fields_count":1,"answers":[{"question":"Right to work?","answer":"Yes","source":"profile","key":"work_authorization"}]};
+`form_swept` {"fields_checked":12,"fixed":1,"notes":"fixed phone"}; `cv_seen` {"artifact_id":7,"sha256":"<from the kit>","where":"chat"};
+`hold_released` {"reason":"done"}; `site_account` {"host":"jobs.example.com"};
+`blocked` {"reason":"captcha","step":"submit form","page_host":"jobs.example.com","detail":"CAPTCHA"}; `unblocked` {"resolution":"retried"};
+`proof_text` {"text":"Thank you, application received.","page_host":"jobs.example.com"}.
+A CV that changed since you read it is 409:
 get the kit again. `duplicate_cleared` and where="web" need the user's own click
 on the website (403). `kit_read` is written by Job360 itself.
 

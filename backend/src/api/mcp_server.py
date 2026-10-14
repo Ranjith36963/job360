@@ -419,6 +419,7 @@ def build_server(version: str = "") -> MCPServer:
         `search_brief.gaps` = ask each once, save to the gap's `path`
         (user_info.answers: {question: ask text, answer: Yes|No, approved: true}), then search.
 
+        No profile yet: `profile_exists` false + `next` (ask for the CV, or update_profile).
         Other keys: job_titles, experience_level, experience_level_inferred, agent_edits, lessons, assistant_hint.
         Full rules and shapes: get_recipe("rules")."""
         # ONE profile read for the whole tool call. `load_profile_response` is
@@ -428,6 +429,7 @@ def build_server(version: str = "") -> MCPServer:
         # nothing extra. Calling the route and then re-loading the profile
         # meant four connections to answer one tool call.
         from src.services.profile import edits as profile_edits  # noqa: PLC0415
+        from src.services.profile.models import UserProfile  # noqa: PLC0415
         from src.services.profile.search_brief import build_search_brief  # noqa: PLC0415
         from src.services.profile.skill_tiering import profile_skills  # noqa: PLC0415
 
@@ -435,6 +437,29 @@ def build_server(version: str = "") -> MCPServer:
         try:
             profile, resp = profile_route.load_profile_response(user_id)
         except HTTPException as exc:
+            if exc.status_code == 404:
+                # Brand-new user, no CV yet: a normal answer with the next step, not an error
+                # (the HTTP route keeps its 404). Same helpers as the normal path below.
+                _audit("get_profile", "ok", profile_exists=False)
+                get_audit_logger().info(
+                    "get_profile_no_profile",
+                    extra={"event": "get_profile_no_profile", "user_id": user_id, "surface": "mcp"},
+                )
+                from src.api.models import AssistantSettingsView  # noqa: PLC0415
+
+                editable = list(profile_edits.editable_paths())
+                view = profile_route.settings_view(UserProfile(), user_id)
+                return {
+                    "profile_exists": False,
+                    "next": (
+                        f"No profile yet. Ask the user to upload their CV at {settings.SITE_BASE_URL}/profile, "
+                        "or save fields with update_profile."
+                    ),
+                    "settings": AssistantSettingsView(**view).model_dump(),
+                    "editable_paths": editable,
+                    "shapes": {k: v for k, v in profile_shapes.compact_shapes().items() if k in editable},
+                    "assistant_hint": ASSISTANT_HINT,
+                }
             _audit("get_profile", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
         s = resp.summary
@@ -548,7 +573,8 @@ def build_server(version: str = "") -> MCPServer:
         Job360 stores it and starts an application for it, then returns the job id and
         the application id to work against. It does NOT judge the fit — that is your
         job; record your own verdict with `save_fit`. Bringing the same title+company
-        again returns the existing job (existing=true). Never use this to search.
+        again returns the existing job (existing=true); a different link/location/country
+        is a 409 saying what to do. Never use this to search.
 
         Visa (optional): if the ad SAYS whether the employer sponsors visas, pass
         `visa_signal` = "sponsors" or "no_sponsorship", quote the sentence in
@@ -648,7 +674,7 @@ def build_server(version: str = "") -> MCPServer:
 
     @mcp.tool()
     async def record_application(
-        job_id: int,
+        job_id: Optional[int] = None,
         channel: str = "",
         note: str = "",
         confirmation: str = "",
@@ -657,14 +683,18 @@ def build_server(version: str = "") -> MCPServer:
         cv_artifact_id: Optional[int] = None,
         cover_letter_artifact_id: Optional[int] = None,
         applied_at: Optional[str] = None,
+        application_id: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Record that the user has applied to this job — ONLY after they say so. Freezes
+        """Record that the user has applied to this job — ONLY after they say so. Pass
+        `application_id` (the same id every other tool takes); `job_id` still works
+        but is the older form — if you give both they must belong together. Freezes
         the named CV / cover-letter version (or the newest saved one, if none named) and
         any answers/fields into an immutable receipt, and appends an `applied` event to
         the application's history. Sends nothing anywhere. `channel` is where they
         applied — one of "company_site", "linkedin_easy_apply", "job_board",
-        "email", "referral", "recruiter", "other" (or leave it empty); any
-        other text is stored as "other" (never refused). `note` is free text.
+        "email", "referral", "recruiter", "other" (or leave it empty); ats_form / workday /
+        greenhouse etc. = company_site; other text is stored as "other" (never refused;
+        the reply has `channel_given` + a `warning`). `note` is free text.
 
         C1 (application-spine review) — this is the SAME tool as before (`job_id`,
         `channel`, `note` still work unchanged), rewired onto the rich
@@ -682,26 +712,45 @@ def build_server(version: str = "") -> MCPServer:
             )
         except ValidationError as exc:
             raise _validation_error(exc) from None
+        if job_id is None and application_id is None:
+            raise _refuse("record_application", 422, "give application_id (the id every other tool takes)")
         try:
             async with _request_db() as db:
-                job = await db.get_job_by_id(job_id)
-                if job is None:
-                    raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-                # Upsert-by-read, same as the legacy `/receipts/{job_id}` route
-                # (receipts.py:126-128): a job the caller never explicitly
-                # `bring_job`-ed still gets an application row here, so
-                # "record I applied" never 404s on a job that plainly exists.
-                await db.create_application(job_id, _user().id)
-                application = await applications_spine.get_application_by_job(db, _user().id, job_id)
-                if application is None:  # pragma: no cover — create_application always upserts one
-                    raise HTTPException(status_code=404, detail="application not found")
+                if application_id is not None:
+                    application = await applications_spine.get_owned_application(db, _user().id, application_id)
+                    if application is None:
+                        raise HTTPException(status_code=404, detail=f"Application {application_id} not found")
+                    if job_id is not None and job_id != application["job_id"]:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"application_id {application_id} and job_id {job_id} do not belong together; "
+                                   "pass application_id alone",
+                        )
+                    job_id = application["job_id"]
+                else:
+                    assert job_id is not None  # both-None was refused above
+                    # P0 2026-10-14 — only a job THIS user brought (same gate as
+                    # `POST /receipts/{job_id}`). The catalog is shared (rule #10);
+                    # upserting an application onto any job_id let a caller adopt
+                    # another user's paste. Never brought = 404, no oracle.
+                    application = await applications_spine.get_application_by_job(db, _user().id, job_id)
+                    if application is None:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Job {job_id} not found — bring_job it first, then record the application.",
+                        )
                 resp = await applications_route.record_application_receipt(
                     application["id"], body, db, _user()
                 )
         except HTTPException as exc:
-            _audit("record_application", "error", job_id=job_id, http_status=exc.status_code)
+            _audit(
+                "record_application", "error", job_id=job_id, application_id=application_id,
+                http_status=exc.status_code,
+            )
             raise _tool_error(exc) from None
         _audit("record_application", "ok", job_id=job_id, receipt_id=resp["receipt_id"])
+        # The spine's url is site-relative; every other tool hands out the absolute one.
+        resp = {**resp, "url": _application_url(application["id"])}
         reply: dict[str, Any] = {"job_id": job_id, **resp}
         try:
             daily_check = profile_route.load_profile_response(_user().id)[0].preferences.daily_check
@@ -874,6 +923,9 @@ def build_server(version: str = "") -> MCPServer:
                 "profile_version": None, "created_at": outreach["recorded_at"], "event_id": resp["event_id"],
                 "contact_id": contact_id,
             }
+        if contact_id is None and kind == "outreach":
+            _audit("save_artifact", "error", application_id=application_id, http_status=422)
+            raise _tool_error(HTTPException(422, applications_route.OUTREACH_NEEDS_CONTACT))
         if application_id is None:
             raise _tool_error(
                 HTTPException(422, "application_id is required unless contact_id names a cold contact")
@@ -1047,6 +1099,8 @@ def build_server(version: str = "") -> MCPServer:
                     "already_existed": resp["already_existed"], "scheduled_at": None,
                     "follow_up_on": resp["follow_up_on"],
                 }
+        if contact_id is None and event_type in ("outreach_sent", "outreach_replied"):
+            raise _refuse("record_event", 422, applications_route.OUTREACH_NEEDS_CONTACT, application_id=application_id)
         if application_id is None:
             raise _refuse(
                 "record_event", 422, "application_id is required unless contact_id names a cold contact"
@@ -1349,14 +1403,18 @@ def build_server(version: str = "") -> MCPServer:
         fill the form, record it, call again), form_not_swept (`stop`: no `form_swept`
         after the latest `form_filled` - re-read every field, fix, record it),
         duplicate_job (same job already applied to: `stop`
-        in auto mode, else `ask`), unknown_site, ask_always_site,
-        job_override_confirm, submit_mode_confirm, cv_not_seen (auto mode but the
+        in auto mode, else `ask`), unknown_site (`form_url` is not one plain
+        http(s) address - no user@, % or backslash before the path, ASCII host),
+        form_host_mismatch (`form_url` is not the site of your latest
+        `form_filled`), email_not_verified (the user has not confirmed their
+        email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto mode but the
         user has not seen the latest CV), practice_run, user_approved (the user
         said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
         `blocked`, no `unblocked` yet: `ask`). Indeed and LinkedIn answer
         `ask` unless the user said yes to this CV. The first application after
         the user turns auto-submit on is a practice run (`ask`, reason
-        `practice_run`). Read-only:
+        `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
+        email_not_verified or blocked: do not submit, tell the user. Read-only:
         it records nothing - after a real submit, record it with
         `record_application`."""
         try:
@@ -1747,8 +1805,8 @@ async def mcp_runtime() -> AsyncIterator[None]:
 
     # serverInfo.version is a fingerprint of the tool surface, and the tools
     # only exist once a server is built — so build a throwaway one to read the
-    # list, then the real one(s) stamped with it. Registering seventeen
-    # decorated functions is microseconds; the lazy imports are already warm.
+    # list, then the real one(s) stamped with it. Registering the
+    # decorated tool functions is microseconds; the lazy imports are already warm.
     fingerprint = tools_fingerprint(await build_server().list_tools())
     announce = settings.MCP_ANNOUNCE_TOOLS_CHANGED
 

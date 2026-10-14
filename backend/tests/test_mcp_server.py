@@ -341,9 +341,6 @@ async def test_route_errors_become_tool_errors_with_status_and_detail(authentica
             missing = _error_text(await mcp.call_tool("get_job", {"job_id": 987654321}))
             assert "404" in missing and "not found" in missing.lower()
 
-            no_profile = _error_text(await mcp.call_tool("get_profile", {}))
-            assert "404" in no_profile
-
             not_applied = _error_text(await mcp.call_tool("get_receipt", {"receipt_id": 987654321}))
             assert "404" in not_applied
 
@@ -506,3 +503,26 @@ async def test_record_event_tool_passes_source_and_scheduled_at(authenticated_as
             evt = next(e for e in detail["events"] if e["id"] == recorded["event_id"])
             assert evt["source"]["message_id"] == "mcp-msg-1"
             assert evt["scheduled_at"] == "2026-09-15T09:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_mcp_get_profile_no_profile_returns_next_step(authenticated_async_context, fixture_user_id):
+    """A brand-new user (no CV yet) gets a normal result with the next step, not a
+    "404: No profile found" tool error. The HTTP route keeps its 404."""
+    pytest.importorskip("mcp")
+    from src.api import mcp_server
+
+    async with authenticated_async_context() as client:
+        assert (await client.get("/api/profile")).status_code == 404
+        tool = mcp_server.build_server()._tool_manager.get_tool("get_profile")
+        mcp_server._current_user.set(mcp_server.CurrentUser(id=fixture_user_id, email="e2e@example.com"))
+        try:
+            result = await tool.fn()
+        finally:
+            mcp_server._current_user.set(None)
+    assert result["profile_exists"] is False
+    assert "/profile" in result["next"] and "update_profile" in result["next"]
+    assert result["settings"]["paused"] is False and "setup_progress" in result["settings"]
+    assert result["editable_paths"]
+    assert set(result["shapes"]) <= set(result["editable_paths"]) and result["shapes"]
+    assert result["assistant_hint"] == mcp_server.ASSISTANT_HINT

@@ -521,21 +521,11 @@ class JobDatabase:
                 pass
         return out
 
-    async def create_application(self, job_id: int, user_id: str) -> None:
-        """Upsert the legacy `applications` row for (user, job) as 'applied'.
-
-        INSERT OR IGNORE — calling it twice is safe. Returns nothing: both
-        callers (`POST /receipts`, the MCP `record_application` tool) read the
-        spine's Application object straight after, never this row.
-        """
-        now = datetime.now(timezone.utc).isoformat()
-        await self._db.execute(
-            """INSERT OR IGNORE INTO applications
-               (user_id, job_id, stage, created_at, updated_at)
-               VALUES (?, ?, 'applied', ?, ?)""",
-            (user_id, job_id, now, now),
-        )
-        await self._db.commit()
+    # `create_application` (an INSERT-OR-IGNORE of a blank application onto
+    # ANY job_id) was deleted 2026-10-14 (P0 bring isolation): it let
+    # `POST /receipts/{job_id}` and MCP `record_application` adopt a job
+    # another user pasted. An application is born only by `bring_job`
+    # (`spine.birth_application`), carrying the caller's own paste.
 
     async def get_job_id_by_key(self, normalized_key: tuple[str, str]) -> int | None:
         """Resolve a (normalized_company, normalized_title) key to the catalog id.

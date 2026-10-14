@@ -79,7 +79,14 @@ def _facts(
     kit.setdefault("form_filled", True)  # rule 4b: the form fill is on record
     kit.setdefault("form_swept", True)  # rule 4c: the pre-submit sweep is on record
     kit.setdefault("fit_score", 80)  # above the default test line of 50
+    kit.setdefault("form_host", "careers.northwind.example")  # rule 5e: the fill was on FORM's site
     return rules.SubmitFacts(status=status, has_receipt=receipt, submit_override=override, cv_seen=seen, **kit)
+
+
+def _at(url: str, **kit: Any) -> rules.SubmitFacts:
+    """Facts for a form filled on ``url``'s own site (rule 5e: check_submit's host
+    must be the newest form_filled's host)."""
+    return _facts(form_host=rules.screen_form_url(url), **kit)
 
 
 AUTO = {"submit_mode": "auto_when_sure"}
@@ -316,7 +323,7 @@ def test_rule_4_unknown_site_asks(host):
     ["uk.indeed.com", "indeed.co.uk", "LinkedIn.com:443", "https://www.linkedin.com/jobs/view/1", "lnkd.in", "indeed.com."],
 )
 def test_rule_5_brand_sites_always_ask(host):
-    d = rules.may_submit(AUTO_CFG, _facts(), host, _counts(), now=NOW)
+    d = rules.may_submit(AUTO_CFG, _at(host), host, _counts(), now=NOW)
     assert (d.decision, d.reason) == ("ask", "ask_always_site")
     assert rules.host_kind(rules.parse_site_host(host)) == "brand"
 
@@ -325,7 +332,7 @@ def test_notindeed_is_a_company_not_a_brand():
     assert rules.host_kind(rules.parse_site_host("notindeed.com")) == "company"
     assert rules.host_kind(rules.parse_site_host("https://jobs.notlinkedin.example/apply")) == "company"
     assert rules.host_kind(rules.parse_site_host("")) == "invalid"
-    assert rules.may_submit(AUTO_CFG, _facts(), "notindeed.com", _counts(), now=NOW).decision == "submit"
+    assert rules.may_submit(AUTO_CFG, _at("notindeed.com"), "notindeed.com", _counts(), now=NOW).decision == "submit"
 
 
 @pytest.mark.parametrize(
@@ -333,15 +340,25 @@ def test_notindeed_is_a_company_not_a_brand():
     [
         "linkedin.com.evil.io",  # a brand label anywhere = ask (over-blocking only asks)
         "https://jobs.linkedin.com:8443/apply",
-        "https://user@uk.indeed.com/apply",
         "https://WWW.LINKEDIN.COM./jobs",
-        "https://www.ｌｉｎｋｅｄｉｎ.com/jobs",  # full-width letters
-        "https://www.linkedin。com/jobs",  # IDNA dot look-alike
     ],
 )
 def test_brand_lookalikes_the_browser_reads_as_the_brand_still_ask(host):
-    d = rules.may_submit(AUTO_CFG, _facts(), host, _counts(), now=NOW)
+    d = rules.may_submit(AUTO_CFG, _at(host), host, _counts(), now=NOW)
     assert (d.decision, d.reason) == ("ask", "ask_always_site"), host
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "https://user@uk.indeed.com/apply",  # user-info: refused outright since 2026-10-14
+        "https://www.ｌｉｎｋｅｄｉｎ.com/jobs",  # full-width letters: non-ASCII host
+        "https://www.linkedin。com/jobs",  # IDNA dot look-alike: non-ASCII host
+    ],
+)
+def test_brand_lookalikes_with_userinfo_or_non_ascii_are_an_unknown_site_even_with_a_yes(host):
+    d = rules.may_submit(AUTO_CFG, _facts(approved=True, form_host="uk.indeed.com"), host, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "unknown_site"), host
 
 
 @pytest.mark.parametrize(
@@ -356,6 +373,57 @@ def test_urls_two_parsers_read_differently_are_an_unknown_site(host):
     assert (d.decision, d.reason) == ("ask", "unknown_site"), host
 
 
+@pytest.mark.parametrize(
+    "host",
+    [
+        "http:/www.linkedin.com/jobs/1",  # one slash: would read as the host "http"
+        "HTTPS:/uk.indeed.com/viewjob",
+        "https:/x",
+        "http:/linkedin.com",
+    ],
+)
+def test_one_slash_scheme_is_unreadable(host):
+    assert rules.parse_site_host(host) is None, host
+    assert rules.screen_form_url(host) is None, host
+    d = rules.may_submit(AUTO_CFG, _facts(approved=True, form_host="http"), host, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "unknown_site"), host
+
+
+@pytest.mark.parametrize("host", ["http", "localhost", "https://localhost/apply", "https://com./x"])
+def test_single_label_host_unreadable(host):
+    assert rules.parse_site_host(host) is None, host
+    assert rules.screen_form_url(host) is None, host
+    d = rules.may_submit(AUTO_CFG, _facts(approved=True, form_host=host), host, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "unknown_site"), host
+
+
+@pytest.mark.parametrize(
+    ("raw", "host"),
+    [
+        ("jobs.lever.co/x", "jobs.lever.co"),
+        ("host.com:8080/x", "host.com"),
+        ("host.com:8080", "host.com"),
+        ("https://uk.indeed.com/viewjob", "uk.indeed.com"),
+    ],
+)
+def test_bare_hosts_and_ports_still_parse(raw, host):
+    assert rules.parse_site_host(raw) == host
+    assert rules.screen_form_url(raw) == host
+
+
+def test_unverified_declined_still_stops():
+    unverified = {"email_verified": False, "approved": True}
+    d = rules.may_submit(AUTO_CFG, _facts(declined=True, **unverified), "careers.northwind.example", _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("stop", "user_declined")
+    capped = _eff(submit_mode="auto_when_sure", daily_cap=1)
+    d = rules.may_submit(capped, _facts(**unverified), "careers.northwind.example", _counts(today=1), now=NOW)
+    assert (d.decision, d.reason) == ("stop", "daily_cap_reached")
+    d = rules.may_submit(AUTO_CFG, _facts(form_swept=False, **unverified), "careers.northwind.example", _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("stop", "form_not_swept")
+    d = rules.may_submit(AUTO_CFG, _facts(**unverified), "careers.northwind.example", _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "email_not_verified")
+
+
 def test_a_hyphenated_lookalike_is_a_company_not_the_brand():
     # evil-linkedin.com is NOT LinkedIn: it is somebody else's site, so the brand rule does not apply.
     assert rules.host_kind(rules.parse_site_host("evil-linkedin.com")) == "company"
@@ -363,8 +431,8 @@ def test_a_hyphenated_lookalike_is_a_company_not_the_brand():
 
 def test_the_brand_list_is_a_parameter(monkeypatch):
     monkeypatch.setattr(settings, "SUBMIT_ASK_ALWAYS_BRANDS", ("workday",))
-    assert rules.may_submit(AUTO_CFG, _facts(), "acme.workday.com", _counts(), now=NOW).reason == "ask_always_site"
-    assert rules.may_submit(AUTO_CFG, _facts(), "indeed.com", _counts(), now=NOW).decision == "submit"
+    assert rules.may_submit(AUTO_CFG, _at("acme.workday.com"), "acme.workday.com", _counts(), now=NOW).reason == "ask_always_site"
+    assert rules.may_submit(AUTO_CFG, _at("indeed.com"), "indeed.com", _counts(), now=NOW).decision == "submit"
 
 
 def test_rule_6_confirm_asks_and_names_whether_it_was_the_job_override():
@@ -391,7 +459,7 @@ def test_order_of_the_rules():
     assert rules.may_submit(_eff(daily_cap=1), _facts(receipt=True), FORM, _counts(today=5), now=NOW).reason == "already_applied"
     assert rules.may_submit(_eff(daily_cap=1), _facts(), "", _counts(today=5), now=NOW).reason == "daily_cap_reached"
     assert rules.may_submit(AUTO_CFG, _facts(), "", _counts(since=0), now=NOW).reason == "unknown_site"
-    assert rules.may_submit(AUTO_CFG, _facts(), "indeed.com", _counts(since=0), now=NOW).reason == "ask_always_site"
+    assert rules.may_submit(AUTO_CFG, _at("indeed.com"), "indeed.com", _counts(since=0), now=NOW).reason == "ask_always_site"
     # the job override beats the global auto; a global confirm with an auto override reaches the practice rule
     assert rules.may_submit(AUTO_CFG, _facts(override="confirm"), FORM, _counts(since=0), now=NOW).reason == "job_override_confirm"
     assert rules.may_submit(_eff(), _facts(override="auto_when_sure"), FORM, _counts(since=0), now=NOW).reason == "practice_run"
@@ -491,11 +559,11 @@ async def _bring(client: AsyncClient, ad: dict[str, Any] = _AD) -> int:
     return int(resp.json()["application_id"])
 
 
-async def _fill(client: AsyncClient, app_id: int) -> None:
+async def _fill(client: AsyncClient, app_id: int, url: str = FORM) -> None:
     """Rule 4b: the gate stops with form_not_recorded until a form_filled is on record."""
     resp = await client.post(
         f"/api/applications/{app_id}/events",
-        json={"event_type": "form_filled", "payload": {"form_url": FORM, "fields_count": 1}},
+        json={"event_type": "form_filled", "payload": {"form_url": url, "fields_count": 1}},
     )
     assert resp.status_code == 201, resp.text
     # ... and with form_not_swept until a form_swept newer than the fill is on record (2026-10-13).
@@ -507,8 +575,8 @@ async def _fill(client: AsyncClient, app_id: int) -> None:
 
 
 async def _check(client: AsyncClient, app_id: int, url: str = FORM, *, fill: bool = True):
-    if fill:
-        await _fill(client, app_id)
+    if fill:  # filled on the checked site (rule 5e); an unreadable address is filled on FORM
+        await _fill(client, app_id, url if rules.screen_form_url(url) else FORM)
     return await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": url})
 
 

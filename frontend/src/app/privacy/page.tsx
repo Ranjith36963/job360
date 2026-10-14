@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SUBPROCESSORS } from "@/lib/legal";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — Job360",
@@ -8,51 +9,6 @@ export const metadata: Metadata = {
 
 // A legal document states when it changed; never derive this at render time.
 const LAST_UPDATED = "27 September 2026";
-
-const SUBPROCESSORS: {
-  name: string;
-  purpose: string;
-  dataShared: string;
-  location: string;
-}[] = [
-  {
-    name: "Railway",
-    purpose: "Application hosting and database",
-    dataShared: "All service data (encrypted in transit and at rest)",
-    location: "Global (servers currently in the USA)",
-  },
-  {
-    name: "Resend",
-    purpose: "Transactional email (login links, email verification, password reset)",
-    dataShared: "Your email address and message content",
-    location: "USA",
-  },
-  {
-    name: "Cloudflare R2",
-    purpose: "Nightly encrypted database backups (kept as the newest 30)",
-    dataShared:
-      "Ciphertext only — backups are encrypted (AES-256) before upload; Cloudflare never sees readable data",
-    location: "Global (Cloudflare network)",
-  },
-  {
-    name: "PostHog (EU)",
-    purpose: "Product analytics (which features are used)",
-    dataShared: "Usage events and pseudonymous identifiers",
-    location: "EU",
-  },
-  {
-    name: "Sentry",
-    purpose: "Error monitoring",
-    dataShared: "Error traces and request metadata (request bodies are scrubbed)",
-    location: "EU/USA",
-  },
-  {
-    name: "GitHub",
-    purpose: "Fetching your public repositories, if you link a GitHub username",
-    dataShared: "The GitHub username you provide",
-    location: "USA",
-  },
-];
 
 export default function PrivacyPage() {
   return (
@@ -107,6 +63,16 @@ export default function PrivacyPage() {
               <span className="text-foreground">Technical data</span> — request
               logs, error traces, and (only if you accept the analytics
               banner) product-usage analytics.
+            </li>
+            <li>
+              <span className="text-foreground">Screen recordings</span> — to
+              investigate errors, Sentry records your screen (session replay)
+              while you use Job360. Recordings include what is on screen,
+              including your CV and profile text. About 1 in 10 sessions are
+              recorded, plus every session where an error happens. This is not
+              controlled by the analytics banner. Recordings are stored by
+              Sentry in Germany (EU) and kept for as long as Sentry&rsquo;s
+              retention setting for our account.
             </li>
           </ul>
         </section>

@@ -26,12 +26,18 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
-from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
+from src.api.auth_deps import (
+    AUTH_FIRST,
+    CurrentUser,
+    email_verification_satisfied,
+    require_session_user,
+    require_user,
+)
 from src.api.dependencies import get_request_db
 from src.api.models import JobResponse, LessonsResponse
-from src.api.routes.bring import job_row_to_response
+from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications import blocked as blocked_service
@@ -56,6 +62,20 @@ router = APIRouter(tags=["applications"])
 
 def _raise(exc: SpineError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+_OUTREACH_EVENT_TYPES = ("outreach_sent", "outreach_replied")
+OUTREACH_NEEDS_CONTACT = "outreach events need contact_id — call add_contact first and pass its contact_id"
+
+
+def _outreach_needs_contact(tool: str, user_id: str, **ids: Any) -> SpineError:
+    """The refusal for outreach written without a person: it would leave an
+    orphan row and never reach the contact's message_count. Logs ids only."""
+    get_audit_logger().info(
+        "outreach_needs_contact",
+        extra={"event": "outreach_needs_contact", "tool": tool, "user_id": safe_log_value(user_id), **ids},
+    )
+    return SpineError(422, OUTREACH_NEEDS_CONTACT)
 
 
 # ── Request models ───────────────────────────────────────────────────────────
@@ -175,19 +195,41 @@ class RecordEventRequest(BaseModel):
 
 
 class ReceiptAnswer(BaseModel):
+    """One answer on a receipt. The SAME shape the ``form_filled`` event takes
+    (``kit.ANSWER_SOURCES`` is the one source list); ``source`` and ``key`` are
+    optional here, stored when given and returned on read."""
+
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(..., max_length=500)
     answer: str = Field(..., max_length=settings.APPLICATION_RECEIPT_ANSWER_MAX_CHARS)
+    source: Optional[str] = None
+    key: Optional[str] = Field(None, min_length=1, max_length=kit_service.ANSWER_KEY_MAX)
+
+    @field_validator("source")
+    @classmethod
+    def _known_source(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in kit_service.ANSWER_SOURCES:
+            raise ValueError("answer source must be one of: " + ", ".join(kit_service.ANSWER_SOURCES))
+        return value
 
 
 class ReceiptAnswerOut(BaseModel):
     """The READ shape of an answer — deliberately without the request caps.
     A receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS
-    is ever lowered, older rows must still read back, not 500 the page."""
+    is ever lowered, older rows must still read back, not 500 the page.
+    ``source`` / ``key`` are absent on receipts recorded before they existed."""
 
     question: str
     answer: str
+    source: Optional[str] = None
+    key: Optional[str] = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset(self, handler: Any):  # type: ignore[no-untyped-def]  # un-annotated keeps the OpenAPI schema typed
+        """An answer stored without a source/key reads back without them (not as nulls)."""
+        data = handler(self)
+        return {k: v for k, v in data.items() if v is not None}
 
 
 class RecordApplicationReceiptRequest(BaseModel):
@@ -689,6 +731,8 @@ class RecordEventResponse(BaseModel):
     status: str
     already_existed: bool
     scheduled_at: Optional[str]
+    # Non-fatal notes, e.g. a deduped message_id that was recorded as another type.
+    warnings: list[str] = Field(default_factory=list)
     # Owner decision, 2026-09-25 — the CURRENT slot value after this call:
     # the new value when this call set/cleared it, the unchanged value when
     # it didn't touch it (omitted `follow_up_on`, or a duplicate source that
@@ -703,6 +747,10 @@ class RecordApplicationReceiptResponse(BaseModel):
     cv_version_no: Optional[int]
     cover_letter_artifact_id: Optional[int]
     channel: str
+    # What the caller sent, verbatim (trimmed); '' when none.
+    channel_given: str = ""
+    # Plain facts, e.g. an unknown channel stored as 'other'. Never a block.
+    warnings: list[str] = []
     confirmation: str
     url: str
     event_id: int
@@ -1045,6 +1093,8 @@ class ExportHistoryResponse(BaseModel):
 
 class AddContactResponse(BaseModel):
     contact: ContactOut
+    # Top-level copy of contact.id: the id every outreach call needs.
+    contact_id: int
     already_existed: bool
     event_id: Optional[int]
 
@@ -1348,12 +1398,16 @@ async def get_job(
     `/applications/export` is — a literal segment must not be swallowed by the
     dynamic one.
     """
-    if await spine.get_application_by_job(db, user.id, job_id) is None:
+    mine = await spine.get_application_by_job(db, user.id, job_id)
+    if mine is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    app_row = await spine.get_owned_application(db, user.id, int(mine["id"]))
     row = await db.get_job_by_id(job_id)
-    if row is None:  # pragma: no cover — an application always has its job row
+    if row is None or app_row is None:  # pragma: no cover — an application always has its job row
         raise HTTPException(status_code=404, detail="Job not found")
-    return job_row_to_response(dict(row))
+    # P0 2026-10-14 — the text, link and location are THIS user's snapshot,
+    # never the shared catalog row (which holds whoever pasted the key first).
+    return application_job_response(app_row, dict(row))
 
 
 @router.get("/applications/{application_id}", response_model=ApplicationDetailOut, dependencies=AUTH_FIRST)
@@ -1579,7 +1633,7 @@ async def add_contact(
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
     response.status_code = 200 if result["already_existed"] else 201
-    return result
+    return {**result, "contact_id": result["contact"]["id"]}
 
 
 @router.post(
@@ -1608,7 +1662,7 @@ async def add_person(
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
     response.status_code = 200 if result["already_existed"] else 201
-    return result
+    return {**result, "contact_id": result["contact"]["id"]}
 
 
 @router.patch("/contacts/{contact_id}", response_model=ContactOut, dependencies=AUTH_FIRST)
@@ -1697,6 +1751,8 @@ async def save_artifact(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
+        if body.contact_id is None and body.kind == "outreach":
+            raise _outreach_needs_contact("save_artifact", user.id, application_id=application_id)
         if body.contact_id is not None:
             # Owner decision, 2026-09-25 — a message DRAFTED for a person:
             # writes a numbered version into that contact's own outreach
@@ -2045,7 +2101,12 @@ async def submit_check(
     ``settings_rules.may_submit`` - the same function for every caller (this route
     and the MCP ``check_submit`` tool). ``form_url`` is the address of the page
     the form is on (a bare host works too); without it the answer is ``ask``
-    (``unknown_site``). Read-only. 404 for an application that is not the
+    (``unknown_site``). The address is read strictly (``screen_form_url``): a
+    user-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host
+    or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
+    than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
+    a stored yes clears neither. An unconfirmed email answers ``ask`` /
+    ``email_not_verified``. Read-only. 404 for an application that is not the
     caller's (rule #12)."""
     try:
         app_row = await spine.get_owned_application(db, user.id, application_id)
@@ -2054,7 +2115,9 @@ async def submit_check(
         now = datetime.now(timezone.utc)
         cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
         counts = await settings_rules.load_submit_counts(db, user.id, now)
-        facts = await kit_service.gate_facts(db, user.id, app_row)
+        facts = await kit_service.gate_facts(
+            db, user.id, app_row, email_verified=email_verification_satisfied(user)
+        )
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
@@ -2065,7 +2128,7 @@ async def submit_check(
             "event": "submit_check", "user_id": safe_log_value(user.id),
             "actor": safe_log_value(actor_for(user)), "application_id": application_id,
             "decision": verdict.decision, "reason": verdict.reason,
-            "host_kind": settings_rules.host_kind(settings_rules.parse_site_host(form_url)), "result": "ok",
+            "host_kind": settings_rules.host_kind(settings_rules.screen_form_url(form_url)), "result": "ok",
         },
     )
     return {
@@ -2085,6 +2148,8 @@ async def record_event(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
+        if body.contact_id is None and body.event_type in _OUTREACH_EVENT_TYPES:
+            raise _outreach_needs_contact("record_event", user.id, application_id=application_id)
         source = spine.validate_source(body.source.model_dump() if body.source else None)
         if body.contact_id is not None:
             # Owner decision, 2026-09-25 — record this as OUTREACH for a
@@ -2240,7 +2305,7 @@ async def record_application_receipt(
         return await spine.record_receipt(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
             channel=body.channel, note=body.note, confirmation=body.confirmation,
-            answers=[a.model_dump() for a in body.answers], fields_filled=fields_filled,
+            answers=[a.model_dump(exclude_none=True) for a in body.answers], fields_filled=fields_filled,
             cv_artifact_id=body.cv_artifact_id, cover_letter_artifact_id=body.cover_letter_artifact_id,
             applied_at=body.applied_at,
         )
