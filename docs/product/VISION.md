@@ -63,26 +63,15 @@ Candidate (one profile per user, versioned; multiple named profiles = later)
       └── Events[]          the history; the current status is just the last status event
 ```
 
-**Event types (fixed list, plus free-text detail):**
-`brought`, `fit_judged`, `artifact_saved`, `contact_added`, `outreach_sent`,
-`outreach_replied`, `applied`, `replied`, `interview_requested`, `interview_scheduled`,
-`interview_done`, `offer`, `rejected`, `withdrawn`, `ghosted`, `note`,
-`lesson` ("flag for next time"), `asked` / `answered` / `ask_withdrawn` (the
-"Needs you" queue — note-family, never move the status), `submit_mode_set`
-(per-job submit switch: `confirm` | `auto_when_sure` | `inherit` — note-family; an
-assistant may only send `confirm`), and the application-kit trail (S3, all note-family):
-`kit_read` (written by Job360 when an assistant reads the kit), `cv_seen` /
-`submit_approved` / `submit_declined` (the user saw the CV, said yes to sending it, or said
-don't send - `where` is `web` or `chat`), `autofill_set` (`allow` | `deny`; an assistant may
-only send `deny`), `duplicate_cleared` (web only), `form_filled` (host + field count),
-`hold_released`, `site_account` / `account_needed` (a host name only - never a password), and the
-blocked record (S6, note-family): `blocked` (the assistant got stuck - reason, step, host only, short
-detail; opens one Needs-you ask, and `check_submit` asks until) `unblocked` (`retried` | `user_did_it` |
-`skipped`; closes the ask), and the
-proof trail (S7, note-family): `proof_text` (the thank-you page text, <=4,000 chars plain, plus the page
-host; the server fills who/when) and `proof_screenshot` (written by Job360 when a screenshot is stored;
-the image lives in its own table and is erasable). Every event: `type`, `detail`, `occurred_at`,
-`recorded_by` (which token/agent/web), `recorded_at`. Nothing is deleted.
+**Event types are a fixed list plus free-text detail.** The list is
+`core.settings.APPLICATION_STATUS_EVENT_TYPES` (these move the status) and
+`APPLICATION_NOTE_EVENT_TYPES` (these never do). Who may write each one, and
+the payload it must carry, is the `record_event` route in
+`api/routes/applications.py`, which dispatches one validator per event family.
+Pinned by `tests/test_application_kit.py::test_autofill_events_assistants_may_only_deny`,
+`tests/test_application_kit.py::test_duplicate_clear_is_web_only` and
+`tests/test_assistant_settings.py::test_per_job_override_an_assistant_may_only_send_confirm`.
+Nothing is ever deleted.
 
 Today's `applications` (stage) + `application_receipts` (snapshot) +
 `application_stage_history` + `tailored_documents` (unversioned, DELETE+INSERT)
