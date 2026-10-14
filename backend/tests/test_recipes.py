@@ -228,7 +228,7 @@ async def test_list_and_read_and_unknown_name(authenticated_async_context):
         resp = await client.get("/api/recipes")
         assert resp.status_code == 200, resp.text
         names = [r["name"] for r in resp.json()]
-        assert names == ["setup", "hunt", "research", "apply", "reach", "daily", "prep", "review", "rules"]
+        assert names == ["setup", "hunt", "research", "apply", "forms", "reach", "daily", "prep", "review", "rules"]
         assert all(r["title"] for r in resp.json())
 
         one = await client.get("/api/recipes/hunt")
@@ -317,3 +317,24 @@ async def test_every_recipe_read_is_logged_with_who_which_and_when(
         r for r in audit_capture.records if r.get("event") == "mcp_tool_call" and r.get("tool") == "get_recipe"
     ]
     assert {(r["recipe"], r["actor"]) for r in tool_calls} == {("setup", "token:agent"), ("list", "token:agent")}
+
+
+def test_forms_recipe_is_listed_served_and_under_the_cap():
+    """The forms recipe (owner, apply-run 2026-10-13/14): one list, one foreground
+    tab, CV first, real keyboard, read back everything, per-ATS table, no CAPTCHA."""
+    from src.api.routes.recipes import RECIPE_NAMES, load_recipe
+
+    assert RECIPE_NAMES.index("forms") == RECIPE_NAMES.index("apply") + 1
+    recipe = load_recipe("forms")
+    assert recipe.title == "360-forms — fill an application form reliably, per ATS"
+    assert len(recipe.text.splitlines()) <= 70
+    assert "Print this checklist and tick each step:" in recipe.text
+    assert "STOP" in recipe.text and "**Done when**" in recipe.text
+    text = flat(recipe.text)
+    for words in ("one approved list", "upload the cv first", "triple-click", "never ctrl+a", "read back every value",
+                  "aria-invalid", "form_filled", "form_swept", "check_submit", "never solve a captcha",
+                  "never type a password", "job-boards.greenhouse.io/embed/job_app", "jazzhr", "rippling", "lever",
+                  "ashby", "workable", "wellfound", "account_needed", "willingness", "privacy-safe",
+                  "lower bound inclusive"):
+        assert words in text, words
+    assert 'get_recipe("forms")' in load_recipe("apply").text
