@@ -69,6 +69,7 @@ ROUTE_MODULES = [
     "receipts",
     "applications",
     "proof",
+    "calendar",
     "oauth",
     "hunt_kit",
 ]
@@ -108,6 +109,11 @@ PUBLIC_ROUTES: dict[str, str] = {
         "S7 proof-of-application upload: the unguessable single-use token IS the credential (32 random bytes, "
         "only its SHA-256 stored, spent by one atomic UPDATE, dead after 5 minutes); no cookie to carry for an "
         "assistant's file tool. Bad tokens 404 behind a per-IP lockout, like /api/files/{token}"
+    ),
+    "/api/calendar/{token}.ics": (
+        "private calendar feed (routes/calendar.py, migration 0058): a calendar app polls it with no cookie; the "
+        "unguessable URL IS the credential (32 random bytes, only its SHA-256 stored, revocable). Bad tokens "
+        "404 behind a per-IP lockout and the owner is rate-limited, like /api/files/{token}"
     ),
     "/api/hunt-kit": (
         "hunt kit index (routes/hunt_kit.py): fixed static files, no user data, no DB; an assistant's "
