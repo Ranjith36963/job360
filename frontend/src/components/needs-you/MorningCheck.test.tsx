@@ -40,10 +40,10 @@ describe("MorningCheck", () => {
   it("running: word, both mode labels, quota with a limit", async () => {
     render(<MorningCheck />);
     const strip = await screen.findByTestId("mc-strip");
-    for (const t of ["Running", "Score line 75", "Above: ask me · Below: apply on its own", "Confirm before sending", "4 of 10 today"]) {
+    for (const t of ["On", "Score line 75", "Above: ask me · Below: apply on its own", "Confirm before sending", "4 of 10 today"]) {
       expect(strip).toHaveTextContent(t);
     }
-    expect(screen.getByText("Morning check")).toBeInTheDocument();
+    expect(screen.getByText("Morning check (run by your assistant)")).toBeInTheDocument();
     expect(screen.queryByTestId("mc-paused-by")).toBeNull();
   });
 
