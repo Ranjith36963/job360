@@ -34,6 +34,8 @@ def _sorted(values: Any) -> list[str]:
     return sorted(values)
 
 
+_LIST_NOTE = "a list of strings, one short item each (at most 200 characters); duplicates are dropped"
+
 # path -> {"example": a VALID value, "allowed_keys": [...] and/or "allowed_values": [...], "note": one line}
 SHAPES: dict[str, dict[str, Any]] = {
     "user_info.contact": {
@@ -52,13 +54,22 @@ SHAPES: dict[str, dict[str, Any]] = {
                  "note": "remote anywhere; on-site only if sponsored"},
             ],
             "citizenship": ["GB"],
+            "sanctions_country_citizen": False,
         },
         "allowed_keys": list(_ui._RIGHT_TO_WORK),
         "record_keys": list(_ui._RTW_COUNTRY),
         "allowed_values": {
             "work_authorization": _sorted(VALID_WORK_AUTH_STATUSES), "onsite": list(_ui.ONSITE_VALUES),
+            "sanctions_country_citizen": [True, False, _ui.PREFER_NOT_TO_SAY],
+            "needs_sponsorship": [True, False], "remote_ok": [True, False],
         },
-        "note": "one record per country; country 'ANY' = every other country",
+        "note": (
+            "one record per country; country 'ANY' = every other country. citizenship = list of ISO alpha-2 "
+            f"codes. sanctions_country_citizen = true, false or \"{_ui.PREFER_NOT_TO_SAY}\" (nothing else). "
+            "needs_sponsorship and remote_ok = true or false. visa_expires = YYYY-MM or YYYY-MM-DD. "
+            "visa_type and note = one short line. work_authorization citizen / permanent_resident cannot go with "
+            "needs_sponsorship true, and needs_sponsorship cannot go with needs_sponsorship false"
+        ),
     },
     "user_info.logistics": {
         "example": {
@@ -110,6 +121,23 @@ SHAPES: dict[str, dict[str, Any]] = {
     },
     "preferences.target_companies": {
         "example": ["Mistral AI", "Hugging Face"], "note": "companies to check first; short names, empty = no list",
+    },
+    "preferences.target_job_titles": {"example": ["Data Engineer", "Analytics Engineer"], "note": _LIST_NOTE},
+    "preferences.preferred_locations": {"example": ["London", "Remote UK"], "note": _LIST_NOTE},
+    "preferences.industries": {"example": ["Fintech", "Health"], "note": _LIST_NOTE},
+    "preferences.additional_skills": {"example": ["dbt", "Airflow"], "note": _LIST_NOTE},
+    "preferences.excluded_skills": {"example": ["PHP"], "note": _LIST_NOTE},
+    "preferences.negative_keywords": {"example": ["unpaid", "commission only"], "note": _LIST_NOTE},
+    "preferences.looking_for": {"example": ["Small team", "Ownership of a product"], "note": _LIST_NOTE},
+    "preferences.dealbreakers": {"example": ["No sponsorship", "On-site five days"], "note": _LIST_NOTE},
+    "preferences.avoid_companies": {"example": ["Acme Staffing"], "note": _LIST_NOTE},
+    "cv_data.education": {
+        "example": ["BSc Computer Science, University of Leeds, 2019"],
+        "note": "a list of strings, one line per qualification (not objects); " + _LIST_NOTE,
+    },
+    "cv_data.links": {
+        "example": ["https://github.com/sam-example", "https://sam.example.com"],
+        "note": "a list of strings, one plain URL each (not objects); " + _LIST_NOTE,
     },
     "preferences.assistant_notes": {"example": ["Never apply to agencies."], "note": "one short line per note"},
     "cv_data.cv_positions": {

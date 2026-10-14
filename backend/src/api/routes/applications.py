@@ -2179,6 +2179,13 @@ async def record_event(
             corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
             follow_up_on=follow_up_on_arg,
         )
+        if body.event_type == "replied" and source and source.get("sender"):
+            # The sender is a person we sent outreach to on this job: mark them
+            # replied too (a new outreach_replied entry; old events untouched).
+            await contacts_service.mark_reply_from_sender(
+                db, user.id, application_id, actor_for(user),
+                sender=source["sender"], message_id=source["message_id"], occurred_at=body.occurred_at,
+            )
         if body.event_type in kit_service.KIT_EVENT_TYPES:
             kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
         if body.event_type == "proof_text":
