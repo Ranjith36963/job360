@@ -35,8 +35,9 @@ export const SUBPROCESSORS: {
   {
     name: "Sentry",
     purpose: "Error monitoring",
-    dataShared: "Error traces and request metadata (request bodies are scrubbed)",
-    location: "EU/USA",
+    dataShared:
+      "Error traces and request metadata (request bodies are scrubbed), plus screen recordings (session replay) that include on-screen text such as your CV and profile. Recordings cover about 1 in 10 sessions and every session where an error happens, whether or not you accept analytics",
+    location: "EU (Germany)",
   },
   {
     name: "GitHub",

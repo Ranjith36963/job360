@@ -86,7 +86,7 @@ function fetchUrlResponse(overrides: Record<string, unknown>) {
 
 async function mockCommonLayout(page: Page) {
   await page.route("**/api/status**", (route) =>
-    route.fulfill(json({ jobs_total: 0, last_run: null, sources: [] }))
+    route.fulfill(json({ profile_exists: false }))
   );
 }
 
