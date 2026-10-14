@@ -4004,6 +4004,34 @@
         "title": "KitDuplicateOut",
         "type": "object"
       },
+      "KitFile": {
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url",
+          "bytes",
+          "sha256"
+        ],
+        "title": "KitFile",
+        "type": "object"
+      },
       "KitFileOut": {
         "description": "A short-lived download link. The token is in ``url`` and exists nowhere else.",
         "properties": {
@@ -4087,6 +4115,27 @@
           "generated_at"
         ],
         "title": "KitIdOut",
+        "type": "object"
+      },
+      "KitIndex": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/KitFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "how_to": {
+            "title": "How To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "how_to",
+          "files"
+        ],
+        "title": "KitIndex",
         "type": "object"
       },
       "KitJobOut": {
@@ -13534,6 +13583,69 @@
         "summary": "Health Check",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/hunt-kit": {
+      "get": {
+        "description": "The kit's files with size and SHA-256, so the assistant can check what it ran.",
+        "operationId": "hunt_kit_index_api_hunt_kit_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KitIndex"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Hunt Kit Index",
+        "tags": [
+          "hunt-kit"
+        ]
+      }
+    },
+    "/api/hunt-kit/{name}": {
+      "get": {
+        "description": "One kit file. Unknown names are 404 and never touch the filesystem.",
+        "operationId": "hunt_kit_file_api_hunt_kit__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hunt Kit File",
+        "tags": [
+          "hunt-kit"
         ]
       }
     },

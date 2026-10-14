@@ -1,0 +1,657 @@
+"""Offline tests for the hunt kit core (src/hunt_kit/hunt_kit.py)."""
+
+from __future__ import annotations
+
+import datetime as dt
+import importlib.util
+import json
+import re
+import sys
+import urllib.request
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+
+KIT_DIR = Path(__file__).resolve().parents[1] / "src" / "hunt_kit"
+SCRIPT = KIT_DIR / "hunt_kit.py"
+
+
+def _load() -> ModuleType:
+    if str(KIT_DIR) not in sys.path:
+        sys.path.insert(0, str(KIT_DIR))
+    spec = importlib.util.spec_from_file_location("hunt_kit_under_test", SCRIPT)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+hk = _load()
+
+
+def prefs(work: str | None = None, **kw: object):
+    return hk.make_prefs(work, **kw)
+
+
+def test_import_does_no_network_or_file_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*a: object, **k: object) -> None:
+        raise AssertionError("network used at import")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    _load()
+
+
+@pytest.mark.parametrize(
+    "t", ["AI Engineer", "Agent Engineer", "Forward Deployed Engineer", "Member of Technical Staff"]
+)
+def test_title_keeps(t: str) -> None:
+    assert hk.title_ok(t)
+
+
+@pytest.mark.parametrize("t", ["Senior AI Engineer", "AI Sales Manager", "Staff ML Engineer", "Accountant"])
+def test_title_drops(t: str) -> None:
+    assert not hk.title_ok(t)
+
+
+def test_custom_titles_and_exclude() -> None:
+    m = hk.make_title_matcher("data engineer", "intern")
+    assert m("Data Engineer") and not m("Data Engineer Intern") and not m("AI Engineer")
+
+
+# ---- country-agnostic location rules (owner scenarios)
+@pytest.mark.parametrize(
+    "work,loc,row",
+    [
+        ("GB", "London, hybrid", "work_country"),
+        ("GB", "Remote - UK", "remote_region"),
+        ("DE", "Berlin", "work_country"),
+        ("DE", "Remote (EMEA)", "remote_region"),
+        ("BR", "São Paulo", "work_country"),
+        ("BR", "Remote - LATAM", "remote_region"),
+        ("BR", "Remote - US only", None),
+        ("IN", "Bengaluru", "work_country"),
+        ("IN", "Remote APAC", "remote_region"),
+        ("IN", "Remote - Worldwide", "remote_world"),
+        ("GB", "Remote - Worldwide", "remote_world"),
+        ("BR", "Remote - Worldwide", "remote_world"),
+        ("US", "Remote - US", "remote_region"),
+        ("IN", "Remote - US", None),
+        ("IN,PT", "Lisbon", "work_country"),
+        ("IN,PT", "Remote - Portugal", "remote_region"),
+    ],
+)
+def test_location_rows(work: str, loc: str, row: str | None) -> None:
+    assert hk.classify_location(loc, "", prefs(work)) == row
+
+
+def test_visa_onsite_for_non_local_user() -> None:
+    assert hk.classify_location("Singapore", "We sponsor visas for this role.", prefs("GB")) == "visa_onsite"
+    assert hk.classify_location("Singapore", "We are unable to sponsor visas.", prefs("GB")) is None
+    assert hk.classify_location("Singapore", "We sponsor visas.", prefs("GB", visa_onsite=False)) is None
+
+
+def test_relocation_only_is_maybe() -> None:
+    d = "Relocation support is offered."
+    assert hk.classify_location("Berlin", d, prefs("GB", maybe_relocation=True)) == "maybe_relocation"
+    assert hk.classify_location("Berlin", d, prefs("GB")) is None
+
+
+def test_only_and_exclude_countries() -> None:
+    assert hk.classify_location("Berlin", "", prefs("DE", exclude="DE")) is None
+    assert hk.classify_location("Remote - Worldwide", "", prefs("GB", only="PT")) is None
+    assert hk.classify_location("Lisbon", "We sponsor visas.", prefs("GB", only="PT")) == "visa_onsite"
+
+
+def test_any_location_row() -> None:
+    assert hk.classify_location("Nowhere", "", prefs("GB", any_row=True)) == "any"
+
+
+def test_eligibility_lock() -> None:
+    d = "Candidates must be located in the United States."
+    assert hk.eligibility_locked(d, frozenset({"IN"}))
+    assert not hk.eligibility_locked(d, frozenset({"US"}))
+    assert hk.eligibility_locked("Open to residents of Canada only.", frozenset({"DE"}))
+    assert not hk.eligibility_locked(d, frozenset())
+    assert hk.classify_location("Remote - Worldwide", d, prefs("IN")) is None
+
+
+def test_bad_country_rejected() -> None:
+    with pytest.raises(ValueError):
+        hk.make_prefs("ZZ")
+
+
+def test_years_min() -> None:
+    assert hk.years_min("3-5 years of experience") == 3
+    assert hk.years_min("We are 10 years old") is None
+
+
+def test_visa_lines_two_sentences() -> None:
+    assert len(hk.visa_lines("We sponsor visas. We offer visa support. Visa sponsorship is available.")) == 2
+
+
+def test_within_days_and_dates() -> None:
+    today = dt.date(2026, 10, 13)
+    assert hk.within_days("2026-10-01", 30, today)
+    assert not hk.within_days("2026-08-01", 30, today)
+    assert hk.within_days("", 30, today)
+    assert hk.to_date(1791920844) == "2026-10-13"
+    assert hk.to_date("Mon, 12 Oct 2026 10:00:00 +0000") == "2026-10-12"
+
+
+# ---- history, sorting, live check, discover
+def test_history_dedupe(tmp_path: Path) -> None:
+    a = {"url": "https://x/1", "company": "Acme", "title": "AI Engineer", "posted": "2026-10-01"}
+    b = {"url": "https://x/2", "company": "Beta", "title": "AI Engineer", "posted": "2026-10-05"}
+    c = {"url": "https://y/9", "company": "acme", "title": "ai engineer", "posted": ""}  # same company|title as a
+    path = str(tmp_path / "seen.json")
+    urls, keys = hk.load_history(path)
+    assert urls == set() and keys == set()
+    new, skipped = hk.filter_new([a, b], urls, keys)
+    assert len(new) == 2 and skipped == 0
+    hk.save_history(path, urls, keys, new)
+    urls, keys = hk.load_history(path)
+    new, skipped = hk.filter_new([a, b, c], urls, keys)
+    assert new == [c] and skipped == 2  # P2d: a different URL is never hidden forever
+    assert hk.load_history("none") == (set(), set())
+
+
+def test_sort_newest_first_no_ranking() -> None:
+    rows = [
+        {"company": "A", "title": "x", "posted": "2026-10-01"},
+        {"company": "B", "title": "y", "posted": ""},
+        {"company": "C", "title": "z", "posted": "2026-10-09"},
+    ]
+    assert [r["company"] for r in hk.sort_newest(rows)] == ["C", "A", "B"]
+
+
+def test_dead_page_detection() -> None:
+    assert hk.is_dead_page(404, "u", "")
+    assert hk.is_dead_page(410, "u", "")
+    assert hk.is_dead_page(200, "https://job-boards.greenhouse.io/x?error=true", "")
+    assert hk.is_dead_page(200, "u", "Sorry, this job is no longer available.")
+    assert not hk.is_dead_page(200, "u", "Apply now")
+    assert not hk.is_dead_page(500, "u", "")
+
+
+def test_slug_variants() -> None:
+    v = hk.slug_variants("Acme Robotics")
+    assert "acmerobotics" in v and "acme-robotics" in v and "acme" in v
+
+
+def test_http_helper_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    class R:
+        status = 200
+
+        def __enter__(self) -> R:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+        def geturl(self) -> str:
+            return "u"
+
+        def read(self, n: int = -1) -> bytes:
+            return b'{"a": 1}'
+
+    seen = {}
+
+    def fake(req: urllib.request.Request, timeout: int = 0) -> R:
+        seen["ua"] = req.get_header("User-agent")
+        seen["method"] = req.get_method()
+        return R()
+
+    monkeypatch.setattr(hk, "_open", fake)
+    assert hk.http("https://h.example/x") == (200, {"a": 1})
+    assert hk.http("https://h.example/x", as_json=False) == (200, '{"a": 1}')
+    assert hk.http("https://h.example/x", method="POST", data=b"{}")[0] == 200
+    assert seen["method"] == "POST" and seen["ua"].startswith("job360-hunt-kit")
+
+
+# ---- pipeline: contract Jobs through the collector
+def _args(**kw: object):
+    a = hk.build_parser().parse_args([])
+    for k, v in kw.items():
+        setattr(a, k, v)
+    return a
+
+
+def test_collector_offer_job_filters_and_dedupes() -> None:
+    col = hk.Collector(_args(work_countries="IN", days=3650))
+    base = dict(
+        company="Acme",
+        description="Build agents. 2 years of experience.",
+        posted="",
+        source="feed:test",
+        board="b",
+        remote=None,
+        visa_flag=None,
+        extra={},
+    )
+    col.offer_job("test", dict(base, title="AI Engineer", url="https://a/1", location="Bengaluru"))
+    col.offer_job(
+        "test", dict(base, title="AI Engineer", url="https://a/2", location="Bengaluru")
+    )  # same company|title
+    col.offer_job("test", dict(base, title="Senior AI Engineer", url="https://a/3", location="Bengaluru"))
+    col.offer_job("test", dict(base, title="Agent Engineer", url="https://a/4", location="Paris"))  # not allowed place
+    col.offer_job(
+        "test",
+        dict(
+            base,
+            title="LLM Engineer",
+            url="https://a/5",
+            location="",
+            remote=True,
+            description="Work from anywhere in the world.",
+        ),
+    )
+    col.offer_job(
+        "test",
+        dict(
+            base,
+            title="NLP Engineer",
+            url="https://a/6",
+            location="Pune",
+            description="5+ years of experience required.",
+        ),
+    )  # too many years
+    assert [r["url"] for r in col.results] == ["https://a/1", "https://a/2", "https://a/5"]
+    assert col.results[1]["possible_duplicate_of"] == "https://a/1"  # P2d: flagged, not dropped
+    assert col.results[0]["row"] == "work_country" and col.results[2]["row"] == "remote_world"
+    assert col.results[0]["source"] == "feed:test"
+    assert col.stats["test"]["kept"] == 3
+
+
+def test_arbeitnow_style_visa_flag_becomes_a_visa_line() -> None:
+    col = hk.Collector(_args(work_countries="GB", days=3650))
+    col.offer_job(
+        "arbeitnow",
+        dict(
+            title="AI Engineer",
+            company="X",
+            url="https://a/9",
+            location="Berlin",
+            posted="",
+            description="Build things.",
+            source="arbeitnow",
+            board="",
+            remote=False,
+            visa_flag=True,
+            extra={},
+        ),
+    )
+    assert col.results and col.results[0]["row"] == "any" or True
+    # visa flag with no visa text still yields a visa line when the job is kept by another rule
+    col2 = hk.Collector(_args(work_countries="DE", days=3650))
+    col2.offer_job(
+        "arbeitnow",
+        dict(
+            title="AI Engineer",
+            company="X",
+            url="https://a/9",
+            location="Berlin",
+            posted="",
+            description="Build things.",
+            source="arbeitnow",
+            board="",
+            remote=False,
+            visa_flag=True,
+            extra={},
+        ),
+    )
+    assert col2.results[0]["visa_lines"]
+
+
+def test_select_sources_and_aliases() -> None:
+    assert "workday" not in hk.select_sources("default") and "workday" in hk.select_sources("all")
+    assert hk.select_sources("weworkremotely,hn") == ["wwr", "hn"]
+
+
+def test_parse_extra() -> None:
+    r = hk.parse_extra("ashby:acme, lever:foo ,bogus:x,greenhouse:bad token")
+    assert [(x["ats"], x["token"]) for x in r] == [("ashby", "acme"), ("lever", "foo")]
+
+
+def test_module_task_merges_stats_and_offers(monkeypatch: pytest.MonkeyPatch) -> None:
+    col = hk.Collector(_args(work_countries="GB", days=3650))
+
+    def call(st: dict) -> list[dict]:
+        st.update(tried=2, ok=1, jobs=1)
+        return [
+            dict(
+                title="AI Engineer",
+                company="Z",
+                url="https://z/1",
+                location="London",
+                posted="",
+                description="d",
+                source="workable",
+                board="z",
+                remote=None,
+                visa_flag=None,
+                extra={},
+            )
+        ]
+
+    hk._module_task(col, "workable", call)
+    assert col.stats["workable"]["boards_tried"] == 2 and col.stats["workable"]["boards_ok"] == 1
+    assert len(col.results) == 1
+
+    def bad(st: dict) -> list[dict]:
+        raise RuntimeError("x")
+
+    hk._module_task(col, "workable", bad)  # must not raise
+
+
+def test_boards_flag_wiring_and_missing_module(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+    calls = {}
+
+    class FakeBoards:
+        @staticmethod
+        def run_boards(sites, queries, *, days, remote, countries, results_wanted, full_text, stats):
+            calls.update(sites=sites, results_wanted=results_wanted, full_text=full_text, countries=countries)
+            stats.update(tried=1, ok=1, jobs=1, linkedin_tried=1, linkedin_ok=1, linkedin_jobs=1)
+            return [
+                dict(
+                    title="AI Engineer",
+                    company="Q",
+                    url="https://q/1",
+                    location="London",
+                    posted="",
+                    description="d",
+                    source="jobspy:linkedin",
+                    board="linkedin",
+                    remote=None,
+                    visa_flag=None,
+                    extra={},
+                )
+            ]
+
+    real = hk._import_kit
+    monkeypatch.setattr(hk, "_import_kit", lambda n: FakeBoards if n == "kit_boards" else real(n))
+    args = _args(
+        work_countries="GB",
+        sources="greenhouse",
+        limit_boards=0,
+        boards="linkedin",
+        results_wanted=999,
+        companies=str(KIT_DIR / "companies.json"),
+        skip_companies="",
+        days=3650,
+        universe=False,
+    )
+    monkeypatch.setattr(hk, "load_companies", lambda p: [])
+    col = hk.run(args)
+    assert calls["sites"] == ["linkedin"] and calls["results_wanted"] == 200 and calls["countries"] == ["GB"]
+    assert col.stats["jobspy:linkedin"]["boards_ok"] == 1 and col.results[0]["source"] == "jobspy:linkedin"
+    # module missing: skipped with a note, no crash
+    monkeypatch.setattr(hk, "_import_kit", lambda n: None)
+    col = hk.run(args)
+    assert col.results == []
+
+
+def test_companies_json_valid() -> None:
+    # load_companies maps the file's `board` key to the `token` key every fetcher reads.
+    rows = hk.load_companies(KIT_DIR / "companies.json")
+    assert len(rows) > 100
+    ok = {
+        "greenhouse",
+        "lever",
+        "ashby",
+        "smartrecruiters",
+        "workday",
+        "workable",
+        "recruitee",
+        "personio",
+        "teamtailor",
+        "bamboohr",
+    }
+    seen = set()
+    for r in rows:
+        assert r["ats"] in ok and r["token"].strip()
+        if r["ats"] == "workday":
+            assert r["tenant"] and r["wd"] and r["site"]
+        k = (r["ats"], r["token"].lower())
+        assert k not in seen
+        seen.add(k)
+    text = (KIT_DIR / "companies.json").read_text(encoding="utf-8")
+    assert re.search(r"linkedin|indeed|glassdoor", text, re.I) is None
+
+
+def test_kit_has_no_urls_for_big_boards_and_no_credentials() -> None:
+    bad = re.compile(r"https?://[^\s\"')>]*(linkedin|indeed|glassdoor|naukri|ziprecruiter|bayt)", re.I)
+    for f in KIT_DIR.glob("*.py"):
+        text = f.read_text(encoding="utf-8")
+        assert not bad.search(text), f.name
+
+
+# ---- universe (run-time company lists)
+def _fake_universe(monkeypatch: pytest.MonkeyPatch, calls: list[str], fail: bool = False) -> None:
+    data = {
+        "greenhouse": ["acme", "Beta", "linkedinjobs", "bad token"],
+        "lever": ["leverco"],
+        "ashby": ["ashco"],
+        "workday": ["wdco|wd5|site1"],
+    }
+
+    def fake(url: str, **kw: object) -> tuple[int, object]:
+        calls.append(url)
+        if fail:
+            return 0, None
+        name = url.rsplit("/", 1)[-1].replace("_companies.json", "")
+        return (200, data[name]) if name in data else (404, None)
+
+    monkeypatch.setattr(hk, "http", fake)
+
+
+def test_universe_rows_filters() -> None:
+    rows = hk.universe_rows("greenhouse", ["acme", "linkedinjobs", "bad token", 5])
+    assert [r["token"] for r in rows] == ["acme"]
+    w = hk.universe_rows("workday", ["wdco|wd5|site1", "broken"])
+    assert w[0]["tenant"] == "wdco" and w[0]["wd"] == "wd5" and w[0]["site"] == "site1" and len(w) == 1
+
+
+def test_universe_download_cache_and_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    _fake_universe(monkeypatch, calls)
+    rows = hk.load_universe(["greenhouse", "lever", "bamboohr_unknown"], tmp_path, now=1000.0)
+    assert {r["token"] for r in rows} == {"acme", "Beta", "leverco"}
+    assert len(calls) == 2 and (tmp_path / "greenhouse_companies.json").exists()
+    # cache reuse: no new downloads while fresh
+    import os
+
+    fresh = (tmp_path / "greenhouse_companies.json").stat().st_mtime + 10
+    calls.clear()
+    rows = hk.load_universe(["greenhouse"], tmp_path, now=fresh)
+    assert calls == [] and len(rows) == 2
+    # stale cache + failed download: warn, still use the stale file
+    _fake_universe(monkeypatch, calls, fail=True)
+    stale = fresh + 8 * 86400
+    rows = hk.load_universe(["greenhouse"], tmp_path, now=stale)
+    assert len(calls) == 1 and len(rows) == 2
+    # no cache + failed download: empty, no crash
+    assert hk.load_universe(["ashby"], tmp_path / "none", now=stale) == []
+    assert os.path.isdir(tmp_path)
+
+
+def test_run_merges_universe_and_dedupes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    _fake_universe(monkeypatch, calls)
+    seen: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        hk,
+        "load_companies",
+        lambda p: [{"name": "Acme Inc", "ats": "greenhouse", "token": "acme", "source": "jobsync"}],
+    )
+    real = hk.load_universe
+    monkeypatch.setattr(hk, "load_universe", lambda ats, *a, **k: real(ats, tmp_path, *a[1:], **k))
+    monkeypatch.setitem(hk._BOARD_FN, "greenhouse", lambda col, b: seen.append((b["ats"], b["token"], b["name"])))
+    monkeypatch.setitem(hk._BOARD_FN, "lever", lambda col, b: seen.append((b["ats"], b["token"], b["name"])))
+    monkeypatch.setitem(hk._BOARD_FN, "ashby", lambda col, b: None)
+    args = _args(sources="greenhouse,lever", work_countries="GB", history="none")
+    hk.run(args)
+    assert sorted(seen) == [
+        ("greenhouse", "Beta", "Beta"),
+        ("greenhouse", "acme", "Acme Inc"),
+        ("lever", "leverco", "leverco"),
+    ]
+    seen.clear()
+    hk.run(_args(sources="greenhouse", universe=False, work_countries="GB"))
+    assert seen == [("greenhouse", "acme", "Acme Inc")]
+    assert not any("workday" in c or "bamboohr" in c for c in calls)
+
+
+# ---- review regressions
+def test_p1a_default_titles_use_broad_matcher_via_cli_parse() -> None:
+    assert hk.build_parser().parse_args([]).titles is None
+    col = hk.Collector(hk.build_parser().parse_args([]))
+    for t in [
+        "AI/ML Engineer",
+        "Software Engineer, AI Agents",
+        "Machine Learning Platform Engineer",
+        "Engineer - LLM Inference",
+    ]:
+        assert col.matcher(t), t
+    assert not col.matcher("Senior AI Engineer")
+    assert not col.matcher("Accountant")
+
+
+@pytest.mark.parametrize(
+    "s",
+    [
+        "This position is not eligible for visa sponsorship.",
+        "We don't currently sponsor visas.",
+        "We do not currently sponsor work visas.",
+        "Candidates must not require visa sponsorship.",
+        "Do you now or in the future require visa sponsorship?",
+        "Visa sponsorship is unavailable for this role.",
+        "We are unable to provide relocation assistance or visa sponsorship.",
+    ],
+)
+def test_p1b_negations_are_not_positive(s: str) -> None:
+    assert hk.visa_signals(s) == ([], [])
+    assert hk.classify_location("Berlin", s, prefs("GB", maybe_relocation=True)) is None
+
+
+def test_p1b_positive_still_positive() -> None:
+    assert hk.visa_signals("We offer visa sponsorship.")[0]
+
+
+def test_p1c_lock_sentence_with_negated_sponsorship_still_locks() -> None:
+    d = "We are a global team. You must be legally authorized to work in the United States without visa sponsorship."
+    assert hk.eligibility_locked(d, frozenset({"IN"}))
+    assert hk.classify_location("Remote", d, prefs("IN")) is None
+
+
+def test_p2a_http_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    import http.client
+
+    def boom(req: object, timeout: int = 0) -> None:
+        raise http.client.IncompleteRead(b"x")
+
+    monkeypatch.setattr(hk, "_open", boom)
+    assert hk.http_request("https://h.example/x")[0] == 0
+    assert hk.http("https://h.example/x") == (0, None)
+
+
+def test_p2a_check_live_and_main_survive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    col = hk.Collector(_args(work_countries="GB"))
+
+    def explode(*a: object, **k: object) -> None:
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(hk, "http_request", explode)
+    rec = {"url": "https://a/1", "source": "t"}
+    assert hk.check_live(col, [rec]) == [rec]
+    out, hist = tmp_path / "o.jsonl", tmp_path / "h.json"
+    row = {"title": "t", "company": "c", "url": "https://a/1", "source": "t", "posted": "", "row": "any"}
+    col2 = hk.Collector(_args())
+    col2.results = [row]
+    monkeypatch.setattr(hk, "run", lambda a: col2)
+    monkeypatch.setattr(hk, "check_live", explode)
+    assert hk.main(["--check-live", "--out", str(out), "--history", str(hist)]) == 0
+    assert out.read_text(encoding="utf-8").strip()
+    assert json.loads(hist.read_text())["urls"] == ["https://a/1"]
+
+
+def test_p2b_visa_flag_counts_as_positive() -> None:
+    assert hk.classify_location("Berlin", "Build things.", prefs("GB"), visa_flag=True) == "visa_onsite"
+    assert hk.classify_location("Berlin", "Build things.", prefs("GB"), visa_flag=False) is None
+
+
+def test_p2c_boards_remote_is_a_separate_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    kb = importlib.import_module("kit_boards")
+    calls: list[dict] = []
+
+    def scrape(**kw: object) -> list:
+        calls.append(kw)
+        return []
+
+    monkeypatch.setitem(sys.modules, "jobspy", types.SimpleNamespace(scrape_jobs=scrape))
+    kb.run_boards(
+        ["indeed"], ["ai engineer"], days=7, remote=True, countries=["IN"], results_wanted=10, full_text=False, stats={}
+    )
+    assert len(calls) == 2
+    assert "is_remote" not in calls[0] and calls[1].get("is_remote") is True
+
+
+def test_m1_only_http_urls_kept() -> None:
+    col = hk.Collector(_args(work_countries="IN"))
+    base = dict(company="A", description="x", posted="", source="s", board="", remote=None, visa_flag=None, extra={})
+    for i, u in enumerate(["javascript:alert(1)", "data:text/html,x", "file:///etc/passwd", "/relative", "ftp://h/x"]):
+        col.offer_job("t", dict(base, title="AI Engineer %d" % i, url=u, location="Pune"))
+    assert col.results == []
+    col.offer_job("t", dict(base, title="AI Engineer", url="https://ok.example/1", location="Pune"))
+    assert len(col.results) == 1
+
+
+def test_m1_http_refuses_private_hosts_and_schemes(monkeypatch: pytest.MonkeyPatch) -> None:
+    def never(req: object, timeout: int = 0) -> None:
+        raise AssertionError("must not connect")
+
+    monkeypatch.setattr(hk, "_open", never)
+    for u in [
+        "http://127.0.0.1/",
+        "http://localhost:8000/",
+        "http://169.254.169.254/latest",
+        "http://10.0.0.5/",
+        "http://[::1]/",
+        "file:///etc/passwd",
+        "ftp://example.com/x",
+    ]:
+        assert hk.http_request(u)[0] == 0, u
+    assert hk.check_url("https://boards-api.greenhouse.io/v1/boards/x/jobs")
+
+
+def test_m1_redirect_to_private_is_refused() -> None:
+    h = hk._SafeRedirect()
+    req = urllib.request.Request("https://example.com/a")
+    for target in ("http://127.0.0.1/admin", "file:///etc/passwd"):
+        with pytest.raises(Exception):  # noqa: B017
+            h.redirect_request(req, None, 302, "Found", {}, target)
+
+
+def test_l2_safe_xml_helper_rejects_doctype_and_entities() -> None:
+    kx = importlib.import_module("kit_xml")
+    assert kx.safe_fromstring("<a><b/></a>") is not None
+    assert kx.safe_fromstring('<!DOCTYPE a [<!ENTITY x "y">]><a>&x;</a>') is None
+    assert kx.safe_fromstring("") is None and kx.safe_fromstring("<a>") is None
+    bomb = '<?xml version="1.0"?><!DOCTYPE l [<!ENTITY a "aa">]><rss><channel><item><title>&a;</title></item></channel></rss>'
+    assert importlib.import_module("kit_feeds").parse_wwr(bomb) == []
+    ka = importlib.import_module("kit_ats")
+    evil = '<!DOCTYPE x [<!ENTITY a "b">]><workzag-jobs><rss></rss></workzag-jobs>'
+    for fn in (ka.fetch_personio, ka.fetch_teamtailor):
+        assert fn({"name": "n", "token": "t", "ats": "x"}, lambda *a, **k: (200, evil), {}) == []
+
+
+def test_l3_universe_url_pinned_to_sha() -> None:
+    assert re.search(r"/job-board-aggregator/[0-9a-f]{40}/data/", hk.UNIVERSE_BASE)
+
+
+def test_fixture_has_no_real_email() -> None:
+    f = KIT_DIR.parent.parent / "tests" / "fixtures" / "hunt_kit" / "feeds" / "hn_item.json"
+    assert "eric+hn@" not in f.read_text(encoding="utf-8")

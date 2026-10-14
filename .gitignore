@@ -106,3 +106,6 @@ graphify-out/
 # docs/harness/maintenance/claude-md-proposals.md by a designated session, via PR.
 docs/maintenance/inbox/
 .scratch/
+
+# hunt kit runtime cache (downloaded company universe; never committed)
+backend/src/hunt_kit/universe_cache/

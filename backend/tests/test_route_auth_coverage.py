@@ -70,6 +70,7 @@ ROUTE_MODULES = [
     "applications",
     "proof",
     "oauth",
+    "hunt_kit",
 ]
 
 # Route modules main.py mounts at the site ROOT (no "/api"). Only the OAuth
@@ -107,6 +108,14 @@ PUBLIC_ROUTES: dict[str, str] = {
         "S7 proof-of-application upload: the unguessable single-use token IS the credential (32 random bytes, "
         "only its SHA-256 stored, spent by one atomic UPDATE, dead after 5 minutes); no cookie to carry for an "
         "assistant's file tool. Bad tokens 404 behind a per-IP lockout, like /api/files/{token}"
+    ),
+    "/api/hunt-kit": (
+        "hunt kit index (routes/hunt_kit.py): fixed static files, no user data, no DB; an assistant's "
+        "fetch tool carries no Job360 credential (owner 2026-10-13)"
+    ),
+    "/api/hunt-kit/{name}": (
+        "one hunt kit file from a closed allowlist (KIT_FILES); unknown names 404 without touching the "
+        "filesystem; static, public data only"
     ),
     "/api/client-log": "browser error beacon — fires before or without a session",
     "/api/status": (
