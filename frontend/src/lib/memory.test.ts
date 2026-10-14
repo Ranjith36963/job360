@@ -2,8 +2,49 @@ import { describe, it, expect } from "vitest";
 import {
   CONTACT, RTW, SALARY, LANGUAGES, contactRows, equalityRows, fieldProvenance, fromInputs, inputProblem,
   isSensitive, parseLanguages, provenanceText, readRow, rtwCountryRows, rtwTopRows, salaryRow, salaryText,
-  showRow, toInputs, writeRow, logisticsRows,
+  showRow, toInputs, writeRow, logisticsRows, countrySaved, answerApprover, approvalText,
 } from "./memory";
+
+describe("country card count (ANY)", () => {
+  const block = { countries: [{ country: "ANY", remote_ok: true, onsite: "only_if_sponsored" }] };
+
+  it("remote_ok and onsite are rows, so a saved ANY record counts 2 of 6", () => {
+    const specs = rtwCountryRows("ANY");
+    const ids = specs.map((s) => s.id.split(".").pop());
+    expect(ids).toEqual(expect.arrayContaining(["remote_ok", "onsite"]));
+    expect(countrySaved(specs.map((s) => readRow(s, block)))).toBe(2);
+    expect(specs.length).toBe(6);
+    expect(showRow(specs.find((s) => s.id.endsWith("onsite"))!, "only_if_sponsored")).toBe("Only if sponsored");
+  });
+
+  it("a country with nothing saved counts 0", () => {
+    expect(countrySaved(rtwCountryRows("FR").map((s) => readRow(s, block)))).toBe(0);
+  });
+});
+
+describe("who approved a saved answer", () => {
+  const item = (approved: boolean) => ({ question: "Notice?", answer: "1 month", approved });
+  const hist = (by: string, approved: boolean, at = "2026-10-01T00:00:00Z") => ({ set_by: by, set_at: at, value: [item(approved)] });
+
+  it("web approval reads 'Approved by you'", () => {
+    const by = answerApprover([hist("web", true)], "Notice?", "1 month");
+    expect(approvalText(by, "2026-10-03T10:00:00Z")).toBe("Approved by you, 3 Oct");
+  });
+
+  it("an agent/token approval never says 'by you'", () => {
+    const by = answerApprover([hist("token:lc", true)], "Notice?", "1 month");
+    expect(approvalText(by, "2026-10-03T10:00:00Z")).toBe("Marked approved by lc, 3 Oct");
+  });
+
+  it("uses the oldest row in which it is approved (history is newest first)", () => {
+    expect(answerApprover([hist("web", true), hist("agent:Claude", false)], "Notice?", "1 month")).toBe("web");
+    expect(answerApprover([hist("web", true), hist("agent:Claude", true)], "Notice?", "1 month")).toBe("agent:Claude");
+  });
+
+  it("unknown history makes no claim", () => {
+    expect(approvalText(answerApprover([], "Notice?", "1 month"))).toBe("Approved");
+  });
+});
 
 const phone = contactRows().find((r) => r.id.endsWith(".phone"))!;
 const readPhone = (b: unknown) => readRow(phone, b);
