@@ -774,6 +774,21 @@ def setup_round_refusal(round_name: str, missing: list[str]) -> str:
     )
 
 
+def setup_round_waiting_refusal(round_name: str, parked: list[str], site_base_url: str) -> str:
+    """The 422 message for a round marked done while a value it needs is only
+    WAITING for the user's Confirm (owner decision 2026-10-14): it is not saved."""
+    return (
+        f"setup round {round_name} can't be marked done yet: {', '.join(parked)} is waiting for the "
+        f"user's Confirm and is NOT saved - the user must tap Confirm on Needs you at "
+        f"{site_base_url}/needs-you, then mark the round done"
+    )
+
+
+def parked_line(path: str, site_base_url: str) -> str:
+    """The plain line ``update_profile`` returns for each parked (waiting) path."""
+    return f"{path}: NOT saved yet — the user must tap Confirm on Needs you at {site_base_url}/needs-you"
+
+
 def setup_progress_view(progress: Any) -> dict[str, Any]:
     """``{rounds, done, total, next}`` from the stored progress. ``next`` is the
     first unfinished round in order, ``""`` when all six are done. A malformed

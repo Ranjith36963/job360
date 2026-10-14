@@ -694,6 +694,10 @@ class RecordEventResponse(BaseModel):
     # it didn't touch it (omitted `follow_up_on`, or a duplicate source that
     # wrote nothing at all — S corollary of R2).
     follow_up_on: Optional[str]
+    # Owner decision 2026-10-14 — plain sentences for the agent about a fact
+    # that is accepted but leaves the record incomplete (e.g. a reply with no
+    # `applied` event). Empty when there is nothing to say.
+    warnings: list[str] = []
 
 
 class RecordApplicationReceiptResponse(BaseModel):
@@ -1157,6 +1161,10 @@ class StatsOverallOut(BaseModel):
     reply_rate: Optional[float]
     interview_rate: Optional[float]
     offer_rate: Optional[float]
+    # Owner decision 2026-10-14 — replied/interview/offer above count only
+    # applications that ALSO have an `applied` event (so no rate exceeds 1);
+    # this is how many reached a later stage with no `applied` recorded.
+    replies_without_applied: int = 0
 
 
 class StatsCvVersionGroupOut(BaseModel):
@@ -2183,7 +2191,7 @@ async def record_event(
             kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
         if body.event_type == "proof_text":
             proof_service.log_proof_text(user, application_id, int(result["event_id"]), payload)
-        return result
+        return {**result, "warnings": await spine.missing_applied_warnings(db, application_id, body.event_type)}
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

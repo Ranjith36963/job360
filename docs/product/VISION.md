@@ -60,7 +60,7 @@ Candidate (one profile per user, versioned; multiple named profiles = later)
       ├── Contacts[]        name, role, email, linkedin — found by the agent
       ├── Receipt           frozen on "I applied": artifact versions sent, fields filled, answers,
       │                     confirmation text/number, channel, sent_at — append-only
-      └── Events[]          the history; the current status is just the last status event
+      └── Events[]          the history; the current status is the furthest stage reached (a rejection/withdrawal always applies; only a correction moves it back)
 ```
 
 **Event types (fixed list, plus free-text detail):**
