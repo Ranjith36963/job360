@@ -76,6 +76,7 @@ export function allCountries(): Country[] {
 /** The display name for a stored ISO code — the code itself if the runtime
  * cannot resolve it, so an old or unusual value never renders as blank. */
 export function countryName(code: string): string {
+  if (code === "ANY") return "Any other country";
   const found = allCountries().find((c) => c.code === code);
   return found ? found.name : code;
 }

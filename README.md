@@ -38,7 +38,7 @@ Live at **https://job360.uk** (Railway, auto-deployed from `main`).
 - **Needs you** — when the assistant would have to guess, it calls `ask_user`; you answer once, on the web or in chat, and every assistant reads the answer.
 - **Inbox check** — your choice, stored in Job360 so every assistant obeys it:
   **Auto** (reads Gmail for your open applications, records what happened, sends the outreach emails it wrote) · **Ask me first** (asks before each check, only drafts) · **Off**.
-  How often: every 3, 6 or 12 hours, or once a day.
+  How often: the choices are `services/profile/models.VALID_CHECK_EVERY_VALUES`.
 - **Read-back** — `get_application` (one job, everything), `export_history` (the whole hunt), `stats`, `list_people`, `list_receipts`, `whats_new`.
 
 ### For you (web app at job360.uk)
