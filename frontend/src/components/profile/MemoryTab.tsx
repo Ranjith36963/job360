@@ -12,7 +12,7 @@ import type { ProfileResponse } from "@/lib/types";
 import {
   ANSWERS, LOGISTICS, MEMORY_PATHS, RTW, SALARY,
   contactRows, equalityRows, fieldProvenance, isEmpty, logisticsCountryRows, logisticsRows,
-  provenanceText, readRow, rtwCountryRows, rtwTopRows, salaryRow, shortDate, showRow, writeRow,
+  answerApprover, approvalText, countrySaved, provenanceText, readRow, rtwCountryRows, rtwTopRows, salaryRow, showRow, writeRow,
   type HistoryRow, type RowSpec,
 } from "@/lib/memory";
 
@@ -141,7 +141,8 @@ export function MemoryTab() {
     const filled = specs.map((s) => ({ s, ...state(s) })).filter((x) => !isEmpty(x.value));
     const first = filled[0];
     return {
-      saved: filled.length,
+      saved: countrySaved(filled.map((x) => x.value)),
+      total: specs.length,
       firstFact: first ? `${first.s.label}: ${showRow(first.s, first.value).toLowerCase()}${first.prov ? ` · ${provenanceText(first.prov).replace(/^(\w)/, (c) => c.toLowerCase())}` : ""}` : undefined,
     };
   };
@@ -158,7 +159,7 @@ export function MemoryTab() {
           {countries.map((code, i) => {
             const sum = countrySummary(code);
             return (
-              <CountryCard key={code} code={code} total={4} saved={sum.saved} firstFact={sum.firstFact}
+              <CountryCard key={code} code={code} total={sum.total} saved={sum.saved} firstFact={sum.firstFact}
                 defaultOpen={i === 0 || extra.includes(code)}>
                 {rtwCountryRows(code).map((s) => row(s))}
                 {logisticsCountryRows(code).map((s) => row(s))}
@@ -198,7 +199,7 @@ export function MemoryTab() {
               <span className="text-muted-foreground">{String(a.question)}</span>
               <span className="min-w-0 font-medium">{String(a.answer)}</span>
               <span className="font-mono text-xs text-faint">
-                {typeof a.recorded_at === "string" && shortDate(a.recorded_at) ? `Approved by you, ${shortDate(a.recorded_at)}` : "Approved by you"}
+                {approvalText(answerApprover(histories[ANSWERS] ?? [], a.question, a.answer), a.recorded_at)}
               </span>
             </div>
           ))}
