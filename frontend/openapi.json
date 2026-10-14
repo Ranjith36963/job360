@@ -11557,7 +11557,7 @@
     },
     "/api/applications/{application_id}/submit-check": {
       "get": {
-        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). Read-only. 404 for an application that is not the\ncaller's (rule #12).",
+        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -\na stored yes clears neither. An unconfirmed email answers ``ask`` /\n``email_not_verified``. Read-only. 404 for an application that is not the\ncaller's (rule #12).",
         "operationId": "submit_check_api_applications__application_id__submit_check_get",
         "parameters": [
           {

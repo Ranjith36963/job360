@@ -62,14 +62,18 @@ this one application; `stop` - do not submit (paused, already applied, or the
 daily limit is reached). `reason` is a short code and `detail` one plain
 sentence you can show the user. Reasons: paused, already_applied,
 user_declined (the user said don't send), daily_cap_reached, duplicate_job
-(same job already applied to: `stop` in auto mode, else `ask`), unknown_site,
-ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
+(same job already applied to: `stop` in auto mode, else `ask`), unknown_site
+(`form_url` is not one plain http(s) address - no user@, % or backslash before
+the path, ASCII host), form_host_mismatch (`form_url` is not the site of your
+latest `form_filled`), email_not_verified (the user has not confirmed their
+email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
 (the user said yes to this CV: `submit`), auto_when_sure, blocked (you
 recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it). Indeed and LinkedIn
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
-`practice_run`). It is read-only: it records nothing - after a real submit,
+`practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
+email_not_verified or blocked: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
 record it with `record_application`. A yes the user gave for this exact CV
 answers `submit` with `user_approved`; if the CV is edited afterwards that yes
 no longer counts - ask again. A setting that says to apply is never a reason

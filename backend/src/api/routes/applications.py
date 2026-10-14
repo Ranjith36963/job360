@@ -28,7 +28,13 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
-from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
+from src.api.auth_deps import (
+    AUTH_FIRST,
+    CurrentUser,
+    email_verification_satisfied,
+    require_session_user,
+    require_user,
+)
 from src.api.dependencies import get_request_db
 from src.api.models import JobResponse, LessonsResponse
 from src.api.routes.bring import application_job_response
@@ -2100,7 +2106,12 @@ async def submit_check(
     ``settings_rules.may_submit`` - the same function for every caller (this route
     and the MCP ``check_submit`` tool). ``form_url`` is the address of the page
     the form is on (a bare host works too); without it the answer is ``ask``
-    (``unknown_site``). Read-only. 404 for an application that is not the
+    (``unknown_site``). The address is read strictly (``screen_form_url``): a
+    user-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host
+    or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
+    than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
+    a stored yes clears neither. An unconfirmed email answers ``ask`` /
+    ``email_not_verified``. Read-only. 404 for an application that is not the
     caller's (rule #12)."""
     try:
         app_row = await spine.get_owned_application(db, user.id, application_id)
@@ -2109,7 +2120,9 @@ async def submit_check(
         now = datetime.now(timezone.utc)
         cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
         counts = await settings_rules.load_submit_counts(db, user.id, now)
-        facts = await kit_service.gate_facts(db, user.id, app_row)
+        facts = await kit_service.gate_facts(
+            db, user.id, app_row, email_verified=email_verification_satisfied(user)
+        )
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
@@ -2120,7 +2133,7 @@ async def submit_check(
             "event": "submit_check", "user_id": safe_log_value(user.id),
             "actor": safe_log_value(actor_for(user)), "application_id": application_id,
             "decision": verdict.decision, "reason": verdict.reason,
-            "host_kind": settings_rules.host_kind(settings_rules.parse_site_host(form_url)), "result": "ok",
+            "host_kind": settings_rules.host_kind(settings_rules.screen_form_url(form_url)), "result": "ok",
         },
     )
     return {
