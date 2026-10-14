@@ -559,9 +559,9 @@ async def _duplicate_event_result(
         get_audit_logger().info(
             "application_event_type_mismatch",
             extra={
-                "event": "application_event_type_mismatch", "application_id": application_id,
-                "event_id": existing["id"], "event_type": safe_log_value(existing["event_type"]),
-                "requested_type": safe_log_value(requested_type),
+                "event": "application_event_type_mismatch",
+                "application_id": safe_log_value(application_id),
+                "event_id": safe_log_value(existing["id"]), "event_type": safe_log_value(existing["event_type"]),
             },
         )
         warnings.append(
