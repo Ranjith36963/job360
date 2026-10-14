@@ -3080,10 +3080,7 @@ export interface components {
         };
         /** Body_upload_cv_api_profile_cv_post */
         Body_upload_cv_api_profile_cv_post: {
-            /**
-             * Cv
-             * Format: binary
-             */
+            /** Cv */
             cv: string;
         };
         /** Body_upload_github_api_profile_github_post */
@@ -3093,10 +3090,7 @@ export interface components {
         };
         /** Body_upload_linkedin_api_profile_linkedin_post */
         Body_upload_linkedin_api_profile_linkedin_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_upsert_preferences_api_profile_preferences_post */
@@ -3106,10 +3100,7 @@ export interface components {
         };
         /** Body_upsert_profile_api_profile_post */
         Body_upsert_profile_api_profile_post: {
-            /**
-             * Cv
-             * Format: binary
-             */
+            /** Cv */
             cv?: string;
             /** Preferences */
             preferences?: string;
@@ -4948,6 +4939,11 @@ export interface components {
         RecordApplicationReceiptResponse: {
             /** Channel */
             channel: string;
+            /**
+             * Channel Given
+             * @default
+             */
+            channel_given: string;
             /** Confirmation */
             confirmation: string;
             /** Cover Letter Artifact Id */
@@ -4969,6 +4965,11 @@ export interface components {
             sent_at: string;
             /** Url */
             url: string;
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
         };
         /** RecordEventRequest */
         RecordEventRequest: {

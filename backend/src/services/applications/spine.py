@@ -195,6 +195,16 @@ _CHANNEL_ALIASES: dict[str, str] = {
     "website": "company_site",
     "careers_page": "company_site",
     "indeed": "job_board",
+    # Applying through a company's own applicant-tracking form is the
+    # company's site/portal, not a job board.
+    "ats_form": "company_site",
+    "ats": "company_site",
+    "application_form": "company_site",
+    "workday": "company_site",
+    "greenhouse": "company_site",
+    "lever": "company_site",
+    "ashby": "company_site",
+    "smartrecruiters": "company_site",
 }
 
 
@@ -1209,7 +1219,14 @@ async def record_receipt(
     ``channel`` is a closed set for every NEW receipt (owner decision
     2026-10-04, ``normalize_receipt_channel``) — '' stays "not said".
     """
+    channel_given = (channel or "").strip()
     channel = normalize_receipt_channel(channel)
+    warnings: list[str] = []
+    if channel_given and channel == "other" and _slug(channel_given) != "other":
+        warnings.append(
+            f"channel '{channel_given}' is not a known channel; stored as 'other' — allowed: "
+            + ", ".join(settings.APPLICATION_RECEIPT_CHANNELS)
+        )
     app_row = await get_owned_application(db, user_id, application_id)
     if app_row is None:
         raise SpineError(404, "application not found")
@@ -1301,7 +1318,8 @@ async def record_receipt(
         "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
         "cv_version_no": cv_artifact["version_no"] if cv_artifact else None,
         "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
-        "channel": channel or "", "confirmation": confirmation or "",
+        "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
+        "confirmation": confirmation or "",
         "url": f"/applications/{application_id}", "event_id": event["event_id"],
         "possible_duplicate": possible_duplicate,
     }

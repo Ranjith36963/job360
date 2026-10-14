@@ -1866,7 +1866,7 @@
       "Body_upload_cv_api_profile_cv_post": {
         "properties": {
           "cv": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "Cv",
             "type": "string"
           }
@@ -1893,7 +1893,7 @@
       "Body_upload_linkedin_api_profile_linkedin_post": {
         "properties": {
           "file": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "File",
             "type": "string"
           }
@@ -1920,7 +1920,7 @@
       "Body_upsert_profile_api_profile_post": {
         "properties": {
           "cv": {
-            "format": "binary",
+            "contentMediaType": "application/octet-stream",
             "title": "Cv",
             "type": "string"
           },
@@ -6543,6 +6543,11 @@
             "title": "Channel",
             "type": "string"
           },
+          "channel_given": {
+            "default": "",
+            "title": "Channel Given",
+            "type": "string"
+          },
           "confirmation": {
             "title": "Confirmation",
             "type": "string"
@@ -6600,6 +6605,14 @@
           "url": {
             "title": "Url",
             "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
