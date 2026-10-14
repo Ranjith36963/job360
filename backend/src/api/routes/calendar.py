@@ -63,8 +63,8 @@ def _refuse(request: Request, status: int, reason: str, user_id: Optional[str] =
 
 @router.get("/calendar-feed", response_model=CalendarFeedStatus)
 async def feed_status(
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - auth BEFORE the pooled db handle (FC-008)
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
-    user: CurrentUser = Depends(require_session_user),  # noqa: B008
 ) -> dict[str, Any]:
     cur = await db._db.execute("SELECT created_at FROM calendar_feeds WHERE user_id = ?", (user.id,))
     row = await cur.fetchone()
@@ -73,8 +73,8 @@ async def feed_status(
 
 @router.post("/calendar-feed", response_model=CalendarFeedCreated, status_code=201)
 async def create_or_rotate_feed(
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - auth BEFORE the pooled db handle (FC-008)
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
-    user: CurrentUser = Depends(require_session_user),  # noqa: B008
 ) -> dict[str, str]:
     """Create the feed, or rotate it (the old URL dies). The plain URL is in this
     response only; the database keeps the hash."""
@@ -93,8 +93,8 @@ async def create_or_rotate_feed(
 
 @router.delete("/calendar-feed", status_code=204)
 async def revoke_feed(
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - auth BEFORE the pooled db handle (FC-008)
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
-    user: CurrentUser = Depends(require_session_user),  # noqa: B008
 ) -> Response:
     await db._db.execute("DELETE FROM calendar_feeds WHERE user_id = ?", (user.id,))
     await db._db.commit()
