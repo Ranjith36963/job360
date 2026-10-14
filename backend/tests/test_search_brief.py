@@ -130,7 +130,7 @@ def test_hunt_recipe_reads_the_brief_and_names_no_country():
     text = load_recipe("hunt").text
     flat = " ".join(text.split()).lower()
     for words in ("search_brief", "counts_if", "coverage table", "word for word", "never your own summary",
-                  "the site may restrict your account", "never on a scheduled run", "7 in 10"):
+                  "never scrape or browser-search linkedin", "terms forbid automated access", "7 in 10"):
         assert words in flat, words
     # the old rule that turned "remote worldwide" into "remote from where you live"
     assert "work from where they are" not in flat
