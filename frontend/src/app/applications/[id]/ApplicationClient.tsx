@@ -373,6 +373,16 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
               </a>
             )}
             <FollowUpField applicationId={detail.id} followUpOn={detail.follow_up_on ?? null} onRecorded={load} />
+            {(detail.interview_at || detail.follow_up_on) && (
+              <a
+                href={`/api/applications/${detail.id}/calendar.ics`}
+                download
+                data-testid="add-to-calendar"
+                className="text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              >
+                Add to calendar
+              </a>
+            )}
             {ready && (
               <div className="w-full">
                 <ReadyCard card={ready.card} paused={ready.paused} onChanged={reloadAfterAsk} />

@@ -412,6 +412,25 @@ export async function deleteAccount(currentPassword: string): Promise<void> {
   });
 }
 
+// ---- Calendar feed (migration 0057) ----
+// Hand-typed: the new routes are not in the generated api-types yet.
+
+export type CalendarFeedStatus = { exists: boolean; created_at: string | null };
+
+export async function getCalendarFeed(): Promise<CalendarFeedStatus> {
+  return request<CalendarFeedStatus>("/api/calendar-feed");
+}
+
+/** Creates the feed or rotates it (the old URL dies). The plain URL is in this
+ * response ONLY - the server keeps a hash. */
+export async function createCalendarFeed(): Promise<{ url: string }> {
+  return request<{ url: string }>("/api/calendar-feed", { method: "POST" });
+}
+
+export async function revokeCalendarFeed(): Promise<void> {
+  await request<void>("/api/calendar-feed", { method: "DELETE" });
+}
+
 // ---- Step-3: Profile version diff ----
 
 export async function getProfileVersionDiff(

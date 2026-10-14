@@ -27,6 +27,10 @@ vi.mock("@/lib/api", () => ({
   me: (...args: unknown[]) => mockMe(...args),
   setTimezone: (...args: unknown[]) => mockSetTimezone(...args),
   resendVerificationEmail: (...args: unknown[]) => mockResendVerificationEmail(...args),
+  // CalendarFeedSection also lives on this page - stub it so mounting never throws.
+  getCalendarFeed: () => Promise.resolve({ exists: false, created_at: null }),
+  createCalendarFeed: vi.fn(),
+  revokeCalendarFeed: vi.fn(),
 }));
 
 /** Scope queries to the <form> containing a submit button with the given name. */
