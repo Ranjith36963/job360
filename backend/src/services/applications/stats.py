@@ -99,6 +99,24 @@ def _rates(applied: int, replied: int, interview: int, offer: int) -> dict[str, 
     }
 
 
+def _gate_on_applied(rows: list[dict[str, Any]]) -> int:
+    """Owner decision 2026-10-14 — a rate is "of the applications you applied
+    to", so it can never exceed 1: ``replied`` / ``interview`` / ``offer`` are
+    counted only on an application that ALSO has an ``applied`` event. The
+    ones that reached a later stage with no ``applied`` recorded are not
+    dropped silently — they are counted (and returned) as
+    ``replies_without_applied`` so the agent can ask the user and fill the gap.
+    Mutates ``rows`` in place."""
+    without = 0
+    for r in rows:
+        if r["applied"]:
+            continue
+        if r["replied"] or r["interview"] or r["offer"]:
+            without += 1
+        r["replied"] = r["interview"] = r["offer"] = 0
+    return without
+
+
 def _counts(rows: list[dict[str, Any]]) -> dict[str, int]:
     return {
         "brought": len(rows),
@@ -364,8 +382,9 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
     rows = [dict(r) for r in await cur.fetchall()]
     applications_truncated = len(rows) > limit
     rows = rows[:limit]
+    replies_without_applied = _gate_on_applied(rows)
 
-    overall = _summarize(rows)
+    overall = {**_summarize(rows), "replies_without_applied": replies_without_applied}
 
     by_cv_version, cv_truncated = _group(
         rows, key_field="cv_label", label_key="label", with_profile_versions=True

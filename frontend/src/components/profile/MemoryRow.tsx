@@ -35,6 +35,8 @@ interface MemoryRowProps {
   amberEmpty?: boolean;
   /** Write the new value (undefined = clear). Throws when the save fails. */
   onSave: (next: unknown) => Promise<void>;
+  /** Confirm an inferred fact as the user's own (POST /profile/edits/keep). */
+  onConfirm?: () => Promise<void>;
 }
 
 const FIELD =
@@ -97,7 +99,7 @@ type Mode = "view" | "edit" | "confirm-edit" | "confirm-back";
 
 /** One remembered fact: key · value · who saved it · Edit. Editing asks first
  *  for the sensitive ones; a changed row offers "was: …" and Take back. */
-export function MemoryRow({ spec, value, provenance, emptyNote, compact, amberEmpty, onSave }: MemoryRowProps) {
+export function MemoryRow({ spec, value, provenance, emptyNote, compact, amberEmpty, onSave, onConfirm }: MemoryRowProps) {
   const [mode, setMode] = useState<Mode>("view");
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -182,6 +184,30 @@ export function MemoryRow({ spec, value, provenance, emptyNote, compact, amberEm
       </span>
       <span className="font-mono text-xs text-faint">
         {provenance ? provenanceText(provenance) : empty ? (emptyNote ?? "") : ""}
+        {provenance?.unconfirmed && !empty && (
+          <>
+            <span data-testid="fact-unconfirmed" className="ml-2 text-warning">unconfirmed</span>
+            {onConfirm && (
+              <button
+                type="button" data-testid="fact-confirm" disabled={busy}
+                className={`ml-2 underline underline-offset-2 hover:text-foreground ${TAP}`}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await onConfirm();
+                    toast.success("Confirmed.");
+                  } catch (err: unknown) {
+                    toast.error(apiErrorMessage(err, "Could not confirm that."));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Confirm
+              </button>
+            )}
+          </>
+        )}
       </span>
       {mode === "view" && (
         <button

@@ -176,6 +176,11 @@
       "AgentEditOut": {
         "description": "One live ASSISTANT edit on ``GET /profile``'s ``agent_edits``.\n\n``previous_value`` is the field's base value \u2014 what the CV / the user's\nown saves hold under this edit, and so exactly what \"Take back\" restores\n(the label never promises a value Take back would not produce).\n``None`` / ``\"\"`` / ``[]`` all mean \"it was empty\" \u2014 the page words them\nthat way.",
         "properties": {
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
           "path": {
             "title": "Path",
             "type": "string"
@@ -189,6 +194,11 @@
           },
           "set_by": {
             "title": "Set By",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
             "type": "string"
           },
           "value": {
@@ -2830,6 +2840,172 @@
         "title": "CvSeenRequest",
         "type": "object"
       },
+      "DoctorAuth": {
+        "description": "How this caller is signed in: ``session`` (browser), ``token`` (personal\n``j360_\u2026`` token) or ``oauth`` (an OAuth-connected assistant), and the\nactor string every event it records will carry.",
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "actor"
+        ],
+        "title": "DoctorAuth",
+        "type": "object"
+      },
+      "DoctorMissingItem": {
+        "description": "One thing the profile lacks: a path-like ``key`` and a plain ``why``.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "why"
+        ],
+        "title": "DoctorMissingItem",
+        "type": "object"
+      },
+      "DoctorOutreach": {
+        "description": "Today's outreach (the user's own day): ``sent_today`` recorded sends,\n``daily_max`` the cap check_outreach applies, ``blocked_today`` how many\ncheck_outreach answers today were ``stop``.",
+        "properties": {
+          "blocked_today": {
+            "title": "Blocked Today",
+            "type": "integer"
+          },
+          "daily_max": {
+            "title": "Daily Max",
+            "type": "integer"
+          },
+          "sent_today": {
+            "title": "Sent Today",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sent_today",
+          "daily_max",
+          "blocked_today"
+        ],
+        "title": "DoctorOutreach",
+        "type": "object"
+      },
+      "DoctorResponse": {
+        "description": "``GET /api/doctor`` - one read of \"what state is this account in, and\nwhat should the assistant do next?\". Every field is built defensively: a\nuser with no profile gets ``profile_exists: false``, never a 404.",
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/DoctorAuth"
+          },
+          "email_verified": {
+            "title": "Email Verified",
+            "type": "boolean"
+          },
+          "latest_event_recorded_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Event Recorded At"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/DoctorMissingItem"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "next_step": {
+            "title": "Next Step",
+            "type": "string"
+          },
+          "open_asks": {
+            "title": "Open Asks",
+            "type": "integer"
+          },
+          "outreach": {
+            "$ref": "#/components/schemas/DoctorOutreach"
+          },
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "paused_until": {
+            "title": "Paused Until",
+            "type": "string"
+          },
+          "profile_exists": {
+            "title": "Profile Exists",
+            "type": "boolean"
+          },
+          "setup": {
+            "$ref": "#/components/schemas/DoctorSetup"
+          },
+          "waiting_settings": {
+            "title": "Waiting Settings",
+            "type": "integer"
+          },
+          "whats_new_hint": {
+            "title": "Whats New Hint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "auth",
+          "email_verified",
+          "profile_exists",
+          "setup",
+          "missing",
+          "paused",
+          "paused_until",
+          "open_asks",
+          "waiting_settings",
+          "whats_new_hint",
+          "outreach",
+          "next_step"
+        ],
+        "title": "DoctorResponse",
+        "type": "object"
+      },
+      "DoctorSetup": {
+        "description": "The six-round setup: rounds done, of ``total``; ``next`` = first unfinished (\"\" when all done).",
+        "properties": {
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "next": {
+            "title": "Next",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "done",
+          "total",
+          "next"
+        ],
+        "title": "DoctorSetup",
+        "type": "object"
+      },
       "EmailChangeRequest": {
         "properties": {
           "current_password": {
@@ -4537,6 +4713,39 @@
         "title": "MagicLinkRequest",
         "type": "object"
       },
+      "MissingToolRequest": {
+        "additionalProperties": false,
+        "description": "``POST /api/missing-tools`` body. ``name`` must match\n``^[a-z][a-z0-9_]{1,59}$``; ``why`` is at most 280 characters.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "why": {
+            "default": "",
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MissingToolRequest",
+        "type": "object"
+      },
+      "MissingToolResponse": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "MissingToolResponse",
+        "type": "object"
+      },
       "MorningCheckOut": {
         "properties": {
           "now": {
@@ -4745,6 +4954,45 @@
           "last_used_at"
         ],
         "title": "OAuthGrantOut",
+        "type": "object"
+      },
+      "OutreachCheckResponse": {
+        "description": "The answer to \"may I press Send on this outreach email?\" - one gate\n(``settings_rules.may_send_outreach``). ``send``: press Send in Gmail, then\nrecord ``outreach_sent``; ``ask``: save a Gmail draft and ask_user; ``stop``:\ndo not send. ``sent_today`` / ``daily_max``: recorded sends today vs the cap.",
+        "properties": {
+          "daily_max": {
+            "title": "Daily Max",
+            "type": "integer"
+          },
+          "decision": {
+            "enum": [
+              "send",
+              "ask",
+              "stop"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "sent_today": {
+            "title": "Sent Today",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decision",
+          "reason",
+          "detail",
+          "sent_today",
+          "daily_max"
+        ],
+        "title": "OutreachCheckResponse",
         "type": "object"
       },
       "OutreachEntryOut": {
@@ -5180,6 +5428,21 @@
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "user_said",
+                  "agent_inferred"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           },
           "value": {
             "title": "Value"
@@ -7923,6 +8186,11 @@
             "title": "Replied",
             "type": "integer"
           },
+          "replies_without_applied": {
+            "default": 0,
+            "title": "Replies Without Applied",
+            "type": "integer"
+          },
           "reply_rate": {
             "anyOf": [
               {
@@ -8684,6 +8952,14 @@
               "$ref": "#/components/schemas/NormalizedOut"
             },
             "title": "Normalized",
+            "type": "array"
+          },
+          "not_saved": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Not Saved",
             "type": "array"
           },
           "profile": {
@@ -13591,6 +13867,156 @@
         ]
       }
     },
+    "/api/contacts/{contact_id}/outreach-check": {
+      "get": {
+        "description": "THE one gate before pressing Send on an outreach email (feature 10).\n\nReads the user's settings, this contact's facts and the saved message\nversion ``message_id`` (the ``contact_outreach`` row ``save_artifact\nkind=\"outreach\"`` created), plus today's recorded sends, then answers\nthrough ``settings_rules.may_send_outreach`` - the same function for this\nroute and the MCP ``check_outreach`` tool. Read-only: it records nothing\nexcept one audit line. 404 for a contact that is not the caller's (rule #12).",
+        "operationId": "outreach_check_api_contacts__contact_id__outreach_check_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutreachCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Outreach Check",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/doctor": {
+      "get": {
+        "description": "The account's state in one read, plus ONE closed ``next_step``:\n``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.\nRead-only; email verification is NOT required (an unverified user is told\nto verify). No 404 when there is no profile (``profile_exists: false``).",
+        "operationId": "doctor_api_doctor_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoctorResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Doctor",
+        "tags": [
+          "doctor"
+        ]
+      }
+    },
     "/api/files/{token}": {
       "get": {
         "description": "Serve one kit file. See the module docstring for the rules.",
@@ -13887,6 +14313,82 @@
         "summary": "Livez",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/missing-tools": {
+      "post": {
+        "description": "Store \"a tool I needed does not exist\" for the owner. It only stores.\n422 when ``name`` is not ``^[a-z][a-z0-9_]{1,59}$`` or ``why`` is over 280\ncharacters (the message names the rule, never the value); 429 past\n``MISSING_TOOL_REPORTS_MAX_PER_DAY`` reports in the last 24 hours.",
+        "operationId": "report_missing_tool_api_missing_tools_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MissingToolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissingToolResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Missing Tool",
+        "tags": [
+          "doctor"
         ]
       }
     },

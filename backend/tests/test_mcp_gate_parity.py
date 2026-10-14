@@ -96,6 +96,12 @@ TOOL_ROUTES = {
     "get_application_kit": ("applications", "get_application_kit", {"application_id": 987654321}),
     # Proof of application (owner decision 2026-10-10, S7) - require_user, no email gate.
     "get_proof_upload_link": ("proof", "create_proof_link", {"application_id": 987654321}),
+    # The outreach send gate (feature 10) - require_user, read-only, no email gate.
+    "check_outreach": ("applications", "outreach_check", {"contact_id": 987654321, "message_id": 1}),
+    # The agent doctor + missing-tool report (feature 7) - require_user, no email gate
+    # (an unverified user is TOLD to verify by doctor, never refused by it).
+    "doctor": ("doctor", "doctor", {}),
+    "report_missing_tool": ("doctor", "report_missing_tool", {"name": "x"}),
 }
 
 
