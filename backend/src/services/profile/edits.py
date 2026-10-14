@@ -721,7 +721,7 @@ WEB_ACTOR = "web"
 
 # Feature 9 - WHO SAID IT. ``user_said`` = the user told the assistant (or typed
 # it on the web); ``agent_inferred`` = the assistant worked it out. ``''`` is a
-# legacy row (before migration 0056): nobody confirmed it, so it reads as
+# legacy row (before migration 0057): nobody confirmed it, so it reads as
 # unconfirmed. ``set_by`` records who WROTE a fact, not whether the user said it.
 SOURCE_USER_SAID = "user_said"
 SOURCE_AGENT_INFERRED = "agent_inferred"

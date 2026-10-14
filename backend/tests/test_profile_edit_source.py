@@ -1,4 +1,4 @@
-"""Feature 9 - confirmed vs inferred facts (migration 0056_profile_edit_source).
+"""Feature 9 - confirmed vs inferred facts (migration 0057_profile_edit_source).
 
 ``set_by`` says who WROTE a fact; ``source`` says whether the USER said it.
 Helpers are copied, never imported from another test module (a cross-module
@@ -160,7 +160,7 @@ def test_kit_marks_inferred_answer_unconfirmed():
 
 @pytest.mark.asyncio
 async def test_legacy_agent_rows_read_unconfirmed(authenticated_async_context, fixture_user_id):
-    """A row written before migration 0056 has source '' - nobody confirmed it."""
+    """A row written before migration 0057 has source '' - nobody confirmed it."""
     import json
 
     from src.core.settings import DB_PATH
