@@ -2255,7 +2255,9 @@ async def record_event(
             proof_service.log_proof_text(user, application_id, int(result["event_id"]), payload)
         # Keep append_event's own warnings (a duplicate message_id recorded as another type)
         # and add the reply-before-applied one; never replace one list with the other.
-        missing = await spine.missing_applied_warnings(db, application_id, body.event_type)
+        # Judge the STORED type: a duplicate message_id returns the existing event.
+        stored_type = str(result.get("event_type") or body.event_type)
+        missing = await spine.missing_applied_warnings(db, application_id, stored_type)
         return {**result, "warnings": [*result.get("warnings", []), *missing]}
     except SpineError as exc:
         _raise(exc)

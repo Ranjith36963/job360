@@ -193,6 +193,39 @@ async def test_dedupe_with_different_type_warns(authenticated_async_context):
         ]
 
 
+_NO_APPLIED = "no applied event recorded for this application — ask the user when they applied, then record_application"
+
+
+@pytest.mark.asyncio
+async def test_dedupe_missing_applied_warning_judges_stored_type(authenticated_async_context):
+    """The reply-before-applied warning follows the STORED event type, not the
+    retried one: a stored `replied` still warns on a duplicate, and a message
+    stored as `note` retried as `offer` does not."""
+    async with authenticated_async_context() as client:
+        a = await _bring(client)
+        url = f"/api/applications/{a['application_id']}/events"
+        replied_src = {"kind": "email", "message_id": "m-r", "sender": "a@b.c", "subject": "s"}
+        first = await client.post(url, json={"event_type": "replied", "source": replied_src})
+        assert first.status_code == 201, first.text
+        assert first.json()["warnings"] == [_NO_APPLIED]
+        again = await client.post(url, json={"event_type": "note", "source": replied_src})
+        body = again.json()
+        assert body["already_existed"] is True and body["event_type"] == "replied"
+        assert _NO_APPLIED in body["warnings"], body["warnings"]
+
+        b = await _bring(client, _AD2)
+        url_b = f"/api/applications/{b['application_id']}/events"
+        note_src = {"kind": "email", "message_id": "m-n", "sender": "a@b.c", "subject": "s"}
+        note = await client.post(url_b, json={"event_type": "note", "detail": "x", "source": note_src})
+        assert note.status_code == 201, note.text
+        assert note.json()["warnings"] == []
+        retried = await client.post(url_b, json={"event_type": "offer", "source": note_src})
+        body = retried.json()
+        assert body["already_existed"] is True and body["event_type"] == "note"
+        assert _NO_APPLIED not in body["warnings"], body["warnings"]
+        assert len(body["warnings"]) == 1 and body["warnings"][0].startswith("message_id already recorded as note")
+
+
 # ── 5. hunt-kit index urls are absolute ─────────────────────────────────────
 
 

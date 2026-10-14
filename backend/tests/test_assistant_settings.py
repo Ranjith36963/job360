@@ -1638,6 +1638,40 @@ async def test_setup_round_same_call_parked_value_message(authenticated_async_co
         assert view["setup_progress"]["done"] == 0 and view["waiting"] == []
 
 
+def test_setup_round_waiting_refusal_names_other_missing_paths():
+    """Held/waiting paths keep their wording; required paths simply not sent are
+    named too, so the caller resends everything in one call. Default: unchanged."""
+    rtw = "user_info.right_to_work"
+    base = rules.setup_round_waiting_refusal("targets", [SCORE], "https://x.example")
+    assert "also missing" not in base
+    msg = rules.setup_round_waiting_refusal("targets", [SCORE], "https://x.example", other=[TITLES, rtw])
+    assert msg.startswith(base)
+    assert msg.endswith(f"; also missing {TITLES}, {rtw} - ask the user, then save them in the same call")
+    held = rules.setup_round_waiting_refusal("targets", [], "https://x.example", held_now=[SCORE], other=[rtw])
+    assert f"{SCORE} needs the user's OK" in held and f"also missing {rtw}" in held
+
+
+@pytest.mark.asyncio
+async def test_setup_round_waiting_refusal_also_names_unsent_paths(authenticated_async_context, fixture_user_id):
+    """A required path waiting for Confirm AND another required path never sent:
+    the 422 names both."""
+    rtw = "user_info.right_to_work"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (await _patch(client, _e(BELOW, "auto"))).status_code == 200
+        token = await _mint_token(client)
+    at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    async with _bearer_client(token) as agent:
+        parked = (await _patch(agent, _e(SCORE, 0))).json()
+        assert [w["path"] for w in parked["waiting"]] == [SCORE], parked
+        resp = await _patch(agent, _e(PROGRESS, _done("targets", at=at)))
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert f"{SCORE} is waiting for the user's Confirm" in detail
+        assert f"also missing {rtw} - ask the user, then save them in the same call" in detail
+        assert TITLES not in detail, "a saved answer is not named"
+
+
 @pytest.mark.asyncio
 async def test_first_score_line_never_parks(authenticated_async_context, fixture_user_id):
     """The real setup-interview run: auto switches requested (parked) first, THEN the

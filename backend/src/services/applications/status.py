@@ -89,6 +89,13 @@ def _when(raw: Any) -> Optional[datetime]:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
+def _event_when(e: Mapping[str, Any]) -> Optional[datetime]:
+    """When an event happened: ``occurred_at``, falling back to ``recorded_at``
+    when it is empty or unparseable (so the ending/after-ending comparison
+    never silently loses an event)."""
+    return _when(e.get("occurred_at")) or _when(e.get("recorded_at"))
+
+
 def replay_status(
     events: Sequence[Mapping[str, Any]],
     *,
@@ -140,7 +147,7 @@ def replay_status(
             continue
         rank = PROGRESS_RANK.get(mapped)
         if mapped in TERMINAL_STATUSES:
-            status, ended_at = mapped, _when(e.get("occurred_at"))
+            status, ended_at = mapped, _event_when(e)
             continue
         if mapped == GHOSTED:
             if status not in TERMINAL_STATUSES and best <= GHOSTED_MAX_RANK:
@@ -149,7 +156,7 @@ def replay_status(
         if rank is None:  # pragma: no cover — every other status event is a progress rung
             continue
         if status in TERMINAL_STATUSES:
-            occurred = _when(e.get("occurred_at"))
+            occurred = _event_when(e)
             if ended_at is not None and occurred is not None and occurred > ended_at:
                 status, best, ended_at = mapped, rank, None
             continue

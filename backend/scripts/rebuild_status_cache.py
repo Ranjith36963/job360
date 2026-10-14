@@ -40,9 +40,9 @@ from src.services.applications.status import replay_status, stage_for_status  # 
 def rebuild(conn: pgsync.Connection, *, apply: bool = False) -> dict[str, Any]:
     """Replay every application; return ``{checked, changed, skipped, changes}``.
     Writes the differing rows only when ``apply`` is true, and only where the
-    row still holds the status/stage that was read — a row a live write
+    row still holds the status/stage/last_event_at that was read — a row a live write
     changed in between is left alone and listed in ``skipped``."""
-    apps = conn.execute("SELECT id, status, stage FROM applications ORDER BY id").fetchall()
+    apps = conn.execute("SELECT id, status, stage, last_event_at FROM applications ORDER BY id").fetchall()
     events: dict[int, list[dict[str, Any]]] = {}
     for r in conn.execute(
         "SELECT id, application_id, event_type, corrects_event_id, recorded_at, occurred_at "
@@ -70,10 +70,14 @@ def rebuild(conn: pgsync.Connection, *, apply: bool = False) -> dict[str, Any]:
             # Compare-and-set: write only if the row still holds what we read.
             # A live append_event between our read and this UPDATE already
             # re-derived the slot from the full log, so we must not clobber it.
+            # last_event_at is in the predicate too: an event appended after our
+            # read (even one that left status/stage unchanged) means this replay
+            # was computed from a stale log, so the row is skipped.
             cur = conn.execute(
                 "UPDATE applications SET status = ?, stage = ? "
-                "WHERE id = ? AND status = ? AND stage IS NOT DISTINCT FROM ?",
-                (new_status, new_stage, int(app["id"]), app["status"], app["stage"]),
+                "WHERE id = ? AND status = ? AND stage IS NOT DISTINCT FROM ? "
+                "AND last_event_at IS NOT DISTINCT FROM ?",
+                (new_status, new_stage, int(app["id"]), app["status"], app["stage"], app["last_event_at"]),
             )
             if cur.rowcount == 0:
                 skipped.append(int(app["id"]))

@@ -176,6 +176,22 @@ def test_late_applied_does_not_undo_ghosted():
     assert replay_status([ev(1, "applied"), ev(2, "ghosted"), ev(3, "applied"), ev(4, "replied")]) == "replied"
 
 
+def test_ending_without_occurred_at_falls_back_to_recorded_at():
+    """An empty/unparseable occurred_at reads as recorded_at — both for the
+    ending's time and for the later event compared against it."""
+
+    def ev(i: int, t: str, occurred: str = "") -> dict[str, Any]:
+        return {"id": i, "event_type": t, "recorded_at": f"2026-10-14T10:00:0{i}+00:00", "occurred_at": occurred}
+
+    # ending and the later news both lack occurred_at: recorded order decides
+    assert replay_status([ev(1, "applied"), ev(2, "rejected"), ev(3, "interview_requested")]) == "interview_requested"
+    assert replay_status([ev(1, "applied"), ev(2, "rejected", "garbage"), ev(3, "offer", "not-a-date")]) == "offer"
+    # the ending lacks occurred_at; news that HAPPENED before it was recorded stays closed
+    assert replay_status([ev(1, "applied"), ev(2, "rejected"), ev(3, "replied", "2026-10-13T09:00:00+00:00")]) == "rejected"
+    # the ending has occurred_at; a later record without one is judged by recorded_at
+    assert replay_status([ev(1, "applied"), ev(2, "rejected", "2026-10-15T09:00:00+00:00"), ev(3, "replied")]) == "rejected"
+
+
 @pytest.mark.asyncio
 async def test_replied_without_applied_warns(authenticated_async_context):
     async with authenticated_async_context() as client:
@@ -285,7 +301,7 @@ async def test_rebuild_status_cache_dry_run(authenticated_async_context, capsys)
 
             def execute(self, sql: str, params: Any = ()) -> Any:
                 cur = self.inner.execute(sql, params)
-                if sql.startswith("SELECT id, status, stage FROM applications"):
+                if sql.startswith("SELECT id, status, stage"):
                     rows = cur.fetchall()
                     self.inner.execute("UPDATE applications SET status = 'offer', stage = 'offer' WHERE id = ?", (app_id,))
                     return type("C", (), {"fetchall": lambda _self: rows})()
@@ -298,3 +314,44 @@ async def test_rebuild_status_cache_dry_run(authenticated_async_context, capsys)
         assert raced["skipped"] == [app_id] and raced["changed"] == 0
         row = conn.execute("SELECT status, stage FROM applications WHERE id = ?", (app_id,)).fetchone()
         assert tuple(row) == ("offer", "offer"), "the live write survives"
+
+
+@pytest.mark.asyncio
+async def test_rebuild_status_cache_skips_replay_from_stale_event_log(authenticated_async_context):
+    """An event appended after the script read the log bumps last_event_at even
+    when status/stage stay the same: the stale replay must be skipped."""
+    from src.core import settings
+    from src.repositories import pgsync
+
+    script = _load_script()
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _event(client, app_id, "applied")
+        await _event(client, app_id, "interview_requested")
+
+    with pgsync.connect(str(settings.DB_PATH)) as conn:
+        conn.execute("UPDATE applications SET status = 'applied', stage = 'applied' WHERE id = ?", (app_id,))
+
+        class _LateEvent:
+            def __init__(self, inner: Any) -> None:
+                self.inner = inner
+
+            def execute(self, sql: str, params: Any = ()) -> Any:
+                cur = self.inner.execute(sql, params)
+                if sql.startswith("SELECT id, application_id, event_type"):
+                    rows = cur.fetchall()
+                    # a live event lands after the log was read; status/stage unchanged
+                    self.inner.execute(
+                        "UPDATE applications SET last_event_at = ? WHERE id = ?",
+                        ("2099-01-01T00:00:00+00:00", app_id),
+                    )
+                    return type("C", (), {"fetchall": lambda _self: rows})()
+                return cur
+
+            def commit(self) -> None:
+                self.inner.commit()
+
+        raced = script.rebuild(_LateEvent(conn), apply=True)
+        assert raced["skipped"] == [app_id] and raced["changed"] == 0
+        row = conn.execute("SELECT status, stage FROM applications WHERE id = ?", (app_id,)).fetchone()
+        assert tuple(row) == ("applied", "applied"), "the stale replay was not written"

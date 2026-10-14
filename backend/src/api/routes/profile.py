@@ -679,9 +679,10 @@ def _batch_state_rejection(
         if missing:
             held = [m for m in missing if m in held_now]
             parked = [m for m in missing if m in waiting_paths and m not in held_now]
+            other = [m for m in missing if m not in held and m not in parked]
             detail = (
                 settings_rules.setup_round_waiting_refusal(
-                    round_name, parked, settings.SITE_BASE_URL, held_now=held
+                    round_name, parked, settings.SITE_BASE_URL, held_now=held, other=other
                 )
                 if parked or held else settings_rules.setup_round_refusal(round_name, missing)
             )
