@@ -3081,7 +3081,10 @@ export interface components {
         };
         /** Body_upload_cv_api_profile_cv_post */
         Body_upload_cv_api_profile_cv_post: {
-            /** Cv */
+            /**
+             * Cv
+             * Format: binary
+             */
             cv: string;
         };
         /** Body_upload_github_api_profile_github_post */
@@ -3091,7 +3094,10 @@ export interface components {
         };
         /** Body_upload_linkedin_api_profile_linkedin_post */
         Body_upload_linkedin_api_profile_linkedin_post: {
-            /** File */
+            /**
+             * File
+             * Format: binary
+             */
             file: string;
         };
         /** Body_upsert_preferences_api_profile_preferences_post */
@@ -3101,7 +3107,10 @@ export interface components {
         };
         /** Body_upsert_profile_api_profile_post */
         Body_upsert_profile_api_profile_post: {
-            /** Cv */
+            /**
+             * Cv
+             * Format: binary
+             */
             cv?: string;
             /** Preferences */
             preferences?: string;
