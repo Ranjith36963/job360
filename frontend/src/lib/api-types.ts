@@ -2582,6 +2582,11 @@ export interface components {
          *     that way.
          */
         AgentEditOut: {
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
             /** Path */
             path: string;
             /** Previous Value */
@@ -2590,6 +2595,11 @@ export interface components {
             set_at: string;
             /** Set By */
             set_by: string;
+            /**
+             * Source
+             * @default
+             */
+            source: string;
             /** Value */
             value?: unknown;
         };
@@ -4558,6 +4568,8 @@ export interface components {
         ProfileEditIn: {
             /** Path */
             path: string;
+            /** Source */
+            source?: ("user_said" | "agent_inferred") | null;
             /** Value */
             value?: unknown;
         };

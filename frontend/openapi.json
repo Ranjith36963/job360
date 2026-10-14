@@ -176,6 +176,11 @@
       "AgentEditOut": {
         "description": "One live ASSISTANT edit on ``GET /profile``'s ``agent_edits``.\n\n``previous_value`` is the field's base value \u2014 what the CV / the user's\nown saves hold under this edit, and so exactly what \"Take back\" restores\n(the label never promises a value Take back would not produce).\n``None`` / ``\"\"`` / ``[]`` all mean \"it was empty\" \u2014 the page words them\nthat way.",
         "properties": {
+          "confirmed": {
+            "default": false,
+            "title": "Confirmed",
+            "type": "boolean"
+          },
           "path": {
             "title": "Path",
             "type": "string"
@@ -189,6 +194,11 @@
           },
           "set_by": {
             "title": "Set By",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
             "type": "string"
           },
           "value": {
@@ -5418,6 +5428,21 @@
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "user_said",
+                  "agent_inferred"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           },
           "value": {
             "title": "Value"

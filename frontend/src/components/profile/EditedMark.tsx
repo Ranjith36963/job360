@@ -7,6 +7,7 @@ import {
   formatEditValue,
   formatEditedDate,
   isAssistantActor,
+  isUnconfirmed,
 } from "@/lib/agent-edits";
 
 /** "Changed by Claude · was £45k  [Keep] [Take back]" — the mark next to any
@@ -32,6 +33,7 @@ export function EditedMark({
   const [pending, setPending] = useState<"keep" | "take-back" | null>(null);
   if (!edit || !isAssistantActor(edit.set_by)) return null;
   const who = actorName(edit.set_by);
+  const unconfirmed = isUnconfirmed(edit);
   const was = formatEditValue(edit.previous_value, edit.path);
 
   const run = (kind: "keep" | "take-back", fn: (path: string) => Promise<void>) =>
@@ -60,16 +62,25 @@ export function EditedMark({
       >
         Changed by {who} · was {was}
       </span>
+      {unconfirmed && (
+        <span
+          data-testid="unconfirmed-badge"
+          title="Your assistant worked this out. It is not confirmed until you say so."
+          className="rounded-md bg-warning-soft px-2 py-0.5 font-mono text-[10px] font-medium text-warning"
+        >
+          unconfirmed
+        </span>
+      )}
       {onKeep && (
         <button
           type="button"
           data-testid="keep"
-          aria-label={`Keep ${who}'s change`}
+          aria-label={unconfirmed ? `Confirm ${who}'s change` : `Keep ${who}'s change`}
           disabled={pending !== null}
           onClick={run("keep", onKeep)}
           className={buttonClass}
         >
-          {pending === "keep" ? "Keeping…" : "Keep"}
+          {pending === "keep" ? (unconfirmed ? "Confirming…" : "Keeping…") : unconfirmed ? "Confirm" : "Keep"}
         </button>
       )}
       {onTakeBack && (

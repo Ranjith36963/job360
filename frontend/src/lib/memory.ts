@@ -442,8 +442,9 @@ export function showRow(spec: RowSpec, value: unknown): string {
 
 // ---- Provenance ------------------------------------------------------------
 
-export interface HistoryRow { set_by: string; set_at: string; value?: unknown }
-export interface Provenance { by: string; at: string; previous: unknown }
+export interface HistoryRow { set_by: string; set_at: string; value?: unknown; source?: string }
+/** `unconfirmed` (feature 9): an assistant wrote it without the user's word. */
+export interface Provenance { by: string; at: string; previous: unknown; unconfirmed?: boolean }
 
 function stable(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
@@ -469,6 +470,7 @@ export function fieldProvenance(
     const val = read(row.value ?? null);
     if (!same(val, prev)) {
       last = { by: row.set_by, at: row.set_at, previous: prev };
+      if (row.set_by !== "web" && row.source !== "user_said") last.unconfirmed = true;
       prev = val;
     }
   }

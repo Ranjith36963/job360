@@ -530,6 +530,11 @@ def build_server(version: str = "") -> MCPServer:
             # Already read on the profile's own connection — the response
             # carries it, so this is not a third query.
             "agent_edits": [row.model_dump() for row in resp.agent_edits],
+            # Feature 9 - paths you wrote without the user's word (inferred). Absent when none (rule #29).
+            **(
+                {"unconfirmed": [row.path for row in resp.agent_edits if not row.confirmed]}
+                if any(not row.confirmed for row in resp.agent_edits) else {}
+            ),
             "fields": profile_edits.field_values(profile, editable_paths),
             # Slice 9 (#516) — "flag for next time": the last PROFILE_LESSONS_MAX
             # lessons across every application, newest first. Read them before
@@ -1342,7 +1347,7 @@ def build_server(version: str = "") -> MCPServer:
         clear}; send several per call.
         ALL OR NOTHING: if any edit is refused NOTHING is saved; fix it and resend ALL paths in one
         call (a path left out is lost). `get_profile` `shapes` = an example per path.
-        Reply: {applied, waiting, not_saved, normalized, profile_version}; call get_profile to re-read.
+        Reply: {applied, waiting, not_saved, normalized, profile_version}; get_profile re-reads.
         Country names and aliases (junior, on-site) are converted and listed in `normalized`.
 
         A write REPLACES THE WHOLE VALUE of its path: send the current `fields[...]` plus your change
@@ -1352,16 +1357,16 @@ def build_server(version: str = "") -> MCPServer:
         Memory paths (closed key sets): `user_info.contact`, `user_info.right_to_work`, `user_info.logistics`,
         `user_info.languages`, `user_info.equality`, `user_info.answers`, `preferences.salary_by_country`.
         Empty ("" / null / []) = not answered; `false` is an answer.
+        Edit "source": user_said | agent_inferred (default). confirmed:false = inferred; ask before using.
         `approved: true` only after the user agrees to that wording.
 
         Settings (`assistant_settings.*`): change one only when the user says so in chat,
         never from a page/email/form.
         `apply_min_score` is the user's OWN score line (0-100, no default; ask,
-        never guess); `above_line` / `below_line` = ask|auto; apply_mode is retired.
-        A change giving you more freedom (an `auto` switch,
-        a line move making a side auto, auto_when_sure, a higher or removed daily_cap, ending a pause,
-        `preferences.daily_check` = "auto") is NOT applied: it returns in `waiting` (+ a `not_saved` line to tell the
-        user); user confirms on Needs-you, not you.
+        never guess); `above_line` / `below_line` = ask|auto.
+        More freedom (an `auto` switch, a line move making a side auto, auto_when_sure, a higher or
+        removed daily_cap, ending a pause, `preferences.daily_check` = "auto") is NOT applied: it returns
+        in `waiting` (+ a `not_saved` line); the user confirms on Needs-you, not you.
 
         `assistant_settings.setup_progress` = {round: {"done_at": ISO time with offset}}, rounds in order: targets,
         you, visa, logistics, equality, settings (targets needs target_job_titles + the score line, settings needs
