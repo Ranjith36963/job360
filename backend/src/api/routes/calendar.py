@@ -79,9 +79,10 @@ async def create_or_rotate_feed(
     """Create the feed, or rotate it (the old URL dies). The plain URL is in this
     response only; the database keeps the hash."""
     token = secrets.token_urlsafe(32)
-    await db._db.execute("DELETE FROM calendar_feeds WHERE user_id = ?", (user.id,))
+    # One statement: two rotations at once can't race a DELETE/INSERT pair into a duplicate key.
     await db._db.execute(
-        "INSERT INTO calendar_feeds (user_id, token_hash, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO calendar_feeds (user_id, token_hash, created_at) VALUES (?, ?, ?) "
+        "ON CONFLICT (user_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, created_at = EXCLUDED.created_at",
         (user.id, kit.hash_token(token), datetime.now(timezone.utc).isoformat()),
     )
     await db._db.commit()
