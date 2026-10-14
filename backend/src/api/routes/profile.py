@@ -238,9 +238,9 @@ def _build_profile_response(
         "contact": [getattr(cv, "linkedin_contact", {}) or {}]
         if getattr(cv, "linkedin_contact", None)
         else [],
-        # The About section. It reaches the judge and the vector, and would
+        # The About section. It is read by the user's agent, and would
         # otherwise be the one thing on this profile that is extracted, stored
-        # and MATCHED ON while being invisible to the person it describes — the
+        # and READ while being invisible to the person it describes — the
         # third way a shelf goes dark, after a broken extractor and a dropping
         # merge. Shown as a single row so it renders like every other section.
         "summary": [{"text": (getattr(cv, "linkedin_summary", "") or "").strip()}]
@@ -1077,17 +1077,14 @@ def _normalize_work_arrangement(value: object) -> str:
     """Store "I don't mind" as SILENCE, not as the literal string "any".
 
     The preferences select seeds itself at ``"any"`` and posts that value, so
-    "any" reached the database as though the user had stated a constraint. Two
-    consumers then read it RAW, not through the ``preferred_workplace`` property
-    that maps it to None:
+    "any" reached the database as though the user had stated a constraint. The
+    old scoring/judging pipeline (now deleted) read it RAW, not through the
+    ``preferred_workplace`` property that maps it to None, and treated it as a
+    stated preference. Today the reader is the user's own agent, via
+    ``get_profile``, and it would see "any" as a real choice.
 
-      * the LLM judge builds its prompt with ``if v:`` — a non-empty string — so
-        every judged job was told ``work_arrangement=any``, spending real tokens
-        to state a preference the user explicitly declined to make;
-      * the semantic vector appended "any" as a candidate token.
-
-    The property protects the keyword scorer, but a property cannot protect a
-    reader that bypasses it. Normalising on SAVE fixes it once, at the only
+    A property cannot protect a reader that bypasses it. Normalising on SAVE
+    fixes it once, at the only
     point where the sentinel can enter — and it holds for the CLI and any older
     client too, which a frontend-side fix would not.
 
@@ -1134,8 +1131,8 @@ def _normalize_experience_level(value: object) -> str:
     ``work_arrangement``. Before this function existed, ``_apply_preferences``
     stored whatever the client posted with no check at all, so a typo, a stale
     client sending a value the UI no longer offers, or a future free-text
-    field would reach the judge prompt and the semantic vector as though the
-    user had stated it.
+    field would be stored, and shown to the agent through ``get_profile``, as
+    though the user had stated it.
 
     NOT a fix for "a brand-new account saves 'mid' it never chose" — that
     defect is the FRONTEND seeding a real, still-selectable dropdown value
@@ -1825,12 +1822,12 @@ def _clear_prefixed(cv: CVData, prefix: str) -> None:
 
     WHY NOT A HAND-WRITTEN LIST. This was 18 named assignments, and it had
     already fallen two fields behind the dataclass: `linkedin_summary` and
-    `linkedin_headline` were added, wired into the LLM judge and the semantic
-    vector, and never added here. Measured on the shipped code — after
+    `linkedin_headline` were added, read by the old matching pipeline (since
+    deleted), and never added here. Measured on the shipped code — after
     "Clear LinkedIn", `linkedin_skills` and `linkedin_positions` were empty
     while `linkedin_summary` still held the previous person's About paragraph
-    and `linkedin_headline` their tagline, both of which `profile_to_matcher_text`
-    then sent to the judge for every job.
+    and `linkedin_headline` their tagline, and both stayed in the stored
+    profile for the next person's agent to read.
 
     Same failure as `reset_cv_owned_fields`, same root cause, third occurrence
     across the file. Ownership is a PREFIX fact, so read it off the dataclass
