@@ -52,9 +52,10 @@ def test_hunt_recipe_sends_the_assistant_to_the_kit_and_keeps_the_rules():
     hunt = " ".join(load_recipe("hunt").text.lower().split())
     assert "job360.uk/api/hunt-kit" in hunt
     assert "job360 never searches" in hunt
-    # Big boards and the browser hunt: only on the user's yes, never logged in for them.
-    assert "only when the user said yes in this chat" in hunt
+    # Big job sites are never scraped or browser-searched (removed 2026-10-14:
+    # their terms forbid automated access); never logged in for the user.
+    assert "never scrape or browser-search linkedin, indeed, glassdoor" in hunt
+    assert "--boards" not in hunt and "big boards" not in hunt and "browser hunt" not in hunt
     assert "never log in for the user or type a password" in hunt
-    assert "stop at the first captcha" in hunt
     # A relocation line is not a visa line (owner hunt 2026-10-13).
     assert '"relocation support" alone is not visa sponsorship' in hunt

@@ -1403,14 +1403,18 @@ def build_server(version: str = "") -> MCPServer:
         fill the form, record it, call again), form_not_swept (`stop`: no `form_swept`
         after the latest `form_filled` - re-read every field, fix, record it),
         duplicate_job (same job already applied to: `stop`
-        in auto mode, else `ask`), unknown_site, ask_always_site,
-        job_override_confirm, submit_mode_confirm, cv_not_seen (auto mode but the
+        in auto mode, else `ask`), unknown_site (`form_url` is not one plain
+        http(s) address - no user@, % or backslash before the path, ASCII host),
+        form_host_mismatch (`form_url` is not the site of your latest
+        `form_filled`), email_not_verified (the user has not confirmed their
+        email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto mode but the
         user has not seen the latest CV), practice_run, user_approved (the user
         said yes to this CV: `submit`), auto_when_sure, blocked (you recorded
         `blocked`, no `unblocked` yet: `ask`). Indeed and LinkedIn answer
         `ask` unless the user said yes to this CV. The first application after
         the user turns auto-submit on is a practice run (`ask`, reason
-        `practice_run`). Read-only:
+        `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
+        email_not_verified or blocked: do not submit, tell the user. Read-only:
         it records nothing - after a real submit, record it with
         `record_application`."""
         try:

@@ -350,8 +350,20 @@ async def _swept_after_fill(db: JobDatabase, user_id: str, application_id: int) 
     return bool(fills and sweeps and max(sweeps) > max(fills))
 
 
-async def gate_facts(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> settings_rules.SubmitFacts:
-    """The facts :func:`settings_rules.may_submit` reads for this application."""
+async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
+    """The host stored on the NEWEST ``form_filled`` (``None`` when there is none)."""
+    fills = await _events(db, user_id, application_id, ("form_filled",))
+    host = fills[0]["payload"].get("host") if fills else None
+    return host if isinstance(host, str) and host else None
+
+
+async def gate_facts(
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], *, email_verified: bool
+) -> settings_rules.SubmitFacts:
+    """The facts :func:`settings_rules.may_submit` reads for this application.
+    ``email_verified`` comes from the caller's :class:`CurrentUser`
+    (``auth_deps.email_verification_satisfied``) - it is about the account, not
+    the application."""
     application_id = int(app_row["id"])
     cur = await db._db.execute(
         "SELECT 1 FROM application_receipts WHERE application_id = ? AND user_id = ? LIMIT 1",
@@ -376,6 +388,8 @@ async def gate_facts(db: JobDatabase, user_id: str, app_row: dict[str, Any]) -> 
         form_swept=await _swept_after_fill(db, user_id, application_id),
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
+        form_host=await _newest_form_host(db, user_id, application_id),
+        email_verified=email_verified,
     )
 
 
@@ -389,7 +403,7 @@ async def _approved_without_cv(db: JobDatabase, user_id: str, application_id: in
 
 async def submit_verdict(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], form_url: str, now: datetime,
-    *, assume_filled: bool = False,
+    *, email_verified: bool, assume_filled: bool = False,
 ) -> settings_rules.SubmitDecision:
     """The ONE gate, evaluated for one application (the submit-check route and
     the kit's ``settings.submit_preview`` both call this). The kit is read BEFORE
@@ -403,9 +417,13 @@ async def submit_verdict(
 
     cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
     counts = await settings_rules.load_submit_counts(db, user_id, now)
-    facts = await gate_facts(db, user_id, app_row)
+    facts = await gate_facts(db, user_id, app_row, email_verified=email_verified)
     if assume_filled:
-        facts = replace(facts, form_filled=True, form_swept=True)
+        # The preview imagines the form filled ON this address, so it never
+        # shows a form_host_mismatch for a form that is not filled yet.
+        facts = replace(
+            facts, form_filled=True, form_swept=True, form_host=settings_rules.screen_form_url(form_url),
+        )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
 
@@ -667,7 +685,26 @@ async def _check_kit_event(
         count = payload.get("fields_count")
         if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= settings.KIT_FORM_FIELDS_MAX:
             raise SpineError(422, f"fields_count must be a whole number from 0 to {settings.KIT_FORM_FIELDS_MAX}")
-        host = _host(event_type, payload.get("form_url"))
+        # The STRICT reading (the same one check_submit uses): a user-info "@",
+        # "%" or backslash in the authority, a non-ASCII / IDNA host or a non-http(s)
+        # scheme is refused, so a spoofed address can never become the recorded host.
+        host = settings_rules.screen_form_url(
+            payload.get("form_url") if isinstance(payload.get("form_url"), str) else None
+        )
+        if host is None:
+            get_audit_logger().warning(
+                "form_filled_refused",
+                extra={
+                    "event": "form_filled_refused", "user_id": safe_log_value(user.id),
+                    "actor": safe_log_value(actor), "application_id": application_id,
+                    "reason": "form_url_unreadable", "status": 422, "result": "refused",
+                },
+            )
+            raise SpineError(
+                422,
+                "form_filled form_url must be one plain http(s) address: no user@ part, no % escapes "
+                "or backslashes before the path, and an ASCII host name",
+            )
         stored: dict[str, Any] = {"host": host, "fields_count": count, "by": actor}
         if "answers" in payload:
             stored["answers"] = clean_answers(payload["answers"])
@@ -1030,6 +1067,7 @@ async def build_kit(db: JobDatabase, user: CurrentUser, application_id: int, *, 
     429 over ``KIT_READS_MAX_PER_HOUR``. Writes one ``kit_read`` event (the
     timeline shows who read it and when) and one ``artifact_links`` row per
     document. The token appears only in this return value."""
+    from src.api.auth_deps import email_verification_satisfied  # noqa: PLC0415 - the one verification rule
     from src.api.routes.profile import settings_view  # noqa: PLC0415 - the one read model of the settings
     from src.services.profile.models import UserProfile  # noqa: PLC0415
     from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
@@ -1109,7 +1147,10 @@ async def build_kit(db: JobDatabase, user: CurrentUser, application_id: int, *, 
     ).hexdigest()
 
     settings_block = settings_view(profile, user.id)
-    verdict = await submit_verdict(db, user.id, app_row, apply_url, now, assume_filled=True)
+    verdict = await submit_verdict(
+        db, user.id, app_row, apply_url, now,
+        email_verified=email_verification_satisfied(user), assume_filled=True,
+    )
     preview = {"decision": verdict.decision, "reason": verdict.reason, "detail": verdict.detail}
     settings_block = {**settings_block, "submit_preview": preview}
 
