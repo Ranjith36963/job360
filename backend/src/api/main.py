@@ -194,7 +194,11 @@ def _docs_urls(is_prod: bool) -> dict[str, str | None]:
     return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
 
 
-app = FastAPI(title="Job360 API", version="1.0.0", lifespan=lifespan, **_docs_urls(_is_prod_env()))
+_docs = _docs_urls(_is_prod_env())
+app = FastAPI(
+    title="Job360 API", version="1.0.0", lifespan=lifespan,
+    docs_url=_docs["docs_url"], redoc_url=_docs["redoc_url"], openapi_url=_docs["openapi_url"],
+)
 if _is_prod_env():
     logging.getLogger(__name__).info("api docs/openapi endpoints disabled (production)")
 
