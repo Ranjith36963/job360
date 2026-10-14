@@ -489,11 +489,28 @@ REASONS: tuple[str, ...] = (
 )
 
 
+_SCHEME_PREFIX_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+_HOST_PORT_RE = re.compile(r"^[^:/?#@]+:[0-9]+(?:[/?#]|$)")
+
+
+def _malformed_scheme(text: str) -> bool:
+    """True for a scheme-like prefix that is not ``scheme://`` and not a bare
+    ``host:port`` - e.g. the one-slash ``http:/www.linkedin.com/jobs/1``. Read
+    as a bare host it would be the host ``http`` (a "company" site), skipping
+    the LinkedIn / Indeed ask; it is unreadable instead (2026-10-14)."""
+    if "://" in text or not _SCHEME_PREFIX_RE.match(text):
+        return False
+    return _HOST_PORT_RE.match(text) is None
+
+
 def parse_site_host(raw: Optional[str]) -> Optional[str]:
     """The lowercase host of a URL or bare host (port and trailing dot stripped),
-    or ``None`` when there is none or it cannot be read."""
+    or ``None`` when there is none or it cannot be read (a one-slash scheme like
+    ``http:/host``, or a single-label host like ``localhost``)."""
     text = (raw or "").strip()
     if not text or any(ch.isspace() or ord(ch) < 32 for ch in text):
+        return None
+    if _malformed_scheme(text):
         return None
     # A browser reads "\" as "/" in an http(s) URL, Python's urlsplit does not:
     # "https://www.linkedin.com\@evil.example" is LinkedIn to the browser but
@@ -520,7 +537,9 @@ def parse_site_host(raw: Optional[str]) -> Optional[str]:
         for dot in ("。", "．", "｡"):
             host = host.replace(dot, ".")
     host = host.rstrip(".").lower()
-    return host or None
+    if len([label for label in host.split(".") if label]) < 2:
+        return None  # a single label ("http", "localhost") is not a site
+    return host
 
 
 _SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
@@ -535,7 +554,8 @@ def screen_form_url(raw: Optional[str]) -> Optional[str]:
     (user-info), ``%`` or backslash in the authority - a browser and Python can
     disagree about which host those name ("https://boards.greenhouse.io%2F@evil.com"
     is evil.com); any non-ASCII character, an IDNA (``xn--``) label, an IP-literal
-    in brackets, or a label that is not letters/digits/hyphens. A bare host
+    in brackets, a label that is not letters/digits/hyphens, a single-label
+    host, or a one-slash scheme (``http:/host``). A bare host
     (``boards.greenhouse.io``) is read as ``//host``. A ``None`` here can never
     be cleared by a stored yes (``unknown_site``)."""
     text = (raw or "").strip()
@@ -543,6 +563,8 @@ def screen_form_url(raw: Optional[str]) -> Optional[str]:
         return None
     if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in text):
         return None
+    if _malformed_scheme(text):
+        return None  # "http:/linkedin.com" would read as the host "http"
     has_scheme = _SCHEME_RE.match(text) is not None
     try:
         parts = urlsplit(text if has_scheme else f"//{text}")
@@ -558,6 +580,8 @@ def screen_form_url(raw: Optional[str]) -> Optional[str]:
     if not host:
         return None
     labels = host.split(".")
+    if len(labels) < 2:
+        return None  # a single-label host ("http", "localhost") is not a site
     if any(not _HOST_LABEL_RE.match(label) or label.startswith("xn--") for label in labels):
         return None
     return host
@@ -586,14 +610,14 @@ def may_submit(
 
     1. paused -> stop ``paused``
     2. receipt exists, or status is not ``considering`` -> stop ``already_applied``
-    2b. the account's email is not confirmed -> ask ``email_not_verified`` (a
-        yes does NOT clear it)
     3. the user said "don't send" (newer than any yes) -> stop ``user_declined``
     4. daily cap reached -> stop ``daily_cap_reached``
     4b. no ``form_filled`` event recorded -> stop ``form_not_recorded`` (a stored
         yes does NOT clear it: the record of what was typed is needed either way)
     4c. no ``form_swept`` newer than the latest ``form_filled`` -> stop
         ``form_not_swept`` (the pre-submit re-read; a yes does not clear it)
+    4d. the account's email is not confirmed -> ask ``email_not_verified`` (a
+        yes does NOT clear it; after the stops so a stop is never softened to an ask)
     5. same job already applied to -> ``duplicate_job``: STOP when the mode is
        auto (nobody is watching), else ask
     5b. a ``blocked`` with no later ``unblocked`` -> ask ``blocked`` (S6)
@@ -617,19 +641,13 @@ def may_submit(
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
     ``user_approved``. Rules 1-4c, the auto-mode duplicate stop, the ``blocked``
-    ask (5b), the form-address checks (5d, 5e) and ``email_not_verified`` (2b)
+    ask (5b), the form-address checks (5d, 5e) and ``email_not_verified`` (4d)
     are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
         return SubmitDecision("stop", "paused", "Applications are paused. Do not submit anything.")
     if application.has_receipt or application.status != "considering":
         return SubmitDecision("stop", "already_applied", "This application is already applied or closed.")
-    if not application.email_verified:
-        return SubmitDecision(
-            "ask", "email_not_verified",
-            "The user has not confirmed their email address yet. Do not submit; "
-            "the user confirms it on Job360 first, or submits this one themselves.",
-        )
     if application.declined:
         return SubmitDecision(
             "stop", "user_declined", "The user said not to send this application. Do not submit it."
@@ -647,6 +665,12 @@ def may_submit(
             "stop", "form_not_swept",
             "Re-read every field on the page right before submit, fix what is wrong, "
             "then record_event form_swept and call check_submit again.",
+        )
+    if not application.email_verified:
+        return SubmitDecision(
+            "ask", "email_not_verified",
+            "The user has not confirmed their email address yet. Do not submit; "
+            "the user confirms it on Job360 first, or submits this one themselves.",
         )
     override = application.submit_override if application.submit_override in VALID_SUBMIT_MODES else None
     mode = override or cfg.submit_mode

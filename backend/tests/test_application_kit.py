@@ -1791,12 +1791,12 @@ async def test_form_filled_rejects_userinfo_url(authenticated_async_context, fix
 async def test_unverified_email_check_submit_asks(authenticated_async_context, fixture_user_id, monkeypatch):
     from src.repositories import pgsync
 
-    # pure gate order: paused and already_applied win; it beats a decline and a yes
+    # pure gate order: every stop wins (paused, already_applied, declined...); it beats a yes
     unverified = {"email_verified": False, "approved": True, "cv_seen": True}
     paused = _cfg(paused_until="until_resumed")
     assert _gate(paused, _facts(**unverified)) == ("stop", "paused")
     assert _gate(_cfg(), _facts(status="applied", **unverified)) == ("stop", "already_applied")
-    assert _gate(_cfg(), _facts(declined=True, **unverified)) == ("ask", "email_not_verified")
+    assert _gate(_cfg(), _facts(declined=True, **unverified)) == ("stop", "user_declined")
     assert _gate(_cfg(submit_mode="auto_when_sure"), _facts(**unverified)) == ("ask", "email_not_verified")
     assert "email_not_verified" in rules.REASONS
 

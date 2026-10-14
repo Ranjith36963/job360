@@ -373,6 +373,57 @@ def test_urls_two_parsers_read_differently_are_an_unknown_site(host):
     assert (d.decision, d.reason) == ("ask", "unknown_site"), host
 
 
+@pytest.mark.parametrize(
+    "host",
+    [
+        "http:/www.linkedin.com/jobs/1",  # one slash: would read as the host "http"
+        "HTTPS:/uk.indeed.com/viewjob",
+        "https:/x",
+        "http:/linkedin.com",
+    ],
+)
+def test_one_slash_scheme_is_unreadable(host):
+    assert rules.parse_site_host(host) is None, host
+    assert rules.screen_form_url(host) is None, host
+    d = rules.may_submit(AUTO_CFG, _facts(approved=True, form_host="http"), host, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "unknown_site"), host
+
+
+@pytest.mark.parametrize("host", ["http", "localhost", "https://localhost/apply", "https://com./x"])
+def test_single_label_host_unreadable(host):
+    assert rules.parse_site_host(host) is None, host
+    assert rules.screen_form_url(host) is None, host
+    d = rules.may_submit(AUTO_CFG, _facts(approved=True, form_host=host), host, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "unknown_site"), host
+
+
+@pytest.mark.parametrize(
+    ("raw", "host"),
+    [
+        ("jobs.lever.co/x", "jobs.lever.co"),
+        ("host.com:8080/x", "host.com"),
+        ("host.com:8080", "host.com"),
+        ("https://uk.indeed.com/viewjob", "uk.indeed.com"),
+    ],
+)
+def test_bare_hosts_and_ports_still_parse(raw, host):
+    assert rules.parse_site_host(raw) == host
+    assert rules.screen_form_url(raw) == host
+
+
+def test_unverified_declined_still_stops():
+    unverified = {"email_verified": False, "approved": True}
+    d = rules.may_submit(AUTO_CFG, _facts(declined=True, **unverified), "careers.northwind.example", _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("stop", "user_declined")
+    capped = _eff(submit_mode="auto_when_sure", daily_cap=1)
+    d = rules.may_submit(capped, _facts(**unverified), "careers.northwind.example", _counts(today=1), now=NOW)
+    assert (d.decision, d.reason) == ("stop", "daily_cap_reached")
+    d = rules.may_submit(AUTO_CFG, _facts(form_swept=False, **unverified), "careers.northwind.example", _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("stop", "form_not_swept")
+    d = rules.may_submit(AUTO_CFG, _facts(**unverified), "careers.northwind.example", _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "email_not_verified")
+
+
 def test_a_hyphenated_lookalike_is_a_company_not_the_brand():
     # evil-linkedin.com is NOT LinkedIn: it is somebody else's site, so the brand rule does not apply.
     assert rules.host_kind(rules.parse_site_host("evil-linkedin.com")) == "company"
