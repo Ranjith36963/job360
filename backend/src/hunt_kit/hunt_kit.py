@@ -501,10 +501,12 @@ def classify_location(
     if remote_only:
         if not p.remote or locked:
             return None
+        if c:
+            # An explicit country list that excludes every work country wins over a region tag
+            # ("Remote | APAC | Thailand" is a Thailand job, not an all-APAC one).
+            return None
         if p.work and (info.regions & p.work):
             return "remote_region"
-        if c:
-            return None  # locked to a country you cannot work in
         if info.world or DESC_WORLD.search(desc):
             return "remote_world"
         return None
@@ -1186,7 +1188,7 @@ def run(args: argparse.Namespace) -> Collector:
     sources = select_sources(args.sources)
     queries = split_csv(args.titles or DEFAULT_TITLES)[:12]
     countries = sorted(col.prefs.only or col.prefs.work)
-    tasks: list[Callable[[], None]] = []
+    tasks: list[tuple[str, Callable[[], None]]] = []
 
     base = load_companies(Path(args.companies))
     extra_universe = load_universe([a for a in UNIVERSE_ATS if a in sources]) if args.universe else []
@@ -1211,32 +1213,63 @@ def run(args: argparse.Namespace) -> Collector:
     ats_fetchers = getattr(kit_ats, "ATS_FETCHERS", {}) if kit_ats else {}
     for b in boards:
         if b["ats"] in _BOARD_FN:
-            tasks.append(functools.partial(_BOARD_FN[b["ats"]], col, b))
+            tasks.append((b["ats"], functools.partial(_BOARD_FN[b["ats"]], col, b)))
         elif b["ats"] in ats_fetchers:
             call = functools.partial(_ats_call, ats_fetchers[b["ats"]], b)
-            tasks.append(functools.partial(_module_task, col, b["ats"], call))
+            tasks.append((b["ats"], functools.partial(_module_task, col, b["ats"], call)))
     if "freehire" in sources:
-        tasks.append(lambda: _freehire(col, queries))
+        tasks.append(("freehire", lambda: _freehire(col, queries)))
     wanted_feeds = [s for s in sources if s in FEED_SOURCES and s != "freehire"]
     if wanted_feeds:
         kit_feeds = _import_kit("kit_feeds")
         feeds = getattr(kit_feeds, "FEEDS", {}) if kit_feeds else {}
         for name in wanted_feeds:
             if name in feeds:
-                tasks.append(functools.partial(
+                tasks.append((name, functools.partial(
                     _module_task, col, name,
                     functools.partial(_feed_call, feeds[name], queries, args.days, countries),
-                ))
+                )))
             elif kit_feeds is not None:
                 print("note: feed %s not provided by kit_feeds; skipped" % name, file=sys.stderr)
 
+    progress = Progress(col, [src for src, _ in tasks])
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(MAX_WORKERS, args.workers))) as ex:
-        for f in concurrent.futures.as_completed([ex.submit(t) for t in tasks]):
+        futs = {ex.submit(t): src for src, t in tasks}
+        for f in concurrent.futures.as_completed(futs):
             try:
                 f.result()
             except Exception as e:  # one bad board must not stop the sweep
                 print("warning: task failed: %s: %s" % (type(e).__name__, e), file=sys.stderr)
+            progress.done(futs[f])
     return col
+
+
+class Progress:
+    """One short stderr line per source: at the start, then every ~25% of its boards."""
+
+    def __init__(self, col: Collector, sources: Iterable[str]) -> None:
+        self.col = col
+        self.lock = threading.Lock()
+        self.total = collections.Counter(sources)
+        self.finished: collections.Counter[str] = collections.Counter()
+        self.step: dict[str, int] = {}
+        for src in sorted(self.total):
+            print("[%s] starting: %d board%s" % (src, self.total[src], "" if self.total[src] == 1 else "s"),
+                  file=sys.stderr, flush=True)
+
+    def done(self, src: str) -> None:
+        with self.lock:
+            self.finished[src] += 1
+            n, tot = self.finished[src], self.total[src]
+            quarter = n * 4 // tot
+            if tot < 4 and n < tot:
+                return
+            if quarter <= self.step.get(src, 0) and n < tot:
+                return
+            self.step[src] = quarter
+            kept = self.col.stats[src]["kept"]
+            print("[%s] %d/%d boards (%d%%), %d kept so far" % (src, n, tot, n * 100 // tot, kept),
+                  file=sys.stderr, flush=True)
 
 
 def sort_newest(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
