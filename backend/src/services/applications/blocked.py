@@ -108,10 +108,22 @@ def check_payload(user: CurrentUser, event_type: str, payload: dict[str, Any], d
     return {"reason": reason, "step": step, "page_host": page_host, "detail": text, "assistant": actor}
 
 
+_USER_TODO: dict[str, str] = {
+    "captcha": "Open the form on {host}, solve the check and press Submit yourself, then mark this resolved.",
+    "bot_check": "Open the form on {host}, solve the check and press Submit yourself, then mark this resolved.",
+    "login_needed": "Sign in on {host} yourself (never share the password), then mark this resolved.",
+    "upload_failed": "Attach the CV file on {host} yourself, then mark this resolved.",
+    "unknown_question": "Answer the question on {host} (the assistant could not), then mark this resolved.",
+}
+
+
 def ask_question(stored: dict[str, Any]) -> str:
     step = stored.get("step") or "a step"
     host = stored.get("page_host") or "the job site"
-    return f"Your assistant got stuck: {BLOCKED_REASONS[stored['reason']]} at {step} on {host}. What should it do?"
+    reason = stored["reason"]
+    return f"Your assistant got stuck: {BLOCKED_REASONS[reason]} at {step} on {host}. " + _USER_TODO.get(
+        reason, "Check the form on {host} and finish it or tell your assistant what to do."
+    ).format(host=host)
 
 
 async def _block_events(db: JobDatabase, user_id: str, application_id: int) -> list[dict[str, Any]]:

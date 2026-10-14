@@ -967,7 +967,8 @@ def build_server(version: str = "") -> MCPServer:
     ) -> dict[str, Any]:
         """Record YOUR OWN fit judgement for this application — never computed
         by Job360 (VISION rule 4). Overwrites the current verdict; the log
-        keeps every past judgement too. Visa (optional, same as bring_job): if
+        keeps every past judgement too. `verdict`: one sentence, at most 200
+        characters. Visa (optional, same as bring_job): if
         the ad says whether the employer sponsors, pass `visa_signal`
         ("sponsors" / "no_sponsorship"), the ad sentence in `visa_detail`, and
         the job's ISO alpha-2 country in `visa_country`; leave it out when the ad

@@ -186,7 +186,8 @@ async def test_blocked_opens_one_ask_dedups_and_unblocked_closes_it(authenticate
         asks = await _open_asks(agent, app_id)
         assert len(asks) == 1
         assert asks[0]["question"] == (
-            "Your assistant got stuck: a CAPTCHA at upload CV on jobs.northwind.example. What should it do?"
+            "Your assistant got stuck: a CAPTCHA at upload CV on jobs.northwind.example. "
+            "Open the form on jobs.northwind.example, solve the check and press Submit yourself, then mark this resolved."
         )
         # Same reason again while the ask is open: no second ask.
         assert (await _event(agent, app_id, "blocked", _blocked(step="submit"))).status_code == 201

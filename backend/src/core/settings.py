@@ -414,6 +414,9 @@ JOB_FOUND_ON = (
 OFFICIAL_ATS_HOSTS = (
     "greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com", "smartrecruiters.com",
     "workable.com", "bamboohr.com", "recruitee.com", "teamtailor.com", "personio.de", "personio.com",
+    "applytojob.com", "jazzhr.com", "gem.com", "dayforcehcm.com", "freshteam.com",
+    "zohorecruit.com", "zohorecruit.in", "rippling.com", "icims.com", "taleo.net",
+    "ultipro.com", "careers-page.com",
 )
 JOB_BOARD_HOSTS = ("linkedin.com",)  # plus indeed.<tld>, handled in job_checks
 JOB_CHECK_PARTIAL_MIN_WORDS = 40   # below this the "ad" is a title or a teaser
