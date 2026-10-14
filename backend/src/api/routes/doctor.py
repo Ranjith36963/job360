@@ -202,7 +202,7 @@ async def report_missing_tool(
         "missing_tool_reported",
         extra={
             "event": "missing_tool_reported", "user_id": safe_log_value(user.id),
-            "report_id": report_id, "tool_name": name,  # `name` is a reserved LogRecord attribute
+            "report_id": report_id, "tool_name": safe_log_value(name),  # `name` is a reserved LogRecord attribute
         },
     )
     return {"id": report_id}
