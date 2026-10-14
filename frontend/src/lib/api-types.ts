@@ -640,7 +640,12 @@ export interface paths {
          *     ``settings_rules.may_submit`` - the same function for every caller (this route
          *     and the MCP ``check_submit`` tool). ``form_url`` is the address of the page
          *     the form is on (a bare host works too); without it the answer is ``ask``
-         *     (``unknown_site``). Read-only. 404 for an application that is not the
+         *     (``unknown_site``). The address is read strictly (``screen_form_url``): a
+         *     user-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host
+         *     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
+         *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
+         *     a stored yes clears neither. An unconfirmed email answers ``ask`` /
+         *     ``email_not_verified``. Read-only. 404 for an application that is not the
          *     caller's (rule #12).
          */
         get: operations["submit_check_api_applications__application_id__submit_check_get"];

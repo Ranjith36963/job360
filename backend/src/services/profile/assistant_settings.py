@@ -38,6 +38,7 @@ or an assistant typed); the callers log paths, actors, ids and closed values.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal, Optional
@@ -460,6 +461,13 @@ class SubmitFacts:
     # The latest saved fit score for this application (``None`` = no fit yet).
     # Compared with the user's score line by :func:`line_side` (rule 5c).
     fit_score: Optional[int] = None
+    # The host stored on the NEWEST ``form_filled`` (``None`` = none / unreadable).
+    # check_submit's ``form_url`` must name the same host (``form_host_mismatch``).
+    form_host: Optional[str] = None
+    # The account's email is confirmed (or REQUIRE_EMAIL_VERIFICATION is off).
+    # ``kit.gate_facts`` always sets it from the caller; ``False`` asks
+    # ``email_not_verified`` and a yes never clears it (2026-10-14).
+    email_verified: bool = True
 
 
 @dataclass(frozen=True)
@@ -477,7 +485,7 @@ REASONS: tuple[str, ...] = (
     "paused", "already_applied", "user_declined", "daily_cap_reached", "duplicate_job", "unknown_site",
     "ask_always_site", "job_override_confirm", "submit_mode_confirm", "cv_not_seen", "practice_run",
     "user_approved", "auto_when_sure", "blocked", "score_line_unknown", "line_ask_above", "line_ask_below",
-    "form_not_recorded", "form_not_swept",
+    "form_not_recorded", "form_not_swept", "form_host_mismatch", "email_not_verified",
 )
 
 
@@ -515,6 +523,46 @@ def parse_site_host(raw: Optional[str]) -> Optional[str]:
     return host or None
 
 
+_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+_HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def screen_form_url(raw: Optional[str]) -> Optional[str]:
+    """The STRICT reading of a form address (check_submit's ``form_url`` and
+    ``form_filled``'s): the lowercase ASCII host, or ``None`` when the address is
+    not plainly one http(s) site. Parsed with ``urllib.parse`` only, never by
+    splitting strings. ``None`` for: a scheme other than http/https; any ``@``
+    (user-info), ``%`` or backslash in the authority - a browser and Python can
+    disagree about which host those name ("https://boards.greenhouse.io%2F@evil.com"
+    is evil.com); any non-ASCII character, an IDNA (``xn--``) label, an IP-literal
+    in brackets, or a label that is not letters/digits/hyphens. A bare host
+    (``boards.greenhouse.io``) is read as ``//host``. A ``None`` here can never
+    be cleared by a stored yes (``unknown_site``)."""
+    text = (raw or "").strip()
+    if not text or len(text) > 2048 or not text.isascii() or "\\" in text:
+        return None
+    if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        return None
+    has_scheme = _SCHEME_RE.match(text) is not None
+    try:
+        parts = urlsplit(text if has_scheme else f"//{text}")
+        _ = parts.port  # a non-numeric / out-of-range port raises ValueError
+    except ValueError:
+        return None
+    if has_scheme and parts.scheme.lower() not in ("http", "https"):
+        return None
+    netloc = parts.netloc
+    if not netloc or any(ch in netloc for ch in "@%[]"):
+        return None
+    host = (parts.hostname or "").rstrip(".").lower()
+    if not host:
+        return None
+    labels = host.split(".")
+    if any(not _HOST_LABEL_RE.match(label) or label.startswith("xn--") for label in labels):
+        return None
+    return host
+
+
 def host_kind(host: Optional[str]) -> Literal["brand", "company", "invalid"]:
     """``brand`` when any whole label of ``host`` is an always-ask brand
     (``uk.indeed.com``, ``indeed.co.uk``, ``lnkd.in``); ``company`` for any other
@@ -538,6 +586,8 @@ def may_submit(
 
     1. paused -> stop ``paused``
     2. receipt exists, or status is not ``considering`` -> stop ``already_applied``
+    2b. the account's email is not confirmed -> ask ``email_not_verified`` (a
+        yes does NOT clear it)
     3. the user said "don't send" (newer than any yes) -> stop ``user_declined``
     4. daily cap reached -> stop ``daily_cap_reached``
     4b. no ``form_filled`` event recorded -> stop ``form_not_recorded`` (a stored
@@ -547,6 +597,11 @@ def may_submit(
     5. same job already applied to -> ``duplicate_job``: STOP when the mode is
        auto (nobody is watching), else ask
     5b. a ``blocked`` with no later ``unblocked`` -> ask ``blocked`` (S6)
+    5d. ``form_url`` fails :func:`screen_form_url` (user-info ``@``, ``%`` or a
+        backslash in the authority, non-ASCII / IDNA host, not http(s)) -> ask
+        ``unknown_site`` (a yes does NOT clear it)
+    5e. ``form_url``'s host is not the host of the newest ``form_filled`` -> ask
+        ``form_host_mismatch`` (a yes does NOT clear it)
     5c. the fit score vs the user's score line (``line_side``): no line or no fit
         yet -> ask ``score_line_unknown``; the switch for that side
         (``above_line`` / ``below_line``) is ``ask`` -> ask ``line_ask_above`` /
@@ -561,13 +616,20 @@ def may_submit(
 
     A stored yes for THIS CV (``approved``) clears every ASK from 5 to 10 (5c too)(even
     Indeed / LinkedIn and the practice run) and answers ``submit`` /
-    ``user_approved``. Rules 1-4c, the auto-mode duplicate stop and the ``blocked``
-    ask (5b) are NEVER cleared by a yes.
+    ``user_approved``. Rules 1-4c, the auto-mode duplicate stop, the ``blocked``
+    ask (5b), the form-address checks (5d, 5e) and ``email_not_verified`` (2b)
+    are NEVER cleared by a yes.
     """
     if is_paused(cfg.paused_until, now):
         return SubmitDecision("stop", "paused", "Applications are paused. Do not submit anything.")
     if application.has_receipt or application.status != "considering":
         return SubmitDecision("stop", "already_applied", "This application is already applied or closed.")
+    if not application.email_verified:
+        return SubmitDecision(
+            "ask", "email_not_verified",
+            "The user has not confirmed their email address yet. Do not submit; "
+            "the user confirms it on Job360 first, or submits this one themselves.",
+        )
     if application.declined:
         return SubmitDecision(
             "stop", "user_declined", "The user said not to send this application. Do not submit it."
@@ -599,7 +661,20 @@ def may_submit(
             "ask", "blocked",
             "Your assistant got stuck on this application. Do not submit; the user resolves it first.",
         )
-    ask = _first_ask(cfg, application, site_host, counts, override=override, auto=auto)
+    screened = screen_form_url(site_host)
+    if screened is None:
+        return SubmitDecision(
+            "ask", "unknown_site",
+            "The form address could not be read as one plain http(s) site. "
+            "Fill the form, stop before submit and ask yes.",
+        )
+    if screened != application.form_host:
+        return SubmitDecision(
+            "ask", "form_host_mismatch",
+            "This address is not the site where the form was filled (form_filled). "
+            "Do not submit; check the page, and ask the user.",
+        )
+    ask = _first_ask(cfg, application, screened, counts, override=override, auto=auto)
     if ask is None:
         return SubmitDecision("submit", "auto_when_sure", "Auto-submit is on and this site allows it. You may submit.")
     if application.approved:

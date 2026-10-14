@@ -33,7 +33,6 @@ KIT_FILES: dict[str, str] = {
     "hunt_kit.py": "text/plain; charset=utf-8",
     "kit_ats.py": "text/plain; charset=utf-8",
     "kit_feeds.py": "text/plain; charset=utf-8",
-    "kit_boards.py": "text/plain; charset=utf-8",
     "kit_places.py": "text/plain; charset=utf-8",
     "kit_xml.py": "text/plain; charset=utf-8",
     "companies.json": "application/json",
@@ -87,8 +86,8 @@ def _index() -> KitIndex:
         how_to=(
             "Download every file into one folder, read README.md, then run "
             "`python hunt_kit.py --help`. Python 3.10+, standard library only. "
-            "It reads company job boards and open job feeds with no login; big "
-            "boards (LinkedIn, Indeed, ...) only if the user switches them on, "
+            "It reads company job boards and open job feeds with no login; it "
+            "never reads LinkedIn, Indeed, Glassdoor or other big job sites, "
             "and it never logs in. Read each job it keeps, "
             "judge it yourself, and bring only fits into Job360."
         ),

@@ -116,7 +116,8 @@ def test_gate_asks_blocked_and_a_yes_does_not_clear_it():
 
     now = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
     facts = rules.SubmitFacts(status="considering", has_receipt=False, submit_override=None,
-                              cv_seen=True, approved=True, blocked=True, form_filled=True, form_swept=True)
+                              cv_seen=True, approved=True, blocked=True, form_filled=True, form_swept=True,
+                              form_host="careers.northwind.example")
     verdict = rules.may_submit(cfg, facts, FORM, counts, now=now)
     assert (verdict.decision, verdict.reason) == ("ask", "blocked")
     assert "blocked" in rules.REASONS

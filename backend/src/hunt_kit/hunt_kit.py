@@ -5,8 +5,9 @@ It reads the public JSON job boards that companies publish themselves (Greenhous
 Lever, Ashby, SmartRecruiters, Workable, Recruitee, Personio, Teamtailor, BambooHR,
 Workday) plus open job feeds (freehire.me, Himalayas, Remotive, Arbeitnow, RemoteOK,
 Jobicy, Working Nomads, We Work Remotely, The Muse, Hacker News "Who is hiring").
-Official keyed APIs (Adzuna, Jooble) run only if you set their env vars.  Big job
-boards (LinkedIn, Indeed, ...) are OFF unless you pass --boards (needs python-jobspy).
+Official keyed APIs (Adzuna, Jooble) run only if you set their env vars.  It never
+touches LinkedIn, Indeed, Glassdoor or other big job sites (their terms forbid
+automated access); the user searches those themselves.
 
 It never logs in.  Standard library only (Python 3.10+).  It never ranks or scores:
 it filters by words and sorts newest first.  Your assistant reads each kept job's
@@ -82,7 +83,6 @@ SOURCE_ALIASES = {"weworkremotely": "wwr", "we-work-remotely": "wwr", "hackernew
 ALL_SOURCES = BOARD_SOURCES + FEED_SOURCES
 # "default" skips the two giant unvetted lists (bamboohr, workday: ~24k boards).
 DEFAULT_SKIP = ("bamboohr", "workday")
-JOBSPY_SITES = ("linkedin", "indeed", "glassdoor", "google", "naukri", "bayt", "zip_recruiter")
 
 DEFAULT_TITLES = (
     "ai engineer, llm engineer, agent engineer, agentic engineer, generative ai engineer, "
@@ -1000,7 +1000,7 @@ def _freehire(col: Collector, queries: list[str]) -> None:
     for r in jobs.values():
         url = r.get("url") or ""
         if r.get("source") == "telegram" or re.search(r"linkedin\.com|indeed\.|glassdoor", url, re.I):
-            continue  # copies of ads from big boards: those only run through --boards
+            continue  # copies of ads from big job sites: the kit never reads those
         wm = r.get("work_mode") or ""
         regions = r.get("regions") or []
         extra = (["Worldwide"] if "global" in regions else []) + (["APAC"] if "apac" in regions else [])
@@ -1149,20 +1149,12 @@ def select_sources(value: str) -> list[str]:
 
 
 def _merge_stats(col: Collector, label: str, st: dict[str, Any]) -> None:
-    if label == "jobspy":  # one row per site, honest about sites that return 0 or fail
-        for site in JOBSPY_SITES:
-            if st.get(site + "_tried"):
-                col.bump("jobspy:" + site, "boards_tried", int(st.get(site + "_tried", 0)))
-                col.bump("jobspy:" + site, "boards_ok", int(st.get(site + "_ok", 0)))
-        for note in st.get("notes") or []:
-            print("note: %s" % note, file=sys.stderr)
-        return
     col.bump(label, "boards_tried", int(st.get("tried", 0)))
     col.bump(label, "boards_ok", int(st.get("ok", 0)))
 
 
 def _module_task(
-    col: Collector, label: str, call: Callable[[dict[str, int]], list[dict[str, Any]]], by_job_source: bool = False
+    col: Collector, label: str, call: Callable[[dict[str, int]], list[dict[str, Any]]]
 ) -> None:
     """Run one module call, merge its tried/ok stats, and offer every Job it returns."""
     st: dict[str, int] = {"tried": 0, "ok": 0, "jobs": 0}
@@ -1173,7 +1165,7 @@ def _module_task(
         jobs = []
     _merge_stats(col, label, st)
     for j in jobs:
-        col.offer_job(j.get("source") or label if by_job_source else label, j)
+        col.offer_job(label, j)
 
 
 def _ats_call(fetch: Callable[..., list[dict[str, Any]]], board: dict[str, Any],
@@ -1237,27 +1229,6 @@ def run(args: argparse.Namespace) -> Collector:
                 ))
             elif kit_feeds is not None:
                 print("note: feed %s not provided by kit_feeds; skipped" % name, file=sys.stderr)
-    boards_opt = [s for s in split_csv(args.boards) if s in JOBSPY_SITES]
-    if boards_opt:
-        kit_boards = _import_kit("kit_boards")
-        if kit_boards is not None:
-            tasks.append(
-                lambda: _module_task(
-                    col,
-                    "jobspy",
-                    lambda st: kit_boards.run_boards(
-                        boards_opt,
-                        queries,
-                        days=args.days,
-                        remote=col.prefs.remote,
-                        countries=countries,
-                        results_wanted=max(1, min(int(args.results_wanted), 200)),
-                        full_text=bool(args.full_text),
-                        stats=st,
-                    ),
-                    by_job_source=True,
-                )
-            )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(MAX_WORKERS, args.workers))) as ex:
         for f in concurrent.futures.as_completed([ex.submit(t) for t in tasks]):
@@ -1447,11 +1418,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--history", default="seen_jobs.json", help="remember output; next run shows only NEW jobs ('none' = off)"
     )
     p.add_argument("--all", action="store_true", help="ignore history when choosing what to output")
-    p.add_argument("--boards", default="", help="OPT-IN big boards via python-jobspy: " + ",".join(JOBSPY_SITES))
-    p.add_argument("--results-wanted", type=int, default=50, help="per search, with --boards (cap 200)")
-    p.add_argument(
-        "--full-text", action="store_true", help="with --boards: fetch LinkedIn full text (one request per job)"
-    )
     p.add_argument("--out", default="-", help="JSONL output path (default stdout)")
     p.add_argument("--stats", action="store_true", help="print coverage counts per source to stderr")
     return p
@@ -1466,10 +1432,6 @@ def main(argv: list[str] | None = None) -> int:
         make_prefs(args.work_countries, only=args.only_countries, exclude=args.exclude_countries)
     except ValueError as e:
         print(str(e), file=sys.stderr)
-        return 2
-    bad = [s for s in split_csv(args.boards) if s not in JOBSPY_SITES]
-    if bad:
-        print("unknown --boards value: %s (use %s)" % (",".join(bad), ",".join(JOBSPY_SITES)), file=sys.stderr)
         return 2
     if args.discover:
         for hit in discover(split_csv(args.discover)):

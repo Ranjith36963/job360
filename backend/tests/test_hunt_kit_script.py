@@ -345,53 +345,6 @@ def test_module_task_merges_stats_and_offers(monkeypatch: pytest.MonkeyPatch) ->
     hk._module_task(col, "workable", bad)  # must not raise
 
 
-def test_boards_flag_wiring_and_missing_module(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
-    calls = {}
-
-    class FakeBoards:
-        @staticmethod
-        def run_boards(sites, queries, *, days, remote, countries, results_wanted, full_text, stats):
-            calls.update(sites=sites, results_wanted=results_wanted, full_text=full_text, countries=countries)
-            stats.update(tried=1, ok=1, jobs=1, linkedin_tried=1, linkedin_ok=1, linkedin_jobs=1)
-            return [
-                dict(
-                    title="AI Engineer",
-                    company="Q",
-                    url="https://q/1",
-                    location="London",
-                    posted="",
-                    description="d",
-                    source="jobspy:linkedin",
-                    board="linkedin",
-                    remote=None,
-                    visa_flag=None,
-                    extra={},
-                )
-            ]
-
-    real = hk._import_kit
-    monkeypatch.setattr(hk, "_import_kit", lambda n: FakeBoards if n == "kit_boards" else real(n))
-    args = _args(
-        work_countries="GB",
-        sources="greenhouse",
-        limit_boards=0,
-        boards="linkedin",
-        results_wanted=999,
-        companies=str(KIT_DIR / "companies.json"),
-        skip_companies="",
-        days=3650,
-        universe=False,
-    )
-    monkeypatch.setattr(hk, "load_companies", lambda p: [])
-    col = hk.run(args)
-    assert calls["sites"] == ["linkedin"] and calls["results_wanted"] == 200 and calls["countries"] == ["GB"]
-    assert col.stats["jobspy:linkedin"]["boards_ok"] == 1 and col.results[0]["source"] == "jobspy:linkedin"
-    # module missing: skipped with a note, no crash
-    monkeypatch.setattr(hk, "_import_kit", lambda n: None)
-    col = hk.run(args)
-    assert col.results == []
-
-
 def test_companies_json_valid() -> None:
     # load_companies maps the file's `board` key to the `token` key every fetcher reads.
     rows = hk.load_companies(KIT_DIR / "companies.json")
@@ -418,6 +371,22 @@ def test_companies_json_valid() -> None:
         seen.add(k)
     text = (KIT_DIR / "companies.json").read_text(encoding="utf-8")
     assert re.search(r"linkedin|indeed|glassdoor", text, re.I) is None
+
+
+def test_hunt_kit_has_no_board_scraper() -> None:
+    """The opt-in big-board scraper (kit_boards.py + --boards, via python-jobspy)
+    was removed 2026-10-14: those sites' terms forbid automated access. The
+    public ATS APIs and open feeds stay."""
+    assert not (KIT_DIR / "kit_boards.py").exists()
+    for f in (p for p in KIT_DIR.iterdir() if p.suffix in {".py", ".md", ".json"}):
+        text = f.read_text(encoding="utf-8")
+        assert not re.search(r"kit_boards|--boards\b|jobspy|scrape_jobs", text, re.I), f.name
+    with pytest.raises(SystemExit):
+        hk.build_parser().parse_args(["--boards", "linkedin"])
+    args = hk.build_parser().parse_args([])
+    assert not hasattr(args, "boards") and not hasattr(args, "full_text")
+    assert not hasattr(hk, "JOBSPY_SITES")
+    assert {"greenhouse", "lever", "ashby"} <= set(hk.ALL_SOURCES)
 
 
 def test_kit_has_no_urls_for_big_boards_and_no_credentials() -> None:
@@ -579,24 +548,6 @@ def test_p2a_check_live_and_main_survive(monkeypatch: pytest.MonkeyPatch, tmp_pa
 def test_p2b_visa_flag_counts_as_positive() -> None:
     assert hk.classify_location("Berlin", "Build things.", prefs("GB"), visa_flag=True) == "visa_onsite"
     assert hk.classify_location("Berlin", "Build things.", prefs("GB"), visa_flag=False) is None
-
-
-def test_p2c_boards_remote_is_a_separate_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    import types
-
-    kb = importlib.import_module("kit_boards")
-    calls: list[dict] = []
-
-    def scrape(**kw: object) -> list:
-        calls.append(kw)
-        return []
-
-    monkeypatch.setitem(sys.modules, "jobspy", types.SimpleNamespace(scrape_jobs=scrape))
-    kb.run_boards(
-        ["indeed"], ["ai engineer"], days=7, remote=True, countries=["IN"], results_wanted=10, full_text=False, stats={}
-    )
-    assert len(calls) == 2
-    assert "is_remote" not in calls[0] and calls[1].get("is_remote") is True
 
 
 def test_m1_only_http_urls_kept() -> None:

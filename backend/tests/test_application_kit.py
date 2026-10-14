@@ -227,7 +227,7 @@ def _cfg(**kw: Any) -> rules.EffectiveSettings:
 def _facts(**kw: Any) -> rules.SubmitFacts:
     base: dict[str, Any] = {
         "status": "considering", "has_receipt": False, "submit_override": None, "fit_score": 80, "form_filled": True,
-        "form_swept": True,
+        "form_swept": True, "form_host": "careers.northwind.example",  # rule 5e: filled on FORM's site
     }
     base.update(kw)
     return rules.SubmitFacts(**base)
@@ -254,9 +254,11 @@ def test_gate_a_matching_yes_clears_asks_including_brand_sites_and_practice_run(
     assert _gate(confirm, _facts()) == ("ask", "submit_mode_confirm")
     assert _gate(confirm, _facts(approved=True)) == ("submit", "user_approved")
     auto = _cfg(submit_mode="auto_when_sure")
-    assert _gate(auto, _facts(approved=True), url="https://uk.indeed.com/x") == ("submit", "user_approved")
-    assert _gate(auto, _facts(approved=True), url="", counts=rules.SubmitCounts(0, 0)) == ("submit", "user_approved")
-    assert _gate(auto, _facts(approved=True, cv_seen=True), url="") == ("submit", "user_approved")
+    indeed = {"approved": True, "form_host": "uk.indeed.com"}
+    assert _gate(auto, _facts(**indeed), url="https://uk.indeed.com/x") == ("submit", "user_approved")
+    assert _gate(auto, _facts(approved=True), counts=rules.SubmitCounts(0, 0)) == ("submit", "user_approved")
+    # 2026-10-14: an unreadable form address is an ask a yes can NOT clear (it used to)
+    assert _gate(auto, _facts(approved=True, cv_seen=True), url="") == ("ask", "unknown_site")
 
 
 def test_gate_stops_are_never_overridden_by_a_yes():
@@ -1696,3 +1698,122 @@ async def test_an_empty_or_short_sweep_of_a_filled_form_is_refused(authenticated
         assert ok.status_code == 201, ok.text
         body = await _check(client, app_id, fill=False)
         assert body["reason"] not in ("form_not_swept", "form_not_recorded")
+
+
+# ── 2026-10-14 security fixes: form address screening, host match, verified email ──
+
+GREENHOUSE = "https://boards.greenhouse.io/northwind/jobs/7"
+SPOOFED = (
+    "https://boards.greenhouse.io%2F@evil.com/x",  # the reproduced bug: userinfo hides the real host
+    "https://boards.greenhouse.io@evil.com/x",
+    "https://boards.greenhouse.io\\@evil.com/x",
+    "https://boards%2Egreenhouse.io/x",
+    "https://bоards.greenhouse.io/x",  # Cyrillic o
+    "https://xn--bards-3ve.greenhouse.io/x",  # IDNA label
+    "javascript://boards.greenhouse.io/x",
+    "ftp://boards.greenhouse.io/x",
+    "https://[::1]/x",
+    "",
+)
+
+
+async def _yes_without_cv(client: AsyncClient, app_id: int) -> None:
+    resp = await _event(client, app_id, "submit_approved", {"artifact_id": None, "sha256": "", "where": "web"})
+    assert resp.status_code == 201, resp.text
+
+
+async def _fill_and_sweep(client: AsyncClient, app_id: int, url: str) -> None:
+    resp = await _event(client, app_id, "form_filled", {"form_url": url, "fields_count": 1})
+    assert resp.status_code == 201, resp.text
+    await _sweep(client, app_id)
+
+
+async def _submit_check(client: AsyncClient, app_id: int, url: str) -> tuple[str, str]:
+    resp = await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": url})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["decision"], resp.json()["reason"]
+
+
+@pytest.mark.asyncio
+async def test_spoofed_form_url_never_submits_even_with_yes(authenticated_async_context, fixture_user_id):
+    # pure gate: a yes, filled on the very host the spoof names, still asks unknown_site
+    yes = _facts(approved=True, cv_seen=True, form_host="boards.greenhouse.io")
+    for url in SPOOFED:
+        assert rules.screen_form_url(url) is None, url
+        assert _gate(_cfg(submit_mode="auto_when_sure"), yes, url=url) == ("ask", "unknown_site"), url
+        assert _gate(_cfg(), yes, url=url) == ("ask", "unknown_site"), url
+    assert rules.screen_form_url("HTTPS://Boards.Greenhouse.IO.:443/x?a=b@c#d@e") == "boards.greenhouse.io"
+    assert rules.screen_form_url("boards.greenhouse.io") == "boards.greenhouse.io"
+    # through the route, with a stored yes
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _yes_without_cv(client, app_id)
+        await _fill_and_sweep(client, app_id, GREENHOUSE)
+        assert await _submit_check(client, app_id, GREENHOUSE) == ("submit", "user_approved")
+        for url in SPOOFED:
+            assert await _submit_check(client, app_id, url) == ("ask", "unknown_site"), url
+
+
+@pytest.mark.asyncio
+async def test_form_host_mismatch_asks_even_with_yes(authenticated_async_context, fixture_user_id):
+    yes = _facts(approved=True, cv_seen=True, form_host="boards.greenhouse.io")
+    assert _gate(_cfg(), yes, url="https://jobs.lever.co/northwind/1") == ("ask", "form_host_mismatch")
+    assert _gate(_cfg(), yes, url="https://evil.greenhouse.io/x") == ("ask", "form_host_mismatch")
+    assert _gate(_cfg(), _facts(approved=True, form_host=None)) == ("ask", "form_host_mismatch")
+    assert "form_host_mismatch" in rules.REASONS
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _yes_without_cv(client, app_id)
+        await _fill_and_sweep(client, app_id, GREENHOUSE)
+        assert await _submit_check(client, app_id, "https://evil.com/northwind") == ("ask", "form_host_mismatch")
+        # the NEWEST form_filled names the host
+        await _fill_and_sweep(client, app_id, "https://jobs.lever.co/northwind/1")
+        assert await _submit_check(client, app_id, GREENHOUSE) == ("ask", "form_host_mismatch")
+        assert await _submit_check(client, app_id, "https://jobs.lever.co/x") == ("submit", "user_approved")
+
+
+@pytest.mark.asyncio
+async def test_form_filled_rejects_userinfo_url(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        for url in SPOOFED:
+            resp = await _event(client, app_id, "form_filled", {"form_url": url, "fields_count": 1})
+            assert resp.status_code == 422, url
+            assert "form_url" in resp.text and "evil" not in resp.text
+        # nothing was stored, so the gate still says the form is not recorded
+        assert await _submit_check(client, app_id, GREENHOUSE) == ("stop", "form_not_recorded")
+
+
+@pytest.mark.asyncio
+async def test_unverified_email_check_submit_asks(authenticated_async_context, fixture_user_id, monkeypatch):
+    from src.repositories import pgsync
+
+    # pure gate order: paused and already_applied win; it beats a decline and a yes
+    unverified = {"email_verified": False, "approved": True, "cv_seen": True}
+    paused = _cfg(paused_until="until_resumed")
+    assert _gate(paused, _facts(**unverified)) == ("stop", "paused")
+    assert _gate(_cfg(), _facts(status="applied", **unverified)) == ("stop", "already_applied")
+    assert _gate(_cfg(), _facts(declined=True, **unverified)) == ("ask", "email_not_verified")
+    assert _gate(_cfg(submit_mode="auto_when_sure"), _facts(**unverified)) == ("ask", "email_not_verified")
+    assert "email_not_verified" in rules.REASONS
+
+    monkeypatch.delenv("REQUIRE_EMAIL_VERIFICATION", raising=False)
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _yes_without_cv(client, app_id)
+        await _fill_and_sweep(client, app_id, GREENHOUSE)
+        assert await _submit_check(client, app_id, GREENHOUSE) == ("submit", "user_approved")
+        conn = pgsync.connect(str(settings.DB_PATH))
+        conn.execute("UPDATE users SET email_verified_at = NULL WHERE id = ?", (fixture_user_id,))
+        conn.commit()
+        conn.close()
+        assert await _submit_check(client, app_id, GREENHOUSE) == ("ask", "email_not_verified")
+        kit = (await _kit(client, app_id)).json()
+        assert kit["settings"]["submit_preview"]["reason"] == "email_not_verified"
+        # the escape hatch switches this gate off with every other verification gate
+        monkeypatch.setenv("REQUIRE_EMAIL_VERIFICATION", "false")
+        assert await _submit_check(client, app_id, GREENHOUSE) == ("submit", "user_approved")
