@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
 from src.api.dependencies import get_request_db
@@ -175,19 +175,41 @@ class RecordEventRequest(BaseModel):
 
 
 class ReceiptAnswer(BaseModel):
+    """One answer on a receipt. The SAME shape the ``form_filled`` event takes
+    (``kit.ANSWER_SOURCES`` is the one source list); ``source`` and ``key`` are
+    optional here, stored when given and returned on read."""
+
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(..., max_length=500)
     answer: str = Field(..., max_length=settings.APPLICATION_RECEIPT_ANSWER_MAX_CHARS)
+    source: Optional[str] = None
+    key: Optional[str] = Field(None, min_length=1, max_length=kit_service.ANSWER_KEY_MAX)
+
+    @field_validator("source")
+    @classmethod
+    def _known_source(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in kit_service.ANSWER_SOURCES:
+            raise ValueError("answer source must be one of: " + ", ".join(kit_service.ANSWER_SOURCES))
+        return value
 
 
 class ReceiptAnswerOut(BaseModel):
     """The READ shape of an answer — deliberately without the request caps.
     A receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS
-    is ever lowered, older rows must still read back, not 500 the page."""
+    is ever lowered, older rows must still read back, not 500 the page.
+    ``source`` / ``key`` are absent on receipts recorded before they existed."""
 
     question: str
     answer: str
+    source: Optional[str] = None
+    key: Optional[str] = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset(self, handler: Any):  # type: ignore[no-untyped-def]  # un-annotated keeps the OpenAPI schema typed
+        """An answer stored without a source/key reads back without them (not as nulls)."""
+        data = handler(self)
+        return {k: v for k, v in data.items() if v is not None}
 
 
 class RecordApplicationReceiptRequest(BaseModel):
@@ -2244,7 +2266,7 @@ async def record_application_receipt(
         return await spine.record_receipt(
             db, user_id=user.id, application_id=application_id, recorded_by=actor_for(user),
             channel=body.channel, note=body.note, confirmation=body.confirmation,
-            answers=[a.model_dump() for a in body.answers], fields_filled=fields_filled,
+            answers=[a.model_dump(exclude_none=True) for a in body.answers], fields_filled=fields_filled,
             cv_artifact_id=body.cv_artifact_id, cover_letter_artifact_id=body.cover_letter_artifact_id,
             applied_at=body.applied_at,
         )

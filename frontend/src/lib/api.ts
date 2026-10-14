@@ -412,6 +412,30 @@ export async function deleteAccount(currentPassword: string): Promise<void> {
   });
 }
 
+/** Download everything we hold on the signed-in user as one JSON file
+ * (GDPR Article 20). GET, fetched into a blob and saved by an anchor click,
+ * like the CV downloads. Rate limited server-side (429). */
+export async function downloadMyData(): Promise<void> {
+  const res = await fetch(`${API}/api/auth/users/me/export`, { credentials: "include" });
+  if (!res.ok) {
+    let detail = "Download failed";
+    try {
+      const body = await res.json();
+      detail = body?.detail ?? detail;
+    } catch {
+      // no JSON body — keep the fallback detail
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "job360-my-data.json";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ---- Step-3: Profile version diff ----
 
 export async function getProfileVersionDiff(

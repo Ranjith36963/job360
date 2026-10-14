@@ -23,6 +23,7 @@ from src.api.auth_deps import (
 )
 from src.api.dependencies import get_request_db
 from src.api.middleware import _is_production
+from src.core import settings
 from src.core.settings import DB_PATH, LOGIN_LOCKOUT_WINDOW_SECONDS, LOGIN_MAX_ATTEMPTS, USER_TIMEZONE_MAX_CHARS
 from src.repositories import pg
 from src.repositories.database import JobDatabase
@@ -373,7 +374,26 @@ async def export_my_data(
     Secrets (password hash, encrypted channel creds) are redacted and the
     security-token tables are omitted entirely; see ``export_user_data``.
     """
+    # Per-user cap (feature 4): a full export reads every table, so bound repeats.
+    # 0 or less disables the cap, matching the other *_MAX_PER_HOUR settings.
+    if settings.USER_EXPORT_MAX_PER_HOUR > 0 and not auth_rate_limit.check_and_record(
+        f"user_export:{user.id}", max_in_window=settings.USER_EXPORT_MAX_PER_HOUR, window_seconds=3600
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail=f"too many exports this hour (USER_EXPORT_MAX_PER_HOUR = {settings.USER_EXPORT_MAX_PER_HOUR})",
+        )
     data = await db.export_user_data(user.id)
+    # Audit line: ids and counts only, never the exported content.
+    get_audit_logger().info(
+        "auth",
+        extra={
+            "event": "user_data_exported",
+            "user_id": user.id,
+            "tables": len([k for k in data if not k.startswith("_") and k != "user"]),
+            "incomplete": bool(data.get("_incomplete_tables")),
+        },
+    )
     # Flat file: ``exported_at`` beside the tables (``user``, ``api_tokens``, …),
     # no wrapper object — one level to read for a human opening the download.
     body = json.dumps(
