@@ -660,7 +660,7 @@ KIT_READS_MAX_PER_HOUR = int(os.getenv("KIT_READS_MAX_PER_HOUR", "60"))
 # never locked out).
 FILE_DOWNLOADS_MAX_PER_MIN = int(os.getenv("FILE_DOWNLOADS_MAX_PER_MIN", "30"))
 FILE_BAD_TOKEN_MAX_PER_MIN = int(os.getenv("FILE_BAD_TOKEN_MAX_PER_MIN", "20"))
-# Private calendar feed (GET /api/calendar/{token}.ics, migration 0056): fetches per feed
+# Private calendar feed (GET /api/calendar/{token}.ics, migration 0058): fetches per feed
 # OWNER per hour (calendar apps poll slowly; this only stops a leaked URL being hammered).
 CALENDAR_FEED_MAX_PER_HOUR = int(os.getenv("CALENDAR_FEED_MAX_PER_HOUR", "30"))
 # How far back the feed reaches for interviews (days).

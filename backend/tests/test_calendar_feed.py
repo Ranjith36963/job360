@@ -1,4 +1,4 @@
-"""The private calendar feed (migration 0056, ``routes/calendar.py``).
+"""The private calendar feed (migration 0058, ``routes/calendar.py``).
 
 ``GET /api/calendar/{token}.ics`` has no login and serves private data, so the
 tests pin the credential rules (hash only, lockout, owner rate limit, headers,
