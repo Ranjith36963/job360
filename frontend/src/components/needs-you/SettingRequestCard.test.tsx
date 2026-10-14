@@ -80,6 +80,22 @@ describe("describeSettingRequest", () => {
     expect(describeSettingRequest("assistant_settings.paused_until", "").change).toBe("Start applying again");
     expect(describeSettingRequest("preferences.daily_check", "auto").title).toBe("Your inbox");
   });
+
+  it("says EVERY job plainly when the auto side covers all of them", () => {
+    expect(describeSettingRequest("assistant_settings.above_line", "auto", 0).change).toBe(
+      "Apply on its own for EVERY job (your score line is 0)",
+    );
+    expect(describeSettingRequest("assistant_settings.below_line", "auto", 100).change).toBe(
+      "Apply on its own for EVERY job (your score line is 100)",
+    );
+    // the other side at those lines, and "ask", stay as before
+    expect(describeSettingRequest("assistant_settings.below_line", "auto", 0).change).toBe(
+      "Apply on its own for jobs below your score line (0)",
+    );
+    expect(describeSettingRequest("assistant_settings.above_line", "ask", 0).change).toBe(
+      "Ask me about jobs at or above my score line (0)",
+    );
+  });
 });
 
 describe("SettingRequestCard", () => {

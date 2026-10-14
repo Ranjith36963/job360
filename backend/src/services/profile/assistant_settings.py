@@ -873,6 +873,44 @@ def setup_round_refusal(round_name: str, missing: list[str]) -> str:
     )
 
 
+def setup_round_waiting_refusal(
+    round_name: str,
+    parked: list[str],
+    site_base_url: str,
+    held_now: list[str] | None = None,
+    other: list[str] | None = None,
+) -> str:
+    """The 422 message for a round marked done while a value it needs is not
+    saved (owner decision 2026-10-14).
+
+    ``parked`` — paths with a request ALREADY waiting for the user's Confirm.
+    ``held_now`` — paths THIS call would have parked: no request exists yet (the
+    whole call is refused), so they must never be described as waiting.
+    ``other`` — required paths simply not sent: named too, so the caller can
+    resend everything in one call."""
+    held = list(held_now or [])
+    missing = list(other or [])
+    parts: list[str] = []
+    if held:
+        parts.append(
+            f"{', '.join(held)} needs the user's OK: resend this call WITHOUT setup_progress "
+            "(the change will be parked for the user's Confirm), then mark the round done after they Confirm"
+        )
+    if parked:
+        parts.append(
+            f"{', '.join(parked)} is waiting for the user's Confirm and is NOT saved - the user must tap "
+            f"Confirm on Needs you at {site_base_url}/needs-you, then mark the round done"
+        )
+    if missing:
+        parts.append(f"also missing {', '.join(missing)} - ask the user, then save them in the same call")
+    return f"setup round {round_name} can't be marked done yet: " + "; ".join(parts)
+
+
+def parked_line(path: str, site_base_url: str) -> str:
+    """The plain line ``update_profile`` returns for each parked (waiting) path."""
+    return f"{path}: NOT saved yet — the user must tap Confirm on Needs you at {site_base_url}/needs-you"
+
+
 def setup_progress_view(progress: Any) -> dict[str, Any]:
     """``{rounds, done, total, next}`` from the stored progress. ``next`` is the
     first unfinished round in order, ``""`` when all six are done. A malformed

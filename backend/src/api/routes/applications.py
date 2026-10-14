@@ -731,7 +731,8 @@ class RecordEventResponse(BaseModel):
     status: str
     already_existed: bool
     scheduled_at: Optional[str]
-    # Non-fatal notes, e.g. a deduped message_id that was recorded as another type.
+    # Non-fatal notes: a deduped message_id recorded as another type, or (owner
+    # decision 2026-10-14) a reply/interview/offer with no `applied` event yet.
     warnings: list[str] = Field(default_factory=list)
     # Owner decision, 2026-09-25 — the CURRENT slot value after this call:
     # the new value when this call set/cleared it, the unchanged value when
@@ -1207,6 +1208,10 @@ class StatsOverallOut(BaseModel):
     reply_rate: Optional[float]
     interview_rate: Optional[float]
     offer_rate: Optional[float]
+    # Owner decision 2026-10-14 — replied/interview/offer above count only
+    # applications that ALSO have an `applied` event (so no rate exceeds 1);
+    # this is how many reached a later stage with no `applied` recorded.
+    replies_without_applied: int = 0
 
 
 class StatsCvVersionGroupOut(BaseModel):
@@ -2255,7 +2260,12 @@ async def record_event(
             kit_service.log_kit_event(user, application_id, body.event_type, payload, int(result["event_id"]))
         if body.event_type == "proof_text":
             proof_service.log_proof_text(user, application_id, int(result["event_id"]), payload)
-        return result
+        # Keep append_event's own warnings (a duplicate message_id recorded as another type)
+        # and add the reply-before-applied one; never replace one list with the other.
+        # Judge the STORED type: a duplicate message_id returns the existing event.
+        stored_type = str(result.get("event_type") or body.event_type)
+        missing = await spine.missing_applied_warnings(db, application_id, stored_type)
+        return {**result, "warnings": [*result.get("warnings", []), *missing]}
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
