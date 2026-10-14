@@ -45,9 +45,9 @@ for them from the CV. Job360 is the record. Plain words. Rules: `get_recipe("rul
    (REQUIRED; "not now" = `paused`, a real answer), `preferences.check_every`. And: "turn on
    form filling (browser control) in your own app".
    **Read back**, then on OK save after each round in ONE `update_profile` call: its paths
-   plus `assistant_settings.setup_progress` with that round's `done_at`. Job360 refuses `targets`
-   done without roles, a score line and a place to search, and `settings` done without a Gmail
-   answer: ask what is missing. A refused save saved NOTHING: fix the named path, resend ALL
+   plus `assistant_settings.setup_progress` with that round's `done_at`. No clock? Use `now` from
+   `whats_new` (a future time is refused). Job360 refuses `targets` done without roles, a score
+   line and a place to search, and `settings` done without a Gmail answer: ask what is missing. A refused save saved NOTHING: fix the named path, resend ALL
    paths. Print "N of 6 done". The user may stop: "type run 360 to continue". **Done when** the
    round is saved. STOP if they stop. **Waiting for your OK:** more freedom for you (a side
    set to `auto`, a score line that moves jobs onto an `auto` side, `auto_when_sure`, a higher or
