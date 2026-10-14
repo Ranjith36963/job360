@@ -8150,17 +8150,12 @@
       },
       "StatusResponse": {
         "properties": {
-          "jobs_total": {
-            "title": "Jobs Total",
-            "type": "integer"
-          },
           "profile_exists": {
             "title": "Profile Exists",
             "type": "boolean"
           }
         },
         "required": [
-          "jobs_total",
           "profile_exists"
         ],
         "title": "StatusResponse",
@@ -16130,7 +16125,7 @@
     },
     "/api/status": {
       "get": {
-        "description": "How much is stored, and has this deployment been set up at all.\n\nSlice 5 (#483) took the source counters and the last-run block off this\nresponse: nothing fetches jobs any more, so there is no run to report.",
+        "description": "Has this deployment been set up at all.\n\nSlice 5 (#483) took the source counters and the last-run block off this\nresponse; the public-audit fix then removed ``jobs_total`` \u2014 a public\nendpoint must not reveal how many ads the shared catalog holds.",
         "operationId": "status_api_status_get",
         "responses": {
           "200": {

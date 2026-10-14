@@ -35,7 +35,10 @@ async def test_status_returns_counts(authenticated_async_context):
         resp = await client.get("/api/status")
     assert resp.status_code == 200
     data = resp.json()
-    assert "jobs_total" in data
+    # Public endpoint: the shared-catalog size must not be disclosed.
+    assert "jobs_total" not in data
+    # The isolated test DB has no single-tenant (DEFAULT_TENANT_ID) profile.
+    assert data["profile_exists"] is False
     # Slice 5 — nothing fetches jobs, so there is no source count and no last
     # run to report. Their absence is the assertion.
     assert "sources_total" not in data

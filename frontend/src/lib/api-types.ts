@@ -2210,10 +2210,11 @@ export interface paths {
         };
         /**
          * Status
-         * @description How much is stored, and has this deployment been set up at all.
+         * @description Has this deployment been set up at all.
          *
          *     Slice 5 (#483) took the source counters and the last-run block off this
-         *     response: nothing fetches jobs any more, so there is no run to report.
+         *     response; the public-audit fix then removed ``jobs_total`` — a public
+         *     endpoint must not reveal how many ads the shared catalog holds.
          */
         get: operations["status_api_status_get"];
         put?: never;
@@ -5474,8 +5475,6 @@ export interface components {
         };
         /** StatusResponse */
         StatusResponse: {
-            /** Jobs Total */
-            jobs_total: number;
             /** Profile Exists */
             profile_exists: boolean;
         };
