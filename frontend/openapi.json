@@ -80,6 +80,10 @@
           "contact": {
             "$ref": "#/components/schemas/ContactOut"
           },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
           "event_id": {
             "anyOf": [
               {
@@ -94,6 +98,7 @@
         },
         "required": [
           "contact",
+          "contact_id",
           "already_existed",
           "event_id"
         ],
@@ -6828,6 +6833,11 @@
             "title": "Channel",
             "type": "string"
           },
+          "channel_given": {
+            "default": "",
+            "title": "Channel Given",
+            "type": "string"
+          },
           "confirmation": {
             "title": "Confirmation",
             "type": "string"
@@ -6885,6 +6895,14 @@
           "url": {
             "title": "Url",
             "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
@@ -7059,6 +7077,13 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
@@ -8388,17 +8413,12 @@
       },
       "StatusResponse": {
         "properties": {
-          "jobs_total": {
-            "title": "Jobs Total",
-            "type": "integer"
-          },
           "profile_exists": {
             "title": "Profile Exists",
             "type": "boolean"
           }
         },
         "required": [
-          "jobs_total",
           "profile_exists"
         ],
         "title": "StatusResponse",
@@ -11761,7 +11781,7 @@
     },
     "/api/applications/{application_id}/submit-check": {
       "get": {
-        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). Read-only. 404 for an application that is not the\ncaller's (rule #12).",
+        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -\na stored yes clears neither. An unconfirmed email answers ``ask`` /\n``email_not_verified``. Read-only. 404 for an application that is not the\ncaller's (rule #12).",
         "operationId": "submit_check_api_applications__application_id__submit_check_get",
         "parameters": [
           {
@@ -16594,7 +16614,7 @@
     },
     "/api/status": {
       "get": {
-        "description": "How much is stored, and has this deployment been set up at all.\n\nSlice 5 (#483) took the source counters and the last-run block off this\nresponse: nothing fetches jobs any more, so there is no run to report.",
+        "description": "Has this deployment been set up at all.\n\nSlice 5 (#483) took the source counters and the last-run block off this\nresponse; the public-audit fix then removed ``jobs_total`` \u2014 a public\nendpoint must not reveal how many ads the shared catalog holds.",
         "operationId": "status_api_status_get",
         "responses": {
           "200": {

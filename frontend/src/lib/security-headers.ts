@@ -37,5 +37,11 @@ export const SECURITY_HEADERS: { key: string; value: string }[] = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  // HSTS: job360.uk is HTTPS-only. Browsers ignore this header over plain
+  // http (local dev), so it is safe to send unconditionally.
+  {
+    key: "Strict-Transport-Security",
+    value: "max-age=31536000; includeSubDomains",
+  },
   { key: "Content-Security-Policy", value: CONTENT_SECURITY_POLICY },
 ];

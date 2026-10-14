@@ -119,7 +119,7 @@ PUBLIC_ROUTES: dict[str, str] = {
     ),
     "/api/client-log": "browser error beacon — fires before or without a session",
     "/api/status": (
-        "how many jobs are stored and whether the deployment has a profile at all "
+        "whether the deployment has a profile at all (no job count: it is public) "
         "(routes/health.py). No per-user data. Slice 5 also removed the `last_run` "
         "block that served a run_log row verbatim — the one thing here that could "
         "ever have leaked a keyed URL."

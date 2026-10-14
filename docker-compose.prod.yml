@@ -70,6 +70,9 @@ services:
       SESSION_SECRET: ${SESSION_SECRET}
       CHANNEL_ENCRYPTION_KEY: ${CHANNEL_ENCRYPTION_KEY}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+      # Production mode: turns off /docs, /redoc and /openapi.json and enables
+      # the other prod-only guards (Railway sets RAILWAY_ENVIRONMENT itself).
+      APP_ENV: production
       # LLM provider keys REMOVED 2026-09-21 (decision 28): Job360 has no model
       # of its own. GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY and
       # OPENAI_API_KEY used to be injected here for the profile's provider

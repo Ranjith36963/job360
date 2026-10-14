@@ -43,10 +43,6 @@ Patterns studied from career-ops (MIT) and ai-job-search (MIT); no code copied.
 - Country names, ISO codes and UN regions: datasets/country-codes (https://github.com/datasets/country-codes), Public Domain Dedication and License (PDDL).
 - City and region names: GeoNames (https://www.geonames.org), licensed under Creative Commons Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/). Data was filtered by population and reformatted.
 
-## Optional library
-
-- python-jobspy, MIT licence, (c) speedyapply (github.com/speedyapply/JobSpy). Called as a library, optional, not bundled.
-
 ---
 
 ## career-ops (MIT)

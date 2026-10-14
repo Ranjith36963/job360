@@ -33,12 +33,8 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
    c. **Open lists:** Hacker News "Who is hiring", Y Combinator jobs, remote boards, that country's own job
       sites; an official job connector (e.g. Indeed's in Claude). **Job alerts:** suggest the user turns on
       LinkedIn/Indeed alerts; the daily check reads them from Gmail.
-   d. **Big boards** (LinkedIn, Indeed, Glassdoor, Naukri, Google Jobs...) only when the user said yes in
-      this chat: the kit's `--boards` reads their public no-login pages. **Browser hunt:** if you control
-      the user's browser, search job sites and Google Jobs like a person - typed searches, read each ad,
-      human pace, never a script clicking through results, at most 10 pages per site, stop at the first
-      CAPTCHA; a site the user is signed in to only after you told them "the site may restrict your
-      account" and they said yes; never on a scheduled run.
+   Never scrape or browser-search LinkedIn, Indeed, Glassdoor or other big job sites, signed in or not: their
+   terms forbid automated access. Their jobs reach you through the user's alerts (c) or a link the user pastes.
    Prefer the employer's own posting; from a LinkedIn or Indeed ad follow "Apply on company site". Never log
    in for the user or type a password. **Handing off:** a helper gets `get_recipe("hunt")` and `search_brief`
    word for word plus one line naming its rows, never your own summary; check every job it returns against the rows before you bring

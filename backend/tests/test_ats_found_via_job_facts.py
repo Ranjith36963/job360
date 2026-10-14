@@ -120,7 +120,9 @@ async def test_ats_is_only_for_cv_and_cover_letter(authenticated_async_context):
         app_id = (await _bring(client, _AD_FR))["application_id"]
         ok = await _save(client, app_id, kind="cover_letter", text="Dear team", ats_score=70)
         assert ok.status_code == 201, ok.text
-        for kind in ("answers", "outreach"):
+        # "outreach" without a contact_id now refuses earlier (test_lifecycle_mcp_fixes.py); the ATS refusal
+        # for outreach WITH a contact lives in spine.validate_ats, shared by both branches.
+        for kind in ("answers",):
             resp = await _save(client, app_id, kind=kind, text="x", ats_notes="n/a")
             assert resp.status_code == 422, (kind, resp.text)
             assert "ats_score/ats_notes are only allowed" in resp.json()["detail"]
@@ -294,6 +296,7 @@ def test_receipt_channel_normalisers():
     assert normalize_receipt_channel("Company website") == "company_site"
     assert normalize_receipt_channel("Indeed") == "job_board"
     assert normalize_receipt_channel("carrier pigeon") == "other"
+    assert normalize_receipt_channel("ATS form") == "company_site"
     # Legacy reading: same map, anything else → other, empty → None.
     assert receipt_channel_key("Company Site") == "company_site"
     assert receipt_channel_key("LinkedIn") == "linkedin_easy_apply"
@@ -528,3 +531,23 @@ def test_instructions_and_recipes_tell_the_assistant_about_the_new_params():
     hunt = load_recipe("hunt").text
     assert "`country`" in hunt and "`remote`" in hunt and "`found_on`" in hunt
     assert "found_on" in load_recipe("setup").text
+
+
+def test_ats_form_alias_maps_to_company_channel():
+    from src.services.applications.spine import normalize_receipt_channel
+
+    for raw in ("ats_form", "ats", "application_form", "Workday", "greenhouse", "lever", "ashby", "SmartRecruiters"):
+        assert normalize_receipt_channel(raw) == "company_site", raw
+
+
+@pytest.mark.asyncio
+async def test_unknown_channel_reply_warns_stored_as_other(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = (await _bring(client, _AD_FR))["application_id"]
+        odd = (await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "carrier pigeon"})).json()
+        assert odd["channel"] == "other" and odd["channel_given"] == "carrier pigeon"
+        assert len(odd["warnings"]) == 1
+        assert "'carrier pigeon'" in odd["warnings"][0] and "stored as 'other'" in odd["warnings"][0]
+        assert "company_site" in odd["warnings"][0]
+        ok = (await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "ats_form"})).json()
+        assert ok["channel"] == "company_site" and ok["channel_given"] == "ats_form" and ok["warnings"] == []

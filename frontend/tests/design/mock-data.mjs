@@ -135,7 +135,7 @@ export const MOCK_ROUTES = [
   },
   {
     pattern: "**/api/status**",
-    body: { jobs_total: MOCK_JOBS.length, sources_total: 47, last_run: iso(2) },
+    body: { profile_exists: true },
   },
   // The LIST endpoint only. `**/api/jobs**` on its own also swallows
   // `/api/jobs/101`, so the job-detail page would receive a list payload and

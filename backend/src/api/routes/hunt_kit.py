@@ -22,6 +22,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
+from src.core.settings import SITE_BASE_URL
+
 router = APIRouter(tags=["hunt-kit"])
 
 HUNT_KIT_DIR = Path(__file__).resolve().parents[2] / "hunt_kit"
@@ -33,7 +35,6 @@ KIT_FILES: dict[str, str] = {
     "hunt_kit.py": "text/plain; charset=utf-8",
     "kit_ats.py": "text/plain; charset=utf-8",
     "kit_feeds.py": "text/plain; charset=utf-8",
-    "kit_boards.py": "text/plain; charset=utf-8",
     "kit_places.py": "text/plain; charset=utf-8",
     "kit_xml.py": "text/plain; charset=utf-8",
     "companies.json": "application/json",
@@ -80,15 +81,15 @@ def _index() -> KitIndex:
     for name in KIT_FILES:
         data = _read(name)
         files.append(KitFile(
-            name=name, url=f"/api/hunt-kit/{name}", bytes=len(data),
+            name=name, url=f"{SITE_BASE_URL}/api/hunt-kit/{name}", bytes=len(data),
             sha256=hashlib.sha256(data).hexdigest(),
         ))
     return KitIndex(
         how_to=(
             "Download every file into one folder, read README.md, then run "
             "`python hunt_kit.py --help`. Python 3.10+, standard library only. "
-            "It reads company job boards and open job feeds with no login; big "
-            "boards (LinkedIn, Indeed, ...) only if the user switches them on, "
+            "It reads company job boards and open job feeds with no login; it "
+            "never reads LinkedIn, Indeed, Glassdoor or other big job sites, "
             "and it never logs in. Read each job it keeps, "
             "judge it yourself, and bring only fits into Job360."
         ),

@@ -18,6 +18,9 @@ const nextConfig: NextConfig = {
   // surface for dependency CVEs to be reported against.
   output: "standalone",
 
+  // Don't advertise the framework in an `x-powered-by: Next.js` response header.
+  poweredByHeader: false,
+
   // Same-origin proxy: the browser calls `/api/*` on the frontend origin and
   // Next forwards it to the backend. This keeps frontend + backend same-origin
   // so the host-only session cookie is always sent and the middleware auth gate

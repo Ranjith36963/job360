@@ -65,7 +65,7 @@ export default function TrustPage() {
               analytics banner.
             </li>
             {/* Source: SUBPROCESSORS (Sentry row); region quoted as the privacy page words it. */}
-            <li>Error monitoring (Sentry) is located &ldquo;EU/USA&rdquo;.</li>
+            <li>Error monitoring (Sentry) is located in the EU (Germany).</li>
           </ul>
         </section>
 
