@@ -43,7 +43,6 @@ const PROTECTED_PREFIXES = [
   "/stats",
   "/needs-you",
   "/settings",
-  "/admin",
   "/oauth",
 ];
 
