@@ -560,7 +560,8 @@ async def _event_by_source_message_id(
 
 
 async def _duplicate_event_result(
-    db: JobDatabase, application_id: int, recorded_by: str, existing: dict[str, Any]
+    db: JobDatabase, application_id: int, recorded_by: str, existing: dict[str, Any],
+    requested_type: Optional[str] = None,
 ) -> dict[str, Any]:
     """R2/S4 — the same message id has already been recorded: audit ids ONLY
     (never subject/sender/message_id — S4), write nothing, and hand back the
@@ -582,7 +583,24 @@ async def _duplicate_event_result(
     )
     cur = await db._db.execute("SELECT status, follow_up_on FROM applications WHERE id = ?", (application_id,))
     app_row = await cur.fetchone()
+    warnings: list[str] = []
+    if requested_type is not None and requested_type != existing["event_type"]:
+        # Same message id, DIFFERENT type: the dedupe stands (nothing written),
+        # but say so — otherwise the caller believes its type was recorded.
+        get_audit_logger().info(
+            "application_event_type_mismatch",
+            extra={
+                "event": "application_event_type_mismatch",
+                "application_id": safe_log_value(application_id),
+                "event_id": safe_log_value(existing["id"]), "event_type": safe_log_value(existing["event_type"]),
+            },
+        )
+        warnings.append(
+            f"message_id already recorded as {existing['event_type']}; to reclassify, "
+            f"record_event(..., corrects_event_id={existing['id']}) without `source` (the original keeps it)"
+        )
     return {
+        "warnings": warnings,
         "event_id": existing["id"],
         "event_type": existing["event_type"],
         "occurred_at": existing["occurred_at"],
@@ -702,7 +720,7 @@ async def append_event(
     if source is not None:
         existing = await _event_by_source_message_id(db, application_id, source["message_id"])
         if existing is not None:
-            return await _duplicate_event_result(db, application_id, recorded_by, existing)
+            return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
 
     # The slot's value BEFORE this event — needed to decide the auto-clear
     # below, and to echo back an unchanged value at the end without a stale
@@ -762,7 +780,7 @@ async def append_event(
         if source is not None:
             existing = await _event_by_source_message_id(db, application_id, source["message_id"])
             if existing is not None:
-                return await _duplicate_event_result(db, application_id, recorded_by, existing)
+                return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
         raise
     event_id = cur.lastrowid
 

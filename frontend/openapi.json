@@ -80,6 +80,10 @@
           "contact": {
             "$ref": "#/components/schemas/ContactOut"
           },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
           "event_id": {
             "anyOf": [
               {
@@ -94,6 +98,7 @@
         },
         "required": [
           "contact",
+          "contact_id",
           "already_existed",
           "event_id"
         ],
@@ -6821,6 +6826,13 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
