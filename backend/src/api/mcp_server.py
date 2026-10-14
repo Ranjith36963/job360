@@ -548,7 +548,8 @@ def build_server(version: str = "") -> MCPServer:
         Job360 stores it and starts an application for it, then returns the job id and
         the application id to work against. It does NOT judge the fit — that is your
         job; record your own verdict with `save_fit`. Bringing the same title+company
-        again returns the existing job (existing=true). Never use this to search.
+        again returns the existing job (existing=true); a different link/location/country
+        is a 409 saying what to do. Never use this to search.
 
         Visa (optional): if the ad SAYS whether the employer sponsors visas, pass
         `visa_signal` = "sponsors" or "no_sponsorship", quote the sentence in
@@ -684,17 +685,16 @@ def build_server(version: str = "") -> MCPServer:
             raise _validation_error(exc) from None
         try:
             async with _request_db() as db:
-                job = await db.get_job_by_id(job_id)
-                if job is None:
-                    raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-                # Upsert-by-read, same as the legacy `/receipts/{job_id}` route
-                # (receipts.py:126-128): a job the caller never explicitly
-                # `bring_job`-ed still gets an application row here, so
-                # "record I applied" never 404s on a job that plainly exists.
-                await db.create_application(job_id, _user().id)
+                # P0 2026-10-14 — only a job THIS user brought (same gate as
+                # `POST /receipts/{job_id}`). The catalog is shared (rule #10);
+                # upserting an application onto any job_id let a caller adopt
+                # another user's paste. Never brought = 404, no oracle.
                 application = await applications_spine.get_application_by_job(db, _user().id, job_id)
-                if application is None:  # pragma: no cover — create_application always upserts one
-                    raise HTTPException(status_code=404, detail="application not found")
+                if application is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Job {job_id} not found — bring_job it first, then record the application.",
+                    )
                 resp = await applications_route.record_application_receipt(
                     application["id"], body, db, _user()
                 )

@@ -166,18 +166,27 @@ async def create_receipt(
     except applications_spine.SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
-    job = await db.get_job_by_id(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    # Mark applied FIRST — `create_application` is an upsert (INSERT OR
-    # IGNORE), so the application row (and its id) exists before the receipt
-    # does. R8's `application_id` is then part of the receipt's own INSERT
-    # (below), never a later UPDATE: tests/test_receipts.py::
+    # P0 2026-10-14 — only a job THIS user brought. The catalog is shared
+    # (rule #10): upserting an application onto any existing job_id and
+    # freezing the catalog row into the receipt handed the caller another
+    # user's pasted ad. A job they never brought reads as 404 (no oracle).
+    # R8's `application_id` is part of the receipt's own INSERT (below),
+    # never a later UPDATE: tests/test_receipts.py::
     # test_receipts_are_append_only greps `backend/src/` for any
     # UPDATE/DELETE against `application_receipts`.
-    await db.create_application(job_id, user.id)
     application = await applications_spine.get_application_by_job(db, user.id, job_id)
+    app_row = (
+        await applications_spine.get_owned_application(db, user.id, int(application["id"]))
+        if application is not None else None
+    )
+    if application is None or app_row is None or await db.get_job_by_id(job_id) is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    # The ad "as it read" is the caller's own snapshot, never the catalog row.
+    job = {
+        "id": job_id, "title": app_row.get("job_title") or "", "company": app_row.get("job_company") or "",
+        "location": app_row.get("job_location") or "", "apply_url": app_row.get("job_url") or "",
+        "source": app_row.get("job_source") or "", "description": app_row.get("job_description_snapshot") or "",
+    }
 
     # Decision 28 (2026-09-21): the documents live in `application_artifacts`
     # — the agent writes them and `save_artifact` versions them. Nothing has
