@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
-from src.services.applications import kit, spine
+from src.services.applications import event_examples, kit, spine
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 from src.services.auth import rate_limit as auth_rate_limit
@@ -68,18 +68,23 @@ def sniff_mime(data: bytes) -> Optional[str]:
 def check_proof_text(user: CurrentUser, payload: Any) -> dict[str, Any]:
     """Validate a ``proof_text`` payload and return the one to STORE (the server
     adds ``by``). The cap is in characters, so this replaces the generic byte cap."""
-    if not isinstance(payload, dict) or set(payload) - {"text", "page_host"}:
-        raise SpineError(422, 'proof_text takes a JSON object with only "text" and "page_host"')
+    if not isinstance(payload, dict):
+        raise event_examples.refusal("proof_text", ['proof_text takes a JSON object with only "text" and "page_host"'])
+    problems: list[str] = []
+    if set(payload) - {"text", "page_host"}:
+        problems.append('proof_text takes a JSON object with only "text" and "page_host"')
     text = spine._strip_control_chars(payload["text"]).strip() if isinstance(payload.get("text"), str) else ""
     text = _URL.sub("[link removed]", text)  # a link can carry a token; the cap counts what is kept
     if not text:
-        raise SpineError(422, "proof_text needs non-empty text")
-    if len(text) > settings.PROOF_TEXT_MAX_CHARS:
-        raise SpineError(422, f"text exceeds PROOF_TEXT_MAX_CHARS ({settings.PROOF_TEXT_MAX_CHARS} chars)")
+        problems.append("proof_text needs non-empty text")
+    elif len(text) > settings.PROOF_TEXT_MAX_CHARS:
+        problems.append(f"text exceeds PROOF_TEXT_MAX_CHARS ({settings.PROOF_TEXT_MAX_CHARS} chars)")
     page = payload.get("page_host")
     host = settings_rules.parse_site_host(page) if isinstance(page, str) and page.strip() else None
     if page not in (None, "") and host is None:
-        raise SpineError(422, "proof_text page_host could not be read")
+        problems.append("proof_text page_host could not be read")
+    if problems:
+        raise event_examples.refusal("proof_text", problems)
     return {"text": text, "page_host": host or "", "by": actor_for(user)}
 
 
