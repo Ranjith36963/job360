@@ -20,8 +20,8 @@ def test_every_kit_module_and_data_file_is_served():
 
 def test_hunt_kit_not_imported():
     """The server never imports the kit: it only serves its bytes. That is why
-    tests/test_runtime_deps_declared.py may skip src/hunt_kit/ (its optional
-    jobspy import is the user's choice, not a server dependency)."""
+    tests/test_runtime_deps_declared.py may skip src/hunt_kit/ (its sibling-module
+    imports are the user's machine's business, not a server dependency)."""
     import re
 
     src = Path(__file__).resolve().parent.parent / "src"

@@ -214,11 +214,6 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             found_on: detail.job.found_on ?? null,
           }}
         />
-        {!detail.job.catalog_present && (
-          <p className="mt-1 text-xs text-muted-foreground/70">
-            This listing is no longer in the catalog — the snapshot above is what it read when you brought it.
-          </p>
-        )}
       </header>
 
       {openAsks.length > 0 && (

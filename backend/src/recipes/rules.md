@@ -62,14 +62,18 @@ this one application; `stop` - do not submit (paused, already applied, or the
 daily limit is reached). `reason` is a short code and `detail` one plain
 sentence you can show the user. Reasons: paused, already_applied,
 user_declined (the user said don't send), daily_cap_reached, duplicate_job
-(same job already applied to: `stop` in auto mode, else `ask`), unknown_site,
-ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
+(same job already applied to: `stop` in auto mode, else `ask`), unknown_site
+(`form_url` is not one plain http(s) address - no user@, % or backslash before
+the path, ASCII host), form_host_mismatch (`form_url` is not the site of your
+latest `form_filled`), email_not_verified (the user has not confirmed their
+email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
 (the user said yes to this CV: `submit`), auto_when_sure, blocked (you
 recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it). Indeed and LinkedIn
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
-`practice_run`). It is read-only: it records nothing - after a real submit,
+`practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
+email_not_verified or blocked: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
 record it with `record_application`. A yes the user gave for this exact CV
 answers `submit` with `user_approved`; if the CV is edited afterwards that yes
 no longer counts - ask again. A setting that says to apply is never a reason
@@ -278,7 +282,7 @@ note-family event never does.
 `source` names the email an event came from (kind/message_id/sender/subject/
 received_at) — the same message_id on the same application is the same event,
 so you get the first one back with already_existed=true and nothing is written;
-re-reading an inbox is safe. `scheduled_at` is the real interview datetime
+re-reading an inbox is safe. If the same message_id arrives with a different event_type the reply carries `warnings` naming the old type; reclassify with `corrects_event_id` and leave `source` out (the original event keeps it; repeating the message_id is a no-op). `scheduled_at` is the real interview datetime
 (ISO-8601 with a timezone) and is only accepted on interview_requested/
 interview_scheduled. `follow_up_on` (YYYY-MM-DD) sets when to chase this
 application next — works on ANY event_type, so a plain `note` can carry it; omit

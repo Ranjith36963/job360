@@ -65,7 +65,7 @@ def _third_party_imports() -> dict[str, str]:
     for path in SRC.rglob("*.py"):
         # src/hunt_kit/ is a standalone download the USER's assistant runs on the
         # user's machine (routes/hunt_kit.py only serves its bytes). The server never
-        # imports it, so its own imports (its sibling modules, the optional jobspy)
+        # imports it, so its own imports (its sibling modules)
         # are not server runtime dependencies. Guarded by test_hunt_kit_not_imported.
         if HUNT_KIT in path.parents:
             continue

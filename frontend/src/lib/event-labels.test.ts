@@ -1,32 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { STATUS_LABEL, EVENT_LABEL, eventLabel, whoLabel } from "./event-labels";
 
-// The closed sets from backend/src/core/settings.py — kept in sync by hand
-// (there is no shared schema to import across the language boundary); a
-// vocabulary edit there should also edit these two lists.
-const APPLICATION_STATUS_EVENT_TYPES = [
-  "brought",
-  "applied",
-  "replied",
-  "interview_requested",
-  "interview_scheduled",
-  "interview_done",
-  "offer",
-  "rejected",
-  "withdrawn",
-  "ghosted",
-];
+// The closed sets from backend/src/core/settings.py, via a checked-in JSON that
+// backend/tests/test_event_types_json_matches_settings.py pins to the settings
+// tuples. A new backend event type fails that backend test until the JSON is
+// regenerated, and then fails the label test below until it has a label.
+import eventTypes from "./event-types.json";
 
-const APPLICATION_NOTE_EVENT_TYPES = [
-  "fit_judged",
-  "artifact_saved",
-  "contact_added",
-  "outreach_sent",
-  "note",
-  "lesson",
-  "blocked",
-  "unblocked",
-];
+const APPLICATION_STATUS_EVENT_TYPES: string[] = eventTypes.status;
+const APPLICATION_NOTE_EVENT_TYPES: string[] = eventTypes.note;
 
 describe("STATUS_LABEL", () => {
   it("has a label for every status a status event can produce", () => {
@@ -43,6 +25,21 @@ describe("EVENT_LABEL", () => {
     for (const type of APPLICATION_NOTE_EVENT_TYPES) {
       expect(EVENT_LABEL[type]).toBeTruthy();
     }
+  });
+});
+
+describe("event labels are plain words", () => {
+  it("no note-family label is the raw event name", () => {
+    for (const type of APPLICATION_NOTE_EVENT_TYPES) {
+      expect(eventLabel({ event_type: type })).not.toBe(type);
+      expect(eventLabel({ event_type: type })).not.toContain("_");
+    }
+  });
+  it("labels the kit trail in the seeker's words", () => {
+    expect(eventLabel({ event_type: "kit_read" })).toBe("Assistant opened your application kit");
+    expect(eventLabel({ event_type: "form_swept" })).toBe("Form double-checked before sending");
+    expect(eventLabel({ event_type: "submit_declined" })).toBe("You said don't send");
+    expect(eventLabel({ event_type: "proof_text" })).toBe("Saved the confirmation page text");
   });
 });
 
@@ -68,7 +65,7 @@ describe("eventLabel", () => {
     expect(eventLabel({ event_type: "note" })).toBe("Note");
     expect(eventLabel({ event_type: "lesson" })).toBe("Lesson");
     expect(eventLabel({ event_type: "blocked" })).toBe("Assistant got stuck");
-    expect(eventLabel({ event_type: "unblocked" })).toBe("Marked resolved");
+    expect(eventLabel({ event_type: "unblocked" })).toBe("Unblocked");
   });
 
   it("falls back to the raw event_type string for an unknown type", () => {

@@ -195,6 +195,16 @@ _CHANNEL_ALIASES: dict[str, str] = {
     "website": "company_site",
     "careers_page": "company_site",
     "indeed": "job_board",
+    # Applying through a company's own applicant-tracking form is the
+    # company's site/portal, not a job board.
+    "ats_form": "company_site",
+    "ats": "company_site",
+    "application_form": "company_site",
+    "workday": "company_site",
+    "greenhouse": "company_site",
+    "lever": "company_site",
+    "ashby": "company_site",
+    "smartrecruiters": "company_site",
 }
 
 
@@ -482,6 +492,34 @@ def _display_payload(event_type: str, raw: Optional[str]) -> dict[str, Any]:
     return payload
 
 
+async def _attach_contact_names(
+    db: JobDatabase, user_id: Optional[str], events: list[dict[str, Any]]
+) -> None:
+    """Add ``contact_name`` to the payload of every event that names a
+    ``contact_id`` (outreach_sent / outreach_replied / contact_added), so the
+    UI can say who without a second call. Only the CALLER's own contacts are
+    read (``user_id`` match); an unknown or foreign id adds nothing. Payload
+    is a free-form dict, so the response model is unchanged."""
+    if not user_id:
+        return
+    ids = sorted({
+        int(e["payload"]["contact_id"]) for e in events
+        if isinstance(e["payload"].get("contact_id"), int) and not isinstance(e["payload"].get("contact_id"), bool)
+    })
+    if not ids:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    cur = await db._db.execute(
+        f"SELECT id, name FROM application_contacts WHERE user_id = ? AND id IN ({placeholders})",  # noqa: S608
+        [user_id, *ids],
+    )
+    names = {int(r["id"]): r["name"] for r in await cur.fetchall()}
+    for e in events:
+        cid = e["payload"].get("contact_id")
+        if isinstance(cid, int) and cid in names:
+            e["payload"]["contact_name"] = names[cid]
+
+
 async def list_events_for_display(db: JobDatabase, application_id: int) -> list[dict[str, Any]]:
     """Timeline order — ``occurred_at`` (backdated events included), NOT the
     ``recorded_at`` order the status recompute uses."""
@@ -510,6 +548,9 @@ async def list_events_for_display(db: JobDatabase, application_id: int) -> list[
                 "scheduled_at": r["scheduled_at"] or None,
             }
         )
+    owner = await db._db.execute("SELECT user_id FROM applications WHERE id = ?", (application_id,))
+    owner_row = await owner.fetchone()
+    await _attach_contact_names(db, owner_row["user_id"] if owner_row else None, out)
     return out
 
 
@@ -529,7 +570,8 @@ async def _event_by_source_message_id(
 
 
 async def _duplicate_event_result(
-    db: JobDatabase, application_id: int, recorded_by: str, existing: dict[str, Any]
+    db: JobDatabase, application_id: int, recorded_by: str, existing: dict[str, Any],
+    requested_type: Optional[str] = None,
 ) -> dict[str, Any]:
     """R2/S4 — the same message id has already been recorded: audit ids ONLY
     (never subject/sender/message_id — S4), write nothing, and hand back the
@@ -551,7 +593,24 @@ async def _duplicate_event_result(
     )
     cur = await db._db.execute("SELECT status, follow_up_on FROM applications WHERE id = ?", (application_id,))
     app_row = await cur.fetchone()
+    warnings: list[str] = []
+    if requested_type is not None and requested_type != existing["event_type"]:
+        # Same message id, DIFFERENT type: the dedupe stands (nothing written),
+        # but say so — otherwise the caller believes its type was recorded.
+        get_audit_logger().info(
+            "application_event_type_mismatch",
+            extra={
+                "event": "application_event_type_mismatch",
+                "application_id": safe_log_value(application_id),
+                "event_id": safe_log_value(existing["id"]), "event_type": safe_log_value(existing["event_type"]),
+            },
+        )
+        warnings.append(
+            f"message_id already recorded as {existing['event_type']}; to reclassify, "
+            f"record_event(..., corrects_event_id={existing['id']}) without `source` (the original keeps it)"
+        )
     return {
+        "warnings": warnings,
         "event_id": existing["id"],
         "event_type": existing["event_type"],
         "occurred_at": existing["occurred_at"],
@@ -671,7 +730,7 @@ async def append_event(
     if source is not None:
         existing = await _event_by_source_message_id(db, application_id, source["message_id"])
         if existing is not None:
-            return await _duplicate_event_result(db, application_id, recorded_by, existing)
+            return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
 
     # The slot's value BEFORE this event — needed to decide the auto-clear
     # below, and to echo back an unchanged value at the end without a stale
@@ -731,7 +790,7 @@ async def append_event(
         if source is not None:
             existing = await _event_by_source_message_id(db, application_id, source["message_id"])
             if existing is not None:
-                return await _duplicate_event_result(db, application_id, recorded_by, existing)
+                return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
         raise
     event_id = cur.lastrowid
 
@@ -1209,7 +1268,14 @@ async def record_receipt(
     ``channel`` is a closed set for every NEW receipt (owner decision
     2026-10-04, ``normalize_receipt_channel``) — '' stays "not said".
     """
+    channel_given = (channel or "").strip()
     channel = normalize_receipt_channel(channel)
+    warnings: list[str] = []
+    if channel_given and channel == "other" and _slug(channel_given) != "other":
+        warnings.append(
+            f"channel '{channel_given}' is not a known channel; stored as 'other' — allowed: "
+            + ", ".join(settings.APPLICATION_RECEIPT_CHANNELS)
+        )
     app_row = await get_owned_application(db, user_id, application_id)
     if app_row is None:
         raise SpineError(404, "application not found")
@@ -1301,7 +1367,8 @@ async def record_receipt(
         "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
         "cv_version_no": cv_artifact["version_no"] if cv_artifact else None,
         "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
-        "channel": channel or "", "confirmation": confirmation or "",
+        "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
+        "confirmation": confirmation or "",
         "url": f"/applications/{application_id}", "event_id": event["event_id"],
         "possible_duplicate": possible_duplicate,
     }
@@ -1851,6 +1918,8 @@ async def whats_new(
         if r["application_id"] not in seen:
             seen.add(r["application_id"])
             app_ids.append(r["application_id"])
+
+    await _attach_contact_names(db, user_id, events)
 
     applications: list[dict[str, Any]] = []
     if app_ids:

@@ -7,8 +7,8 @@ search for you. Job360 only stores what your assistant brings back.
 
 It uses the same no-login methods as career-ops, jobsync and ai-job-search:
 company job boards that companies publish themselves, plus open feeds.
-It never logs in. Big boards (LinkedIn, Indeed, ...) run only if you switch them
-on (see "Big job boards (opt-in)" below). Python 3.10+, standard library only.
+It never logs in, and it never reads LinkedIn, Indeed, Glassdoor or other big job
+sites: their terms forbid automated access. Python 3.10+, standard library only.
 
 It never ranks or scores. It filters by words and sorts newest first.
 The assistant judges fit.
@@ -91,30 +91,11 @@ two-letter codes are only read in patterns like "Remote - US".
   Ads in other languages can slip past them. The assistant must read the ad itself.
 - Country locks are found in ad text by sentence patterns. They can miss odd wording.
 
-## Big job boards (opt-in)
+## LinkedIn, Indeed and other big job sites
 
-Off by default. Turn on with `--boards linkedin,indeed,glassdoor,google,naukri,bayt,zip_recruiter`.
-
-Every time you use it, the kit prints this warning to stderr:
-
-> These sites' terms forbid automated access. The kit reads only their public no-login pages - never your account. Your internet address may be blocked for a while. You chose to turn this on.
-
-- Needs `pip install python-jobspy` (MIT). If it is not installed the boards are skipped with that hint and the rest of the kit still works.
-- No login, no cookies, no proxies, no credentials are ever passed.
-- Each site runs alone, so one failure does not stop the others. A site that returns 0 or errors is shown honestly in `--stats`.
-- Limits: Google Jobs is broken upstream (usually 0). ZipRecruiter works for US and Canada only and is blocked from the EU. LinkedIn may rate-limit after bursts. Naukri is India-focused. Bayt is Gulf-focused. Max 200 results per query (`--results-wanted`, default 50).
-- Results are tagged `jobspy:<site>`. The direct employer link is used when the site gives one.
-- `--full-text` makes LinkedIn return full descriptions and costs one request per job.
-
-Example:
-
-```
-pip install python-jobspy
-python hunt_kit.py --work-countries IN --boards indeed,naukri --titles "ai engineer" --out big.jsonl --stats
-```
-
-Safer tip: LinkedIn and Indeed jobs also reach you through their own job-alert
-emails. The assistant reads Gmail and takes the links from those mails. No scraping.
+The kit does not read them: their terms forbid automated access. Their jobs still
+reach you through their own job-alert emails; the assistant reads Gmail and takes
+the links from those mails. No scraping.
 
 ## What the assistant must do next
 
@@ -129,7 +110,7 @@ Never bring jobs in bulk without reading them.
 ## Files
 
 - `hunt_kit.py` the CLI, filters and the Greenhouse, Lever, Ashby, SmartRecruiters and freehire sources
-- `kit_ats.py` the other company-board types, `kit_feeds.py` open and keyed feeds, `kit_boards.py` opt-in big boards
+- `kit_ats.py` the other company-board types, `kit_feeds.py` open and keyed feeds
 - `kit_places.py`, `places.json`, `build_places.py` place data
 - `companies.json` board list (`name`, `ats`, `token`, `source`; Workday rows also `tenant`, `wd`, `site`)
 - `NOTICE.md` where the data came from, with licences
