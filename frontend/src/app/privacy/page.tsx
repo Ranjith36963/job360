@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SUBPROCESSORS } from "@/lib/legal";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — Job360",
@@ -8,51 +9,6 @@ export const metadata: Metadata = {
 
 // A legal document states when it changed; never derive this at render time.
 const LAST_UPDATED = "27 September 2026";
-
-const SUBPROCESSORS: {
-  name: string;
-  purpose: string;
-  dataShared: string;
-  location: string;
-}[] = [
-  {
-    name: "Railway",
-    purpose: "Application hosting and database",
-    dataShared: "All service data (encrypted in transit and at rest)",
-    location: "Global (servers currently in the USA)",
-  },
-  {
-    name: "Resend",
-    purpose: "Transactional email (login links, email verification, password reset)",
-    dataShared: "Your email address and message content",
-    location: "USA",
-  },
-  {
-    name: "Cloudflare R2",
-    purpose: "Nightly encrypted database backups (kept as the newest 30)",
-    dataShared:
-      "Ciphertext only — backups are encrypted (AES-256) before upload; Cloudflare never sees readable data",
-    location: "Global (Cloudflare network)",
-  },
-  {
-    name: "PostHog (EU)",
-    purpose: "Product analytics (which features are used)",
-    dataShared: "Usage events and pseudonymous identifiers",
-    location: "EU",
-  },
-  {
-    name: "Sentry",
-    purpose: "Error monitoring",
-    dataShared: "Error traces and request metadata (request bodies are scrubbed)",
-    location: "EU/USA",
-  },
-  {
-    name: "GitHub",
-    purpose: "Fetching your public repositories, if you link a GitHub username",
-    dataShared: "The GitHub username you provide",
-    location: "USA",
-  },
-];
 
 export default function PrivacyPage() {
   return (
