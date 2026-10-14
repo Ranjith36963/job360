@@ -1,4 +1,4 @@
-"""Private calendar feed (migration 0057): interviews and follow-ups as an .ics feed.
+"""Private calendar feed (migration 0056): interviews and follow-ups as an .ics feed.
 
 ``GET /api/calendar/{token}.ics`` has NO login: a calendar app polls it, and the URL
 IS the credential. So it copies the ``files.py`` rules exactly:

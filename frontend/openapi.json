@@ -2301,6 +2301,43 @@
         "title": "CVDetail",
         "type": "object"
       },
+      "CalendarFeedCreated": {
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "CalendarFeedCreated",
+        "type": "object"
+      },
+      "CalendarFeedStatus": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "exists"
+        ],
+        "title": "CalendarFeedStatus",
+        "type": "object"
+      },
       "ClientLogRequest": {
         "properties": {
           "context": {
@@ -6299,16 +6336,41 @@
       },
       "ReceiptAnswer": {
         "additionalProperties": false,
+        "description": "One answer on a receipt. The SAME shape the ``form_filled`` event takes\n(``kit.ANSWER_SOURCES`` is the one source list); ``source`` and ``key`` are\noptional here, stored when given and returned on read.",
         "properties": {
           "answer": {
             "maxLength": 2000,
             "title": "Answer",
             "type": "string"
           },
+          "key": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
           "question": {
             "maxLength": 500,
             "title": "Question",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           }
         },
         "required": [
@@ -6319,15 +6381,37 @@
         "type": "object"
       },
       "ReceiptAnswerOut": {
-        "description": "The READ shape of an answer \u2014 deliberately without the request caps.\nA receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS\nis ever lowered, older rows must still read back, not 500 the page.",
+        "description": "The READ shape of an answer \u2014 deliberately without the request caps.\nA receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS\nis ever lowered, older rows must still read back, not 500 the page.\n``source`` / ``key`` are absent on receipts recorded before they existed.",
         "properties": {
           "answer": {
             "title": "Answer",
             "type": "string"
           },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
           "question": {
             "title": "Question",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           }
         },
         "required": [
@@ -10148,6 +10232,79 @@
         ]
       }
     },
+    "/api/applications/{application_id}/calendar.ics": {
+      "get": {
+        "description": "One application's interview and follow-up, as a download (Add to calendar).",
+        "operationId": "application_ics_api_applications__application_id__calendar_ics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Application Ics",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
     "/api/applications/{application_id}/contacts": {
       "post": {
         "description": "201 for a new contact, 200 (``already_existed: true``) for the same\nemail seen again on this application (R2) \u2014 the status code is set\ndynamically since the same call can legitimately answer either.",
@@ -13186,6 +13343,232 @@
         "summary": "Verify Email Request",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/calendar-feed": {
+      "delete": {
+        "operationId": "revoke_feed_api_calendar_feed_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Feed",
+        "tags": [
+          "calendar"
+        ]
+      },
+      "get": {
+        "operationId": "feed_status_api_calendar_feed_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarFeedStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Feed Status",
+        "tags": [
+          "calendar"
+        ]
+      },
+      "post": {
+        "description": "Create the feed, or rotate it (the old URL dies). The plain URL is in this\nresponse only; the database keeps the hash.",
+        "operationId": "create_or_rotate_feed_api_calendar_feed_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarFeedCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Or Rotate Feed",
+        "tags": [
+          "calendar"
+        ]
+      }
+    },
+    "/api/calendar/{token}.ics": {
+      "get": {
+        "description": "Serve the feed. See the module docstring for the rules.",
+        "operationId": "serve_feed_api_calendar__token__ics_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Serve Feed",
+        "tags": [
+          "calendar"
         ]
       }
     },

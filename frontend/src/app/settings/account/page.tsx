@@ -27,6 +27,7 @@ import {
   changePassword,
   changeEmail,
   deleteAccount,
+  downloadMyData,
   logout,
   me,
   resendVerificationEmail,
@@ -533,6 +534,60 @@ function VerifyEmailCard() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Your data — download everything (GDPR Article 20)
+// ---------------------------------------------------------------------------
+
+function YourDataCard() {
+  const [busy, setBusy] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  async function onDownload() {
+    setServerError(null);
+    setSuccess(null);
+    setBusy(true);
+    try {
+      await downloadMyData();
+      setSuccess("Downloaded job360-my-data.json.");
+    } catch (err) {
+      setServerError(apiErrorMessage(err, "Failed to download your data."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className={CARD_CLASS} id="your-data">
+      <CardHeader>
+        <CardTitle className={TITLE_CLASS}>Your data</CardTitle>
+        <CardDescription className={DESC_CLASS}>
+          Download everything Job360 holds on you as one JSON file: your
+          profile, applications, events, every CV and cover letter version, and
+          receipts. Secrets such as your password hash are left out.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button
+          type="button"
+          className={PRIMARY_BTN_CLASS}
+          data-testid="download-everything"
+          onClick={() => void onDownload()}
+          disabled={busy}
+        >
+          {busy ? "Preparing..." : "Download everything"}
+        </Button>
+        {success && (
+          <p className="mt-3 text-xs text-success" role="status">
+            {success}
+          </p>
+        )}
+        <FieldError message={serverError ?? undefined} />
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AccountSettingsPage() {
   return (
     <div className="max-w-3xl space-y-8 py-12">
@@ -549,6 +604,7 @@ export default function AccountSettingsPage() {
       <CalendarFeedSection />
       <ChangePasswordCard />
       <ChangeEmailCard />
+      <YourDataCard />
       <DeleteAccountCard />
     </div>
   );

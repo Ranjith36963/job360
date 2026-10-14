@@ -111,7 +111,7 @@ PUBLIC_ROUTES: dict[str, str] = {
         "assistant's file tool. Bad tokens 404 behind a per-IP lockout, like /api/files/{token}"
     ),
     "/api/calendar/{token}.ics": (
-        "private calendar feed (routes/calendar.py, migration 0057): a calendar app polls it with no cookie; the "
+        "private calendar feed (routes/calendar.py, migration 0056): a calendar app polls it with no cookie; the "
         "unguessable URL IS the credential (32 random bytes, only its SHA-256 stored, revocable). Bad tokens "
         "404 behind a per-IP lockout and the owner is rate-limited, like /api/files/{token}"
     ),

@@ -227,7 +227,7 @@ app.include_router(receipts.router, prefix="/api")
 app.include_router(applications.router, prefix="/api")
 app.include_router(proof.router, prefix="/api")  # S7: PUBLIC token upload + per-user proof routes
 app.include_router(files.router, prefix="/api")  # PUBLIC token download for application-kit file links (S3)
-app.include_router(calendar.router, prefix="/api")  # PUBLIC token .ics feed + session-only feed management (0057)
+app.include_router(calendar.router, prefix="/api")  # PUBLIC token .ics feed + session-only feed management (0056)
 # run 360 recipes — the playbooks a connected assistant follows (owner plan 2026-10-01)
 app.include_router(recipes.router, prefix="/api")
 # PUBLIC static hunt kit the user's own assistant runs (owner 2026-10-13; Job360 still never searches)

@@ -473,6 +473,8 @@ WHATS_NEW_MAX_EVENTS = int(os.getenv("WHATS_NEW_MAX_EVENTS", "200"))
 EXPORT_HISTORY_MAX_APPLICATIONS = int(os.getenv("EXPORT_HISTORY_MAX_APPLICATIONS", "500"))
 EXPORT_HISTORY_MAX_BYTES = int(os.getenv("EXPORT_HISTORY_MAX_BYTES", str(8 * 1024 * 1024)))
 EXPORT_HISTORY_MAX_PER_HOUR = int(os.getenv("EXPORT_HISTORY_MAX_PER_HOUR", "12"))
+# Feature 4 — "Download everything" (GET /api/auth/users/me/export): per-user cap.
+USER_EXPORT_MAX_PER_HOUR = int(os.getenv("USER_EXPORT_MAX_PER_HOUR", "6"))
 # Slice 4 review (S3) — the export's top-level `profile_edits` blob is bounded
 # like everything else it carries: the NEWEST N rows, rendered oldest-first,
 # with `profile_edits_truncated` saying when the tail was cut.
@@ -658,7 +660,7 @@ KIT_READS_MAX_PER_HOUR = int(os.getenv("KIT_READS_MAX_PER_HOUR", "60"))
 # never locked out).
 FILE_DOWNLOADS_MAX_PER_MIN = int(os.getenv("FILE_DOWNLOADS_MAX_PER_MIN", "30"))
 FILE_BAD_TOKEN_MAX_PER_MIN = int(os.getenv("FILE_BAD_TOKEN_MAX_PER_MIN", "20"))
-# Private calendar feed (GET /api/calendar/{token}.ics, migration 0057): fetches per feed
+# Private calendar feed (GET /api/calendar/{token}.ics, migration 0056): fetches per feed
 # OWNER per hour (calendar apps poll slowly; this only stops a leaked URL being hammered).
 CALENDAR_FEED_MAX_PER_HOUR = int(os.getenv("CALENDAR_FEED_MAX_PER_HOUR", "30"))
 # How far back the feed reaches for interviews (days).

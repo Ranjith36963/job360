@@ -31,6 +31,7 @@ vi.mock("@/lib/api", () => ({
   getCalendarFeed: () => Promise.resolve({ exists: false, created_at: null }),
   createCalendarFeed: vi.fn(),
   revokeCalendarFeed: vi.fn(),
+  downloadMyData: vi.fn(),
 }));
 
 /** Scope queries to the <form> containing a submit button with the given name. */
