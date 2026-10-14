@@ -38,6 +38,10 @@ async def test_every_user_id_table_is_erased_or_allowlisted(tmp_path):
         await db.close()
 
     assert tables, "found no user_id tables - the schema query is broken"
+    # The reverse: a stale or mistyped list entry is silently skipped by
+    # hard_delete_user (it filters to tables that have user_id), so name it.
+    stale = sorted(set(JobDatabase._PER_USER_TABLES) - tables)
+    assert not stale, f"_PER_USER_TABLES names tables with no user_id column: {stale}"
     handled = set(JobDatabase._PER_USER_TABLES) | ERASURE_ALLOWLIST
     missing = sorted(tables - handled)
     assert not missing, (
