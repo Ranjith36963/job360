@@ -113,7 +113,7 @@ async def test_record_application_mismatched_ids_422_and_unknown_application_404
             assert "do not belong together" in _err(await mcp.call_tool(
                 "record_application", {"application_id": a["application_id"], "job_id": 987654}
             ))
-            _err(await mcp.call_tool("record_application", {}))
+            assert "give application_id" in _err(await mcp.call_tool("record_application", {}))
 
 
 # ── 2. outreach needs a contact ─────────────────────────────────────────────
