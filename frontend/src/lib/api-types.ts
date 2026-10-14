@@ -4848,24 +4848,38 @@ export interface components {
             /** Sent At */
             sent_at: string;
         };
-        /** ReceiptAnswer */
+        /**
+         * ReceiptAnswer
+         * @description One answer on a receipt. The SAME shape the ``form_filled`` event takes
+         *     (``kit.ANSWER_SOURCES`` is the one source list); ``source`` and ``key`` are
+         *     optional here, stored when given and returned on read.
+         */
         ReceiptAnswer: {
             /** Answer */
             answer: string;
+            /** Key */
+            key?: string | null;
             /** Question */
             question: string;
+            /** Source */
+            source?: string | null;
         };
         /**
          * ReceiptAnswerOut
          * @description The READ shape of an answer — deliberately without the request caps.
          *     A receipt is append-only history; if APPLICATION_RECEIPT_ANSWER_MAX_CHARS
          *     is ever lowered, older rows must still read back, not 500 the page.
+         *     ``source`` / ``key`` are absent on receipts recorded before they existed.
          */
         ReceiptAnswerOut: {
             /** Answer */
             answer: string;
+            /** Key */
+            key?: string | null;
             /** Question */
             question: string;
+            /** Source */
+            source?: string | null;
         };
         /** ReceiptListResponse */
         ReceiptListResponse: {

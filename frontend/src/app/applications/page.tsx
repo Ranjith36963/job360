@@ -25,6 +25,16 @@ export default function ApplicationsPage() {
         </Link>
       </div>
       <ApplicationList />
+      <p className="text-xs text-muted-foreground">
+        <Link
+          href="/settings/account#your-data"
+          data-testid="applications-download-all"
+          className="underline"
+        >
+          Download everything
+        </Link>{" "}
+        you have stored here as one file.
+      </p>
     </PageContainer>
   );
 }

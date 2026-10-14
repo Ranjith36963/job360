@@ -1,7 +1,7 @@
 "use client";
 
 import type { ApplicationEvent } from "@/lib/api";
-import { eventLabel } from "@/lib/event-labels";
+import { eventTitle } from "@/lib/event-detail";
 import { WhoChip } from "@/components/applications/WhoChip";
 import { formatDateTime } from "@/lib/format-date";
 
@@ -27,7 +27,7 @@ export function Timeline({ events }: { events: ApplicationEvent[] }) {
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <WhoChip recordedBy={event.recorded_by} />
             <span className={`font-medium ${event.superseded ? "line-through" : ""}`}>
-              {eventLabel(event)}
+              {eventTitle(event)}
             </span>
             {event.superseded && (
               <span className="font-mono text-[11px] text-faint">superseded</span>

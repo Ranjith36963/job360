@@ -338,7 +338,14 @@ export default function Landing() {
               </Link>
             </div>
             <p className="mt-6 text-xs text-faint">
-              No spam, no fluff.
+              No spam, no fluff.{" "}
+              <Link
+                href="/trust"
+                data-testid="landing-trust-link"
+                className="underline"
+              >
+                How we handle your data
+              </Link>
             </p>
           </div>
         </div>
