@@ -445,6 +445,8 @@ def build_server(version: str = "") -> MCPServer:
                     "get_profile_no_profile",
                     extra={"event": "get_profile_no_profile", "user_id": user_id, "surface": "mcp"},
                 )
+                from src.api.models import AssistantSettingsView  # noqa: PLC0415
+
                 editable = list(profile_edits.editable_paths())
                 view = profile_route.settings_view(UserProfile(), user_id)
                 return {
@@ -453,7 +455,7 @@ def build_server(version: str = "") -> MCPServer:
                         f"No profile yet. Ask the user to upload their CV at {settings.SITE_BASE_URL}/profile, "
                         "or save fields with update_profile."
                     ),
-                    "settings": profile_route.AssistantSettingsView(**view).model_dump(),
+                    "settings": AssistantSettingsView(**view).model_dump(),
                     "editable_paths": editable,
                     "shapes": {k: v for k, v in profile_shapes.compact_shapes().items() if k in editable},
                     "assistant_hint": ASSISTANT_HINT,
