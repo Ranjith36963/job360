@@ -2448,6 +2448,8 @@ export interface components {
             /** Already Existed */
             already_existed: boolean;
             contact: components["schemas"]["ContactOut"];
+            /** Contact Id */
+            contact_id: number;
             /** Event Id */
             event_id: number | null;
         };
@@ -5031,6 +5033,8 @@ export interface components {
             scheduled_at: string | null;
             /** Status */
             status: string;
+            /** Warnings */
+            warnings?: string[];
         };
         /**
          * RecordOutreachRequest
