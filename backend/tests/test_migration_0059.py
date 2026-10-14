@@ -1,4 +1,4 @@
-"""Migration 0056 — the sourcing-era score columns leave `jobs`, and stay gone."""
+"""Migration 0059 — the sourcing-era score columns leave `jobs`, and stay gone."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from migrations import runner
 from src.repositories import pg
 from src.repositories.database import JobDatabase
 
-STEM = "0056_drop_jobs_sourcing_columns"
+STEM = "0059_drop_jobs_sourcing_columns"
 DROPPED = {
     "match_score", "role", "skill", "seniority_score", "experience", "credentials",
     "location_score", "recency", "semantic", "penalty",
@@ -36,7 +36,7 @@ async def _boot(path: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_migration_0056_up_down(tmp_path):
+async def test_migration_0059_up_down(tmp_path):
     path = str(tmp_path / f"m56_{uuid.uuid4().hex[:8]}.db")
     await _boot(path)
     await runner.up(path, target=STEM)
@@ -49,7 +49,7 @@ async def test_migration_0056_up_down(tmp_path):
         )
 
     cols = await _jobs_columns(path)
-    assert not (DROPPED & cols), f"0056 left {sorted(DROPPED & cols)}"
+    assert not (DROPPED & cols), f"0059 left {sorted(DROPPED & cols)}"
     assert KEPT <= cols
 
     # A reboot must NOT resurrect them (init_db's _migrate runs before the runner).
@@ -85,7 +85,7 @@ async def test_fresh_init_db_has_none_of_the_dropped_columns(tmp_path):
     assert not (DROPPED & await _jobs_columns(path))
 
 
-def test_migration_0056_drops_exactly_the_twelve():
+def test_migration_0059_drops_exactly_the_twelve():
     from pathlib import Path
 
     folder = Path(__file__).resolve().parent.parent / "migrations"

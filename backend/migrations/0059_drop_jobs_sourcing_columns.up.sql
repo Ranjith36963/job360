@@ -1,4 +1,4 @@
--- 0056_drop_jobs_sourcing_columns: retire the sourcing-era score columns on
+-- 0059_drop_jobs_sourcing_columns: retire the sourcing-era score columns on
 -- the shared `jobs` catalog.
 --
 -- WHY. The scorer, the per-dimension breakdown and the GBP salary normaliser

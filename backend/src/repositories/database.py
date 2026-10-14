@@ -160,9 +160,9 @@ class JobDatabase:
             ("consecutive_misses", "INTEGER DEFAULT 0"),
             ("staleness_state", "TEXT DEFAULT 'active'"),
             # (The Step-1.5 per-dim score columns — migration 0011 — and
-            # `match_score` are NOT mirrored any more: migration 0056 drops
+            # `match_score` are NOT mirrored any more: migration 0059 drops
             # them. Re-adding them here would resurrect them on every boot,
-            # because this runs BEFORE the runner and 0056 runs only once.)
+            # because this runs BEFORE the runner and 0059 runs only once.)
             # Migration 0020 — application deadline columns.
             ("deadline", "TEXT"),
             ("deadline_source", "TEXT"),
@@ -186,7 +186,7 @@ class JobDatabase:
             ("salary_currency", "TEXT"),
             ("salary_period", "TEXT"),
             ("salary_is_estimated", "BOOLEAN"),
-            # salary_min/max_gbp_annual: dropped by migration 0056 — see above.
+            # salary_min/max_gbp_annual: dropped by migration 0059 — see above.
             ("shelf_provenance", "JSONB NOT NULL DEFAULT '{}'"),
         ]
         applications_migrations = [

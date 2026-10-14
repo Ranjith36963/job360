@@ -1,4 +1,4 @@
--- 0056 down: put the twelve sourcing-era columns back, empty.
+-- 0059 down: put the twelve sourcing-era columns back, empty.
 --
 -- The data is NOT restored. Nothing has written these columns since slice 5
 -- (#483), so every row returns to the default the column always carried.

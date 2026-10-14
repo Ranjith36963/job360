@@ -9,7 +9,7 @@ ORPHAN = a `jobs` row whose id appears in no `job_id` column of any other
 table in the schema. The referencing tables are DISCOVERED from
 information_schema at run time (every column literally named `job_id`), so a
 legacy table still present in production is honoured automatically. On the
-migrated schema (head 0056) that is:
+migrated schema (head 0059) that is:
 
     applications.job_id               the per-user Application (spine)
     application_receipts.job_id       frozen receipts (they also COPY the ad)
