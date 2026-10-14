@@ -49,6 +49,8 @@ export function MemoryTab() {
   const [error, setError] = useState<string | null>(null);
   const [extra, setExtra] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
+  const [keepingAll, setKeepingAll] = useState(false);
+  const [keepAllError, setKeepAllError] = useState<string | null>(null);
   // The block a save starts from is the LATEST one (not the render's copy),
   // and saves run one after another: two quick edits in the same block must
   // not each start from the old block and silently drop the other's change.
@@ -145,6 +147,43 @@ export function MemoryTab() {
     return <MemoryRow key={spec.id} spec={spec} value={value} provenance={prov} onSave={(n) => save(spec, n)} onConfirm={() => confirm(spec)} {...opts} />;
   };
 
+  // Every row the page shows that an assistant saved and the user has not confirmed.
+  const unconfirmed = (() => {
+    const specs = [
+      ...contactRows(),
+      ...countries.flatMap((c) => [...rtwCountryRows(c), ...logisticsCountryRows(c)]),
+      ...rtwTopRows(), ...logisticsRows(), ...equalityRows(),
+      ...[...new Set([...codesIn(blockOf(profile, SALARY)), ...codesIn((blockOf(profile, RTW) as Record<string, unknown> | undefined)?.countries)])].map(salaryRow),
+    ];
+    const seen = new Set<string>();
+    return specs.filter((s) => {
+      if (seen.has(s.id)) return false;
+      seen.add(s.id);
+      const { value, prov } = state(s);
+      return !isEmpty(value) && !!prov?.unconfirmed;
+    });
+  })();
+
+  /** Keep all: the same per-row confirm, one request at a time, stop at the first failure. */
+  const keepAll = async () => {
+    setKeepingAll(true);
+    setKeepAllError(null);
+    try {
+      // One keep confirms a whole block (spec.path), so each path is kept once.
+      const done = new Set<string>();
+      for (const spec of unconfirmed) {
+        if (done.has(spec.path)) continue;
+        done.add(spec.path);
+        await confirm(spec);
+      }
+    } catch (err: unknown) {
+      setKeepAllError(apiErrorMessage(err, "Could not confirm everything. Try again."));
+    } finally {
+      await load();
+      setKeepingAll(false);
+    }
+  };
+
   const countrySummary = (code: string) => {
     const specs = rtwCountryRows(code);
     const filled = specs.map((s) => ({ s, ...state(s) })).filter((x) => !isEmpty(x.value));
@@ -162,6 +201,20 @@ export function MemoryTab() {
   return (
     <div className="grid gap-8 pt-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="flex min-w-0 flex-col gap-8" data-testid="memory-tab">
+        {unconfirmed.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-border bg-muted px-3.5 py-2.5">
+            <span className="text-[13px] text-muted-foreground">
+              Marks every answer your assistant saved as yours, so it stops asking.
+            </span>
+            <Button type="button" size="sm" className="min-h-11 md:min-h-8" data-testid="memory-keep-all"
+              disabled={keepingAll} aria-busy={keepingAll} onClick={() => void keepAll()}>
+              {keepingAll ? "Keeping…" : `Keep all ${unconfirmed.length}`}
+            </Button>
+            {keepAllError && (
+              <p role="alert" data-testid="memory-keep-all-error" className="basis-full text-[13px] text-destructive">{keepAllError}</p>
+            )}
+          </div>
+        )}
         <Section title="Contact & identity">{contactRows().map((s) => row(s))}</Section>
 
         <Section title="Right to work" hint="One card per country">
