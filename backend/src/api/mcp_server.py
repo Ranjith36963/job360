@@ -503,6 +503,11 @@ def build_server(version: str = "") -> MCPServer:
             # Already read on the profile's own connection — the response
             # carries it, so this is not a third query.
             "agent_edits": [row.model_dump() for row in resp.agent_edits],
+            # Feature 9 - paths you wrote without the user's word (inferred). Absent when none (rule #29).
+            **(
+                {"unconfirmed": [row.path for row in resp.agent_edits if not row.confirmed]}
+                if any(not row.confirmed for row in resp.agent_edits) else {}
+            ),
             "fields": profile_edits.field_values(profile, editable_paths),
             # Slice 9 (#516) — "flag for next time": the last PROFILE_LESSONS_MAX
             # lessons across every application, newest first. Read them before
@@ -1294,6 +1299,9 @@ def build_server(version: str = "") -> MCPServer:
         Memory paths (closed key sets): `user_info.contact`, `user_info.right_to_work`, `user_info.logistics`,
         `user_info.languages`, `user_info.equality`, `user_info.answers`, `preferences.salary_by_country`.
         Empty ("" / null / []) = not answered; `false` is an answer.
+        Each edit may carry "source": "user_said" (the user told you) or "agent_inferred" (you worked it
+        out); omitted = agent_inferred. An answer with confirmed:false was inferred - confirm it with the
+        user before using it.
         `approved: true` only after the user agrees to that wording.
 
         Settings (`assistant_settings.*`): change one only when the user says so in chat,

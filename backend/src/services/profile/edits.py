@@ -686,7 +686,7 @@ def current_overlay(user_id: str, conn: pgsync.Connection | None = None) -> list
     connection (S1/N4).
     """
     sql = """
-        SELECT path, value, set_by, set_at
+        SELECT path, value, set_by, set_at, source
         FROM profile_edits
         WHERE user_id = ? AND id IN (
             SELECT MAX(id) FROM profile_edits WHERE user_id = ? GROUP BY path
@@ -704,10 +704,13 @@ def current_overlay(user_id: str, conn: pgsync.Connection | None = None) -> list
             return []
         raise
     out: list[dict[str, Any]] = []
-    for path, value, set_by, set_at in rows:
+    for path, value, set_by, set_at, source in rows:
         if value is None:
             continue
-        out.append({"path": path, "value": json.loads(value), "set_by": set_by, "set_at": set_at})
+        out.append({
+            "path": path, "value": json.loads(value), "set_by": set_by, "set_at": set_at,
+            "source": source or "",
+        })
     return out
 
 
@@ -715,6 +718,20 @@ def current_overlay(user_id: str, conn: pgsync.Connection | None = None) -> list
 # Rows by this author are the human's own changes: they are history, never an
 # "assistant changed this" mark.
 WEB_ACTOR = "web"
+
+# Feature 9 - WHO SAID IT. ``user_said`` = the user told the assistant (or typed
+# it on the web); ``agent_inferred`` = the assistant worked it out. ``''`` is a
+# legacy row (before migration 0056): nobody confirmed it, so it reads as
+# unconfirmed. ``set_by`` records who WROTE a fact, not whether the user said it.
+SOURCE_USER_SAID = "user_said"
+SOURCE_AGENT_INFERRED = "agent_inferred"
+VALID_SOURCES = (SOURCE_USER_SAID, SOURCE_AGENT_INFERRED)
+
+
+def is_confirmed(set_by: str, source: str) -> bool:
+    """True when the user stands behind this value: a web write, or an
+    assistant write explicitly marked ``user_said``. A legacy ``''`` is not."""
+    return set_by == WEB_ACTOR or source == SOURCE_USER_SAID
 
 
 def is_assistant_actor(set_by: str) -> bool:
@@ -730,7 +747,7 @@ def path_history(user_id: str, path: str, limit: int) -> list[dict[str, Any]]:
     can only ever read its own history.
     """
     sql = (
-        "SELECT value, set_by, set_at FROM profile_edits "
+        "SELECT value, set_by, set_at, source FROM profile_edits "
         "WHERE user_id = ? AND path = ? ORDER BY id DESC LIMIT ?"
     )
     try:
@@ -741,8 +758,11 @@ def path_history(user_id: str, path: str, limit: int) -> list[dict[str, Any]]:
             return []
         raise
     return [
-        {"value": None if value is None else json.loads(value), "set_by": set_by, "set_at": set_at}
-        for value, set_by, set_at in rows
+        {
+            "value": None if value is None else json.loads(value), "set_by": set_by, "set_at": set_at,
+            "source": source or "",
+        }
+        for value, set_by, set_at, source in rows
     ]
 
 
@@ -801,6 +821,7 @@ def record_edits(
     *,
     enforce_rate_limit: bool = True,
     store_as_given: bool = False,
+    source: str | dict[str, str] = "",
 ) -> list[dict[str, Any]]:
     """Validate every edit, then insert them append-only in ONE transaction.
 
@@ -831,8 +852,11 @@ def record_edits(
     same value — a normalised copy (stripped, de-duplicated) would shadow the
     base with something the human did not type.
 
+    ``source`` (feature 9) is ``user_said`` / ``agent_inferred`` / ``""``, one
+    word for the whole batch or a ``{path: word}`` map; stored on each row.
+
     Returns the applied rows in the same ``{"path", "value", "set_by",
-    "set_at"}`` shape as :func:`current_overlay`.
+    "set_at", "source"}`` shape as :func:`current_overlay`.
     """
     # Validate everything up front — nothing below this line can 422.
     normalised: list[tuple[str, Any]] = [(path, validate_edit(path, value)) for path, value in edits]
@@ -861,11 +885,17 @@ def record_edits(
     with pgsync.connect(str(DB_PATH)) as conn, conn._raw.transaction():
         for path, value in normalised:
             encoded = None if value is None else json.dumps(value)
+            row_source = source.get(path, "") if isinstance(source, dict) else source
+            if not row_source and actor == WEB_ACTOR:
+                row_source = SOURCE_USER_SAID  # a human at the browser is the user speaking
             conn.execute(
-                "INSERT INTO profile_edits (user_id, path, value, set_by, set_at) VALUES (?, ?, ?, ?, ?)",
-                (user_id, path, encoded, actor, now),
+                "INSERT INTO profile_edits (user_id, path, value, set_by, set_at, source) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, path, encoded, actor, now, row_source),
             )
-            applied.append({"path": path, "value": value, "set_by": actor, "set_at": now})
+            applied.append(
+                {"path": path, "value": value, "set_by": actor, "set_at": now, "source": row_source}
+            )
     return applied
 
 

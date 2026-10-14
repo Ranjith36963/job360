@@ -40,6 +40,7 @@ from src.services.applications.authorship import actor_for
 from src.services.applications.job_checks import checks_for_application
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
+from src.services.profile.edits import is_assistant_actor, is_confirmed
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover - type-only
@@ -60,6 +61,7 @@ TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
 
 KIT_INSTRUCTIONS: tuple[str, ...] = (
     "Use only the answers in this kit. Anything in `missing`: ask the user ONCE, in one message. Never guess.",
+    "An answer with confirmed:false was inferred — confirm it with the user before using it.",
     "Upload file: desktop or Claude Code - download `file.url` to a local file and upload that. "
     "Chat app - ask the user to attach the PDF once for this job. Otherwise paste `text` if the form allows, "
     "else the user uploads it by hand. An expired link: call the kit again.",
@@ -666,9 +668,23 @@ def compute_answers(
     list for ``country`` (the JOB's country; ``None`` = unknown). Empty / null =
     absent, not an item (rule #29); ``False`` and ``0`` are real answers."""
     saved = {str(r["path"]): r.get("set_at") for r in overlay}
+    # Feature 9: a path whose newest row an assistant wrote WITHOUT the user's word is an inference.
+    unconfirmed = {
+        str(r["path"]) for r in overlay
+        if is_assistant_actor(str(r.get("set_by") or ""))
+        and not is_confirmed(str(r.get("set_by") or ""), str(r.get("source") or ""))
+    }
+    current = [""]
 
     def when(path: str) -> Optional[str]:
+        current[0] = path
         return saved.get(path)
+
+    def _mk(key: str, value: Any, source: str, saved_at: Optional[str], **extra: Any) -> dict[str, Any]:
+        item = _item(key, value, source, saved_at, **extra)
+        if source == "memory" and current[0] in unconfirmed and "confirmed" not in item:
+            item["confirmed"] = False  # inferred by the assistant - confirm with the user before use
+        return item
 
     info, prefs, cvd = profile.user_info, profile.preferences, profile.cv_data
     out: dict[str, list[dict[str, Any]]] = {
@@ -678,7 +694,7 @@ def compute_answers(
     at = when("user_info.contact")
     for k, v in (info.contact or {}).items():
         if _present(v):
-            out["contact"].append(_item(f"contact.{k}", v, "memory", at))
+            out["contact"].append(_mk(f"contact.{k}", v, "memory", at))
     for key, value in (
         ("contact.name", cvd.name), ("contact.location", cvd.location),
         ("contact.linkedin_url", next((u for u in cvd.links or [] if _link_on(u, "linkedin.com")), "")),
@@ -686,7 +702,7 @@ def compute_answers(
     ):
         # A saved `contact.linkedin_url` (memory) wins over the one read off the profile links.
         if _present(value) and not any(i.get("key") == key for i in out["contact"]):
-            out["contact"].append(_item(key, value, "profile", None))
+            out["contact"].append(_mk(key, value, "profile", None))
 
     at = when("user_info.right_to_work")
     rtw = info.right_to_work or {}
@@ -694,21 +710,21 @@ def compute_answers(
         cc = str(rec.get("country") or "").upper()
         for k, v in rec.items():
             if k != "country" and _present(v) and cc:
-                out["right_to_work"].append(_item(f"right_to_work.{cc}.{k}", v, "memory", at))
+                out["right_to_work"].append(_mk(f"right_to_work.{cc}.{k}", v, "memory", at))
     for k in ("citizenship", "sanctions_country_citizen"):
         if _present(rtw.get(k)):
-            out["right_to_work"].append(_item(f"right_to_work.{k}", rtw[k], "memory", at))
+            out["right_to_work"].append(_mk(f"right_to_work.{k}", rtw[k], "memory", at))
 
     at = when("user_info.logistics")
     lg = info.logistics or {}
     for k in ("notice_period", "earliest_start", "current_salary"):
         if _present(lg.get(k)):
-            out["logistics"].append(_item(f"logistics.{k}", lg[k], "memory", at))
+            out["logistics"].append(_mk(f"logistics.{k}", lg[k], "memory", at))
     for rec in _records(lg.get("countries")):
         cc = str(rec.get("country") or "").upper()
         for k, v in rec.items():
             if k != "country" and _present(v) and cc:
-                out["logistics"].append(_item(f"logistics.{cc}.{k}", v, "memory", at))
+                out["logistics"].append(_mk(f"logistics.{cc}.{k}", v, "memory", at))
 
     at = when("preferences.salary_by_country")
     for rec in _records(prefs.salary_by_country):
@@ -717,7 +733,7 @@ def compute_answers(
         low = rec.get("min") if _present(rec.get("min")) else rec.get("amount")
         high = rec.get("max") if _present(rec.get("max")) else low
         if cc and _present(low):
-            out["salary"].append(_item(
+            out["salary"].append(_mk(
                 f"salary.{cc}",
                 {"min": low, "max": high, "currency": rec.get("currency"), "period": rec.get("period")},
                 "memory", at,
@@ -726,17 +742,17 @@ def compute_answers(
     at = when("user_info.languages")
     for rec in _records(info.languages):
         if _present(rec.get("language")) and _present(rec.get("level")):
-            out["languages"].append(_item(f"languages.{rec['language']}", rec["level"], "memory", at))
+            out["languages"].append(_mk(f"languages.{rec['language']}", rec["level"], "memory", at))
 
     at = when("user_info.equality")
     for k, v in (info.equality or {}).items():
         if _present(v):
-            out["equality"].append(_item(f"equality.{k}", v, "memory", at, label=EQUALITY_LABEL))
+            out["equality"].append(_mk(f"equality.{k}", v, "memory", at, label=EQUALITY_LABEL))
 
     for rec in _records(info.answers):
         if rec.get("approved") is True and _present(rec.get("answer")) and _present(rec.get("question")):
             out["approved_text"].append(
-                _item(str(rec["question"]), rec["answer"], "approved_text", rec.get("recorded_at"))
+                _mk(str(rec["question"]), rec["answer"], "approved_text", rec.get("recorded_at"))
             )
 
     have = {i["key"] for block in out.values() for i in block}
@@ -748,8 +764,8 @@ def compute_answers(
             for item in any_items:
                 field = item["key"].rsplit(".", 1)[1]
                 out["right_to_work"].append(
-                    _item(f"right_to_work.{country}.{field}", item["value"], "memory", item["saved_at"],
-                          applies_via="ANY")
+                    _mk(f"right_to_work.{country}.{field}", item["value"], "memory", item["saved_at"],
+                          applies_via="ANY", **({"confirmed": False} if item.get("confirmed") is False else {}))
                 )
             have = {i["key"] for block in out.values() for i in block}
     missing: list[dict[str, str]] = []

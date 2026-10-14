@@ -179,6 +179,10 @@ class AgentEditOut(ProfileEditOut):
     """
 
     previous_value: Any = None
+    # Feature 9: "user_said" | "agent_inferred" | "" (legacy row). `confirmed` is
+    # true only when the user stands behind the value (web write or user_said).
+    source: str = ""
+    confirmed: bool = False
 
 
 class ProfileEditHistoryRow(BaseModel):

@@ -11,7 +11,7 @@ import os
 import re
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, Optional, cast
+from typing import Any, Literal, Optional, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
@@ -420,7 +420,11 @@ def load_profile_response(user_id: str) -> tuple[UserProfile, ProfileResponse]:
     # only an ASSISTANT's row is an "assistant changed this" — a field whose
     # newest row is the human's own save carries no mark and is not listed.
     rows = [
-        AgentEditOut(**row) for row in overlay if profile_edits.is_assistant_actor(str(row["set_by"]))
+        AgentEditOut(
+            **row, confirmed=profile_edits.is_confirmed(str(row["set_by"]), str(row.get("source") or ""))
+        )
+        for row in overlay
+        if profile_edits.is_assistant_actor(str(row["set_by"]))
     ]
     return profile, _build_profile_response(
         profile, user_id, rows, lessons=_recent_lessons(user_id),
@@ -462,6 +466,9 @@ class ProfileEditIn(BaseModel):
 
     path: str
     value: Any = None
+    # Feature 9: did the user SAY this, or did you work it out? Omitted = "agent_inferred"
+    # for an assistant (the safe default); the web always stores "user_said".
+    source: Optional[Literal["user_said", "agent_inferred"]] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -714,6 +721,14 @@ async def update_profile(
     # that is going to be rejected outright.
     actor = actor_for(user)
     pairs = [(edit.path, edit.value) for edit in body.edits]
+    # Feature 9 - who said it. A web write is the user speaking: always user_said, and it may not
+    # claim "agent_inferred". An assistant that names no source gets the safe default (hard line 4).
+    if actor == profile_edits.WEB_ACTOR:
+        if any(edit.source == profile_edits.SOURCE_AGENT_INFERRED for edit in body.edits):
+            raise HTTPException(status_code=422, detail="source 'agent_inferred' is not allowed on a web write")
+        sources = {edit.path: profile_edits.SOURCE_USER_SAID for edit in body.edits}
+    else:
+        sources = {edit.path: edit.source or profile_edits.SOURCE_AGENT_INFERRED for edit in body.edits}
     if len(body.edits) > settings.PROFILE_EDIT_MAX_PATHS_PER_CALL:
         _log_edit_rejected(user.id, actor, pairs, "", 422, "too_long")
         raise EditRefused(
@@ -798,7 +813,7 @@ async def update_profile(
         # including every MCP update_profile call (/api/mcp is bearer-only),
         # are never WEB_ACTOR and stay limited.
         applied = profile_edits.record_edits(
-            user.id, actor, write_now, enforce_rate_limit=actor != profile_edits.WEB_ACTOR
+            user.id, actor, write_now, enforce_rate_limit=actor != profile_edits.WEB_ACTOR, source=sources
         )
     except profile_edits.ProfileEditError as exc:
         _log_edit_rejected(
@@ -814,6 +829,7 @@ async def update_profile(
         "profile_edit",
         extra={
             "event": "profile_edit", "paths": [path for path, _ in write_now],
+            "sources": sorted({sources.get(path, "") for path, _ in write_now}),
             "actor": safe_log_value(actor), "user_id": safe_log_value(user.id), "result": "ok",
         },
     )
@@ -973,7 +989,8 @@ async def keep_edit(
     else:
         save_profile(base, user.id, source_action="keep_edit")
     profile_edits.record_edits(
-        user.id, actor_for(user), [(path, value)], enforce_rate_limit=False, store_as_given=True
+        user.id, actor_for(user), [(path, value)], enforce_rate_limit=False, store_as_given=True,
+        source=profile_edits.SOURCE_USER_SAID,
     )
     get_audit_logger().info(
         "profile_edit_kept",

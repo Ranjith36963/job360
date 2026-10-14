@@ -403,7 +403,11 @@ before acting on it, exactly as the offer-once rule above says.
 Each edit is {"path": <one of get_profile's editable_paths>, "value": <new
 value, or null to clear back to what the structural read says>}. An unknown path
 or a wrongly-typed value is refused with the allowed set/values named. Send
-several edits in one call. To drop a wrong skill from every surface, add it to
+several edits in one call. Each edit may carry `"source": "user_said"` (the user
+told you) or `"agent_inferred"` (you worked it out); omitted = agent_inferred.
+get_profile lists your inferred paths in `unconfirmed`. An answer with
+confirmed:false was inferred — confirm it with the user before using it. Only
+the user confirms, on the web; you cannot confirm your own guess. To drop a wrong skill from every surface, add it to
 `preferences.excluded_skills` (value = the current list from get_profile's
 `fields` plus the new names); rewriting `cv_data.skills` only reaches the CV's
 share and is capped per edit.
