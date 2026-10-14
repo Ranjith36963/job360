@@ -168,3 +168,27 @@ def test_cors_normal_origins_allow_credentials():
 
     assert _resolve_cors_credentials(["https://job360.uk"], is_prod=True) is True
     assert _resolve_cors_credentials(["http://localhost:3000"], is_prod=False) is True
+
+
+def test_api_docs_disabled_in_production_only():
+    """/docs, /redoc and /openapi.json are 404 in production, open in dev/CI."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from src.api.main import _docs_urls
+
+    prod = TestClient(FastAPI(**_docs_urls(True)))
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert prod.get(path).status_code == 404, path
+
+    dev = TestClient(FastAPI(**_docs_urls(False)))
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert dev.get(path).status_code == 200, path
+
+
+def test_app_in_test_env_keeps_openapi_for_type_generation():
+    """gen:types / check:types-drift read app.openapi(); never break it."""
+    from src.api.main import app
+
+    assert app.openapi_url == "/openapi.json"
+    assert "/api/status" in app.openapi()["paths"]
