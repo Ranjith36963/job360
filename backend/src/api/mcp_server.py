@@ -548,9 +548,8 @@ def build_server(version: str = "") -> MCPServer:
         Job360 stores it and starts an application for it, then returns the job id and
         the application id to work against. It does NOT judge the fit — that is your
         job; record your own verdict with `save_fit`. Bringing the same title+company
-        again returns the existing job (existing=true). If its apply link, location
-        or country differs from the one already brought, it is refused (409) and
-        nothing changes - the error says what differs and what to do. Never use this to search.
+        again returns the existing job (existing=true); a different link/location/country
+        is a 409 saying what to do. Never use this to search.
 
         Visa (optional): if the ad SAYS whether the employer sponsors visas, pass
         `visa_signal` = "sponsors" or "no_sponsorship", quote the sentence in
