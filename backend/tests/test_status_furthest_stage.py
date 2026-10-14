@@ -133,11 +133,47 @@ async def test_regress_only_via_corrects_event_id(authenticated_async_context):
         # correcting the mis-recorded event drops it from the replay
         fixed = await _event(client, app_id, "note", detail="no interview yet", corrects_event_id=wrong["event_id"])
         assert fixed["status"] == "replied"
-        # a STATUS event that corrects another is an explicit "the status is this"
+        # correcting `replied` away too leaves applied as the furthest real rung;
+        # the correcting `applied` is replayed like any event (no forced status)
         back = await _event(client, app_id, "applied", corrects_event_id=replied["event_id"])
         assert back["status"] == "applied"
         detail = await _detail(client, app_id)
         assert detail["status"] == "applied" and replay_status(detail["events"]) == "applied"
+
+
+@pytest.mark.asyncio
+async def test_correcting_applied_date_keeps_interview(authenticated_async_context):
+    """Fixing the date of `applied` must not undo a later interview."""
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        first = await _event(client, app_id, "applied", occurred_at=_ago(10))
+        await _event(client, app_id, "interview_scheduled", occurred_at=_ago(2))
+        fixed = await _event(client, app_id, "applied", occurred_at=_ago(12), corrects_event_id=first["event_id"])
+        assert fixed["status"] == "interview_scheduled"
+        detail = await _detail(client, app_id)
+        assert detail["status"] == "interview_scheduled"
+        assert replay_status(detail["events"]) == "interview_scheduled"
+
+
+@pytest.mark.asyncio
+async def test_correcting_applied_date_keeps_rejection(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        first = await _event(client, app_id, "applied", occurred_at=_ago(10))
+        await _event(client, app_id, "rejected", occurred_at=_ago(2))
+        fixed = await _event(client, app_id, "applied", occurred_at=_ago(12), corrects_event_id=first["event_id"])
+        assert fixed["status"] == "rejected"
+        detail = await _detail(client, app_id)
+        assert detail["status"] == "rejected" and replay_status(detail["events"]) == "rejected"
+
+
+def test_late_applied_does_not_undo_ghosted():
+    def ev(i: int, t: str) -> dict[str, Any]:
+        return {"id": i, "event_type": t, "recorded_at": f"2026-10-14T10:00:0{i}+00:00", "occurred_at": ""}
+
+    assert replay_status([ev(1, "brought"), ev(2, "applied"), ev(3, "ghosted"), ev(4, "applied")]) == "ghosted"
+    # a reply after the silence is still news
+    assert replay_status([ev(1, "applied"), ev(2, "ghosted"), ev(3, "applied"), ev(4, "replied")]) == "replied"
 
 
 @pytest.mark.asyncio
@@ -238,3 +274,27 @@ async def test_rebuild_status_cache_dry_run(authenticated_async_context, capsys)
         assert tuple(row) == ("interview_requested", "interview")
         assert script.rebuild(conn, apply=True)["changed"] == 0, "idempotent"
         assert conn.execute("SELECT COUNT(*) FROM application_events").fetchone()[0] == events_before
+
+        # A row a live write changes between the script's read and its UPDATE
+        # is skipped (compare-and-set), never clobbered with the stale replay.
+        conn.execute("UPDATE applications SET status = 'applied', stage = 'applied' WHERE id = ?", (app_id,))
+
+        class _Racing:
+            def __init__(self, inner: Any) -> None:
+                self.inner = inner
+
+            def execute(self, sql: str, params: Any = ()) -> Any:
+                cur = self.inner.execute(sql, params)
+                if sql.startswith("SELECT id, status, stage FROM applications"):
+                    rows = cur.fetchall()
+                    self.inner.execute("UPDATE applications SET status = 'offer', stage = 'offer' WHERE id = ?", (app_id,))
+                    return type("C", (), {"fetchall": lambda _self: rows})()
+                return cur
+
+            def commit(self) -> None:
+                self.inner.commit()
+
+        raced = script.rebuild(_Racing(conn), apply=True)
+        assert raced["skipped"] == [app_id] and raced["changed"] == 0
+        row = conn.execute("SELECT status, stage FROM applications WHERE id = ?", (app_id,)).fetchone()
+        assert tuple(row) == ("offer", "offer"), "the live write survives"

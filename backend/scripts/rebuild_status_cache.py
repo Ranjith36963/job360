@@ -10,6 +10,8 @@ writes the cache slot ONLY where it differs.
 * Dry run by default: prints counts (and each change) and writes nothing.
   ``--apply`` writes.
 * Idempotent: a second ``--apply`` finds nothing to change.
+* Safe beside live traffic: each UPDATE is conditional on the values read,
+  so a row an event changed mid-run is skipped (and reported), not clobbered.
 * Touches ONLY ``applications.status`` and ``applications.stage`` (``stage``
   only when the new status has a legacy stage — ``considering`` has none, the
   same rule ``spine.append_event`` follows). Never reads-for-write, updates
@@ -36,8 +38,10 @@ from src.services.applications.status import replay_status, stage_for_status  # 
 
 
 def rebuild(conn: pgsync.Connection, *, apply: bool = False) -> dict[str, Any]:
-    """Replay every application; return ``{checked, changed, changes}``. Writes
-    the differing rows only when ``apply`` is true."""
+    """Replay every application; return ``{checked, changed, skipped, changes}``.
+    Writes the differing rows only when ``apply`` is true, and only where the
+    row still holds the status/stage that was read — a row a live write
+    changed in between is left alone and listed in ``skipped``."""
     apps = conn.execute("SELECT id, status, stage FROM applications ORDER BY id").fetchall()
     events: dict[int, list[dict[str, Any]]] = {}
     for r in conn.execute(
@@ -48,6 +52,7 @@ def rebuild(conn: pgsync.Connection, *, apply: bool = False) -> dict[str, Any]:
         events.setdefault(int(row["application_id"]), []).append(row)
 
     changes: list[dict[str, Any]] = []
+    skipped: list[int] = []  # rows that changed under us between read and write
     for a in apps:
         app = dict(a)
         new_status = replay_status(events.get(int(app["id"]), []))
@@ -62,13 +67,24 @@ def rebuild(conn: pgsync.Connection, *, apply: bool = False) -> dict[str, Any]:
             }
         )
         if apply:
-            conn.execute(
-                "UPDATE applications SET status = ?, stage = ? WHERE id = ?",
-                (new_status, new_stage, int(app["id"])),
+            # Compare-and-set: write only if the row still holds what we read.
+            # A live append_event between our read and this UPDATE already
+            # re-derived the slot from the full log, so we must not clobber it.
+            cur = conn.execute(
+                "UPDATE applications SET status = ?, stage = ? "
+                "WHERE id = ? AND status = ? AND stage IS NOT DISTINCT FROM ?",
+                (new_status, new_stage, int(app["id"]), app["status"], app["stage"]),
             )
+            if cur.rowcount == 0:
+                skipped.append(int(app["id"]))
     if apply:
         conn.commit()
-    return {"checked": len(apps), "changed": len(changes), "changes": changes}
+    return {
+        "checked": len(apps),
+        "changed": len(changes) - len(skipped),
+        "skipped": skipped,
+        "changes": changes,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -81,6 +97,11 @@ def main(argv: list[str] | None = None) -> int:
         result = rebuild(conn, apply=args.apply)
     mode = "APPLIED" if args.apply else "DRY RUN (nothing written; pass --apply to write)"
     print(f"{mode}: {result['checked']} applications checked, {result['changed']} differ")
+    if result["skipped"]:
+        print(
+            f"  {len(result['skipped'])} skipped (changed while the script ran; re-run to check them): "
+            + ", ".join(str(i) for i in result["skipped"])
+        )
     for c in result["changes"]:
         print(
             f"  application {c['application_id']}: status {c['status'][0]} -> {c['status'][1]}, "

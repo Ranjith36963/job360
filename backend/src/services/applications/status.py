@@ -106,7 +106,8 @@ def replay_status(
     * A progress event (considering < applied < replied < interview_requested
       < interview_scheduled < interview_done < offer) moves the status only
       when its rung is >= the furthest rung reached so far. From ``ghosted``
-      the same test applies, so a reply after silence moves it forward.
+      it must be strictly > that rung: a reply after silence moves it
+      forward, a late-recorded ``applied`` does not undo the silence.
     * ``rejected`` / ``withdrawn`` always apply; the latest of them wins.
     * After a ``rejected`` / ``withdrawn``, a progress event reopens the
       application only when its ``occurred_at`` is LATER than that ending's
@@ -116,8 +117,9 @@ def replay_status(
     * ``ghosted`` applies over considering..interview_done; it never
       overrides an offer or a rejected/withdrawn.
     * The ONLY way backwards is ``corrects_event_id``: the corrected event is
-      skipped, and a STATUS event that itself carries ``corrects_event_id``
-      is an explicit correction, so it sets the status unconditionally.
+      skipped as if it never happened. The correcting event itself is
+      replayed like any other event — it does NOT force the status, so
+      correcting the date of ``applied`` never undoes a later interview.
 
     Pure function, no DB — the frozen test calls this directly and compares
     against the stored column. Needs ``event_type``, ``id``, ``recorded_at``,
@@ -137,14 +139,6 @@ def replay_status(
         if mapped is None:
             continue
         rank = PROGRESS_RANK.get(mapped)
-        if e.get("corrects_event_id") is not None:
-            # An explicit correction: the caller says "the status is THIS".
-            status = mapped
-            if rank is not None:
-                best, ended_at = rank, None
-            elif mapped in TERMINAL_STATUSES:
-                ended_at = _when(e.get("occurred_at"))
-            continue
         if mapped in TERMINAL_STATUSES:
             status, ended_at = mapped, _when(e.get("occurred_at"))
             continue
@@ -158,6 +152,12 @@ def replay_status(
             occurred = _when(e.get("occurred_at"))
             if ended_at is not None and occurred is not None and occurred > ended_at:
                 status, best, ended_at = mapped, rank, None
+            continue
+        if status == GHOSTED:
+            # Silence is only broken by news BEYOND the furthest rung — a late
+            # record of the application itself does not undo `ghosted`.
+            if rank > best:
+                status, best = mapped, rank
             continue
         if rank >= best:
             status, best = mapped, rank

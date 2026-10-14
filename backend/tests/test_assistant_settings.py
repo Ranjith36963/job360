@@ -1533,20 +1533,41 @@ async def test_setup_round_refused_while_value_waiting(authenticated_async_conte
         token = await _mint_token(client)
     at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
     async with _bearer_client(token) as agent:
+        # parked on its own first: a request now waits from an earlier call
+        parked = (await _patch(agent, _e(DAILY, "auto"))).json()
+        assert [w["path"] for w in parked["waiting"]] == [DAILY]
+        again = await _patch(agent, _e(PROGRESS, _done("settings", at=at)))
+        assert again.status_code == 422, again.text
+        detail = again.json()["detail"]
+        assert detail.startswith("Nothing was saved.")
+        assert DAILY in detail and "waiting for the user's Confirm" in detail and "/needs-you" in detail
+    async with authenticated_async_context() as client:
+        view = await _view(client)
+        assert view["setup_progress"]["done"] == 0 and view["inbox_mode"] == ""
+
+
+@pytest.mark.asyncio
+async def test_setup_round_same_call_parked_value_message(authenticated_async_context, fixture_user_id):
+    """A path THIS call would park has no request yet - the whole call is refused,
+    so nothing waits. The 422 must not say "waiting for Confirm"; it says to resend
+    without setup_progress, and no request is created."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    async with _bearer_client(token) as agent:
         resp = await _patch(agent, _e(DAILY, "auto"), _e(PROGRESS, _done("settings", at=at)))
         assert resp.status_code == 422, resp.text
         detail = resp.json()["detail"]
         assert detail.startswith("Nothing was saved.")
-        assert DAILY in detail and "waiting for the user's Confirm" in detail and "/needs-you" in detail
-        # parked on its own, then the round is still refused (a request waiting from an earlier call)
-        parked = (await _patch(agent, _e(DAILY, "auto"))).json()
-        assert [w["path"] for w in parked["waiting"]] == [DAILY]
-        again = await _patch(agent, _e(PROGRESS, _done("settings", at=at)))
-        assert again.status_code == 422 and DAILY in again.json()["detail"]
-        assert "waiting for the user's Confirm" in again.json()["detail"]
+        assert (
+            f"{DAILY} needs the user's OK: resend this call WITHOUT setup_progress (the change will be "
+            "parked for the user's Confirm), then mark the round done after they Confirm"
+        ) in detail
+        assert "waiting for the user's Confirm" not in detail and "/needs-you" not in detail
     async with authenticated_async_context() as client:
         view = await _view(client)
-        assert view["setup_progress"]["done"] == 0 and view["inbox_mode"] == ""
+        assert view["setup_progress"]["done"] == 0 and view["waiting"] == []
 
 
 @pytest.mark.asyncio

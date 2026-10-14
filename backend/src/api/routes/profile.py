@@ -627,7 +627,10 @@ def _split_gated(
 
 
 def _batch_state_rejection(
-    user_id: str, write_now: list[tuple[str, Any]], waiting_paths: frozenset[str] = frozenset()
+    user_id: str,
+    write_now: list[tuple[str, Any]],
+    waiting_paths: frozenset[str] = frozenset(),
+    held_now: frozenset[str] = frozenset(),
 ) -> tuple[str, str, str] | None:
     """``(path, closed reason code, message)`` when the profile AS IT WILL BE after
     ``write_now`` breaks a cross-field rule, else ``None``. Pure on the inputs it
@@ -635,9 +638,10 @@ def _batch_state_rejection(
     a setup round newly marked done needs its answers (``setup_round_missing``).
     Applying the batch in memory first is what lets ONE call carry the answers AND
     the ``done_at``. Only what is written NOW counts: a value that is only waiting
-    for the user's Confirm (``waiting_paths`` — parked by this call or earlier) is
-    not saved, so a round that needs it is refused, naming that path (owner
-    decision 2026-10-14)."""
+    for the user's Confirm (``waiting_paths`` — a request from an earlier call) or
+    that THIS call would park (``held_now`` — no request exists yet, and none will:
+    the refusal writes nothing) is not saved, so a round that needs it is refused,
+    naming that path (owner decision 2026-10-14)."""
     years_touched = any(path in profile_edits.YEARS_PATHS for path, _ in write_now)
     progress_pairs = [
         (path, value) for path, value in write_now
@@ -673,10 +677,13 @@ def _batch_state_rejection(
             continue  # not newly marked done by this call
         missing = settings_rules.setup_round_missing(round_name, after)
         if missing:
-            parked = [m for m in missing if m in waiting_paths]
+            held = [m for m in missing if m in held_now]
+            parked = [m for m in missing if m in waiting_paths and m not in held_now]
             detail = (
-                settings_rules.setup_round_waiting_refusal(round_name, parked, settings.SITE_BASE_URL)
-                if parked else settings_rules.setup_round_refusal(round_name, missing)
+                settings_rules.setup_round_waiting_refusal(
+                    round_name, parked, settings.SITE_BASE_URL, held_now=held
+                )
+                if parked or held else settings_rules.setup_round_refusal(round_name, missing)
             )
             return settings_rules.SETUP_PROGRESS_PATH, "setup_round_missing_answers", detail
     return None
@@ -784,10 +791,11 @@ async def update_profile(
     # Owner decision 2026-10-10 - checks that need the state AFTER this batch:
     # years min <= max, and a setup round only counts as done once its answers
     # are saved (in this call or before). A refusal writes nothing.
-    waiting_paths = frozenset(path for path, _ in hold) | frozenset(
-        str(r["path"]) for r in setting_requests.list_waiting(user.id)
-    )
-    reject = _batch_state_rejection(user.id, write_now, waiting_paths)
+    # A path THIS call holds has no request yet (create_requests runs after the
+    # checks), so it is named apart from paths already waiting for Confirm.
+    held_now = frozenset(path for path, _ in hold)
+    waiting_paths = frozenset(str(r["path"]) for r in setting_requests.list_waiting(user.id))
+    reject = _batch_state_rejection(user.id, write_now, waiting_paths, held_now)
     if reject is not None:
         reject_path, reject_reason, reject_detail = reject
         _log_edit_rejected(user.id, actor, pairs, reject_path, 422, reject_reason)
