@@ -22,7 +22,7 @@ import re
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.services.applications import asks as asks_service
-from src.services.applications import spine
+from src.services.applications import event_examples, spine
 from src.services.applications.authorship import actor_for
 from src.services.applications.spine import SpineError
 from src.services.profile import assistant_settings as settings_rules
@@ -82,28 +82,30 @@ def _page_host(value: Any) -> str:
 def check_payload(user: CurrentUser, event_type: str, payload: dict[str, Any], detail: str) -> dict[str, Any]:
     """Validate a ``blocked`` / ``unblocked`` payload; return the payload to STORE
     (``assistant`` server-filled). Raises ``SpineError`` 422."""
+    problems: list[str] = []
     if detail:
-        raise SpineError(422, f"{event_type} keeps its text in the payload; leave the event detail empty")
+        problems.append(f"{event_type} keeps its text in the payload; leave the event detail empty")
     actor = actor_for(user)
     if event_type == "unblocked":
         if set(payload) != {"resolution"} or payload.get("resolution") not in UNBLOCK_RESOLUTIONS:
-            raise SpineError(
-                422, 'unblocked needs payload {"resolution": "retried" | "user_did_it" | "skipped"} and nothing else'
+            problems.append(
+                'unblocked needs payload {"resolution": "retried" | "user_did_it" | "skipped"} and nothing else'
             )
+        if problems:
+            raise event_examples.refusal(event_type, problems)
         return {"resolution": payload["resolution"], "assistant": actor}
     unknown = set(payload) - BLOCKED_KEYS
     if unknown:
-        raise SpineError(422, f"blocked payload keys are {sorted(BLOCKED_KEYS)}; unknown: {sorted(unknown)}")
+        problems.append(f"blocked payload keys are {sorted(BLOCKED_KEYS)}; unknown: {sorted(unknown)}")
     reason = payload.get("reason")
     if reason not in BLOCKED_REASONS:
-        raise SpineError(422, "blocked reason must be one of: " + ", ".join(BLOCKED_REASONS))
-    return {
-        "reason": reason,
-        "step": _plain("step", payload.get("step"), STEP_MAX_CHARS),
-        "page_host": _page_host(payload.get("page_host")),
-        "detail": _plain("detail", payload.get("detail"), DETAIL_MAX_CHARS),
-        "assistant": actor,
-    }
+        problems.append("blocked reason must be one of: " + ", ".join(BLOCKED_REASONS))
+    step = event_examples.collect(problems, _plain, "step", payload.get("step"), STEP_MAX_CHARS)
+    page_host = event_examples.collect(problems, _page_host, payload.get("page_host"))
+    text = event_examples.collect(problems, _plain, "detail", payload.get("detail"), DETAIL_MAX_CHARS)
+    if problems:
+        raise event_examples.refusal(event_type, problems)
+    return {"reason": reason, "step": step, "page_host": page_host, "detail": text, "assistant": actor}
 
 
 def ask_question(stored: dict[str, Any]) -> str:

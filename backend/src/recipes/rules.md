@@ -318,7 +318,17 @@ ONLY when the user typed yes to submitting THIS application; `submit_declined`
 may only send deny; `form_filled` {form_url, fields_count, answers?} - after you filled
 the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `form_swept` {fields_checked, fixed, notes?} - after you re-read every field and fixed what was wrong (check_submit stops until it is newer than the fill); `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
 - the user has an account there; `account_needed` {host} - you hit a sign-up
-wall (never a password anywhere). A CV that changed since you read it is 409:
+wall (never a password anywhere). A payload that is wrong is refused ONCE (422) with every
+problem listed and one complete valid example for that event; fix them all and
+resend. `record_application` answers take the same shape as `form_filled`
+answers: {question, answer, source?, key?} (source: memory|profile|approved|written|guessed),
+and `source`/`key` are returned when you read the receipt. Examples:
+`form_filled` {"form_url":"https://jobs.example.com/apply/1","fields_count":1,"answers":[{"question":"Right to work?","answer":"Yes","source":"profile","key":"work_authorization"}]};
+`form_swept` {"fields_checked":12,"fixed":1,"notes":"fixed phone"}; `cv_seen` {"artifact_id":7,"sha256":"<from the kit>","where":"chat"};
+`hold_released` {"reason":"done"}; `site_account` {"host":"jobs.example.com"};
+`blocked` {"reason":"captcha","step":"submit form","page_host":"jobs.example.com","detail":"CAPTCHA"}; `unblocked` {"resolution":"retried"};
+`proof_text` {"text":"Thank you, application received.","page_host":"jobs.example.com"}.
+A CV that changed since you read it is 409:
 get the kit again. `duplicate_cleared` and where="web" need the user's own click
 on the website (403). `kit_read` is written by Job360 itself.
 
