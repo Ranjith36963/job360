@@ -41,28 +41,28 @@ describe("buildSentence", () => {
 
   it("one assistant, one record (singular) and the name after agent:", () => {
     expect(text({ events: [ev(1, "agent:Claude")], truncated: false, openAsks: 0 })).toBe(
-      "Claude wrote 1 record since you were last here."
+      "Your assistant (Claude) wrote 1 record since you were last here."
     );
   });
 
   it("one assistant, many records; token: names work too; web ignored", () => {
     const events = [ev(1, "token:Cursor"), ev(2, "token:Cursor"), ev(3, "web")];
     expect(text({ events, truncated: false, openAsks: 0 })).toBe(
-      "Cursor wrote 2 records since you were last here."
+      "Your assistant (Cursor) wrote 2 records since you were last here."
     );
   });
 
   it("several assistants: every one is named exactly as it signed, never a vague plural", () => {
     const events = [ev(1, "agent:Claude"), ev(2, "token:Cursor"), ev(3, "agent:Claude")];
     expect(text({ events, truncated: false, openAsks: 0 })).toBe(
-      "Claude and Cursor wrote 3 records since you were last here."
+      "Your assistants (Claude and Cursor) wrote 3 records since you were last here."
     );
   });
 
   it("three or more assistants are listed with commas, in first-seen order", () => {
     const events = [ev(1, "agent:Claude Code (job360)"), ev(2, "agent:Codex"), ev(3, "agent:Grok"), ev(4, "agent:Codex")];
     expect(text({ events, truncated: false, openAsks: 1 })).toBe(
-      "Claude Code (job360), Codex and Grok wrote 4 records since you were last here. One thing needs you."
+      "Your assistants (Claude Code (job360), Codex and Grok) wrote 4 records since you were last here. One thing needs you."
     );
   });
 
@@ -73,17 +73,17 @@ describe("buildSentence", () => {
 
   it("truncated shows N+", () => {
     expect(text({ events: [ev(1, "agent:Claude"), ev(2, "agent:Claude")], truncated: true, openAsks: 0 })).toBe(
-      "Claude wrote 2+ records since you were last here."
+      "Your assistant (Claude) wrote 2+ records since you were last here."
     );
   });
 
   it("appends the needs-you sentence: 0, 1, many, and after the quiet line", () => {
     const one = [ev(1, "agent:Claude")];
     expect(text({ events: one, truncated: false, openAsks: 1 })).toBe(
-      "Claude wrote 1 record since you were last here. One thing needs you."
+      "Your assistant (Claude) wrote 1 record since you were last here. One thing needs you."
     );
     expect(text({ events: one, truncated: false, openAsks: 2 })).toBe(
-      "Claude wrote 1 record since you were last here. Two things need you."
+      "Your assistant (Claude) wrote 1 record since you were last here. Two things need you."
     );
     expect(text({ events: [], truncated: false, openAsks: 3 })).toBe(
       "Nothing new since you were last here. Three things need you."

@@ -74,7 +74,7 @@ describe("MemoryTab", () => {
   it("Germany is a collapsed card with an amber chip; the rail shows salary and the missing one", async () => {
     render(<MemoryTab />);
     await screen.findByTestId("memory-tab");
-    expect(screen.getByTestId("country-missing-DE")).toHaveTextContent("3 not saved yet");
+    expect(screen.getByTestId("country-missing-DE")).toHaveTextContent("5 not saved yet");
     expect(screen.getByTestId("memory-rail")).toHaveTextContent("£80k–95k GBP");
     expect(screen.getByTestId("memory-row-preferences.salary_by_country.DE")).toHaveTextContent("not saved yet");
   });
@@ -133,7 +133,7 @@ describe("MemoryTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add a country" }));
     fireEvent.change(screen.getByPlaceholderText("Search countries…"), { target: { value: "France" } });
     fireEvent.click(await screen.findByText("France"));
-    expect(screen.getByTestId("country-missing-FR")).toHaveTextContent("4 not saved yet");
+    expect(screen.getByTestId("country-missing-FR")).toHaveTextContent("6 not saved yet");
     expect(updateProfileFields).not.toHaveBeenCalled();
   });
 });

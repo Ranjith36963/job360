@@ -22,6 +22,8 @@ export const MEMORY_PATHS = [CONTACT, RTW, LOGISTICS, LANGUAGES, EQUALITY, ANSWE
 
 export const PNS = "Prefer not to say";
 export const WORK_AUTH_OPTIONS = ["citizen", "permanent_resident", "visa", "needs_sponsorship"] as const;
+export const ONSITE_OPTIONS = ["yes", "only_if_sponsored", "no"] as const;
+const ONSITE_LABEL: Record<string, string> = { yes: "Yes", only_if_sponsored: "Only if sponsored", no: "No" };
 export const LEVEL_OPTIONS = ["native", "fluent", "professional", "basic"] as const;
 const WORK_AUTH_LABEL: Record<string, string> = {
   citizen: "Citizen",
@@ -58,6 +60,8 @@ export const FIELD_LABEL: Record<string, string> = {
   sexual_orientation: "Sexual orientation",
   transgender: "Transgender",
   salary: "Salary",
+  remote_ok: "Remote work is fine",
+  onsite: "On-site work",
 };
 
 export type PartInput = "text" | "date" | "number" | "textarea" | "yesno" | "select" | "countries" | "languages";
@@ -153,7 +157,7 @@ export function contactRows(): RowSpec[] {
   ];
 }
 
-/** The four right-to-work facts for one country. */
+/** The right-to-work facts for one country (the card total is this list's length). */
 export function rtwCountryRows(code: string): RowSpec[] {
   const s = { kind: "country", code } as const;
   const p = (key: string) => `${RTW}.${code}.${key}`;
@@ -162,6 +166,9 @@ export function rtwCountryRows(code: string): RowSpec[] {
     single(RTW, p("needs_sponsorship"), "needs_sponsorship", "yesno", s),
     single(RTW, p("visa_type"), "visa_type", "text", s),
     single(RTW, p("visa_expires"), "visa_expires", "text", s, { placeholder: "2027-03 or 2027-03-14" }),
+    // What people really say: "remote anywhere, on-site only if sponsored" (also saved for ANY).
+    single(RTW, p("remote_ok"), "remote_ok", "yesno", s),
+    single(RTW, p("onsite"), "onsite", "select", s, { options: ONSITE_OPTIONS }),
   ];
 }
 
@@ -422,6 +429,7 @@ export function showRow(spec: RowSpec, value: unknown): string {
   const key = spec.parts[0].key;
   if (isPns(value)) return PNS;
   if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (key === "onsite") return ONSITE_LABEL[String(value)] ?? String(value);
   if (key === "work_authorization") return WORK_AUTH_LABEL[String(value)] ?? String(value);
   if (key === "citizenship" && Array.isArray(value)) return value.map((c) => countryName(String(c))).join(", ");
   if (key === "languages" && Array.isArray(value)) {
@@ -480,4 +488,40 @@ export function provenanceText(p: Provenance): string {
   const who = whoLabel(p.by);
   const when = shortDate(p.at);
   return p.by === "web" ? `You changed this, ${when}` : `Saved by ${who.name}, ${when}`;
+}
+
+const isApprovedMatch = (a: unknown, question: unknown, answer: unknown) =>
+  isObj(a) && a.approved === true && a.question === question && a.answer === answer;
+
+/** Who recorded the approval of one saved answer: the `set_by` of the OLDEST
+ *  history row in which that exact question + answer is present AND approved
+ *  (history arrives newest first). `null` = the history cannot say. */
+export function answerApprover(
+  history: HistoryRow[],
+  question: unknown,
+  answer: unknown,
+): string | null {
+  for (const row of [...history].reverse()) {
+    const list = Array.isArray(row.value) ? row.value : [];
+    if (list.some((a) => isApprovedMatch(a, question, answer))) return row.set_by;
+  }
+  return null;
+}
+
+/** "Approved by you, 3 Oct" only when the web session recorded the approval;
+ *  a token or agent reads "Marked approved by <assistant>, 3 Oct"; when the
+ *  history cannot say, just "Approved, 3 Oct" (never claim the user did it). */
+export function approvalText(recordedBy: string | null, recordedAt?: unknown): string {
+  const when = typeof recordedAt === "string" ? shortDate(recordedAt) : "";
+  const tail = when ? `, ${when}` : "";
+  if (recordedBy === "web") return `Approved by you${tail}`;
+  if (recordedBy) return `Marked approved by ${whoLabel(recordedBy).name}${tail}`;
+  return `Approved${tail}`;
+}
+
+/** Saved facts for one country card. A fact counts as saved when it holds a
+ *  value, and the card total is the number of facts shown (`total`). Pure so
+ *  the count logic is testable apart from the component. */
+export function countrySaved(values: readonly unknown[]): number {
+  return values.filter((v) => !isEmpty(v)).length;
 }
