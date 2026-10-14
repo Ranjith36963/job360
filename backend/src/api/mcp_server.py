@@ -419,6 +419,7 @@ def build_server(version: str = "") -> MCPServer:
         `search_brief.gaps` = ask each once, save to the gap's `path`
         (user_info.answers: {question: ask text, answer: Yes|No, approved: true}), then search.
 
+        No profile yet: `profile_exists` false + `next` (ask for the CV, or update_profile).
         Other keys: job_titles, experience_level, experience_level_inferred, agent_edits, lessons, assistant_hint.
         Full rules and shapes: get_recipe("rules")."""
         # ONE profile read for the whole tool call. `load_profile_response` is
@@ -428,6 +429,7 @@ def build_server(version: str = "") -> MCPServer:
         # nothing extra. Calling the route and then re-loading the profile
         # meant four connections to answer one tool call.
         from src.services.profile import edits as profile_edits  # noqa: PLC0415
+        from src.services.profile.models import UserProfile  # noqa: PLC0415
         from src.services.profile.search_brief import build_search_brief  # noqa: PLC0415
         from src.services.profile.skill_tiering import profile_skills  # noqa: PLC0415
 
@@ -435,6 +437,29 @@ def build_server(version: str = "") -> MCPServer:
         try:
             profile, resp = profile_route.load_profile_response(user_id)
         except HTTPException as exc:
+            if exc.status_code == 404:
+                # Brand-new user, no CV yet: a normal answer with the next step, not an error
+                # (the HTTP route keeps its 404). Same helpers as the normal path below.
+                _audit("get_profile", "ok", profile_exists=False)
+                get_audit_logger().info(
+                    "get_profile_no_profile",
+                    extra={"event": "get_profile_no_profile", "user_id": user_id, "surface": "mcp"},
+                )
+                from src.api.models import AssistantSettingsView  # noqa: PLC0415
+
+                editable = list(profile_edits.editable_paths())
+                view = profile_route.settings_view(UserProfile(), user_id)
+                return {
+                    "profile_exists": False,
+                    "next": (
+                        f"No profile yet. Ask the user to upload their CV at {settings.SITE_BASE_URL}/profile, "
+                        "or save fields with update_profile."
+                    ),
+                    "settings": AssistantSettingsView(**view).model_dump(),
+                    "editable_paths": editable,
+                    "shapes": {k: v for k, v in profile_shapes.compact_shapes().items() if k in editable},
+                    "assistant_hint": ASSISTANT_HINT,
+                }
             _audit("get_profile", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
         s = resp.summary
@@ -667,8 +692,9 @@ def build_server(version: str = "") -> MCPServer:
         any answers/fields into an immutable receipt, and appends an `applied` event to
         the application's history. Sends nothing anywhere. `channel` is where they
         applied — one of "company_site", "linkedin_easy_apply", "job_board",
-        "email", "referral", "recruiter", "other" (or leave it empty); any
-        other text is stored as "other" (never refused). `note` is free text.
+        "email", "referral", "recruiter", "other" (or leave it empty); ats_form / workday /
+        greenhouse etc. = company_site; other text is stored as "other" (never refused;
+        the reply has `channel_given` + a `warning`). `note` is free text.
 
         C1 (application-spine review) — this is the SAME tool as before (`job_id`,
         `channel`, `note` still work unchanged), rewired onto the rich

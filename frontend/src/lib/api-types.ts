@@ -4965,6 +4965,11 @@ export interface components {
         RecordApplicationReceiptResponse: {
             /** Channel */
             channel: string;
+            /**
+             * Channel Given
+             * @default
+             */
+            channel_given: string;
             /** Confirmation */
             confirmation: string;
             /** Cover Letter Artifact Id */
@@ -4986,6 +4991,11 @@ export interface components {
             sent_at: string;
             /** Url */
             url: string;
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
         };
         /** RecordEventRequest */
         RecordEventRequest: {

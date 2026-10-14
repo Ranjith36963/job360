@@ -6595,6 +6595,11 @@
             "title": "Channel",
             "type": "string"
           },
+          "channel_given": {
+            "default": "",
+            "title": "Channel Given",
+            "type": "string"
+          },
           "confirmation": {
             "title": "Confirmation",
             "type": "string"
@@ -6652,6 +6657,14 @@
           "url": {
             "title": "Url",
             "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [

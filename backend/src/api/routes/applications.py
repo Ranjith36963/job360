@@ -741,6 +741,10 @@ class RecordApplicationReceiptResponse(BaseModel):
     cv_version_no: Optional[int]
     cover_letter_artifact_id: Optional[int]
     channel: str
+    # What the caller sent, verbatim (trimmed); '' when none.
+    channel_given: str = ""
+    # Plain facts, e.g. an unknown channel stored as 'other'. Never a block.
+    warnings: list[str] = []
     confirmation: str
     url: str
     event_id: int
