@@ -8161,6 +8161,11 @@
             "title": "Replied",
             "type": "integer"
           },
+          "replies_without_applied": {
+            "default": 0,
+            "title": "Replies Without Applied",
+            "type": "integer"
+          },
           "reply_rate": {
             "anyOf": [
               {
@@ -8922,6 +8927,14 @@
               "$ref": "#/components/schemas/NormalizedOut"
             },
             "title": "Normalized",
+            "type": "array"
+          },
+          "not_saved": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Not Saved",
             "type": "array"
           },
           "profile": {

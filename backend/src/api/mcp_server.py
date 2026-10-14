@@ -1026,7 +1026,9 @@ def build_server(version: str = "") -> MCPServer:
         message_id returns already_existed=true and writes nothing, so re-reading an inbox is safe.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status; a note
-        never does. `occurred_at` may be in the past. `scheduled_at` (ISO-8601 with timezone) only on
+        never does; the furthest stage wins (a late `applied` never moves it back; only corrects_event_id does).
+        `warnings` = what to fix (e.g. no applied event yet).
+        `occurred_at` may be in the past. `scheduled_at` (ISO-8601 with timezone) only on
         interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase on any event; ""
         clears it.
 
@@ -1340,7 +1342,7 @@ def build_server(version: str = "") -> MCPServer:
         clear}; send several per call.
         ALL OR NOTHING: if any edit is refused NOTHING is saved; fix it and resend ALL paths in one
         call (a path left out is lost). `get_profile` `shapes` = an example per path.
-        Reply: {applied, waiting, normalized, profile_version}; call get_profile to re-read.
+        Reply: {applied, waiting, not_saved, normalized, profile_version}; call get_profile to re-read.
         Country names and aliases (junior, on-site) are converted and listed in `normalized`.
 
         A write REPLACES THE WHOLE VALUE of its path: send the current `fields[...]` plus your change
@@ -1358,8 +1360,8 @@ def build_server(version: str = "") -> MCPServer:
         never guess); `above_line` / `below_line` = ask|auto; apply_mode is retired.
         A change giving you more freedom (an `auto` switch,
         a line move making a side auto, auto_when_sure, a higher or removed daily_cap, ending a pause,
-        `preferences.daily_check` = "auto") is NOT applied: it returns in `waiting`; user confirms
-        on Needs-you, not you.
+        `preferences.daily_check` = "auto") is NOT applied: it returns in `waiting` (+ a `not_saved` line to tell the
+        user); user confirms on Needs-you, not you.
 
         `assistant_settings.setup_progress` = {round: {"done_at": ISO time with offset}}, rounds in order: targets,
         you, visa, logistics, equality, settings (targets needs target_job_titles + the score line, settings needs
@@ -1387,6 +1389,7 @@ def build_server(version: str = "") -> MCPServer:
         return {
             "applied": [a.model_dump() for a in resp.applied],
             "waiting": [w.model_dump() for w in resp.waiting],
+            "not_saved": list(resp.not_saved),
             "normalized": [n.model_dump() for n in resp.normalized],
             "profile_version": resp.profile.current_version_id,
         }

@@ -5616,6 +5616,11 @@ export interface components {
             rejected: number;
             /** Replied */
             replied: number;
+            /**
+             * Replies Without Applied
+             * @default 0
+             */
+            replies_without_applied: number;
             /** Reply Rate */
             reply_rate: number | null;
         };
@@ -5880,6 +5885,11 @@ export interface components {
              * @default []
              */
             normalized: components["schemas"]["NormalizedOut"][];
+            /**
+             * Not Saved
+             * @default []
+             */
+            not_saved: string[];
             profile: components["schemas"]["ProfileResponse"];
             /**
              * Waiting
