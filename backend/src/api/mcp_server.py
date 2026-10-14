@@ -1299,9 +1299,7 @@ def build_server(version: str = "") -> MCPServer:
         Memory paths (closed key sets): `user_info.contact`, `user_info.right_to_work`, `user_info.logistics`,
         `user_info.languages`, `user_info.equality`, `user_info.answers`, `preferences.salary_by_country`.
         Empty ("" / null / []) = not answered; `false` is an answer.
-        Each edit may carry "source": "user_said" (the user told you) or "agent_inferred" (you worked it
-        out); omitted = agent_inferred. An answer with confirmed:false was inferred - confirm it with the
-        user before using it.
+        Edit "source": user_said | agent_inferred (default). confirmed:false = inferred; ask before using.
         `approved: true` only after the user agrees to that wording.
 
         Settings (`assistant_settings.*`): change one only when the user says so in chat,
