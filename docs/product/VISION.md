@@ -103,6 +103,18 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 | `whats_new` | everything since a timestamp (replaces push for now) |
 | `export_history` | applications + events + versions + outcomes as clean JSON |
 | `stats` | cheap counts: reply / interview rate per CV version, per role |
+| `update_contact` | correct a contact's details; the old value is kept in its edit history |
+| `list_people` | every person you've added, grouped so one recruiter on two jobs shows once; `contact_id` gives one in full |
+| `list_receipts` | the user's application receipts, newest first; optionally filtered by job |
+| `get_receipt` | one receipt in full: the job as it read, the exact CV / cover letter sent, and what was recorded |
+| `get_job` | an ad the user brought, by job id: full text, apply link, dates and recorded facts |
+| `update_job` | set or fix the job facts on an application (country, remote, found-on, posted dates) |
+| `check_submit` | may the agent press the final submit? One decision (`submit` / `ask` / `stop`) from the user's settings |
+| `get_application_kit` | everything for filling ONE application form: CV, cover letter, stored answers, and what is missing |
+| `get_proof_upload_link` | a one-time link to upload the proof screenshot of one application |
+| `get_recipe` | the "run 360" playbooks: numbered steps for the agent to follow (no name = the list) |
+| `ask_user` | raise a question the user must answer when the agent is stuck or would have to guess |
+| `answer_ask` | record the answer the user gave in chat to an ask |
 | `get_tailored_documents` | the newest saved CV / cover letter — **we write neither** (decision 28); the agent writes them and saves them with `save_artifact`, the web renders DOCX / PDF from the saved text |
 
 Auth: OAuth 2.1 (`api/routes/oauth.py` + the discovery documents in
