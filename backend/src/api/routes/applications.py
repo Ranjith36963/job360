@@ -1740,8 +1740,7 @@ async def outreach_check(
         "outreach_check",
         extra={
             "event": "outreach_check", "user_id": safe_log_value(user.id),
-            "actor": safe_log_value(actor_for(user)),
-            "contact_id": safe_log_value(contact_id), "message_id": safe_log_value(message_id),
+            "actor": safe_log_value(actor_for(user)), "contact_id": contact_id, "message_id": message_id,
             "decision": verdict.decision, "reason": verdict.reason, "result": "ok",
         },
     )
