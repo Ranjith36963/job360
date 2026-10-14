@@ -606,3 +606,71 @@ def test_l3_universe_url_pinned_to_sha() -> None:
 def test_fixture_has_no_real_email() -> None:
     f = KIT_DIR.parent.parent / "tests" / "fixtures" / "hunt_kit" / "feeds" / "hn_item.json"
     assert "eric+hn@" not in f.read_text(encoding="utf-8")
+
+
+# ---- remote jobs locked to other countries (region tag must not override a country list)
+_IN_DESC = "Build agents."
+
+
+@pytest.mark.parametrize(
+    "loc",
+    [
+        "Thailand | remote | Remote | APAC | Thailand",
+        "Philippines | remote | Remote | APAC | Philippines",
+        "China | remote | Remote | APAC | China",
+        "Bogotá, Bogota, Colombia | remote | Remote | APAC | Colombia | Pakistan",
+        "Korea | remote | Remote | APAC | South Korea",
+        "APAC; Australia; Hong Kong; Malaysia; New Zealand; Singapore; Taiwan",
+    ],
+)
+def test_remote_locked_to_other_countries_dropped_for_india(loc: str) -> None:
+    assert hk.classify_location(loc, _IN_DESC, prefs("IN")) is None
+
+
+@pytest.mark.parametrize(
+    ("loc", "row"),
+    [
+        ("India | remote | Remote | APAC | India", "remote_region"),
+        ("Remote | Worldwide", "remote_world"),
+        ("Remote - APAC", "remote_region"),
+    ],
+)
+def test_remote_true_positives_kept_for_india(loc: str, row: str) -> None:
+    assert hk.classify_location(loc, _IN_DESC, prefs("IN")) == row
+
+
+def test_progress_lines_per_source(capsys: pytest.CaptureFixture[str]) -> None:
+    col = hk.Collector(_args(work_countries="IN"))
+    prog = hk.Progress(col, ["greenhouse"] * 8 + ["freehire"])
+    for _ in range(8):
+        col.bump("greenhouse", "kept")
+        prog.done("greenhouse")
+    prog.done("freehire")
+    out = capsys.readouterr()
+    assert out.out == ""
+    lines = out.err.strip().splitlines()
+    assert "[greenhouse] starting: 8 boards" in lines
+    assert "[freehire] 1/1 boards (100%), 0 kept so far" in lines
+    gh = [x for x in lines if x.startswith("[greenhouse] ") and "/8" in x]
+    assert [x.split()[1] for x in gh] == ["2/8", "4/8", "6/8", "8/8"]
+    assert gh[-1].endswith("8 kept so far")
+
+
+def test_freehire_maps_posted_at_to_posted(monkeypatch: pytest.MonkeyPatch) -> None:
+    row = {
+        "public_slug": "ai-engineer-x",
+        "source": "greenhouse",
+        "url": "https://boards.example.com/jobs/1",
+        "title": "AI Engineer",
+        "company": "Acme",
+        "location": "Pune, India",
+        "countries": ["in"],
+        "regions": [],
+        "work_mode": "remote",
+        "posted_at": "2026-10-14T01:11:53Z",
+        "description": "Build agents.",
+    }
+    monkeypatch.setattr(hk, "http_get_json", lambda url, params=None, **k: (200, {"data": [row]}))
+    col = hk.Collector(_args(work_countries="IN", days=3650, titles="ai engineer"))
+    hk._freehire(col, ["ai engineer"])
+    assert [r["posted"] for r in col.results] == ["2026-10-14"]
