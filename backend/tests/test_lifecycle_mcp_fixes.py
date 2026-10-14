@@ -186,7 +186,7 @@ async def test_dedupe_with_different_type_warns(authenticated_async_context):
         assert body["already_existed"] is True and body["event_type"] == "replied"
         assert body["warnings"] == [
             f"message_id already recorded as replied; to reclassify, "
-            f"record_event(..., corrects_event_id={first.json()['event_id']})"
+            f"record_event(..., corrects_event_id={first.json()['event_id']}) without `source` (the original keeps it)"
         ]
 
 

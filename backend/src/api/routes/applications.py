@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serial
 from src.api.auth_deps import AUTH_FIRST, CurrentUser, require_session_user, require_user
 from src.api.dependencies import get_request_db
 from src.api.models import JobResponse, LessonsResponse
-from src.api.routes.bring import job_row_to_response
+from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications import blocked as blocked_service
@@ -1388,12 +1388,16 @@ async def get_job(
     `/applications/export` is — a literal segment must not be swallowed by the
     dynamic one.
     """
-    if await spine.get_application_by_job(db, user.id, job_id) is None:
+    mine = await spine.get_application_by_job(db, user.id, job_id)
+    if mine is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    app_row = await spine.get_owned_application(db, user.id, int(mine["id"]))
     row = await db.get_job_by_id(job_id)
-    if row is None:  # pragma: no cover — an application always has its job row
+    if row is None or app_row is None:  # pragma: no cover — an application always has its job row
         raise HTTPException(status_code=404, detail="Job not found")
-    return job_row_to_response(dict(row))
+    # P0 2026-10-14 — the text, link and location are THIS user's snapshot,
+    # never the shared catalog row (which holds whoever pasted the key first).
+    return application_job_response(app_row, dict(row))
 
 
 @router.get("/applications/{application_id}", response_model=ApplicationDetailOut, dependencies=AUTH_FIRST)

@@ -597,7 +597,7 @@ async def _duplicate_event_result(
         )
         warnings.append(
             f"message_id already recorded as {existing['event_type']}; to reclassify, "
-            f"record_event(..., corrects_event_id={existing['id']})"
+            f"record_event(..., corrects_event_id={existing['id']}) without `source` (the original keeps it)"
         )
     return {
         "warnings": warnings,
