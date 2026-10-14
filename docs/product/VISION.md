@@ -66,8 +66,9 @@ Candidate (one profile per user, versioned; multiple named profiles = later)
 **Event types are a fixed list plus free-text detail.** The list is
 `core.settings.APPLICATION_STATUS_EVENT_TYPES` (these move the status) and
 `APPLICATION_NOTE_EVENT_TYPES` (these never do). Who may write each one, and
-the payload it must carry, is `services/applications/kit.check_kit_event`,
-pinned by `tests/test_application_kit.py::test_autofill_events_assistants_may_only_deny`,
+the payload it must carry, is the `record_event` route in
+`api/routes/applications.py`, which dispatches one validator per event family.
+Pinned by `tests/test_application_kit.py::test_autofill_events_assistants_may_only_deny`,
 `tests/test_application_kit.py::test_duplicate_clear_is_web_only` and
 `tests/test_assistant_settings.py::test_per_job_override_an_assistant_may_only_send_confirm`.
 Nothing is ever deleted.
