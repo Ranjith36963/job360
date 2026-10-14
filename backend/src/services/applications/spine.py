@@ -195,6 +195,16 @@ _CHANNEL_ALIASES: dict[str, str] = {
     "website": "company_site",
     "careers_page": "company_site",
     "indeed": "job_board",
+    # Applying through a company's own applicant-tracking form is the
+    # company's site/portal, not a job board.
+    "ats_form": "company_site",
+    "ats": "company_site",
+    "application_form": "company_site",
+    "workday": "company_site",
+    "greenhouse": "company_site",
+    "lever": "company_site",
+    "ashby": "company_site",
+    "smartrecruiters": "company_site",
 }
 
 
@@ -560,7 +570,8 @@ async def _event_by_source_message_id(
 
 
 async def _duplicate_event_result(
-    db: JobDatabase, application_id: int, recorded_by: str, existing: dict[str, Any]
+    db: JobDatabase, application_id: int, recorded_by: str, existing: dict[str, Any],
+    requested_type: Optional[str] = None,
 ) -> dict[str, Any]:
     """R2/S4 — the same message id has already been recorded: audit ids ONLY
     (never subject/sender/message_id — S4), write nothing, and hand back the
@@ -582,7 +593,24 @@ async def _duplicate_event_result(
     )
     cur = await db._db.execute("SELECT status, follow_up_on FROM applications WHERE id = ?", (application_id,))
     app_row = await cur.fetchone()
+    warnings: list[str] = []
+    if requested_type is not None and requested_type != existing["event_type"]:
+        # Same message id, DIFFERENT type: the dedupe stands (nothing written),
+        # but say so — otherwise the caller believes its type was recorded.
+        get_audit_logger().info(
+            "application_event_type_mismatch",
+            extra={
+                "event": "application_event_type_mismatch",
+                "application_id": safe_log_value(application_id),
+                "event_id": safe_log_value(existing["id"]), "event_type": safe_log_value(existing["event_type"]),
+            },
+        )
+        warnings.append(
+            f"message_id already recorded as {existing['event_type']}; to reclassify, "
+            f"record_event(..., corrects_event_id={existing['id']}) without `source` (the original keeps it)"
+        )
     return {
+        "warnings": warnings,
         "event_id": existing["id"],
         "event_type": existing["event_type"],
         "occurred_at": existing["occurred_at"],
@@ -702,7 +730,7 @@ async def append_event(
     if source is not None:
         existing = await _event_by_source_message_id(db, application_id, source["message_id"])
         if existing is not None:
-            return await _duplicate_event_result(db, application_id, recorded_by, existing)
+            return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
 
     # The slot's value BEFORE this event — needed to decide the auto-clear
     # below, and to echo back an unchanged value at the end without a stale
@@ -762,7 +790,7 @@ async def append_event(
         if source is not None:
             existing = await _event_by_source_message_id(db, application_id, source["message_id"])
             if existing is not None:
-                return await _duplicate_event_result(db, application_id, recorded_by, existing)
+                return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
         raise
     event_id = cur.lastrowid
 
@@ -1240,7 +1268,14 @@ async def record_receipt(
     ``channel`` is a closed set for every NEW receipt (owner decision
     2026-10-04, ``normalize_receipt_channel``) — '' stays "not said".
     """
+    channel_given = (channel or "").strip()
     channel = normalize_receipt_channel(channel)
+    warnings: list[str] = []
+    if channel_given and channel == "other" and _slug(channel_given) != "other":
+        warnings.append(
+            f"channel '{channel_given}' is not a known channel; stored as 'other' — allowed: "
+            + ", ".join(settings.APPLICATION_RECEIPT_CHANNELS)
+        )
     app_row = await get_owned_application(db, user_id, application_id)
     if app_row is None:
         raise SpineError(404, "application not found")
@@ -1332,7 +1367,8 @@ async def record_receipt(
         "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
         "cv_version_no": cv_artifact["version_no"] if cv_artifact else None,
         "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
-        "channel": channel or "", "confirmation": confirmation or "",
+        "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
+        "confirmation": confirmation or "",
         "url": f"/applications/{application_id}", "event_id": event["event_id"],
         "possible_duplicate": possible_duplicate,
     }

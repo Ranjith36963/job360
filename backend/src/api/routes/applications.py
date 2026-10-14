@@ -37,7 +37,7 @@ from src.api.auth_deps import (
 )
 from src.api.dependencies import get_request_db
 from src.api.models import JobResponse, LessonsResponse
-from src.api.routes.bring import job_row_to_response
+from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
 from src.services.applications import blocked as blocked_service
@@ -62,6 +62,20 @@ router = APIRouter(tags=["applications"])
 
 def _raise(exc: SpineError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
+
+
+_OUTREACH_EVENT_TYPES = ("outreach_sent", "outreach_replied")
+OUTREACH_NEEDS_CONTACT = "outreach events need contact_id — call add_contact first and pass its contact_id"
+
+
+def _outreach_needs_contact(tool: str, user_id: str, **ids: Any) -> SpineError:
+    """The refusal for outreach written without a person: it would leave an
+    orphan row and never reach the contact's message_count. Logs ids only."""
+    get_audit_logger().info(
+        "outreach_needs_contact",
+        extra={"event": "outreach_needs_contact", "tool": tool, "user_id": safe_log_value(user_id), **ids},
+    )
+    return SpineError(422, OUTREACH_NEEDS_CONTACT)
 
 
 # ── Request models ───────────────────────────────────────────────────────────
@@ -717,6 +731,8 @@ class RecordEventResponse(BaseModel):
     status: str
     already_existed: bool
     scheduled_at: Optional[str]
+    # Non-fatal notes, e.g. a deduped message_id that was recorded as another type.
+    warnings: list[str] = Field(default_factory=list)
     # Owner decision, 2026-09-25 — the CURRENT slot value after this call:
     # the new value when this call set/cleared it, the unchanged value when
     # it didn't touch it (omitted `follow_up_on`, or a duplicate source that
@@ -731,6 +747,10 @@ class RecordApplicationReceiptResponse(BaseModel):
     cv_version_no: Optional[int]
     cover_letter_artifact_id: Optional[int]
     channel: str
+    # What the caller sent, verbatim (trimmed); '' when none.
+    channel_given: str = ""
+    # Plain facts, e.g. an unknown channel stored as 'other'. Never a block.
+    warnings: list[str] = []
     confirmation: str
     url: str
     event_id: int
@@ -1073,6 +1093,8 @@ class ExportHistoryResponse(BaseModel):
 
 class AddContactResponse(BaseModel):
     contact: ContactOut
+    # Top-level copy of contact.id: the id every outreach call needs.
+    contact_id: int
     already_existed: bool
     event_id: Optional[int]
 
@@ -1376,12 +1398,16 @@ async def get_job(
     `/applications/export` is — a literal segment must not be swallowed by the
     dynamic one.
     """
-    if await spine.get_application_by_job(db, user.id, job_id) is None:
+    mine = await spine.get_application_by_job(db, user.id, job_id)
+    if mine is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    app_row = await spine.get_owned_application(db, user.id, int(mine["id"]))
     row = await db.get_job_by_id(job_id)
-    if row is None:  # pragma: no cover — an application always has its job row
+    if row is None or app_row is None:  # pragma: no cover — an application always has its job row
         raise HTTPException(status_code=404, detail="Job not found")
-    return job_row_to_response(dict(row))
+    # P0 2026-10-14 — the text, link and location are THIS user's snapshot,
+    # never the shared catalog row (which holds whoever pasted the key first).
+    return application_job_response(app_row, dict(row))
 
 
 @router.get("/applications/{application_id}", response_model=ApplicationDetailOut, dependencies=AUTH_FIRST)
@@ -1607,7 +1633,7 @@ async def add_contact(
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
     response.status_code = 200 if result["already_existed"] else 201
-    return result
+    return {**result, "contact_id": result["contact"]["id"]}
 
 
 @router.post(
@@ -1636,7 +1662,7 @@ async def add_person(
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
     response.status_code = 200 if result["already_existed"] else 201
-    return result
+    return {**result, "contact_id": result["contact"]["id"]}
 
 
 @router.patch("/contacts/{contact_id}", response_model=ContactOut, dependencies=AUTH_FIRST)
@@ -1725,6 +1751,8 @@ async def save_artifact(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
+        if body.contact_id is None and body.kind == "outreach":
+            raise _outreach_needs_contact("save_artifact", user.id, application_id=application_id)
         if body.contact_id is not None:
             # Owner decision, 2026-09-25 — a message DRAFTED for a person:
             # writes a numbered version into that contact's own outreach
@@ -2120,6 +2148,8 @@ async def record_event(
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
+        if body.contact_id is None and body.event_type in _OUTREACH_EVENT_TYPES:
+            raise _outreach_needs_contact("record_event", user.id, application_id=application_id)
         source = spine.validate_source(body.source.model_dump() if body.source else None)
         if body.contact_id is not None:
             # Owner decision, 2026-09-25 — record this as OUTREACH for a

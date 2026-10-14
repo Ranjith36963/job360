@@ -24,12 +24,22 @@ kept as `apply_url` so the receipt can point back.
 Storage follows rule #10: the ad goes into the SHARED `jobs` catalog under
 `source='user_brought'` (no user_id on `jobs`); "this user is tracking it"
 lives in `applications`. Two users pasting the same (company, title) share one
-row — `insert_job` is INSERT-OR-IGNORE on the normalized key, and
-`existing=True` tells the caller.
+catalog row — `insert_job` is INSERT-OR-IGNORE on the normalized key.
+
+P0 2026-10-14 (bring isolation): the catalog row is a KEY, never the text a
+user reads. What a user pasted (title, company, location, apply link, ad text)
+is copied onto THEIR application snapshot from THEIR request body, and every
+per-user read (`GET /applications/job/{job_id}`, `get_job`, the kit, tailor
+provenance, receipts) reads that snapshot — so one user's paste is never
+served to another. `existing=True` means "YOU already had this job", never
+"someone else brought it". A same-user re-bring of a clearly different posting
+under the same title+company (different job link, location or country) is a
+409 naming what differs — never a silent overwrite of the application.
 """
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 from urllib.parse import urlsplit
@@ -88,6 +98,76 @@ def job_row_to_response(row: dict[str, Any]) -> JobResponse:
         deadline=row.get("deadline"),
         deadline_source=row.get("deadline_source"),
     )
+
+
+def application_job_response(app_row: dict[str, Any], catalog_row: Optional[dict[str, Any]]) -> JobResponse:
+    """The ad as THIS user brought it: their application snapshot, never the
+    shared catalog row's pasted fields (P0 2026-10-14 — the catalog row holds
+    whichever user pasted first).
+
+    From the snapshot: title, company, location, apply link, ad text, source
+    and the per-user dates. From the catalog only what no paste ever writes
+    (salary, experience level, deadline, date confidence) — plus title/company
+    when an old snapshot left them blank, which is safe because they ARE the
+    catalog key every sharer typed. Description, link and location never fall
+    back to the catalog.
+    """
+    cat = dict(catalog_row or {})
+    base: dict[str, Any] = job_row_to_response(cat).model_dump() if cat else {"salary": None}
+    when = str(app_row.get("created_at") or app_row.get("snapshot_at") or "")
+    base.update(
+        id=int(app_row.get("job_id") or cat.get("id") or 0),
+        title=app_row.get("job_title") or cat.get("title") or "",
+        company=app_row.get("job_company") or cat.get("company") or "",
+        location=app_row.get("job_location") or "",
+        apply_url=app_row.get("job_url") or "",
+        description=app_row.get("job_description_snapshot") or None,
+        source=app_row.get("job_source") or cat.get("source") or "",
+        date_found=when,
+        posted_at=when or None,
+        first_seen_at=when or None,
+        last_seen_at=app_row.get("snapshot_at") or when or None,
+    )
+    return JobResponse(**base)
+
+
+def _loose_location(value: str) -> str:
+    return " ".join(re.sub(r"[\W_]+", " ", (value or "").casefold()).split())
+
+
+def _posting_link(url: str) -> str:
+    """Host + path of the ad link (tracking params, ``www.``, a trailing slash
+    and the fragment ignored), plus only the query keys that NAME a job
+    (``jk``, ``gh_jid``…). '' for a blank or unparseable link."""
+    from urllib.parse import parse_qsl  # noqa: PLC0415
+
+    from src.services.applications.job_checks import _JOB_ID_KEYS, canonical_url  # noqa: PLC0415
+
+    canon = canonical_url(url)
+    if not canon:
+        return ""
+    parts = urlsplit(canon)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    keep = sorted((k.lower(), v) for k, v in query if k.lower() in _JOB_ID_KEYS)
+    return f"{parts.netloc}{parts.path}" + ("?" + "&".join(f"{k}={v}" for k, v in keep) if keep else "")
+
+
+def posting_differences(app_row: dict[str, Any], body: BringJobRequest, country: Optional[str]) -> list[str]:
+    """What makes this paste a DIFFERENT posting from the one already on the
+    caller's application. Only a field both sides actually state can differ
+    (rule #29 — blank is "not said", never a conflict). Location is compared
+    loosely: "London" and "London, UK" are the same place."""
+    diffs: list[str] = []
+    have_link, want_link = _posting_link(str(app_row.get("job_url") or "")), _posting_link(body.apply_url)
+    if have_link and want_link and have_link != want_link:
+        diffs.append("apply_url")
+    have_loc, want_loc = _loose_location(str(app_row.get("job_location") or "")), _loose_location(body.location)
+    if have_loc and want_loc and have_loc not in want_loc and want_loc not in have_loc:
+        diffs.append("location")
+    have_country = str(app_row.get("job_country") or "").upper()
+    if have_country and country and have_country != country:
+        diffs.append("country")
+    return diffs
 
 # Bounds are guardrails, not product limits: a real ad is 500–8,000 chars; the
 # cap stops a pasted PDF dump (or a hostile 50 MB body) from becoming a
@@ -154,7 +234,9 @@ class BringJobRequest(BaseModel):
 
 class BringJobResponse(BaseModel):
     job: JobResponse
-    existing: bool   # the same (company, title) was already in the catalog
+    # THIS user already had an application for this job (an exact re-bring).
+    # Never "another user brought it" (P0 2026-10-14).
+    existing: bool
     # spec 2026-09-04-application-spine R1 — an Application is born HERE.
     application_id: int
     status: str
@@ -229,7 +311,7 @@ async def bring_job(
         if v is not None and v != ""
     }
     try:
-        job_facts.validate_job_facts(given_facts)
+        clean_facts = job_facts.validate_job_facts(given_facts)
     except SpineError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from None
 
@@ -276,14 +358,62 @@ async def bring_job(
     if row is None:
         raise HTTPException(status_code=500, detail="Could not read the job back")
 
+    # P0 2026-10-14 — a SAME-user re-bring of a clearly different posting
+    # (another job link, location or country under the same title+company)
+    # must not land silently on the existing application: applications are
+    # UNIQUE(user_id, job_id) and the catalog key is (company, title), so a
+    # second application would need a second catalog row. Refuse BEFORE any
+    # visa/fact write and tell the agent exactly how to proceed.
+    mine = await applications_spine.get_application_by_job(db, user.id, job_id)
+    if mine is not None:
+        mine_row = await applications_spine.get_owned_application(db, user.id, int(mine["id"])) or {}
+        diffs = posting_differences(mine_row, body, clean_facts.get("country"))
+        if diffs:
+            get_audit_logger().info(
+                "job_bring_conflict",
+                extra={
+                    "event": "job_bring_conflict", "user_id": user.id, "job_id": job_id,
+                    "application_id": int(mine["id"]), "reason": ",".join(diffs), "status": "refused",
+                },
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"You already brought this title at this company as application {int(mine['id'])}, "
+                    f"and this ad differs from it in: {', '.join(diffs)}. Nothing was changed. "
+                    f"If it is the SAME job, keep using application {int(mine['id'])} "
+                    "(fix country/remote/found_on/dates with update_job, i.e. PATCH "
+                    f"/applications/{int(mine['id'])}/job). If it is a DIFFERENT posting, bring it "
+                    "again with a title that tells the two apart, e.g. add the city in brackets."
+                ),
+            )
+
     # R1/R2 — the Application is born HERE, in the same request: upsert the
     # `applications` row for (user, job) with status='considering', copy the
     # ad onto it (the user's own snapshot, independent of the catalog row),
     # append a `brought` event. Bringing the same job twice reuses the row and appends
     # no second event (birth_application reads-before-inserting).
+    # P0 2026-10-14 — the snapshot is THIS caller's paste, never the shared
+    # catalog row (which holds whichever user brought the key first).
+    own_paste = {
+        **dict(row),
+        "title": body.title, "company": body.company, "location": body.location,
+        "apply_url": body.apply_url, "description": body.description, "source": USER_BROUGHT_SOURCE,
+    }
     birth = await applications_spine.birth_application(
-        db, user_id=user.id, job_id=job_id, job_row=dict(row), recorded_by=actor_for(user),
+        db, user_id=user.id, job_id=job_id, job_row=own_paste, recorded_by=actor_for(user),
     )
+    if not birth["existing"] and not inserted:
+        # The catalog key already existed (another user's paste, a re-titled
+        # same-link repost, or a legacy row) — the new application still
+        # carries this caller's own text. Ids only; never ad text or URLs.
+        get_audit_logger().info(
+            "job_bring_own_snapshot",
+            extra={
+                "event": "job_bring_own_snapshot", "user_id": user.id, "job_id": job_id,
+                "application_id": birth["application_id"], "reason": "shared_catalog_key", "status": "ok",
+            },
+        )
     # Slice 7 — the agent's visa reading, when it gave one. Omitted means the
     # ad said nothing: the slot stays 'unknown' and a re-bring never clears a
     # judgement recorded earlier through save_fit or the web.
@@ -312,13 +442,16 @@ async def bring_job(
     from src.services.applications.job_checks import checks_for_application  # noqa: PLC0415
 
     app_now = await applications_spine.get_owned_application(db, user.id, birth["application_id"]) or {}
-    checks = checks_for_application(app_now, description=str(row.get("description") or body.description))
+    checks = checks_for_application(
+        app_now, description=str(app_now.get("job_description_snapshot") or body.description)
+    )
 
     get_audit_logger().info(
         "job_brought",
         extra={
             "event": "job_brought", "job_id": job_id, "user_id": user.id,
-            "existing": not inserted, "status": "ok",
+            "application_id": birth["application_id"],
+            "existing": bool(birth["existing"]), "catalog_existing": not inserted, "status": "ok",
         },
     )
 
@@ -338,8 +471,11 @@ async def bring_job(
         logger.debug("analytics_first_bring_failed", extra={"user_id": user.id})
 
     return BringJobResponse(
-        job=job_row_to_response(dict(row)),
-        existing=not inserted,
+        # THIS caller's snapshot, never the shared row (P0 2026-10-14).
+        job=application_job_response(app_now, dict(row)),
+        # Per user: "you already had this job". Whether another user brought
+        # the same key is not this caller's business (and was a leak).
+        existing=bool(birth["existing"]),
         application_id=birth["application_id"],
         status=birth["status"],
         ad_posted_at=stored.get("ad_posted_at"),
