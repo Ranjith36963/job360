@@ -250,24 +250,84 @@ def _paren_parts(raw: str) -> tuple[list[str], list[str]]:
     return inner, outer
 
 
+def _split_top(body: str) -> list[str]:
+    """Split on ``, ; • |`` only at parenthesis depth 0, so "AWS (Bedrock, S3)" stays whole."""
+    parts: list[str] = []
+    depth = 0
+    cur: list[str] = []
+    for ch in body:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        if depth == 0 and ch in ",;•|":
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    if depth > 0:  # unmatched "(": fall back to the plain split
+        return re.split(r"[,;•|]", body)
+    return parts
+
+
 def _split_items(body: str) -> list[str]:
     items: list[str] = []
-    for raw in re.split(r"[,;•|]", body):
+    for raw in _split_top(body):
         raw = raw.strip(" .\t")
         # "Python (FastAPI, aiohttp)" -> Python, FastAPI, aiohttp
         inner, outer_parts = _paren_parts(raw)
-        outer = "".join(outer_parts).strip(" .")
+        outer = "".join(outer_parts)
         for piece in [outer] + [p for grp in inner for p in grp.split(",")]:
-            piece = piece.strip(" .")
+            piece = piece.replace("(", "").replace(")", "").strip(" .")
             if piece:
                 items.append(piece)
     return items
 
 
+_HEADING_WORD_RE = re.compile(r"[A-Z]+")
+
+
+def _is_section_heading(line: str) -> bool:
+    """SUMMARY / EXPERIENCE / TECHNICAL SKILLS: non-empty, alphabetic words only, all upper-case."""
+    s = line.strip(" \t#*:")
+    words = [w for w in s.replace("&", " ").replace("/", " ").split() if w]
+    return bool(words) and all(_HEADING_WORD_RE.fullmatch(w) for w in words)
+
+
+def _is_skill_line(line: str) -> bool:
+    m = _SKILL_LINE_RE.match(line)
+    return bool(m and len(m.group("label").split()) <= 4 and m.group("body").count(",") >= 2)
+
+
+_HEADER_WINDOW = 6 # a heading ends the header block only within the first N non-empty lines
+
+
+def _body_lines(text: str) -> list[str]:
+    """CV lines after the header block (name / title headline / contact), i.e. from the
+    first all-caps section heading on, provided it sits within the first few non-empty
+    lines. The very first non-empty line is the name, never a heading. Otherwise nothing
+    is skipped."""
+    lines = text.splitlines()
+    seen = 0
+    for i, line in enumerate(lines):
+        if not line.strip():
+            continue
+        seen += 1
+        if seen == 1:
+            continue
+        if seen > _HEADER_WINDOW:
+            break
+        if _is_section_heading(line):
+            kept = [ln for ln in lines[:i] if _is_skill_line(ln)]
+            return kept + lines[i:]
+    return lines
+
+
 def terms_to_check(text: str) -> list[str]:
     """Skill-line items ("Label: a, b, c") and project tech after ``|`` - nothing else."""
     out: list[str] = []
-    for line in text.splitlines():
+    for line in _body_lines(text):
         m = _SKILL_LINE_RE.match(line)
         if m and len(m.group("label").split()) <= 4 and m.group("body").count(",") >= 2:
             out.extend(_split_items(m.group("body")))
@@ -285,9 +345,32 @@ def terms_to_check(text: str) -> list[str]:
     return [i for i in out if _plausible(i)]
 
 
+_COMBINE_RE = re.compile(r"\s+(?:and|&)\s+|/")
+
+
+def _found(part: str, hay: str) -> bool:
+    p = _norm(part)
+    if not p:
+        return False
+    if p in hay:
+        return True
+    head, sep, last = p.rpartition(" ")
+    if last.endswith("s") and len(last) > 3:  # APIs -> API
+        stem = head + sep + last[:-1]
+        return re.search(rf"(?<!\w){re.escape(stem)}(?!\w)", hay) is not None
+    return False
+
+
+def _supported(term: str, hay: str) -> bool:
+    if _norm(term) in hay:
+        return True
+    parts = [p for p in _COMBINE_RE.split(term) if p.strip()]
+    return len(parts) > 1 and all(_found(p, hay) for p in parts)
+
+
 def unsupported_terms(text: str, source: str) -> Optional[dict[str, str]]:
     hay = _norm(source)
-    bad = [t for t in terms_to_check(text) if _norm(t) not in hay]
+    bad = [t for t in terms_to_check(text) if not _supported(t, hay)]
     if not bad:
         return None
     return _issue(
@@ -302,6 +385,16 @@ def unsupported_terms(text: str, source: str) -> Optional[dict[str, str]]:
 _PRESENT_RE = re.compile(r"(present|current|now|ongoing)\s*$", re.I)
 
 
+_DOMAIN_TAIL_RE = re.compile(r"\s+[\w-]+(?:\.[\w-]+)*\.(?:com|io|uk|dev|org|net|ai|co)\s*$", re.I)
+
+
+def _core_company(name: str) -> str:
+    """"Job360 (job360.uk)" -> "Job360": parentheticals dropped, then a trailing domain."""
+    inner, outer = _paren_parts(name)
+    core = " ".join("".join(outer).split()) if inner else name.strip()
+    return _DOMAIN_TAIL_RE.sub("", core).strip(" .,")
+
+
 def missing_current_roles(text: str, profile: Any) -> Optional[dict[str, str]]:
     cv = getattr(profile, "cv_data", None)
     hay = _norm(text)
@@ -310,8 +403,12 @@ def missing_current_roles(text: str, profile: Any) -> Optional[dict[str, str]]:
         if not isinstance(pos, dict):
             continue
         company = str(pos.get("company") or "").strip()
-        if company and _PRESENT_RE.search(str(pos.get("dates") or "").strip()) and _norm(company) not in hay:
-            gone.append(company)
+        if not (company and _PRESENT_RE.search(str(pos.get("dates") or "").strip())):
+            continue
+        core = _norm(_core_company(company))
+        if _norm(company) in hay or (core and core in hay):
+            continue
+        gone.append(company)
     if not gone:
         return None
     return _issue("missing_current_roles", "warn", f"Current role missing from the CV: {_listed(gone)}.")
