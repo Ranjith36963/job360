@@ -59,9 +59,31 @@ export const EVENT_LABEL: Record<string, string> = {
   outreach_sent: "Outreach sent",
   note: "Note",
   lesson: "Lesson",
+  outreach_replied: "Reply received to your outreach",
+  // Needs-you asks.
+  asked: "Assistant asked you a question",
+  answered: "You answered a question",
+  ask_withdrawn: "Question withdrawn",
+  // Per-job submit switch.
+  submit_mode_set: "Sending setting changed for this job",
+  // Application kit trail (human-in-the-loop before sending).
+  kit_read: "Assistant opened your application kit",
+  cv_seen: "CV checked",
+  submit_approved: "You said yes to sending",
+  submit_declined: "You said don't send",
+  autofill_set: "Autofill setting changed",
+  duplicate_cleared: "Possible duplicate cleared",
+  form_filled: "Form filled",
+  form_swept: "Form double-checked before sending",
+  hold_released: "Hold on sending lifted",
+  site_account: "Account on the employer site noted",
+  account_needed: "Employer site needs an account",
   // S6 blocked record.
   blocked: "Assistant got stuck",
-  unblocked: "Marked resolved",
+  unblocked: "Unblocked",
+  // S7 proof of application.
+  proof_text: "Saved the confirmation page text",
+  proof_screenshot: "Saved a screenshot of the confirmation",
 };
 
 /** The label for one timeline row. A status event reads "Status → <label>";
