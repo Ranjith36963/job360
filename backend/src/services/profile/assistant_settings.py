@@ -20,7 +20,7 @@ the base lives in ``user_profiles.assistant_settings`` (one writer,
 ``storage.save_assistant_settings``), the values ride the ``profile_edits``
 overlay on ``assistant_settings.*`` paths.
 
-Three things live here, all PURE except the two loaders at the bottom:
+Four things live here, all PURE except the loaders at the bottom:
 
 1. :func:`validate_setting` — the per-path value rules (called by
    ``edits.validate_edit``). Errors name the PATH, never echo the value.
@@ -31,6 +31,9 @@ Three things live here, all PURE except the two loaders at the bottom:
 3. :func:`may_submit` — THE one gate every "may I press submit?" question goes
    through (``GET /applications/{id}/submit-check`` and the MCP ``check_submit``
    tool both call it). One function, one order of rules, closed reason codes.
+4. :func:`may_send_outreach` — the same idea for "may I press Send on this
+   outreach email?" (``GET /contacts/{id}/outreach-check`` and the MCP
+   ``check_outreach`` tool, feature 10).
 
 Logs never carry ``pause_reason`` or notes text (they are free text the user
 or an assistant typed); the callers log paths, actors, ids and closed values.
@@ -669,6 +672,138 @@ def _first_ask(
     return None
 
 
+# ── THE outreach send gate (feature 10) ──────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class OutreachCounts:
+    """What the outreach gate needs counted: recorded ``sent`` marks today (the
+    user's own day) and ``sent`` marks to the same company inside the window."""
+
+    sent_today: int
+    company_sent_in_window: int = 0
+
+
+@dataclass(frozen=True)
+class OutreachFacts:
+    """One contact + one saved message version, as the gate reads them
+    (``contacts.outreach_gate_facts`` loads them; every field is a closed fact,
+    never text):
+
+    * ``message_found`` - ``message_id`` is a ``message`` row of THIS contact;
+    * ``latest_draft`` - no newer ``message`` version exists for the contact;
+    * ``channel`` - that version's channel (``email`` | ``linkedin`` | ``other``);
+    * ``has_email`` - the contact's CURRENT email (edits applied) is set;
+    * ``already_sent`` / ``replied`` - any ``sent`` / ``reply`` mark on the contact;
+    * ``linked`` - the contact is tied to an application; ``application_closed`` -
+      that application's status is closed (rejected / withdrawn / ghosted);
+    * ``found_via`` - where the person was found (``None`` = not said);
+    * ``company`` - the linked job's company ("" when unlinked).
+    """
+
+    message_found: bool
+    latest_draft: bool = False
+    channel: str = ""
+    has_email: bool = False
+    already_sent: bool = False
+    replied: bool = False
+    linked: bool = False
+    application_closed: bool = False
+    found_via: Optional[str] = None
+    company: str = ""
+
+
+@dataclass(frozen=True)
+class OutreachDecision:
+    """``send`` - press Send in Gmail; ``ask`` - save a Gmail draft and ask_user;
+    ``stop`` - do not send. ``reason`` is a closed code, ``detail`` one sentence."""
+
+    decision: Literal["send", "ask", "stop"]
+    reason: str
+    detail: str
+
+
+# In the order :func:`may_send_outreach` checks them (first match wins).
+OUTREACH_REASONS: tuple[str, ...] = (
+    "paused", "message_not_found", "not_latest_draft", "not_email_channel", "no_email", "already_sent",
+    "replied", "application_closed", "daily_outreach_cap_reached", "company_cap_reached",
+    "mode_not_auto", "no_found_via", "unlinked_contact", "auto_mode",
+)
+
+
+def may_send_outreach(
+    cfg: EffectiveSettings,
+    facts: OutreachFacts,
+    counts: OutreachCounts,
+    now: datetime,
+    *,
+    inbox_mode: str = "",
+) -> OutreachDecision:
+    """May the assistant press Send on this outreach email? Pure; first match wins.
+
+    STOP (do not send; nothing clears these): paused, message_not_found,
+    not_latest_draft, not_email_channel (LinkedIn/other: the user sends),
+    no_email, already_sent, replied, application_closed,
+    daily_outreach_cap_reached (``OUTREACH_AUTO_SENDS_MAX_PER_DAY``),
+    company_cap_reached (``OUTREACH_COMPANY_MAX`` within
+    ``OUTREACH_COMPANY_WINDOW_DAYS``).
+    ASK (save a Gmail draft, ask_user): mode_not_auto (``preferences.daily_check``
+    is not ``auto``/``scheduled``), no_found_via, unlinked_contact.
+    SEND: auto_mode.
+    """
+    if is_paused(cfg.paused_until, now):
+        return OutreachDecision("stop", "paused", "Your assistant is paused. Do not send anything.")
+    if not facts.message_found:
+        return OutreachDecision(
+            "stop", "message_not_found",
+            "No saved message with that id for this person. Save it with save_artifact first; do not send.",
+        )
+    if not facts.latest_draft:
+        return OutreachDecision(
+            "stop", "not_latest_draft", "A newer version of this message exists. Check that one instead; do not send.",
+        )
+    if facts.channel != "email":
+        return OutreachDecision(
+            "stop", "not_email_channel", "Only email can be sent by you. The user sends LinkedIn and other messages.",
+        )
+    if not facts.has_email:
+        return OutreachDecision("stop", "no_email", "This person has no email address saved. Do not send.")
+    if facts.already_sent:
+        return OutreachDecision("stop", "already_sent", "A message to this person is already recorded as sent.")
+    if facts.replied:
+        return OutreachDecision(
+            "stop", "replied", "This person already replied. Do not send; tell the user instead.",
+        )
+    if facts.application_closed:
+        return OutreachDecision("stop", "application_closed", "This application is closed. Do not send.")
+    if counts.sent_today >= settings.OUTREACH_AUTO_SENDS_MAX_PER_DAY:
+        return OutreachDecision(
+            "stop", "daily_outreach_cap_reached", "Today's limit of outreach emails is reached. Try tomorrow.",
+        )
+    if facts.company and counts.company_sent_in_window >= settings.OUTREACH_COMPANY_MAX:
+        return OutreachDecision(
+            "stop", "company_cap_reached",
+            f"Enough people at this company were emailed in the last {settings.OUTREACH_COMPANY_WINDOW_DAYS} days. "
+            "Do not send.",
+        )
+    if not _is_auto_inbox(inbox_mode):
+        return OutreachDecision(
+            "ask", "mode_not_auto", "The user sends outreach themselves. Save a Gmail draft and ask_user.",
+        )
+    if not facts.found_via:
+        return OutreachDecision(
+            "ask", "no_found_via", "Where this person was found is not saved. Save a Gmail draft and ask_user.",
+        )
+    if not facts.linked:
+        return OutreachDecision(
+            "ask", "unlinked_contact", "This person is not linked to a job. Save a Gmail draft and ask_user.",
+        )
+    return OutreachDecision(
+        "send", "auto_mode",
+        "Auto mode: you may press Send in Gmail, then record outreach_sent with the Gmail message id as source.",
+    )
+
+
 # ── Loaders (the only I/O here) ──────────────────────────────────────────────
 
 
@@ -706,9 +841,14 @@ def practice_info(user_id: str) -> tuple[Optional[str], int]:
         return since, int(cnt[0]) if cnt else 0
 
 
-async def load_submit_counts(db: JobDatabase, user_id: str, now: datetime) -> SubmitCounts:
-    """Count what :func:`may_submit` needs for this user: submits today (in the
-    user's OWN timezone, ``spine.user_today``) and the practice-run counter."""
+async def count_on_user_today(
+    db: JobDatabase, user_id: str, now: datetime, sql: str, params: tuple[Any, ...]
+) -> int:
+    """How many of the ``recorded_at`` values ``sql`` returns fall on the user's
+    OWN today (``spine.user_today``, their stored timezone). ``sql`` must select
+    one ``recorded_at`` column and end with ``recorded_at >= ?``: the floor
+    (now - 48h; only that window can be "today" whatever the offset) is appended
+    to ``params`` here. The ONE day boundary both gates use (submit and outreach)."""
     from src.services.applications import spine  # noqa: PLC0415 — spine imports the profile package
 
     today = await spine.user_today(db, user_id, now=now)
@@ -719,14 +859,9 @@ async def load_submit_counts(db: JobDatabase, user_id: str, now: datetime) -> Su
         zone: ZoneInfo = ZoneInfo(raw_zone)
     except (ZoneInfoNotFoundError, ValueError):
         zone = ZoneInfo("UTC")
-    # Only the last 48h can fall on the user's today, whatever their offset.
     floor = (now - timedelta(hours=48)).isoformat()
-    cur = await db._db.execute(
-        "SELECT recorded_at FROM application_events "
-        "WHERE user_id = ? AND event_type = 'applied' AND recorded_at >= ?",
-        (user_id, floor),
-    )
-    submitted = 0
+    cur = await db._db.execute(sql, (*params, floor))
+    count = 0
     for r in await cur.fetchall():
         try:
             at = datetime.fromisoformat(str(dict(r)["recorded_at"]))
@@ -735,9 +870,50 @@ async def load_submit_counts(db: JobDatabase, user_id: str, now: datetime) -> Su
         if at.tzinfo is None:
             at = at.replace(tzinfo=timezone.utc)
         if at.astimezone(zone).date() == today:
-            submitted += 1
+            count += 1
+    return count
+
+
+async def load_submit_counts(db: JobDatabase, user_id: str, now: datetime) -> SubmitCounts:
+    """Count what :func:`may_submit` needs for this user: submits today (in the
+    user's OWN timezone, ``spine.user_today``) and the practice-run counter."""
+    submitted = await count_on_user_today(
+        db, user_id, now,
+        "SELECT recorded_at FROM application_events "
+        "WHERE user_id = ? AND event_type = 'applied' AND recorded_at >= ?",
+        (user_id,),
+    )
     _since, applied_since = practice_info(user_id)
     return SubmitCounts(submitted_today=submitted, applied_since_auto_on=applied_since)
+
+
+async def load_outreach_counts(
+    db: JobDatabase, user_id: str, now: datetime, company: Optional[str] = None
+) -> OutreachCounts:
+    """Count what :func:`may_send_outreach` needs: this user's recorded ``sent``
+    marks today (the user's own day, same boundary as :func:`load_submit_counts`)
+    and, when ``company`` is given, ``sent`` marks to contacts linked to a job at
+    that (lower-cased, trimmed) company within ``OUTREACH_COMPANY_WINDOW_DAYS``."""
+    sent_today = await count_on_user_today(
+        db, user_id, now,
+        "SELECT recorded_at FROM contact_outreach WHERE user_id = ? AND entry = 'sent' AND recorded_at >= ?",
+        (user_id,),
+    )
+    company_sent = 0
+    key = (company or "").strip().lower()
+    if key:
+        since = (now - timedelta(days=settings.OUTREACH_COMPANY_WINDOW_DAYS)).isoformat()
+        cur = await db._db.execute(
+            "SELECT COUNT(*) FROM contact_outreach co "
+            "JOIN application_contacts ac ON ac.id = co.contact_id "
+            "JOIN applications a ON a.id = ac.application_id "
+            "WHERE co.user_id = ? AND ac.user_id = ? AND co.entry = 'sent' AND co.recorded_at >= ? "
+            "AND LOWER(TRIM(COALESCE(a.job_company, ''))) = ?",
+            (user_id, user_id, since, key),
+        )
+        row = await cur.fetchone()
+        company_sent = int(row[0]) if row else 0
+    return OutreachCounts(sent_today=sent_today, company_sent_in_window=company_sent)
 
 
 # ── The read model ───────────────────────────────────────────────────────────

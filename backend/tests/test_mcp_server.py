@@ -58,6 +58,11 @@ EXPECTED_TOOLS = {
     "get_application_kit",
     # Proof of application (owner decision 2026-10-10, S7) - 25 -> 26.
     "get_proof_upload_link",
+    # The outreach send gate (feature 10) and the agent doctor + missing-tool
+    # report (feature 7) - 26 -> 29.
+    "check_outreach",
+    "doctor",
+    "report_missing_tool",
 }
 
 JOB = {

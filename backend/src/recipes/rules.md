@@ -242,7 +242,11 @@ SENDING depends on preferences.daily_check: in mode "auto" (or the older
 "scheduled") you MAY send an email you wrote and saved with channel="email",
 to a contact that has an email address, **only by pressing Send in Gmail in
 the user's browser, when you control the browser. Never send through a Gmail
-connector — connectors only draft.** Without browser control: save it as a
+connector — connectors only draft.** Right before pressing Send, call
+check_outreach(contact_id, message_id) — message_id is the artifact_id
+save_artifact returned: `send` = press Send, then record outreach_sent; `ask` =
+save a Gmail draft and ask_user; `stop` = do not send. It counts only RECORDED
+sends against the daily and per-company caps. Without browser control: save it as a
 Gmail draft and `ask_user` "Press Send on the draft to <name>" (Needs you);
 the user sends. A LinkedIn or other-channel message is ALWAYS sent by the
 user. Before sending, make sure it was not sent already: look in the user's

@@ -507,6 +507,14 @@ OUTREACH_ENTRIES_PER_CONTACT_MAX = int(os.getenv("OUTREACH_ENTRIES_PER_CONTACT_M
 CONTACTS_UNLINKED_MAX = int(os.getenv("CONTACTS_UNLINKED_MAX", "500"))
 CONTACT_EDITS_PER_CONTACT_MAX = int(os.getenv("CONTACT_EDITS_PER_CONTACT_MAX", "200"))
 OUTREACH_MAX_PER_HOUR = int(os.getenv("OUTREACH_MAX_PER_HOUR", "120"))  # S7 — per USER
+# The outreach SEND gate (check_outreach, feature 10). Operator ceilings, not user
+# settings: OUTREACH_MAX_PER_HOUR above throttles WRITES; these cap SENDS. Only
+# recorded `sent` marks count. Day = the user's own today (as for check_submit).
+OUTREACH_AUTO_SENDS_MAX_PER_DAY = int(os.getenv("OUTREACH_AUTO_SENDS_MAX_PER_DAY", "10"))
+# At most this many sends to people at the same (lower-cased) job_company within
+# the window, so one company is never carpet-bombed.
+OUTREACH_COMPANY_MAX = int(os.getenv("OUTREACH_COMPANY_MAX", "2"))
+OUTREACH_COMPANY_WINDOW_DAYS = int(os.getenv("OUTREACH_COMPANY_WINDOW_DAYS", "14"))
 LIST_PEOPLE_MAX = int(os.getenv("LIST_PEOPLE_MAX", "500"))
 # Owner decision 2026-10-04 — where a person was found. Closed set; unset =
 # NULL (rule #29). Editable like the other fields (a contact_edits row).
@@ -693,6 +701,10 @@ PROOF_LINK_TTL_MINUTES = int(os.getenv("PROOF_LINK_TTL_MINUTES", "5"))
 PROOF_NO_PROOF_AFTER_DAYS = int(os.getenv("PROOF_NO_PROOF_AFTER_DAYS", "7"))
 # Upload links one user may mint per hour.
 PROOF_LINKS_MAX_PER_HOUR = int(os.getenv("PROOF_LINKS_MAX_PER_HOUR", "30"))
+# report_missing_tool (feature 7): reports ONE user's assistants may store per
+# rolling day — counted off the table, so a looping agent cannot fill it.
+MISSING_TOOL_REPORTS_MAX_PER_DAY = int(os.getenv("MISSING_TOOL_REPORTS_MAX_PER_DAY", "20"))
+MISSING_TOOL_WHY_MAX_CHARS = 280
 
 # GET /profile/edits/history — how many rows of one field's history come back
 # (newest first). The export carries the full log.

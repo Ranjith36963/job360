@@ -35,6 +35,7 @@ from src.api.routes import (
     auth,
     bring,
     client_log,
+    doctor,
     files,
     health,
     hunt_kit,
@@ -231,6 +232,7 @@ app.include_router(recipes.router, prefix="/api")
 # PUBLIC static hunt kit the user's own assistant runs (owner 2026-10-13; Job360 still never searches)
 app.include_router(hunt_kit.router, prefix="/api")
 app.include_router(asks.router, prefix="/api")  # "Needs you" queue (owner plan 2026-10-01)
+app.include_router(doctor.router, prefix="/api")  # agent doctor + report_missing_tool (feature 7)
 app.include_router(assistant_settings.router, prefix="/api")  # assistant settings + waiting requests (S2, 2026-10-08)
 app.include_router(morning_check.router, prefix="/api")  # state strip + since-last-visit tally (S5b)
 app.include_router(ready_to_send.router, prefix="/api")  # approval cards for Ready to send (S5d)
