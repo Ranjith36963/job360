@@ -701,6 +701,7 @@ def build_server(version: str = "") -> MCPServer:
                         )
                     job_id = application["job_id"]
                 else:
+                    assert job_id is not None  # both-None was refused above
                     job = await db.get_job_by_id(job_id)
                     if job is None:
                         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
