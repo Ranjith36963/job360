@@ -2210,10 +2210,11 @@ export interface paths {
         };
         /**
          * Status
-         * @description How much is stored, and has this deployment been set up at all.
+         * @description Has this deployment been set up at all.
          *
          *     Slice 5 (#483) took the source counters and the last-run block off this
-         *     response: nothing fetches jobs any more, so there is no run to report.
+         *     response; the public-audit fix then removed ``jobs_total`` — a public
+         *     endpoint must not reveal how many ads the shared catalog holds.
          */
         get: operations["status_api_status_get"];
         put?: never;
@@ -3080,10 +3081,7 @@ export interface components {
         };
         /** Body_upload_cv_api_profile_cv_post */
         Body_upload_cv_api_profile_cv_post: {
-            /**
-             * Cv
-             * Format: binary
-             */
+            /** Cv */
             cv: string;
         };
         /** Body_upload_github_api_profile_github_post */
@@ -3093,10 +3091,7 @@ export interface components {
         };
         /** Body_upload_linkedin_api_profile_linkedin_post */
         Body_upload_linkedin_api_profile_linkedin_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_upsert_preferences_api_profile_preferences_post */
@@ -3106,10 +3101,7 @@ export interface components {
         };
         /** Body_upsert_profile_api_profile_post */
         Body_upsert_profile_api_profile_post: {
-            /**
-             * Cv
-             * Format: binary
-             */
+            /** Cv */
             cv?: string;
             /** Preferences */
             preferences?: string;
@@ -5460,8 +5452,6 @@ export interface components {
         };
         /** StatusResponse */
         StatusResponse: {
-            /** Jobs Total */
-            jobs_total: number;
             /** Profile Exists */
             profile_exists: boolean;
         };

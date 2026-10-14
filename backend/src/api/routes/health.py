@@ -3,10 +3,9 @@
 import logging
 import os
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from src.api.dependencies import get_request_db
 from src.api.models import (
     HealthResponse,
     LivezResponse,
@@ -15,7 +14,6 @@ from src.api.models import (
     StatusResponse,
 )
 from src.core.tenancy import DEFAULT_TENANT_ID
-from src.repositories.database import JobDatabase
 from src.services.profile.storage import profile_exists
 
 logger = logging.getLogger(__name__)
@@ -99,14 +97,14 @@ async def readyz() -> JSONResponse:
 
 
 @router.get("/status", response_model=StatusResponse)
-async def status(db: JobDatabase = Depends(get_request_db)) -> StatusResponse:
-    """How much is stored, and has this deployment been set up at all.
+async def status() -> StatusResponse:
+    """Has this deployment been set up at all.
 
     Slice 5 (#483) took the source counters and the last-run block off this
-    response: nothing fetches jobs any more, so there is no run to report.
+    response; the public-audit fix then removed ``jobs_total`` — a public
+    endpoint must not reveal how many ads the shared catalog holds.
     """
     return StatusResponse(
-        jobs_total=await db.count_jobs(),
         # Public /health endpoint reports "has the single-tenant deployment
         # been set up?". Checking DEFAULT_TENANT_ID preserves CLI-era semantics
         # — per-user existence checks belong inside authenticated routes.

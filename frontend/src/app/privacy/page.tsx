@@ -43,8 +43,9 @@ const SUBPROCESSORS: {
   {
     name: "Sentry",
     purpose: "Error monitoring",
-    dataShared: "Error traces and request metadata (request bodies are scrubbed)",
-    location: "EU/USA",
+    dataShared:
+      "Error traces and request metadata (request bodies are scrubbed), plus screen recordings (session replay) that include on-screen text such as your CV and profile. Recordings cover about 1 in 10 sessions and every session where an error happens, whether or not you accept analytics",
+    location: "EU (Germany)",
   },
   {
     name: "GitHub",
@@ -107,6 +108,16 @@ export default function PrivacyPage() {
               <span className="text-foreground">Technical data</span> — request
               logs, error traces, and (only if you accept the analytics
               banner) product-usage analytics.
+            </li>
+            <li>
+              <span className="text-foreground">Screen recordings</span> — to
+              investigate errors, Sentry records your screen (session replay)
+              while you use Job360. Recordings include what is on screen,
+              including your CV and profile text. About 1 in 10 sessions are
+              recorded, plus every session where an error happens. This is not
+              controlled by the analytics banner. Recordings are stored by
+              Sentry in Germany (EU) and kept for as long as Sentry&rsquo;s
+              retention setting for our account.
             </li>
           </ul>
         </section>

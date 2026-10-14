@@ -181,7 +181,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # inside init_sentry, so this is a no-op in dev/tests.
 _init_sentry()
 
-app = FastAPI(title="Job360 API", version="1.0.0", lifespan=lifespan)
+def _docs_urls(is_prod: bool) -> dict[str, str | None]:
+    """Interactive docs + schema are dev/CI only.
+
+    In production /docs, /redoc and /openapi.json were open to the world and
+    listed every route. ``app.openapi()`` still works offline (frontend
+    ``gen:types`` calls it directly, not over HTTP), so disabling the URLs
+    does not affect type generation.
+    """
+    if is_prod:
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+
+
+app = FastAPI(title="Job360 API", version="1.0.0", lifespan=lifespan, **_docs_urls(_is_prod_env()))
+if _is_prod_env():
+    logging.getLogger(__name__).info("api docs/openapi endpoints disabled (production)")
 
 # Gap E — log every unhandled exception (traceback + request_id) into data/logs/.
 register_exception_logging(app)
