@@ -1012,3 +1012,53 @@ async def test_bug4r2_deferred_email_history_has_no_empty_entry(authenticated_as
         assert history_after[0]["value"] == "stale-r2@x.example"
         assert history_after[1]["value"] == "final-r2@x.example"
         assert patched.json()["email"] == "final-r2@x.example"
+
+
+@pytest.mark.asyncio
+async def test_outreach_events_carry_contact_name_on_timeline_and_whats_new(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        added = await client.post(
+            f"/api/applications/{app_id}/contacts", json={"name": "Jordan Lee", "email": "jordan@x.example"}
+        )
+        contact_id = added.json()["contact"]["id"]
+        for et in ("outreach_sent", "outreach_replied"):
+            r = await client.post(
+                f"/api/applications/{app_id}/events",
+                json={"event_type": et, "contact_id": contact_id, "channel": "email"},
+            )
+            assert r.status_code == 201, r.text
+
+        detail = await client.get(f"/api/applications/{app_id}")
+        outreach = [e for e in detail.json()["events"] if e["event_type"].startswith("outreach_")]
+        assert len(outreach) == 2
+        assert all(e["payload"]["contact_name"] == "Jordan Lee" for e in outreach)
+
+        wn = await client.get("/api/whats-new", params={"since": "2000-01-01T00:00:00Z"})
+        assert wn.status_code == 200, wn.text
+        wn_out = [e for e in wn.json()["events"] if e["event_type"].startswith("outreach_")]
+        assert wn_out and all(e["payload"]["contact_name"] == "Jordan Lee" for e in wn_out)
+
+
+@pytest.mark.asyncio
+async def test_contact_name_is_never_resolved_from_another_users_contact(authenticated_async_context):
+    from src.services.applications.spine import _attach_contact_names
+
+    class _Cur:
+        async def fetchall(self):
+            return []
+
+    class _Conn:
+        args = None
+
+        async def execute(self, sql, params):
+            _Conn.args = params
+            return _Cur()
+
+    class _Db:
+        _db = _Conn()
+
+    events = [{"payload": {"contact_id": 7}}]
+    await _attach_contact_names(_Db(), "user-a", events)
+    assert _Conn.args[0] == "user-a"  # scoped to the caller
+    assert "contact_name" not in events[0]["payload"]

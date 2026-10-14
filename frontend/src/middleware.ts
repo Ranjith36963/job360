@@ -11,7 +11,6 @@ const PROTECTED_PATHS = [
   "/stats",
   "/needs-you",
   "/settings",
-  "/admin",
   "/oauth",
 ];
 

@@ -118,15 +118,13 @@ account-site / autofill state and a preview of the gate. Each read writes a
 (`services/applications/kit._mint_link`); the public `GET /api/files/{token}`
 compares, counts down and rate-limits it (`api/routes/files.py`), and
 `utils.logger.redact_path` keeps the token out of every log and Sentry event.
-Caps: `core.settings.KIT_LINK_TTL_MINUTES` / `KIT_LINK_MAX_DOWNLOADS` /
-`FILE_DOWNLOADS_MAX_PER_MIN` / `FILE_BAD_TOKEN_MAX_PER_MIN`. `application_receipts` gained
-`possible_duplicate`, `kit_event_id`, `kit_sha256`, all set at INSERT. The human
-in the loop is a set of note events (`cv_seen`, `submit_approved`,
-`submit_declined`, `autofill_set`, `duplicate_cleared`, `form_filled`, `form_swept`,
-`hold_released`, `site_account`, `account_needed`) validated in the
-`record_event` route (`kit.check_kit_event`), plus four website-only buttons
-(`/cv-seen`, `/send/approve|decline`, `/autofill`, `/duplicate/clear`);
-`may_submit` reads them through `kit.gate_facts`.
+Caps: the `KIT_*` and `FILE_*` constants in `core/settings.py`.
+`application_receipts` gained `possible_duplicate`, `kit_event_id`,
+`kit_sha256`, all set at INSERT. The human in the loop is the note events in
+`services/applications/kit.KIT_EVENT_TYPES`, validated in the `record_event`
+route (`kit.check_kit_event`), plus the website-only buttons — the
+`require_session_user` routes in `api/routes/applications.py`; `may_submit`
+reads them through `kit.gate_facts`.
 
 PROOF OF APPLICATION (S7, migration 0053): the tables and every column are
 `backend/migrations/0053_application_proof.up.sql`; what counts as proof and how
