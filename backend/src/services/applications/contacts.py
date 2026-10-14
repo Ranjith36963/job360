@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from email.utils import parseaddr
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
@@ -737,6 +738,42 @@ def _outreach_view(rows: list[dict[str, Any]], *, include_text: bool = True) -> 
         "replied": bool(replies),
         "last_reply": replies[-1] if replies else None,
     }
+
+
+async def mark_reply_from_sender(
+    db: JobDatabase,
+    user_id: str,
+    application_id: int,
+    actor: str,
+    *,
+    sender: str,
+    message_id: str,
+    occurred_at: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """A ``replied`` event on an application whose email ``source.sender`` is a
+    contact of THAT application we already sent outreach to: ALSO record the
+    reply on the person (the same door as ``outreach_replied``), so the person
+    card stops saying "No reply yet". Best effort and append-only: no match, no
+    ``sent`` mark, or any refusal means nothing extra is written and the caller's
+    ``replied`` event stands. The same ``message_id`` makes a re-read idempotent."""
+    address = parseaddr(sender or "")[1].strip().lower()
+    if not address or not message_id:
+        return None
+    contact = await _find_contact_by_current_email(db, application_id, user_id, address)
+    if contact is None:
+        return None
+    cur = await db._db.execute(
+        "SELECT 1 FROM contact_outreach WHERE contact_id = ? AND entry = 'sent' LIMIT 1", (contact["id"],)
+    )
+    if await cur.fetchone() is None:
+        return None
+    try:
+        return await record_outreach(
+            db, user_id, int(contact["id"]), actor, entry="reply", channel="email", text="",
+            occurred_at=occurred_at, source_message_id=message_id, application_id_hint=application_id,
+        )
+    except SpineError:
+        return None
 
 
 async def _find_outreach_by_source(
