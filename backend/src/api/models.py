@@ -403,3 +403,75 @@ class GitHubResponse(BaseModel):
     merged: bool
 
 
+# ── Agent doctor + report_missing_tool (feature 7) ───────────────────────────
+
+
+class DoctorAuth(BaseModel):
+    """How this caller is signed in: ``session`` (browser), ``token`` (personal
+    ``j360_…`` token) or ``oauth`` (an OAuth-connected assistant), and the
+    actor string every event it records will carry."""
+
+    kind: str
+    actor: str
+
+
+class DoctorSetup(BaseModel):
+    """The six-round setup: rounds done, of ``total``; ``next`` = first unfinished ("" when all done)."""
+
+    done: int
+    total: int
+    next: str
+
+
+class DoctorMissingItem(BaseModel):
+    """One thing the profile lacks: a path-like ``key`` and a plain ``why``."""
+
+    key: str
+    why: str
+
+
+class DoctorOutreach(BaseModel):
+    """Today's outreach (the user's own day): ``sent_today`` recorded sends,
+    ``daily_max`` the cap check_outreach applies, ``blocked_today`` how many
+    check_outreach answers today were ``stop``."""
+
+    sent_today: int
+    daily_max: int
+    blocked_today: int
+
+
+class DoctorResponse(BaseModel):
+    """``GET /api/doctor`` - one read of "what state is this account in, and
+    what should the assistant do next?". Every field is built defensively: a
+    user with no profile gets ``profile_exists: false``, never a 404."""
+
+    auth: DoctorAuth
+    email_verified: bool
+    profile_exists: bool
+    setup: DoctorSetup
+    missing: list[DoctorMissingItem]
+    # TODO(feature 9 - confirmed vs inferred facts): add `unconfirmed` (count) once that branch lands.
+    paused: bool
+    paused_until: str
+    open_asks: int
+    waiting_settings: int
+    latest_event_recorded_at: Optional[str] = None
+    whats_new_hint: str
+    outreach: DoctorOutreach
+    next_step: str
+
+
+class MissingToolRequest(BaseModel):
+    """``POST /api/missing-tools`` body. ``name`` must match
+    ``^[a-z][a-z0-9_]{1,59}$``; ``why`` is at most 280 characters."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    why: str = ""
+
+
+class MissingToolResponse(BaseModel):
+    id: int
+
+

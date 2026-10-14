@@ -15,10 +15,10 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0055** | `backend/migrations/` |
-| Migration files | **56** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 19 route modules (113 endpoints) | `backend/src/api/routes/` |
-| Test files | across 178 `test_*.py` files | `backend/tests/` |
+| Migration head | **0056** | `backend/migrations/` |
+| Migration files | **57** | `backend/migrations/*.up.sql` |
+| FastAPI surface | 20 route modules (116 endpoints) | `backend/src/api/routes/` |
+| Test files | across 181 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 28 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -62,6 +62,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/contacts` | `applications.py` |
 | `PATCH` | `/api/contacts/{contact_id}` | `applications.py` |
 | `POST` | `/api/contacts/{contact_id}/outreach` | `applications.py` |
+| `GET` | `/api/contacts/{contact_id}/outreach-check` | `applications.py` |
 | `GET` | `/api/people` | `applications.py` |
 | `GET` | `/api/whats-new` | `applications.py` |
 | `GET` | `/api/asks` | `asks.py` |
@@ -92,6 +93,8 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `POST` | `/api/jobs/bring` | `bring.py` |
 | `POST` | `/api/jobs/fetch-url` | `bring.py` |
 | `POST` | `/api/client-log` | `client_log.py` |
+| `GET` | `/api/doctor` | `doctor.py` |
+| `POST` | `/api/missing-tools` | `doctor.py` |
 | `GET` | `/api/files/{token}` | `files.py` |
 | `GET` | `/api/health` | `health.py` |
 | `GET` | `/api/livez` | `health.py` |
@@ -147,5 +150,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**113 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**116 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from email.utils import parseaddr
 from typing import TYPE_CHECKING, Any, Optional
 
 from src.core import settings
@@ -45,6 +46,7 @@ from src.services.applications.spine import (
     user_today,
 )
 from src.services.auth import rate_limit
+from src.services.profile import assistant_settings as settings_rules
 from src.utils.logger import get_audit_logger, safe_log_value
 
 if TYPE_CHECKING:  # pragma: no cover — type-only, same reasoning as spine.py
@@ -738,6 +740,42 @@ def _outreach_view(rows: list[dict[str, Any]], *, include_text: bool = True) -> 
     }
 
 
+async def mark_reply_from_sender(
+    db: JobDatabase,
+    user_id: str,
+    application_id: int,
+    actor: str,
+    *,
+    sender: str,
+    message_id: str,
+    occurred_at: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """A ``replied`` event on an application whose email ``source.sender`` is a
+    contact of THAT application we already sent outreach to: ALSO record the
+    reply on the person (the same door as ``outreach_replied``), so the person
+    card stops saying "No reply yet". Best effort and append-only: no match, no
+    ``sent`` mark, or any refusal means nothing extra is written and the caller's
+    ``replied`` event stands. The same ``message_id`` makes a re-read idempotent."""
+    address = parseaddr(sender or "")[1].strip().lower()
+    if not address or not message_id:
+        return None
+    contact = await _find_contact_by_current_email(db, application_id, user_id, address)
+    if contact is None:
+        return None
+    cur = await db._db.execute(
+        "SELECT 1 FROM contact_outreach WHERE contact_id = ? AND entry = 'sent' LIMIT 1", (contact["id"],)
+    )
+    if await cur.fetchone() is None:
+        return None
+    try:
+        return await record_outreach(
+            db, user_id, int(contact["id"]), actor, entry="reply", channel="email", text="",
+            occurred_at=occurred_at, source_message_id=message_id, application_id_hint=application_id,
+        )
+    except SpineError:
+        return None
+
+
 async def _find_outreach_by_source(
     db: JobDatabase, contact_id: int, source_message_id: str
 ) -> Optional[dict[str, Any]]:
@@ -966,6 +1004,44 @@ async def record_outreach(
         "outreach": outreach, "already_existed": False, "event_id": event_id,
         "follow_up_on": final_follow_up_on,
     }
+
+
+async def outreach_gate_facts(
+    db: JobDatabase, user_id: str, contact: dict[str, Any], message_id: int
+) -> settings_rules.OutreachFacts:
+    """The closed facts ``may_send_outreach`` reads for one OWNED contact (the
+    caller already checked ownership via ``get_owned_contact``) and one saved
+    message version. Read-only; never returns the message text or the email
+    address, only whether they exist. A message row that belongs to another
+    contact (or user) reads as ``message_found=False`` (no existence oracle)."""
+    contact_id = int(contact["id"])
+    rows = await _outreach_rows(db, contact_id)
+    messages = [r for r in rows if r["entry"] == "message"]
+    target = next((r for r in messages if int(r["id"]) == int(message_id)), None)
+    if target is None:
+        return settings_rules.OutreachFacts(message_found=False)
+    current = dict(contact)
+    _apply_current_fields(current, (await _latest_edits_for_user(db, user_id)).get(contact_id, {}))
+    application_id = contact.get("application_id")
+    closed = False
+    company = ""
+    if application_id is not None:
+        app_row = await get_owned_application(db, user_id, int(application_id))
+        if app_row is not None:
+            closed = str(app_row.get("status") or "") in settings.APPLICATION_FOLLOW_UP_CLOSED_STATUSES
+            company = str(app_row.get("job_company") or "").strip().lower()
+    return settings_rules.OutreachFacts(
+        message_found=True,
+        latest_draft=int(target["id"]) == max(int(r["id"]) for r in messages),
+        channel=str(target.get("channel") or ""),
+        has_email=bool((current.get("email") or "").strip()),
+        already_sent=any(r["entry"] == "sent" for r in rows),
+        replied=any(r["entry"] == "reply" for r in rows),
+        linked=application_id is not None,
+        application_closed=closed,
+        found_via=current.get("found_via") or None,
+        company=company,
+    )
 
 
 # ── Full-record readers ─────────────────────────────────────────────────────

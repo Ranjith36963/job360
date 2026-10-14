@@ -79,7 +79,14 @@ def _facts(
     kit.setdefault("form_filled", True)  # rule 4b: the form fill is on record
     kit.setdefault("form_swept", True)  # rule 4c: the pre-submit sweep is on record
     kit.setdefault("fit_score", 80)  # above the default test line of 50
+    kit.setdefault("form_host", "careers.northwind.example")  # rule 5e: the fill was on FORM's site
     return rules.SubmitFacts(status=status, has_receipt=receipt, submit_override=override, cv_seen=seen, **kit)
+
+
+def _at(url: str, **kit: Any) -> rules.SubmitFacts:
+    """Facts for a form filled on ``url``'s own site (rule 5e: check_submit's host
+    must be the newest form_filled's host)."""
+    return _facts(form_host=rules.screen_form_url(url), **kit)
 
 
 AUTO = {"submit_mode": "auto_when_sure"}
@@ -316,7 +323,7 @@ def test_rule_4_unknown_site_asks(host):
     ["uk.indeed.com", "indeed.co.uk", "LinkedIn.com:443", "https://www.linkedin.com/jobs/view/1", "lnkd.in", "indeed.com."],
 )
 def test_rule_5_brand_sites_always_ask(host):
-    d = rules.may_submit(AUTO_CFG, _facts(), host, _counts(), now=NOW)
+    d = rules.may_submit(AUTO_CFG, _at(host), host, _counts(), now=NOW)
     assert (d.decision, d.reason) == ("ask", "ask_always_site")
     assert rules.host_kind(rules.parse_site_host(host)) == "brand"
 
@@ -325,7 +332,7 @@ def test_notindeed_is_a_company_not_a_brand():
     assert rules.host_kind(rules.parse_site_host("notindeed.com")) == "company"
     assert rules.host_kind(rules.parse_site_host("https://jobs.notlinkedin.example/apply")) == "company"
     assert rules.host_kind(rules.parse_site_host("")) == "invalid"
-    assert rules.may_submit(AUTO_CFG, _facts(), "notindeed.com", _counts(), now=NOW).decision == "submit"
+    assert rules.may_submit(AUTO_CFG, _at("notindeed.com"), "notindeed.com", _counts(), now=NOW).decision == "submit"
 
 
 @pytest.mark.parametrize(
@@ -333,15 +340,25 @@ def test_notindeed_is_a_company_not_a_brand():
     [
         "linkedin.com.evil.io",  # a brand label anywhere = ask (over-blocking only asks)
         "https://jobs.linkedin.com:8443/apply",
-        "https://user@uk.indeed.com/apply",
         "https://WWW.LINKEDIN.COM./jobs",
-        "https://www.ｌｉｎｋｅｄｉｎ.com/jobs",  # full-width letters
-        "https://www.linkedin。com/jobs",  # IDNA dot look-alike
     ],
 )
 def test_brand_lookalikes_the_browser_reads_as_the_brand_still_ask(host):
-    d = rules.may_submit(AUTO_CFG, _facts(), host, _counts(), now=NOW)
+    d = rules.may_submit(AUTO_CFG, _at(host), host, _counts(), now=NOW)
     assert (d.decision, d.reason) == ("ask", "ask_always_site"), host
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "https://user@uk.indeed.com/apply",  # user-info: refused outright since 2026-10-14
+        "https://www.ｌｉｎｋｅｄｉｎ.com/jobs",  # full-width letters: non-ASCII host
+        "https://www.linkedin。com/jobs",  # IDNA dot look-alike: non-ASCII host
+    ],
+)
+def test_brand_lookalikes_with_userinfo_or_non_ascii_are_an_unknown_site_even_with_a_yes(host):
+    d = rules.may_submit(AUTO_CFG, _facts(approved=True, form_host="uk.indeed.com"), host, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "unknown_site"), host
 
 
 @pytest.mark.parametrize(
@@ -356,6 +373,57 @@ def test_urls_two_parsers_read_differently_are_an_unknown_site(host):
     assert (d.decision, d.reason) == ("ask", "unknown_site"), host
 
 
+@pytest.mark.parametrize(
+    "host",
+    [
+        "http:/www.linkedin.com/jobs/1",  # one slash: would read as the host "http"
+        "HTTPS:/uk.indeed.com/viewjob",
+        "https:/x",
+        "http:/linkedin.com",
+    ],
+)
+def test_one_slash_scheme_is_unreadable(host):
+    assert rules.parse_site_host(host) is None, host
+    assert rules.screen_form_url(host) is None, host
+    d = rules.may_submit(AUTO_CFG, _facts(approved=True, form_host="http"), host, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "unknown_site"), host
+
+
+@pytest.mark.parametrize("host", ["http", "localhost", "https://localhost/apply", "https://com./x"])
+def test_single_label_host_unreadable(host):
+    assert rules.parse_site_host(host) is None, host
+    assert rules.screen_form_url(host) is None, host
+    d = rules.may_submit(AUTO_CFG, _facts(approved=True, form_host=host), host, _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "unknown_site"), host
+
+
+@pytest.mark.parametrize(
+    ("raw", "host"),
+    [
+        ("jobs.lever.co/x", "jobs.lever.co"),
+        ("host.com:8080/x", "host.com"),
+        ("host.com:8080", "host.com"),
+        ("https://uk.indeed.com/viewjob", "uk.indeed.com"),
+    ],
+)
+def test_bare_hosts_and_ports_still_parse(raw, host):
+    assert rules.parse_site_host(raw) == host
+    assert rules.screen_form_url(raw) == host
+
+
+def test_unverified_declined_still_stops():
+    unverified = {"email_verified": False, "approved": True}
+    d = rules.may_submit(AUTO_CFG, _facts(declined=True, **unverified), "careers.northwind.example", _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("stop", "user_declined")
+    capped = _eff(submit_mode="auto_when_sure", daily_cap=1)
+    d = rules.may_submit(capped, _facts(**unverified), "careers.northwind.example", _counts(today=1), now=NOW)
+    assert (d.decision, d.reason) == ("stop", "daily_cap_reached")
+    d = rules.may_submit(AUTO_CFG, _facts(form_swept=False, **unverified), "careers.northwind.example", _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("stop", "form_not_swept")
+    d = rules.may_submit(AUTO_CFG, _facts(**unverified), "careers.northwind.example", _counts(), now=NOW)
+    assert (d.decision, d.reason) == ("ask", "email_not_verified")
+
+
 def test_a_hyphenated_lookalike_is_a_company_not_the_brand():
     # evil-linkedin.com is NOT LinkedIn: it is somebody else's site, so the brand rule does not apply.
     assert rules.host_kind(rules.parse_site_host("evil-linkedin.com")) == "company"
@@ -363,8 +431,8 @@ def test_a_hyphenated_lookalike_is_a_company_not_the_brand():
 
 def test_the_brand_list_is_a_parameter(monkeypatch):
     monkeypatch.setattr(settings, "SUBMIT_ASK_ALWAYS_BRANDS", ("workday",))
-    assert rules.may_submit(AUTO_CFG, _facts(), "acme.workday.com", _counts(), now=NOW).reason == "ask_always_site"
-    assert rules.may_submit(AUTO_CFG, _facts(), "indeed.com", _counts(), now=NOW).decision == "submit"
+    assert rules.may_submit(AUTO_CFG, _at("acme.workday.com"), "acme.workday.com", _counts(), now=NOW).reason == "ask_always_site"
+    assert rules.may_submit(AUTO_CFG, _at("indeed.com"), "indeed.com", _counts(), now=NOW).decision == "submit"
 
 
 def test_rule_6_confirm_asks_and_names_whether_it_was_the_job_override():
@@ -391,7 +459,7 @@ def test_order_of_the_rules():
     assert rules.may_submit(_eff(daily_cap=1), _facts(receipt=True), FORM, _counts(today=5), now=NOW).reason == "already_applied"
     assert rules.may_submit(_eff(daily_cap=1), _facts(), "", _counts(today=5), now=NOW).reason == "daily_cap_reached"
     assert rules.may_submit(AUTO_CFG, _facts(), "", _counts(since=0), now=NOW).reason == "unknown_site"
-    assert rules.may_submit(AUTO_CFG, _facts(), "indeed.com", _counts(since=0), now=NOW).reason == "ask_always_site"
+    assert rules.may_submit(AUTO_CFG, _at("indeed.com"), "indeed.com", _counts(since=0), now=NOW).reason == "ask_always_site"
     # the job override beats the global auto; a global confirm with an auto override reaches the practice rule
     assert rules.may_submit(AUTO_CFG, _facts(override="confirm"), FORM, _counts(since=0), now=NOW).reason == "job_override_confirm"
     assert rules.may_submit(_eff(), _facts(override="auto_when_sure"), FORM, _counts(since=0), now=NOW).reason == "practice_run"
@@ -491,11 +559,11 @@ async def _bring(client: AsyncClient, ad: dict[str, Any] = _AD) -> int:
     return int(resp.json()["application_id"])
 
 
-async def _fill(client: AsyncClient, app_id: int) -> None:
+async def _fill(client: AsyncClient, app_id: int, url: str = FORM) -> None:
     """Rule 4b: the gate stops with form_not_recorded until a form_filled is on record."""
     resp = await client.post(
         f"/api/applications/{app_id}/events",
-        json={"event_type": "form_filled", "payload": {"form_url": FORM, "fields_count": 1}},
+        json={"event_type": "form_filled", "payload": {"form_url": url, "fields_count": 1}},
     )
     assert resp.status_code == 201, resp.text
     # ... and with form_not_swept until a form_swept newer than the fill is on record (2026-10-13).
@@ -507,8 +575,8 @@ async def _fill(client: AsyncClient, app_id: int) -> None:
 
 
 async def _check(client: AsyncClient, app_id: int, url: str = FORM, *, fill: bool = True):
-    if fill:
-        await _fill(client, app_id)
+    if fill:  # filled on the checked site (rule 5e); an unreadable address is filled on FORM
+        await _fill(client, app_id, url if rules.screen_form_url(url) else FORM)
     return await client.get(f"/api/applications/{app_id}/submit-check", params={"form_url": url})
 
 
@@ -1524,18 +1592,136 @@ async def test_a_line_move_is_held_when_an_auto_switch_request_is_already_waitin
 
 
 @pytest.mark.asyncio
-async def test_a_held_required_answer_counts_for_the_setup_round(authenticated_async_context, fixture_user_id):
+async def test_setup_round_refused_while_value_waiting(authenticated_async_context, fixture_user_id):
+    """Owner decision 2026-10-14 (replaces "a held required answer counts"): a value
+    that is only WAITING for the user's Confirm is not saved, so a round that needs
+    it cannot be marked done - a 422 naming the path, and nothing is saved."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    async with _bearer_client(token) as agent:
+        # parked on its own first: a request now waits from an earlier call
+        parked = (await _patch(agent, _e(DAILY, "auto"))).json()
+        assert [w["path"] for w in parked["waiting"]] == [DAILY]
+        again = await _patch(agent, _e(PROGRESS, _done("settings", at=at)))
+        assert again.status_code == 422, again.text
+        detail = again.json()["detail"]
+        assert detail.startswith("Nothing was saved.")
+        assert DAILY in detail and "waiting for the user's Confirm" in detail and "/needs-you" in detail
+    async with authenticated_async_context() as client:
+        view = await _view(client)
+        assert view["setup_progress"]["done"] == 0 and view["inbox_mode"] == ""
+
+
+@pytest.mark.asyncio
+async def test_setup_round_same_call_parked_value_message(authenticated_async_context, fixture_user_id):
+    """A path THIS call would park has no request yet - the whole call is refused,
+    so nothing waits. The 422 must not say "waiting for Confirm"; it says to resend
+    without setup_progress, and no request is created."""
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)
         token = await _mint_token(client)
     at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
     async with _bearer_client(token) as agent:
         resp = await _patch(agent, _e(DAILY, "auto"), _e(PROGRESS, _done("settings", at=at)))
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert detail.startswith("Nothing was saved.")
+        assert (
+            f"{DAILY} needs the user's OK: resend this call WITHOUT setup_progress (the change will be "
+            "parked for the user's Confirm), then mark the round done after they Confirm"
+        ) in detail
+        assert "waiting for the user's Confirm" not in detail and "/needs-you" not in detail
+    async with authenticated_async_context() as client:
+        view = await _view(client)
+        assert view["setup_progress"]["done"] == 0 and view["waiting"] == []
+
+
+def test_setup_round_waiting_refusal_names_other_missing_paths():
+    """Held/waiting paths keep their wording; required paths simply not sent are
+    named too, so the caller resends everything in one call. Default: unchanged."""
+    rtw = "user_info.right_to_work"
+    base = rules.setup_round_waiting_refusal("targets", [SCORE], "https://x.example")
+    assert "also missing" not in base
+    msg = rules.setup_round_waiting_refusal("targets", [SCORE], "https://x.example", other=[TITLES, rtw])
+    assert msg.startswith(base)
+    assert msg.endswith(f"; also missing {TITLES}, {rtw} - ask the user, then save them in the same call")
+    held = rules.setup_round_waiting_refusal("targets", [], "https://x.example", held_now=[SCORE], other=[rtw])
+    assert f"{SCORE} needs the user's OK" in held and f"also missing {rtw}" in held
+
+
+@pytest.mark.asyncio
+async def test_setup_round_waiting_refusal_also_names_unsent_paths(authenticated_async_context, fixture_user_id):
+    """A required path waiting for Confirm AND another required path never sent:
+    the 422 names both."""
+    rtw = "user_info.right_to_work"
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        assert (await _patch(client, _e(BELOW, "auto"))).status_code == 200
+        token = await _mint_token(client)
+    at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    async with _bearer_client(token) as agent:
+        parked = (await _patch(agent, _e(SCORE, 0))).json()
+        assert [w["path"] for w in parked["waiting"]] == [SCORE], parked
+        resp = await _patch(agent, _e(PROGRESS, _done("targets", at=at)))
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert f"{SCORE} is waiting for the user's Confirm" in detail
+        assert f"also missing {rtw} - ask the user, then save them in the same call" in detail
+        assert TITLES not in detail, "a saved answer is not named"
+
+
+@pytest.mark.asyncio
+async def test_first_score_line_never_parks(authenticated_async_context, fixture_user_id):
+    """The real setup-interview run: auto switches requested (parked) first, THEN the
+    user's first-ever score line with the targets round. Pending autos are not in
+    effect, so the first line is saved at once and the round is marked done."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    where = {"countries": [{"country": "GB", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes"}]}
+    async with _bearer_client(token) as agent:
+        first = (await _patch(agent, _e(SUBMIT, "auto_when_sure"), _e(APPLY, "auto"))).json()
+        assert {w["path"] for w in first["waiting"]} == {SUBMIT, APPLY}
+        resp = await _patch(
+            agent, _e(SCORE, 70), _e(PROGRESS, _done("targets", at=at)), _e("user_info.right_to_work", where)
+        )
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert [w["path"] for w in body["waiting"]] == [DAILY]
-        assert [a["path"] for a in body["applied"]] == [PROGRESS]
-        assert body["profile"]["preferences"]["daily_check"] == ""
+        assert SCORE in [a["path"] for a in body["applied"]] and body["waiting"] == [] and body["not_saved"] == []
+        # a MOVED line is still judged against the pending auto (the old guard stands)
+        moved = (await _patch(agent, _e(SCORE, 10))).json()
+        assert [w["path"] for w in moved["waiting"]] == [SCORE]
+    async with authenticated_async_context() as client:
+        view = await _view(client)
+        assert view["apply_min_score"]["effective"] == 70 and view["setup_progress"]["next"] == "you"
+
+
+@pytest.mark.asyncio
+async def test_parked_change_reply_says_not_saved(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+    async with _bearer_client(token) as agent:
+        body = (await _patch(agent, _e(SUBMIT, "auto_when_sure"), _e(APPLY, "auto"))).json()
+        assert sorted(body["not_saved"]) == sorted(
+            f"{p}: NOT saved yet — the user must tap Confirm on Needs you at {settings.SITE_BASE_URL}/needs-you"
+            for p in (SUBMIT, APPLY)
+        )
+        safe = (await _patch(agent, _e(CAP, 3))).json()
+        assert safe["not_saved"] == [] and safe["waiting"] == []
+    # the MCP reply carries the same lines
+    pytest.importorskip("mcp")
+    from src.api.mcp_server import mcp_runtime
+
+    async with mcp_runtime(), _mcp_client(token) as mcp:
+        result = _payload(await mcp.call_tool("update_profile", {"edits": [_e(BELOW, "auto")]}))
+        assert [w["path"] for w in result["waiting"]] == [BELOW]
+        assert result["not_saved"] == [
+            f"{BELOW}: NOT saved yet — the user must tap Confirm on Needs you at {settings.SITE_BASE_URL}/needs-you"
+        ]
 
 
 def test_form_not_recorded_stops_before_anything_else_but_the_four_stops():

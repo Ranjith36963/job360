@@ -215,7 +215,8 @@ async def test_mcp_update_profile_reply_is_small_and_record_application_hints(
             )
             assert not res.is_error, res.content[0].text
             body = json.loads(res.content[0].text)
-            assert set(body) == {"applied", "waiting", "normalized", "profile_version"}
+            assert set(body) == {"applied", "waiting", "not_saved", "normalized", "profile_version"}
+            assert body["not_saved"] == []
             assert "profile" not in body and "raw_text" not in res.content[0].text
             assert body["applied"][0]["path"] == "user_info.logistics"
             got = json.loads((await session.call_tool("get_profile", {})).content[0].text)
