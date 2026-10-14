@@ -158,9 +158,16 @@ async def collect_events(
             day = date.fromisoformat(str(raw)[:10])
         except ValueError:
             continue
+        if not (lo.date() <= day <= hi.date()):
+            continue
         out.append(CalEvent(
             uid=f"app-{app_id}-followup@job360.uk", summary=f"Follow up: {_title(a)}",
             url=f"{base}/applications/{app_id}", stamp=now, day=day,
         ))
-    out.sort(key=lambda e: (e.start or datetime.combine(e.day, datetime.min.time(), tzinfo=timezone.utc), e.uid))
+    def _when(e: CalEvent) -> datetime:
+        if e.start is not None:
+            return e.start
+        return datetime.combine(e.day or now.date(), datetime.min.time(), tzinfo=timezone.utc)
+
+    out.sort(key=lambda e: (_when(e), e.uid))
     return out

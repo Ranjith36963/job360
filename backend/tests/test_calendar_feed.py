@@ -78,6 +78,16 @@ def _reset_limits() -> None:
     rate_limit._BUCKETS.clear()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_limits():
+    """Per-IP lockout / rate-limit state is process-global: never let it leak in or out."""
+    _reset_limits()
+    try:
+        yield
+    finally:
+        _reset_limits()
+
+
 async def _second_user_session_cookie(email: str = "second@example.com") -> str:
     from fastapi.testclient import TestClient
 

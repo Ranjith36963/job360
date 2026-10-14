@@ -413,9 +413,9 @@ export async function deleteAccount(currentPassword: string): Promise<void> {
 }
 
 // ---- Calendar feed (migration 0056) ----
-// Hand-typed: the new routes are not in the generated api-types yet.
 
-export type CalendarFeedStatus = { exists: boolean; created_at: string | null };
+export type CalendarFeedStatus = components["schemas"]["CalendarFeedStatus"];
+export type CalendarFeedCreated = components["schemas"]["CalendarFeedCreated"];
 
 export async function getCalendarFeed(): Promise<CalendarFeedStatus> {
   return request<CalendarFeedStatus>("/api/calendar-feed");
@@ -423,8 +423,8 @@ export async function getCalendarFeed(): Promise<CalendarFeedStatus> {
 
 /** Creates the feed or rotates it (the old URL dies). The plain URL is in this
  * response ONLY - the server keeps a hash. */
-export async function createCalendarFeed(): Promise<{ url: string }> {
-  return request<{ url: string }>("/api/calendar-feed", { method: "POST" });
+export async function createCalendarFeed(): Promise<CalendarFeedCreated> {
+  return request<CalendarFeedCreated>("/api/calendar-feed", { method: "POST" });
 }
 
 export async function revokeCalendarFeed(): Promise<void> {

@@ -42,8 +42,8 @@ export function CalendarFeedSection() {
       .then((s) => {
         if (!cancelled) setExists(s.exists);
       })
-      .catch(() => {
-        if (!cancelled) setExists(false);
+      .catch((err) => {
+        if (!cancelled) setError(apiErrorMessage(err, "Could not load the calendar feed."));
       });
     return () => {
       cancelled = true;
