@@ -27,6 +27,7 @@ vi.mock("@/lib/api", () => ({
   me: (...args: unknown[]) => mockMe(...args),
   setTimezone: (...args: unknown[]) => mockSetTimezone(...args),
   resendVerificationEmail: (...args: unknown[]) => mockResendVerificationEmail(...args),
+  downloadMyData: vi.fn(),
 }));
 
 /** Scope queries to the <form> containing a submit button with the given name. */

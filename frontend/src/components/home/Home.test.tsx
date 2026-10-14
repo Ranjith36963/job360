@@ -95,8 +95,8 @@ describe("Home", () => {
   it("shows the sentence, the ledger and the right pane", async () => {
     happy({ asks: [ask(1), ask(2)] });
     render(<Home />);
-    const h1 = await screen.findByRole("heading", { level: 1, name: /Claude wrote 1 record/ });
-    expect(h1).toHaveTextContent("Claude wrote 1 record since you were last here. Two things need you.");
+    const h1 = await screen.findByRole("heading", { level: 1, name: /Your assistant \(Claude\) wrote 1 record/ });
+    expect(h1).toHaveTextContent("Your assistant (Claude) wrote 1 record since you were last here. Two things need you.");
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(await screen.findByTestId("home-apps")).toHaveTextContent("Mistral AI");
     expect(screen.getByTestId("row-fit")).toHaveTextContent("Good fit");
@@ -198,7 +198,7 @@ describe("Home", () => {
     const old = { ...event(3, "agent:Claude"), recorded_at: new Date(Date.now() - 20 * 864e5).toISOString() };
     happy({ events: [old, event(1, "agent:Claude")] });
     render(<Home />);
-    await screen.findByRole("heading", { level: 1, name: /Claude wrote 1 record/ });
+    await screen.findByRole("heading", { level: 1, name: /Your assistant \(Claude\) wrote 1 record/ });
     expect(screen.getByTestId("home-feed").querySelectorAll("li")).toHaveLength(2);
   });
 
