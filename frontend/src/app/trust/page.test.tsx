@@ -33,7 +33,7 @@ describe("TrustPage", () => {
     render(<TrustPage />);
     const where = screen.getByTestId("trust-where").textContent ?? "";
     expect(where).toMatch(/servers currently in the USA/);
-    expect(where).toMatch(/EU\/USA/);
+    expect(where).toMatch(/Sentry\) is located in the EU \(Germany\)/);
     expect(where).not.toMatch(/hosted in the EU/i);
   });
 

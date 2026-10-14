@@ -167,8 +167,10 @@ async def provenance(
     _check_kind(doc_kind)
     application_id = await _application_id(db, user.id, job_id)
     row = await _latest(db, user.id, application_id, doc_kind)
-    job = await db.get_job_by_id(job_id)
-    source = _load_cv_text(user.id) + "\n" + (job.get("description", "") if job else "")
+    # P0 2026-10-14 — the ad as THIS user brought it (their snapshot), never
+    # the shared catalog row another user may have pasted first.
+    app_row = await applications_spine.get_owned_application(db, user.id, application_id) or {}
+    source = _load_cv_text(user.id) + "\n" + str(app_row.get("job_description_snapshot") or "")
     return annotate_provenance(row.get("text") or "", source)
 
 

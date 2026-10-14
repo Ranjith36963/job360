@@ -24,6 +24,12 @@ describe("SECURITY_HEADERS (M15)", () => {
     expect(headerValue("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
   });
 
+  it("sets Strict-Transport-Security with a one-year max-age", () => {
+    expect(headerValue("Strict-Transport-Security")).toBe(
+      "max-age=31536000; includeSubDomains",
+    );
+  });
+
   it("includes a Content-Security-Policy with frame-ancestors 'none'", () => {
     expect(CONTENT_SECURITY_POLICY).toContain("frame-ancestors 'none'");
   });

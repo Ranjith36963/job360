@@ -27,7 +27,6 @@ class ReadyzResponse(BaseModel):
 
 
 class StatusResponse(BaseModel):
-    jobs_total: int
     profile_exists: bool
 
 

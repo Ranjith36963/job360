@@ -22,6 +22,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
+from src.core.settings import SITE_BASE_URL
+
 router = APIRouter(tags=["hunt-kit"])
 
 HUNT_KIT_DIR = Path(__file__).resolve().parents[2] / "hunt_kit"
@@ -80,7 +82,7 @@ def _index() -> KitIndex:
     for name in KIT_FILES:
         data = _read(name)
         files.append(KitFile(
-            name=name, url=f"/api/hunt-kit/{name}", bytes=len(data),
+            name=name, url=f"{SITE_BASE_URL}/api/hunt-kit/{name}", bytes=len(data),
             sha256=hashlib.sha256(data).hexdigest(),
         ))
     return KitIndex(
