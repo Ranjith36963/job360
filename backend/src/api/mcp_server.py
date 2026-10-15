@@ -35,7 +35,7 @@ import inspect
 import json
 from contextlib import AbstractAsyncContextManager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Mapping, Optional
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Mapping, Optional, cast
 
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -351,7 +351,7 @@ def _strict_server_class() -> type[MCPServer]:
         from mcp.server import MCPServer as _Base
         from mcp.server.mcpserver.exceptions import ToolError
 
-        class StrictArgsMCPServer(_Base):  # type: ignore[misc,valid-type]
+        class StrictArgsMCPServer(_Base):
             async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
                 tool = self._tool_manager.get_tool(name)
                 if tool is not None:
@@ -363,7 +363,7 @@ def _strict_server_class() -> type[MCPServer]:
                 return await super().call_tool(name, arguments, context)
 
         _STRICT_SERVER_CLASS = StrictArgsMCPServer
-    return _STRICT_SERVER_CLASS
+    return cast("type[MCPServer]", _STRICT_SERVER_CLASS)
 
 
 def build_server(version: str = "") -> MCPServer:
