@@ -117,6 +117,10 @@ async def test_bad_input_is_refused_and_writes_nothing(authenticated_async_conte
         too_many = await _mark(client, [a, a + 1])
         assert too_many.status_code == 422 and "INBOX_CHECK_MAX_APPLICATIONS" in too_many.text
         assert (await _row(client, a))["inbox_checked_at"] is None
+        # inside the clock-skew allowance: accepted but held at now, never ahead of it
+        soon = (datetime.now(timezone.utc) + timedelta(seconds=120)).isoformat()
+        held = await _mark(client, [a], soon)
+        assert held.status_code == 200 and held.json()["inbox_checked_at"] < soon
 
 
 @pytest.mark.asyncio

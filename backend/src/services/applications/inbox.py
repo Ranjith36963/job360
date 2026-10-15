@@ -37,10 +37,13 @@ def email_senders_for(url: str) -> list[str]:
 
 
 def _checked_at(raw: Optional[str]) -> str:
-    """ISO-8601 with a timezone, not in the future (same bound as occurred_at); now when empty."""
+    """ISO-8601 with a timezone; now when empty. Never later than now: occurred_at's
+    clock-skew allowance would let the cursor skip mail from the next few minutes."""
+    now = datetime.now(timezone.utc)
     if not raw:
-        return datetime.now(timezone.utc).isoformat()
-    return parse_occurred_at(raw)
+        return now.isoformat()
+    parsed = parse_occurred_at(raw)
+    return min(datetime.fromisoformat(parsed), now).isoformat()
 
 
 async def mark_checked(
