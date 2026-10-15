@@ -168,12 +168,12 @@ def pay_evidence(description: str) -> str:
         left = text[max(0, ms - _PAY_WINDOW):ms]
         right = text[me:me + _PAY_WINDOW]
         cut = 0
-        for e in _SENTENCE_END_RE.finditer(left):
-            cut = e.end()
+        for prev_end in _SENTENCE_END_RE.finditer(left):
+            cut = prev_end.end()
         left = left[cut:]
-        e = _SENTENCE_END_RE.search(right)
-        if e:
-            right = right[:e.start()]
+        next_end = _SENTENCE_END_RE.search(right)
+        if next_end:
+            right = right[:next_end.start()]
         sentence = left + m.group(0) + right
         pos = len(left)
         near = sentence[max(0, pos - _NOT_PAY_WINDOW):pos + len(m.group(0)) + _NOT_PAY_WINDOW]
