@@ -64,7 +64,9 @@ this one application; `stop` - do not submit (paused, already applied, or the
 daily limit is reached). `reason` is a short code and `detail` one plain
 sentence you can show the user. Reasons: paused, already_applied,
 user_declined (the user said don't send), daily_cap_reached, duplicate_job
-(same job already applied to: `stop` in auto mode, else `ask`), unknown_site
+(same job already applied to: `stop` in auto mode, else `ask`),
+held_by_other_session (another assistant session read this application's kit
+recently and did not record `hold_released`: `ask`), unknown_site
 (`form_url` is not one plain http(s) address - no user@, % or backslash before
 the path, ASCII host), form_host_mismatch (`form_url` is not the site of your
 latest `form_filled`), email_not_verified (the user has not confirmed their
@@ -75,7 +77,7 @@ recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it). Inde
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
 `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
-email_not_verified or blocked: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
+email_not_verified, blocked or held_by_other_session: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
 record it with `record_application`. A yes the user gave for this exact CV
 answers `submit` with `user_approved`; if the CV is edited afterwards that yes
 no longer counts - ask again. A setting that says to apply is never a reason
@@ -139,8 +141,10 @@ if the form allows; else the user uploads by hand. Expired link = call the
 kit again. Show the CV; when the user OKs it in chat record_event cv_seen
 (where chat); when they say yes to submitting, record_event submit_approved.
 After filling, record_event form_filled with `answers`: every field you typed,
-its `source`, the kit `key` for memory/profile answers; a guess is `guessed`. `hold` set = another assistant is
-on it — tell the user. `duplicate` set = warn before any work. `autofill`
+its `source`, the kit `key` for memory/profile answers; a guess is `guessed`. Pass a `session` label (same one
+all conversation) to get_application_kit and check_submit. `hold` set means another session is working this
+application: tell the user and stop unless they say continue. When you finish or hand over, record
+`hold_released` {reason: done|stopped}. `duplicate` set = warn before any work. `autofill`
 deny = do not type into the form: give the user the answers to paste.
 Account site: stop, the user signs up and signs in themselves (never a
 password), then record_event site_account and continue; a sign-up wall on
@@ -153,7 +157,8 @@ logistics / salary / languages / equality ("equality / voluntary") /
 approved_text, each with its `source` (memory, profile, approved_text) and
 `saved_at`, and `missing` - what the form may ask that Job360 does not have for
 THIS job's country. Also: `duplicate` (warn the user before any work), `hold`
-(another assistant is on it - tell the user), `account_site` (an account is
+(another session is on it: `held_by`, `session`, `until`; `unsure` = maybe your own
+other session - tell the user), `account_site` (an account is
 needed: stop, the user signs up and signs in themselves, never a password),
 `autofill` (deny = do not type into the form, give the user the answers to
 paste) and `settings` (including `submit_preview`, what check_submit would
