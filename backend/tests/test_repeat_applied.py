@@ -34,7 +34,12 @@ EMAIL = {
     "received_at": "2026-10-14T09:30:00+00:00",
 }
 WARNING = (
-    "this application is already applied; recorded as a submission confirmation (proof), not a second applied event"
+    "this application is already applied; recorded as a submission confirmation (proof), "
+    "not a second applied event; to change the applied date use corrects_event_id"
+)
+EXISTS_WARNING = (
+    "a submission confirmation without a source is already recorded for this application; nothing written; "
+    "to change the applied date use corrects_event_id"
 )
 
 
@@ -159,6 +164,61 @@ async def test_same_message_id_again_already_exists_and_writes_nothing(authentic
         )
         assert repeat["warnings"] == []
         assert len(_rows(other)) == n
+
+
+@pytest.mark.asyncio
+async def test_converted_note_carries_the_reserved_key_and_callers_cannot_set_it(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _receipt(client, app_id)
+        await _event(client, app_id, "applied", source=EMAIL)
+        assert json.loads(_rows(app_id)[-1]["payload"])["confirms"] == "applied"
+        n = len(_rows(app_id))
+        resp = await client.post(
+            f"/api/applications/{app_id}/events",
+            json={"event_type": "note", "detail": "Submission confirmed", "payload": {"confirms": "applied"}},
+        )
+        assert resp.status_code == 422, resp.text
+        assert "reserved" in resp.text
+        assert len(_rows(app_id)) == n
+
+
+@pytest.mark.asyncio
+async def test_converted_note_without_an_email_source_is_not_email_proof(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _receipt(client, app_id)
+        body = await _event(client, app_id, "applied", detail="I think it went through")
+        assert body["event_type"] == "note"
+        assert json.loads(_rows(app_id)[-1]["payload"])["confirms"] == "applied"
+        assert await _proof_level(client, app_id) == "none"
+
+
+@pytest.mark.asyncio
+async def test_converted_note_with_an_email_source_and_message_id_is_email_proof(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _receipt(client, app_id)
+        await _event(client, app_id, "applied", source=EMAIL)
+        assert await _proof_level(client, app_id) == "email"
+
+
+@pytest.mark.asyncio
+async def test_repeat_without_source_twice_gives_one_note(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _receipt(client, app_id)
+        first = await _event(client, app_id, "applied", detail="first repeat")
+        assert (first["event_type"], first["already_existed"], first["warnings"]) == ("note", False, [WARNING])
+        count = len(_rows(app_id))
+        second = await _event(client, app_id, "applied", detail="second repeat")
+        assert second["already_existed"] is True
+        assert second["event_id"] == first["event_id"]
+        assert second["event_type"] == "note"
+        assert second["warnings"] == [EXISTS_WARNING]
+        assert len(_rows(app_id)) == count
+        notes = [r for r in _rows(app_id) if r["event_type"] == "note"]
+        assert [r["detail"] for r in notes] == ["Submission confirmed: first repeat"]
 
 
 @pytest.mark.asyncio

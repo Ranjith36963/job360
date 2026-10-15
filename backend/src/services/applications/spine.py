@@ -66,6 +66,13 @@ def validate_event_type(event_type: str) -> None:
         )
 
 
+# Reserved payload key (weak spot #4 audit). A converted repeat-applied note carries
+# ``{"confirms": "applied"}``; validate_payload refuses it from callers, so only Job360 writes it.
+# proof.py counts such a note as email proof ONLY with an email source + message_id.
+CONFIRMS_KEY = "confirms"
+CONFIRMS_APPLIED = "applied"
+
+
 def payload_bytes(payload: Mapping[str, Any]) -> int:
     """The SERIALISED size of an event payload, in bytes — what the column
     actually costs, not ``len()`` of the Python object (S5)."""
@@ -89,6 +96,8 @@ def validate_payload(payload: Any, *, max_bytes: Optional[int] = None) -> dict[s
         raise SpineError(422, "payload must be a JSON object")
     if "follow_up_on" in payload:
         raise SpineError(422, "pass follow_up_on as its own field, not inside payload")
+    if CONFIRMS_KEY in payload:  # reserved: only append_event's repeat-applied conversion may write it
+        raise SpineError(422, f"payload key {CONFIRMS_KEY!r} is reserved for Job360 itself")
     size = payload_bytes(payload)
     cap = settings.APPLICATION_EVENT_PAYLOAD_MAX_BYTES if max_bytes is None else max_bytes
     if size > cap:
@@ -665,10 +674,17 @@ async def _replay_follow_up_on(db: JobDatabase, application_id: int) -> Optional
 # application (typically the confirmation email arriving after
 # record_application) is not a second status event: it is stored as a note
 # whose detail starts with this prefix, which proof.py already counts as email
-# proof (``LIKE 'submission confirmed%'``) whatever its source.
+# proof when it also carries an email source + message_id (proof.py). The text prefix alone is NOT
+# proof for new rows: the structured ``confirms`` payload key marks the conversion.
 SUBMISSION_CONFIRMED_PREFIX = "Submission confirmed"
+CHANGE_DATE_HINT = "to change the applied date use corrects_event_id"
 REPEAT_APPLIED_WARNING = (
-    "this application is already applied; recorded as a submission confirmation (proof), not a second applied event"
+    "this application is already applied; recorded as a submission confirmation (proof), "
+    f"not a second applied event; {CHANGE_DATE_HINT}"
+)
+CONFIRMATION_EXISTS_WARNING = (
+    "a submission confirmation without a source is already recorded for this application; nothing written; "
+    f"{CHANGE_DATE_HINT}"
 )
 
 
@@ -690,6 +706,25 @@ async def _has_surviving_applied(db: JobDatabase, application_id: int) -> bool:
         (application_id,),
     )
     return await cur.fetchone() is not None
+
+
+async def _existing_confirmation(db: JobDatabase, application_id: int) -> Optional[dict[str, Any]]:
+    """The first surviving converted confirmation note (``payload.confirms == 'applied'``) on this
+    application, else None. Mirrors career-ops reply-watch.mjs:180 (skip a receipt already seen)."""
+    cur = await db._db.execute(
+        "SELECT e.id, e.event_type, e.detail, e.occurred_at, e.recorded_at, e.recorded_by, e.scheduled_at, "
+        "e.payload FROM application_events e WHERE e.application_id = ? AND e.event_type = 'note' "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) ORDER BY e.id",
+        (application_id,),
+    )
+    for row in await cur.fetchall():
+        try:
+            confirms = json.loads(row["payload"] or "{}").get(CONFIRMS_KEY)
+        except (ValueError, AttributeError):
+            continue
+        if confirms == CONFIRMS_APPLIED:
+            return {k: row[k] for k in row.keys() if k != "payload"}
+    return None
 
 
 def _confirmation_detail(detail: str) -> str:
@@ -811,8 +846,16 @@ async def append_event(
         and corrects_event_id is None
         and await _has_surviving_applied(db, application_id)
     ):
+        if source is None:
+            # No source = no identity: without this a repeat would write a new note every time.
+            existing = await _existing_confirmation(db, application_id)
+            if existing is not None:
+                dup = await _duplicate_event_result(db, application_id, recorded_by, existing, requested_type)
+                dup["warnings"] = [*dup["warnings"], CONFIRMATION_EXISTS_WARNING]
+                return dup
         event_type = "note"
         detail = _confirmation_detail(detail)
+        payload = {**(payload or {}), CONFIRMS_KEY: CONFIRMS_APPLIED}
         warnings.append(REPEAT_APPLIED_WARNING)
 
     # The slot's value BEFORE this event — needed to decide the auto-clear
