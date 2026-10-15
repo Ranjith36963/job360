@@ -35,7 +35,7 @@ import inspect
 import json
 from contextlib import AbstractAsyncContextManager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Mapping, Optional
+from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable, Mapping, Optional, cast
 
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -294,6 +294,80 @@ def clean_tool_descriptions(server: MCPServer) -> None:
             tool.description = inspect.cleandoc(tool.description)
 
 
+# ── Unknown arguments are refused, never dropped ───────────────────────────────
+#
+# 2026-10-15: an assistant called update_job with `apply_url` while its client
+# served an OLD cached tool list. The SDK's argument model ignores keys it does
+# not know (pydantic's default `extra="ignore"`), so the argument vanished: no
+# error, no field in the reply, and the assistant believed the link was saved.
+# Every tool now refuses an argument it does not take, by name, and points at
+# doctor (whose `tools` map shows what this server really takes).
+
+UNKNOWN_ARGS_HINT = (
+    "If you expected an argument that is not listed, your tool list may be out of date: call doctor."
+)
+
+
+def unknown_arguments_message(input_schema: Mapping[str, Any], arguments: Mapping[str, Any]) -> str:
+    """The refusal text for ``arguments`` keys the tool's advertised schema lacks, or "" when none.
+
+    The accepted keys are exactly the advertised ``inputSchema.properties`` (the
+    SDK builds them by alias), so what is refused is what the client was never
+    told it could send. Names are cut to 60 chars and at most 10 are listed -
+    a key is caller-supplied text.
+    """
+    allowed = list((input_schema.get("properties") or {}).keys())
+    unknown = [str(k) for k in arguments if k not in allowed]
+    if not unknown:
+        return ""
+    shown = ", ".join(k[:60] for k in unknown[:10]) + (f" (+{len(unknown) - 10} more)" if len(unknown) > 10 else "")
+    takes = ", ".join(allowed) if allowed else "no arguments"
+    return f"Nothing was done: unknown argument(s): {shown}. This tool takes: {takes}. {UNKNOWN_ARGS_HINT}"
+
+
+def forbid_unknown_arguments(server: MCPServer) -> None:
+    """Advertise ``additionalProperties: false`` on every tool's input schema.
+
+    The refusal itself lives in :func:`_strict_server_class` (it runs before the
+    SDK validates, so it can name the keys); this makes the schema say the same
+    thing, so a client that validates locally refuses the call before sending.
+    """
+    for tool in server._tool_manager.list_tools():  # noqa: SLF001 — no public hook for this
+        tool.parameters["additionalProperties"] = False
+
+
+_STRICT_SERVER_CLASS: Any = None
+
+
+def _strict_server_class() -> type[MCPServer]:
+    """``MCPServer`` whose ``call_tool`` refuses unknown arguments (built once; the SDK is lazy, rule #16).
+
+    ``call_tool`` is the SDK's public entry for every tool call - the wire
+    handler (``_handle_call_tool``) and in-process callers both go through it -
+    so one override covers every tool with no per-tool code. A ``ToolError``
+    raised here reaches the client as ``isError: true`` with this text, before
+    the tool body (and so before any write) runs. Measured on mcp 2.3.0.
+    """
+    global _STRICT_SERVER_CLASS
+    if _STRICT_SERVER_CLASS is None:
+        from mcp.server import MCPServer as _Base
+        from mcp.server.mcpserver.exceptions import ToolError
+
+        class StrictArgsMCPServer(_Base):
+            async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
+                tool = self._tool_manager.get_tool(name)
+                if tool is not None:
+                    refusal = unknown_arguments_message(tool.parameters, arguments or {})
+                    if refusal:
+                        if _current_user.get() is not None:
+                            _audit(name, "error", http_status=422, reason="unknown_key")
+                        raise ToolError(refusal)
+                return await super().call_tool(name, arguments, context)
+
+        _STRICT_SERVER_CLASS = StrictArgsMCPServer
+    return cast("type[MCPServer]", _STRICT_SERVER_CLASS)
+
+
 def build_server(version: str = "") -> MCPServer:
     """Create the MCPServer with its tools and recipe prompts. Imports the SDK here (rule #16).
 
@@ -302,7 +376,6 @@ def build_server(version: str = "") -> MCPServer:
     tool surface this process serves. Left empty the server reports no version,
     exactly as before.
     """
-    from mcp.server import MCPServer
     from pydantic import ValidationError
     from starlette.responses import Response
 
@@ -321,7 +394,7 @@ def build_server(version: str = "") -> MCPServer:
     from src.services.profile import refusals as profile_refusals
     from src.services.profile import shapes as profile_shapes
 
-    mcp = MCPServer(SERVER_NAME, description=CATEGORY_LINE, instructions=INSTRUCTIONS, version=version)
+    mcp = _strict_server_class()(SERVER_NAME, description=CATEGORY_LINE, instructions=INSTRUCTIONS, version=version)
 
     def _validation_error(
         exc: ValidationError, *, tool: str | None = None, message: str | None = None, **fields: Any
@@ -752,7 +825,8 @@ def build_server(version: str = "") -> MCPServer:
         applied_at: Optional[str] = None,
         application_id: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Record that the user has applied to this job — ONLY after they say so. Pass
+        """Record that the user has applied to this job — ONLY after they say so, or an
+        employer's confirmation email in their Gmail proves it (name it in `note`). Pass
         `application_id` (the same id every other tool takes); `job_id` still works
         but is the older form — if you give both they must belong together. Freezes
         the named CV version (the newest saved one, with a warning, if none named), the
@@ -911,7 +985,9 @@ def build_server(version: str = "") -> MCPServer:
         arrived (soonest first); `quiet_days` — only applications with no
         activity in that many days. Both skip closed applications (rejected/
         withdrawn/ghosted). The daily-check routine ends its run with one call
-        of each."""
+        of each. Gmail check: `email_senders` = the ATS domains to add as
+        `from:` (mail that never names the company), `inbox_checked_at` = read
+        only mail after it (null = since the application was added)."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(
@@ -923,6 +999,26 @@ def build_server(version: str = "") -> MCPServer:
             raise _tool_error(exc) from None
         _audit("list_applications", "ok", count=len(resp.get("applications", [])))
         return {**resp, "assistant_hint": ASSISTANT_HINT}
+
+    @mcp.tool()
+    async def mark_inbox_checked(application_ids: list[int], checked_at: str = "") -> dict[str, Any]:
+        """After you read the user's Gmail for these applications, say how far you read:
+        `checked_at` = ISO-8601 with timezone (empty = now). Each row's `inbox_checked_at`
+        moves forward (never back), so your next check reads only newer mail. Job360 reads
+        no email; this stores the cursor only. All or nothing: an id that is not the
+        user's refuses the whole call."""
+        try:
+            body = applications_route.InboxCheckedIn(application_ids=application_ids, checked_at=checked_at)
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.mark_inbox_checked(body, db, _user())
+        except HTTPException as exc:
+            _audit("mark_inbox_checked", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("mark_inbox_checked", "ok", count=len(resp.get("application_ids", [])))
+        return resp
 
     @mcp.tool()
     async def save_artifact(
@@ -1092,21 +1188,20 @@ def build_server(version: str = "") -> MCPServer:
     ) -> dict[str, Any]:
         """Append one event to an application's history (append-only).
 
-        `source` ({kind, message_id, sender, subject, received_at}) names the email an event came from: the same
+        `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; the same
         message_id returns already_existed=true and writes nothing, so re-reading an inbox is safe.
 
-        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status; a note
-        never does; the furthest stage wins (a late `applied` never moves it back; only corrects_event_id does).
-        `warnings` = what to fix (e.g. no applied event yet).
-        `occurred_at` may be in the past. `scheduled_at` (ISO-8601 with timezone) only on
+        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status, a note
+        never; the furthest stage wins (only corrects_event_id moves it back). A repeat `applied` (e.g. its
+        confirmation email + `source`) becomes the submission confirmation (proof), not a 2nd applied.
+        `warnings` = what to fix. `occurred_at` may be past. `scheduled_at` (ISO-8601 with timezone) only on
         interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase on any event; ""
         clears it.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (only when Gmail Sent shows it, message id as `source`,
-        or the user says it went) or outreach_replied; `application_id` is optional for a cold contact; a reply
-        never changes the job status.
+        Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`, or the
+        user says it went) or outreach_replied; no application_id for a cold contact; a reply never moves the status.
 
-        Kit events (closed payloads, else 422; only these keys):
+        Kit events (only these keys, else 422):
         form_filled {form_url, fields_count, answers?: [{question, answer, source, key?}]}, source = memory | profile |
         approved | written | guessed (key = the kit key, for memory/profile/approved);
         cv_seen and submit_approved {artifact_id, sha256, where} ONLY after the user said so in chat (where = chat);
@@ -1473,20 +1568,22 @@ def build_server(version: str = "") -> MCPServer:
         }
 
     @mcp.tool()
-    async def check_submit(application_id: int, form_url: str = "") -> dict[str, Any]:
+    async def check_submit(application_id: int, form_url: str = "", session: str = "") -> dict[str, Any]:
         """May you press the FINAL submit on this application's form? Call this
         right before the submit, with the address of the page the form is on
-        (`form_url`). Job360 answers with ONE decision from the user's settings:
+        (`form_url`) and your `session` label (the one you gave get_application_kit).
+        Job360 answers with ONE decision from the user's settings:
         `submit` - go ahead; `ask` - fill the form, stop before submit and ask
-        the user yes for this one application; `stop` - do not submit (paused,
-        already applied, or the daily limit is reached). `reason` is a short
-        code and `detail` one plain sentence you can show the user. Reasons:
+        the user yes for this one application; `stop` - do not submit. `reason`
+        is a short code and `detail` one plain sentence you can show the user. Reasons:
         paused, already_applied, user_declined (the user said don't send),
         daily_cap_reached, form_not_recorded (`stop`: no `form_filled` recorded yet -
         fill the form, record it, call again), form_not_swept (`stop`: no `form_swept`
         after the latest `form_filled` - re-read every field, fix, record it),
         duplicate_job (same job already applied to: `stop`
-        in auto mode, else `ask`), unknown_site (`form_url` is not one plain
+        in auto mode, else `ask`), held_by_other_session (another assistant
+        session read this kit recently and did not record `hold_released`),
+        unknown_site (`form_url` is not one plain
         http(s) address - no user@, % or backslash before the path, ASCII host),
         form_host_mismatch (`form_url` is not the site of your latest
         `form_filled`), email_not_verified (the user has not confirmed their
@@ -1497,12 +1594,14 @@ def build_server(version: str = "") -> MCPServer:
         `ask` unless the user said yes to this CV. The first application after
         the user turns auto-submit on is a practice run (`ask`, reason
         `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
-        email_not_verified or blocked: do not submit, tell the user. Read-only:
-        it records nothing - after a real submit, record it with
-        `record_application`."""
+        email_not_verified, blocked or held_by_other_session: do not submit, tell
+        the user. Read-only: it records nothing - after a real submit, record it
+        with `record_application`."""
         try:
             async with _request_db() as db:
-                resp = await applications_route.submit_check(application_id, form_url, db, _user())
+                resp = await applications_route.submit_check(
+                    application_id, form_url=form_url, session=session, db=db, user=_user()
+                )
         except HTTPException as exc:
             _audit("check_submit", "error", application_id=application_id, http_status=exc.status_code)
             raise _tool_error(exc) from None
@@ -1532,17 +1631,22 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
-    async def doctor() -> dict[str, Any]:
+    async def doctor(client_tools_version: str = "") -> dict[str, Any]:
         """Call first when something seems wrong or at the start of a run; read
         `next_step` (verify_email | upload_cv | setup:<round> | answer_asks |
         confirm_settings | ok). Also: how you are signed in (`auth`), what the
         profile still lacks (`missing`), open asks, waiting setting changes, the
         pause, today's outreach (`sent_today`, `daily_max`, `blocked_today`) and
         when the last event was recorded - then whats_new(since=<your last
-        check>) for what changed. Read-only."""
+        check>) for what changed. Read-only.
+        Tool list check: `tools` = every tool and its parameters as served now,
+        `tools_version` = their short hash. Pass the `tools_version` you saw last
+        time as `client_tools_version`: `tools_stale` true = your client's tool
+        list is old (follow `stale_hint`: tell the user to reconnect Job360). Call
+        doctor too when a tool ignores or refuses an argument you expected."""
         try:
             async with _request_db() as db:
-                resp = await doctor_route.doctor(db, _user())
+                resp = await doctor_route.doctor(db, _user(), client_tools_version)
         except HTTPException as exc:
             _audit("doctor", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
@@ -1569,33 +1673,39 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
-    async def get_application_kit(application_id: int, include_text: bool = True) -> dict[str, Any]:
+    async def get_application_kit(application_id: int, include_text: bool = True, session: str = "") -> dict[str, Any]:
         """The APPLICATION KIT - call this before you fill ANY application form.
+        Pass `session`: a short label you pick once per conversation (letters, digits,
+        space . _ : -, max 60) and reuse, also in check_submit.
         It holds, for THIS application only: the CV and cover letter (`text` up to 8000
         chars - `text_truncated` + `text_more` say how to fetch the rest; `include_text=false`
         sends no text - a `sha256` of the FULL text, and a 30-minute `file.url` PDF link you can download, 3
         downloads), every stored answer grouped as contact / right_to_work /
         logistics / salary / languages / equality ("equality / voluntary") /
         approved_text, each with its `source` (memory, profile, approved_text) and
-        `saved_at`, and `missing` - what the form may ask that Job360 does not have
-        for THIS job's country. Use only kit answers; ask the user ONCE, in one
-        message, for anything in `missing`; never guess. Also: `duplicate` (warn
-        the user before any work), `hold` (another assistant is on it - tell the
-        user), `account_site` (an account is needed: stop, the user signs up and
+        `saved_at`, and `missing` - country and contact facts Job360 lacks for THIS
+        job; it does not see the form's own questions, so call check_form with them.
+        Use only kit answers; ask the user ONCE, in one message, for anything in
+        `missing`; never guess. Also: `duplicate` (warn
+        the user before any work), `hold` (another session is working this
+        application: `held_by`, `session`, `until`; tell the user and stop unless
+        they say continue; `unsure` = maybe your own other session), `account_site`
+        (an account is needed: stop, the user signs up and
         signs in themselves, never a password), `autofill` (deny = do not type
         into the form, give the user the answers to paste) and `settings`
         (including `submit_preview`, what check_submit would say). Each call
         mints fresh links and records a `kit_read` on the timeline; an expired
         link means call it again. After filling the form, record_event
         form_filled {form_url, fields_count}, re-read every field and record form_swept
-        {fields_checked, fixed}; check_submit says stop until you do. `warnings` and
+        {fields_checked, fixed}; check_submit says stop until you do. When you finish
+        or hand over, record_event hold_released {reason: done|stopped}. `warnings` and
         `cv.checks` are plain facts to check, never a block. `approved_text` holds
         the newest 25 answers (`answers_omitted` counts the rest)."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.get_application_kit(
                     application_id=application_id, response=Response(), include_text=include_text,
-                    db=db, user=_user(),
+                    session=session, db=db, user=_user(),
                 )
         except HTTPException as exc:
             _audit("get_application_kit", "error", application_id=application_id, http_status=exc.status_code)
@@ -1603,6 +1713,38 @@ def build_server(version: str = "") -> MCPServer:
         _audit(
             "get_application_kit", "ok", application_id=application_id,
             kit_event_id=resp["kit"]["id"], missing_count=len(resp["missing"]),
+        )
+        return resp
+
+    @mcp.tool()
+    async def check_form(application_id: int, questions: list[dict[str, Any]], form_url: str = "") -> dict[str, Any]:
+        """Call right after get_application_kit and BEFORE typing into any form.
+        Read the LIVE form first and list EVERY question, including hidden or
+        below-the-fold sections and optional ones (`required` false). `questions`
+        = [{question, required (default true), key}]: `key` is the kit key you
+        will answer with (contact.email, logistics.notice_period, salary.GB ...)
+        or the saved approved_text question; leave it out and Job360 matches the
+        exact wording (case and punctuation ignored) against approved answers.
+        Job360 never reads the form or judges a question. You get `answered`
+        (question, key, value, source, matched_by; confirmed false = inferred,
+        confirm with the user), `missing` (question, required, why) and `counts`.
+        Anything in `missing`: ask the user ONCE, in one message; never guess.
+        Read-only: it writes nothing, 404 if the application is not yours."""
+        try:
+            body = models.FormCheckRequest.model_validate({"questions": questions, "form_url": form_url})
+        except ValidationError as exc:
+            raise _validation_error(exc, tool="check_form", application_id=application_id) from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.check_application_form(
+                    application_id=application_id, body=body, response=Response(), db=db, user=_user(),
+                )
+        except HTTPException as exc:
+            _audit("check_form", "error", application_id=application_id, http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit(
+            "check_form", "ok", application_id=application_id, questions_count=resp["questions_count"],
+            missing_count=resp["counts"]["missing"],
         )
         return resp
 
@@ -1698,6 +1840,7 @@ def build_server(version: str = "") -> MCPServer:
         _register_recipe_prompt(_name)
 
     clean_tool_descriptions(mcp)
+    forbid_unknown_arguments(mcp)
     return mcp
 
 
@@ -1731,6 +1874,58 @@ def tools_fingerprint(tools: list[McpTool]) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+TOOLS_STALE_HINT = (
+    "Compare these tools and parameters with your own tool list; if any parameter here is missing "
+    "from yours, reconnect the Job360 connector (your client cached an old list)."
+)
+
+
+def tools_version(tool_params: Mapping[str, Any]) -> str:
+    """12 hex chars of sha256 over the sorted tool names and each tool's sorted parameter names.
+
+    Narrower than :func:`tools_fingerprint` on purpose: it moves only when a
+    tool or a parameter is added, removed or renamed - the change an assistant
+    can act on (reconnect) - not on a description edit. ``doctor`` reports it;
+    an assistant passes back the one it saw last time.
+    """
+    payload = json.dumps(
+        [[name, sorted(str(p) for p in tool_params[name])] for name in sorted(tool_params)],
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+_SERVED_TOOL_PARAMS: Optional[dict[str, list[str]]] = None
+
+
+def served_tool_parameters() -> dict[str, list[str]]:
+    """``{tool name: [parameter names]}`` this server advertises, sorted by tool (built once, lazily)."""
+    global _SERVED_TOOL_PARAMS
+    if _SERVED_TOOL_PARAMS is None:
+        tools = build_server()._tool_manager.list_tools()  # noqa: SLF001
+        _SERVED_TOOL_PARAMS = {
+            t.name: list((t.parameters.get("properties") or {}).keys()) for t in sorted(tools, key=lambda t: t.name)
+        }
+    return {name: list(params) for name, params in _SERVED_TOOL_PARAMS.items()}
+
+
+def tools_report(client_tools_version: str = "") -> dict[str, Any]:
+    """The doctor's tool-list block: ``tools_version``, ``tools``, ``tools_stale`` and ``stale_hint``.
+
+    ``tools_stale`` is null when the caller passed no version, else whether the
+    version it saw differs from what this server serves now.
+    """
+    tools = served_tool_parameters()
+    version = tools_version(tools)
+    given = (client_tools_version or "").strip()
+    return {
+        "tools_version": version,
+        "tools": tools,
+        "tools_stale": (given.lower() != version) if given else None,
+        "stale_hint": TOOLS_STALE_HINT,
+    }
 
 
 def _declare_tools_list_changed(result: HandlerResult) -> HandlerResult:

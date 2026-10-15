@@ -17,6 +17,7 @@ One module, four jobs:
 * :func:`check_kit_event` - the payload and who-may-write rules for the S3 event
   types (``record_event`` route and the web buttons share it);
 * :func:`gate_facts` / :func:`submit_verdict` - the facts ``may_submit`` needs;
+* :func:`live_hold` - another assistant session's hold (kit warning, gate ask);
 * :func:`duplicate_facts` - the duplicate flag (kit, receipt and gate).
 
 Logs name the user, the application and a closed result. They never carry a
@@ -71,7 +72,12 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "After filling the form, record_event form_filled {form_url, fields_count}. "
     "Then re-read EVERY field on the page, fix what is wrong, and record_event form_swept "
     "{fields_checked, fixed}. Then call check_submit (it says stop until both are recorded).",
-    "`hold` set: another assistant is on this application - tell the user. `duplicate` flagged: warn before any work.",
+    "Before typing into a form, read every question on the LIVE form and call check_form with them; "
+    "the kit's `missing` covers only country and contact facts.",
+    "Pass a `session` label (same one all conversation) to get_application_kit and check_submit. "
+    "`hold` set means another session is working this application: tell the user and stop unless they say "
+    "continue. When you finish or hand over, record `hold_released` {reason: done|stopped}.",
+    "`duplicate` flagged: warn before any work.",
     "Account site: stop. The user signs up and signs in themselves (never ask for or store a password), "
     "then record_event site_account {host} and continue. Hit a sign-in wall on any other site: "
     "record_event account_needed {host}.",
@@ -360,12 +366,14 @@ async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) 
 
 
 async def gate_facts(
-    db: JobDatabase, user_id: str, app_row: dict[str, Any], *, email_verified: bool
+    db: JobDatabase, user_id: str, app_row: dict[str, Any], *, email_verified: bool,
+    other_session_hold: Optional[tuple[str, str, str]] = None,
 ) -> settings_rules.SubmitFacts:
     """The facts :func:`settings_rules.may_submit` reads for this application.
     ``email_verified`` comes from the caller's :class:`CurrentUser`
     (``auth_deps.email_verification_satisfied``) - it is about the account, not
-    the application."""
+    the application. ``other_session_hold`` is :func:`hold_fact` of the caller's
+    :func:`live_hold` (it depends on who asks, so the caller computes it)."""
     application_id = int(app_row["id"])
     cur = await db._db.execute(
         "SELECT 1 FROM application_receipts WHERE application_id = ? AND user_id = ? LIMIT 1",
@@ -392,6 +400,7 @@ async def gate_facts(
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
         form_host=await _newest_form_host(db, user_id, application_id),
         email_verified=email_verified,
+        other_session_hold=other_session_hold,
     )
 
 
@@ -406,6 +415,7 @@ async def _approved_without_cv(db: JobDatabase, user_id: str, application_id: in
 async def submit_verdict(
     db: JobDatabase, user_id: str, app_row: dict[str, Any], form_url: str, now: datetime,
     *, email_verified: bool, assume_filled: bool = False,
+    other_session_hold: Optional[tuple[str, str, str]] = None,
 ) -> settings_rules.SubmitDecision:
     """The ONE gate, evaluated for one application (the submit-check route and
     the kit's ``settings.submit_preview`` both call this). The kit is read BEFORE
@@ -419,7 +429,9 @@ async def submit_verdict(
 
     cfg = settings_rules.effective((load_profile(user_id) or UserProfile()).assistant_settings)
     counts = await settings_rules.load_submit_counts(db, user_id, now)
-    facts = await gate_facts(db, user_id, app_row, email_verified=email_verified)
+    facts = await gate_facts(
+        db, user_id, app_row, email_verified=email_verified, other_session_hold=other_session_hold
+    )
     if assume_filled:
         # The preview imagines the form filled ON this address, so it never
         # shows a form_host_mismatch for a form that is not filled yet.
@@ -1062,38 +1074,109 @@ async def _mint_link(
     )
 
 
-async def _hold(db: JobDatabase, user: CurrentUser, application_id: int, now: datetime) -> Optional[dict[str, Any]]:
-    """Another actor's live hold: its newest kit read inside ``KIT_HOLD_MINUTES``,
-    with no later applied / withdrawn / rejected / hold_released. Warns only."""
+SESSION_MAX_CHARS = 60
+SESSION_RE = re.compile(r"^[A-Za-z0-9 ._:-]*$")
+UNSURE_HOLD_DETAIL = (
+    "another session of this assistant may be working on this application; pass `session` to tell sessions apart"
+)
+
+
+def clean_session(raw: Any) -> str:
+    """The assistant session's own label (weak spot #3, 2026-10-15): stripped, at most
+    ``SESSION_MAX_CHARS``, only letters, digits, space and ``. _ : -``. ``""`` = not
+    given. Raises ``SpineError`` 422 otherwise. It is DATA: never markup, never logged raw."""
+    text = (raw if isinstance(raw, str) else "").strip()
+    if len(text) > SESSION_MAX_CHARS or not SESSION_RE.match(text):
+        raise SpineError(
+            422,
+            f"session must be a short label of at most {SESSION_MAX_CHARS} characters using only letters, "
+            "digits, spaces and . _ : - (for example \"desktop-apply\"); pick one per conversation",
+        )
+    return text
+
+
+async def live_hold(
+    db: JobDatabase, user: CurrentUser, application_id: int, now: datetime, session: str = ""
+) -> Optional[dict[str, Any]]:
+    """Another session's live hold: the newest kit read inside ``KIT_HOLD_MINUTES`` whose
+    ``(recorded_by, session)`` differs from the caller's ``(actor, session)``, with no later
+    applied / withdrawn / rejected / hold_released by ANY actor. A kit read with no
+    ``session`` key (before 2026-10-15) counts as session ``""``; the same actor with both
+    sessions ``""`` is the same holder. An UNLABELLED caller after a labelled read by its
+    own actor gets ``unsure: true`` (it may be another session of the same assistant).
+    Warns in the kit; check_submit asks ``held_by_other_session`` on a sure hold."""
     actor = actor_for(user)
     cutoff = (now - timedelta(minutes=settings.KIT_HOLD_MINUTES)).isoformat()
     cur = await db._db.execute(
-        "SELECT id, recorded_at, recorded_by FROM application_events WHERE application_id = ? AND user_id = ? "
-        "AND event_type = 'kit_read' AND recorded_by <> ? AND recorded_at >= ? ORDER BY id DESC LIMIT 1",
-        (application_id, user.id, actor, cutoff),
+        "SELECT id, recorded_at, recorded_by, payload FROM application_events WHERE application_id = ? "
+        "AND user_id = ? AND event_type = 'kit_read' AND recorded_at >= ? ORDER BY id DESC LIMIT 200",
+        (application_id, user.id, cutoff),
     )
-    row = await cur.fetchone()
-    if row is None:
+    reads = [dict(r) for r in await cur.fetchall()]
+    if not reads:
         return None
-    r = dict(row)
     cur = await db._db.execute(
-        "SELECT 1 FROM application_events WHERE application_id = ? AND user_id = ? AND id > ? "
-        "AND event_type IN ('applied', 'withdrawn', 'rejected', 'hold_released') LIMIT 1",
-        (application_id, user.id, r["id"]),
+        "SELECT MAX(id) FROM application_events WHERE application_id = ? AND user_id = ? "
+        "AND event_type IN ('applied', 'withdrawn', 'rejected', 'hold_released')",
+        (application_id, user.id),
     )
-    if await cur.fetchone() is not None:
+    got = await cur.fetchone()
+    cleared_upto = int(got[0]) if got is not None and got[0] is not None else 0
+    sure: Optional[dict[str, Any]] = None
+    unsure: Optional[dict[str, Any]] = None
+    for r in reads:  # newest first
+        if int(r["id"]) <= cleared_upto:
+            break  # this read and every older one were released
+        their = str(_json(r.get("payload")).get("session") or "")
+        if r["recorded_by"] != actor or (session and their != session):
+            sure = sure or {**r, "session": their}
+        elif not session and their:
+            unsure = unsure or {**r, "session": their}
+    found = sure or unsure
+    if found is None:
         return None
-    since = datetime.fromisoformat(str(r["recorded_at"]))
-    return {
-        "held_by": r["recorded_by"], "since": r["recorded_at"],
-        "until": (since + timedelta(minutes=settings.KIT_HOLD_MINUTES)).isoformat(),
+    since = datetime.fromisoformat(str(found["recorded_at"]))
+    hold: dict[str, Any] = {
+        "held_by": found["recorded_by"], "session": found["session"], "since": found["recorded_at"],
+        "until": (since + timedelta(minutes=settings.KIT_HOLD_MINUTES)).isoformat(), "unsure": sure is None,
     }
+    if sure is None:
+        hold["detail"] = UNSURE_HOLD_DETAIL
+    return hold
+
+
+def hold_fact(hold: Optional[dict[str, Any]]) -> Optional[tuple[str, str, str]]:
+    """The gate's view of a hold: ``(held_by, session, since)`` for a SURE hold, else ``None``."""
+    if not hold or hold.get("unsure"):
+        return None
+    return (str(hold["held_by"]), str(hold.get("session") or ""), str(hold["since"]))
+
+
+async def _application_answers(
+    db: JobDatabase, user: CurrentUser, app_row: dict[str, Any]
+) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
+    """The profile, the job's country and :func:`compute_answers` for ONE application - the single
+    place the kit and the form check load them (same profile, overlay, country and company key)."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    loaded, overlay = load_profile_with_overlay(user.id)
+    profile = loaded or UserProfile()
+    country = (str(app_row.get("job_country") or "").strip().upper()) or None
+    cur = await db._db.execute("SELECT normalized_company FROM jobs WHERE id = ?", (app_row.get("job_id"),))
+    job_row = await cur.fetchone()
+    job_company_key = str(dict(job_row).get("normalized_company") or "") if job_row is not None else ""
+    answers, missing = compute_answers(profile, overlay, country, job_company_key or None)
+    return profile, country, answers, missing
 
 
 async def build_kit(
-    db: JobDatabase, user: CurrentUser, application_id: int, *, now: datetime, include_text: bool = True
+    db: JobDatabase, user: CurrentUser, application_id: int, *, now: datetime, include_text: bool = True,
+    session: str = "",
 ) -> dict[str, Any]:
     """Build the kit for one application and record that it was read.
+    ``session`` is the caller's own label (:func:`clean_session`, already cleaned):
+    it is stored on the ``kit_read`` and tells two sessions of one assistant apart.
 
     404 for an application that is not the caller's (no link row is written);
     429 over ``KIT_READS_MAX_PER_HOUR``. Writes one ``kit_read`` event (the
@@ -1101,8 +1184,6 @@ async def build_kit(
     document. The token appears only in this return value."""
     from src.api.auth_deps import email_verification_satisfied  # noqa: PLC0415 - the one verification rule
     from src.api.routes.profile import settings_view  # noqa: PLC0415 - the one read model of the settings
-    from src.services.profile.models import UserProfile  # noqa: PLC0415
-    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
     actor = actor_for(user)
     log = get_audit_logger()
@@ -1128,13 +1209,7 @@ async def build_kit(
             429, f"too many kit reads this hour (KIT_READS_MAX_PER_HOUR = {settings.KIT_READS_MAX_PER_HOUR})"
         )
 
-    loaded, overlay = load_profile_with_overlay(user.id)
-    profile = loaded or UserProfile()
-    country = (str(app_row.get("job_country") or "").strip().upper()) or None
-    cur = await db._db.execute("SELECT normalized_company FROM jobs WHERE id = ?", (app_row.get("job_id"),))
-    job_row = await cur.fetchone()
-    job_company_key = str(dict(job_row).get("normalized_company") or "") if job_row is not None else ""
-    answers, missing = compute_answers(profile, overlay, country, job_company_key or None)
+    profile, country, answers, missing = await _application_answers(db, user, app_row)
     answers_omitted = 0
     approved = answers["approved_text"]
     if len(approved) > settings.KIT_APPROVED_TEXT_MAX:
@@ -1143,7 +1218,7 @@ async def build_kit(
         keep = set(newest[-settings.KIT_APPROVED_TEXT_MAX:])
         answers_omitted = len(approved) - len(keep)
         answers["approved_text"] = [it for i, it in enumerate(approved) if i in keep]
-    hold = await _hold(db, user, application_id, now)
+    hold = await live_hold(db, user, application_id, now, session)
     state = await controls_state(db, user.id, app_row, now)
     events = await _events(db, user.id, application_id, ("cv_seen", "submit_approved"))
 
@@ -1192,7 +1267,7 @@ async def build_kit(
     settings_block = settings_view(profile, user.id)
     verdict = await submit_verdict(
         db, user.id, app_row, apply_url, now,
-        email_verified=email_verification_satisfied(user), assume_filled=True,
+        email_verified=email_verification_satisfied(user), assume_filled=True, other_session_hold=hold_fact(hold),
     )
     preview = {"decision": verdict.decision, "reason": verdict.reason, "detail": verdict.detail}
     settings_block = {**settings_block, "submit_preview": preview}
@@ -1206,7 +1281,7 @@ async def build_kit(
                 {"artifact_id": d["artifact_id"], "version": d["version"], "expires_at": d["file"]["expires_at"]}
                 for d in docs
             ],
-            "by": actor,
+            "by": actor, "session": session,
         },
         occurred_at=now.isoformat(), recorded_by=actor,
     )
@@ -1214,7 +1289,8 @@ async def build_kit(
     log.info("kit_read", extra={
         "event": "kit_read", "user_id": safe_log_value(user.id), "actor": safe_log_value(actor),
         "application_id": application_id, "kit_event_id": event["event_id"], "missing_count": len(missing),
-        "hold": bool(hold), "duplicate": dup["flag"], "surface": "mcp" if user.auth_via != "session" else "web",
+        "hold": bool(hold), "session": safe_log_value(session, max_len=SESSION_MAX_CHARS),
+        "duplicate": dup["flag"], "surface": "mcp" if user.auth_via != "session" else "web",
         "result": "ok",
     })
     out: dict[str, Any] = {
@@ -1239,6 +1315,95 @@ async def build_kit(
     if letter is None:
         out["cover_letter_none_reason"] = NO_LETTER_REASON
     return out
+
+
+# ── Form check: which questions on the LIVE form already have a saved answer ──
+
+FORM_NEXT_ASK = (
+    "Ask the user ONCE, in one message, for every question in `missing`; "
+    "save reusable answers with update_profile (user_info.answers); never guess."
+)
+FORM_NEXT_FILL = "Every question has a saved answer. Fill the form with these values."
+_NON_ALNUM_RE = re.compile(r"[\W_]+")  # a run of anything that is not a letter or digit
+
+
+def _norm_question(text: Any) -> str:
+    """Casefold, every non-alphanumeric run -> one space, stripped. No fuzzy or semantic matching."""
+    return _NON_ALNUM_RE.sub(" ", str(text or "").casefold()).strip()
+
+
+def form_check(answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pure: for each form question, a saved answer from ``answers`` (the output of
+    :func:`compute_answers`) or a gap. A question with a ``key`` must name an item that
+    really is in the kit (an ``approved_text`` item is also matched by normalized
+    question); without a key the normalized wording is matched against the approved
+    answers only. Never logs, never writes, never guesses."""
+    items = [i for block in answers.values() for i in block]
+    by_key = {str(i["key"]): i for i in items}
+    approved = {_norm_question(i["key"]): i for i in answers.get("approved_text", [])}
+    answered: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for q in questions:
+        text = str(q["question"])
+        required = bool(q.get("required", True))
+        key = (q.get("key") or "").strip() or None
+        item: Optional[dict[str, Any]] = None
+        matched_by = "key"
+        if key is not None:
+            item = by_key.get(key)
+            if item is None:
+                item = approved.get(_norm_question(key)) if _norm_question(key) else None
+            if item is None:
+                missing.append({"question": text, "required": required,
+                                "why": f"key '{key}' is not in this application's kit"})
+                continue
+        else:
+            item = approved.get(_norm_question(text)) if _norm_question(text) else None
+            matched_by = "wording"
+            if item is None:
+                missing.append({"question": text, "required": required, "why": "no saved answer for this question"})
+                continue
+        row: dict[str, Any] = {
+            "question": text, "required": required, "key": item["key"], "value": item["value"],
+            "source": item["source"], "matched_by": matched_by,
+        }
+        if item.get("confirmed") is False:
+            row["confirmed"] = False
+        answered.append(row)
+    missing_required = sum(1 for m in missing if m["required"])
+    return {
+        "questions_count": len(questions), "answered": answered, "missing": missing,
+        "counts": {"answered": len(answered), "missing": len(missing), "missing_required": missing_required},
+        "next": FORM_NEXT_ASK if missing else FORM_NEXT_FILL,
+    }
+
+
+async def check_form(
+    db: JobDatabase, user: CurrentUser, application_id: int, *,
+    questions: list[dict[str, Any]], form_url: str = "", now: datetime,
+) -> dict[str, Any]:
+    """Read-only: look up a saved answer for every question on the live form. Loads the
+    answers exactly as :func:`build_kit` does (same profile, overlay, country, company
+    key). 404 for an application that is not the caller's. Writes NO event. Logs counts
+    only - never a question or an answer value."""
+    log = get_audit_logger()
+    app_row = await spine.get_owned_application(db, user.id, application_id)
+    if app_row is None:
+        log.warning("form_check", extra={
+            "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,
+            "questions_count": len(questions), "answered": 0, "missing": 0, "missing_required": 0,
+            "result": "refused",
+        })
+        raise SpineError(404, "application not found")
+    _profile, _country, answers, _missing = await _application_answers(db, user, app_row)
+    out = form_check(answers, questions)
+    log.info("form_check", extra={
+        "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,
+        "questions_count": out["questions_count"], "answered": out["counts"]["answered"],
+        "missing": out["counts"]["missing"], "missing_required": out["counts"]["missing_required"],
+        "result": "ok",
+    })
+    return {"application_id": application_id, **out}
 
 
 TEXT_MORE = "get_application(application_id, with_artifact_text=true)"
