@@ -132,3 +132,19 @@ describe("Ready to send", () => {
     }
   });
 });
+
+describe("nothing-sent", () => {
+  it("shows '<N> changes · nothing sent yet' while considering, gone once applied", () => {
+    const { rerender } = render(<ReadyCard card={card(5)} paused={false} changes={4} onChanged={() => undefined} />);
+    expect(screen.getByTestId("nothing-sent")).toHaveTextContent("4 changes · nothing sent yet");
+    expect(screen.getByTestId("changes-since-approved")).toHaveTextContent("4 changes");
+    rerender(<ReadyCard card={card(5)} paused={false} status="applied" changes={4} onChanged={() => undefined} />);
+    expect(screen.queryByTestId("nothing-sent")).toBeNull();
+  });
+
+  it("shows no made-up count when the change count is unknown (Needs-you list)", () => {
+    render(<ReadyCard card={card(5)} paused={false} onChanged={() => undefined} />);
+    expect(screen.getByTestId("nothing-sent")).toHaveTextContent("Nothing sent yet");
+    expect(screen.queryByTestId("changes-since-approved")).toBeNull();
+  });
+});
