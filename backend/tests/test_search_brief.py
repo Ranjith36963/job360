@@ -210,3 +210,81 @@ def test_only_remote_ok_rows_get_the_residence_question():
 def test_no_remote_row_means_no_residence_question():
     in_onsite = {"country": "IN", "work_authorization": "citizen", "remote_ok": False, "onsite": "yes"}
     assert build_search_brief(_rtw(in_onsite), "GB", [])["gaps"] == []
+
+
+# ── answers match a gap by topic or by wording (weak spot #11) ──────────────
+
+def _wf_brief(answers: list[dict[str, Any]] | None):
+    rtw = _rtw(
+        {"country": "GB", "work_authorization": "citizen", "remote_ok": True, "onsite": "yes"},
+        {"country": "IN", "work_authorization": "citizen", "remote_ok": True, "onsite": "no"},
+    )
+    return build_search_brief(rtw, "GB", answers)
+
+
+def test_gap_carries_a_fixed_topic():
+    gaps = _wf_brief(None)["gaps"]
+    assert [(g["country"], g["topic"]) for g in gaps] == [("IN", "work_from.IN")]
+
+
+def test_gap_closes_via_topic_with_different_wording():
+    brief = _wf_brief([{
+        "question": "Will you work from India for an India-remote role?", "answer": "Yes",
+        "approved": True, "topic": "work_from.IN",
+    }])
+    assert brief["gaps"] == [] and brief["work_from"] == ["GB", "IN"]
+
+
+def test_gap_closes_via_wording_differing_in_case_and_punctuation():
+    from src.services.profile.search_brief import work_from_question
+
+    q = work_from_question("GB", "IN").upper().replace(".", "!!").replace("?", " ??")
+    brief = _wf_brief([{"question": q, "answer": "No", "approved": True}])  # old item, no topic
+    assert brief["gaps"] == [] and brief["work_from"] == ["GB"]
+
+
+def test_gap_stays_open_for_a_different_topic_or_unapproved_answer():
+    other = {"question": "Notice period?", "answer": "Yes", "approved": True, "topic": "work_from.US"}
+    assert [g["country"] for g in _wf_brief([other])["gaps"]] == ["IN"]
+    unapproved = {"question": "x", "answer": "Yes", "approved": False, "topic": "work_from.IN"}
+    assert [g["topic"] for g in _wf_brief([unapproved])["gaps"]] == ["work_from.IN"]
+
+
+def test_find_answer_company_scope_and_normalizer():
+    from src.services.applications.kit import normalized_company_key
+    from src.services.profile.answer_match import find_answer, normalize_question
+
+    assert normalize_question("  Work--from  IN?! ") == "work from in"
+    scoped = [{"question": "Consent?", "answer": "Yes", "approved": True, "company": "BJAK Ltd", "topic": "consent"}]
+    assert find_answer(scoped, topic="consent") is None, "scoped answer never matches without a company"
+    assert find_answer(scoped, topic="consent", company_key=normalized_company_key("Acme")) is None
+    assert find_answer(scoped, topic="consent", company_key=normalized_company_key("bjak"))["answer"] == "Yes"
+    # gaps are per country, never per company: an unscoped answer closes them for every company
+
+
+def test_resolve_answer_narrower_wins_aliases_and_ambiguity_fail_closed():
+    from src.services.applications.kit import normalized_company_key
+    from src.services.profile.answer_match import find_answer, normalize_question, resolve_answer
+
+    assert normalize_question("Ｗork－from IN?") == "work from in"  # NFKC
+    base = {"approved": True, "topic": "why_job"}
+    wide = {**base, "question": "Why us?", "answer": "General"}
+    narrow = {**base, "question": "Why BJAK?", "answer": "Specific", "company": "BJAK Ltd"}
+    key = normalized_company_key("bjak")
+    assert find_answer([wide, narrow], topic="why_job", company_key=key)["answer"] == "Specific"
+    assert find_answer([wide, narrow], topic="why_job")["answer"] == "General", "never widen: scoped is not used unscoped"
+    # an alias matches as a fallback
+    alias = {"question": "Notice?", "answer": "1 month", "approved": True, "aliases": ["How soon can you start?"]}
+    assert find_answer([alias], question="how SOON can you start")["answer"] == "1 month"
+    # two disagreeing candidates: no answer plus a note, never a guess
+    a = {**base, "question": "A", "answer": "Yes"}
+    b = {**base, "question": "B", "answer": "No"}
+    rec, note = resolve_answer([a, b], topic="why_job")
+    assert rec is None and note.startswith("ambiguous")
+    same = {**base, "question": "C", "answer": "yes"}
+    assert resolve_answer([a, same], topic="why_job")[0] is not None, "agreeing candidates are not ambiguous"
+    gap = _wf_brief([
+        {"question": "A", "answer": "Yes", "approved": True, "topic": "work_from.IN"},
+        {"question": "B", "answer": "No", "approved": True, "topic": "work_from.IN"},
+    ])["gaps"]
+    assert [g["topic"] for g in gap] == ["work_from.IN"] and gap[0]["note"].startswith("ambiguous")

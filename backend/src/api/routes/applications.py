@@ -905,6 +905,7 @@ class KitAnswerOut(BaseModel):
     saved_at: Optional[str] = None
     label: Optional[str] = None
     company: Optional[str] = None
+    topic: Optional[str] = None
 
 
 class KitAnswersOut(BaseModel):

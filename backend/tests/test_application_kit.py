@@ -1906,3 +1906,22 @@ async def test_approved_text_keeps_the_newest_25_and_counts_the_rest(authenticat
         await _patch(client, _e("user_info.answers", records[:3]))
         small = (await _kit(client, app_id)).json()
         assert "answers_omitted" not in small or small["answers_omitted"] is None
+
+
+async def test_kit_approved_text_carries_topic_and_bad_topic_is_refused(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        bad = await _patch(client, _e("user_info.answers", [
+            {"question": "Work from India?", "answer": "Yes", "approved": True, "topic": "Work From India!"},
+        ]))
+        assert bad.status_code == 422, bad.text
+        assert "Nothing was saved." in bad.text and "user_info.answers[0].topic" in bad.text
+        ok = await _patch(client, _e("user_info.answers", [
+            {"question": "Work from India?", "answer": "Yes", "approved": True, "topic": "work_from.IN"},
+            {"question": "Notice period?", "answer": "1 month", "approved": True},
+        ]))
+        assert ok.status_code == 200, ok.text
+        items = {i["key"]: i for i in (await _kit(client, app_id)).json()["answers"]["approved_text"]}
+        assert items["Work from India?"]["topic"] == "work_from.IN"
+        assert items["Notice period?"].get("topic") is None

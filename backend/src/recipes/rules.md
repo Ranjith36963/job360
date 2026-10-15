@@ -504,10 +504,13 @@ basic}].
 `user_info.equality` = {gender, ethnicity, disability, veteran,
 sexual_orientation, transgender}; "prefer not to say" is valid.
 `user_info.answers` = [{question, answer, approved (bool, default false),
-recorded_at, company (optional)}] — set `approved: true` only after the user agrees to that exact
+recorded_at, company (optional), topic (optional)}] — set `approved: true` only after the user agrees to that exact
 wording, and send `recorded_at` back as stored. An answer given for ONE employer (consent,
 why-this-company, a referral there) gets `company`: that job's company; it is reused only for that company.
-The kit's `approved_text` holds the newest 25; more: get_profile `fields["user_info.answers"]`.
+`topic` = a short stable key you choose (letters digits _ . only, 60 chars max, e.g. `work_from.IN`,
+`notice_period_days`): save it with every answer; a gap's own `topic` goes in unchanged. An approved answer
+closes a gap when its topic matches, or its question equals the gap's text ignoring case and punctuation.
+The kit's `approved_text` holds the newest 25 (with `topic` when saved); more: get_profile `fields["user_info.answers"]`.
 `preferences.salary_by_country` = [{country (ISO2), min, max (numbers > 0, min
 not above max; equal = one figure), currency (3 letters, e.g. EUR), period:
 year | month}], ONE record per country (`min` alone = one figure; never `max`

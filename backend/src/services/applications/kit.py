@@ -908,7 +908,8 @@ def compute_answers(
                 continue  # given for ONE employer; this kit is for another (or an unknown) one
             out["approved_text"].append(
                 _mk(str(rec["question"]), rec["answer"], "approved_text", rec.get("recorded_at"),
-                    **({"company": scoped} if scoped else {}))
+                    **({"company": scoped} if scoped else {}),
+                    **({"topic": rec["topic"]} if _present(rec.get("topic")) else {}))
             )
 
     have = {i["key"] for block in out.values() for i in block}
