@@ -54,7 +54,7 @@ note), then continue. Full rules (Gmail modes, outreach, events):
    application, move on; never retry or bypass a CAPTCHA or bot check; a login
    page means the user signs in. An application still blocked: leave it.
 8. **Still open?** For "considering" applications check the posting exists; if
-   gone, `withdrawn` with detail "posting closed". **Deadlines:** outreach with
+   gone, look for the employer's link (`update_job` `apply_url`), else `withdrawn` with detail "posting closed". **Deadlines:** outreach with
    no reply after 7 days: suggest one follow-up. No reply after 45 days:
    suggest `ghosted` (ask first; never past 60 days without asking).
 9. **Due and quiet:** `list_applications(due=true)` and `(quiet_days=7)`.

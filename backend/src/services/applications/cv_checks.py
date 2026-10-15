@@ -47,7 +47,8 @@ def _drop_emails(text: str) -> str:
 _PHONE_RE = re.compile(r"(?<![\w.])\+?\(?\d[\d\s().-]{7,}\d(?![\w])")
 _MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
 _DATE_RES = (
-    re.compile(rf"\b{_MONTH}\s+(?:\d{{1,2}},?\s+)?(?:19|20)\d{{2}}\b", re.I),
+    re.compile(rf"\b\d{{1,2}}(?:st|nd|rd|th)?\s+{_MONTH}\s+(?:19|20)\d{{2}}\b", re.I),  # "15 October 2026"
+    re.compile(rf"\b{_MONTH}\s+(?:\d{{1,2}}(?:st|nd|rd|th)?,?\s+)?(?:19|20)\d{{2}}\b", re.I),
     re.compile(r"\b\d{1,2}[/.-]\d{1,2}[/.-](?:19|20)?\d{2}\b"),
     re.compile(r"\b\d{1,2}/(?:19|20)\d{2}\b"),
     re.compile(r"\b(?:19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|\d{2})\b"),
@@ -447,6 +448,57 @@ def leaked_chatter(text: str) -> Optional[dict[str, str]]:
     return _issue("leaked_chatter", "warn", f"Looks like assistant chat, not CV text: {_listed(quoted)}.")
 
 
+# ── (e) cover letter letterhead + date ─────────────────────────────────────
+
+_EMAIL_IN_TEXT_RE = re.compile(r"(?<![\w.+-])[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}")
+_LETTER_DATE_RES = (
+    re.compile(
+        rf"\b(?:\d{{1,2}}(?:st|nd|rd|th)?\s+)?{_MONTH}\s+(?:\d{{1,2}}(?:st|nd|rd|th)?,?\s+)?(?:19|20)\d{{2}}\b",
+        re.I,
+    ),
+    re.compile(r"\b\d{1,2}[/.-]\d{1,2}[/.-](?:19|20)?\d{2}\b"),
+    re.compile(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b"),
+)
+_LETTER_HEAD_LINES = 8
+_LETTER_HEAD_CHARS = 600
+_SALUTATION_RE = re.compile(r"(?:dear|to whom|hello|hi)\b", re.I)
+
+
+def letter_no_header(text: str, profile: Any = None) -> Optional[dict[str, str]]:
+    """A cover letter is printed verbatim, so its letterhead and date must be in the
+    text. Looks at the first 8 non-blank lines: contact = the profile's email or phone
+    digits (``user_info.contact``) when the profile has them, else ANY email address or
+    phone number; date = a month-name date or a numeric date. Warn only."""
+    lines = [ln for ln in text.splitlines() if ln.strip()][:_LETTER_HEAD_LINES]
+    # The letterhead sits ABOVE the salutation; a date or number in the body is not one.
+    cut = next((i for i, ln in enumerate(lines) if _SALUTATION_RE.match(ln.lstrip()[:20])), None)
+    # Bounded: a letterhead is short, and the regexes below never see a long run.
+    head = "\n".join(lines[:cut] if cut is not None else lines[:4])[:_LETTER_HEAD_CHARS]
+    contact = getattr(getattr(profile, "user_info", None), "contact", None)
+    contact = contact if isinstance(contact, dict) else {}
+    email = str(contact.get("email") or "").strip().casefold()
+    phone = re.sub(r"\D", "", str(contact.get("phone") or ""))
+    if email or phone:
+        has_contact = bool(email and email in head.casefold()) or bool(
+            phone and phone[-9:] in re.sub(r"\D", "", head)
+        )
+    else:  # nothing on file to match: any email address or phone number will do
+        has_contact = bool(_EMAIL_IN_TEXT_RE.search(head)) or any(
+            len(re.sub(r"\D", "", m)) >= 8 and not any(r.fullmatch(m.strip()) for r in _LETTER_DATE_RES)
+            for ln in head.splitlines()  # per line: a phone match must never join a date to the next line
+            for m in _PHONE_RE.findall(ln)
+        )
+    has_date = any(r.search(head) for r in _LETTER_DATE_RES)
+    if has_contact and has_date:
+        return None
+    missing = " and ".join(n for n, ok in (("contact line", has_contact), ("date", has_date)) if not ok)
+    return _issue(
+        "letter_no_header",
+        "warn",
+        f"The letter's first lines have no {missing}: put name, phone | email | city and the date first.",
+    )
+
+
 # ── entry points ────────────────────────────────────────────────────────────
 
 
@@ -454,6 +506,8 @@ def check_text(kind: str, text: str, profile: Any) -> list[dict[str, str]]:
     """All text checks for one saved version. ``profile`` may be ``None`` (then only
     chatter runs - an empty source would flag everything)."""
     out: list[Optional[dict[str, str]]] = [leaked_chatter(text)]
+    if kind == "cover_letter":
+        out.append(letter_no_header(text, profile))
     if profile is not None:
         source = profile_source_text(profile)
         if source.strip():

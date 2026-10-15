@@ -115,6 +115,16 @@ RULES:
    page count, nothing cut off, dates on the right, no orphan heading. Fix
    and save a new version if anything looks wrong.
 
+## Writing the cover letter
+
+Job360 never adds a letterhead when it renders the letter, so the letterhead
+is YOUR text. Line 1 the name; line 2 `phone | email | city` (from the kit contact
+answers); line 3 the date (e.g. "15 October 2026"); a blank line; the company
+(and the recipient if the ad names one); "Dear ..."; 3-4 short paragraphs;
+the sign-off with the name. Truth only: no placeholders like "[Your address]",
+no invented recipient. A letter without a letterhead or a date is flagged in
+`cover_letter.checks` (`letter_no_header`).
+
 ## Apply kit
 
 APPLY KIT: before filling any form call get_application_kit(application_id) —

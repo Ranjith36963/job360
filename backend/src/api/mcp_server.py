@@ -1376,11 +1376,15 @@ def build_server(version: str = "") -> MCPServer:
         found_on: Optional[str] = None,
         posted_at: Optional[str] = None,
         employer_published_at: Optional[str] = None,
+        apply_url: Optional[str] = None,
     ) -> dict[str, Any]:
         """Set or fix the job facts on one application after bring_job:
         `country` (ISO alpha-2, e.g. "FR"; "" clears it), `remote`
         (true/false), `found_on` (same closed set as bring_job; "" clears it),
-        `posted_at` / `employer_published_at` (YYYY-MM-DD from the ad; "" clears).
+        `posted_at` / `employer_published_at` (YYYY-MM-DD from the ad; "" clears),
+        `apply_url` (http(s) link: the employer's working link when the brought one is dead; "" is refused, it
+        never clears; it changes only THIS user's link, and moves the account_site / unknown_site / form_host
+        checks to the new host).
         Only what you pass changes. These are the user's own facts about the
         job — they feed stats (by_country, by_job_source)."""
         given: dict[str, Any] = {
@@ -1388,6 +1392,7 @@ def build_server(version: str = "") -> MCPServer:
             for k, v in (
                 ("country", country), ("remote", remote), ("found_on", found_on),
                 ("posted_at", posted_at), ("employer_published_at", employer_published_at),
+                ("apply_url", apply_url),
             )
             if v is not None
         }

@@ -8941,6 +8941,18 @@
         "additionalProperties": false,
         "description": "Owner decision 2026-10-04 \u2014 set or fix the job's facts after\nbring_job: ISO alpha-2 ``country``, ``remote``, ``found_on`` (closed set\nJOB_FOUND_ON). Only the keys SENT change; an explicit ``null`` (or \"\")\nclears one (rule #29: unset is null, never a default). Validated by\n``job_facts.validate_job_facts`` \u2014 the same rules bring_job uses.",
         "properties": {
+          "apply_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apply Url"
+          },
           "country": {
             "anyOf": [
               {

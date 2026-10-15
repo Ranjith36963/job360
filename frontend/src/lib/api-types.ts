@@ -5953,6 +5953,8 @@ export interface components {
          *     ``job_facts.validate_job_facts`` — the same rules bring_job uses.
          */
         UpdateJobFactsRequest: {
+            /** Apply Url */
+            apply_url?: string | null;
             /** Country */
             country?: string | null;
             /** Employer Published At */

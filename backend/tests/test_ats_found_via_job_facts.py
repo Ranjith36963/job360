@@ -282,6 +282,54 @@ async def test_job_facts_are_per_user_never_on_the_shared_catalog_row(authentica
         conn.close()
 
 
+@pytest.mark.asyncio
+async def test_update_job_apply_url_is_per_user(authenticated_async_context):
+    """A dead aggregator link is replaced by the employer's, on THIS user's
+    application only; the shared catalog row and another user's kit keep the
+    original. Only http(s) with a host; "" is refused, never a clear."""
+    from httpx import ASGITransport
+
+    from src.api.main import app
+    from tests.test_preference_memory import _second_user_session_cookie
+
+    new_url = "https://careers.parisien.example/ml-engineer-1"
+    async with authenticated_async_context() as client:
+        a_app = (await _bring(client, _AD_FR))["application_id"]
+        path = f"/api/applications/{a_app}/job"
+        for bad in ("ftp://x", "", "   ", "not a url", "https://", "http://[bad", "https://x.example/" + "a" * 2049):
+            resp = await client.patch(path, json={"apply_url": bad})
+            assert resp.status_code == 422, (bad, resp.text)
+        kit0 = (await client.get(f"/api/applications/{a_app}/kit")).json()
+        assert kit0["job"]["apply_url"] == _AD_FR["apply_url"], "refused values change nothing"
+
+        resp = await client.patch(path, json={"apply_url": new_url})
+        assert resp.status_code == 200, resp.text
+        kit = (await client.get(f"/api/applications/{a_app}/kit")).json()
+        assert kit["job"]["apply_url"] == new_url
+
+        # Re-bringing the ORIGINAL ad (a job alert repeats it) is the same
+        # posting, never a 409 "different posting".
+        again = await client.post("/api/jobs/bring", json=_AD_FR)
+        assert again.status_code == 200, again.text
+        assert again.json()["application_id"] == a_app
+        # A re-titled repost of an ORIGINAL job-specific link still merges into the same job.
+        board = {**_AD_FR, "company": "Boardco", "apply_url": "https://boards.greenhouse.io/boardco/jobs/12345"}
+        b_id = (await _bring(client, board))["application_id"]
+        moved = await client.patch(f"/api/applications/{b_id}/job", json={"apply_url": "https://boardco.example/careers/1"})
+        assert moved.status_code == 200, moved.text
+        repost = await client.post("/api/jobs/bring", json={**board, "title": board["title"] + " (Repost)"})
+        assert repost.status_code == 200, repost.text
+        assert repost.json()["application_id"] == b_id
+
+    cookie = await _second_user_session_cookie("apply-url-b@example.com")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", cookies={"job360_session": cookie}
+    ) as other:
+        b_app = (await _bring(other, _AD_FR))["application_id"]
+        kit_b = (await other.get(f"/api/applications/{b_app}/kit")).json()
+        assert kit_b["job"]["apply_url"] == _AD_FR["apply_url"], "user B keeps the original link"
+
+
 # ── 3b. Receipt channel closed set ───────────────────────────────────────────
 
 

@@ -86,6 +86,29 @@ def normalize_ad_date(value: Optional[str], name: str = "date") -> Optional[str]
     return day.isoformat()
 
 
+def normalize_apply_url(value: Any) -> str:
+    """The employer's working link: ``http(s)://`` with a host the kit can read
+    (``settings_rules.parse_site_host`` - the same parser the account_site /
+    unknown_site / form_host checks use). Never cleared: "" / null are 422."""
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    from src.services.profile import assistant_settings as settings_rules  # noqa: PLC0415
+
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        raise SpineError(422, "apply_url cannot be empty (it replaces the link, it never clears it)")
+    if len(text) > 2048:
+        raise SpineError(422, "apply_url is too long")
+    bad = "apply_url must be an http(s) link with a host, like https://company.com/careers/1"
+    try:
+        scheme = urlsplit(text).scheme.lower()
+    except ValueError:  # "http://[bad" - unparseable is bad input, never a 500
+        raise SpineError(422, bad) from None
+    if scheme not in ("http", "https") or settings_rules.parse_site_host(text) is None:
+        raise SpineError(422, bad)
+    return text
+
+
 def validate_job_facts(given: Mapping[str, Any]) -> dict[str, Any]:
     """Validate ONLY the fields present in ``given`` (a key with ``None`` =
     clear it). Unknown keys are a programming error, never user input."""
@@ -99,6 +122,8 @@ def validate_job_facts(given: Mapping[str, Any]) -> dict[str, Any]:
     for key in JOB_DATE_FIELDS:
         if key in given:
             out[key] = normalize_ad_date(given[key], key)
+    if "apply_url" in given:
+        out["apply_url"] = normalize_apply_url(given["apply_url"])
     return out
 
 
@@ -117,6 +142,7 @@ def job_facts_view(app_row: Mapping[str, Any]) -> dict[str, Any]:
 _COLUMN = {
     "country": "job_country", "remote": "job_remote", "found_on": "job_found_on",
     "posted_at": "ad_posted_at", "employer_published_at": "employer_published_at",
+    "apply_url": "job_url",  # the per-user link; never the shared jobs.apply_url (rule #10)
 }
 
 
@@ -131,7 +157,9 @@ async def set_job_facts(
     if app_row is None:
         raise SpineError(404, "application not found")
     if not clean:
-        raise SpineError(422, "give at least one of country, remote, found_on, posted_at, employer_published_at")
+        raise SpineError(
+            422, "give at least one of country, remote, found_on, posted_at, employer_published_at, apply_url"
+        )
     now = datetime.now(timezone.utc).isoformat()
     sets = ", ".join(f"{_COLUMN[k]} = ?" for k in clean)
     await db._db.execute(
