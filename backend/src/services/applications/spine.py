@@ -66,6 +66,13 @@ def validate_event_type(event_type: str) -> None:
         )
 
 
+# Reserved payload key (weak spot #4 audit). A converted repeat-applied note carries
+# ``{"confirms": "applied"}``; validate_payload refuses it from callers, so only Job360 writes it.
+# proof.py counts such a note as email proof ONLY with an email source + message_id.
+CONFIRMS_KEY = "confirms"
+CONFIRMS_APPLIED = "applied"
+
+
 def payload_bytes(payload: Mapping[str, Any]) -> int:
     """The SERIALISED size of an event payload, in bytes — what the column
     actually costs, not ``len()`` of the Python object (S5)."""
@@ -89,6 +96,8 @@ def validate_payload(payload: Any, *, max_bytes: Optional[int] = None) -> dict[s
         raise SpineError(422, "payload must be a JSON object")
     if "follow_up_on" in payload:
         raise SpineError(422, "pass follow_up_on as its own field, not inside payload")
+    if CONFIRMS_KEY in payload:  # reserved: only append_event's repeat-applied conversion may write it
+        raise SpineError(422, f"payload key {CONFIRMS_KEY!r} is reserved for Job360 itself")
     size = payload_bytes(payload)
     cap = settings.APPLICATION_EVENT_PAYLOAD_MAX_BYTES if max_bytes is None else max_bytes
     if size > cap:
@@ -567,7 +576,7 @@ async def _event_by_source_message_id(
     ``(application_id, source_message_id)``, backed by the partial UNIQUE
     index `migrations/0041...up.sql`."""
     cur = await db._db.execute(
-        "SELECT id, event_type, occurred_at, recorded_at, recorded_by, scheduled_at "
+        "SELECT id, event_type, detail, occurred_at, recorded_at, recorded_by, scheduled_at "
         "FROM application_events WHERE application_id = ? AND source_message_id = ?",
         (application_id, message_id),
     )
@@ -600,7 +609,9 @@ async def _duplicate_event_result(
     cur = await db._db.execute("SELECT status, follow_up_on FROM applications WHERE id = ?", (application_id,))
     app_row = await cur.fetchone()
     warnings: list[str] = []
-    if requested_type is not None and requested_type != existing["event_type"]:
+    if requested_type is not None and requested_type != existing["event_type"] and not _is_confirmation_of(
+        requested_type, existing
+    ):
         # Same message id, DIFFERENT type: the dedupe stands (nothing written),
         # but say so — otherwise the caller believes its type was recorded.
         get_audit_logger().info(
@@ -659,6 +670,68 @@ async def _replay_follow_up_on(db: JobDatabase, application_id: int) -> Optional
     return None if value is FOLLOW_UP_UNSET else value
 
 
+# Weak spot #4 (2026-10-15) — a second `applied` on an already-applied
+# application (typically the confirmation email arriving after
+# record_application) is not a second status event: it is stored as a note
+# whose detail starts with this prefix, which proof.py already counts as email
+# proof when it also carries an email source + message_id (proof.py). The text prefix alone is NOT
+# proof for new rows: the structured ``confirms`` payload key marks the conversion.
+SUBMISSION_CONFIRMED_PREFIX = "Submission confirmed"
+CHANGE_DATE_HINT = "to change the applied date use corrects_event_id"
+REPEAT_APPLIED_WARNING = (
+    "this application is already applied; recorded as a submission confirmation (proof), "
+    f"not a second applied event; {CHANGE_DATE_HINT}"
+)
+CONFIRMATION_EXISTS_WARNING = (
+    "a submission confirmation without a source is already recorded for this application; nothing written; "
+    f"{CHANGE_DATE_HINT}"
+)
+
+
+def _is_confirmation_of(requested_type: str, existing: dict[str, Any]) -> bool:
+    """A repeat ``applied`` whose message id was already stored as the
+    submission-confirmation note is the SAME fact, not a type mismatch."""
+    return (
+        requested_type == "applied"
+        and existing.get("event_type") == "note"
+        and str(existing.get("detail") or "").startswith(SUBMISSION_CONFIRMED_PREFIX)
+    )
+
+
+async def _has_surviving_applied(db: JobDatabase, application_id: int) -> bool:
+    """An ``applied`` event on this application that no correction superseded."""
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_events e WHERE e.application_id = ? AND e.event_type = 'applied' "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) LIMIT 1",
+        (application_id,),
+    )
+    return await cur.fetchone() is not None
+
+
+async def _existing_confirmation(db: JobDatabase, application_id: int) -> Optional[dict[str, Any]]:
+    """The first surviving converted confirmation note (``payload.confirms == 'applied'``) on this
+    application, else None. Mirrors career-ops reply-watch.mjs:180 (skip a receipt already seen)."""
+    cur = await db._db.execute(
+        "SELECT e.id, e.event_type, e.detail, e.occurred_at, e.recorded_at, e.recorded_by, e.scheduled_at, "
+        "e.payload FROM application_events e WHERE e.application_id = ? AND e.event_type = 'note' "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) ORDER BY e.id",
+        (application_id,),
+    )
+    for row in await cur.fetchall():
+        try:
+            confirms = json.loads(row["payload"] or "{}").get(CONFIRMS_KEY)
+        except (ValueError, AttributeError):
+            continue
+        if confirms == CONFIRMS_APPLIED:
+            return {k: row[k] for k in row.keys() if k != "payload"}
+    return None
+
+
+def _confirmation_detail(detail: str) -> str:
+    text = SUBMISSION_CONFIRMED_PREFIX + (f": {detail}" if detail else "")
+    return text[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS]
+
+
 NO_APPLIED_WARNING = (
     "no applied event recorded for this application — ask the user when they applied, then record_application"
 )
@@ -674,12 +747,7 @@ async def missing_applied_warnings(db: JobDatabase, application_id: int, event_t
     rank = progress_rank(mapped) if mapped else None
     if rank is None or rank <= PROGRESS_RANK["applied"]:
         return []
-    cur = await db._db.execute(
-        "SELECT 1 FROM application_events e WHERE e.application_id = ? AND e.event_type = 'applied' "
-        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) LIMIT 1",
-        (application_id,),
-    )
-    return [] if await cur.fetchone() is not None else [NO_APPLIED_WARNING]
+    return [] if await _has_surviving_applied(db, application_id) else [NO_APPLIED_WARNING]
 
 
 async def append_event(
@@ -696,6 +764,7 @@ async def append_event(
     source: Optional[dict[str, Any]] = None,
     scheduled_at: str = "",
     follow_up_on: Any = FOLLOW_UP_UNSET,
+    repeat_applied_as_confirmation: bool = False,
 ) -> dict[str, Any]:
     """R3/R4 — append one event, then recompute + write-through the status
     cache (and its legacy `stage` projection) in the SAME logical operation.
@@ -744,7 +813,17 @@ async def append_event(
     change. The UNIQUE index still backstops a race between two concurrent
     callers (``pg.IntegrityError``): re-read and return the existing row the
     same way ``save_artifact``'s version race does.
+
+    ``repeat_applied_as_confirmation`` (weak spot #4; the record_event door
+    only, never record_application's receipt path): an ``applied`` with no
+    ``corrects_event_id`` on an application that already has a surviving
+    ``applied`` is stored as a ``note`` whose detail starts
+    ``SUBMISSION_CONFIRMED_PREFIX`` (source, occurred_at and follow_up_on
+    kept) and answered with ``REPEAT_APPLIED_WARNING``. Checked AFTER the
+    source dedupe, so a re-read message id returns the existing row either way.
     """
+    requested_type = event_type
+    warnings: list[str] = []
     if corrects_event_id is not None:
         cur = await db._db.execute(
             "SELECT 1 FROM application_events WHERE id = ? AND application_id = ?",
@@ -760,6 +839,24 @@ async def append_event(
         existing = await _event_by_source_message_id(db, application_id, source["message_id"])
         if existing is not None:
             return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
+
+    if (
+        repeat_applied_as_confirmation
+        and event_type == "applied"
+        and corrects_event_id is None
+        and await _has_surviving_applied(db, application_id)
+    ):
+        if source is None:
+            # No source = no identity: without this a repeat would write a new note every time.
+            existing = await _existing_confirmation(db, application_id)
+            if existing is not None:
+                dup = await _duplicate_event_result(db, application_id, recorded_by, existing, requested_type)
+                dup["warnings"] = [*dup["warnings"], CONFIRMATION_EXISTS_WARNING]
+                return dup
+        event_type = "note"
+        detail = _confirmation_detail(detail)
+        payload = {**(payload or {}), CONFIRMS_KEY: CONFIRMS_APPLIED}
+        warnings.append(REPEAT_APPLIED_WARNING)
 
     # The slot's value BEFORE this event — needed to decide the auto-clear
     # below, and to echo back an unchanged value at the end without a stale
@@ -819,7 +916,7 @@ async def append_event(
         if source is not None:
             existing = await _event_by_source_message_id(db, application_id, source["message_id"])
             if existing is not None:
-                return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
+                return await _duplicate_event_result(db, application_id, recorded_by, existing, requested_type)
         raise
     event_id = cur.lastrowid
 
@@ -873,6 +970,7 @@ async def append_event(
         "already_existed": False,
         "scheduled_at": scheduled_at or None,
         "follow_up_on": final_follow_up_on,
+        **({"warnings": warnings} if warnings else {}),
     }
 
 
