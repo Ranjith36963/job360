@@ -89,6 +89,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/inbox-checked": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Inbox Checked
+         * @description Gmail check slice (2026-10-15): move each application's ``inbox_checked_at``
+         *     cursor forward. The assistant read the mail; Job360 only remembers how far
+         *     (VISION rule 5). All or nothing; never rewinds a newer cursor.
+         */
+        post: operations["mark_inbox_checked_api_applications_inbox_checked_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/job/{job_id}": {
         parameters: {
             query?: never;
@@ -497,11 +519,42 @@ export interface paths {
          *     response. 404 for an application that is not the caller's; 429 over the
          *     hourly cap. Document ``text`` is cut to ``KIT_DOC_TEXT_MAX_CHARS`` (``text_truncated`` /
          *     ``text_more``; ``include_text=false`` sends none); ``approved_text`` keeps the newest
-         *     ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``Cache-Control: no-store``.
+         *     ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``session`` is the assistant
+         *     session's own short label (``kit.clean_session``; 422 otherwise): it is stored on
+         *     the ``kit_read`` so ``hold`` can tell two sessions of one assistant apart.
+         *     ``Cache-Control: no-store``.
          */
         get: operations["get_application_kit_api_applications__application_id__kit_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/kit/form-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Application Form
+         * @description Which questions on the LIVE form already have a saved answer. The assistant reads
+         *     the form, lists every question (optional ones too, ``required=false``) and, for each,
+         *     the kit ``key`` it plans to use. Job360 checks that key really exists in THIS
+         *     application's kit (an ``approved_text`` answer also matches by its question); with no
+         *     key it matches the normalized wording of the question against the user's approved
+         *     answers. No fuzzy matching, no NLP. ``answered`` carries the value and its source
+         *     (``confirmed: false`` = inferred, confirm with the user); ``missing`` is what to ask
+         *     the user, once. Read-only: no event is written. 404 for an application that is not the
+         *     caller's. ``Cache-Control: no-store``.
+         */
+        post: operations["check_application_form_api_applications__application_id__kit_form_check_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -667,8 +720,11 @@ export interface paths {
          *     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
          *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
          *     a stored yes clears neither. An unconfirmed email answers ``ask`` /
-         *     ``email_not_verified``. Read-only. 404 for an application that is not the
-         *     caller's (rule #12).
+         *     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
+         *     ``get_application_kit``; 422 when malformed): another session's live kit hold
+         *     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
+         *     ``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an
+         *     application that is not the caller's (rule #12).
          */
         get: operations["submit_check_api_applications__application_id__submit_check_get"];
         put?: never;
@@ -1405,6 +1461,11 @@ export interface paths {
          *     ``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.
          *     Read-only; email verification is NOT required (an unverified user is told
          *     to verify). No 404 when there is no profile (``profile_exists: false``).
+         *
+         *     Also the MCP tool list as served now (``tools``, ``tools_version``) so an
+         *     assistant can tell its client cached an old one: pass the version it saw
+         *     last as ``client_tools_version`` and ``tools_stale`` says whether it moved
+         *     (null when none was passed).
          */
         get: operations["doctor_api_doctor_get"];
         put?: never;
@@ -2784,6 +2845,11 @@ export interface components {
             contacts: components["schemas"]["ContactOut"][];
             /** Created At */
             created_at: string;
+            /**
+             * Email Senders
+             * @default []
+             */
+            email_senders: string[];
             /** Events */
             events: components["schemas"]["ApplicationEventOut"][];
             fit: components["schemas"]["ApplicationFitOut"] | null;
@@ -2793,6 +2859,8 @@ export interface components {
             follow_up_on: string | null;
             /** Id */
             id: number;
+            /** Inbox Checked At */
+            inbox_checked_at?: string | null;
             /** Interview At */
             interview_at: string | null;
             job: components["schemas"]["ApplicationJobOut"];
@@ -3008,6 +3076,11 @@ export interface components {
             };
             /** Country */
             country?: string | null;
+            /**
+             * Email Senders
+             * @default []
+             */
+            email_senders: string[];
             /** Employer Published At */
             employer_published_at?: string | null;
             /** Events */
@@ -3030,6 +3103,8 @@ export interface components {
             found_on?: string | null;
             /** Id */
             id: number;
+            /** Inbox Checked At */
+            inbox_checked_at?: string | null;
             /** Interview At */
             interview_at?: string | null;
             /** Job Company */
@@ -3735,6 +3810,25 @@ export interface components {
             /** Profile Exists */
             profile_exists: boolean;
             setup: components["schemas"]["DoctorSetup"];
+            /**
+             * Stale Hint
+             * @default
+             */
+            stale_hint: string;
+            /**
+             * Tools
+             * @default {}
+             */
+            tools: {
+                [key: string]: string[];
+            };
+            /** Tools Stale */
+            tools_stale?: boolean | null;
+            /**
+             * Tools Version
+             * @default
+             */
+            tools_version: string;
             /** Waiting Settings */
             waiting_settings: number;
             /** Whats New Hint */
@@ -4006,6 +4100,93 @@ export interface components {
             /** You */
             you: number;
         };
+        /** FormAnsweredOut */
+        FormAnsweredOut: {
+            /** Confirmed */
+            confirmed?: boolean | null;
+            /** Key */
+            key: string;
+            /**
+             * Matched By
+             * @enum {string}
+             */
+            matched_by: "key" | "wording";
+            /** Question */
+            question: string;
+            /** Required */
+            required: boolean;
+            /** Source */
+            source: string;
+            /** Value */
+            value: unknown;
+        };
+        /** FormCheckCountsOut */
+        FormCheckCountsOut: {
+            /** Answered */
+            answered: number;
+            /** Missing */
+            missing: number;
+            /** Missing Required */
+            missing_required: number;
+        };
+        /**
+         * FormCheckOut
+         * @description For every question on the live form: a saved answer from this application's
+         *     kit, or a gap to ask the user about. Job360 only looks up; the assistant reads
+         *     the form and decides.
+         */
+        FormCheckOut: {
+            /** Answered */
+            answered: components["schemas"]["FormAnsweredOut"][];
+            /** Application Id */
+            application_id: number;
+            counts: components["schemas"]["FormCheckCountsOut"];
+            /** Missing */
+            missing: components["schemas"]["FormMissingOut"][];
+            /** Next */
+            next: string;
+            /** Questions Count */
+            questions_count: number;
+        };
+        /**
+         * FormCheckRequest
+         * @description ``POST /applications/{id}/kit/form-check`` body: every question on the live form.
+         */
+        FormCheckRequest: {
+            /**
+             * Form Url
+             * @default
+             */
+            form_url: string;
+            /** Questions */
+            questions: components["schemas"]["FormQuestion"][];
+        };
+        /** FormMissingOut */
+        FormMissingOut: {
+            /** Question */
+            question: string;
+            /** Required */
+            required: boolean;
+            /** Why */
+            why: string;
+        };
+        /**
+         * FormQuestion
+         * @description One question read off a LIVE application form. ``key`` is the kit key the
+         *     assistant plans to answer it with (``contact.email``, ``logistics.notice_period``,
+         *     or the saved ``approved_text`` question).
+         */
+        FormQuestion: {
+            /** Key */
+            key?: string | null;
+            /** Question */
+            question: string;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+        };
         /** GitHubResponse */
         GitHubResponse: {
             /** Merged */
@@ -4029,6 +4210,26 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /**
+         * InboxCheckedIn
+         * @description The assistant read Gmail for these applications up to ``checked_at`` (now when empty).
+         */
+        InboxCheckedIn: {
+            /** Application Ids */
+            application_ids: number[];
+            /**
+             * Checked At
+             * @default
+             */
+            checked_at: string;
+        };
+        /** InboxCheckedOut */
+        InboxCheckedOut: {
+            /** Application Ids */
+            application_ids: number[];
+            /** Inbox Checked At */
+            inbox_checked_at: string;
         };
         /** JobFactsOut */
         JobFactsOut: {
@@ -4138,6 +4339,8 @@ export interface components {
              * @enum {string}
              */
             state: "confirmed" | "inferred" | "sensitive";
+            /** Topic */
+            topic?: string | null;
             /** Value */
             value: unknown;
         };
@@ -4254,12 +4457,30 @@ export interface components {
             /** Url */
             url: string;
         };
-        /** KitHoldOut */
+        /**
+         * KitHoldOut
+         * @description Another assistant session is on this application (weak spot #3, 2026-10-15).
+         *     ``session`` is the other holder's own label (data, never markup; ``""`` = none
+         *     given). ``unsure``: the caller passed no ``session`` and its own assistant read
+         *     the kit under a label - maybe another session of the same assistant (``detail``).
+         */
         KitHoldOut: {
+            /** Detail */
+            detail?: string | null;
             /** Held By */
             held_by: string;
+            /**
+             * Session
+             * @default
+             */
+            session: string;
             /** Since */
             since: string;
+            /**
+             * Unsure
+             * @default false
+             */
+            unsure: boolean;
             /** Until */
             until: string;
         };
@@ -6309,6 +6530,43 @@ export interface operations {
             };
         };
     };
+    mark_inbox_checked_api_applications_inbox_checked_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboxCheckedIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxCheckedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_job_api_applications_job__job_id__get: {
         parameters: {
             query?: never;
@@ -7027,6 +7285,7 @@ export interface operations {
         parameters: {
             query?: {
                 include_text?: boolean;
+                session?: string;
             };
             header?: {
                 authorization?: string | null;
@@ -7047,6 +7306,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationKitOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_application_form_api_applications__application_id__kit_form_check_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormCheckOut"];
                 };
             };
             /** @description Validation Error */
@@ -7358,6 +7656,7 @@ export interface operations {
         parameters: {
             query?: {
                 form_url?: string;
+                session?: string;
             };
             header?: {
                 authorization?: string | null;
@@ -8614,7 +8913,9 @@ export interface operations {
     };
     doctor_api_doctor_get: {
         parameters: {
-            query?: never;
+            query?: {
+                client_tools_version?: string;
+            };
             header?: {
                 authorization?: string | null;
             };

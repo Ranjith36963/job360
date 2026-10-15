@@ -36,7 +36,7 @@ from src.api.auth_deps import (
     require_user,
 )
 from src.api.dependencies import get_request_db
-from src.api.models import JobResponse, LessonsResponse
+from src.api.models import FormCheckOut, FormCheckRequest, JobResponse, LessonsResponse
 from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
@@ -627,6 +627,10 @@ class ApplicationDetailOut(BaseModel):
     follow_up_due: bool
     # S7 - proof of application (email > text > screenshot_only > none).
     proof: ProofOut
+    # Gmail check slice 2026-10-15 - the ATS sender domains to search (`[]` = not a
+    # known ATS) and the time up to which this job's mail was read (null = never).
+    email_senders: list[str] = []
+    inbox_checked_at: Optional[str] = None
 
 
 class ApplicationSummaryOut(BaseModel):
@@ -676,11 +680,26 @@ class ApplicationSummaryOut(BaseModel):
     ad_posted_at: Optional[str] = None
     employer_published_at: Optional[str] = None
     proof: ProofOut
+    # Gmail check slice 2026-10-15 - same pair as ApplicationDetailOut.
+    email_senders: list[str] = []
+    inbox_checked_at: Optional[str] = None
 
 
 class ListApplicationsResponse(BaseModel):
     applications: list[ApplicationSummaryOut]
     total: int
+
+
+class InboxCheckedIn(BaseModel):
+    """The assistant read Gmail for these applications up to ``checked_at`` (now when empty)."""
+
+    application_ids: list[int] = Field(min_length=1)
+    checked_at: str = ""
+
+
+class InboxCheckedOut(BaseModel):
+    application_ids: list[int]
+    inbox_checked_at: str
 
 
 class SaveArtifactResponse(BaseModel):
@@ -739,8 +758,9 @@ class RecordEventResponse(BaseModel):
     status: str
     already_existed: bool
     scheduled_at: Optional[str]
-    # Non-fatal notes: a deduped message_id recorded as another type, or (owner
-    # decision 2026-10-14) a reply/interview/offer with no `applied` event yet.
+    # Non-fatal notes: a deduped message_id recorded as another type, (owner
+    # decision 2026-10-14) a reply/interview/offer with no `applied` event yet,
+    # or a repeat `applied` stored as the submission confirmation (weak spot #4).
     warnings: list[str] = Field(default_factory=list)
     # Owner decision, 2026-09-25 — the CURRENT slot value after this call:
     # the new value when this call set/cleared it, the unchanged value when
@@ -915,6 +935,7 @@ class KitAnswerOut(BaseModel):
     saved_at: Optional[str] = None
     label: Optional[str] = None
     company: Optional[str] = None
+    topic: Optional[str] = None
     # Weak spot #6: who stands behind it. confirmed = the user's (web, user_said, approved
     # wording); inferred = an assistant worked it out; sensitive = equality / sanctions / visa.
     state: Literal["confirmed", "inferred", "sensitive"]
@@ -981,9 +1002,17 @@ class KitDuplicateOut(BaseModel):
 
 
 class KitHoldOut(BaseModel):
+    """Another assistant session is on this application (weak spot #3, 2026-10-15).
+    ``session`` is the other holder's own label (data, never markup; ``""`` = none
+    given). ``unsure``: the caller passed no ``session`` and its own assistant read
+    the kit under a label - maybe another session of the same assistant (``detail``)."""
+
     held_by: str
+    session: str = ""
     since: str
     until: str
+    unsure: bool = False
+    detail: Optional[str] = None
 
 
 class KitKnownAccountOut(BaseModel):
@@ -1421,6 +1450,24 @@ async def list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
             due=due, quiet_days=quiet_days,
         )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+@router.post("/applications/inbox-checked", response_model=InboxCheckedOut, dependencies=AUTH_FIRST)
+async def mark_inbox_checked(
+    body: InboxCheckedIn,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Gmail check slice (2026-10-15): move each application's ``inbox_checked_at``
+    cursor forward. The assistant read the mail; Job360 only remembers how far
+    (VISION rule 5). All or nothing; never rewinds a newer cursor."""
+    from src.services.applications.inbox import mark_checked  # noqa: PLC0415
+
+    try:
+        return await mark_checked(db, user.id, body.application_ids, body.checked_at or None)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover
@@ -1995,6 +2042,7 @@ async def get_application_kit(
     application_id: int,
     response: Response,
     include_text: bool = Query(True),
+    session: str = Query(""),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
@@ -2006,11 +2054,47 @@ async def get_application_kit(
     response. 404 for an application that is not the caller's; 429 over the
     hourly cap. Document ``text`` is cut to ``KIT_DOC_TEXT_MAX_CHARS`` (``text_truncated`` /
     ``text_more``; ``include_text=false`` sends none); ``approved_text`` keeps the newest
-    ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``Cache-Control: no-store``."""
+    ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``session`` is the assistant
+    session's own short label (``kit.clean_session``; 422 otherwise): it is stored on
+    the ``kit_read`` so ``hold`` can tell two sessions of one assistant apart.
+    ``Cache-Control: no-store``."""
     response.headers["Cache-Control"] = "no-store"
     try:
+        label = kit_service.clean_session(session)
         return await kit_service.build_kit(
-            db, user, application_id, now=datetime.now(timezone.utc), include_text=include_text
+            db, user, application_id, now=datetime.now(timezone.utc), include_text=include_text, session=label,
+        )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+@router.post(
+    "/applications/{application_id}/kit/form-check", response_model=FormCheckOut,
+    response_model_exclude_none=True, dependencies=AUTH_FIRST,
+)
+async def check_application_form(
+    application_id: int,
+    body: FormCheckRequest,
+    response: Response,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Which questions on the LIVE form already have a saved answer. The assistant reads
+    the form, lists every question (optional ones too, ``required=false``) and, for each,
+    the kit ``key`` it plans to use. Job360 checks that key really exists in THIS
+    application's kit (an ``approved_text`` answer also matches by its question); with no
+    key it matches the normalized wording of the question against the user's approved
+    answers. No fuzzy matching, no NLP. ``answered`` carries the value and its source
+    (``confirmed: false`` = inferred, confirm with the user); ``missing`` is what to ask
+    the user, once. Read-only: no event is written. 404 for an application that is not the
+    caller's. ``Cache-Control: no-store``."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return await kit_service.check_form(
+            db, user, application_id,
+            questions=[q.model_dump() for q in body.questions], form_url=body.form_url,
+            now=datetime.now(timezone.utc),
         )
     except SpineError as exc:
         _raise(exc)
@@ -2214,6 +2298,7 @@ async def resolve_blocked(
 async def submit_check(
     application_id: int,
     form_url: str = Query("", max_length=2048),
+    session: str = Query(""),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
@@ -2229,17 +2314,23 @@ async def submit_check(
     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
     a stored yes clears neither. An unconfirmed email answers ``ask`` /
-    ``email_not_verified``. Read-only. 404 for an application that is not the
-    caller's (rule #12)."""
+    ``email_not_verified``. ``session`` is the caller's own label (the one it gave
+    ``get_application_kit``; 422 when malformed): another session's live kit hold
+    answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
+    ``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an
+    application that is not the caller's (rule #12)."""
     try:
+        label = kit_service.clean_session(session)
         app_row = await spine.get_owned_application(db, user.id, application_id)
         if app_row is None:
             raise SpineError(404, "application not found")
         now = datetime.now(timezone.utc)
         cfg = settings_rules.effective((load_profile(user.id) or UserProfile()).assistant_settings)
         counts = await settings_rules.load_submit_counts(db, user.id, now)
+        hold = await kit_service.live_hold(db, user, application_id, now, label)
         facts = await kit_service.gate_facts(
-            db, user.id, app_row, email_verified=email_verification_satisfied(user)
+            db, user.id, app_row, email_verified=email_verification_satisfied(user),
+            other_session_hold=kit_service.hold_fact(hold),
         )
     except SpineError as exc:
         _raise(exc)
@@ -2366,6 +2457,9 @@ async def record_event(
             detail=detail, payload=payload, occurred_at=occurred_at, recorded_by=actor_for(user),
             corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
             follow_up_on=follow_up_on_arg,
+            # Weak spot #4: a repeat `applied` (e.g. the confirmation email) is
+            # stored as the submission-confirmation note, never a second applied.
+            repeat_applied_as_confirmation=True,
         )
         if body.event_type == "replied" and source and source.get("sender"):
             # The sender is a person we sent outreach to on this job: mark them

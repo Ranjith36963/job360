@@ -1,6 +1,6 @@
 ---
 name: session-lessons
-description: Mistakes past sessions made in this repo and the rule each one taught. Read BEFORE dispatching parallel workers, opening or watching PRs, handing work to another Claude session, running a real apply / outreach lifecycle for the owner, or writing a CV, letter or outreach note. Append a new lesson whenever you make a mistake the owner had to catch or that cost real time.
+description: Mistakes past sessions made in this repo and the rule each one taught. Read BEFORE dispatching parallel workers, opening or watching PRs, handing work to another Claude session, running a real apply / outreach lifecycle for the owner, or writing a CV, letter or outreach note. Append a new lesson whenever you make a mistake the owner had to catch or that cost real time, and put its one-line rule in .claude/rules/mistakes.md (loads every session).
 ---
 <!-- doc: LIVING | last-verified: 2026-10-15 by the owner ("ask Claude to document its mistakes") -->
 
@@ -33,6 +33,12 @@ delete a lesson; if one stops being true, say so on its line and why.
   once.
 - The WIP limit is 2 open PRs. Extras get `wip:parked`. **Rule:** merge one at a
   time, then remove the label from the next PR.
+- 2026-10-15: a backend CI failure was unreadable: the log tail is Postgres
+  service-container noise and the full-log download host is blocked from the
+  cloud container, so the owner had to paste the failure. **Rule:** read the job
+  summary (failing tests are written there since the failed-tests-in-summary
+  PR). When a head shows few check runs, read the PR's `mergeable_state` first:
+  a CONFLICTING PR runs no CI.
 - CodeRabbit's free tier rate-limits after a few reviews an hour. **Rule:** never
   wait on it; the repo's own reviewer-bugs / reviewer-security / CI are the gate.
 
@@ -85,6 +91,25 @@ delete a lesson; if one stops being true, say so on its line and why.
   when the code no longer guesses (weak spot #2 PR); until then, check the
   receipt after recording it.
 
+## Reference index (open these before "borrowing" anything)
+
+They live in the cloud container's /var/tmp and vanish when it is reclaimed.
+If a path is missing, re-clone the repo, or re-capture the site with the
+Apify web-fetch tool, before you build. Never cite from memory.
+
+- career-ops (terminal OSS): /var/tmp/co-src, https://github.com/career-ops-hq/career-ops
+  (modes/apply.md, scan.mjs, salary-gap.mjs, update-system.mjs, pipeline-lock.mjs, AGENTS.md)
+- neonwatty job-apply-plugin: /var/tmp/refs/job-apply-plugin, https://github.com/neonwatty/job-apply-plugin
+  (skills/answer-memory, skills/job-apply, scripts/job-apply-store.py)
+- trackly-cli: /var/tmp/refs/trackly-cli, https://github.com/kevinastuhuaman/trackly-cli
+- jobctl-claude: /var/tmp/refs/jobctl-claude, https://github.com/DmytroRybka/jobctl-claude
+- JobCtrl: /var/tmp/refs/JobCtrl, https://github.com/ebarti/JobCtrl
+- Tsenta (YC) and 40+ other sites, captured pages: /var/tmp/rea-comp/<site>
+  (tsenta, simplify, huntr, teal, jobright, lazyapply.com, loopcv,
+  jobcopilot.com, jackandjill, jobwyre, aiapply.co, careerflow, himalayas_app,
+  freehire_me, jobspipe_dev, scale.jobs, ...). Summary: /var/tmp/comp-evidence.md.
+  Tsenta's real content is in home-curl.txt (home.txt is a 502 page).
+
 ## Why mistakes repeated (owner, 2026-10-15)
 
 - "Borrowed from <competitor>" was written into PRs while the workers never
@@ -109,6 +134,18 @@ delete a lesson; if one stops being true, say so on its line and why.
   after the merge CONFLICTED and pushed a commit full of conflict markers
   (caught and fixed one commit later). **Rule:** never chain past a merge.
   Check its exit code (or `set -e`), resolve, run the tests, then commit.
+- 2026-10-15: pushes failed CI on the mypy ratchet and, after merging main, on
+  the recipe line cap and MCP tool count. **Rule:** run the ratchet
+  (`cd backend && python scripts/mypy_ratchet.py`) before every backend push, and
+  re-run tests/test_recipes.py + tests/test_outreach_people.py after merging main.
+
+- 2026-10-15: the first round of the 11 weak-spot PRs used 6 references the
+  lead remembered; the 44 captured competitor sites in /var/tmp/rea-comp were
+  never searched, and citations were not checked until the owner asked.
+  **Rule:** before planning a borrowed fix, sweep EVERY source in the
+  reference index for that topic (Haiku can grep), write a plan that quotes
+  file:line or says NOT IN REFERENCE, and have each quote checked against the
+  file (another agent or the lead) before any code is built.
 
 ## Tooling
 

@@ -28,6 +28,7 @@ from typing import Any, cast
 
 from src.core import settings
 from src.services.profile import forgiving
+from src.services.profile.answer_match import TOPIC_MAX_CHARS, TOPIC_PATTERN
 from src.services.profile.countries import is_plain_code, to_iso2
 from src.services.profile.edits import ProfileEditError, _strip_control
 from src.services.profile.models import VALID_LANGUAGE_LEVELS, VALID_WORK_AUTH_STATUSES
@@ -82,7 +83,7 @@ _EQUALITY: dict[str, str] = {
     "gender": "line_or_bool", "ethnicity": "line_or_bool", "disability": "line_or_bool",
     "veteran": "line_or_bool", "sexual_orientation": "line_or_bool", "transgender": "line_or_bool",
 }
-_ANSWER_KEYS = ("question", "answer", "approved", "recorded_at", "company")
+_ANSWER_KEYS = ("question", "answer", "approved", "recorded_at", "company", "topic", "aliases")
 _SALARY_KEYS = ("country", "min", "max", "currency", "period")
 _SALARY_LEGACY_KEY = "amount"  # old single figure: read as min = max, never stored
 PREFER_NOT_TO_SAY = "Prefer not to say"
@@ -606,6 +607,23 @@ def _answers(path: str, value: Any) -> list[dict[str, Any]]:
             company_line = _line(f"{where}.company", company, 200)
             if company_line:
                 record["company"] = company_line
+        topic = raw.get("topic")
+        if topic is not None and topic != "":
+            if not isinstance(topic, str):
+                raise _type_error(f"{where}.topic", "a string", topic)
+            if len(topic) > TOPIC_MAX_CHARS or not TOPIC_PATTERN.match(topic):
+                raise _fail(
+                    f"{where}.topic must be a short stable key of at most {TOPIC_MAX_CHARS} characters "
+                    f"using only letters, digits, _ and . - no spaces (e.g. work_from.IN), got {topic!r}"
+                )
+            record["topic"] = topic
+        aliases = raw.get("aliases")
+        if aliases is not None and aliases != []:
+            if not isinstance(aliases, list) or len(aliases) > 5:
+                raise _fail(f"{where}.aliases must be a list of at most 5 other wordings of the question")
+            cap = settings.USER_INFO_QUESTION_MAX_CHARS
+            clean = [_line(f"{where}.aliases[{j}]", x, cap) for j, x in enumerate(aliases)]
+            record["aliases"] = [x for x in clean if x]
         out.append(record)
     return out
 

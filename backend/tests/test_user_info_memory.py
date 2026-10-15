@@ -1067,3 +1067,15 @@ def test_answer_company_round_trips_empty_is_dropped_and_is_a_capped_line():
     assert "company" not in validate_edit(ANSWERS, [{"question": "Q", "answer": "A", "company": None}])[0]
     assert "company" in _reject(ANSWERS, [{"question": "Q", "answer": "A", "company": "x" * 201}])
     validate_edit(ANSWERS, [{"question": "Q", "answer": "A", "company": "x" * 200}])
+
+
+def test_answer_topic_is_validated_and_old_items_stay_valid():
+    ok = validate_edit(ANSWERS, [
+        {"question": "Work from India?", "answer": "Yes", "approved": True, "topic": "work_from.IN"},
+        {"question": "Old one", "answer": "x"},
+    ])
+    assert ok[0]["topic"] == "work_from.IN" and "topic" not in ok[1]
+    for bad in ("Work From India!", "x" * 61, 5):
+        with pytest.raises(ProfileEditError) as info:
+            validate_edit(ANSWERS, [{"question": "q", "answer": "a", "topic": bad}])
+        assert f"{ANSWERS}[0].topic" in str(info.value)

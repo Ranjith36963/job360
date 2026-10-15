@@ -100,6 +100,7 @@ fold into this. Receipts stay append-only (bring-a-job constraint 4).
 | `update_job` | set or fix the job facts on an application (country, remote, found-on, posted dates) |
 | `check_submit` | may the agent press the final submit? One decision (`submit` / `ask` / `stop`) from the user's settings |
 | `get_application_kit` | everything for filling ONE application form: CV, cover letter, stored answers, and what is missing |
+| `check_form` | before typing into a form: the agent lists every question on the live form; for each, Job360 says whether a saved answer exists (kit key verified, or exact wording of an approved answer) or it is `missing`; read-only |
 | `get_proof_upload_link` | a one-time link to upload the proof screenshot of one application |
 | `get_recipe` | the "run 360" playbooks: numbered steps for the agent to follow (no name = the list) |
 | `ask_user` | raise a question the user must answer when the agent is stuck or would have to guess |
