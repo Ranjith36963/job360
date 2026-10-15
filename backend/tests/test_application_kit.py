@@ -1141,6 +1141,9 @@ async def test_autofill_events_assistants_may_only_deny(authenticated_async_cont
         assert (await agent.post(f"/api/applications/{app_id}/autofill", json={"mode": "deny"})).status_code in (401, 403)
         assert (await _event(agent, app_id, "autofill_set", {"mode": "deny"})).status_code == 201
         assert (await _kit(agent, app_id)).json()["autofill"] == "deny"
+        # The assistant hands over (2026-10-15): otherwise its fresh kit read is another
+        # session's live hold and the user's own check_submit below asks held_by_other_session.
+        assert (await _event(agent, app_id, "hold_released", {"reason": "done"})).status_code == 201
     async with authenticated_async_context() as client:
         state = (await _controls(client, app_id))["autofill"]
         assert state["mode"] == "deny" and state["by"] == "token:claude-code" and state["at"]
