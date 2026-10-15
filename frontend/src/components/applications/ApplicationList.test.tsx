@@ -303,3 +303,40 @@ describe("ApplicationList — fit display (redesign slice 2)", () => {
     expect(labels[1]).toHaveTextContent("Below your line");
   });
 });
+
+describe("ApplicationList — In flight tab (weak spot #3 wave 2)", () => {
+  beforeEach(() => {
+    listApplications.mockReset();
+  });
+
+  it("In flight fetches in_flight=true and renders the stage text", async () => {
+    listApplications.mockImplementation((params: { in_flight?: boolean }) =>
+      Promise.resolve(
+        params.in_flight
+          ? { applications: [summary({ id: 7, job_title: "Held Job", stage: "Reading the kit…" })], total: 1 }
+          : {
+              applications: [summary({ id: 7, job_title: "Held Job" }), summary({ id: 8, job_title: "Free Job" })],
+              total: 2,
+            }
+      )
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Free Job");
+    expect(listApplications).toHaveBeenLastCalledWith({ limit: 50 });
+    fireEvent.click(screen.getByTestId("in-flight-filter"));
+    await waitFor(() => expect(listApplications).toHaveBeenLastCalledWith({ limit: 50, in_flight: true }));
+    expect(await screen.findByTestId("row-stage")).toHaveTextContent("Reading the kit…");
+    expect(screen.queryByText("Free Job")).toBeNull();
+  });
+
+  it("an empty In flight tab keeps the tab row and says nothing is in flight", async () => {
+    listApplications.mockImplementation((params: { in_flight?: boolean }) =>
+      Promise.resolve(params.in_flight ? { applications: [], total: 0 } : { applications: [summary()], total: 1 })
+    );
+    render(<ApplicationList />);
+    await screen.findByText("Staff Engineer");
+    fireEvent.click(screen.getByTestId("in-flight-filter"));
+    expect(await screen.findByText("Nothing is in flight right now.")).toBeInTheDocument();
+    expect(screen.getByTestId("in-flight-filter")).toBeInTheDocument();
+  });
+});

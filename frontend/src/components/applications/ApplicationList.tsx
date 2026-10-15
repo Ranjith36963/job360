@@ -96,6 +96,14 @@ export function ApplicationRows({ applications }: { applications: ApplicationSum
                   />
                   {STATUS_LABEL[app.status] ?? app.status}
                 </span>
+                {/* Weak spot #3 wave 2: the headline stage while another assistant session
+                    holds this application (mirrors Tsenta's two-line "Tailoring résumé /
+                    Reading job description…" status cell; the derivation is Job360's own). */}
+                {app.stage && (
+                  <p data-testid="row-stage" className="mt-1 text-xs text-warning">
+                    {app.stage}
+                  </p>
+                )}
               </div>
 
               {/* 2-6. Everything else — fills the right on wide screens. */}
@@ -190,10 +198,13 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
   // Owner decision, 2026-09-25 — client-side, over the already-fetched page,
   // the same way the status chips filter: no separate `due=true` round trip.
   const [dueOnly, setDueOnly] = useState(false);
+  // Weak spot #3 wave 2: "In flight" asks the server (`in_flight=true`), because the
+  // hold lives in the event log, not in anything the page already fetched.
+  const [inFlight, setInFlight] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    listApplications({ limit })
+    listApplications(inFlight ? { limit, in_flight: true } : { limit })
       .then((res) => {
         if (cancelled) return;
         setApplications(res.applications);
@@ -206,7 +217,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
     return () => {
       cancelled = true;
     };
-  }, [limit]);
+  }, [limit, inFlight]);
 
   // Browser-side only — one chip per status actually present in this list,
   // plus "All". Counts move with the data; there is no server-side facet
@@ -240,7 +251,7 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
     return <p className="text-sm text-muted-foreground">Loading your applications…</p>;
   }
 
-  if (applications.length === 0) {
+  if (applications.length === 0 && !inFlight) {
     return (
       <p className="text-sm text-muted-foreground">
         Nothing yet. Bring a job from your assistant, or the{" "}
@@ -257,15 +268,31 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
       <div data-testid="status-filter" className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => setStatusFilter("all")}
-          aria-pressed={statusFilter === "all"}
+          onClick={() => {
+            setStatusFilter("all");
+            setInFlight(false);
+          }}
+          aria-pressed={statusFilter === "all" && !inFlight}
           className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-            statusFilter === "all"
+            statusFilter === "all" && !inFlight
               ? "bg-primary text-primary-foreground"
               : "bg-primary/10 text-brand hover:bg-primary/20"
           }`}
         >
-          All ({applications.length})
+          All{inFlight ? "" : ` (${applications.length})`}
+        </button>
+        <button
+          type="button"
+          data-testid="in-flight-filter"
+          onClick={() => setInFlight((v) => !v)}
+          aria-pressed={inFlight}
+          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            inFlight
+              ? "bg-warning text-background"
+              : "bg-warning/10 text-warning hover:bg-warning/20"
+          }`}
+        >
+          In flight
         </button>
         {[...statusCounts.entries()].map(([status, count]) => (
           <button
@@ -300,7 +327,9 @@ export function ApplicationList({ limit = 50 }: { limit?: number }) {
       </div>
 
       {visibleApplications && visibleApplications.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No applications with this status.</p>
+        <p className="text-sm text-muted-foreground">
+          {inFlight ? "Nothing is in flight right now." : "No applications with this status."}
+        </p>
       ) : (
         <ApplicationRows applications={visibleApplications ?? []} />
       )}

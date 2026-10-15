@@ -480,6 +480,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/hold/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release Hold
+         * @description "Release" - the user frees an application another assistant session holds (it crashed
+         *     or was closed): appends ``hold_released`` {reason: stopped, by: web}; nothing is rewritten.
+         *     ``{released: false}`` and no event when no hold is live. 404 for an application that is not
+         *     the caller's. Session only: a bearer token is refused, so an assistant can never release
+         *     another session's hold; assistants record ``hold_released`` through ``record_event``.
+         */
+        post: operations["release_hold_api_applications__application_id__hold_release_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/job": {
         parameters: {
             query?: never;
@@ -2878,6 +2902,7 @@ export interface components {
             follow_up_due: boolean;
             /** Follow Up On */
             follow_up_on: string | null;
+            hold?: components["schemas"]["KitHoldOut"] | null;
             /** Id */
             id: number;
             /** Inbox Checked At */
@@ -2893,6 +2918,11 @@ export interface components {
             proof: components["schemas"]["ProofOut"];
             /** Receipts */
             receipts: components["schemas"]["ApplicationReceiptOut"][];
+            /**
+             * Stage
+             * @default
+             */
+            stage: string;
             /** Status */
             status: string;
             /** Updated At */
@@ -3174,6 +3204,7 @@ export interface components {
             follow_up_on?: string | null;
             /** Found On */
             found_on?: string | null;
+            hold?: components["schemas"]["KitHoldOut"] | null;
             /** Id */
             id: number;
             /** Inbox Checked At */
@@ -3214,6 +3245,11 @@ export interface components {
             receipts: number;
             /** Remote */
             remote?: boolean | null;
+            /**
+             * Stage
+             * @default
+             */
+            stage: string;
             /** Status */
             status: string;
             /**
@@ -5805,6 +5841,11 @@ export interface components {
              */
             status: string;
         };
+        /** ReleaseHoldOut */
+        ReleaseHoldOut: {
+            /** Released */
+            released: boolean;
+        };
         /** SaveArtifactRequest */
         SaveArtifactRequest: {
             /** Ats Notes */
@@ -6574,6 +6615,7 @@ export interface operations {
                 offset?: number;
                 due?: boolean;
                 quiet_days?: number | null;
+                in_flight?: boolean;
             };
             header?: {
                 authorization?: string | null;
@@ -7342,6 +7384,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaveFitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    release_hold_api_applications__application_id__hold_release_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseHoldOut"];
                 };
             };
             /** @description Validation Error */
