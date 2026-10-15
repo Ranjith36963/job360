@@ -464,6 +464,8 @@ class ApplicationReceiptOut(BaseModel):
     confirmation: str
     cv_artifact_id: Optional[int]
     cover_letter_artifact_id: Optional[int]
+    # True iff cover_letter_artifact_id is set; False = "Cover letter: not sent".
+    cover_letter_sent: bool = False
     note: str
     # What was actually sent (R8) — stored since 0037, readable since 2026-09-11.
     answers: list[ReceiptAnswerOut] = Field(default_factory=list)
@@ -747,6 +749,8 @@ class RecordApplicationReceiptResponse(BaseModel):
     cv_artifact_id: Optional[int]
     cv_version_no: Optional[int]
     cover_letter_artifact_id: Optional[int]
+    # False when no letter was named: the receipt says no cover letter was sent.
+    cover_letter_sent: bool = False
     channel: str
     # What the caller sent, verbatim (trimmed); '' when none.
     channel_given: str = ""

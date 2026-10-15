@@ -2937,6 +2937,11 @@ export interface components {
             confirmation: string;
             /** Cover Letter Artifact Id */
             cover_letter_artifact_id: number | null;
+            /**
+             * Cover Letter Sent
+             * @default false
+             */
+            cover_letter_sent: boolean;
             /** Cover Letter Text */
             cover_letter_text?: string | null;
             /** Cv Artifact Id */
@@ -2969,6 +2974,11 @@ export interface components {
             confirmation: string;
             /** Cover Letter Artifact Id */
             cover_letter_artifact_id: number | null;
+            /**
+             * Cover Letter Sent
+             * @default false
+             */
+            cover_letter_sent: boolean;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
             /** Fields Filled */
@@ -5089,6 +5099,11 @@ export interface components {
             confirmation?: string | null;
             /** Cover Letter Origin */
             cover_letter_origin: string | null;
+            /**
+             * Cover Letter Sent
+             * @default false
+             */
+            cover_letter_sent: boolean;
             /** Cover Letter Text */
             cover_letter_text: string | null;
             /** Cover Letter Version No */
@@ -5188,6 +5203,11 @@ export interface components {
         ReceiptSummary: {
             /** Channel */
             channel: string;
+            /**
+             * Cover Letter Sent
+             * @default false
+             */
+            cover_letter_sent: boolean;
             /** Has Cover Letter */
             has_cover_letter: boolean;
             /** Has Cv */
@@ -5269,6 +5289,11 @@ export interface components {
             confirmation: string;
             /** Cover Letter Artifact Id */
             cover_letter_artifact_id: number | null;
+            /**
+             * Cover Letter Sent
+             * @default false
+             */
+            cover_letter_sent: boolean;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
             /** Cv Version No */

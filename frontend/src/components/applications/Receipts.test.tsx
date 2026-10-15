@@ -95,4 +95,18 @@ describe("Receipts", () => {
     expect(screen.queryByTestId("receipt-answers")).not.toBeInTheDocument();
     expect(screen.queryByTestId("receipt-fields")).not.toBeInTheDocument();
   });
+
+  it("says the cover letter was not sent when the receipt names none", () => {
+    render(<Receipts receipts={[makeReceipt({ cv_artifact_id: 5, cover_letter_artifact_id: null })]} />);
+
+    expect(screen.getByTestId("receipt-no-cover-letter")).toHaveTextContent("Cover letter: not sent");
+    expect(screen.getByText("CV #5")).toBeInTheDocument();
+  });
+
+  it("shows the letter id and no 'not sent' line when a letter was sent", () => {
+    render(<Receipts receipts={[makeReceipt({ cover_letter_artifact_id: 9, cover_letter_sent: true })]} />);
+
+    expect(screen.getByText("Cover letter #9")).toBeInTheDocument();
+    expect(screen.queryByTestId("receipt-no-cover-letter")).not.toBeInTheDocument();
+  });
 });
