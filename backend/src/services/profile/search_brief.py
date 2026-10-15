@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from src.services.profile.answer_match import resolve_answer
 from src.services.profile.user_info import ANY_COUNTRY, ONSITE_VALUES, USER_INFO_ANSWERS_PATH
 
 RIGHT_TO_WORK_PATH = "user_info.right_to_work"
@@ -71,16 +72,16 @@ _YES = frozenset({"yes", "y", "true"})
 _NO = frozenset({"no", "n", "false"})
 
 
-def _approved_answer(answers: Any, question: str) -> str:
-    """The user's approved answer to ``question`` (matched on the question text,
-    case and spacing ignored), lower-cased; ``""`` when none (never a guess)."""
-    want = " ".join(question.lower().split())
-    for rec in answers if isinstance(answers, list) else []:
-        if not isinstance(rec, dict) or rec.get("approved") is not True:
-            continue
-        if " ".join(str(rec.get("question") or "").lower().split()) == want:
-            return str(rec.get("answer") or "").strip().lower().rstrip(".!")
-    return ""
+def work_from_topic(country: str) -> str:
+    """The fixed topic of the work-from-country gap; an answer saved with it closes the gap."""
+    return f"work_from.{country}"
+
+
+def _approved_answer(answers: Any, question: str, topic: str = "") -> tuple[str, Optional[str]]:
+    """``(reply, note)``: the user's approved answer for the gap (its ``topic``, else the
+    question wording or an alias), lower-cased; ``""`` when none or ambiguous (note says why)."""
+    rec, note = resolve_answer(answers, topic=topic or None, question=question)
+    return (str(rec.get("answer") or "").strip().lower().rstrip(".!") if rec else ""), note
 
 
 def build_search_brief(
@@ -118,11 +119,15 @@ def build_search_brief(
             if country == residence or country not in remote_countries:
                 continue
             question = work_from_question(residence, country)
-            reply = _approved_answer(answers, question)
+            topic = work_from_topic(country)
+            reply, note = _approved_answer(answers, question, topic)
             if reply in _NO:
                 work_from.remove(country)
             elif reply not in _YES:  # no answer, or an unclear one: ask again, never infer consent
-                gaps.append({"path": USER_INFO_ANSWERS_PATH, "country": country, "ask": question})
+                gaps.append({
+                    "path": USER_INFO_ANSWERS_PATH, "country": country, "ask": question, "topic": topic,
+                    **({"note": note} if note else {}),
+                })
     for rec in records:
         country, remote, onsite = rec["country"], rec.get("remote_ok"), rec.get("onsite")
         if not isinstance(remote, bool) and onsite in ONSITE_VALUES:

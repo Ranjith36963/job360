@@ -9,7 +9,8 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    "Send all" on Needs-you. Fill and submit each now: held tabs vanish. **Done when** each job has its yes.
 2. **Open one form, in ONE foreground tab.** Typing only lands in the foreground tab. One browser action at a time
    (two uploads at once both fail). Close the tab after submit. Greenhouse: use the plain embed URL (table).
-   **Done when** the form is loaded and in front.
+   List every question on the form (scroll to the bottom; open collapsed sections) and call `check_form`; ask the
+   user ONCE for its `missing` before typing. **Done when** the form is loaded and in front.
 3. **Upload the CV first.** Some forms parse it and overwrite or wipe fields (Lever, Greenhouse), and a parse can
    freeze the tab. Wait for the parse to finish, then re-read the page. **Done when** the file name shows and the
    page is idle.
@@ -30,6 +31,9 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    `blocked` {reason: safety_block, step: "final submit", page_host}, `hold_released` {reason: blocked}, leave the
    filled tab open and tell the user to press Submit themselves. When they say it went: `unblocked`
    {resolution: user_did_it}, then `record_application`. **Done when** the page shows the confirmation, or `blocked`.
+   Pass a `session` label (same one all conversation) to get_application_kit and check_submit. `hold` set means another
+   session is working this application: tell the user and stop unless they say continue. When you finish or hand over,
+   record `hold_released` {reason: done|stopped}.
 8. **Next form.** Go back to step 2 for the next job on the approved list.
 
 Per ATS (only what was seen):
@@ -44,7 +48,7 @@ Per ATS (only what was seen):
 | Zoho, Wellfound | Zoho renders client-side. Wellfound wants an account and a timed test: `account_needed`. |
 
 Facts a form asks:
-- "Must be located in <country>" or "authorised to work in <country>": answer from the stored record. A willingness
+- "Must be located in <country>" or "authorised to work in <country>": answer from the stored record, confirmed with the user on this form (visa status is `sensitive`). A willingness
   answer ("willing to work from <country>") is NOT a "yes" to either: ask the user.
 - Consent and marketing boxes: the privacy-safe choice (No), unless the user approved that employer. Never tick an
   attestation for the user.

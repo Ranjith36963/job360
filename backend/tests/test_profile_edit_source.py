@@ -155,7 +155,135 @@ def test_kit_marks_inferred_answer_unconfirmed():
     assert inferred["logistics"][0]["confirmed"] is False
     assert "confirmed" not in said["logistics"][0]
     assert "confirmed" not in web["logistics"][0]
-    assert any("confirmed:false" in line for line in kit.KIT_INSTRUCTIONS)
+    # Weak spot #6: the instruction now speaks in states, not in confirmed:false.
+    assert any("state 'inferred'" in line and "source user_said" in line for line in kit.KIT_INSTRUCTIONS)
+    assert not any("confirmed:false" in line for line in kit.KIT_INSTRUCTIONS)
+
+
+# ── Weak spot #6: every kit answer carries a state ──────────────────────────
+
+
+def _kit_rows(path: str, value: Any, source: str, set_by: str = "agent:Claude") -> dict[str, Any]:
+    return {"path": path, "value": value, "set_by": set_by, "set_at": "2026-10-01T00:00:00Z", "source": source}
+
+
+def _full_profile():
+    from src.services.profile.models import CVData, UserInfo, UserProfile
+
+    return UserProfile(
+        cv_data=CVData(),
+        user_info=UserInfo(
+            logistics=dict(NOTICE),
+            contact={"email": "ada@example.com"},
+            right_to_work={"citizenship": "GB", "sanctions_country_citizen": "prefer not to say"},
+            equality={"gender": "prefer not to say"},
+            answers=[{"question": "Why us?", "answer": "Because.", "approved": True,
+                      "recorded_at": "2026-10-01T00:00:00Z"}],
+        ),
+    )
+
+
+def test_assistant_write_marked_user_said_is_confirmed():
+    from src.services.applications import kit
+
+    answers, _ = kit.compute_answers(_full_profile(), [_kit_rows(LOGI, NOTICE, "user_said")], "GB")
+    item = answers["logistics"][0]
+    assert item["state"] == "confirmed"
+    assert "confirmed" not in item
+
+
+def test_assistant_write_agent_inferred_is_inferred_and_keeps_confirmed_false():
+    from src.services.applications import kit
+
+    answers, _ = kit.compute_answers(_full_profile(), [_kit_rows(LOGI, NOTICE, "agent_inferred")], "GB")
+    item = answers["logistics"][0]
+    assert item["state"] == "inferred"
+    assert item["confirmed"] is False
+
+
+def test_approved_text_is_confirmed_even_when_an_assistant_wrote_it_inferred():
+    from src.services.applications import kit
+
+    rows = [_kit_rows("user_info.answers", [], "agent_inferred")]
+    answers, _ = kit.compute_answers(_full_profile(), rows, "GB")
+    item = answers["approved_text"][0]
+    assert (item["key"], item["state"]) == ("Why us?", "confirmed")
+    assert "confirmed" not in item
+
+
+def test_equality_and_sanctions_are_sensitive_whoever_wrote_them():
+    from src.services.applications import kit
+
+    rows = [
+        _kit_rows("user_info.equality", {}, "user_said"),
+        _kit_rows("user_info.right_to_work", {}, "agent_inferred"),
+    ]
+    answers, _ = kit.compute_answers(_full_profile(), rows, "GB")
+    assert [(i["key"], i["state"]) for i in answers["equality"]] == [("equality.gender", "sensitive")]
+    rtw = {i["key"]: i for i in answers["right_to_work"]}
+    assert rtw["right_to_work.sanctions_country_citizen"]["state"] == "sensitive"
+    # confirmed:false stays where it was (back-compat); citizenship is plainly inferred.
+    assert rtw["right_to_work.sanctions_country_citizen"]["confirmed"] is False
+    assert rtw["right_to_work.citizenship"]["state"] == "inferred"
+
+
+def test_answers_summary_counts_each_state():
+    from src.services.applications import kit
+
+    rows = [
+        _kit_rows(LOGI, NOTICE, "agent_inferred"),  # logistics.notice_period -> inferred
+        _kit_rows("user_info.contact", {}, "user_said"),  # contact.email -> confirmed
+        _kit_rows("user_info.right_to_work", {}, "agent_inferred"),  # citizenship inferred, sanctions sensitive
+    ]
+    answers, _ = kit.compute_answers(_full_profile(), rows, "GB")
+    states = sorted(i["state"] for block in answers.values() for i in block)
+    assert states == ["confirmed", "confirmed", "inferred", "inferred", "sensitive", "sensitive"]
+    # contact.email + approved_text = 2 confirmed; notice + citizenship = 2 inferred; equality + sanctions = 2.
+    assert kit.answers_summary(answers) == {"confirmed": 2, "inferred": 2, "sensitive": 2}
+
+
+def test_a_profile_item_an_assistant_inferred_is_inferred():
+    from src.services.applications import kit
+    from src.services.profile.models import CVData, UserProfile
+
+    profile = UserProfile(cv_data=CVData(name="Ada Lovelace"))
+    inferred, _ = kit.compute_answers(profile, [_kit_rows("cv_data.name", "Ada Lovelace", "agent_inferred")], "GB")
+    parsed, _ = kit.compute_answers(profile, [], "GB")
+    assert inferred["contact"][0]["state"] == "inferred" and "confirmed" not in inferred["contact"][0]
+    assert parsed["contact"][0]["state"] == "confirmed"
+
+
+def test_setup_recipe_tells_the_assistant_to_save_the_users_words_as_user_said():
+    from src.api.routes.recipes import load_recipe
+
+    assert "user_said" in load_recipe("setup").text
+    assert "user_said" in load_recipe("rules").text
+
+
+@pytest.mark.asyncio
+async def test_kit_route_carries_state_and_answers_summary(authenticated_async_context, fixture_user_id):
+    """End to end: a user_said write over MCP's route reads confirmed, an inferred one inferred."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        token = await _mint_token(client)
+        resp = await client.post("/api/jobs/bring", json={
+            "title": "Data Engineer", "company": "Acme", "apply_url": "https://jobs.example.com/acme/1",
+            "description": "Build pipelines.", "country": "GB",
+        })
+        assert resp.status_code in (200, 201), resp.text
+        app_id = resp.json()["application_id"]
+    async with _bearer_client(token) as agent:
+        resp = await agent.patch("/api/profile", json={"edits": [
+            _edit("user_said"),
+            {"path": "user_info.contact", "value": {"email": "ada@example.com"}, "source": "agent_inferred"},
+        ]})
+        assert resp.status_code == 200, resp.text
+        kit_body = (await agent.get(f"/api/applications/{app_id}/kit")).json()
+    logi = kit_body["answers"]["logistics"][0]
+    email = next(i for i in kit_body["answers"]["contact"] if i["key"] == "contact.email")
+    assert (logi["key"], logi["state"]) == ("logistics.notice_period", "confirmed")
+    assert email["state"] == "inferred"
+    assert kit_body["answers_summary"]["inferred"] >= 1 and kit_body["answers_summary"]["confirmed"] >= 1
 
 
 @pytest.mark.asyncio
@@ -177,3 +305,64 @@ async def test_legacy_agent_rows_read_unconfirmed(authenticated_async_context, f
     row = next(r for r in body["agent_edits"] if r["path"] == LOGI)
     assert row["source"] == ""
     assert row["confirmed"] is False
+
+
+# ── Sensitive answers mirror the job-apply-plugin reference (re-confirmed before every use) ──
+
+
+def test_visa_fields_are_sensitive_and_citizenship_is_not():
+    from src.services.applications import kit
+    from src.services.profile.models import CVData, UserInfo, UserProfile
+
+    profile = UserProfile(
+        cv_data=CVData(),
+        user_info=UserInfo(right_to_work={
+            "citizenship": "GB",
+            "countries": [{"country": "gb", "work_authorization": "citizen", "needs_sponsorship": False}],
+        }),
+    )
+    rows = [_kit_rows("user_info.right_to_work", {}, "user_said", set_by="web")]
+    answers, _ = kit.compute_answers(profile, rows, "GB")
+    rtw = {i["key"]: i for i in answers["right_to_work"]}
+    assert rtw["right_to_work.GB.work_authorization"]["state"] == "sensitive"
+    assert rtw["right_to_work.GB.needs_sponsorship"]["state"] == "sensitive"
+    assert rtw["right_to_work.GB.needs_sponsorship"]["value"] is False
+    assert rtw["right_to_work.citizenship"]["state"] == "confirmed"
+    assert "confirmed_at" not in rtw["right_to_work.GB.work_authorization"]
+
+
+def test_instructions_say_confirm_sensitive_on_this_form_never_ask_again_is_gone():
+    from src.services.applications import kit
+
+    text = " ".join(kit.KIT_INSTRUCTIONS)
+    assert "never ask again" not in text
+    assert "is shown to the user and confirmed on THIS form before it is used; never fill it silently" in text
+    assert "visa / right-to-work status" in text
+
+
+def test_confirmed_items_carry_confirmed_at_and_inferred_do_not():
+    from src.services.applications import kit
+
+    rows = [
+        _kit_rows(LOGI, NOTICE, "user_said"),
+        _kit_rows("user_info.contact", {}, "agent_inferred"),
+    ]
+    answers, _ = kit.compute_answers(_full_profile(), rows, "GB")
+    notice = answers["logistics"][0]
+    assert notice["state"] == "confirmed"
+    assert notice["confirmed_at"] == "2026-10-01T00:00:00Z"
+    email = answers["contact"][0]
+    assert email["state"] == "inferred"
+    assert "confirmed_at" not in email
+    # No stored time (profile-sourced item): nothing to say.
+    assert all("confirmed_at" not in i for i in answers["equality"])
+
+
+def test_salary_is_sensitive_like_the_reference():
+    """neonwatty answer-memory SKILL.md L131: salary is sensitive - ask before every use."""
+    from src.services.applications import kit  # noqa: PLC0415
+    assert kit._is_sensitive("salary", "salary.IN") is True
+    assert kit._is_sensitive("logistics", "logistics.current_salary") is True
+    assert kit._is_sensitive("logistics", "logistics.notice_period") is False
+    text = " ".join(kit.KIT_INSTRUCTIONS)
+    assert "may I use it on this form, and may I remember it for later" in text
