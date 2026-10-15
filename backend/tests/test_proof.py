@@ -353,7 +353,8 @@ async def test_the_level_is_the_strongest_proof_and_a_correction_withdraws_text(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "event_type,detail,source,level",
-    [("note", "Submission confirmed on the page", None, "email"), ("note", "SUBMISSION CONFIRMED", None, "email"),
+    [("note", "Submission confirmed on the page", None, "none"), ("note", "SUBMISSION CONFIRMED", None, "none"),
+     ("note", "Submission confirmed: yes", None, "none"),
      ("note", "", EMAIL, "none"), ("note", "the portal said submission confirmed", None, "none"),
      ("note", "Submission confirmed", EMAIL, "email"), ("applied", "", EMAIL, "email"),
      ("applied", "I applied", None, "none"), ("lesson", "submission confirmed", None, "none")],
@@ -364,6 +365,18 @@ async def test_what_counts_as_email_proof(authenticated_async_context, event_typ
         resp = await _ev(client, app_id, event_type, {}, detail=detail, **({"source": source} if source else {}))
         assert resp.status_code == 201, resp.text
         assert (await _proof(client, app_id))["proof"]["level"] == level
+
+
+@pytest.mark.asyncio
+async def test_a_user_note_with_the_confirmation_text_and_no_email_source_is_not_email_proof(
+    authenticated_async_context,
+):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        await _ev(client, app_id, "applied", {})
+        await _ev(client, app_id, "note", {}, detail="Submission confirmed: yes")
+        p = (await _proof(client, app_id))["proof"]
+        assert (p["has_email"], p["level"], p["email_seen_at"]) == (False, "none", None)
 
 
 @pytest.mark.asyncio
