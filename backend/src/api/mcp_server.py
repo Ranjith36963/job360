@@ -825,7 +825,8 @@ def build_server(version: str = "") -> MCPServer:
         applied_at: Optional[str] = None,
         application_id: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Record that the user has applied to this job — ONLY after they say so. Pass
+        """Record that the user has applied to this job — ONLY after they say so, or an
+        employer's confirmation email in their Gmail proves it (name it in `note`). Pass
         `application_id` (the same id every other tool takes); `job_id` still works
         but is the older form — if you give both they must belong together. Freezes
         the named CV version (the newest saved one, with a warning, if none named), the
@@ -984,7 +985,9 @@ def build_server(version: str = "") -> MCPServer:
         arrived (soonest first); `quiet_days` — only applications with no
         activity in that many days. Both skip closed applications (rejected/
         withdrawn/ghosted). The daily-check routine ends its run with one call
-        of each."""
+        of each. Gmail check: `email_senders` = the ATS domains to add as
+        `from:` (mail that never names the company), `inbox_checked_at` = read
+        only mail after it (null = since the application was added)."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(
@@ -996,6 +999,26 @@ def build_server(version: str = "") -> MCPServer:
             raise _tool_error(exc) from None
         _audit("list_applications", "ok", count=len(resp.get("applications", [])))
         return {**resp, "assistant_hint": ASSISTANT_HINT}
+
+    @mcp.tool()
+    async def mark_inbox_checked(application_ids: list[int], checked_at: str = "") -> dict[str, Any]:
+        """After you read the user's Gmail for these applications, say how far you read:
+        `checked_at` = ISO-8601 with timezone (empty = now). Each row's `inbox_checked_at`
+        moves forward (never back), so your next check reads only newer mail. Job360 reads
+        no email; this stores the cursor only. All or nothing: an id that is not the
+        user's refuses the whole call."""
+        try:
+            body = applications_route.InboxCheckedIn(application_ids=application_ids, checked_at=checked_at)
+        except ValidationError as exc:
+            raise _validation_error(exc) from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.mark_inbox_checked(body, db, _user())
+        except HTTPException as exc:
+            _audit("mark_inbox_checked", "error", http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit("mark_inbox_checked", "ok", count=len(resp.get("application_ids", [])))
+        return resp
 
     @mcp.tool()
     async def save_artifact(

@@ -560,6 +560,14 @@
             "title": "Created At",
             "type": "string"
           },
+          "email_senders": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Email Senders",
+            "type": "array"
+          },
           "events": {
             "items": {
               "$ref": "#/components/schemas/ApplicationEventOut"
@@ -595,6 +603,17 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "inbox_checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbox Checked At"
           },
           "interview_at": {
             "anyOf": [
@@ -1280,6 +1299,14 @@
             ],
             "title": "Country"
           },
+          "email_senders": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Email Senders",
+            "type": "array"
+          },
           "employer_published_at": {
             "anyOf": [
               {
@@ -1341,6 +1368,17 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "inbox_checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbox Checked At"
           },
           "interview_at": {
             "anyOf": [
@@ -3780,6 +3818,50 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "InboxCheckedIn": {
+        "description": "The assistant read Gmail for these applications up to ``checked_at`` (now when empty).",
+        "properties": {
+          "application_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Application Ids",
+            "type": "array"
+          },
+          "checked_at": {
+            "default": "",
+            "title": "Checked At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_ids"
+        ],
+        "title": "InboxCheckedIn",
+        "type": "object"
+      },
+      "InboxCheckedOut": {
+        "properties": {
+          "application_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Application Ids",
+            "type": "array"
+          },
+          "inbox_checked_at": {
+            "title": "Inbox Checked At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_ids",
+          "inbox_checked_at"
+        ],
+        "title": "InboxCheckedOut",
         "type": "object"
       },
       "JobFactsOut": {
@@ -9768,6 +9850,82 @@
           }
         },
         "summary": "Export History",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/inbox-checked": {
+      "post": {
+        "description": "Gmail check slice (2026-10-15): move each application's ``inbox_checked_at``\ncursor forward. The assistant read the mail; Job360 only remembers how far\n(VISION rule 5). All or nothing; never rewinds a newer cursor.",
+        "operationId": "mark_inbox_checked_api_applications_inbox_checked_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxCheckedIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxCheckedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Inbox Checked",
         "tags": [
           "applications"
         ]
