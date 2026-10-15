@@ -1714,6 +1714,17 @@
             "title": "Asked By",
             "type": "string"
           },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
           "context": {
             "title": "Context",
             "type": "string"
@@ -12443,6 +12454,81 @@
           }
         },
         "summary": "Answer Ask",
+        "tags": [
+          "asks"
+        ]
+      }
+    },
+    "/api/asks/{ask_id}/confirm": {
+      "post": {
+        "description": "The user confirms a relayed chat answer. Web session only: an assistant\ncan never confirm for the user, so there is deliberately no MCP tool.",
+        "operationId": "confirm_ask_api_asks__ask_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ask_id",
+            "required": true,
+            "schema": {
+              "title": "Ask Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Ask",
         "tags": [
           "asks"
         ]

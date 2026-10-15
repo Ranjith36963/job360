@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ASKS_CHANGED_EVENT, answerAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
+import { ASKS_CHANGED_EVENT, answerAsk, confirmAsk, getAssistantSettings, listAsks, withdrawAsk } from "@/lib/api";
 import type { Ask } from "@/lib/api";
 import { MorningCheck } from "./MorningCheck";
 import { ReadyToSend } from "./ReadyToSend";
@@ -103,6 +103,24 @@ export function AskCard({
               ? "You answered on Job360"
               : "Your assistant recorded your answer from chat"}
           </p>
+          {ask.relayed_from_chat &&
+            (ask.confirmed_at ? (
+              <p className="text-xs font-medium" data-testid="ask-confirmed">
+                You confirmed
+              </p>
+            ) : (
+              <div>
+                <button
+                  type="button"
+                  data-testid="confirm-relayed"
+                  disabled={busy}
+                  onClick={() => void run(() => confirmAsk(ask.id), "Could not confirm this answer.")}
+                  className={confirmBtn}
+                >
+                  {busy ? "Confirming…" : "Confirm"}
+                </button>
+              </div>
+            ))}
           <div>
             <button
               type="button"

@@ -780,6 +780,10 @@ export async function answerAsk(id: number, answer: string): Promise<Ask> {
   });
 }
 
+export async function confirmAsk(id: number): Promise<Ask> {
+  return request<Ask>(`/api/asks/${id}/confirm`, { method: "POST" });
+}
+
 export async function withdrawAsk(id: number): Promise<Ask> {
   return request<Ask>(`/api/asks/${id}/withdraw`, { method: "POST" });
 }

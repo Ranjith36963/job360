@@ -731,6 +731,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asks/{ask_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Ask
+         * @description The user confirms a relayed chat answer. Web session only: an assistant
+         *     can never confirm for the user, so there is deliberately no MCP tool.
+         */
+        post: operations["confirm_ask_api_asks__ask_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asks/{ask_id}/withdraw": {
         parameters: {
             query?: never;
@@ -3164,6 +3185,8 @@ export interface components {
             asked_at: string;
             /** Asked By */
             asked_by: string;
+            /** Confirmed At */
+            confirmed_at?: string | null;
             /** Context */
             context: string;
             /** Id */
@@ -7471,6 +7494,41 @@ export interface operations {
                 "application/json": components["schemas"]["AnswerAskRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_ask_api_asks__ask_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                ask_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

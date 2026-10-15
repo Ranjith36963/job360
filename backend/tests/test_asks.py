@@ -515,3 +515,52 @@ async def test_mcp_answer_ask_user_words_matches_the_route(authenticated_async_c
         stored = {a["id"]: a for a in (await web.get("/api/asks?status=answered")).json()["asks"]}
         assert stored[ids[0]]["user_words"] == "about 55k I think" and stored[ids[0]]["said_by"] == "you"
         assert stored[ids[1]]["said_by"] == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_user_confirms_a_relayed_answer_once_and_a_changed_answer_unconfirms(authenticated_async_context):
+    token = await _mint_token(authenticated_async_context)
+    async with authenticated_async_context() as web:
+        ask_id = (await _ask(web)).json()["id"]
+        assert (await web.post(f"/api/asks/{ask_id}/confirm")).status_code == 409  # nothing answered yet
+    from src.api.main import app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        answer = {"answer": "Two months", "user_words": "two months"}
+        assert (await agent.post(f"/api/asks/{ask_id}/answer", json=answer)).json()["confirmed_at"] is None
+        # an assistant can never confirm for the user
+        assert (await agent.post(f"/api/asks/{ask_id}/confirm")).status_code == 403
+    async with authenticated_async_context() as web:
+        first = (await web.post(f"/api/asks/{ask_id}/confirm")).json()
+        assert first["confirmed_at"] and first["relayed_from_chat"] is True
+        again = (await web.post(f"/api/asks/{ask_id}/confirm")).json()
+        assert again["confirmed_at"] == first["confirmed_at"]  # set once
+        assert (await web.get("/api/asks?status=answered")).json()["asks"][0]["confirmed_at"] == first["confirmed_at"]
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"Authorization": f"Bearer {token}"}
+    ) as agent:
+        changed = {"answer": "Three months", "user_words": "actually three"}
+        assert (await agent.post(f"/api/asks/{ask_id}/answer", json=changed)).json()["confirmed_at"] is None
+    async with authenticated_async_context() as web:
+        assert (await web.post(f"/api/asks/{ask_id}/confirm")).json()["confirmed_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_confirm_needs_a_relayed_answer_and_is_per_user(authenticated_async_context):
+    async with authenticated_async_context() as web:
+        ask_id = (await _ask(web)).json()["id"]
+        await web.post(f"/api/asks/{ask_id}/answer", json={"answer": "Two months"})
+        assert (await web.post(f"/api/asks/{ask_id}/confirm")).status_code == 409  # the user's own web answer
+        assert (await web.post("/api/asks/999999/confirm")).status_code == 404
+    cookie = await _second_user_session_cookie("other-confirm@example.com")
+    async with _session_client(cookie) as other:
+        assert (await other.post(f"/api/asks/{ask_id}/confirm")).status_code == 404
+
+
+def test_no_mcp_tool_confirms_an_ask():
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "src" / "api" / "mcp_server.py").read_text(encoding="utf-8")
+    assert "confirm_ask" not in src
