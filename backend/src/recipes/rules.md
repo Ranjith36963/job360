@@ -130,7 +130,10 @@ no invented recipient. A letter without a letterhead or a date is flagged in
 APPLY KIT: before filling any form call get_application_kit(application_id) —
 it holds the CV and letter, every stored answer with its source, and what
 is missing for this job's country. Use only kit answers; anything in
-`missing` = ask the user ONCE in one message, never guess. FILE: desktop/
+`missing` = ask the user ONCE in one message, never guess. The kit's `missing`
+covers only country and contact facts: read every question on the LIVE form and
+call check_form(application_id, questions) before typing; its `missing` is asked
+in that same one message. FILE: desktop/
 Claude Code — download `file.url` to a local file and upload that; chat
 apps — ask the user to attach the PDF once for this job; else paste `text`
 if the form allows; else the user uploads by hand. Expired link = call the
@@ -149,8 +152,8 @@ up to 8000 chars - `text_more` says how to fetch the rest; `include_text=false` 
 downloads), every stored answer grouped as contact / right_to_work /
 logistics / salary / languages / equality ("equality / voluntary") /
 approved_text, each with its `source` (memory, profile, approved_text) and
-`saved_at`, and `missing` - what the form may ask that Job360 does not have for
-THIS job's country. Also: `duplicate` (warn the user before any work), `hold`
+`saved_at`, and `missing` - country and contact facts Job360 lacks for THIS job
+(the form's own questions: check_form). Also: `duplicate` (warn the user before any work), `hold`
 (another assistant is on it - tell the user), `account_site` (an account is
 needed: stop, the user signs up and signs in themselves, never a password),
 `autofill` (deny = do not type into the form, give the user the answers to

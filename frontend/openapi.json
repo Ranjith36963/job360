@@ -3650,6 +3650,208 @@
         "title": "FitAxisOut",
         "type": "object"
       },
+      "FormAnsweredOut": {
+        "properties": {
+          "confirmed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "matched_by": {
+            "enum": [
+              "key",
+              "wording"
+            ],
+            "title": "Matched By",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "question",
+          "required",
+          "key",
+          "value",
+          "source",
+          "matched_by"
+        ],
+        "title": "FormAnsweredOut",
+        "type": "object"
+      },
+      "FormCheckCountsOut": {
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "integer"
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "integer"
+          },
+          "missing_required": {
+            "title": "Missing Required",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "answered",
+          "missing",
+          "missing_required"
+        ],
+        "title": "FormCheckCountsOut",
+        "type": "object"
+      },
+      "FormCheckOut": {
+        "description": "For every question on the live form: a saved answer from this application's\nkit, or a gap to ask the user about. Job360 only looks up; the assistant reads\nthe form and decides.",
+        "properties": {
+          "answered": {
+            "items": {
+              "$ref": "#/components/schemas/FormAnsweredOut"
+            },
+            "title": "Answered",
+            "type": "array"
+          },
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/FormCheckCountsOut"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/FormMissingOut"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "next": {
+            "title": "Next",
+            "type": "string"
+          },
+          "questions_count": {
+            "title": "Questions Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "application_id",
+          "questions_count",
+          "answered",
+          "missing",
+          "counts",
+          "next"
+        ],
+        "title": "FormCheckOut",
+        "type": "object"
+      },
+      "FormCheckRequest": {
+        "additionalProperties": false,
+        "description": "``POST /applications/{id}/kit/form-check`` body: every question on the live form.",
+        "properties": {
+          "form_url": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Form Url",
+            "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/FormQuestion"
+            },
+            "maxItems": 80,
+            "minItems": 1,
+            "title": "Questions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "questions"
+        ],
+        "title": "FormCheckRequest",
+        "type": "object"
+      },
+      "FormMissingOut": {
+        "properties": {
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "required",
+          "why"
+        ],
+        "title": "FormMissingOut",
+        "type": "object"
+      },
+      "FormQuestion": {
+        "additionalProperties": false,
+        "description": "One question read off a LIVE application form. ``key`` is the kit key the\nassistant plans to answer it with (``contact.email``, ``logistics.notice_period``,\nor the saved ``approved_text`` question).",
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "question": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "FormQuestion",
+        "type": "object"
+      },
       "GitHubResponse": {
         "properties": {
           "merged": {
@@ -11325,6 +11527,91 @@
           }
         },
         "summary": "Get Application Kit",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/kit/form-check": {
+      "post": {
+        "description": "Which questions on the LIVE form already have a saved answer. The assistant reads\nthe form, lists every question (optional ones too, ``required=false``) and, for each,\nthe kit ``key`` it plans to use. Job360 checks that key really exists in THIS\napplication's kit (an ``approved_text`` answer also matches by its question); with no\nkey it matches the normalized wording of the question against the user's approved\nanswers. No fuzzy matching, no NLP. ``answered`` carries the value and its source\n(``confirmed: false`` = inferred, confirm with the user); ``missing`` is what to ask\nthe user, once. Read-only: no event is written. 404 for an application that is not the\ncaller's. ``Cache-Control: no-store``.",
+        "operationId": "check_application_form_api_applications__application_id__kit_form_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FormCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormCheckOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Application Form",
         "tags": [
           "applications"
         ]

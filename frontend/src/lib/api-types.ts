@@ -508,6 +508,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/kit/form-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Application Form
+         * @description Which questions on the LIVE form already have a saved answer. The assistant reads
+         *     the form, lists every question (optional ones too, ``required=false``) and, for each,
+         *     the kit ``key`` it plans to use. Job360 checks that key really exists in THIS
+         *     application's kit (an ``approved_text`` answer also matches by its question); with no
+         *     key it matches the normalized wording of the question against the user's approved
+         *     answers. No fuzzy matching, no NLP. ``answered`` carries the value and its source
+         *     (``confirmed: false`` = inferred, confirm with the user); ``missing`` is what to ask
+         *     the user, once. Read-only: no event is written. 404 for an application that is not the
+         *     caller's. ``Cache-Control: no-store``.
+         */
+        post: operations["check_application_form_api_applications__application_id__kit_form_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/{application_id}/proof": {
         parameters: {
             query?: never;
@@ -3974,6 +4002,93 @@ export interface components {
             /** You */
             you: number;
         };
+        /** FormAnsweredOut */
+        FormAnsweredOut: {
+            /** Confirmed */
+            confirmed?: boolean | null;
+            /** Key */
+            key: string;
+            /**
+             * Matched By
+             * @enum {string}
+             */
+            matched_by: "key" | "wording";
+            /** Question */
+            question: string;
+            /** Required */
+            required: boolean;
+            /** Source */
+            source: string;
+            /** Value */
+            value: unknown;
+        };
+        /** FormCheckCountsOut */
+        FormCheckCountsOut: {
+            /** Answered */
+            answered: number;
+            /** Missing */
+            missing: number;
+            /** Missing Required */
+            missing_required: number;
+        };
+        /**
+         * FormCheckOut
+         * @description For every question on the live form: a saved answer from this application's
+         *     kit, or a gap to ask the user about. Job360 only looks up; the assistant reads
+         *     the form and decides.
+         */
+        FormCheckOut: {
+            /** Answered */
+            answered: components["schemas"]["FormAnsweredOut"][];
+            /** Application Id */
+            application_id: number;
+            counts: components["schemas"]["FormCheckCountsOut"];
+            /** Missing */
+            missing: components["schemas"]["FormMissingOut"][];
+            /** Next */
+            next: string;
+            /** Questions Count */
+            questions_count: number;
+        };
+        /**
+         * FormCheckRequest
+         * @description ``POST /applications/{id}/kit/form-check`` body: every question on the live form.
+         */
+        FormCheckRequest: {
+            /**
+             * Form Url
+             * @default
+             */
+            form_url: string;
+            /** Questions */
+            questions: components["schemas"]["FormQuestion"][];
+        };
+        /** FormMissingOut */
+        FormMissingOut: {
+            /** Question */
+            question: string;
+            /** Required */
+            required: boolean;
+            /** Why */
+            why: string;
+        };
+        /**
+         * FormQuestion
+         * @description One question read off a LIVE application form. ``key`` is the kit key the
+         *     assistant plans to answer it with (``contact.email``, ``logistics.notice_period``,
+         *     or the saved ``approved_text`` question).
+         */
+        FormQuestion: {
+            /** Key */
+            key?: string | null;
+            /** Question */
+            question: string;
+            /**
+             * Required
+             * @default true
+             */
+            required: boolean;
+        };
         /** GitHubResponse */
         GitHubResponse: {
             /** Merged */
@@ -6975,6 +7090,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationKitOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_application_form_api_applications__application_id__kit_form_check_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                application_id: number;
+            };
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormCheckOut"];
                 };
             };
             /** @description Validation Error */

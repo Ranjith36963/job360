@@ -63,6 +63,8 @@ EXPECTED_TOOLS = {
     "check_outreach",
     "doctor",
     "report_missing_tool",
+    # The form check (weak spot #1) - which live-form questions have a saved answer - 29 -> 30.
+    "check_form",
 }
 
 JOB = {

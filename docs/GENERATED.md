@@ -17,8 +17,8 @@
 | --- | --- | --- |
 | Migration head | **0059** | `backend/migrations/` |
 | Migration files | **60** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 21 route modules (121 endpoints) | `backend/src/api/routes/` |
-| Test files | across 188 `test_*.py` files | `backend/tests/` |
+| FastAPI surface | 21 route modules (122 endpoints) | `backend/src/api/routes/` |
+| Test files | across 189 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 28 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -54,6 +54,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `PUT` | `/api/applications/{application_id}/fit` | `applications.py` |
 | `PATCH` | `/api/applications/{application_id}/job` | `applications.py` |
 | `GET` | `/api/applications/{application_id}/kit` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/kit/form-check` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/receipt` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/send/approve` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/send/decline` | `applications.py` |
@@ -155,5 +156,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**121 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**122 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->

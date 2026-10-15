@@ -36,7 +36,7 @@ from src.api.auth_deps import (
     require_user,
 )
 from src.api.dependencies import get_request_db
-from src.api.models import JobResponse, LessonsResponse
+from src.api.models import FormCheckOut, FormCheckRequest, JobResponse, LessonsResponse
 from src.api.routes.bring import application_job_response
 from src.core import settings
 from src.repositories.database import JobDatabase
@@ -1989,6 +1989,38 @@ async def get_application_kit(
     try:
         return await kit_service.build_kit(
             db, user, application_id, now=datetime.now(timezone.utc), include_text=include_text
+        )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+@router.post(
+    "/applications/{application_id}/kit/form-check", response_model=FormCheckOut,
+    response_model_exclude_none=True, dependencies=AUTH_FIRST,
+)
+async def check_application_form(
+    application_id: int,
+    body: FormCheckRequest,
+    response: Response,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Which questions on the LIVE form already have a saved answer. The assistant reads
+    the form, lists every question (optional ones too, ``required=false``) and, for each,
+    the kit ``key`` it plans to use. Job360 checks that key really exists in THIS
+    application's kit (an ``approved_text`` answer also matches by its question); with no
+    key it matches the normalized wording of the question against the user's approved
+    answers. No fuzzy matching, no NLP. ``answered`` carries the value and its source
+    (``confirmed: false`` = inferred, confirm with the user); ``missing`` is what to ask
+    the user, once. Read-only: no event is written. 404 for an application that is not the
+    caller's. ``Cache-Control: no-store``."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return await kit_service.check_form(
+            db, user, application_id,
+            questions=[q.model_dump() for q in body.questions], form_url=body.form_url,
+            now=datetime.now(timezone.utc),
         )
     except SpineError as exc:
         _raise(exc)

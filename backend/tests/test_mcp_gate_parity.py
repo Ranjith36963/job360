@@ -100,6 +100,11 @@ TOOL_ROUTES = {
     "check_outreach": ("applications", "outreach_check", {"contact_id": 987654321, "message_id": 1}),
     # The agent doctor + missing-tool report (feature 7) - require_user, no email gate
     # (an unverified user is TOLD to verify by doctor, never refused by it).
+    # The live-form check (weak spot #1) - require_user, read-only, no email gate.
+    "check_form": (
+        "applications", "check_application_form",
+        {"application_id": 987654321, "questions": [{"question": "x"}]},
+    ),
     "doctor": ("doctor", "doctor", {}),
     "report_missing_tool": ("doctor", "report_missing_tool", {"name": "x"}),
 }
