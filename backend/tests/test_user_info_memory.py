@@ -1058,3 +1058,12 @@ async def test_profile_cleared_log_carries_the_user(authenticated_async_context,
     cleared = [r for r in caplog.records if getattr(r, "event", "") == "profile_cleared"]
     assert len(cleared) == 1
     assert cleared[0].user_id == fixture_user_id and cleared[0].section == "memory"
+
+
+def test_answer_company_round_trips_empty_is_dropped_and_is_a_capped_line():
+    rec = validate_edit(ANSWERS, [{"question": "Consent?", "answer": "Yes", "company": " BJAK "}])[0]
+    assert rec["company"] == "BJAK"
+    assert "company" not in validate_edit(ANSWERS, [{"question": "Q", "answer": "A", "company": ""}])[0]
+    assert "company" not in validate_edit(ANSWERS, [{"question": "Q", "answer": "A", "company": None}])[0]
+    assert "company" in _reject(ANSWERS, [{"question": "Q", "answer": "A", "company": "x" * 201}])
+    validate_edit(ANSWERS, [{"question": "Q", "answer": "A", "company": "x" * 200}])

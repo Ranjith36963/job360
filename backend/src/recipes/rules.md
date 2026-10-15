@@ -134,8 +134,8 @@ Account site: stop, the user signs up and signs in themselves (never a
 password), then record_event site_account and continue; a sign-up wall on
 any other site: record_event account_needed.
 
-The kit holds, for THIS application only: the CV and cover letter (full
-`text`, a `sha256`, and a 30-minute `file.url` PDF link you can download, 3
+The kit holds, for THIS application only: the CV and cover letter (`text`
+up to 8000 chars - `text_more` says how to fetch the rest; `include_text=false` sends none - a `sha256` of the full text, and a 30-minute `file.url` PDF link you can download, 3
 downloads), every stored answer grouped as contact / right_to_work /
 logistics / salary / languages / equality ("equality / voluntary") /
 approved_text, each with its `source` (memory, profile, approved_text) and
@@ -490,8 +490,10 @@ basic}].
 `user_info.equality` = {gender, ethnicity, disability, veteran,
 sexual_orientation, transgender}; "prefer not to say" is valid.
 `user_info.answers` = [{question, answer, approved (bool, default false),
-recorded_at}] — set `approved: true` only after the user agrees to that exact
-wording, and send `recorded_at` back as stored.
+recorded_at, company (optional)}] — set `approved: true` only after the user agrees to that exact
+wording, and send `recorded_at` back as stored. An answer given for ONE employer (consent,
+why-this-company, a referral there) gets `company`: that job's company; it is reused only for that company.
+The kit's `approved_text` holds the newest 25; more: get_profile `fields["user_info.answers"]`.
 `preferences.salary_by_country` = [{country (ISO2), min, max (numbers > 0, min
 not above max; equal = one figure), currency (3 letters, e.g. EUR), period:
 year | month}], ONE record per country (`min` alone = one figure; never `max`

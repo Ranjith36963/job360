@@ -664,6 +664,8 @@ SUBMIT_ASK_ALWAYS_BRANDS = _env_list("SUBMIT_ASK_ALWAYS_BRANDS", ("indeed", "lin
 KIT_LINK_TTL_MINUTES = int(os.getenv("KIT_LINK_TTL_MINUTES", "30"))
 KIT_LINK_MAX_DOWNLOADS = int(os.getenv("KIT_LINK_MAX_DOWNLOADS", "3"))
 # Kit reads one user may make per hour (each mints links + writes an event).
+KIT_DOC_TEXT_MAX_CHARS = int(os.getenv("KIT_DOC_TEXT_MAX_CHARS", "8000"))
+KIT_APPROVED_TEXT_MAX = int(os.getenv("KIT_APPROVED_TEXT_MAX", "25"))
 KIT_READS_MAX_PER_HOUR = int(os.getenv("KIT_READS_MAX_PER_HOUR", "60"))
 # Public /api/files/{token}: downloads per link OWNER per minute (not per IP:
 # behind the Next rewrite every caller may share one address), and bad tokens

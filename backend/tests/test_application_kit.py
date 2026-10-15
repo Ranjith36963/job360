@@ -1817,3 +1817,90 @@ async def test_unverified_email_check_submit_asks(authenticated_async_context, f
         # the escape hatch switches this gate off with every other verification gate
         monkeypatch.setenv("REQUIRE_EMAIL_VERIFICATION", "false")
         assert await _submit_check(client, app_id, GREENHOUSE) == ("submit", "user_approved")
+
+
+# ── employer-scoped answers + bounded kit payload (2026-10-15) ───────────────
+
+
+async def test_company_scoped_answer_only_in_that_company_kit(authenticated_async_context, fixture_user_id):
+    from src.models import Job
+
+    # "Ltd" is stripped by normalized_key, so "BJAK Ltd" and "bjak" are the same company.
+    key = lambda c: Job(title="", company=c, apply_url="", source="", date_found="").normalized_key()[0]  # noqa: E731
+    assert key("BJAK Ltd") == key("bjak")
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        bjak = await _bring(client, {**_AD, "company": "bjak", "apply_url": "https://bjak.example/c/1"})
+        acme = await _bring(client, {**_AD, "company": "Acme", "apply_url": "https://acme.example/c/2"})
+        edits = await _patch(client, _e("user_info.answers", [
+            {"question": "Consent to BJAK privacy notice?", "answer": "Yes", "approved": True,
+             "company": "BJAK Ltd", "recorded_at": "2026-10-14T09:00:00+00:00"},
+            {"question": "Notice period?", "answer": "1 month", "approved": True,
+             "recorded_at": "2026-10-14T09:00:00+00:00"},
+        ]))
+        assert edits.status_code == 200, edits.text
+
+        def texts(kit: dict[str, Any]) -> dict[str, dict[str, Any]]:
+            return {i["key"]: i for i in kit["answers"]["approved_text"]}
+
+        in_bjak = texts((await _kit(client, bjak)).json())
+        assert set(in_bjak) == {"Consent to BJAK privacy notice?", "Notice period?"}
+        assert in_bjak["Consent to BJAK privacy notice?"]["company"] == "BJAK Ltd"
+        assert "company" not in in_bjak["Notice period?"] or in_bjak["Notice period?"]["company"] is None
+        in_acme = texts((await _kit(client, acme)).json())
+        assert set(in_acme) == {"Notice period?"}, "the BJAK-only answer never reaches another employer's kit"
+
+
+async def test_kit_document_text_is_capped_but_sha_is_of_the_full_text(authenticated_async_context, fixture_user_id):
+    big = "Ada Lovelace\n" + ("Built data pipelines. " * 1000)
+    assert len(big) > 20_000
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        cv = await _save(client, app_id, "cv", big)
+        kit = (await _kit(client, app_id)).json()
+        doc = kit["cv"]
+        assert doc["text"] == big[: settings.KIT_DOC_TEXT_MAX_CHARS] and len(doc["text"]) == 8000
+        assert doc["text_truncated"] is True
+        assert doc["text_more"] == "get_application(application_id, with_artifact_text=true)"
+        assert doc["sha256"] == sha(big) and doc["chars"] == len(big)
+        none = (await client.get(f"/api/applications/{app_id}/kit", params={"include_text": "false"})).json()
+        assert none["cv"]["text"] == "" and none["cv"]["text_truncated"] is True and none["cv"]["sha256"] == sha(big)
+        assert none["kit"]["sha256"] == kit["kit"]["sha256"], "kit sha is of the full text either way"
+        # the sha of the FULL text is still what cv_seen validates against
+        async with _bearer_client(await _mint_token(client)) as agent:
+            seen = await _event(agent, app_id, "cv_seen", {"artifact_id": cv["artifact_id"], "sha256": doc["sha256"], "where": "chat"})
+        assert seen.status_code == 201, seen.text
+        # a short document is untouched (no truncation keys set)
+        assert (await _kit(client, app_id)).json()["cover_letter"] is None
+
+
+async def test_short_document_text_is_whole(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _save(client, app_id, "cv", CV_TEXT)
+        doc = (await _kit(client, app_id)).json()["cv"]
+        assert doc["text"] == CV_TEXT and not doc.get("text_truncated") and not doc.get("text_more")
+
+
+async def test_approved_text_keeps_the_newest_25_and_counts_the_rest(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        records = [
+            {"question": f"Question {i:02d}?", "answer": f"Answer {i}", "approved": True,
+             "recorded_at": f"2026-09-{i + 1:02d}T09:00:00+00:00"}
+            for i in range(30)
+        ]
+        edits = await _patch(client, _e("user_info.answers", records))
+        assert edits.status_code == 200, edits.text
+        kit = (await _kit(client, app_id)).json()
+        keys = [i["key"] for i in kit["answers"]["approved_text"]]
+        assert len(keys) == 25 and kit["answers_omitted"] == 5
+        assert set(keys) == {f"Question {i:02d}?" for i in range(5, 30)}, "the newest 25 whole items"
+        assert any("get_profile fields['user_info.answers']" in line for line in kit["instructions"])
+        # absent when nothing was dropped
+        await _patch(client, _e("user_info.answers", records[:3]))
+        small = (await _kit(client, app_id)).json()
+        assert "answers_omitted" not in small or small["answers_omitted"] is None
