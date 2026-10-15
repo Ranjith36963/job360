@@ -424,6 +424,19 @@ OFFICIAL_ATS_HOSTS = (
     "zohorecruit.com", "zohorecruit.in", "rippling.com", "icims.com", "taleo.net",
     "ultipro.com", "careers-page.com",
 )
+# Gmail check slice (owner decision 2026-10-15): an employer's ATS sends its
+# emails from its OWN domain, and many never name the company in the text
+# (an Ashby confirmation signed "TALENT TEAM"), so a company-name search misses
+# them. Each application exposes `email_senders` = the ATS host's domain plus the
+# extra sender domains below, for the assistant's Gmail `from:` search. Data, not
+# a keyword list: a vendor missing here still gets its own domain.
+ATS_EXTRA_EMAIL_SENDERS: dict[str, tuple[str, ...]] = {
+    "greenhouse.io": ("greenhouse-mail.io",),
+    "myworkdayjobs.com": ("myworkday.com",),
+    "workable.com": ("workablemail.com",),
+}
+# A batch mark covers at most this many applications (one list_applications page).
+INBOX_CHECK_MAX_APPLICATIONS = int(os.getenv("INBOX_CHECK_MAX_APPLICATIONS", "200"))
 JOB_BOARD_HOSTS = ("linkedin.com",)  # plus indeed.<tld>, handled in job_checks
 JOB_CHECK_PARTIAL_MIN_WORDS = 40   # below this the "ad" is a title or a teaser
 JOB_CHECK_FULL_MIN_WORDS = 150     # at or above this the ad is treated as complete

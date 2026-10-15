@@ -1641,6 +1641,7 @@ async def get_application_detail(
     # spec.md R3).
     from src.services.applications.asks import list_asks  # noqa: PLC0415
     from src.services.applications.contacts import list_contacts  # noqa: PLC0415
+    from src.services.applications.inbox import email_senders_for  # noqa: PLC0415 - inbox imports spine
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     app_row = await get_owned_application(db, user_id, application_id)
@@ -1713,6 +1714,9 @@ async def get_application_detail(
         "follow_up_on": follow_up_on,
         "follow_up_due": follow_up_due,
         "proof": (await proof_for(db, user_id, [application_id]))[application_id],
+        # Gmail check slice 2026-10-15 — where to search and from when.
+        "email_senders": email_senders_for(app_row.get("job_url") or ""),
+        "inbox_checked_at": app_row.get("inbox_checked_at"),
     }
     # 2026-09-20 — the one line at the top: what to do next, read off the
     # stored state above (never a judgement of the job). The same value
@@ -1811,7 +1815,7 @@ async def list_applications(
     cur = await db._db.execute(
         f"SELECT id, job_id, job_title, job_company, job_url, job_location, status, last_event_at, "  # noqa: S608
         f"visa_signal, visa_country, fit_recorded_at, fit_score, fit_verdict, follow_up_on, "
-        f"job_country, job_remote, job_found_on, ad_posted_at, employer_published_at "
+        f"job_country, job_remote, job_found_on, ad_posted_at, employer_published_at, inbox_checked_at "
         f"FROM applications WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
         [*params, limit, offset],
     )
@@ -1874,6 +1878,7 @@ async def list_applications(
             receipt_count_by_app[row[0]] = int(row[1])
             last_receipt_at_by_app[row[0]] = row[2]
 
+    from src.services.applications.inbox import email_senders_for  # noqa: PLC0415 - inbox imports spine
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     proofs = await proof_for(db, user_id, app_ids)
@@ -1907,6 +1912,9 @@ async def list_applications(
                 "follow_up_on": follow_up_on,
                 "follow_up_due": follow_up_due,
                 "proof": proofs[app_id],
+                # Gmail check slice 2026-10-15 — where to search and from when.
+                "email_senders": email_senders_for(r.get("job_url") or ""),
+                "inbox_checked_at": r.get("inbox_checked_at"),
                 # 2026-09-24 — same state machine `get_application` feeds its
                 # header with, over the same stored facts (S21: real values,
                 # not a schema-presence default).

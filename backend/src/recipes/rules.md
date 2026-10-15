@@ -204,8 +204,10 @@ the Job360 website), do not ask the mode again — offer once to create
 the task at preferences.check_every.
 
 AUTO: right after the user picks it, read Gmail at once for every OPEN
-application (list_applications), looking only at mail since that
-application was added to Job360, and record what happened with
+application (list_applications), looking only at mail since its
+`inbox_checked_at` (null = since it was added to Job360), searching by
+company name OR its `email_senders` OR the user's job label (the steps are
+in get_recipe("daily")), and record what happened with
 record_event; then schedule the recurring check. Record clear facts
 on your own (replied, interview, rejected, offer, submission
 confirmed), including replies from people the user reached out to;
@@ -537,7 +539,8 @@ fix them later with update_job), then get_job + get_profile, judge fit yourself
 and save_fit, write the CV/cover letter yourself and save_artifact — run your
 own ATS check on EVERY CV you save and pass `ats_score` (0-100) and `ats_notes`;
 it is YOUR opinion, Job360 never computes one — then record_application (with
-its `channel`) once the user says they applied. Pass `found_via` (where you
+its `channel`) once the user says they applied, or an employer's confirmation
+email proves it (daily step 3). Pass `found_via` (where you
 found them) on every add_contact.
 
 NEEDS YOU: when you would have to guess, call ask_user (and ask in chat); before

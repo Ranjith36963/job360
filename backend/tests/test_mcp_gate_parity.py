@@ -66,6 +66,7 @@ TOOL_ROUTES = {
     # new "applications" route module, none require_verified_user.
     "get_application": ("applications", "get_application", {"application_id": 987654321}),
     "list_applications": ("applications", "list_applications", {}),
+    "mark_inbox_checked": ("applications", "mark_inbox_checked", {"application_ids": [987654321]}),
     "save_artifact": (
         "applications", "save_artifact", {"application_id": 987654321, "kind": "cv", "text": "x"}
     ),

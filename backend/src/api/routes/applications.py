@@ -627,6 +627,10 @@ class ApplicationDetailOut(BaseModel):
     follow_up_due: bool
     # S7 - proof of application (email > text > screenshot_only > none).
     proof: ProofOut
+    # Gmail check slice 2026-10-15 - the ATS sender domains to search (`[]` = not a
+    # known ATS) and the time up to which this job's mail was read (null = never).
+    email_senders: list[str] = []
+    inbox_checked_at: Optional[str] = None
 
 
 class ApplicationSummaryOut(BaseModel):
@@ -676,11 +680,26 @@ class ApplicationSummaryOut(BaseModel):
     ad_posted_at: Optional[str] = None
     employer_published_at: Optional[str] = None
     proof: ProofOut
+    # Gmail check slice 2026-10-15 - same pair as ApplicationDetailOut.
+    email_senders: list[str] = []
+    inbox_checked_at: Optional[str] = None
 
 
 class ListApplicationsResponse(BaseModel):
     applications: list[ApplicationSummaryOut]
     total: int
+
+
+class InboxCheckedIn(BaseModel):
+    """The assistant read Gmail for these applications up to ``checked_at`` (now when empty)."""
+
+    application_ids: list[int] = Field(min_length=1)
+    checked_at: str = ""
+
+
+class InboxCheckedOut(BaseModel):
+    application_ids: list[int]
+    inbox_checked_at: str
 
 
 class SaveArtifactResponse(BaseModel):
@@ -1409,6 +1428,24 @@ async def list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
             due=due, quiet_days=quiet_days,
         )
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+@router.post("/applications/inbox-checked", response_model=InboxCheckedOut, dependencies=AUTH_FIRST)
+async def mark_inbox_checked(
+    body: InboxCheckedIn,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """Gmail check slice (2026-10-15): move each application's ``inbox_checked_at``
+    cursor forward. The assistant read the mail; Job360 only remembers how far
+    (VISION rule 5). All or nothing; never rewinds a newer cursor."""
+    from src.services.applications.inbox import mark_checked  # noqa: PLC0415
+
+    try:
+        return await mark_checked(db, user.id, body.application_ids, body.checked_at or None)
     except SpineError as exc:
         _raise(exc)
         raise AssertionError("unreachable")  # pragma: no cover

@@ -89,6 +89,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/inbox-checked": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Inbox Checked
+         * @description Gmail check slice (2026-10-15): move each application's ``inbox_checked_at``
+         *     cursor forward. The assistant read the mail; Job360 only remembers how far
+         *     (VISION rule 5). All or nothing; never rewinds a newer cursor.
+         */
+        post: operations["mark_inbox_checked_api_applications_inbox_checked_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/applications/job/{job_id}": {
         parameters: {
             query?: never;
@@ -2784,6 +2806,11 @@ export interface components {
             contacts: components["schemas"]["ContactOut"][];
             /** Created At */
             created_at: string;
+            /**
+             * Email Senders
+             * @default []
+             */
+            email_senders: string[];
             /** Events */
             events: components["schemas"]["ApplicationEventOut"][];
             fit: components["schemas"]["ApplicationFitOut"] | null;
@@ -2793,6 +2820,8 @@ export interface components {
             follow_up_on: string | null;
             /** Id */
             id: number;
+            /** Inbox Checked At */
+            inbox_checked_at?: string | null;
             /** Interview At */
             interview_at: string | null;
             job: components["schemas"]["ApplicationJobOut"];
@@ -3007,6 +3036,11 @@ export interface components {
             };
             /** Country */
             country?: string | null;
+            /**
+             * Email Senders
+             * @default []
+             */
+            email_senders: string[];
             /** Employer Published At */
             employer_published_at?: string | null;
             /** Events */
@@ -3029,6 +3063,8 @@ export interface components {
             found_on?: string | null;
             /** Id */
             id: number;
+            /** Inbox Checked At */
+            inbox_checked_at?: string | null;
             /** Interview At */
             interview_at?: string | null;
             /** Job Company */
@@ -4028,6 +4064,26 @@ export interface components {
             status: string;
             /** Version */
             version: string;
+        };
+        /**
+         * InboxCheckedIn
+         * @description The assistant read Gmail for these applications up to ``checked_at`` (now when empty).
+         */
+        InboxCheckedIn: {
+            /** Application Ids */
+            application_ids: number[];
+            /**
+             * Checked At
+             * @default
+             */
+            checked_at: string;
+        };
+        /** InboxCheckedOut */
+        InboxCheckedOut: {
+            /** Application Ids */
+            application_ids: number[];
+            /** Inbox Checked At */
+            inbox_checked_at: string;
         };
         /** JobFactsOut */
         JobFactsOut: {
@@ -6270,6 +6326,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExportHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_inbox_checked_api_applications_inbox_checked_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                job360_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboxCheckedIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxCheckedOut"];
                 };
             };
             /** @description Validation Error */
