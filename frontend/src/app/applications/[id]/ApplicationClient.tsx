@@ -177,6 +177,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
 
   const openAsks: Ask[] = (detail.asks ?? []).filter((a) => a.status === "open" && !a.withdrawn_at);
   const tone = STAGE_TONE[detail.status] ?? "quiet";
+  const cvChanges = changesSinceApprovedCv(detail.events, detail.artifacts);
   // The one table (lib/application-actions) decides which buttons show.
   const actions = allowedActions(detail.status, { hasReceipt: detail.receipts.length > 0 });
   const place = detail.job.job_location;
@@ -383,7 +384,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             )}
             {ready && actions.includes("ready_card") && (
               <div className="w-full">
-                <ReadyCard card={ready.card} paused={ready.paused} status={detail.status} onChanged={reloadAfterAsk} />
+                <ReadyCard card={ready.card} paused={ready.paused} status={detail.status} changes={cvChanges} onChanged={reloadAfterAsk} />
               </div>
             )}
             {controls && (
@@ -391,7 +392,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
                 applicationId={detail.id}
                 controls={controls}
                 status={detail.status}
-                changesSinceApproved={changesSinceApprovedCv(detail.events, detail.artifacts)}
+                changesSinceApproved={cvChanges}
                 newFillWaiting={ready !== null}
                 onChanged={(next) => {
                   setControls(next);

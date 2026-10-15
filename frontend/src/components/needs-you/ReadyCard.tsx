@@ -33,9 +33,12 @@ export function ReadyCard({
   paused,
   onChanged,
   status = "considering",
+  changes = 0,
 }: {
   /** The application status: "Nothing has been sent" shows while the table says so. */
   status?: string;
+  /** CV changes not yet approved. */
+  changes?: number;
   card: ReadyCardData;
   paused: boolean;
   onChanged: () => void;
@@ -137,12 +140,6 @@ export function ReadyCard({
         </div>
       )}
 
-      {nothingSent(status) && (
-        <p data-testid="nothing-sent" className="text-xs text-muted-foreground">
-          Nothing has been sent.
-        </p>
-      )}
-
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
@@ -162,6 +159,11 @@ export function ReadyCard({
         >
           Don&apos;t send
         </button>
+        {nothingSent(status) && (
+          <p data-testid="nothing-sent" className="text-xs text-muted-foreground">
+            <span data-testid="changes-since-approved">{`${changes} change${changes === 1 ? "" : "s"}`}</span> · nothing sent yet
+          </p>
+        )}
         <span className="text-xs text-faint">Your choice is saved with the time and this page as the place.</span>
       </div>
     </article>

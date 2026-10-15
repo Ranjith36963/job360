@@ -70,23 +70,24 @@ interface ArtifactLike {
 }
 
 /**
- * How many CV versions were saved after the CV the user last approved
- * (`submit_approved`). `null` when there was no approval, or its CV is not in
- * the list. Read off the existing application payload (events + artifacts).
+ * CV changes not yet approved: cv versions above the newest `submit_approved`
+ * artifact, or above the first cv version if never approved (or if the approved
+ * artifact is not in the list). Read off the existing application payload.
  */
 export function changesSinceApprovedCv(
   events: readonly EventLike[],
   artifacts: readonly ArtifactLike[],
-): number | null {
+): number {
+  const cvs = artifacts.filter((a) => a.kind === "cv");
+  if (cvs.length === 0) return 0;
   let approval: EventLike | null = null;
   for (const e of events) {
     if (e.event_type === "submit_approved" && typeof e.payload?.artifact_id === "number") {
       if (!approval || e.id > approval.id) approval = e;
     }
   }
-  if (!approval) return null;
-  const approvedId = approval.payload.artifact_id;
-  const approved = artifacts.find((a) => a.id === approvedId && a.kind === "cv");
-  if (!approved) return null;
-  return artifacts.filter((a) => a.kind === "cv" && a.version_no > approved.version_no).length;
+  const approvedId = approval ? approval.payload.artifact_id : undefined;
+  const approved = cvs.find((a) => a.id === approvedId);
+  const base = approved ? approved.version_no : Math.min(...cvs.map((a) => a.version_no));
+  return cvs.filter((a) => a.version_no > base).length;
 }

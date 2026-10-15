@@ -41,7 +41,7 @@ export function ApplicationDecisions({
   onChanged,
   newFillWaiting = false,
   status = "considering",
-  changesSinceApproved = null,
+  changesSinceApproved = 0,
 }: {
   applicationId: number;
   controls: ApplicationControls;
@@ -49,8 +49,8 @@ export function ApplicationDecisions({
   newFillWaiting?: boolean;
   /** The application's status: Send / Don't send only show while it is pre-apply. */
   status?: string;
-  /** CV versions saved after the approved one (null = no approval to compare with). */
-  changesSinceApproved?: number | null;
+  /** CV versions saved after the approved one not yet approved. */
+  changesSinceApproved?: number;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -126,12 +126,6 @@ export function ApplicationDecisions({
         </p>
       )}
 
-      {changesSinceApproved !== null && changesSinceApproved > 0 && (
-        <p data-testid="changes-since-approved" className="text-xs text-warning">
-          {`${changesSinceApproved} change${changesSinceApproved === 1 ? "" : "s"} since approved CV`}
-        </p>
-      )}
-
       {cv && (
         <div className="flex flex-col gap-1.5">
           {/* A newer fill is waiting: the Ready card above owns Send / Don't send (it passes the
@@ -157,6 +151,11 @@ export function ApplicationDecisions({
                 Don&apos;t send
               </button>
             </div>
+          )}
+          {allowed.includes("send_approve") && (
+            <p data-testid="nothing-sent" className={NOTE}>
+              <span data-testid="changes-since-approved">{`${changesSinceApproved} change${changesSinceApproved === 1 ? "" : "s"}`}</span> · nothing sent yet
+            </p>
           )}
           {newFillWaiting ? (
             <p data-testid="send-state" className={NOTE}>

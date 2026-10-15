@@ -64,8 +64,9 @@ describe("changesSinceApprovedCv", () => {
   it("uses the newest approval", () => {
     expect(changesSinceApprovedCv([approved(1, 10), approved(5, 12)], [cv(10, 1), cv(12, 3), cv(13, 4)])).toBe(1);
   });
-  it("is null with no approval or an unknown approved CV", () => {
-    expect(changesSinceApprovedCv([], [cv(10, 1)])).toBeNull();
-    expect(changesSinceApprovedCv([approved(1, 99)], [cv(10, 1)])).toBeNull();
+  it("never approved: counts versions above the first", () => {
+    expect(changesSinceApprovedCv([], [cv(10, 1), cv(11, 2), cv(12, 3)])).toBe(2);
+    expect(changesSinceApprovedCv([approved(1, 99)], [cv(10, 1), cv(11, 2)])).toBe(1);
+    expect(changesSinceApprovedCv([], [])).toBe(0);
   });
 });

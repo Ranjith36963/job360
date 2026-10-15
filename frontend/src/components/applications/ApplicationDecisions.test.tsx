@@ -297,20 +297,19 @@ describe("Your assistant got stuck (blocked record)", () => {
   });
 });
 
-describe("changes-since-approved", () => {
+describe("nothing-sent line", () => {
   const noop = () => undefined;
-  it("shows the count when the CV changed after the approval", () => {
-    render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} status="applied" changesSinceApproved={2} />);
-    expect(screen.getByTestId("changes-since-approved")).toHaveTextContent("2 changes since approved CV");
+  it("reads '<N> changes · nothing sent yet' next to the approve button", () => {
+    render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} changesSinceApproved={2} />);
+    expect(screen.getByTestId("nothing-sent")).toHaveTextContent("2 changes · nothing sent yet");
+    expect(screen.getByTestId("changes-since-approved")).toHaveTextContent("2 changes");
   });
   it("says change (singular) for one", () => {
-    render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} status="applied" changesSinceApproved={1} />);
-    expect(screen.getByTestId("changes-since-approved")).toHaveTextContent("1 change since approved CV");
+    render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} changesSinceApproved={1} />);
+    expect(screen.getByTestId("changes-since-approved")).toHaveTextContent("1 change");
   });
-  it("is absent for 0 or null", () => {
-    const { rerender } = render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} changesSinceApproved={0} />);
-    expect(screen.queryByTestId("changes-since-approved")).toBeNull();
-    rerender(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} changesSinceApproved={null} />);
-    expect(screen.queryByTestId("changes-since-approved")).toBeNull();
+  it("is gone once the status is applied", () => {
+    render(<ApplicationDecisions applicationId={7} controls={controls()} onChanged={noop} status="applied" changesSinceApproved={2} />);
+    expect(screen.queryByTestId("nothing-sent")).toBeNull();
   });
 });
