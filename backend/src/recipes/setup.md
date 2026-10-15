@@ -30,11 +30,11 @@ for what you worked out yourself). Plain words. Rules: `get_recipe("rules")`.
    (REQUIRED; never suggest or assume a number).
    (2) **you** - `user_info.contact`. (3) **visa** - `user_info.right_to_work` per
    country, citizenship, the sanctions question once ("prefer not to say" is
-   allowed; store `sanctions_country_citizen`; reuse it only when a form asks).
+   allowed; store `sanctions_country_citizen`; reuse it only when a form asks, and confirm it then).
    (4) **logistics** - notice, start, per-country relocate, travel, licence,
    `user_info.languages`. (5) **equality** - `user_info.equality`; a skip still
    marks the round done; if the user skips, ask again only on the first form that
-   needs it. (6) **settings** - one at a time: *Jobs at or above your line* - ask me
+   needs it; a stored one is still confirmed on each form. (6) **settings** - one at a time: *Jobs at or above your line* - ask me
    / apply on its own (`assistant_settings.above_line` = ask | auto); *jobs below
    your line* - the same (`assistant_settings.below_line`); not chosen = ask.
    *Submitting* - `confirm` (default) / `auto_when_sure` (you submit when

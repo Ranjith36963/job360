@@ -1572,7 +1572,11 @@ def build_server(version: str = "") -> MCPServer:
         downloads), every stored answer grouped as contact / right_to_work /
         logistics / salary / languages / equality ("equality / voluntary") /
         approved_text, each with its `source` (memory, profile, approved_text),
-        `saved_at` and `state` (confirmed / inferred / sensitive; `answers_summary` counts them), and `missing` - what the form may ask that Job360 does not have
+        `saved_at` and `state` (confirmed / inferred / sensitive; `answers_summary` counts
+        them; a 'sensitive' answer - equality, sanctions, visa / right-to-work status - is
+        shown to the user and confirmed on THIS form before it is used, never filled
+        silently; a confirmed one may carry `confirmed_at`), and `missing` - what the
+        form may ask that Job360 does not have
         for THIS job's country. Use only kit answers; ask the user ONCE, in one
         message, for anything in `missing`; never guess. Also: `duplicate` (warn
         the user before any work), `hold` (another assistant is on it - tell the

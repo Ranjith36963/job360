@@ -4089,6 +4089,8 @@ export interface components {
         KitAnswerOut: {
             /** Company */
             company?: string | null;
+            /** Confirmed At */
+            confirmed_at?: string | null;
             /** Key */
             key: string;
             /** Label */

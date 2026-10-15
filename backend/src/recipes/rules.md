@@ -133,7 +133,8 @@ is missing for this job's country. Use only kit answers; anything in
 `missing` = ask the user ONCE in one message, never guess. Each answer has a
 `state`: `confirmed` (the user's - use it), `inferred` (an assistant worked it
 out - confirm once, then save it again with source user_said) or `sensitive`
-(equality, sanctions - use only as stored, never ask again). FILE: desktop/
+(equality, sanctions, visa / right-to-work status - show it to the user and confirm it on THIS form before use; never
+fill it silently). FILE: desktop/
 Claude Code — download `file.url` to a local file and upload that; chat
 apps — ask the user to attach the PDF once for this job; else paste `text`
 if the form allows; else the user uploads by hand. Expired link = call the

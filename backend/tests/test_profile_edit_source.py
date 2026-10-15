@@ -305,3 +305,54 @@ async def test_legacy_agent_rows_read_unconfirmed(authenticated_async_context, f
     row = next(r for r in body["agent_edits"] if r["path"] == LOGI)
     assert row["source"] == ""
     assert row["confirmed"] is False
+
+
+# ── Sensitive answers mirror the job-apply-plugin reference (re-confirmed before every use) ──
+
+
+def test_visa_fields_are_sensitive_and_citizenship_is_not():
+    from src.services.applications import kit
+    from src.services.profile.models import CVData, UserInfo, UserProfile
+
+    profile = UserProfile(
+        cv_data=CVData(),
+        user_info=UserInfo(right_to_work={
+            "citizenship": "GB",
+            "countries": [{"country": "gb", "work_authorization": "citizen", "needs_sponsorship": False}],
+        }),
+    )
+    rows = [_kit_rows("user_info.right_to_work", {}, "user_said", set_by="web")]
+    answers, _ = kit.compute_answers(profile, rows, "GB")
+    rtw = {i["key"]: i for i in answers["right_to_work"]}
+    assert rtw["right_to_work.GB.work_authorization"]["state"] == "sensitive"
+    assert rtw["right_to_work.GB.needs_sponsorship"]["state"] == "sensitive"
+    assert rtw["right_to_work.GB.needs_sponsorship"]["value"] is False
+    assert rtw["right_to_work.citizenship"]["state"] == "confirmed"
+    assert "confirmed_at" not in rtw["right_to_work.GB.work_authorization"]
+
+
+def test_instructions_say_confirm_sensitive_on_this_form_never_ask_again_is_gone():
+    from src.services.applications import kit
+
+    text = " ".join(kit.KIT_INSTRUCTIONS)
+    assert "never ask again" not in text
+    assert "is shown to the user and confirmed on THIS form before it is used; never fill it silently" in text
+    assert "visa / right-to-work status" in text
+
+
+def test_confirmed_items_carry_confirmed_at_and_inferred_do_not():
+    from src.services.applications import kit
+
+    rows = [
+        _kit_rows(LOGI, NOTICE, "user_said"),
+        _kit_rows("user_info.contact", {}, "agent_inferred"),
+    ]
+    answers, _ = kit.compute_answers(_full_profile(), rows, "GB")
+    notice = answers["logistics"][0]
+    assert notice["state"] == "confirmed"
+    assert notice["confirmed_at"] == "2026-10-01T00:00:00Z"
+    email = answers["contact"][0]
+    assert email["state"] == "inferred"
+    assert "confirmed_at" not in email
+    # No stored time (profile-sourced item): nothing to say.
+    assert all("confirmed_at" not in i for i in answers["equality"])

@@ -3995,6 +3995,17 @@
             ],
             "title": "Company"
           },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
           "key": {
             "title": "Key",
             "type": "string"

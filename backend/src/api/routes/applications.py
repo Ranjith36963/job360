@@ -906,8 +906,10 @@ class KitAnswerOut(BaseModel):
     label: Optional[str] = None
     company: Optional[str] = None
     # Weak spot #6: who stands behind it. confirmed = the user's (web, user_said, approved
-    # wording); inferred = an assistant worked it out; sensitive = equality / sanctions.
+    # wording); inferred = an assistant worked it out; sensitive = equality / sanctions / visa.
     state: Literal["confirmed", "inferred", "sensitive"]
+    # Set when state is confirmed and the stored row has a time (the reference's confirmedAt).
+    confirmed_at: Optional[str] = None
 
 
 class KitAnswersSummaryOut(BaseModel):
