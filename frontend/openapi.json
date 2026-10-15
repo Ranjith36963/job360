@@ -978,6 +978,9 @@
             ],
             "title": "Answers Omitted"
           },
+          "answers_summary": {
+            "$ref": "#/components/schemas/KitAnswersSummaryOut"
+          },
           "application": {
             "$ref": "#/components/schemas/KitApplicationOut"
           },
@@ -1087,6 +1090,7 @@
           "job",
           "application",
           "answers",
+          "answers_summary",
           "missing",
           "settings",
           "duplicate",
@@ -4494,6 +4498,17 @@
             ],
             "title": "Company"
           },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
           "key": {
             "title": "Key",
             "type": "string"
@@ -4529,6 +4544,15 @@
             "title": "Source",
             "type": "string"
           },
+          "state": {
+            "enum": [
+              "confirmed",
+              "inferred",
+              "sensitive"
+            ],
+            "title": "State",
+            "type": "string"
+          },
           "topic": {
             "anyOf": [
               {
@@ -4547,7 +4571,8 @@
         "required": [
           "key",
           "value",
-          "source"
+          "source",
+          "state"
         ],
         "title": "KitAnswerOut",
         "type": "object"
@@ -4605,6 +4630,27 @@
           }
         },
         "title": "KitAnswersOut",
+        "type": "object"
+      },
+      "KitAnswersSummaryOut": {
+        "properties": {
+          "confirmed": {
+            "default": 0,
+            "title": "Confirmed",
+            "type": "integer"
+          },
+          "inferred": {
+            "default": 0,
+            "title": "Inferred",
+            "type": "integer"
+          },
+          "sensitive": {
+            "default": 0,
+            "title": "Sensitive",
+            "type": "integer"
+          }
+        },
+        "title": "KitAnswersSummaryOut",
         "type": "object"
       },
       "KitApplicationOut": {

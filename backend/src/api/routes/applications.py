@@ -936,6 +936,17 @@ class KitAnswerOut(BaseModel):
     label: Optional[str] = None
     company: Optional[str] = None
     topic: Optional[str] = None
+    # Weak spot #6: who stands behind it. confirmed = the user's (web, user_said, approved
+    # wording); inferred = an assistant worked it out; sensitive = equality / sanctions / visa.
+    state: Literal["confirmed", "inferred", "sensitive"]
+    # Set when state is confirmed and the stored row has a time (the reference's confirmedAt).
+    confirmed_at: Optional[str] = None
+
+
+class KitAnswersSummaryOut(BaseModel):
+    confirmed: int = 0
+    inferred: int = 0
+    sensitive: int = 0
 
 
 class KitAnswersOut(BaseModel):
@@ -1027,6 +1038,7 @@ class ApplicationKitOut(BaseModel):
     cover_letter: Optional[KitDocumentOut] = None
     cover_letter_none_reason: Optional[str] = None
     answers: KitAnswersOut
+    answers_summary: KitAnswersSummaryOut
     answers_omitted: Optional[int] = None
     missing: list[KitMissingOut]
     settings: dict[str, Any]
