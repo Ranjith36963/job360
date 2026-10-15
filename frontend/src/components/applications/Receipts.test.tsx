@@ -109,4 +109,34 @@ describe("Receipts", () => {
     expect(screen.getByText("Cover letter #9")).toBeInTheDocument();
     expect(screen.queryByTestId("receipt-no-cover-letter")).not.toBeInTheDocument();
   });
+
+  it("shows the counts line, the form host and the sent versions", () => {
+    render(
+      <Receipts
+        receipts={[
+          makeReceipt({
+            cv_artifact_id: 5,
+            cover_letter_artifact_id: 9,
+            cover_letter_sent: true,
+            cv_version_no: 1,
+            cover_letter_version_no: 1,
+            form_host: "boards.greenhouse.io",
+            counts_line: "6 of 6 fields \u00b7 0 skipped \u00b7 1 guessed",
+          }),
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId("receipt-counts")).toHaveTextContent("6 of 6 fields \u00b7 0 skipped \u00b7 1 guessed");
+    expect(screen.getByTestId("receipt-via")).toHaveTextContent("via boards.greenhouse.io");
+    expect(screen.getByText(/CV v1/)).toBeInTheDocument();
+    expect(screen.getByText(/Cover letter v1/)).toBeInTheDocument();
+  });
+
+  it("hides the counts line and host when the backend sent none", () => {
+    render(<Receipts receipts={[makeReceipt({ counts_line: "", form_host: "" })]} />);
+
+    expect(screen.queryByTestId("receipt-counts")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("receipt-via")).not.toBeInTheDocument();
+  });
 });

@@ -238,6 +238,8 @@ def _receipt_summary(r: Any) -> dict[str, Any]:
         "has_cv": r.has_cv,
         "has_cover_letter": r.has_cover_letter,
         "cover_letter_sent": r.cover_letter_sent,
+        "counts_line": r.counts_line,
+        "form_host": r.form_host,
         "channel": r.channel,
         "note": r.note,
         "proof": r.proof.model_dump(),
@@ -271,6 +273,11 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "cv_version_no": r.cv_version_no,
         "cover_letter_version_no": r.cover_letter_version_no,
         "cover_letter_sent": r.cover_letter_sent,
+        "counts_line": r.counts_line,
+        "fields_total": r.fields_total,
+        "fields_skipped": r.fields_skipped,
+        "guessed_count": r.guessed_count,
+        "form_host": r.form_host,
         "recorded_by": r.recorded_by,
         "possible_duplicate": r.possible_duplicate,
         "kit_event_id": r.kit_event_id,
@@ -1202,14 +1209,14 @@ def build_server(version: str = "") -> MCPServer:
         user says it went) or outreach_replied; no application_id for a cold contact; a reply never moves the status.
 
         Kit events (only these keys, else 422):
-        form_filled {form_url, fields_count, answers?: [{question, answer, source, key?}]}, source = memory | profile |
+        form_filled {form_url, fields_count, fields_skipped?: [blank fields],
+        answers?: [{question, answer, source, key?}]}, source = memory | profile |
         approved | written | guessed (key = the kit key, for memory/profile/approved);
         cv_seen and submit_approved {artifact_id, sha256, where} ONLY after the user said so in chat (where = chat);
         submit_declined {where};
-        form_swept {fields_checked, fixed, notes} (notes optional; after re-reading every field);
+        form_swept {fields_checked, fixed, notes} (notes optional);
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
-        site_account {host};
-        account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
+        site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|other, step, page_host, detail}, then stop that application; unblocked {resolution:
         retried|user_did_it|skipped}.

@@ -466,6 +466,15 @@ class ApplicationReceiptOut(BaseModel):
     cover_letter_artifact_id: Optional[int]
     # True iff cover_letter_artifact_id is set; False = "Cover letter: not sent".
     cover_letter_sent: bool = False
+    cv_version_no: Optional[int] = None
+    cover_letter_version_no: Optional[int] = None
+    # Read-time facts (spine.receipt_summary_facts), never stored: "N of M fields · S skipped · G guessed".
+    # counts_line is "" and fields_total None when no form_filled event was recorded (no invented M).
+    counts_line: str = ""
+    fields_total: Optional[int] = None
+    fields_skipped: int = 0
+    guessed_count: int = 0
+    form_host: str = ""
     note: str
     # What was actually sent (R8) — stored since 0037, readable since 2026-09-11.
     answers: list[ReceiptAnswerOut] = Field(default_factory=list)
@@ -779,6 +788,7 @@ class RecordApplicationReceiptResponse(BaseModel):
     cover_letter_artifact_id: Optional[int]
     # False when no letter was named: the receipt says no cover letter was sent.
     cover_letter_sent: bool = False
+    cover_letter_version_no: Optional[int] = None
     channel: str
     # What the caller sent, verbatim (trimmed); '' when none.
     channel_given: str = ""

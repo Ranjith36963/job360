@@ -3030,6 +3030,11 @@ export interface components {
             channel: string;
             /** Confirmation */
             confirmation: string;
+            /**
+             * Counts Line
+             * @default
+             */
+            counts_line: string;
             /** Cover Letter Artifact Id */
             cover_letter_artifact_id: number | null;
             /**
@@ -3039,14 +3044,35 @@ export interface components {
             cover_letter_sent: boolean;
             /** Cover Letter Text */
             cover_letter_text?: string | null;
+            /** Cover Letter Version No */
+            cover_letter_version_no?: number | null;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
             /** Cv Text */
             cv_text?: string | null;
+            /** Cv Version No */
+            cv_version_no?: number | null;
             /** Fields Filled */
             fields_filled?: {
                 [key: string]: unknown;
             };
+            /**
+             * Fields Skipped
+             * @default 0
+             */
+            fields_skipped: number;
+            /** Fields Total */
+            fields_total?: number | null;
+            /**
+             * Form Host
+             * @default
+             */
+            form_host: string;
+            /**
+             * Guessed Count
+             * @default 0
+             */
+            guessed_count: number;
             /** Id */
             id: number;
             /** Note */
@@ -3067,6 +3093,11 @@ export interface components {
             channel: string;
             /** Confirmation */
             confirmation: string;
+            /**
+             * Counts Line
+             * @default
+             */
+            counts_line: string;
             /** Cover Letter Artifact Id */
             cover_letter_artifact_id: number | null;
             /**
@@ -3074,12 +3105,33 @@ export interface components {
              * @default false
              */
             cover_letter_sent: boolean;
+            /** Cover Letter Version No */
+            cover_letter_version_no?: number | null;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
+            /** Cv Version No */
+            cv_version_no?: number | null;
             /** Fields Filled */
             fields_filled?: {
                 [key: string]: unknown;
             };
+            /**
+             * Fields Skipped
+             * @default 0
+             */
+            fields_skipped: number;
+            /** Fields Total */
+            fields_total?: number | null;
+            /**
+             * Form Host
+             * @default
+             */
+            form_host: string;
+            /**
+             * Guessed Count
+             * @default 0
+             */
+            guessed_count: number;
             /** Id */
             id: number;
             /** Note */
@@ -5388,6 +5440,11 @@ export interface components {
             channel: string;
             /** Confirmation */
             confirmation?: string | null;
+            /**
+             * Counts Line
+             * @default
+             */
+            counts_line: string;
             /** Cover Letter Origin */
             cover_letter_origin: string | null;
             /**
@@ -5409,6 +5466,23 @@ export interface components {
             fields_filled?: {
                 [key: string]: unknown;
             };
+            /**
+             * Fields Skipped
+             * @default 0
+             */
+            fields_skipped: number;
+            /** Fields Total */
+            fields_total?: number | null;
+            /**
+             * Form Host
+             * @default
+             */
+            form_host: string;
+            /**
+             * Guessed Count
+             * @default 0
+             */
+            guessed_count: number;
             /** Id */
             id: number;
             /** Job Apply Url */
@@ -5495,10 +5569,20 @@ export interface components {
             /** Channel */
             channel: string;
             /**
+             * Counts Line
+             * @default
+             */
+            counts_line: string;
+            /**
              * Cover Letter Sent
              * @default false
              */
             cover_letter_sent: boolean;
+            /**
+             * Form Host
+             * @default
+             */
+            form_host: string;
             /** Has Cover Letter */
             has_cover_letter: boolean;
             /** Has Cv */
@@ -5585,6 +5669,8 @@ export interface components {
              * @default false
              */
             cover_letter_sent: boolean;
+            /** Cover Letter Version No */
+            cover_letter_version_no?: number | null;
             /** Cv Artifact Id */
             cv_artifact_id: number | null;
             /** Cv Version No */
