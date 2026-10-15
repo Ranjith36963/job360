@@ -9,7 +9,8 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    "Send all" on Needs-you. Fill and submit each now: held tabs vanish. **Done when** each job has its yes.
 2. **Open one form, in ONE foreground tab.** Typing only lands in the foreground tab. One browser action at a time
    (two uploads at once both fail). Close the tab after submit. Greenhouse: use the plain embed URL (table).
-   **Done when** the form is loaded and in front.
+   List every question on the form (scroll to the bottom; open collapsed sections) and call `check_form`; ask the
+   user ONCE for its `missing` before typing. **Done when** the form is loaded and in front.
 3. **Upload the CV first.** Some forms parse it and overwrite or wipe fields (Lever, Greenhouse), and a parse can
    freeze the tab. Wait for the parse to finish, then re-read the page. **Done when** the file name shows and the
    page is idle.

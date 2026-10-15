@@ -1683,9 +1683,10 @@ def build_server(version: str = "") -> MCPServer:
         downloads), every stored answer grouped as contact / right_to_work /
         logistics / salary / languages / equality ("equality / voluntary") /
         approved_text, each with its `source` (memory, profile, approved_text) and
-        `saved_at`, and `missing` - what the form may ask that Job360 does not have
-        for THIS job's country. Use only kit answers; ask the user ONCE, in one
-        message, for anything in `missing`; never guess. Also: `duplicate` (warn
+        `saved_at`, and `missing` - country and contact facts Job360 lacks for THIS
+        job; it does not see the form's own questions, so call check_form with them.
+        Use only kit answers; ask the user ONCE, in one message, for anything in
+        `missing`; never guess. Also: `duplicate` (warn
         the user before any work), `hold` (another session is working this
         application: `held_by`, `session`, `until`; tell the user and stop unless
         they say continue; `unsure` = maybe your own other session), `account_site`
@@ -1712,6 +1713,38 @@ def build_server(version: str = "") -> MCPServer:
         _audit(
             "get_application_kit", "ok", application_id=application_id,
             kit_event_id=resp["kit"]["id"], missing_count=len(resp["missing"]),
+        )
+        return resp
+
+    @mcp.tool()
+    async def check_form(application_id: int, questions: list[dict[str, Any]], form_url: str = "") -> dict[str, Any]:
+        """Call right after get_application_kit and BEFORE typing into any form.
+        Read the LIVE form first and list EVERY question, including hidden or
+        below-the-fold sections and optional ones (`required` false). `questions`
+        = [{question, required (default true), key}]: `key` is the kit key you
+        will answer with (contact.email, logistics.notice_period, salary.GB ...)
+        or the saved approved_text question; leave it out and Job360 matches the
+        exact wording (case and punctuation ignored) against approved answers.
+        Job360 never reads the form or judges a question. You get `answered`
+        (question, key, value, source, matched_by; confirmed false = inferred,
+        confirm with the user), `missing` (question, required, why) and `counts`.
+        Anything in `missing`: ask the user ONCE, in one message; never guess.
+        Read-only: it writes nothing, 404 if the application is not yours."""
+        try:
+            body = models.FormCheckRequest.model_validate({"questions": questions, "form_url": form_url})
+        except ValidationError as exc:
+            raise _validation_error(exc, tool="check_form", application_id=application_id) from None
+        try:
+            async with _request_db() as db:
+                resp = await applications_route.check_application_form(
+                    application_id=application_id, body=body, response=Response(), db=db, user=_user(),
+                )
+        except HTTPException as exc:
+            _audit("check_form", "error", application_id=application_id, http_status=exc.status_code)
+            raise _tool_error(exc) from None
+        _audit(
+            "check_form", "ok", application_id=application_id, questions_count=resp["questions_count"],
+            missing_count=resp["counts"]["missing"],
         )
         return resp
 

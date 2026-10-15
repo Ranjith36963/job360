@@ -72,6 +72,8 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "After filling the form, record_event form_filled {form_url, fields_count}. "
     "Then re-read EVERY field on the page, fix what is wrong, and record_event form_swept "
     "{fields_checked, fixed}. Then call check_submit (it says stop until both are recorded).",
+    "Before typing into a form, read every question on the LIVE form and call check_form with them; "
+    "the kit's `missing` covers only country and contact facts.",
     "Pass a `session` label (same one all conversation) to get_application_kit and check_submit. "
     "`hold` set means another session is working this application: tell the user and stop unless they say "
     "continue. When you finish or hand over, record `hold_released` {reason: done|stopped}.",
@@ -1149,6 +1151,24 @@ def hold_fact(hold: Optional[dict[str, Any]]) -> Optional[tuple[str, str, str]]:
     return (str(hold["held_by"]), str(hold.get("session") or ""), str(hold["since"]))
 
 
+async def _application_answers(
+    db: JobDatabase, user: CurrentUser, app_row: dict[str, Any]
+) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
+    """The profile, the job's country and :func:`compute_answers` for ONE application - the single
+    place the kit and the form check load them (same profile, overlay, country and company key)."""
+    from src.services.profile.models import UserProfile  # noqa: PLC0415
+    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
+
+    loaded, overlay = load_profile_with_overlay(user.id)
+    profile = loaded or UserProfile()
+    country = (str(app_row.get("job_country") or "").strip().upper()) or None
+    cur = await db._db.execute("SELECT normalized_company FROM jobs WHERE id = ?", (app_row.get("job_id"),))
+    job_row = await cur.fetchone()
+    job_company_key = str(dict(job_row).get("normalized_company") or "") if job_row is not None else ""
+    answers, missing = compute_answers(profile, overlay, country, job_company_key or None)
+    return profile, country, answers, missing
+
+
 async def build_kit(
     db: JobDatabase, user: CurrentUser, application_id: int, *, now: datetime, include_text: bool = True,
     session: str = "",
@@ -1163,8 +1183,6 @@ async def build_kit(
     document. The token appears only in this return value."""
     from src.api.auth_deps import email_verification_satisfied  # noqa: PLC0415 - the one verification rule
     from src.api.routes.profile import settings_view  # noqa: PLC0415 - the one read model of the settings
-    from src.services.profile.models import UserProfile  # noqa: PLC0415
-    from src.services.profile.storage import load_profile_with_overlay  # noqa: PLC0415
 
     actor = actor_for(user)
     log = get_audit_logger()
@@ -1190,13 +1208,7 @@ async def build_kit(
             429, f"too many kit reads this hour (KIT_READS_MAX_PER_HOUR = {settings.KIT_READS_MAX_PER_HOUR})"
         )
 
-    loaded, overlay = load_profile_with_overlay(user.id)
-    profile = loaded or UserProfile()
-    country = (str(app_row.get("job_country") or "").strip().upper()) or None
-    cur = await db._db.execute("SELECT normalized_company FROM jobs WHERE id = ?", (app_row.get("job_id"),))
-    job_row = await cur.fetchone()
-    job_company_key = str(dict(job_row).get("normalized_company") or "") if job_row is not None else ""
-    answers, missing = compute_answers(profile, overlay, country, job_company_key or None)
+    profile, country, answers, missing = await _application_answers(db, user, app_row)
     answers_omitted = 0
     approved = answers["approved_text"]
     if len(approved) > settings.KIT_APPROVED_TEXT_MAX:
@@ -1302,6 +1314,95 @@ async def build_kit(
     if letter is None:
         out["cover_letter_none_reason"] = NO_LETTER_REASON
     return out
+
+
+# ── Form check: which questions on the LIVE form already have a saved answer ──
+
+FORM_NEXT_ASK = (
+    "Ask the user ONCE, in one message, for every question in `missing`; "
+    "save reusable answers with update_profile (user_info.answers); never guess."
+)
+FORM_NEXT_FILL = "Every question has a saved answer. Fill the form with these values."
+_NON_ALNUM_RE = re.compile(r"[\W_]+")  # a run of anything that is not a letter or digit
+
+
+def _norm_question(text: Any) -> str:
+    """Casefold, every non-alphanumeric run -> one space, stripped. No fuzzy or semantic matching."""
+    return _NON_ALNUM_RE.sub(" ", str(text or "").casefold()).strip()
+
+
+def form_check(answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pure: for each form question, a saved answer from ``answers`` (the output of
+    :func:`compute_answers`) or a gap. A question with a ``key`` must name an item that
+    really is in the kit (an ``approved_text`` item is also matched by normalized
+    question); without a key the normalized wording is matched against the approved
+    answers only. Never logs, never writes, never guesses."""
+    items = [i for block in answers.values() for i in block]
+    by_key = {str(i["key"]): i for i in items}
+    approved = {_norm_question(i["key"]): i for i in answers.get("approved_text", [])}
+    answered: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for q in questions:
+        text = str(q["question"])
+        required = bool(q.get("required", True))
+        key = (q.get("key") or "").strip() or None
+        item: Optional[dict[str, Any]] = None
+        matched_by = "key"
+        if key is not None:
+            item = by_key.get(key)
+            if item is None:
+                item = approved.get(_norm_question(key)) if _norm_question(key) else None
+            if item is None:
+                missing.append({"question": text, "required": required,
+                                "why": f"key '{key}' is not in this application's kit"})
+                continue
+        else:
+            item = approved.get(_norm_question(text)) if _norm_question(text) else None
+            matched_by = "wording"
+            if item is None:
+                missing.append({"question": text, "required": required, "why": "no saved answer for this question"})
+                continue
+        row: dict[str, Any] = {
+            "question": text, "required": required, "key": item["key"], "value": item["value"],
+            "source": item["source"], "matched_by": matched_by,
+        }
+        if item.get("confirmed") is False:
+            row["confirmed"] = False
+        answered.append(row)
+    missing_required = sum(1 for m in missing if m["required"])
+    return {
+        "questions_count": len(questions), "answered": answered, "missing": missing,
+        "counts": {"answered": len(answered), "missing": len(missing), "missing_required": missing_required},
+        "next": FORM_NEXT_ASK if missing else FORM_NEXT_FILL,
+    }
+
+
+async def check_form(
+    db: JobDatabase, user: CurrentUser, application_id: int, *,
+    questions: list[dict[str, Any]], form_url: str = "", now: datetime,
+) -> dict[str, Any]:
+    """Read-only: look up a saved answer for every question on the live form. Loads the
+    answers exactly as :func:`build_kit` does (same profile, overlay, country, company
+    key). 404 for an application that is not the caller's. Writes NO event. Logs counts
+    only - never a question or an answer value."""
+    log = get_audit_logger()
+    app_row = await spine.get_owned_application(db, user.id, application_id)
+    if app_row is None:
+        log.warning("form_check", extra={
+            "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,
+            "questions_count": len(questions), "answered": 0, "missing": 0, "missing_required": 0,
+            "result": "refused",
+        })
+        raise SpineError(404, "application not found")
+    _profile, _country, answers, _missing = await _application_answers(db, user, app_row)
+    out = form_check(answers, questions)
+    log.info("form_check", extra={
+        "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,
+        "questions_count": out["questions_count"], "answered": out["counts"]["answered"],
+        "missing": out["counts"]["missing"], "missing_required": out["counts"]["missing_required"],
+        "result": "ok",
+    })
+    return {"application_id": application_id, **out}
 
 
 TEXT_MORE = "get_application(application_id, with_artifact_text=true)"

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -475,6 +475,62 @@ class MissingToolRequest(BaseModel):
 
     name: str
     why: str = ""
+
+
+class FormQuestion(BaseModel):
+    """One question read off a LIVE application form. ``key`` is the kit key the
+    assistant plans to answer it with (``contact.email``, ``logistics.notice_period``,
+    or the saved ``approved_text`` question)."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    question: str = Field(min_length=1, max_length=500)
+    required: bool = True
+    key: Optional[str] = Field(None, max_length=300)
+
+
+class FormCheckRequest(BaseModel):
+    """``POST /applications/{id}/kit/form-check`` body: every question on the live form."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    form_url: str = Field("", max_length=2000)
+    questions: list[FormQuestion] = Field(min_length=1, max_length=80)
+
+
+class FormAnsweredOut(BaseModel):
+    question: str
+    required: bool
+    key: str
+    value: Any
+    source: str
+    confirmed: Optional[bool] = None
+    matched_by: Literal["key", "wording"]
+
+
+class FormMissingOut(BaseModel):
+    question: str
+    required: bool
+    why: str
+
+
+class FormCheckCountsOut(BaseModel):
+    answered: int
+    missing: int
+    missing_required: int
+
+
+class FormCheckOut(BaseModel):
+    """For every question on the live form: a saved answer from this application's
+    kit, or a gap to ask the user about. Job360 only looks up; the assistant reads
+    the form and decides."""
+
+    application_id: int
+    questions_count: int
+    answered: list[FormAnsweredOut]
+    missing: list[FormMissingOut]
+    counts: FormCheckCountsOut
+    next: str
 
 
 class MissingToolResponse(BaseModel):
