@@ -15,10 +15,10 @@
 
 | Fact | Value | Where the code says it |
 | --- | --- | --- |
-| Migration head | **0061** | `backend/migrations/` |
-| Migration files | **62** | `backend/migrations/*.up.sql` |
-| FastAPI surface | 21 route modules (122 endpoints) | `backend/src/api/routes/` |
-| Test files | across 189 `test_*.py` files | `backend/tests/` |
+| Migration head | **0062** | `backend/migrations/` |
+| Migration files | **63** | `backend/migrations/*.up.sql` |
+| FastAPI surface | 21 route modules (124 endpoints) | `backend/src/api/routes/` |
+| Test files | across 196 `test_*.py` files | `backend/tests/` |
 | GitHub Actions | 28 workflows in `.github/workflows/` | `.github/workflows/` |
 | Hard rules | **14** | `.claude/skills/hard-rules/SKILL.md` |
 <!-- /generated -->
@@ -35,6 +35,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | --- | --- | --- |
 | `GET` | `/api/applications` | `applications.py` |
 | `GET` | `/api/applications/export` | `applications.py` |
+| `POST` | `/api/applications/inbox-checked` | `applications.py` |
 | `GET` | `/api/applications/job/{job_id}` | `applications.py` |
 | `GET` | `/api/applications/lessons` | `applications.py` |
 | `GET` | `/api/applications/stats` | `applications.py` |
@@ -54,6 +55,7 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `PUT` | `/api/applications/{application_id}/fit` | `applications.py` |
 | `PATCH` | `/api/applications/{application_id}/job` | `applications.py` |
 | `GET` | `/api/applications/{application_id}/kit` | `applications.py` |
+| `POST` | `/api/applications/{application_id}/kit/form-check` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/receipt` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/send/approve` | `applications.py` |
 | `POST` | `/api/applications/{application_id}/send/decline` | `applications.py` |
@@ -156,5 +158,5 @@ routers — a wrong endpoint reads like a contract and 404s whoever trusts it.
 | `GET` | `/.well-known/oauth-protected-resource` | `well_known.py` |
 | `GET` | `/.well-known/oauth-protected-resource/api/mcp` | `well_known.py` |
 
-**122 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
+**124 routes.** Generated from the routers; a path is assembled from `APIRouter(prefix=…)` + the decorator + the `include_router(prefix=…)` in `main.py` (`/api` for all but the root-mounted `/.well-known/*` discovery documents).
 <!-- /generated -->

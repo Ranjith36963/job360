@@ -1141,6 +1141,9 @@ async def test_autofill_events_assistants_may_only_deny(authenticated_async_cont
         assert (await agent.post(f"/api/applications/{app_id}/autofill", json={"mode": "deny"})).status_code in (401, 403)
         assert (await _event(agent, app_id, "autofill_set", {"mode": "deny"})).status_code == 201
         assert (await _kit(agent, app_id)).json()["autofill"] == "deny"
+        # The assistant hands over (2026-10-15): otherwise its fresh kit read is another
+        # session's live hold and the user's own check_submit below asks held_by_other_session.
+        assert (await _event(agent, app_id, "hold_released", {"reason": "done"})).status_code == 201
     async with authenticated_async_context() as client:
         state = (await _controls(client, app_id))["autofill"]
         assert state["mode"] == "deny" and state["by"] == "token:claude-code" and state["at"]
@@ -1906,6 +1909,25 @@ async def test_approved_text_keeps_the_newest_25_and_counts_the_rest(authenticat
         await _patch(client, _e("user_info.answers", records[:3]))
         small = (await _kit(client, app_id)).json()
         assert "answers_omitted" not in small or small["answers_omitted"] is None
+
+
+async def test_kit_approved_text_carries_topic_and_bad_topic_is_refused(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        bad = await _patch(client, _e("user_info.answers", [
+            {"question": "Work from India?", "answer": "Yes", "approved": True, "topic": "Work From India!"},
+        ]))
+        assert bad.status_code == 422, bad.text
+        assert "Nothing was saved." in bad.text and "user_info.answers[0].topic" in bad.text
+        ok = await _patch(client, _e("user_info.answers", [
+            {"question": "Work from India?", "answer": "Yes", "approved": True, "topic": "work_from.IN"},
+            {"question": "Notice period?", "answer": "1 month", "approved": True},
+        ]))
+        assert ok.status_code == 200, ok.text
+        items = {i["key"]: i for i in (await _kit(client, app_id)).json()["answers"]["approved_text"]}
+        assert items["Work from India?"]["topic"] == "work_from.IN"
+        assert items["Notice period?"].get("topic") is None
 
 
 @pytest.mark.asyncio

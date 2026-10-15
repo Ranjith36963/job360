@@ -66,6 +66,13 @@ def validate_event_type(event_type: str) -> None:
         )
 
 
+# Reserved payload key (weak spot #4 audit). A converted repeat-applied note carries
+# ``{"confirms": "applied"}``; validate_payload refuses it from callers, so only Job360 writes it.
+# proof.py counts such a note as email proof ONLY with an email source + message_id.
+CONFIRMS_KEY = "confirms"
+CONFIRMS_APPLIED = "applied"
+
+
 def payload_bytes(payload: Mapping[str, Any]) -> int:
     """The SERIALISED size of an event payload, in bytes — what the column
     actually costs, not ``len()`` of the Python object (S5)."""
@@ -89,6 +96,8 @@ def validate_payload(payload: Any, *, max_bytes: Optional[int] = None) -> dict[s
         raise SpineError(422, "payload must be a JSON object")
     if "follow_up_on" in payload:
         raise SpineError(422, "pass follow_up_on as its own field, not inside payload")
+    if CONFIRMS_KEY in payload:  # reserved: only append_event's repeat-applied conversion may write it
+        raise SpineError(422, f"payload key {CONFIRMS_KEY!r} is reserved for Job360 itself")
     size = payload_bytes(payload)
     cap = settings.APPLICATION_EVENT_PAYLOAD_MAX_BYTES if max_bytes is None else max_bytes
     if size > cap:
@@ -567,7 +576,7 @@ async def _event_by_source_message_id(
     ``(application_id, source_message_id)``, backed by the partial UNIQUE
     index `migrations/0041...up.sql`."""
     cur = await db._db.execute(
-        "SELECT id, event_type, occurred_at, recorded_at, recorded_by, scheduled_at "
+        "SELECT id, event_type, detail, occurred_at, recorded_at, recorded_by, scheduled_at "
         "FROM application_events WHERE application_id = ? AND source_message_id = ?",
         (application_id, message_id),
     )
@@ -600,7 +609,9 @@ async def _duplicate_event_result(
     cur = await db._db.execute("SELECT status, follow_up_on FROM applications WHERE id = ?", (application_id,))
     app_row = await cur.fetchone()
     warnings: list[str] = []
-    if requested_type is not None and requested_type != existing["event_type"]:
+    if requested_type is not None and requested_type != existing["event_type"] and not _is_confirmation_of(
+        requested_type, existing
+    ):
         # Same message id, DIFFERENT type: the dedupe stands (nothing written),
         # but say so — otherwise the caller believes its type was recorded.
         get_audit_logger().info(
@@ -659,6 +670,68 @@ async def _replay_follow_up_on(db: JobDatabase, application_id: int) -> Optional
     return None if value is FOLLOW_UP_UNSET else value
 
 
+# Weak spot #4 (2026-10-15) — a second `applied` on an already-applied
+# application (typically the confirmation email arriving after
+# record_application) is not a second status event: it is stored as a note
+# whose detail starts with this prefix, which proof.py already counts as email
+# proof when it also carries an email source + message_id (proof.py). The text prefix alone is NOT
+# proof for new rows: the structured ``confirms`` payload key marks the conversion.
+SUBMISSION_CONFIRMED_PREFIX = "Submission confirmed"
+CHANGE_DATE_HINT = "to change the applied date use corrects_event_id"
+REPEAT_APPLIED_WARNING = (
+    "this application is already applied; recorded as a submission confirmation (proof), "
+    f"not a second applied event; {CHANGE_DATE_HINT}"
+)
+CONFIRMATION_EXISTS_WARNING = (
+    "a submission confirmation without a source is already recorded for this application; nothing written; "
+    f"{CHANGE_DATE_HINT}"
+)
+
+
+def _is_confirmation_of(requested_type: str, existing: dict[str, Any]) -> bool:
+    """A repeat ``applied`` whose message id was already stored as the
+    submission-confirmation note is the SAME fact, not a type mismatch."""
+    return (
+        requested_type == "applied"
+        and existing.get("event_type") == "note"
+        and str(existing.get("detail") or "").startswith(SUBMISSION_CONFIRMED_PREFIX)
+    )
+
+
+async def _has_surviving_applied(db: JobDatabase, application_id: int) -> bool:
+    """An ``applied`` event on this application that no correction superseded."""
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_events e WHERE e.application_id = ? AND e.event_type = 'applied' "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) LIMIT 1",
+        (application_id,),
+    )
+    return await cur.fetchone() is not None
+
+
+async def _existing_confirmation(db: JobDatabase, application_id: int) -> Optional[dict[str, Any]]:
+    """The first surviving converted confirmation note (``payload.confirms == 'applied'``) on this
+    application, else None. Mirrors career-ops reply-watch.mjs:180 (skip a receipt already seen)."""
+    cur = await db._db.execute(
+        "SELECT e.id, e.event_type, e.detail, e.occurred_at, e.recorded_at, e.recorded_by, e.scheduled_at, "
+        "e.payload FROM application_events e WHERE e.application_id = ? AND e.event_type = 'note' "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) ORDER BY e.id",
+        (application_id,),
+    )
+    for row in await cur.fetchall():
+        try:
+            confirms = json.loads(row["payload"] or "{}").get(CONFIRMS_KEY)
+        except (ValueError, AttributeError):
+            continue
+        if confirms == CONFIRMS_APPLIED:
+            return {k: row[k] for k in row.keys() if k != "payload"}
+    return None
+
+
+def _confirmation_detail(detail: str) -> str:
+    text = SUBMISSION_CONFIRMED_PREFIX + (f": {detail}" if detail else "")
+    return text[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS]
+
+
 NO_APPLIED_WARNING = (
     "no applied event recorded for this application — ask the user when they applied, then record_application"
 )
@@ -674,12 +747,7 @@ async def missing_applied_warnings(db: JobDatabase, application_id: int, event_t
     rank = progress_rank(mapped) if mapped else None
     if rank is None or rank <= PROGRESS_RANK["applied"]:
         return []
-    cur = await db._db.execute(
-        "SELECT 1 FROM application_events e WHERE e.application_id = ? AND e.event_type = 'applied' "
-        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) LIMIT 1",
-        (application_id,),
-    )
-    return [] if await cur.fetchone() is not None else [NO_APPLIED_WARNING]
+    return [] if await _has_surviving_applied(db, application_id) else [NO_APPLIED_WARNING]
 
 
 async def append_event(
@@ -696,6 +764,7 @@ async def append_event(
     source: Optional[dict[str, Any]] = None,
     scheduled_at: str = "",
     follow_up_on: Any = FOLLOW_UP_UNSET,
+    repeat_applied_as_confirmation: bool = False,
 ) -> dict[str, Any]:
     """R3/R4 — append one event, then recompute + write-through the status
     cache (and its legacy `stage` projection) in the SAME logical operation.
@@ -744,7 +813,17 @@ async def append_event(
     change. The UNIQUE index still backstops a race between two concurrent
     callers (``pg.IntegrityError``): re-read and return the existing row the
     same way ``save_artifact``'s version race does.
+
+    ``repeat_applied_as_confirmation`` (weak spot #4; the record_event door
+    only, never record_application's receipt path): an ``applied`` with no
+    ``corrects_event_id`` on an application that already has a surviving
+    ``applied`` is stored as a ``note`` whose detail starts
+    ``SUBMISSION_CONFIRMED_PREFIX`` (source, occurred_at and follow_up_on
+    kept) and answered with ``REPEAT_APPLIED_WARNING``. Checked AFTER the
+    source dedupe, so a re-read message id returns the existing row either way.
     """
+    requested_type = event_type
+    warnings: list[str] = []
     if corrects_event_id is not None:
         cur = await db._db.execute(
             "SELECT 1 FROM application_events WHERE id = ? AND application_id = ?",
@@ -760,6 +839,24 @@ async def append_event(
         existing = await _event_by_source_message_id(db, application_id, source["message_id"])
         if existing is not None:
             return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
+
+    if (
+        repeat_applied_as_confirmation
+        and event_type == "applied"
+        and corrects_event_id is None
+        and await _has_surviving_applied(db, application_id)
+    ):
+        if source is None:
+            # No source = no identity: without this a repeat would write a new note every time.
+            existing = await _existing_confirmation(db, application_id)
+            if existing is not None:
+                dup = await _duplicate_event_result(db, application_id, recorded_by, existing, requested_type)
+                dup["warnings"] = [*dup["warnings"], CONFIRMATION_EXISTS_WARNING]
+                return dup
+        event_type = "note"
+        detail = _confirmation_detail(detail)
+        payload = {**(payload or {}), CONFIRMS_KEY: CONFIRMS_APPLIED}
+        warnings.append(REPEAT_APPLIED_WARNING)
 
     # The slot's value BEFORE this event — needed to decide the auto-clear
     # below, and to echo back an unchanged value at the end without a stale
@@ -819,7 +916,7 @@ async def append_event(
         if source is not None:
             existing = await _event_by_source_message_id(db, application_id, source["message_id"])
             if existing is not None:
-                return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
+                return await _duplicate_event_result(db, application_id, recorded_by, existing, requested_type)
         raise
     event_id = cur.lastrowid
 
@@ -873,6 +970,7 @@ async def append_event(
         "already_existed": False,
         "scheduled_at": scheduled_at or None,
         "follow_up_on": final_follow_up_on,
+        **({"warnings": warnings} if warnings else {}),
     }
 
 
@@ -1287,8 +1385,9 @@ async def record_receipt(
     cover_letter_artifact_id: Optional[int] = None,
     applied_at: Optional[str] = None,
 ) -> dict[str, Any]:
-    """R8/S3 — the rich receipt: freeze the named artifact versions (or the
-    newest, if none named — ``_resolve_receipt_artifact``) as text, and
+    """R8/S3 — the rich receipt: freeze the named CV version (the newest, if
+    none named, with a warning) and the named cover letter (NONE if not named:
+    the receipt records "no cover letter sent") as text, and
     append the ``applied`` event. ``profile_version`` is stamped from the
     CALLER's current profile (B6 fix — this used to be hardcoded ``None``,
     unlike the legacy ``/receipts/{job_id}`` route which has always stamped
@@ -1322,9 +1421,23 @@ async def record_receipt(
         raise SpineError(404, "application not found")
 
     cv_artifact = await _resolve_receipt_artifact(db, user_id, application_id, "cv", cv_artifact_id)
-    cl_artifact = await _resolve_receipt_artifact(
-        db, user_id, application_id, "cover_letter", cover_letter_artifact_id
-    )
+    if cv_artifact_id is None and cv_artifact is not None:
+        warnings.append(
+            "cv_artifact_id not given: froze the newest CV "
+            f"(artifact {cv_artifact['id']}, v{cv_artifact['version_no']})"
+        )
+    # A receipt never guesses a letter: only a NAMED letter is frozen (M3 - the
+    # receipt is permanent, so a wrong "sent" claim could never be corrected).
+    cl_artifact: Optional[dict[str, Any]] = None
+    if cover_letter_artifact_id is None:
+        warnings.append(
+            "no cover_letter_artifact_id given: the receipt says no cover letter was sent. "
+            "If one was sent, record a correction note; receipts cannot be edited."
+        )
+    else:
+        cl_artifact = await _resolve_receipt_artifact(
+            db, user_id, application_id, "cover_letter", cover_letter_artifact_id
+        )
 
     # Lazy: profile storage pulls the scoring stack transitively (rule #16),
     # same reasoning as save_artifact's identical import above.
@@ -1408,6 +1521,7 @@ async def record_receipt(
         "cv_artifact_id": cv_artifact["id"] if cv_artifact else None,
         "cv_version_no": cv_artifact["version_no"] if cv_artifact else None,
         "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
+        "cover_letter_sent": cl_artifact is not None,
         "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
         "confirmation": confirmation or "",
         "url": f"/applications/{application_id}", "event_id": event["event_id"],
@@ -1479,7 +1593,7 @@ async def _list_receipts_for_application(
     never read back until 2026-09-11 (``tests/test_receipt_answers_readable.py``)."""
     cols = (
         "id, sent_at, channel, confirmation, cv_artifact_id, cover_letter_artifact_id, note, "
-        "answers, fields_filled"
+        "answers, fields_filled, (COALESCE(cover_letter_text, '') <> '') AS _letter_frozen"
     )
     if include_text:
         cols += ", cv_text, cover_letter_text"
@@ -1492,6 +1606,8 @@ async def _list_receipts_for_application(
     for row in rows:
         row["answers"] = _receipt_answers(row.get("answers"))
         row["fields_filled"] = _receipt_json(row.get("fields_filled"), dict)
+        frozen = bool(row.pop("_letter_frozen", None))
+        row["cover_letter_sent"] = frozen or row.get("cover_letter_artifact_id") is not None
     return rows
 
 
@@ -1540,7 +1656,8 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
     """
     cur = await db._db.execute(
         "SELECT application_id, cv_artifact_id, cover_letter_artifact_id, answers, fields_filled, "
-        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256 "
+        "confirmation, recorded_by, possible_duplicate, kit_event_id, kit_sha256, "
+        "(COALESCE(cover_letter_text, '') <> '') AS letter_frozen "
         "FROM application_receipts WHERE user_id = ? AND id = ?",
         (user_id, receipt_id),
     )
@@ -1567,6 +1684,25 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
         "cover_letter_version_no": await _artifact_version_no(
             db, user_id, application_id, "cover_letter", r.get("cover_letter_artifact_id")
         ),
+        "cover_letter_sent": r.get("cover_letter_artifact_id") is not None or bool(r.get("letter_frozen")),
+    }
+
+
+async def receipt_letter_sent(db: JobDatabase, user_id: str, receipt_ids: list[int]) -> dict[int, bool]:
+    """``cover_letter_sent`` for many receipts at once: true when the row names a
+    cover letter artifact or froze a letter's text (the legacy web "I applied"
+    route stores text without an id). Read-only; a foreign or unknown id is absent."""
+    if not receipt_ids:
+        return {}
+    marks = ",".join("?" for _ in receipt_ids)
+    cur = await db._db.execute(
+        f"SELECT id, cover_letter_artifact_id, (COALESCE(cover_letter_text, '') <> '') AS frozen "  # noqa: S608
+        f"FROM application_receipts "
+        f"WHERE user_id = ? AND id IN ({marks})",
+        (user_id, *receipt_ids),
+    )
+    return {
+        int(r["id"]): r["cover_letter_artifact_id"] is not None or bool(r["frozen"]) for r in await cur.fetchall()
     }
 
 
@@ -1603,6 +1739,7 @@ async def get_application_detail(
     # spec.md R3).
     from src.services.applications.asks import list_asks  # noqa: PLC0415
     from src.services.applications.contacts import list_contacts  # noqa: PLC0415
+    from src.services.applications.inbox import email_senders_for  # noqa: PLC0415 - inbox imports spine
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     app_row = await get_owned_application(db, user_id, application_id)
@@ -1675,6 +1812,9 @@ async def get_application_detail(
         "follow_up_on": follow_up_on,
         "follow_up_due": follow_up_due,
         "proof": (await proof_for(db, user_id, [application_id]))[application_id],
+        # Gmail check slice 2026-10-15 — where to search and from when.
+        "email_senders": email_senders_for(app_row.get("job_url") or ""),
+        "inbox_checked_at": app_row.get("inbox_checked_at"),
     }
     # 2026-09-20 — the one line at the top: what to do next, read off the
     # stored state above (never a judgement of the job). The same value
@@ -1773,7 +1913,7 @@ async def list_applications(
     cur = await db._db.execute(
         f"SELECT id, job_id, job_title, job_company, job_url, job_location, status, last_event_at, "  # noqa: S608
         f"visa_signal, visa_country, fit_recorded_at, fit_score, fit_verdict, follow_up_on, "
-        f"job_country, job_remote, job_found_on, ad_posted_at, employer_published_at "
+        f"job_country, job_remote, job_found_on, ad_posted_at, employer_published_at, inbox_checked_at "
         f"FROM applications WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
         [*params, limit, offset],
     )
@@ -1836,6 +1976,7 @@ async def list_applications(
             receipt_count_by_app[row[0]] = int(row[1])
             last_receipt_at_by_app[row[0]] = row[2]
 
+    from src.services.applications.inbox import email_senders_for  # noqa: PLC0415 - inbox imports spine
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     proofs = await proof_for(db, user_id, app_ids)
@@ -1869,6 +2010,9 @@ async def list_applications(
                 "follow_up_on": follow_up_on,
                 "follow_up_due": follow_up_due,
                 "proof": proofs[app_id],
+                # Gmail check slice 2026-10-15 — where to search and from when.
+                "email_senders": email_senders_for(r.get("job_url") or ""),
+                "inbox_checked_at": r.get("inbox_checked_at"),
                 # 2026-09-24 — same state machine `get_application` feeds its
                 # header with, over the same stored facts (S21: real values,
                 # not a schema-presence default).

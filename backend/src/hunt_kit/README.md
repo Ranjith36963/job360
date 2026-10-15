@@ -50,6 +50,8 @@ Results stream to the stream file as they come: every company or feed that finis
 
 A `--resume` only continues the same search (same titles, countries, sources, days); a different one starts fresh and keeps the unfinished results as `<stream>.prev`. A fresh start without `--resume` does the same.
 
+Every run, including one that failed or was interrupted, appends one JSON line to `hunt_runs.jsonl` (next to the stream; `--run-log PATH`, or `none` to turn it off): start, end, status (`completed`, `partial`, `interrupted`, `failed`), and the counts found, kept, skipped_seen, skipped_company, skipped_bad_url, skipped_dead and failed, plus the failed sources with their error. The same failed-sources list is printed to stderr. The history file also keeps the skipped counts of each run and is replaced atomically, only after the output was written. A second run on the same stream is refused (`<stream>.lock`, exit 3) until the first ends; a lock left by a dead process is reclaimed.
+
 Each output line is one job: title, company, url, location, posted, source,
 board, row (which rule matched: `work_country`, `remote_world`, `remote_region`,
 `visa_onsite`, `maybe_relocation`), years_min, visa_lines (up to 2 exact

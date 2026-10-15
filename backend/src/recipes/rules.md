@@ -6,6 +6,8 @@ conversation. The hard lines in the server instructions win over everything
 here. Sections: Settings and the submit gate, Apply kit, Gmail and the daily
 check, Outreach, Events, Profile, Job facts.
 
+If a Job360 tool ignores or refuses an argument you expected, call doctor: a parameter it lists that your tool list lacks means your connector is stale; tell the user to reconnect Job360.
+
 ## Settings and the submit gate
 
 SETTINGS: read get_profile `settings` before any apply step. Paused = stop.
@@ -62,7 +64,9 @@ this one application; `stop` - do not submit (paused, already applied, or the
 daily limit is reached). `reason` is a short code and `detail` one plain
 sentence you can show the user. Reasons: paused, already_applied,
 user_declined (the user said don't send), daily_cap_reached, duplicate_job
-(same job already applied to: `stop` in auto mode, else `ask`), unknown_site
+(same job already applied to: `stop` in auto mode, else `ask`),
+held_by_other_session (another assistant session read this application's kit
+recently and did not record `hold_released`: `ask`), unknown_site
 (`form_url` is not one plain http(s) address - no user@, % or backslash before
 the path, ASCII host), form_host_mismatch (`form_url` is not the site of your
 latest `form_filled`), email_not_verified (the user has not confirmed their
@@ -73,7 +77,7 @@ recorded `blocked` and no `unblocked` yet: `ask`; a yes does not clear it). Inde
 answer `ask` unless the user said yes to this CV. The first application after
 the user turns auto-submit on is a practice run (`ask`, reason
 `practice_run`). A yes NEVER clears unknown_site, form_host_mismatch,
-email_not_verified or blocked: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
+email_not_verified, blocked or held_by_other_session: do not submit, tell the user the `detail`. It is read-only: it records nothing - after a real submit,
 record it with `record_application`. A yes the user gave for this exact CV
 answers `submit` with `user_approved`; if the CV is edited afterwards that yes
 no longer counts - ask again. A setting that says to apply is never a reason
@@ -130,15 +134,24 @@ no invented recipient. A letter without a letterhead or a date is flagged in
 APPLY KIT: before filling any form call get_application_kit(application_id) —
 it holds the CV and letter, every stored answer with its source, and what
 is missing for this job's country. Use only kit answers; anything in
-`missing` = ask the user ONCE in one message, never guess. FILE: desktop/
+`missing` = ask the user ONCE in one message, never guess. The kit's `missing`
+covers only country and contact facts: read every question on the LIVE form and
+call check_form(application_id, questions) before typing; its `missing` is asked
+in that same one message. Each answer has a
+`state`: `confirmed` (the user's - use it), `inferred` (an assistant worked it
+out - confirm once, then save it again with source user_said) or `sensitive`
+(salary, equality, sanctions, visa / right-to-work status - show it to the user and confirm it on THIS form
+before use; never fill it silently; ask separately "use it here?" and "remember it?"). FILE: desktop/
 Claude Code — download `file.url` to a local file and upload that; chat
 apps — ask the user to attach the PDF once for this job; else paste `text`
 if the form allows; else the user uploads by hand. Expired link = call the
 kit again. Show the CV; when the user OKs it in chat record_event cv_seen
 (where chat); when they say yes to submitting, record_event submit_approved.
 After filling, record_event form_filled with `answers`: every field you typed,
-its `source`, the kit `key` for memory/profile answers; a guess is `guessed`. `hold` set = another assistant is
-on it — tell the user. `duplicate` set = warn before any work. `autofill`
+its `source`, the kit `key` for memory/profile answers; a guess is `guessed`. Pass a `session` label (same one
+all conversation) to get_application_kit and check_submit. `hold` set means another session is working this
+application: tell the user and stop unless they say continue. When you finish or hand over, record
+`hold_released` {reason: done|stopped}. `duplicate` set = warn before any work. `autofill`
 deny = do not type into the form: give the user the answers to paste.
 Account site: stop, the user signs up and signs in themselves (never a
 password), then record_event site_account and continue; a sign-up wall on
@@ -148,10 +161,12 @@ The kit holds, for THIS application only: the CV and cover letter (`text`
 up to 8000 chars - `text_more` says how to fetch the rest; `include_text=false` sends none - a `sha256` of the full text, and a 30-minute `file.url` PDF link you can download, 3
 downloads), every stored answer grouped as contact / right_to_work /
 logistics / salary / languages / equality ("equality / voluntary") /
-approved_text, each with its `source` (memory, profile, approved_text) and
-`saved_at`, and `missing` - what the form may ask that Job360 does not have for
-THIS job's country. Also: `duplicate` (warn the user before any work), `hold`
-(another assistant is on it - tell the user), `account_site` (an account is
+approved_text, each with its `source` (memory, profile, approved_text),
+`saved_at` and `state` (confirmed / inferred / sensitive; `answers_summary`
+counts them), and `missing` - country and contact facts Job360 lacks for THIS job
+(the form's own questions: check_form). Also: `duplicate` (warn the user before any work), `hold`
+(another session is on it: `held_by`, `session`, `until`; `unsure` = maybe your own
+other session - tell the user), `account_site` (an account is
 needed: stop, the user signs up and signs in themselves, never a password),
 `autofill` (deny = do not type into the form, give the user the answers to
 paste) and `settings` (including `submit_preview`, what check_submit would
@@ -166,7 +181,7 @@ is filled.
 the `cv_artifact_id` and `cover_letter_artifact_id` that were sent, and in
 `confirmation` the application ID or portal reference ONLY (it must contain a
 digit; anything else is kept in the note with a warning). This saves an
-immutable receipt. Right after, put the thank-you page text in `record_event`
+immutable receipt. Name `cover_letter_artifact_id` only when the form took a letter; otherwise leave it out and the receipt says none was sent. Right after, put the thank-you page text in `record_event`
 `proof_text` {text, page_host}, and a screenshot only if you can. Proof is one
 of: a confirmation email, the thank-you page text, or the application ID /
 portal reference; with none yet the application is "claimed, unverified".
@@ -204,8 +219,10 @@ the Job360 website), do not ask the mode again — offer once to create
 the task at preferences.check_every.
 
 AUTO: right after the user picks it, read Gmail at once for every OPEN
-application (list_applications), looking only at mail since that
-application was added to Job360, and record what happened with
+application (list_applications), looking only at mail since its
+`inbox_checked_at` (null = since it was added to Job360), searching by
+company name OR its `email_senders` OR the user's job label (the steps are
+in get_recipe("daily")), and record what happened with
 record_event; then schedule the recurring check. Record clear facts
 on your own (replied, interview, rejected, offer, submission
 confirmed), including replies from people the user reached out to;
@@ -384,6 +401,7 @@ from `get_proof_upload_link` (5 minutes, one use, png/jpeg/webp, 3 MB, 3 per
 application); never paste it anywhere else. Never invent proof: no page text
 and no email means "claimed, unverified". Only the user deletes a screenshot,
 on the website.
+A confirmation email for an application already applied: record_event `applied` with the email `source`; Job360 stores it as the submission confirmation (proof), never a second applied.
 
 ## Profile
 
@@ -441,9 +459,11 @@ value, or null to clear back to what the structural read says>}. An unknown path
 or a wrongly-typed value is refused with the allowed set/values named. Send
 several edits in one call. Each edit may carry `"source": "user_said"` (the user
 told you) or `"agent_inferred"` (you worked it out); omitted = agent_inferred.
-get_profile lists your inferred paths in `unconfirmed`. An answer with
-confirmed:false was inferred — confirm it with the user before using it. Only
-the user confirms, on the web; you cannot confirm your own guess. To drop a wrong skill from every surface, add it to
+ALWAYS pass `"source": "user_said"` when the value is the user's own answer;
+`agent_inferred` only for what you worked out yourself.
+get_profile lists your inferred paths in `unconfirmed`. A kit answer with state
+'inferred' was worked out by an assistant — confirm it with the user once, then
+save it again with source user_said. Never mark your own guess user_said. To drop a wrong skill from every surface, add it to
 `preferences.excluded_skills` (value = the current list from get_profile's
 `fields` plus the new names); rewriting `cv_data.skills` only reaches the CV's
 share and is capped per edit.
@@ -466,7 +486,7 @@ MEMORY: the facts job forms ask are in `fields["user_info.contact"]`,
 `fields["user_info.languages"]`, `fields["user_info.equality"]` and
 `fields["user_info.answers"]`. Read them before filling any form. A missing key
 means "not answered": ask the user only that, once, then save it with
-`update_profile`; never guess. Per country, use the record of the HIRING country
+`update_profile` and `"source": "user_said"`; never guess. Per country, use the record of the HIRING country
 in `right_to_work.countries` and `logistics.countries` (also for a remote job).
 The salary is a PREFERENCE: `fields["preferences.salary_by_country"]`, the
 hiring country's record, with its period (year or month); if there is none, ask.
@@ -506,10 +526,13 @@ basic}].
 `user_info.equality` = {gender, ethnicity, disability, veteran,
 sexual_orientation, transgender}; "prefer not to say" is valid.
 `user_info.answers` = [{question, answer, approved (bool, default false),
-recorded_at, company (optional)}] — set `approved: true` only after the user agrees to that exact
+recorded_at, company (optional), topic (optional)}] — set `approved: true` only after the user agrees to that exact
 wording, and send `recorded_at` back as stored. An answer given for ONE employer (consent,
 why-this-company, a referral there) gets `company`: that job's company; it is reused only for that company.
-The kit's `approved_text` holds the newest 25; more: get_profile `fields["user_info.answers"]`.
+`topic` = a short stable key you choose (letters digits _ . only, 60 chars max, e.g. `work_from.IN`,
+`notice_period_days`): save it with every answer; a gap's own `topic` goes in unchanged. An approved answer
+closes a gap when its topic matches, or its question equals the gap's text ignoring case and punctuation.
+The kit's `approved_text` holds the newest 25 (with `topic` when saved); more: get_profile `fields["user_info.answers"]`.
 `preferences.salary_by_country` = [{country (ISO2), min, max (numbers > 0, min
 not above max; equal = one figure), currency (3 letters, e.g. EUR), period:
 year | month}], ONE record per country (`min` alone = one figure; never `max`
@@ -537,7 +560,8 @@ fix them later with update_job), then get_job + get_profile, judge fit yourself
 and save_fit, write the CV/cover letter yourself and save_artifact — run your
 own ATS check on EVERY CV you save and pass `ats_score` (0-100) and `ats_notes`;
 it is YOUR opinion, Job360 never computes one — then record_application (with
-its `channel`) once the user says they applied. Pass `found_via` (where you
+its `channel`) once the user says they applied, or an employer's confirmation
+email proves it (daily step 3). Pass `found_via` (where you
 found them) on every add_contact.
 
 NEEDS YOU: when you would have to guess, call ask_user (and ask in chat); before

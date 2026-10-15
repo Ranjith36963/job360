@@ -560,6 +560,14 @@
             "title": "Created At",
             "type": "string"
           },
+          "email_senders": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Email Senders",
+            "type": "array"
+          },
           "events": {
             "items": {
               "$ref": "#/components/schemas/ApplicationEventOut"
@@ -595,6 +603,17 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "inbox_checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbox Checked At"
           },
           "interview_at": {
             "anyOf": [
@@ -959,6 +978,9 @@
             ],
             "title": "Answers Omitted"
           },
+          "answers_summary": {
+            "$ref": "#/components/schemas/KitAnswersSummaryOut"
+          },
           "application": {
             "$ref": "#/components/schemas/KitApplicationOut"
           },
@@ -1068,6 +1090,7 @@
           "job",
           "application",
           "answers",
+          "answers_summary",
           "missing",
           "settings",
           "duplicate",
@@ -1105,6 +1128,11 @@
               }
             ],
             "title": "Cover Letter Artifact Id"
+          },
+          "cover_letter_sent": {
+            "default": false,
+            "title": "Cover Letter Sent",
+            "type": "boolean"
           },
           "cover_letter_text": {
             "anyOf": [
@@ -1198,6 +1226,11 @@
             ],
             "title": "Cover Letter Artifact Id"
           },
+          "cover_letter_sent": {
+            "default": false,
+            "title": "Cover Letter Sent",
+            "type": "boolean"
+          },
           "cv_artifact_id": {
             "anyOf": [
               {
@@ -1270,6 +1303,14 @@
             ],
             "title": "Country"
           },
+          "email_senders": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Email Senders",
+            "type": "array"
+          },
           "employer_published_at": {
             "anyOf": [
               {
@@ -1331,6 +1372,17 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "inbox_checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbox Checked At"
           },
           "interview_at": {
             "anyOf": [
@@ -3040,6 +3092,38 @@
           "setup": {
             "$ref": "#/components/schemas/DoctorSetup"
           },
+          "stale_hint": {
+            "default": "",
+            "title": "Stale Hint",
+            "type": "string"
+          },
+          "tools": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Tools",
+            "type": "object"
+          },
+          "tools_stale": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools Stale"
+          },
+          "tools_version": {
+            "default": "",
+            "title": "Tools Version",
+            "type": "string"
+          },
           "waiting_settings": {
             "title": "Waiting Settings",
             "type": "integer"
@@ -3686,6 +3770,208 @@
         "title": "FitAxisOut",
         "type": "object"
       },
+      "FormAnsweredOut": {
+        "properties": {
+          "confirmed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "matched_by": {
+            "enum": [
+              "key",
+              "wording"
+            ],
+            "title": "Matched By",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "question",
+          "required",
+          "key",
+          "value",
+          "source",
+          "matched_by"
+        ],
+        "title": "FormAnsweredOut",
+        "type": "object"
+      },
+      "FormCheckCountsOut": {
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "integer"
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "integer"
+          },
+          "missing_required": {
+            "title": "Missing Required",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "answered",
+          "missing",
+          "missing_required"
+        ],
+        "title": "FormCheckCountsOut",
+        "type": "object"
+      },
+      "FormCheckOut": {
+        "description": "For every question on the live form: a saved answer from this application's\nkit, or a gap to ask the user about. Job360 only looks up; the assistant reads\nthe form and decides.",
+        "properties": {
+          "answered": {
+            "items": {
+              "$ref": "#/components/schemas/FormAnsweredOut"
+            },
+            "title": "Answered",
+            "type": "array"
+          },
+          "application_id": {
+            "title": "Application Id",
+            "type": "integer"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/FormCheckCountsOut"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/FormMissingOut"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "next": {
+            "title": "Next",
+            "type": "string"
+          },
+          "questions_count": {
+            "title": "Questions Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "application_id",
+          "questions_count",
+          "answered",
+          "missing",
+          "counts",
+          "next"
+        ],
+        "title": "FormCheckOut",
+        "type": "object"
+      },
+      "FormCheckRequest": {
+        "additionalProperties": false,
+        "description": "``POST /applications/{id}/kit/form-check`` body: every question on the live form.",
+        "properties": {
+          "form_url": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Form Url",
+            "type": "string"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/FormQuestion"
+            },
+            "maxItems": 80,
+            "minItems": 1,
+            "title": "Questions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "questions"
+        ],
+        "title": "FormCheckRequest",
+        "type": "object"
+      },
+      "FormMissingOut": {
+        "properties": {
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "required",
+          "why"
+        ],
+        "title": "FormMissingOut",
+        "type": "object"
+      },
+      "FormQuestion": {
+        "additionalProperties": false,
+        "description": "One question read off a LIVE application form. ``key`` is the kit key the\nassistant plans to answer it with (``contact.email``, ``logistics.notice_period``,\nor the saved ``approved_text`` question).",
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "question": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "FormQuestion",
+        "type": "object"
+      },
       "GitHubResponse": {
         "properties": {
           "merged": {
@@ -3749,6 +4035,50 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "InboxCheckedIn": {
+        "description": "The assistant read Gmail for these applications up to ``checked_at`` (now when empty).",
+        "properties": {
+          "application_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1,
+            "title": "Application Ids",
+            "type": "array"
+          },
+          "checked_at": {
+            "default": "",
+            "title": "Checked At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_ids"
+        ],
+        "title": "InboxCheckedIn",
+        "type": "object"
+      },
+      "InboxCheckedOut": {
+        "properties": {
+          "application_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Application Ids",
+            "type": "array"
+          },
+          "inbox_checked_at": {
+            "title": "Inbox Checked At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_ids",
+          "inbox_checked_at"
+        ],
+        "title": "InboxCheckedOut",
         "type": "object"
       },
       "JobFactsOut": {
@@ -4027,6 +4357,17 @@
             ],
             "title": "Company"
           },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
           "key": {
             "title": "Key",
             "type": "string"
@@ -4062,6 +4403,26 @@
             "title": "Source",
             "type": "string"
           },
+          "state": {
+            "enum": [
+              "confirmed",
+              "inferred",
+              "sensitive"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
           "value": {
             "title": "Value"
           }
@@ -4069,7 +4430,8 @@
         "required": [
           "key",
           "value",
-          "source"
+          "source",
+          "state"
         ],
         "title": "KitAnswerOut",
         "type": "object"
@@ -4127,6 +4489,27 @@
           }
         },
         "title": "KitAnswersOut",
+        "type": "object"
+      },
+      "KitAnswersSummaryOut": {
+        "properties": {
+          "confirmed": {
+            "default": 0,
+            "title": "Confirmed",
+            "type": "integer"
+          },
+          "inferred": {
+            "default": 0,
+            "title": "Inferred",
+            "type": "integer"
+          },
+          "sensitive": {
+            "default": 0,
+            "title": "Sensitive",
+            "type": "integer"
+          }
+        },
+        "title": "KitAnswersSummaryOut",
         "type": "object"
       },
       "KitApplicationOut": {
@@ -4370,14 +4753,36 @@
         "type": "object"
       },
       "KitHoldOut": {
+        "description": "Another assistant session is on this application (weak spot #3, 2026-10-15).\n``session`` is the other holder's own label (data, never markup; ``\"\"`` = none\ngiven). ``unsure``: the caller passed no ``session`` and its own assistant read\nthe kit under a label - maybe another session of the same assistant (``detail``).",
         "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
           "held_by": {
             "title": "Held By",
+            "type": "string"
+          },
+          "session": {
+            "default": "",
+            "title": "Session",
             "type": "string"
           },
           "since": {
             "title": "Since",
             "type": "string"
+          },
+          "unsure": {
+            "default": false,
+            "title": "Unsure",
+            "type": "boolean"
           },
           "until": {
             "title": "Until",
@@ -6514,6 +6919,11 @@
             ],
             "title": "Cover Letter Origin"
           },
+          "cover_letter_sent": {
+            "default": false,
+            "title": "Cover Letter Sent",
+            "type": "boolean"
+          },
           "cover_letter_text": {
             "anyOf": [
               {
@@ -6797,6 +7207,11 @@
             "title": "Channel",
             "type": "string"
           },
+          "cover_letter_sent": {
+            "default": false,
+            "title": "Cover Letter Sent",
+            "type": "boolean"
+          },
           "has_cover_letter": {
             "title": "Has Cover Letter",
             "type": "boolean"
@@ -6994,6 +7409,11 @@
               }
             ],
             "title": "Cover Letter Artifact Id"
+          },
+          "cover_letter_sent": {
+            "default": false,
+            "title": "Cover Letter Sent",
+            "type": "boolean"
           },
           "cv_artifact_id": {
             "anyOf": [
@@ -9705,6 +10125,82 @@
         ]
       }
     },
+    "/api/applications/inbox-checked": {
+      "post": {
+        "description": "Gmail check slice (2026-10-15): move each application's ``inbox_checked_at``\ncursor forward. The assistant read the mail; Job360 only remembers how far\n(VISION rule 5). All or nothing; never rewinds a newer cursor.",
+        "operationId": "mark_inbox_checked_api_applications_inbox_checked_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxCheckedIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxCheckedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Inbox Checked",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
     "/api/applications/job/{job_id}": {
       "get": {
         "description": "Read back an ad THIS user brought, by its `job_id`.\n\nSlice 5 (#483) deleted the public `GET /api/jobs/{id}`. That route served\nthe shared catalog to anyone with an id, which stopped being defensible\nthe moment `jobs` held nothing but ads individual people pasted (S1). This\nis its per-user replacement: the row is returned only when the caller has\nan application for it, so an id they never brought reads as 404, never as\nsomebody else's paste.\n\nDeclared BEFORE `/applications/{application_id}` for the same reason\n`/applications/export` is \u2014 a literal segment must not be swallowed by the\ndynamic one.",
@@ -11283,7 +11779,7 @@
     },
     "/api/applications/{application_id}/kit": {
       "get": {
-        "description": "The application kit (S3): the CV and cover letter of THIS application, every\nstored answer with its source, what is missing for the job's country, fresh\n30-minute file links, the duplicate / hold / account-site / autofill state and\nthe gate's preview. Writes one ``kit_read`` event (the timeline shows who read\nit and when) and one link row per document; the file tokens appear only in this\nresponse. 404 for an application that is not the caller's; 429 over the\nhourly cap. Document ``text`` is cut to ``KIT_DOC_TEXT_MAX_CHARS`` (``text_truncated`` /\n``text_more``; ``include_text=false`` sends none); ``approved_text`` keeps the newest\n``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``Cache-Control: no-store``.",
+        "description": "The application kit (S3): the CV and cover letter of THIS application, every\nstored answer with its source, what is missing for the job's country, fresh\n30-minute file links, the duplicate / hold / account-site / autofill state and\nthe gate's preview. Writes one ``kit_read`` event (the timeline shows who read\nit and when) and one link row per document; the file tokens appear only in this\nresponse. 404 for an application that is not the caller's; 429 over the\nhourly cap. Document ``text`` is cut to ``KIT_DOC_TEXT_MAX_CHARS`` (``text_truncated`` /\n``text_more``; ``include_text=false`` sends none); ``approved_text`` keeps the newest\n``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``session`` is the assistant\nsession's own short label (``kit.clean_session``; 422 otherwise): it is stored on\nthe ``kit_read`` so ``hold`` can tell two sessions of one assistant apart.\n``Cache-Control: no-store``.",
         "operationId": "get_application_kit_api_applications__application_id__kit_get",
         "parameters": [
           {
@@ -11303,6 +11799,16 @@
               "default": true,
               "title": "Include Text",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Session",
+              "type": "string"
             }
           },
           {
@@ -11361,6 +11867,91 @@
           }
         },
         "summary": "Get Application Kit",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/kit/form-check": {
+      "post": {
+        "description": "Which questions on the LIVE form already have a saved answer. The assistant reads\nthe form, lists every question (optional ones too, ``required=false``) and, for each,\nthe kit ``key`` it plans to use. Job360 checks that key really exists in THIS\napplication's kit (an ``approved_text`` answer also matches by its question); with no\nkey it matches the normalized wording of the question against the user's approved\nanswers. No fuzzy matching, no NLP. ``answered`` carries the value and its source\n(``confirmed: false`` = inferred, confirm with the user); ``missing`` is what to ask\nthe user, once. Read-only: no event is written. 404 for an application that is not the\ncaller's. ``Cache-Control: no-store``.",
+        "operationId": "check_application_form_api_applications__application_id__kit_form_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FormCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormCheckOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Application Form",
         "tags": [
           "applications"
         ]
@@ -12036,7 +12627,7 @@
     },
     "/api/applications/{application_id}/submit-check": {
       "get": {
-        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -\na stored yes clears neither. An unconfirmed email answers ``ask`` /\n``email_not_verified``. Read-only. 404 for an application that is not the\ncaller's (rule #12).",
+        "description": "THE one gate before a final submit (owner decision 2026-10-08, S2).\n\nReads the user's settings, this application's own facts (status, receipt,\nthe per-job override) and the day's counts, then answers through\n``settings_rules.may_submit`` - the same function for every caller (this route\nand the MCP ``check_submit`` tool). ``form_url`` is the address of the page\nthe form is on (a bare host works too); without it the answer is ``ask``\n(``unknown_site``). The address is read strictly (``screen_form_url``): a\nuser-info ``@``, ``%`` or backslash in the authority, a non-ASCII / IDNA host\nor a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other\nthan the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -\na stored yes clears neither. An unconfirmed email answers ``ask`` /\n``email_not_verified``. ``session`` is the caller's own label (the one it gave\n``get_application_kit``; 422 when malformed): another session's live kit hold\nanswers ``ask`` / ``held_by_other_session``, which a yes does not clear (only\n``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an\napplication that is not the caller's (rule #12).",
         "operationId": "submit_check_api_applications__application_id__submit_check_get",
         "parameters": [
           {
@@ -12056,6 +12647,16 @@
               "default": "",
               "maxLength": 2048,
               "title": "Form Url",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Session",
               "type": "string"
             }
           },
@@ -14471,9 +15072,20 @@
     },
     "/api/doctor": {
       "get": {
-        "description": "The account's state in one read, plus ONE closed ``next_step``:\n``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.\nRead-only; email verification is NOT required (an unverified user is told\nto verify). No 404 when there is no profile (``profile_exists: false``).",
+        "description": "The account's state in one read, plus ONE closed ``next_step``:\n``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.\nRead-only; email verification is NOT required (an unverified user is told\nto verify). No 404 when there is no profile (``profile_exists: false``).\n\nAlso the MCP tool list as served now (``tools``, ``tools_version``) so an\nassistant can tell its client cached an old one: pass the version it saw\nlast as ``client_tools_version`` and ``tools_stale`` says whether it moved\n(null when none was passed).",
         "operationId": "doctor_api_doctor_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "client_tools_version",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 64,
+              "title": "Client Tools Version",
+              "type": "string"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",
