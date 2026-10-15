@@ -25,6 +25,8 @@ connectors, parallel helpers (one per source), a scheduled daily run. Go WIDE: t
       `https://job360.uk/api/hunt-kit` into one folder, read its README.md, and run `hunt_kit.py` with
       the user's titles and rows (`--work-countries`, `--remote`, `--visa-onsite`). It reads thousands of
       company job boards and open feeds, and keeps only ads that pass the rows, with full text.
+      Results stream to the `--out` file's `.stream` file as they come; if a run stops (it has a 15-minute
+      budget by default), rerun the same command with `--resume` to continue where it left off.
    b. **Without Python:** read the kit's `companies.json` and call the boards' public APIs yourself: Greenhouse
       `boards-api.greenhouse.io/v1/boards/<token>/jobs?content=true`, Lever `api.lever.co/v0/postings/<token>`,
       Ashby `api.ashbyhq.com/posting-api/job-board/<token>`. `<token>` is the employer's board token, not its

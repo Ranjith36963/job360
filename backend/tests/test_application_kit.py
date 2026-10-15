@@ -1906,3 +1906,37 @@ async def test_approved_text_keeps_the_newest_25_and_counts_the_rest(authenticat
         await _patch(client, _e("user_info.answers", records[:3]))
         small = (await _kit(client, app_id)).json()
         assert "answers_omitted" not in small or small["answers_omitted"] is None
+
+
+@pytest.mark.asyncio
+async def test_send_approve_and_decline_refuse_once_applied_or_closed(
+    authenticated_async_context, fixture_user_id
+):
+    """Defence in depth for the website buttons: after `applied` (or a closed
+    status) approve / decline answer 409 "already applied" and write no event."""
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        app_id = await _bring(client)
+        await _save(client, app_id, "cv", CV_TEXT)
+        assert (await client.post(f"/api/applications/{app_id}/send/approve")).status_code == 201
+        assert (await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "company_site"})).status_code == 201
+        before = (await client.get(f"/api/applications/{app_id}")).json()
+        assert before["status"] == "applied"
+        types_before = [e["event_type"] for e in before["events"]]
+
+        approve = await client.post(f"/api/applications/{app_id}/send/approve")
+        assert approve.status_code == 409 and approve.json()["detail"] == "already applied"
+        decline = await client.post(f"/api/applications/{app_id}/send/decline")
+        assert decline.status_code == 409 and decline.json()["detail"] == "already applied"
+
+        after = (await client.get(f"/api/applications/{app_id}")).json()
+        assert [e["event_type"] for e in after["events"]] == types_before
+        assert "submit_declined" not in types_before
+
+        # a closed status refuses too
+        assert (await _event(client, app_id, "rejected", {})).status_code == 201
+        assert (await client.get(f"/api/applications/{app_id}")).json()["status"] == "rejected"
+        assert (await client.post(f"/api/applications/{app_id}/send/approve")).status_code == 409
+        assert (await client.post(f"/api/applications/{app_id}/send/decline")).status_code == 409
+        closed = (await client.get(f"/api/applications/{app_id}")).json()
+        assert [e["event_type"] for e in closed["events"]][-1] == "rejected"
