@@ -4504,7 +4504,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "confirmed" | "inferred" | "sensitive";
+            state: "confirmed" | "relayed" | "inferred" | "sensitive";
             /** Topic */
             topic?: string | null;
             /** Value */
@@ -4539,6 +4539,11 @@ export interface components {
              * @default 0
              */
             inferred: number;
+            /**
+             * Relayed
+             * @default 0
+             */
+            relayed: number;
             /**
              * Sensitive
              * @default 0

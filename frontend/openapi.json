@@ -4736,6 +4736,7 @@
           "state": {
             "enum": [
               "confirmed",
+              "relayed",
               "inferred",
               "sensitive"
             ],
@@ -4831,6 +4832,11 @@
           "inferred": {
             "default": 0,
             "title": "Inferred",
+            "type": "integer"
+          },
+          "relayed": {
+            "default": 0,
+            "title": "Relayed",
             "type": "integer"
           },
           "sensitive": {

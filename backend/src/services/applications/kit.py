@@ -64,6 +64,8 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "Use only the answers in this kit. Anything in `missing`: ask the user ONCE, in one message. Never guess.",
     "An answer with state 'inferred' was worked out by an assistant - confirm it with the user once, "
     "then save it again with source user_said. 'confirmed' answers are the user's: use them. "
+    "'relayed' = you saved the user's chat word and they have not confirmed it on Job360 yet: usable, "
+    "but say once that they can confirm it there. "
     "A 'sensitive' answer (salary, equality, sanctions, visa / right-to-work status) is shown to the user "
     "and confirmed on THIS form before it is used; never fill it silently. Ask two things separately: "
     "may I use it on this form, and may I remember it for later. Save it with remember: true only after "
@@ -971,7 +973,7 @@ def _item(key: str, value: Any, source: str, saved_at: Optional[str], **extra: A
 
 
 # Every kit answer carries one of these (answer memory: who stands behind it).
-ANSWER_STATES = ("confirmed", "inferred", "sensitive")
+ANSWER_STATES = ("confirmed", "relayed", "inferred", "sensitive")
 # The profile paths a "profile" item is read from (an assistant may have written them).
 _PROFILE_PATHS = {
     "contact.name": "cv_data.name", "contact.location": "cv_data.location",
@@ -1052,19 +1054,29 @@ def _mark_sensitive(out: dict[str, list[dict[str, Any]]]) -> None:
 
 
 def compute_answers(
-    profile: Any, overlay: list[dict[str, Any]], country: Optional[str], company_key: Optional[str] = None
+    profile: Any, overlay: list[dict[str, Any]], country: Optional[str], company_key: Optional[str] = None,
+    confirmed_through: Optional[str] = None,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
     """The answer blocks (every item tagged with its source) and the ``missing``
     list for ``country`` (the JOB's country; ``None`` = unknown). Empty / null =
     absent, not an item (rule #29); ``False`` and ``0`` are real answers.
     An approved answer with a ``company`` rides only in that company's kit: it is
-    skipped when ``company_key`` differs from the company's normalized key."""
+    skipped when ``company_key`` differs from the company's normalized key.
+    ``confirmed_through`` = when the user last confirmed a relayed chat answer on the web
+    (``asks.confirmed_at >= answered_at``): an assistant's ``user_said`` row saved after it reads
+    ``relayed`` (the assistant says the user said it), not yet ``confirmed``."""
     saved = {str(r["path"]): r.get("set_at") for r in overlay}
     # Feature 9: a path whose newest row an assistant wrote WITHOUT the user's word is an inference.
     unconfirmed = {
         str(r["path"]) for r in overlay
         if is_assistant_actor(str(r.get("set_by") or ""))
         and not is_confirmed(str(r.get("set_by") or ""), str(r.get("source") or ""))
+    }
+    # Relayed: an assistant wrote it as the user's chat word and the user has not confirmed on the web since.
+    relayed_paths = {
+        str(r["path"]) for r in overlay
+        if is_assistant_actor(str(r.get("set_by") or "")) and str(r.get("source") or "") == "user_said"
+        and not (confirmed_through and str(r.get("set_at") or "") <= confirmed_through)
     }
     current = [""]
 
@@ -1082,6 +1094,8 @@ def compute_answers(
             item["state"] = "confirmed"
         elif item.get("confirmed") is False or (source == "profile" and _PROFILE_PATHS.get(key) in unconfirmed):
             item["state"] = "inferred"
+        elif current[0] in relayed_paths or (source == "profile" and _PROFILE_PATHS.get(key) in relayed_paths):
+            item["state"] = "relayed"
         else:
             item["state"] = "confirmed"
         if item["state"] == "confirmed" and saved_at:
@@ -1487,6 +1501,19 @@ async def _job_company_key(db: JobDatabase, app_row: dict[str, Any]) -> str:
     return str(dict(job_row).get("normalized_company") or "") if job_row is not None else ""
 
 
+async def _relayed_confirmed_through(db: JobDatabase, user_id: str) -> Optional[str]:
+    """The newest time the user confirmed a relayed chat answer on the web (the EXISTING
+    ``POST /api/asks/{id}/confirm``: ``confirmed_at >= answered_at``), or ``None``."""
+    cur = await db._db.execute(
+        "SELECT MAX(confirmed_at) FROM application_asks "
+        "WHERE user_id = ? AND withdrawn_at IS NULL AND answered_at IS NOT NULL "
+        "AND answered_by <> 'web' AND COALESCE(user_words, '') <> '' AND confirmed_at >= answered_at",
+        (user_id,),
+    )
+    row = await cur.fetchone()
+    return str(row[0]) if row and row[0] else None
+
+
 async def _application_answers(
     db: JobDatabase, user: CurrentUser, app_row: dict[str, Any]
 ) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
@@ -1499,7 +1526,8 @@ async def _application_answers(
     profile = loaded or UserProfile()
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
     job_company_key = await _job_company_key(db, app_row)
-    answers, missing = compute_answers(profile, overlay, country, job_company_key or None)
+    confirmed_through = await _relayed_confirmed_through(db, user.id)
+    answers, missing = compute_answers(profile, overlay, country, job_company_key or None, confirmed_through)
     return profile, country, answers, missing
 
 
