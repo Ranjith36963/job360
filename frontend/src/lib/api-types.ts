@@ -494,7 +494,8 @@ export interface paths {
          * @description "Release" - the user frees an application another assistant session holds (it crashed
          *     or was closed): appends ``hold_released`` {reason: stopped, by: web}; nothing is rewritten.
          *     ``{released: false}`` and no event when no hold is live. 404 for an application that is not
-         *     the caller's. A web action; assistants record ``hold_released`` through ``record_event``.
+         *     the caller's. Session only: a bearer token is refused, so an assistant can never release
+         *     another session's hold; assistants record ``hold_released`` through ``record_event``.
          */
         post: operations["release_hold_api_applications__application_id__hold_release_post"];
         delete?: never;
@@ -2997,6 +2998,7 @@ export interface components {
             answers: components["schemas"]["KitAnswersOut"];
             /** Answers Omitted */
             answers_omitted?: number | null;
+            answers_summary: components["schemas"]["KitAnswersSummaryOut"];
             application: components["schemas"]["KitApplicationOut"];
             /**
              * Autofill
@@ -4355,6 +4357,8 @@ export interface components {
         KitAnswerOut: {
             /** Company */
             company?: string | null;
+            /** Confirmed At */
+            confirmed_at?: string | null;
             /** Key */
             key: string;
             /** Label */
@@ -4366,6 +4370,13 @@ export interface components {
              * @enum {string}
              */
             source: "memory" | "profile" | "approved_text";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "confirmed" | "inferred" | "sensitive";
+            /** Topic */
+            topic?: string | null;
             /** Value */
             value: unknown;
         };
@@ -4385,6 +4396,24 @@ export interface components {
             right_to_work?: components["schemas"]["KitAnswerOut"][];
             /** Salary */
             salary?: components["schemas"]["KitAnswerOut"][];
+        };
+        /** KitAnswersSummaryOut */
+        KitAnswersSummaryOut: {
+            /**
+             * Confirmed
+             * @default 0
+             */
+            confirmed: number;
+            /**
+             * Inferred
+             * @default 0
+             */
+            inferred: number;
+            /**
+             * Sensitive
+             * @default 0
+             */
+            sensitive: number;
         };
         /** KitApplicationOut */
         KitApplicationOut: {

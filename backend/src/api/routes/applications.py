@@ -955,6 +955,18 @@ class KitAnswerOut(BaseModel):
     saved_at: Optional[str] = None
     label: Optional[str] = None
     company: Optional[str] = None
+    topic: Optional[str] = None
+    # Weak spot #6: who stands behind it. confirmed = the user's (web, user_said, approved
+    # wording); inferred = an assistant worked it out; sensitive = equality / sanctions / visa.
+    state: Literal["confirmed", "inferred", "sensitive"]
+    # Set when state is confirmed and the stored row has a time (the reference's confirmedAt).
+    confirmed_at: Optional[str] = None
+
+
+class KitAnswersSummaryOut(BaseModel):
+    confirmed: int = 0
+    inferred: int = 0
+    sensitive: int = 0
 
 
 class KitAnswersOut(BaseModel):
@@ -1032,6 +1044,7 @@ class ApplicationKitOut(BaseModel):
     cover_letter: Optional[KitDocumentOut] = None
     cover_letter_none_reason: Optional[str] = None
     answers: KitAnswersOut
+    answers_summary: KitAnswersSummaryOut
     answers_omitted: Optional[int] = None
     missing: list[KitMissingOut]
     settings: dict[str, Any]
@@ -2356,12 +2369,13 @@ class ReleaseHoldOut(BaseModel):
 async def release_hold(
     application_id: int,
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
-    user: CurrentUser = Depends(require_user),  # noqa: B008
+    user: CurrentUser = Depends(require_session_user),  # noqa: B008 - a human web action (session only)
 ) -> dict[str, Any]:
     """"Release" - the user frees an application another assistant session holds (it crashed
     or was closed): appends ``hold_released`` {reason: stopped, by: web}; nothing is rewritten.
     ``{released: false}`` and no event when no hold is live. 404 for an application that is not
-    the caller's. A web action; assistants record ``hold_released`` through ``record_event``."""
+    the caller's. Session only: a bearer token is refused, so an assistant can never release
+    another session's hold; assistants record ``hold_released`` through ``record_event``."""
     try:
         if await spine.get_owned_application(db, user.id, application_id) is None:
             raise SpineError(404, "application not found")

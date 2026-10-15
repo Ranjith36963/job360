@@ -37,6 +37,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import socket
 import sys
 import threading
@@ -45,6 +46,7 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from http.client import HTTPException
 from pathlib import Path
@@ -959,6 +961,232 @@ class Stream:
                 pass
 
 
+# ================================================= run lock + run log (ws10b)
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by someone else
+    except OSError:
+        return False
+    return True
+
+
+OWNERLESS_GRACE_S = 1.0
+RECOVER_GUARD_STALE_S = 30.0
+
+
+class RunLock:
+    """One run per stream at a time: ``<stream>.lock`` is a directory (mkdir is atomic).
+
+    Mirrors career-ops pipeline-lock.mjs: the holder records owner.json (pid, token, started_at); a lock
+    is stale when its owner pid is dead, or, with no readable owner, once the directory is older than a
+    short grace period. A live holder is never taken over. Unlike pipeline-lock.mjs (which waits a few
+    seconds for a short append) a hunt lasts minutes, so a second run fails fast instead of waiting.
+    """
+
+    def __init__(self, stream_path: str) -> None:
+        self.dir = stream_path + ".lock"
+        self.token = uuid.uuid4().hex
+        self.held = False
+
+    def _owner(self) -> dict[str, Any] | None:
+        try:
+            with open(os.path.join(self.dir, "owner.json"), encoding="utf-8") as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) else None
+        except (OSError, ValueError):
+            return None
+
+    def _stale(self) -> bool:
+        owner = self._owner()
+        if owner is not None and isinstance(owner.get("pid"), int):
+            return not _pid_alive(owner["pid"])
+        try:
+            return time.time() - os.path.getmtime(self.dir) > OWNERLESS_GRACE_S
+        except OSError:
+            return True  # vanished while we looked: free
+
+    def _reclaim(self) -> bool:
+        """Remove a stale lock, serialized behind ``<lock>.recover`` (pipeline-lock.mjs:500-576).
+
+        Without the guard, two callers that both judge the same lock stale can have the second one's
+        delete remove the first one's freshly created lock, and both would then believe they hold it.
+        Only the caller that wins the guard may decide-then-delete, and it deletes only the very
+        directory it judged (same inode), never a newer lock that replaced it.
+        """
+        guard = self.dir + ".recover"
+        try:
+            os.mkdir(guard)
+        except FileExistsError:
+            # A guard normally lives for milliseconds; one left by a killed process ages out (:518-527).
+            try:
+                if time.time() - os.path.getmtime(guard) > RECOVER_GUARD_STALE_S:
+                    shutil.rmtree(guard, ignore_errors=True)
+            except OSError:
+                pass
+            return False
+        except OSError:
+            return False
+        try:
+            try:
+                judged = os.stat(self.dir)
+            except OSError:
+                return False  # vanished: do not delete on that answer (:532-546)
+            if not self._stale():
+                return False
+            try:
+                now = os.stat(self.dir)
+            except OSError:
+                return False
+            if (judged.st_ino, judged.st_dev) != (now.st_ino, now.st_dev):
+                return False  # replaced under us: leave it alone (:560-565)
+            shutil.rmtree(self.dir, ignore_errors=True)
+            return True
+        finally:
+            shutil.rmtree(guard, ignore_errors=True)
+
+    def acquire(self) -> str:
+        """Take the lock. Returns '' on success, otherwise a message saying who holds it."""
+        os.makedirs(os.path.dirname(os.path.abspath(self.dir)), exist_ok=True)
+        for _attempt in range(6):
+            try:
+                os.mkdir(self.dir)
+            except FileExistsError:
+                if self._stale():
+                    if self._reclaim():
+                        continue
+                    time.sleep(0.02)  # someone else is reclaiming: back off, then compete normally
+                    continue
+                owner = self._owner() or {}
+                return "another run is writing %s (pid %s, started %s)" % (
+                    self.dir[:-len(".lock")], owner.get("pid", "?"), owner.get("started_at", "?"))
+            except OSError as e:
+                return "could not take the run lock %s: %s" % (self.dir, e)
+            try:
+                with open(os.path.join(self.dir, "owner.json"), "w", encoding="utf-8") as f:
+                    json.dump({"pid": os.getpid(), "token": self.token,
+                               "started_at": _dt.datetime.now(_dt.timezone.utc).isoformat()}, f)
+            except OSError:
+                pass  # the directory itself is the lock; an ownerless one only ages out after the grace period
+            self.held = True
+            return ""
+        return "could not take the run lock %s (lost a race)" % self.dir
+
+    def release(self) -> None:
+        """Remove the lock, but only if it is still ours (token check, as in pipeline-lock.mjs)."""
+        if not self.held:
+            return
+        self.held = False
+        owner = self._owner()
+        if owner is None or owner.get("token") == self.token:
+            shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def _atomic_write_text(path: str, text: str) -> None:
+    """Write temp file, fsync, then os.replace (career-ops atomicWriteFile): never a half-written file."""
+    tmp = "%s.tmp-%d-%s" % (path, os.getpid(), uuid.uuid4().hex)
+    try:
+        with open(tmp, "x", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        dfd = os.open(os.path.dirname(os.path.abspath(path)), os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass  # directory fsync is not supported everywhere (Windows)
+
+
+MAX_FAILED_LISTED = 50
+
+
+class RunLog:
+    """One JSON line per run in ``hunt_runs.jsonl``: start, end, status and the counters.
+
+    Mirrors career-ops scan-runs.tsv. The row is written for a finished run (``completed`` or ``partial``)
+    and, from a snapshot, for a run that dies (``failed``) or is stopped (``interrupted``). Like scan.mjs
+    registerRunFailureSnapshot the row is written once (a second signal cannot write a second row), and
+    the failure path is best effort: it swallows its own errors and is not locked.
+    """
+
+    def __init__(self, path: str | None) -> None:
+        self.path = None if not path or path.lower() == "none" else path
+        self.started_at = _dt.datetime.now(_dt.timezone.utc)
+        self.t0 = time.monotonic()
+        self.col: Collector | None = None
+        self.sink: Stream | None = None
+        self.resumed = False
+        self._armed = self.path is not None
+        self._guard = threading.Lock()
+
+    def snapshot(self) -> dict[str, Any]:
+        col, sink = self.col, self.sink
+        stats = col.stats if col is not None else {}
+
+        def total(key: str) -> int:
+            return sum(st[key] for st in list(stats.values()))
+
+        failed = list(col.failed) if col is not None else []
+        return {
+            "start": self.started_at.isoformat(),
+            "end": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "duration_s": round(time.monotonic() - self.t0, 1),
+            "resumed": self.resumed,
+            "stop_reason": sink.stop_reason if sink is not None else "",
+            "sources_done": len(sink.done) if sink is not None else 0,
+            "found": total("jobs_seen"),
+            "kept": sink.count if sink is not None else 0,
+            "skipped_seen": col.skipped_seen if col is not None else 0,
+            "skipped_company": total("skipped_company"),
+            "skipped_bad_url": total("skipped_bad_url"),
+            "skipped_dead": total("live_dead"),
+            "failed": len(failed),
+            "failed_sources": failed[:MAX_FAILED_LISTED],
+        }
+
+    def write(self, status: str, locked: bool = False, **extra: Any) -> bool:
+        """Append the row once. Returns False when disabled, already written, or the write failed."""
+        path = self.path
+        with self._guard:
+            if not self._armed or path is None:
+                return False
+            self._armed = False
+        lock = RunLock(path) if locked else None
+        try:
+            if lock is not None:
+                for _ in range(40):  # the row is one short append: a brief wait for another writer is fine
+                    if not lock.acquire():
+                        break
+                    time.sleep(0.05)
+            row = {**self.snapshot(), "status": status, **extra}
+            line = json.dumps(row, ensure_ascii=False) + "\n"
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            try:
+                os.write(fd, line.encode("utf-8"))
+            finally:
+                os.close(fd)
+            return True
+        except Exception:
+            return False
+        finally:
+            if lock is not None:
+                lock.release()
+
+
 def resume_hint(argv: list[str], stream: Stream) -> str:
     """The exact command that continues a stopped run."""
     parts = [a for a in argv if a != "--resume"]
@@ -981,6 +1209,8 @@ class Collector:
         self.tl = threading.local()  # per worker thread: jobs kept by the source it is running
         self.seen_url: set[str] = set()
         self.seen_key: dict[str, str] = {}
+        self.failed: list[dict[str, str]] = []  # sources that raised: {source, error}
+        self.skipped_seen = 0  # jobs dropped at output because history already has them
         self.matcher = make_title_matcher(args.titles, args.exclude_title_words)
         self.prefs = make_prefs(
             args.work_countries,
@@ -996,6 +1226,11 @@ class Collector:
     def bump(self, source: str, key: str, n: int = 1) -> None:
         with self.lock:
             self.stats[source][key] += n
+
+    def fail(self, source: str, err: BaseException) -> None:
+        """Record a source that raised, with its error, for the run output and the run log."""
+        with self.lock:
+            self.failed.append({"source": source, "error": ("%s: %s" % (type(err).__name__, err))[:300]})
 
     def skipped(self, *names: str) -> bool:
         low = " ".join(n.lower() for n in names if n)
@@ -1028,11 +1263,13 @@ class Collector:
         title = raw.get("title") or ""
         url = raw.get("url") or ""
         if not isinstance(url, str) or urllib.parse.urlsplit(url.strip()).scheme not in ("http", "https"):
+            self.bump(source, "skipped_bad_url")
             return  # javascript:, data:, file: and relative links are never kept
         if not self.matcher(title):
             return
         self.bump(source, "title_matches")
         if self.skipped(raw.get("company", ""), raw.get("board", "")):
+            self.bump(source, "skipped_company")
             return
         det = raw.get("detail")
         if callable(det):  # lazy detail fetch, only for title matches
@@ -1386,7 +1623,7 @@ def _merge_stats(col: Collector, label: str, st: dict[str, Any]) -> None:
 
 
 def _module_task(
-    col: Collector, label: str, call: Callable[[dict[str, int]], list[dict[str, Any]]]
+    col: Collector, label: str, call: Callable[[dict[str, int]], list[dict[str, Any]]], tid: str = ""
 ) -> None:
     """Run one module call, merge its tried/ok stats, and offer every Job it returns."""
     st: dict[str, int] = {"tried": 0, "ok": 0, "jobs": 0}
@@ -1394,6 +1631,7 @@ def _module_task(
         jobs = call(st) or []
     except Exception as e:  # modules must not raise; if one does, report and move on
         print("warning: %s failed: %s: %s" % (label, type(e).__name__, e), file=sys.stderr)
+        col.fail(tid or label, e)
         jobs = []
     _merge_stats(col, label, st)
     for j in jobs:
@@ -1415,6 +1653,9 @@ def _feed_call(fetch: Callable[..., list[dict[str, Any]]], queries: list[str], d
 def run(args: argparse.Namespace) -> Collector:
     """Fetch every selected source and return the Collector with results and stats."""
     col = Collector(args)
+    run_log = getattr(args, "run_log_obj", None)
+    if run_log is not None:
+        run_log.col = col  # lets the failure-path snapshot see the live counters
     sources = select_sources(args.sources)
     queries = split_csv(args.titles or DEFAULT_TITLES)[:12]
     countries = sorted(col.prefs.only or col.prefs.work)
@@ -1451,7 +1692,8 @@ def run(args: argparse.Namespace) -> Collector:
         elif b["ats"] in ats_fetchers:
             call = functools.partial(_ats_call, ats_fetchers[b["ats"]], b)
             tasks.append((b["ats"], "%s:%s" % (b["ats"], b["token"].lower()),
-                          functools.partial(_module_task, col, b["ats"], call)))
+                          functools.partial(_module_task, col, b["ats"], call,
+                                          "%s:%s" % (b["ats"], b["token"].lower()))))
     if "freehire" in sources:
         tasks.append(("freehire", "freehire", lambda: _freehire(col, queries)))
     wanted_feeds = [s for s in sources if s in FEED_SOURCES and s != "freehire"]
@@ -1462,7 +1704,7 @@ def run(args: argparse.Namespace) -> Collector:
             if name in feeds:
                 tasks.append((name, "feed:" + name, functools.partial(
                     _module_task, col, name,
-                    functools.partial(_feed_call, feeds[name], queries, args.days, countries),
+                    functools.partial(_feed_call, feeds[name], queries, args.days, countries), "feed:" + name,
                 )))
             elif kit_feeds is not None:
                 print("note: feed %s not provided by kit_feeds; skipped" % name, file=sys.stderr)
@@ -1485,6 +1727,7 @@ def run(args: argparse.Namespace) -> Collector:
         except Exception as e:  # one bad board must not stop the sweep (and is retried on --resume)
             ok = False
             print("warning: %s failed: %s: %s" % (tid, type(e).__name__, e), file=sys.stderr)
+            col.fail(tid, e)
         except BaseException:  # Ctrl-C or a hard crash: no further source may start
             if sink is not None:
                 sink.stop("interrupted")
@@ -1572,14 +1815,37 @@ def filter_new(results: list[dict[str, Any]], urls: set[str], keys: set[str]) ->
     return new, len(results) - len(new)
 
 
-def save_history(path: str | None, urls: set[str], keys: set[str], results: list[dict[str, Any]]) -> None:
-    """Add this run's output to the history file."""
+HISTORY_RUNS_KEPT = 100
+
+
+def load_history_runs(path: str | None) -> list[dict[str, Any]]:
+    """The per-run skipped counters saved in the history file (missing or old-format file = empty)."""
+    if not path or path.lower() == "none":
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            runs = json.load(f).get("runs", [])
+        return [r for r in runs if isinstance(r, dict)]
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def save_history(
+    path: str | None, urls: set[str], keys: set[str], results: list[dict[str, Any]],
+    run: dict[str, Any] | None = None,
+) -> None:
+    """Add this run's output (and its skipped_* counters) to the history file, atomically.
+
+    Written to a temp file and swapped in with os.replace, so a kill mid-write leaves the old file whole.
+    """
     if not path or path.lower() == "none":
         return
     u = sorted(urls | {r["url"] for r in results})
     k = sorted(keys | {job_key(r) for r in results})
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump({"urls": u, "keys": k}, f)
+    runs = load_history_runs(path)
+    if run:
+        runs = (runs + [run])[-HISTORY_RUNS_KEPT:]
+    _atomic_write_text(path, json.dumps({"urls": u, "keys": k, "runs": runs}))
 
 
 # ------------------------------------------------------------ check-live
@@ -1733,8 +1999,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="stop starting new sources after N minutes (default 15, 0 = no limit); rerun with --resume",
     )
     p.add_argument("--max-sources", type=int, default=0, help="stop after N sources (0 = no limit)")
+    p.add_argument(
+        "--run-log", default=None,
+        help="JSONL file one summary row is appended to for every run, failed ones too "
+             "(default: hunt_runs.jsonl next to the stream; 'none' = off)",
+    )
     p.add_argument("--stats", action="store_true", help="print coverage counts per source to stderr")
     return p
+
+
+def format_failed(col: Collector) -> str:
+    """The sources that raised, one per line: name and error (empty string when none failed)."""
+    if not col.failed:
+        return ""
+    lines = ["Failed sources (%d):" % len(col.failed)]
+    lines += ["  %s: %s" % (f["source"], f["error"]) for f in sorted(col.failed, key=lambda f: f["source"])]
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1752,62 +2032,90 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(hit, ensure_ascii=False))
         return 0
     stream_path = args.stream or ("hunt_stream.jsonl" if args.out == "-" else args.out + ".stream")
-    sink = Stream(stream_path, run_fingerprint(args), args.max_minutes, args.max_sources)
-    state = sink.open(args.resume)
-    if state == "complete":
-        print("That run already finished: %d jobs are in %s. Rerun without --resume to search again."
-              % (sink.count, stream_path), file=sys.stderr)
-        sink.close()
-        return 0
-    args.sink = sink
-    print("Results stream to %s as they come; if the run stops, rerun with --resume to continue."
-          % stream_path, file=sys.stderr, flush=True)
-    cli = list(sys.argv[1:] if argv is None else argv)
+    lock = RunLock(stream_path)
+    busy = lock.acquire()
+    if busy:
+        print("%s. Wait for it to finish, or use another --stream." % busy, file=sys.stderr)
+        return 3
     try:
+        return _main_locked(args, stream_path, list(sys.argv[1:] if argv is None else argv))
+    finally:
+        lock.release()
+
+
+def _main_locked(args: argparse.Namespace, stream_path: str, cli: list[str]) -> int:
+    run_log = RunLog(args.run_log or os.path.join(os.path.dirname(os.path.abspath(stream_path)), "hunt_runs.jsonl"))
+    sink = Stream(stream_path, run_fingerprint(args), args.max_minutes, args.max_sources)
+    run_log.sink = sink
+    try:
+        state = sink.open(args.resume)
+        if state == "complete":  # nothing ran: not a run, so no run-log row
+            print("That run already finished: %d jobs are in %s. Rerun without --resume to search again."
+                  % (sink.count, stream_path), file=sys.stderr)
+            return 0
+        run_log.resumed = state == "resumed"
+        args.sink = sink
+        args.run_log_obj = run_log
+        print("Results stream to %s as they come; if the run stops, rerun with --resume to continue."
+              % stream_path, file=sys.stderr, flush=True)
         try:
             col = run(args)
-        except KeyboardInterrupt:
-            print("\nInterrupted.\n" + resume_hint(cli, sink), file=sys.stderr)
-            return 130
-        partial = bool(sink.stop_reason)
-        stored = list(sink.iter_records()) if sink.count else col.results
-        results = sort_newest(stored)
-        del stored
-        urls, keys = load_history(args.history)
-        skipped = 0
-        try:
-            results, skipped = filter_new(results, set() if args.all else urls, set() if args.all else keys)
-            if args.check_live and not partial:
-                results = check_live(col, results)
-        except Exception as e:  # a late step must not lose the results
-            print("warning: late step failed: %s: %s" % (type(e).__name__, e), file=sys.stderr)
-        col.results = results
-        try:
+            partial = bool(sink.stop_reason)
+            stored = list(sink.iter_records()) if sink.count else col.results
+            results = sort_newest(stored)
+            del stored
+            urls, keys = load_history(args.history)
+            skipped = 0
+            try:
+                results, skipped = filter_new(results, set() if args.all else urls, set() if args.all else keys)
+                col.skipped_seen = skipped
+                if args.check_live and not partial:
+                    results = check_live(col, results)
+            except Exception as e:  # a late step must not lose the results
+                print("warning: late step failed: %s: %s" % (type(e).__name__, e), file=sys.stderr)
+            col.results = results
             if args.out == "-":
                 for r in results:
                     sys.stdout.write(json.dumps(r, ensure_ascii=False) + "\n")
+                sys.stdout.flush()
             else:
                 with open(args.out, "w", encoding="utf-8") as f:
                     for r in results:
                         f.write(json.dumps(r, ensure_ascii=False) + "\n")
-        finally:
+            counts = {"kept": len(results), "stored": sink.count}
             if not partial:  # a partial run must not mark its jobs "seen": the resumed run still outputs them
+                # Only now, after the output was written in full: a run that died before this line
+                # leaves the history untouched, so the next run still outputs these jobs.
                 try:
-                    save_history(args.history, urls, keys, results)
+                    snap = run_log.snapshot()
+                    row = {k: snap[k] for k in ("end", "found", "skipped_seen", "skipped_company",
+                                                "skipped_bad_url", "skipped_dead", "failed")}
+                    row["kept"] = len(results)
+                    save_history(args.history, urls, keys, results, run=row)
                 except OSError as e:
                     print("warning: could not write history: %s" % e, file=sys.stderr)
-        if args.stats or skipped:
-            print(format_stats(col, skipped), file=sys.stderr)
-        if partial:
-            print("\nStopped early: %s. The %d job%s found so far %s written to %s.\n%s"
-                  % (sink.stop_reason, len(results), "" if len(results) == 1 else "s",
-                     "was" if len(results) == 1 else "were", "stdout" if args.out == "-" else args.out,
-                     resume_hint(cli, sink)), file=sys.stderr)
-            if args.check_live:
-                print("(--check-live was skipped on this partial run.)", file=sys.stderr)
-        else:
-            sink.mark_complete()
-        return 0
+            if args.stats or skipped:
+                print(format_stats(col, skipped), file=sys.stderr)
+            if col.failed:
+                print(format_failed(col), file=sys.stderr)
+            if partial:
+                print("\nStopped early: %s. The %d job%s found so far %s written to %s.\n%s"
+                      % (sink.stop_reason, len(results), "" if len(results) == 1 else "s",
+                         "was" if len(results) == 1 else "were", "stdout" if args.out == "-" else args.out,
+                         resume_hint(cli, sink)), file=sys.stderr)
+                if args.check_live:
+                    print("(--check-live was skipped on this partial run.)", file=sys.stderr)
+            else:
+                sink.mark_complete()
+            run_log.write("partial" if partial else "completed", locked=True, **counts)
+            return 0
+        except KeyboardInterrupt:  # scan.mjs: process.once('SIGINT', ...) writes the failure row, exits 130
+            print("\nInterrupted.\n" + resume_hint(cli, sink), file=sys.stderr)
+            run_log.write("interrupted")
+            return 130
+        except BaseException as e:  # scan.mjs: main().catch(... writeRunFailureRow('failed'))
+            run_log.write("failed", error="%s: %s" % (type(e).__name__, e))
+            raise
     finally:
         sink.close()
 

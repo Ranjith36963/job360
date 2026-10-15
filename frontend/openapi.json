@@ -993,6 +993,9 @@
             ],
             "title": "Answers Omitted"
           },
+          "answers_summary": {
+            "$ref": "#/components/schemas/KitAnswersSummaryOut"
+          },
           "application": {
             "$ref": "#/components/schemas/KitApplicationOut"
           },
@@ -1102,6 +1105,7 @@
           "job",
           "application",
           "answers",
+          "answers_summary",
           "missing",
           "settings",
           "duplicate",
@@ -4372,6 +4376,17 @@
             ],
             "title": "Company"
           },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
           "key": {
             "title": "Key",
             "type": "string"
@@ -4407,6 +4422,26 @@
             "title": "Source",
             "type": "string"
           },
+          "state": {
+            "enum": [
+              "confirmed",
+              "inferred",
+              "sensitive"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
           "value": {
             "title": "Value"
           }
@@ -4414,7 +4449,8 @@
         "required": [
           "key",
           "value",
-          "source"
+          "source",
+          "state"
         ],
         "title": "KitAnswerOut",
         "type": "object"
@@ -4472,6 +4508,27 @@
           }
         },
         "title": "KitAnswersOut",
+        "type": "object"
+      },
+      "KitAnswersSummaryOut": {
+        "properties": {
+          "confirmed": {
+            "default": 0,
+            "title": "Confirmed",
+            "type": "integer"
+          },
+          "inferred": {
+            "default": 0,
+            "title": "Inferred",
+            "type": "integer"
+          },
+          "sensitive": {
+            "default": 0,
+            "title": "Sensitive",
+            "type": "integer"
+          }
+        },
+        "title": "KitAnswersSummaryOut",
         "type": "object"
       },
       "KitApplicationOut": {
@@ -11679,7 +11736,7 @@
     },
     "/api/applications/{application_id}/hold/release": {
       "post": {
-        "description": "\"Release\" - the user frees an application another assistant session holds (it crashed\nor was closed): appends ``hold_released`` {reason: stopped, by: web}; nothing is rewritten.\n``{released: false}`` and no event when no hold is live. 404 for an application that is not\nthe caller's. A web action; assistants record ``hold_released`` through ``record_event``.",
+        "description": "\"Release\" - the user frees an application another assistant session holds (it crashed\nor was closed): appends ``hold_released`` {reason: stopped, by: web}; nothing is rewritten.\n``{released: false}`` and no event when no hold is live. 404 for an application that is not\nthe caller's. Session only: a bearer token is refused, so an assistant can never release\nanother session's hold; assistants record ``hold_released`` through ``record_event``.",
         "operationId": "release_hold_api_applications__application_id__hold_release_post",
         "parameters": [
           {

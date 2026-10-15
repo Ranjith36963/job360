@@ -176,6 +176,28 @@ async def test_release_route_appends_event_and_clears_hold(authenticated_async_c
             assert gate.json()["reason"] != "held_by_other_session"
 
 
+def test_release_route_is_session_only_with_auth_first():
+    from src.api.auth_deps import require_session_user, require_user
+    from src.api.routes.applications import router
+
+    route = next(r for r in router.routes if getattr(r, "path", "") == "/applications/{application_id}/hold/release")
+    assert [d.dependency for d in route.dependencies] == [require_user]
+    assert any(d.call is require_session_user for d in route.dependant.dependencies)
+
+
+@pytest.mark.asyncio
+async def test_release_bearer_token_is_refused_and_hold_stands(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as web:
+        a, _b, token = await _setup(web, fixture_user_id)
+        async with _bearer_client(token) as agent:
+            await _kit(agent, a, "owner-session")
+            before = _count_events(a)
+            # same refusal as blocked/resolve: a j360_ token can never release another session's hold
+            assert (await agent.post(f"/api/applications/{a}/hold/release")).status_code in (401, 403)
+        assert _count_events(a) == before and _count_events(a, "hold_released") == 0
+        assert (await _rows(web))[a]["hold"]["session"] == "owner-session", "the hold stands"
+
+
 @pytest.mark.asyncio
 async def test_release_idempotent_when_no_hold(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as web:
