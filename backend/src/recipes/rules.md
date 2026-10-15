@@ -166,7 +166,7 @@ is filled.
 the `cv_artifact_id` and `cover_letter_artifact_id` that were sent, and in
 `confirmation` the application ID or portal reference ONLY (it must contain a
 digit; anything else is kept in the note with a warning). This saves an
-immutable receipt. Right after, put the thank-you page text in `record_event`
+immutable receipt. Name `cover_letter_artifact_id` only when the form took a letter; otherwise leave it out and the receipt says none was sent. Right after, put the thank-you page text in `record_event`
 `proof_text` {text, page_host}, and a screenshot only if you can. Proof is one
 of: a confirmation email, the thank-you page text, or the application ID /
 portal reference; with none yet the application is "claimed, unverified".

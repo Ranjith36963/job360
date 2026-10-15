@@ -237,6 +237,7 @@ def _receipt_summary(r: Any) -> dict[str, Any]:
         "job_location": r.job_location,
         "has_cv": r.has_cv,
         "has_cover_letter": r.has_cover_letter,
+        "cover_letter_sent": r.cover_letter_sent,
         "channel": r.channel,
         "note": r.note,
         "proof": r.proof.model_dump(),
@@ -269,6 +270,7 @@ def _receipt_full(r: Any) -> dict[str, Any]:
         "confirmation": r.confirmation,
         "cv_version_no": r.cv_version_no,
         "cover_letter_version_no": r.cover_letter_version_no,
+        "cover_letter_sent": r.cover_letter_sent,
         "recorded_by": r.recorded_by,
         "possible_duplicate": r.possible_duplicate,
         "kit_event_id": r.kit_event_id,
@@ -753,8 +755,8 @@ def build_server(version: str = "") -> MCPServer:
         """Record that the user has applied to this job — ONLY after they say so. Pass
         `application_id` (the same id every other tool takes); `job_id` still works
         but is the older form — if you give both they must belong together. Freezes
-        the named CV / cover-letter version (or the newest saved one, if none named) and
-        any answers/fields into an immutable receipt, and appends an `applied` event to
+        the named CV version (the newest saved one, with a warning, if none named), the
+        named cover letter and any answers/fields into an immutable receipt, and appends an `applied` event to
         the application's history. Sends nothing anywhere. `channel` is where they
         applied — one of "company_site", "linkedin_easy_apply", "job_board",
         "email", "referral", "recruiter", "other" (or leave it empty); ats_form / workday /
@@ -768,6 +770,9 @@ def build_server(version: str = "") -> MCPServer:
         `POST /receipts/{job_id}` — the new optional fields (`confirmation`, `answers`,
         `fields_filled`, `cv_artifact_id`, `cover_letter_artifact_id`, `applied_at`)
         are exactly spec R8/S4's tool contract.
+
+        cover_letter_artifact_id: pass it ONLY if a letter was actually sent; leave it out
+        and the receipt records no letter (`cover_letter_sent` false, plus a warning).
         """
         try:
             body = applications_route.RecordApplicationReceiptRequest(
