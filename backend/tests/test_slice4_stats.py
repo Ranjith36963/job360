@@ -210,6 +210,25 @@ async def test_an_event_superseded_by_a_correction_is_not_counted(authenticated_
         assert overall["interview_rate"] is None
 
 
+@pytest.mark.asyncio
+async def test_simulation_is_excluded(authenticated_async_context):
+    """A `simulation` note marks a test application: it is counted nowhere, and a
+    correction of the marker brings it back."""
+    async with authenticated_async_context() as client:
+        real = await _bring(client, _AD)
+        fake = await _bring(client, {**_AD, "company": "Simulated Ltd"})
+        await _event(client, real, "applied")
+        resp = await client.post(f"/api/applications/{fake}/events", json={"event_type": "simulation"})
+        assert resp.status_code == 201, resp.text
+        sim_id = int(resp.json()["event_id"])
+        await _event(client, fake, "applied")
+        overall = (await _stats(client)).json()["overall"]
+        assert overall["applied"] == 1 and overall["brought"] == 1 and overall["simulations_excluded"] == 1
+        await _event(client, fake, "note", corrects_event_id=sim_id, detail="was real")
+        overall = (await _stats(client)).json()["overall"]
+        assert overall["applied"] == 2 and overall["simulations_excluded"] == 0
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # R6 — grouping by CV label and by role
 # ═══════════════════════════════════════════════════════════════════════════

@@ -338,6 +338,7 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
             MAX(CASE WHEN e.event_type IN ({interview_placeholders}) THEN 1 ELSE 0 END) AS interview,
             MAX(CASE WHEN e.event_type = ? THEN 1 ELSE 0 END) AS offer,
             MAX(CASE WHEN e.event_type = ? THEN 1 ELSE 0 END) AS rejected,
+            MAX(CASE WHEN e.event_type = ? THEN 1 ELSE 0 END) AS simulated,
             (
                 SELECT art.label FROM application_receipts r
                 LEFT JOIN application_artifacts art
@@ -375,6 +376,7 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
         *interview_types,
         settings.STATS_OFFER_EVENT_TYPE,
         settings.STATS_REJECTED_EVENT_TYPE,
+        settings.SIMULATION_EVENT_TYPE,
         *where_params,
         limit + 1,
     ]
@@ -382,9 +384,14 @@ async def compute_stats(db: JobDatabase, user_id: str, since: Optional[str] = No
     rows = [dict(r) for r in await cur.fetchall()]
     applications_truncated = len(rows) > limit
     rows = rows[:limit]
+    # A simulation event (not retracted: the join above already drops corrected
+    # events) marks a test application: it counts nowhere.
+    simulations_excluded = sum(1 for r in rows if r.get("simulated"))
+    rows = [r for r in rows if not r.get("simulated")]
     replies_without_applied = _gate_on_applied(rows)
 
-    overall = {**_summarize(rows), "replies_without_applied": replies_without_applied}
+    overall = {**_summarize(rows), "replies_without_applied": replies_without_applied,
+               "simulations_excluded": simulations_excluded}
 
     by_cv_version, cv_truncated = _group(
         rows, key_field="cv_label", label_key="label", with_profile_versions=True

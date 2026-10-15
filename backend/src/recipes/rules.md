@@ -299,6 +299,8 @@ that has already arrived; a future one is left alone, and passing `follow_up_on`
 yourself always wins). list_applications(due=true) is how the user (or your next
 daily-check run) finds what's arrived.
 
+A test or simulated application: `record_event` `simulation` FIRST, before any other event; it is never counted in stats.
+
 Give `contact_id` + `channel` to ALSO record this as outreach for that person —
 `event_type` must then be "outreach_sent" (the message went out: the Sent
 folder shows it, with the Gmail message id as `source`, or the user told you)

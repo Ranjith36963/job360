@@ -1018,6 +1018,20 @@ async def test_practice_run_is_derived_from_the_first_auto_row_and_ends_after_on
 
 
 @pytest.mark.asyncio
+async def test_a_simulated_applied_does_not_end_the_practice_run(authenticated_async_context, fixture_user_id):
+    async with authenticated_async_context() as client:
+        _seed_profile(fixture_user_id)
+        real, fake = await _bring(client), await _bring(client, _AD_2)
+        assert (await _patch(client, _e(SUBMIT, "auto_when_sure"))).status_code == 200
+        sim = await client.post(f"/api/applications/{fake}/events", json={"event_type": "simulation"})
+        assert sim.status_code == 201, sim.text
+        await _apply(client, fake)
+        assert (await _view(client))["practice_run"]["needed"] is True
+        await _apply(client, real)
+        assert (await _view(client))["practice_run"]["needed"] is False
+
+
+@pytest.mark.asyncio
 async def test_per_job_override_an_assistant_may_only_send_confirm(authenticated_async_context, fixture_user_id):
     async with authenticated_async_context() as client:
         _seed_profile(fixture_user_id)

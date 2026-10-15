@@ -933,9 +933,12 @@ def practice_info(user_id: str) -> tuple[Optional[str], int]:
         if since is None:
             return None, 0
         cnt = conn.execute(
-            "SELECT COUNT(*) FROM application_events "
-            "WHERE user_id = ? AND event_type = 'applied' AND recorded_at > ?",
-            (user_id, since),
+            "SELECT COUNT(*) FROM application_events e "
+            "WHERE e.user_id = ? AND e.event_type = 'applied' AND e.recorded_at > ? "
+            "AND NOT EXISTS (SELECT 1 FROM application_events s WHERE s.application_id = e.application_id "
+            "AND s.user_id = e.user_id AND s.event_type = ? AND s.id NOT IN "
+            "(SELECT corrects_event_id FROM application_events WHERE user_id = ? AND corrects_event_id IS NOT NULL))",
+            (user_id, since, settings.SIMULATION_EVENT_TYPE, user_id),
         ).fetchone()
         return since, int(cnt[0]) if cnt else 0
 

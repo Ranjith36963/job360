@@ -302,7 +302,13 @@ APPLICATION_NOTE_EVENT_TYPES = (
     # Owner decision 2026-10-10 (S7, proof of application): the pasted
     # confirmation text, and the server-written trail of an uploaded screenshot.
     "proof_text", "proof_screenshot",
+    # Owner decision 2026-10-15: a test/simulated application is marked with a
+    # `simulation` note (no payload; detail is free text) recorded FIRST. Stats,
+    # proof_missing and the practice run never count it; a corrects_event_id
+    # event retracts the mark.
+    "simulation",
 )
+SIMULATION_EVENT_TYPE = "simulation"
 # Env-added types are non-status only — a status type also needs an R4
 # mapping entry, which an env var cannot supply.
 APPLICATION_EXTRA_EVENT_TYPES = _env_list("APPLICATION_EXTRA_EVENT_TYPES", ())

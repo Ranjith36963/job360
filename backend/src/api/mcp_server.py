@@ -1054,6 +1054,8 @@ def build_server(version: str = "") -> MCPServer:
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
         quick_apply_warning|other, step, page_host, detail}, then stop that application; unblocked {resolution:
         retried|user_did_it|skipped}.
+        simulation (no payload; detail = why): a test or simulated application. Record it FIRST, before any other
+        event; stats, proof and the practice run never count it. Retract with corrects_event_id.
         proof_text {text, page_host}: the pasted confirmation text. Payloads, 403/409: get_recipe("rules"), Events."""
         if contact_id is not None:
             # Bug fix (coordinator review, 2026-09-26) — same refusal as the
@@ -1293,7 +1295,8 @@ def build_server(version: str = "") -> MCPServer:
         `country`; remote jobs are their own "remote" group), by_job_source
         (`found_on`), by_channel (record_application's `channel`) and
         by_contact_found_via (contacts, outreach sent, replies, reply rate per
-        add_contact `found_via`). An unset value is the group with key null
+        add_contact `found_via`). Applications marked with a `simulation` event are left out;
+        overall.simulations_excluded says how many. An unset value is the group with key null
         ("Not set"). `since` (an ISO date/datetime) scopes to applications
         (and contacts) added on/after that date. Nothing is inferred; every
         number is a count of what you recorded."""

@@ -8238,6 +8238,11 @@
               }
             ],
             "title": "Reply Rate"
+          },
+          "simulations_excluded": {
+            "default": 0,
+            "title": "Simulations Excluded",
+            "type": "integer"
           }
         },
         "required": [
