@@ -497,7 +497,10 @@ export interface paths {
          *     response. 404 for an application that is not the caller's; 429 over the
          *     hourly cap. Document ``text`` is cut to ``KIT_DOC_TEXT_MAX_CHARS`` (``text_truncated`` /
          *     ``text_more``; ``include_text=false`` sends none); ``approved_text`` keeps the newest
-         *     ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``Cache-Control: no-store``.
+         *     ``KIT_APPROVED_TEXT_MAX`` (``answers_omitted``). ``session`` is the assistant
+         *     session's own short label (``kit.clean_session``; 422 otherwise): it is stored on
+         *     the ``kit_read`` so ``hold`` can tell two sessions of one assistant apart.
+         *     ``Cache-Control: no-store``.
          */
         get: operations["get_application_kit_api_applications__application_id__kit_get"];
         put?: never;
@@ -667,8 +670,11 @@ export interface paths {
          *     or a non-http(s) scheme answers ``ask`` / ``unknown_site``, and a host other
          *     than the newest ``form_filled``'s answers ``ask`` / ``form_host_mismatch`` -
          *     a stored yes clears neither. An unconfirmed email answers ``ask`` /
-         *     ``email_not_verified``. Read-only. 404 for an application that is not the
-         *     caller's (rule #12).
+         *     ``email_not_verified``. ``session`` is the caller's own label (the one it gave
+         *     ``get_application_kit``; 422 when malformed): another session's live kit hold
+         *     answers ``ask`` / ``held_by_other_session``, which a yes does not clear (only
+         *     ``hold_released`` or the end of ``KIT_HOLD_MINUTES`` does). Read-only. 404 for an
+         *     application that is not the caller's (rule #12).
          */
         get: operations["submit_check_api_applications__application_id__submit_check_get"];
         put?: never;
@@ -1405,6 +1411,11 @@ export interface paths {
          *     ``verify_email | upload_cv | setup:<round> | answer_asks | confirm_settings | ok``.
          *     Read-only; email verification is NOT required (an unverified user is told
          *     to verify). No 404 when there is no profile (``profile_exists: false``).
+         *
+         *     Also the MCP tool list as served now (``tools``, ``tools_version``) so an
+         *     assistant can tell its client cached an old one: pass the version it saw
+         *     last as ``client_tools_version`` and ``tools_stale`` says whether it moved
+         *     (null when none was passed).
          */
         get: operations["doctor_api_doctor_get"];
         put?: never;
@@ -3734,6 +3745,25 @@ export interface components {
             /** Profile Exists */
             profile_exists: boolean;
             setup: components["schemas"]["DoctorSetup"];
+            /**
+             * Stale Hint
+             * @default
+             */
+            stale_hint: string;
+            /**
+             * Tools
+             * @default {}
+             */
+            tools: {
+                [key: string]: string[];
+            };
+            /** Tools Stale */
+            tools_stale?: boolean | null;
+            /**
+             * Tools Version
+             * @default
+             */
+            tools_version: string;
             /** Waiting Settings */
             waiting_settings: number;
             /** Whats New Hint */
@@ -4228,12 +4258,30 @@ export interface components {
             /** Url */
             url: string;
         };
-        /** KitHoldOut */
+        /**
+         * KitHoldOut
+         * @description Another assistant session is on this application (weak spot #3, 2026-10-15).
+         *     ``session`` is the other holder's own label (data, never markup; ``""`` = none
+         *     given). ``unsure``: the caller passed no ``session`` and its own assistant read
+         *     the kit under a label - maybe another session of the same assistant (``detail``).
+         */
         KitHoldOut: {
+            /** Detail */
+            detail?: string | null;
             /** Held By */
             held_by: string;
+            /**
+             * Session
+             * @default
+             */
+            session: string;
             /** Since */
             since: string;
+            /**
+             * Unsure
+             * @default false
+             */
+            unsure: boolean;
             /** Until */
             until: string;
         };
@@ -7001,6 +7049,7 @@ export interface operations {
         parameters: {
             query?: {
                 include_text?: boolean;
+                session?: string;
             };
             header?: {
                 authorization?: string | null;
@@ -7332,6 +7381,7 @@ export interface operations {
         parameters: {
             query?: {
                 form_url?: string;
+                session?: string;
             };
             header?: {
                 authorization?: string | null;
@@ -8588,7 +8638,9 @@ export interface operations {
     };
     doctor_api_doctor_get: {
         parameters: {
-            query?: never;
+            query?: {
+                client_tools_version?: string;
+            };
             header?: {
                 authorization?: string | null;
             };
