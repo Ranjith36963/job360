@@ -24,6 +24,7 @@ import { Receipts } from "@/components/applications/Receipts";
 import { NoteForm } from "@/components/applications/NoteForm";
 import { LessonForm } from "@/components/applications/LessonForm";
 import { JobFacts } from "@/components/applications/JobFacts";
+import { PayAdvertised } from "@/components/applications/PayAdvertised";
 import { VisaBadge } from "@/components/applications/VisaBadge";
 import { VisaSelect } from "@/components/applications/VisaSelect";
 import { StatusMenu } from "@/components/applications/StatusMenu";
@@ -215,6 +216,7 @@ export function ApplicationClient({ applicationId }: { applicationId: number }) 
             found_on: detail.job.found_on ?? null,
           }}
         />
+        <PayAdvertised pay={detail.job.pay_advertised} />
       </header>
 
       {openAsks.length > 0 && (

@@ -286,6 +286,20 @@ class AddContactRequest(BaseModel):
 # `X | null` and the second as an optional key).
 
 
+class PayAdvertisedOut(BaseModel):
+    """Pay exactly as the ad states it (job_checks.pay_facts). Never annualised:
+    ``period`` is null when the ad does not say; ``currency`` is "UNKNOWN" when
+    no ISO code / unambiguous symbol sits beside the amount."""
+
+    amount: str
+    evidence: str
+    period: Optional[str] = None
+    currency: str
+    min: Optional[int] = None
+    max: Optional[int] = None
+    equity: bool = False
+
+
 class ApplicationJobOut(BaseModel):
     job_title: str
     job_company: str
@@ -302,6 +316,8 @@ class ApplicationJobOut(BaseModel):
     found_on: Optional[str] = None
     ad_posted_at: Optional[str] = None
     employer_published_at: Optional[str] = None
+    # Pay as advertised in the stored ad text (null = the ad states none).
+    pay_advertised: Optional[PayAdvertisedOut] = None
 
 
 class FitAxisOut(BaseModel):

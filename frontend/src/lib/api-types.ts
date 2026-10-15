@@ -2953,6 +2953,7 @@ export interface components {
             job_title: string;
             /** Job Url */
             job_url: string;
+            pay_advertised?: components["schemas"]["PayAdvertisedOut"] | null;
             /** Remote */
             remote?: boolean | null;
             /** Snapshot At */
@@ -4810,6 +4811,31 @@ export interface components {
              * Format: email
              */
             email: string;
+        };
+        /**
+         * PayAdvertisedOut
+         * @description Pay exactly as the ad states it (job_checks.pay_facts). Never annualised:
+         *     ``period`` is null when the ad does not say; ``currency`` is "UNKNOWN" when
+         *     no ISO code / unambiguous symbol sits beside the amount.
+         */
+        PayAdvertisedOut: {
+            /** Amount */
+            amount: string;
+            /** Currency */
+            currency: string;
+            /**
+             * Equity
+             * @default false
+             */
+            equity: boolean;
+            /** Evidence */
+            evidence: string;
+            /** Max */
+            max?: number | null;
+            /** Min */
+            min?: number | null;
+            /** Period */
+            period?: string | null;
         };
         /**
          * PersonFullOut
