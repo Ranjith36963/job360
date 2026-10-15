@@ -300,6 +300,19 @@ async def test_a_captcha_or_bot_check_is_never_retried(authenticated_async_conte
 
 
 @pytest.mark.asyncio
+async def test_safety_block_is_never_retried(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        blocked = _blocked(reason="safety_block", step="final submit")
+        assert (await _event(client, app_id, "blocked", blocked)).status_code == 201
+        asks = await _open_asks(client, app_id)
+        assert len(asks) == 1 and "press Submit yourself" in asks[0]["question"]
+        resp = await _event(client, app_id, "unblocked", {"resolution": "retried"})
+        assert resp.status_code == 422 and "never retried by the assistant" in resp.text
+        assert (await _event(client, app_id, "unblocked", {"resolution": "user_did_it"})).status_code == 201
+
+
+@pytest.mark.asyncio
 async def test_retried_is_fine_for_other_reasons(authenticated_async_context):
     async with authenticated_async_context() as client:
         app_id = await _bring(client)
