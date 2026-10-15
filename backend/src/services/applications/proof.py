@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import re
 import secrets
 from datetime import datetime, timedelta
@@ -286,20 +287,23 @@ async def proof_for(db: JobDatabase, user_id: str, application_ids: list[int]) -
     marks, ids = ",".join("?" for _ in out), list(out)
     cur = await db._db.execute(
         "SELECT id, application_id, event_type, source_kind, corrects_event_id, "  # noqa: S608 - placeholders only
-        "(LOWER(TRIM(detail)) LIKE ?), COALESCE(NULLIF(source_received_at, ''), recorded_at) FROM application_events "
+        "(LOWER(TRIM(detail)) LIKE ?), COALESCE(NULLIF(source_received_at, ''), recorded_at), "
+        "payload, source_message_id FROM application_events "
         f"WHERE user_id = ? AND application_id IN ({marks}) "
         "AND (event_type IN ('proof_text', 'applied', 'note') OR corrects_event_id IS NOT NULL)",
         ["submission confirmed%", user_id, *ids],
     )
     rows = [tuple(r) for r in await cur.fetchall()]
     superseded = {r[4] for r in rows if r[4] is not None}
-    for ev_id, app_id, kind, source, _, confirmed, seen_at in rows:
+    for ev_id, app_id, kind, source, _, prefix, seen_at, raw_payload, message_id in rows:
         if ev_id in superseded:
             continue
         p = out[app_id]
         if kind == "proof_text":
             p["has_text"] = p["has_page_text"] = True
-        elif (kind == "applied" and source == "email") or (kind == "note" and confirmed):
+        elif (kind == "applied" and source == "email") or (
+            kind == "note" and _is_email_confirmation(prefix, raw_payload, source, message_id)
+        ):
             p["has_email"] = True
             if seen_at and (p["email_seen_at"] is None or str(seen_at) < p["email_seen_at"]):
                 p["email_seen_at"] = str(seen_at)
@@ -323,6 +327,20 @@ async def proof_for(db: JobDatabase, user_id: str, application_ids: list[int]) -
         p["level"] = "email" if p["has_email"] else "text" if p["has_text"] else weakest
         p["proof_label"] = proof_label(p)
     return out
+
+
+def _is_email_confirmation(prefix: Any, raw_payload: Any, source_kind: Any, message_id: Any) -> bool:
+    """A ``note`` is email proof ONLY with an email source (and, for a converted note, its message id).
+    The structured ``confirms`` payload key marks a repeat-applied conversion (callers cannot set it); the
+    "Submission confirmed" text prefix is kept for old production rows but, like the key, needs source_kind
+    'email'. With no email source a confirmation note is no proof at all (conservative: text alone is forgeable)."""
+    if source_kind != "email":
+        return False
+    try:
+        converted = json.loads(raw_payload or "{}").get("confirms") == "applied"
+    except (ValueError, AttributeError):
+        converted = False
+    return bool(message_id) if converted else bool(prefix)
 
 
 def looks_like_confirmation_id(value: str) -> bool:

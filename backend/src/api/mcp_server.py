@@ -1188,21 +1188,20 @@ def build_server(version: str = "") -> MCPServer:
     ) -> dict[str, Any]:
         """Append one event to an application's history (append-only).
 
-        `source` ({kind, message_id, sender, subject, received_at}) names the email an event came from: the same
+        `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; the same
         message_id returns already_existed=true and writes nothing, so re-reading an inbox is safe.
 
-        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status; a note
-        never does; the furthest stage wins (a late `applied` never moves it back; only corrects_event_id does).
-        `warnings` = what to fix (e.g. no applied event yet).
-        `occurred_at` may be in the past. `scheduled_at` (ISO-8601 with timezone) only on
+        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status, a note
+        never; the furthest stage wins (only corrects_event_id moves it back). A repeat `applied` (e.g. its
+        confirmation email + `source`) becomes the submission confirmation (proof), not a 2nd applied.
+        `warnings` = what to fix. `occurred_at` may be past. `scheduled_at` (ISO-8601 with timezone) only on
         interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase on any event; ""
         clears it.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (only when Gmail Sent shows it, message id as `source`,
-        or the user says it went) or outreach_replied; `application_id` is optional for a cold contact; a reply
-        never changes the job status.
+        Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`, or the
+        user says it went) or outreach_replied; no application_id for a cold contact; a reply never moves the status.
 
-        Kit events (closed payloads, else 422; only these keys):
+        Kit events (only these keys, else 422):
         form_filled {form_url, fields_count, answers?: [{question, answer, source, key?}]}, source = memory | profile |
         approved | written | guessed (key = the kit key, for memory/profile/approved);
         cv_seen and submit_approved {artifact_id, sha256, where} ONLY after the user said so in chat (where = chat);
