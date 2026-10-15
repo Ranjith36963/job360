@@ -1822,6 +1822,12 @@ async def get_application_detail(
     from src.services.applications.next_step import next_step_for_detail  # noqa: PLC0415
 
     detail["next_step"] = next_step_for_detail(detail)
+    from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
+
+    held = (await kit_service.holds_for_apps(db, user_id, [application_id], datetime.now(timezone.utc))).get(
+        application_id
+    )
+    detail["hold"], detail["stage"] = (held[0], held[1]) if held else (None, "")
     return detail
 
 
@@ -1849,9 +1855,12 @@ async def list_applications(
     offset: int = 0,
     due: bool = False,
     quiet_days: Optional[int] = None,
+    in_flight: bool = False,
 ) -> dict[str, Any]:
     """R11's ``GET /applications`` list: summaries only (snapshot fields,
-    status, per-kind counts) — no event/artifact bodies. Newest
+    status, per-kind counts) — no event/artifact bodies. Each row carries ``hold`` / ``stage``
+    (another assistant session's live kit hold, weak spot #3); ``in_flight`` keeps only the
+    applications with one. Newest
     ``last_event_at`` first; optionally filtered by ``status`` and/or
     ``updated_since``.
 
@@ -1879,6 +1888,8 @@ async def list_applications(
             f"quiet_days must be between 1 and APPLICATION_QUIET_DAYS_MAX "
             f"({settings.APPLICATION_QUIET_DAYS_MAX})",
         )
+    from src.services.applications import kit as kit_service  # noqa: PLC0415 - kit imports spine
+
     where = ["user_id = ?"]
     params: list[Any] = [user_id]
     if status:
@@ -1902,6 +1913,20 @@ async def list_applications(
         cutoff = (datetime.now(timezone.utc) - timedelta(days=quiet_days)).isoformat()
         where.append("(last_event_at IS NULL OR last_event_at < ?)")
         params.append(cutoff)
+    if in_flight:
+        now = datetime.now(timezone.utc)
+        cutoff = (now - timedelta(minutes=settings.KIT_HOLD_MINUTES)).isoformat()
+        cand = await db._db.execute(
+            "SELECT DISTINCT application_id FROM application_events WHERE user_id = ? "
+            "AND event_type = 'kit_read' AND recorded_at >= ?",
+            (user_id, cutoff),
+        )
+        held = await kit_service.holds_for_apps(db, user_id, [int(c[0]) for c in await cand.fetchall()], now)
+        if held:
+            where.append(f"id IN ({','.join('?' for _ in held)})")
+            params.extend(held)
+        else:
+            where.append("1 = 0")
     where_sql = " AND ".join(where)
 
     cur = await db._db.execute(
@@ -1980,6 +2005,7 @@ async def list_applications(
     from src.services.applications.proof import proof_for  # noqa: PLC0415
 
     proofs = await proof_for(db, user_id, app_ids)
+    holds = await kit_service.holds_for_apps(db, user_id, app_ids, datetime.now(timezone.utc))
     out = []
     for r in rows:
         app_id = r["id"]
@@ -2010,6 +2036,8 @@ async def list_applications(
                 "follow_up_on": follow_up_on,
                 "follow_up_due": follow_up_due,
                 "proof": proofs[app_id],
+                "hold": holds[app_id][0] if app_id in holds else None,
+                "stage": holds[app_id][1] if app_id in holds else "",
                 # Gmail check slice 2026-10-15 — where to search and from when.
                 "email_senders": email_senders_for(r.get("job_url") or ""),
                 "inbox_checked_at": r.get("inbox_checked_at"),

@@ -600,6 +600,16 @@
             ],
             "title": "Follow Up On"
           },
+          "hold": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitHoldOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -656,6 +666,11 @@
             },
             "title": "Receipts",
             "type": "array"
+          },
+          "stage": {
+            "default": "",
+            "title": "Stage",
+            "type": "string"
           },
           "status": {
             "title": "Status",
@@ -1365,6 +1380,16 @@
             ],
             "title": "Found On"
           },
+          "hold": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KitHoldOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -1476,6 +1501,11 @@
               }
             ],
             "title": "Remote"
+          },
+          "stage": {
+            "default": "",
+            "title": "Stage",
+            "type": "string"
           },
           "status": {
             "title": "Status",
@@ -7740,6 +7770,19 @@
         "title": "RegisterResponse",
         "type": "object"
       },
+      "ReleaseHoldOut": {
+        "properties": {
+          "released": {
+            "title": "Released",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "released"
+        ],
+        "title": "ReleaseHoldOut",
+        "type": "object"
+      },
       "SaveArtifactRequest": {
         "additionalProperties": false,
         "properties": {
@@ -9880,6 +9923,16 @@
             }
           },
           {
+            "in": "query",
+            "name": "in_flight",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "In Flight",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -11619,6 +11672,81 @@
           }
         },
         "summary": "Save Fit",
+        "tags": [
+          "applications"
+        ]
+      }
+    },
+    "/api/applications/{application_id}/hold/release": {
+      "post": {
+        "description": "\"Release\" - the user frees an application another assistant session holds (it crashed\nor was closed): appends ``hold_released`` {reason: stopped, by: web}; nothing is rewritten.\n``{released: false}`` and no event when no hold is live. 404 for an application that is not\nthe caller's. A web action; assistants record ``hold_released`` through ``record_event``.",
+        "operationId": "release_hold_api_applications__application_id__hold_release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "title": "Application Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "job360_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job360 Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseHoldOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release Hold",
         "tags": [
           "applications"
         ]

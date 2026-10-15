@@ -1121,6 +1121,14 @@ async def live_hold(
     )
     got = await cur.fetchone()
     cleared_upto = int(got[0]) if got is not None and got[0] is not None else 0
+    return _pick_hold(reads, cleared_upto, actor, session)
+
+
+def _pick_hold(
+    reads: list[dict[str, Any]], cleared_upto: int, actor: str, session: str
+) -> Optional[dict[str, Any]]:
+    """The hold shape of :func:`live_hold` from kit reads (newest first) and the id of the
+    newest releasing event. Shared with :func:`holds_for_apps` so the two can never disagree."""
     sure: Optional[dict[str, Any]] = None
     unsure: Optional[dict[str, Any]] = None
     for r in reads:  # newest first
@@ -1142,6 +1150,61 @@ async def live_hold(
     if sure is None:
         hold["detail"] = UNSURE_HOLD_DETAIL
     return hold
+
+
+# The headline stage of a held application. Verb + "..." while the assistant works, a plain
+# state once it waits. Job360's own wording (NOT IN REFERENCE: Tsenta's static dashboard shows
+# "Tailoring résumé" / "Reading job description…" but not how the string is derived).
+STAGE_LABELS = {
+    "kit_read": "Reading the kit…", "form_filled": "Form filled", "form_swept": "Ready to submit",
+    "blocked": "Needs you",
+}
+_RELEASING = ("applied", "withdrawn", "rejected", "hold_released")
+
+
+async def holds_for_apps(
+    db: JobDatabase, user_id: str, application_ids: list[int], now: datetime
+) -> dict[int, tuple[dict[str, Any], str]]:
+    """``{application_id: (hold, stage)}`` for the applications with a live hold, in TWO queries
+    for the whole page. The web user is the viewer: it holds no session of its own, so every
+    kit read in the window counts (``unsure`` holds included, shown softer). ``stage`` is
+    :data:`STAGE_LABELS` of the newest kit_read / form_filled / form_swept / blocked after the
+    last release. Applications without a live hold are absent."""
+    if not application_ids:
+        return {}
+    marks = ",".join("?" for _ in application_ids)
+    cutoff = (now - timedelta(minutes=settings.KIT_HOLD_MINUTES)).isoformat()
+    cur = await db._db.execute(
+        f"SELECT id, application_id, event_type, recorded_at, recorded_by, payload FROM application_events "  # noqa: S608 - placeholders only
+        f"WHERE user_id = ? AND application_id IN ({marks}) AND recorded_at >= ? "
+        f"AND event_type IN ('kit_read', 'form_filled', 'form_swept', 'blocked') ORDER BY id DESC",
+        [user_id, *application_ids, cutoff],
+    )
+    events: dict[int, list[dict[str, Any]]] = {}
+    for r in await cur.fetchall():
+        row = dict(r)
+        events.setdefault(int(row["application_id"]), []).append(row)
+    if not events:
+        return {}
+    held_ids = list(events)
+    marks = ",".join("?" for _ in held_ids)
+    rel = ",".join("?" for _ in _RELEASING)
+    cur = await db._db.execute(
+        f"SELECT application_id, MAX(id) FROM application_events WHERE user_id = ? "  # noqa: S608 - placeholders only
+        f"AND application_id IN ({marks}) AND event_type IN ({rel}) GROUP BY application_id",
+        [user_id, *held_ids, *_RELEASING],
+    )
+    cleared = {int(r[0]): int(r[1]) for r in await cur.fetchall()}
+    out: dict[int, tuple[dict[str, Any], str]] = {}
+    for app_id, rows in events.items():
+        upto = cleared.get(app_id, 0)
+        reads = [r for r in rows if r["event_type"] == "kit_read"]
+        hold = _pick_hold(reads, upto, "", "")
+        if hold is None:
+            continue
+        newest = next((r for r in rows if int(r["id"]) > upto), None)  # rows are newest first
+        out[app_id] = (hold, STAGE_LABELS.get(str(newest["event_type"]), "") if newest else "")
+    return out
 
 
 def hold_fact(hold: Optional[dict[str, Any]]) -> Optional[tuple[str, str, str]]:

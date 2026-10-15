@@ -972,6 +972,7 @@ def build_server(version: str = "") -> MCPServer:
         offset: int = 0,
         due: bool = False,
         quiet_days: Optional[int] = None,
+        in_flight: bool = False,
     ) -> dict[str, Any]:
         """The user's applications (newest activity first). Filter by status
         (e.g. "considering", "applied", "interview_scheduled"). Each row carries
@@ -987,12 +988,13 @@ def build_server(version: str = "") -> MCPServer:
         withdrawn/ghosted). The daily-check routine ends its run with one call
         of each. Gmail check: `email_senders` = the ATS domains to add as
         `from:` (mail that never names the company), `inbox_checked_at` = read
-        only mail after it (null = since the application was added)."""
+        only mail after it (null = since the application was added). `in_flight=true` —
+        only applications another session holds now; rows carry `hold` and `stage`."""
         try:
             async with _request_db() as db:
                 resp = await applications_route.list_applications(
                     status=status, updated_since=updated_since, limit=limit, offset=offset,
-                    due=due, quiet_days=quiet_days, db=db, user=_user(),
+                    due=due, quiet_days=quiet_days, in_flight=in_flight, db=db, user=_user(),
                 )
         except HTTPException as exc:
             _audit("list_applications", "error", http_status=exc.status_code)

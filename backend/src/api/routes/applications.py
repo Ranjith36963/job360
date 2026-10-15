@@ -600,6 +600,20 @@ class ProofMissingOut(BaseModel):
     context: str
 
 
+class KitHoldOut(BaseModel):
+    """Another assistant session is on this application (weak spot #3, 2026-10-15).
+    ``session`` is the other holder's own label (data, never markup; ``""`` = none
+    given). ``unsure``: the caller passed no ``session`` and its own assistant read
+    the kit under a label - maybe another session of the same assistant (``detail``)."""
+
+    held_by: str
+    session: str = ""
+    since: str
+    until: str
+    unsure: bool = False
+    detail: Optional[str] = None
+
+
 class ApplicationDetailOut(BaseModel):
     id: int
     job_id: int
@@ -631,6 +645,9 @@ class ApplicationDetailOut(BaseModel):
     # known ATS) and the time up to which this job's mail was read (null = never).
     email_senders: list[str] = []
     inbox_checked_at: Optional[str] = None
+    # Weak spot #3 wave 2 - another assistant session's live kit hold and the headline stage.
+    hold: Optional[KitHoldOut] = None
+    stage: str = ""
 
 
 class ApplicationSummaryOut(BaseModel):
@@ -683,6 +700,9 @@ class ApplicationSummaryOut(BaseModel):
     # Gmail check slice 2026-10-15 - same pair as ApplicationDetailOut.
     email_senders: list[str] = []
     inbox_checked_at: Optional[str] = None
+    # Weak spot #3 wave 2 - same pair as ApplicationDetailOut, batched for the page.
+    hold: Optional[KitHoldOut] = None
+    stage: str = ""
 
 
 class ListApplicationsResponse(BaseModel):
@@ -987,20 +1007,6 @@ class KitDuplicateOut(BaseModel):
     same_company_30d: int
     flag: str
     cleared: Optional[KitSeenOut] = None
-
-
-class KitHoldOut(BaseModel):
-    """Another assistant session is on this application (weak spot #3, 2026-10-15).
-    ``session`` is the other holder's own label (data, never markup; ``""`` = none
-    given). ``unsure``: the caller passed no ``session`` and its own assistant read
-    the kit under a label - maybe another session of the same assistant (``detail``)."""
-
-    held_by: str
-    session: str = ""
-    since: str
-    until: str
-    unsure: bool = False
-    detail: Optional[str] = None
 
 
 class KitKnownAccountOut(BaseModel):
@@ -1429,13 +1435,15 @@ async def list_applications(
     # the daily-check prompt closes its run with.
     due: bool = Query(False),
     quiet_days: Optional[int] = Query(None, ge=1, le=settings.APPLICATION_QUIET_DAYS_MAX),
+    # Weak spot #3 wave 2 - only applications another assistant session holds right now.
+    in_flight: bool = Query(False),
     db: JobDatabase = Depends(get_request_db),  # noqa: B008
     user: CurrentUser = Depends(require_user),  # noqa: B008
 ) -> dict[str, Any]:
     try:
         return await spine.list_applications(
             db, user.id, status=status, updated_since=updated_since, limit=limit, offset=offset,
-            due=due, quiet_days=quiet_days,
+            due=due, quiet_days=quiet_days, in_flight=in_flight,
         )
     except SpineError as exc:
         _raise(exc)
@@ -2336,6 +2344,40 @@ async def submit_check(
         "application_id": application_id, "decision": verdict.decision,
         "reason": verdict.reason, "detail": verdict.detail,
     }
+
+
+class ReleaseHoldOut(BaseModel):
+    released: bool
+
+
+@router.post(
+    "/applications/{application_id}/hold/release", response_model=ReleaseHoldOut, dependencies=AUTH_FIRST
+)
+async def release_hold(
+    application_id: int,
+    db: JobDatabase = Depends(get_request_db),  # noqa: B008
+    user: CurrentUser = Depends(require_user),  # noqa: B008
+) -> dict[str, Any]:
+    """"Release" - the user frees an application another assistant session holds (it crashed
+    or was closed): appends ``hold_released`` {reason: stopped, by: web}; nothing is rewritten.
+    ``{released: false}`` and no event when no hold is live. 404 for an application that is not
+    the caller's. A web action; assistants record ``hold_released`` through ``record_event``."""
+    try:
+        if await spine.get_owned_application(db, user.id, application_id) is None:
+            raise SpineError(404, "application not found")
+        now = datetime.now(timezone.utc)
+        if application_id not in await kit_service.holds_for_apps(db, user.id, [application_id], now):
+            return {"released": False}
+        stored = await kit_service.check_kit_event(db, user, application_id, "hold_released", {"reason": "stopped"})
+        result = await spine.append_event(
+            db, user_id=user.id, application_id=application_id, event_type="hold_released",
+            payload=stored, occurred_at=now.isoformat(), recorded_by=actor_for(user),
+        )
+        kit_service.log_kit_event(user, application_id, "hold_released", stored, int(result["event_id"]))
+    except SpineError as exc:
+        _raise(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+    return {"released": True}
 
 
 @router.post(

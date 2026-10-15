@@ -753,6 +753,8 @@ export async function listApplications(
     // Owner decision, 2026-09-25 — "what's due" / "gone quiet".
     due?: boolean;
     quiet_days?: number;
+    // Weak spot #3 wave 2 — only applications another assistant session holds now.
+    in_flight?: boolean;
   } = {}
 ): Promise<_Schemas["ListApplicationsResponse"]> {
   const query = { limit: 20, ...params };
@@ -1014,6 +1016,11 @@ export async function deleteProofScreenshot(applicationId: number, screenshotId:
 }
 
 /** "Mark resolved" - the user sorted out what stopped their assistant; records `unblocked` {resolution: user_did_it}. */
+/** Free an application another assistant session holds (appends `hold_released`). */
+export async function releaseHold(applicationId: number): Promise<{ released: boolean }> {
+  return request(`/api/applications/${applicationId}/hold/release`, { method: "POST" });
+}
+
 export async function resolveBlocked(applicationId: number): Promise<ApplicationControls> {
   return request(`/api/applications/${applicationId}/blocked/resolve`, { method: "POST" });
 }
