@@ -155,6 +155,7 @@ def test_rules_recipe_holds_every_moved_rule():
                   "preferences.salary_by_country", "never convert currency", "a salary floor is never stored",
                   "replaces the whole list", "cv_data.cv_positions", "ats_score", "found_via", "found_on",
                   "prefer not to say", "the hiring country", "approved",
+                  "writing the cover letter", "letterhead",
                   # restored by the S4 review (they were dropped from the old texts):
                   "if the cv is edited afterwards that yes no longer counts",
                   "still record `form_filled` when the user says the form is filled",

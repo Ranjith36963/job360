@@ -1925,6 +1925,9 @@ class UpdateJobFactsRequest(BaseModel):
     # Ad dates, YYYY-MM-DD, not in the future ("" / null clears one).
     posted_at: Optional[str] = Field(None, max_length=10)
     employer_published_at: Optional[str] = Field(None, max_length=10)
+    # The employer's working link when the brought one is dead. Replaces ONLY
+    # this user's applications.job_url (never the shared jobs row); "" is 422.
+    apply_url: Optional[str] = Field(None, max_length=2048)
 
 
 class JobFactsOut(BaseModel):

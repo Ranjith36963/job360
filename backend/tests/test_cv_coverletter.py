@@ -298,3 +298,36 @@ async def test_tailor_requires_auth(authenticated_async_context):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anon:
             resp = await anon.get(f"/api/tailor/{job_id}")
     assert resp.status_code == 401
+
+
+def test_letter_without_letterhead_is_flagged():
+    """Letters print verbatim, so the letterhead + date must be in the text: warn
+    (never block) when the first lines carry no contact line or no date."""
+    from src.services.applications import cv_checks as cc
+
+    def codes(kind: str, text: str, profile=None) -> set[str]:
+        return {c["code"] for c in cc.check_text(kind, text, profile)}
+
+    bare = "Dear Hiring Manager,\n\nI am writing to apply for the ML Engineer role.\n\nYours sincerely,\nJane Doe"
+    full = (
+        "Jane Doe\n07700 900123 | jane@example.com | London\n15 October 2026\n\nAcme AI\n\n"
+        "Dear Hiring Manager,\n\nI am writing to apply.\n\nYours sincerely,\nJane Doe"
+    )
+    assert "letter_no_header" in codes("cover_letter", bare)
+    assert "letter_no_header" not in codes("cover_letter", full)
+    # Contact but no date, and date but no contact, are both flagged.
+    assert "letter_no_header" in codes("cover_letter", full.replace("15 October 2026\n", ""))
+    assert "letter_no_header" in codes("cover_letter", full.replace("07700 900123 | jane@example.com | London", "London"))
+    # CV kind never gets it.
+    assert "letter_no_header" not in codes("cv", bare)
+
+    # With a profile, the contact must be THIS user's email / phone.
+    from src.services.profile.models import UserInfo
+
+    class _P:
+        cv_data = None
+        user_info = UserInfo(contact={"email": "me@mine.example", "phone": "+44 7700 900123"})
+
+    assert "letter_no_header" not in codes("cover_letter", full, _P())
+    other = full.replace("jane@example.com", "x@y.example").replace("07700 900123", "01234 567890")
+    assert "letter_no_header" in codes("cover_letter", other, _P())
