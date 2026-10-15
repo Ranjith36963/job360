@@ -31,6 +31,7 @@ EXPECTED_TOOLS = {
     # §Tool contracts) — seven new tools, 8 -> 15 total.
     "get_application",
     "list_applications",
+    "mark_inbox_checked",
     "save_artifact",
     "save_fit",
     "record_event",

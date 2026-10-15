@@ -33,6 +33,12 @@ delete a lesson; if one stops being true, say so on its line and why.
   once.
 - The WIP limit is 2 open PRs. Extras get `wip:parked`. **Rule:** merge one at a
   time, then remove the label from the next PR.
+- 2026-10-15: a backend CI failure was unreadable: the log tail is Postgres
+  service-container noise and the full-log download host is blocked from the
+  cloud container, so the owner had to paste the failure. **Rule:** read the job
+  summary (failing tests are written there since the failed-tests-in-summary
+  PR). When a head shows few check runs, read the PR's `mergeable_state` first:
+  a CONFLICTING PR runs no CI.
 - CodeRabbit's free tier rate-limits after a few reviews an hour. **Rule:** never
   wait on it; the repo's own reviewer-bugs / reviewer-security / CI are the gate.
 
@@ -109,6 +115,10 @@ delete a lesson; if one stops being true, say so on its line and why.
   after the merge CONFLICTED and pushed a commit full of conflict markers
   (caught and fixed one commit later). **Rule:** never chain past a merge.
   Check its exit code (or `set -e`), resolve, run the tests, then commit.
+- 2026-10-15: pushes failed CI on the mypy ratchet and, after merging main, on
+  the recipe line cap and MCP tool count. **Rule:** run the ratchet
+  (`cd backend && python scripts/mypy_ratchet.py`) before every backend push, and
+  re-run tests/test_recipes.py + tests/test_outreach_people.py after merging main.
 
 ## Tooling
 

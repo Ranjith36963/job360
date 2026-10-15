@@ -118,7 +118,25 @@ jobs:
       - name: Run offline suite (full backend + automated Loop 2 E2E)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
-        run: python -m pytest -q -p no:randomly
+        run: |
+          set -o pipefail
+          python -m pytest -q -p no:randomly | tee /tmp/pytest.out
+      - name: Failed tests in job summary (offline suite)
+        if: failure() && needs.scope.outputs.scope == 'full'
+        run: |
+          {
+            echo "### Failed tests (offline suite)"
+            echo '```'
+            if [ ! -f /tmp/pytest.out ]; then
+              echo 'pytest did not run (an earlier step failed)'
+            elif grep -qE '^(FAILED|ERROR) ' /tmp/pytest.out; then
+              grep -E '^(FAILED|ERROR) ' /tmp/pytest.out | head -50
+              grep -E '[0-9]+ (failed|passed|error)' /tmp/pytest.out | tail -1
+            else
+              tail -30 /tmp/pytest.out
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   frontend-e2e:
     # The browser-side of Loop 2: runs the committed Playwright UI specs
@@ -206,7 +224,25 @@ jobs:
       - name: Automated Loop 2 (E2E lifecycle + log-fill assertions)
         if: needs.scope.outputs.scope == 'full'
         working-directory: backend
-        run: python -m pytest tests/test_e2e_lifecycle.py -v -p no:randomly
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_e2e_lifecycle.py -v -p no:randomly | tee /tmp/pytest.out
+      - name: Failed tests in job summary (e2e lifecycle)
+        if: failure() && needs.scope.outputs.scope == 'full'
+        run: |
+          {
+            echo "### Failed tests (e2e lifecycle)"
+            echo '```'
+            if [ ! -f /tmp/pytest.out ]; then
+              echo 'pytest did not run (an earlier step failed)'
+            elif grep -qE '^(FAILED|ERROR) ' /tmp/pytest.out; then
+              grep -E '^(FAILED|ERROR) ' /tmp/pytest.out | head -50
+              grep -E '[0-9]+ (failed|passed|error)' /tmp/pytest.out | tail -1
+            else
+              tail -30 /tmp/pytest.out
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ── Make this loop LOUD ───────────────────────────────────────────────────
   # Measured 2026-07-26: of 9 workflows, only doc-sync could ever reach a human —
