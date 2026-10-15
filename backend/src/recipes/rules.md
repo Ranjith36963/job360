@@ -382,6 +382,7 @@ from `get_proof_upload_link` (5 minutes, one use, png/jpeg/webp, 3 MB, 3 per
 application); never paste it anywhere else. Never invent proof: no page text
 and no email means "claimed, unverified". Only the user deletes a screenshot,
 on the website.
+A confirmation email for an application already applied: record_event `applied` with the email `source`; Job360 stores it as the submission confirmation (proof), never a second applied.
 
 ## Profile
 

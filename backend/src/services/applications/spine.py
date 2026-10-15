@@ -567,7 +567,7 @@ async def _event_by_source_message_id(
     ``(application_id, source_message_id)``, backed by the partial UNIQUE
     index `migrations/0041...up.sql`."""
     cur = await db._db.execute(
-        "SELECT id, event_type, occurred_at, recorded_at, recorded_by, scheduled_at "
+        "SELECT id, event_type, detail, occurred_at, recorded_at, recorded_by, scheduled_at "
         "FROM application_events WHERE application_id = ? AND source_message_id = ?",
         (application_id, message_id),
     )
@@ -600,7 +600,9 @@ async def _duplicate_event_result(
     cur = await db._db.execute("SELECT status, follow_up_on FROM applications WHERE id = ?", (application_id,))
     app_row = await cur.fetchone()
     warnings: list[str] = []
-    if requested_type is not None and requested_type != existing["event_type"]:
+    if requested_type is not None and requested_type != existing["event_type"] and not _is_confirmation_of(
+        requested_type, existing
+    ):
         # Same message id, DIFFERENT type: the dedupe stands (nothing written),
         # but say so — otherwise the caller believes its type was recorded.
         get_audit_logger().info(
@@ -659,6 +661,42 @@ async def _replay_follow_up_on(db: JobDatabase, application_id: int) -> Optional
     return None if value is FOLLOW_UP_UNSET else value
 
 
+# Weak spot #4 (2026-10-15) — a second `applied` on an already-applied
+# application (typically the confirmation email arriving after
+# record_application) is not a second status event: it is stored as a note
+# whose detail starts with this prefix, which proof.py already counts as email
+# proof (``LIKE 'submission confirmed%'``) whatever its source.
+SUBMISSION_CONFIRMED_PREFIX = "Submission confirmed"
+REPEAT_APPLIED_WARNING = (
+    "this application is already applied; recorded as a submission confirmation (proof), not a second applied event"
+)
+
+
+def _is_confirmation_of(requested_type: str, existing: dict[str, Any]) -> bool:
+    """A repeat ``applied`` whose message id was already stored as the
+    submission-confirmation note is the SAME fact, not a type mismatch."""
+    return (
+        requested_type == "applied"
+        and existing.get("event_type") == "note"
+        and str(existing.get("detail") or "").startswith(SUBMISSION_CONFIRMED_PREFIX)
+    )
+
+
+async def _has_surviving_applied(db: JobDatabase, application_id: int) -> bool:
+    """An ``applied`` event on this application that no correction superseded."""
+    cur = await db._db.execute(
+        "SELECT 1 FROM application_events e WHERE e.application_id = ? AND e.event_type = 'applied' "
+        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) LIMIT 1",
+        (application_id,),
+    )
+    return await cur.fetchone() is not None
+
+
+def _confirmation_detail(detail: str) -> str:
+    text = SUBMISSION_CONFIRMED_PREFIX + (f": {detail}" if detail else "")
+    return text[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS]
+
+
 NO_APPLIED_WARNING = (
     "no applied event recorded for this application — ask the user when they applied, then record_application"
 )
@@ -674,12 +712,7 @@ async def missing_applied_warnings(db: JobDatabase, application_id: int, event_t
     rank = progress_rank(mapped) if mapped else None
     if rank is None or rank <= PROGRESS_RANK["applied"]:
         return []
-    cur = await db._db.execute(
-        "SELECT 1 FROM application_events e WHERE e.application_id = ? AND e.event_type = 'applied' "
-        "AND NOT EXISTS (SELECT 1 FROM application_events c WHERE c.corrects_event_id = e.id) LIMIT 1",
-        (application_id,),
-    )
-    return [] if await cur.fetchone() is not None else [NO_APPLIED_WARNING]
+    return [] if await _has_surviving_applied(db, application_id) else [NO_APPLIED_WARNING]
 
 
 async def append_event(
@@ -696,6 +729,7 @@ async def append_event(
     source: Optional[dict[str, Any]] = None,
     scheduled_at: str = "",
     follow_up_on: Any = FOLLOW_UP_UNSET,
+    repeat_applied_as_confirmation: bool = False,
 ) -> dict[str, Any]:
     """R3/R4 — append one event, then recompute + write-through the status
     cache (and its legacy `stage` projection) in the SAME logical operation.
@@ -744,7 +778,17 @@ async def append_event(
     change. The UNIQUE index still backstops a race between two concurrent
     callers (``pg.IntegrityError``): re-read and return the existing row the
     same way ``save_artifact``'s version race does.
+
+    ``repeat_applied_as_confirmation`` (weak spot #4; the record_event door
+    only, never record_application's receipt path): an ``applied`` with no
+    ``corrects_event_id`` on an application that already has a surviving
+    ``applied`` is stored as a ``note`` whose detail starts
+    ``SUBMISSION_CONFIRMED_PREFIX`` (source, occurred_at and follow_up_on
+    kept) and answered with ``REPEAT_APPLIED_WARNING``. Checked AFTER the
+    source dedupe, so a re-read message id returns the existing row either way.
     """
+    requested_type = event_type
+    warnings: list[str] = []
     if corrects_event_id is not None:
         cur = await db._db.execute(
             "SELECT 1 FROM application_events WHERE id = ? AND application_id = ?",
@@ -760,6 +804,16 @@ async def append_event(
         existing = await _event_by_source_message_id(db, application_id, source["message_id"])
         if existing is not None:
             return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
+
+    if (
+        repeat_applied_as_confirmation
+        and event_type == "applied"
+        and corrects_event_id is None
+        and await _has_surviving_applied(db, application_id)
+    ):
+        event_type = "note"
+        detail = _confirmation_detail(detail)
+        warnings.append(REPEAT_APPLIED_WARNING)
 
     # The slot's value BEFORE this event — needed to decide the auto-clear
     # below, and to echo back an unchanged value at the end without a stale
@@ -819,7 +873,7 @@ async def append_event(
         if source is not None:
             existing = await _event_by_source_message_id(db, application_id, source["message_id"])
             if existing is not None:
-                return await _duplicate_event_result(db, application_id, recorded_by, existing, event_type)
+                return await _duplicate_event_result(db, application_id, recorded_by, existing, requested_type)
         raise
     event_id = cur.lastrowid
 
@@ -873,6 +927,7 @@ async def append_event(
         "already_existed": False,
         "scheduled_at": scheduled_at or None,
         "follow_up_on": final_follow_up_on,
+        **({"warnings": warnings} if warnings else {}),
     }
 
 
