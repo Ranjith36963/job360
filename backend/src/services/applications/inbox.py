@@ -9,7 +9,7 @@ only keeps what makes the next read correct:
   look-alike-safe host match as job_checks (pattern from MadsLorentzen/ai-job-search
   ``/gmail-sync``, which ORs ATS sender domains into its Gmail query).
 * ``inbox_checked_at`` - the time up to which this application's mail was read: a
-  cache SLOT on ``applications`` (migration 0061), never an event, so a check every
+  cache SLOT on ``applications`` (migration 0062), never an event, so a check every
   few hours cannot flood the timeline or make a quiet job look active.
 """
 

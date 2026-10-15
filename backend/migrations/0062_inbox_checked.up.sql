@@ -1,4 +1,4 @@
--- 0061_inbox_checked: when the user's assistant last read Gmail for this
+-- 0062_inbox_checked: when the user's assistant last read Gmail for this
 -- application (owner decision, 2026-10-15 - the Gmail check slice).
 --
 -- WHY. The daily recipe said "read Gmail since your last run", but nothing
