@@ -467,6 +467,9 @@ several edits in one call. Each edit may carry `"source": "user_said"` (the user
 told you) or `"agent_inferred"` (you worked it out); omitted = agent_inferred.
 ALWAYS pass `"source": "user_said"` when the value is the user's own answer;
 `agent_inferred` only for what you worked out yourself.
+SENSITIVE VALUES (equality, salary, visa / right-to-work status, current salary): ask "may I remember this for future
+applications?"; only on a yes add `"remember": true` to that edit, else it is NOT saved (the reply lists it in
+`not_saved`; use it on this form only). Permission to fill is not permission to remember.
 get_profile lists your inferred paths in `unconfirmed`. A kit answer with state
 'inferred' was worked out by an assistant — confirm it with the user once, then
 save it again with source user_said. Never mark your own guess user_said. To drop a wrong skill from every surface, add it to

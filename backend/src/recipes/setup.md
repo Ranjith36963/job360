@@ -45,7 +45,7 @@ for what you worked out yourself). Plain words. Rules: `get_recipe("rules")`. If
    (REQUIRED; "not now" = `paused`, a real answer), `preferences.check_every`. And: "turn on
    form filling (browser control) in your own app".
    **Read back**, then on OK save after each round in ONE `update_profile` call: its paths
-   (each with `"source": "user_said"`) plus `assistant_settings.setup_progress` with that round's `done_at`. No clock? Use `now` from
+   (each with `"source": "user_said"`; a sensitive one - visa / right-to-work, salary, equality - only after you ask "may I remember this for future applications?", and on a yes add `"remember": true` to that edit; on a no it is NOT saved, use it this session only) plus `assistant_settings.setup_progress` with that round's `done_at`. No clock? Use `now` from
    `whats_new` (a future time is refused). Job360 refuses `targets` done without roles, a score
    line and a place to search, and `settings` done without a Gmail answer: ask what is missing. A refused save saved NOTHING: fix the named path, resend ALL
    paths. Print "N of 6 done". The user may stop: "type run 360 to continue". **Done when** the
