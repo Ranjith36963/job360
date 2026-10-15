@@ -336,6 +336,6 @@ def test_forms_recipe_is_listed_served_and_under_the_cap():
                   "aria-invalid", "form_filled", "form_swept", "check_submit", "never solve a captcha",
                   "never type a password", "job-boards.greenhouse.io/embed/job_app", "jazzhr", "rippling", "lever",
                   "ashby", "workable", "wellfound", "account_needed", "willingness", "privacy-safe",
-                  "lower bound inclusive"):
+                  "lower bound inclusive", "safety_block", "send all", "do not click again"):
         assert words in text, words
     assert 'get_recipe("forms")' in load_recipe("apply").text

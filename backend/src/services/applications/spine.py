@@ -1305,6 +1305,18 @@ async def record_receipt(
             f"channel '{channel_given}' is not a known channel; stored as 'other' — allowed: "
             + ", ".join(settings.APPLICATION_RECEIPT_CHANNELS)
         )
+    # A label or prose is not an application ID: keep it in the note, never refuse the receipt.
+    # Decided BEFORE the INSERT (receipts are append-only, M3).
+    from src.services.applications.proof import looks_like_confirmation_id  # noqa: PLC0415 - proof imports spine
+
+    if confirmation.strip() and not looks_like_confirmation_id(confirmation):
+        extra = f"Confirmation text (not an ID): {confirmation.strip()[:200]}"
+        note = ((note + "\n") if note else "") + extra
+        note = note[:2_000]
+        confirmation = ""
+        warnings.append(
+            "confirmation does not look like an application ID or portal reference; kept in the note instead"
+        )
     app_row = await get_owned_application(db, user_id, application_id)
     if app_row is None:
         raise SpineError(404, "application not found")
