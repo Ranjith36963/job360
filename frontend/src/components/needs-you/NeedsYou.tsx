@@ -10,6 +10,7 @@ import { ReadyToSend } from "./ReadyToSend";
 import { SettingRequestCard } from "./SettingRequestCard";
 import type { WaitingRequest } from "./SettingRequestCard";
 import { settingScore } from "@/lib/assistant-tab";
+import { whoLabel } from "@/lib/event-labels";
 import { relativeTime } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -91,6 +92,11 @@ export function AskCard({
 
       {mode === "answered" && !editing && (
         <div className="flex flex-col gap-1 rounded-lg bg-muted/30 p-3">
+          {ask.relayed_from_chat && ask.user_words ? (
+            <p className="whitespace-pre-wrap text-sm" data-testid="ask-relayed-from-chat">
+              You said (via {whoLabel(ask.answered_by ?? "").name}): {ask.user_words}
+            </p>
+          ) : null}
           <p className="whitespace-pre-wrap text-sm">{ask.answer}</p>
           <p className="text-xs text-muted-foreground" data-testid="ask-provenance">
             {ask.answered_by_user

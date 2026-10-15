@@ -1664,13 +1664,15 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
-    async def answer_ask(ask_id: int, answer: str) -> dict[str, Any]:
+    async def answer_ask(ask_id: int, answer: str, user_words: str = "") -> dict[str, Any]:
         """Record the answer the user gave you in chat to an ask. Only record an
         answer the user actually gave you in chat, in their words; never invent
-        or infer one. Calling it again changes the answer (the earlier answers
-        stay in the application's history)."""
+        or infer one. Pass `user_words`: the user's exact words from chat (at
+        most 2000 chars). Then the answer shows as theirs (via you). Calling it
+        again changes the answer (the earlier answers stay in the application's
+        history)."""
         try:
-            body = asks_route.AnswerAskRequest(answer=answer)
+            body = asks_route.AnswerAskRequest(answer=answer, user_words=user_words)
         except ValidationError as exc:
             raise _validation_error(exc) from None
         try:

@@ -33,6 +33,9 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 
 STATUS_FILTERS = ("open", "answered", "all")
 
+# The user's exact chat words relayed with an answer (answer_ask `user_words`).
+ASKS_USER_WORDS_MAX_CHARS = 2000
+
 # Same banned set spine.validate_source uses (Cc/Zl/Zp + bidi overrides),
 # except a plain newline and tab are kept: a question or answer is prose and
 # may span lines.
@@ -57,6 +60,8 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         status = "withdrawn"
     else:
         status = "answered" if answered_at else "open"
+    user_words = row.get("user_words") or ""
+    relayed = bool(answered_at) and row.get("answered_by") != "web" and bool(user_words)
     return {
         "id": row["id"],
         "application_id": row.get("application_id"),
@@ -72,6 +77,14 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         # True when the USER typed it on Job360 ("web"); False when the
         # assistant recorded the user's chat answer (token:/agent: actor).
         "answered_by_user": row.get("answered_by") == "web",
+        # The user's exact chat words, when the assistant relayed them.
+        "user_words": user_words,
+        # True when an assistant (not the web) recorded an answer AND passed the
+        # user's own words. answered_by_user keeps its strict meaning.
+        "relayed_from_chat": relayed,
+        # Whose decision it reads as: "you" for a web answer or a relayed chat
+        # answer; "assistant" when the assistant answered with no user words.
+        "said_by": "you" if (row.get("answered_by") == "web" or relayed) else "assistant",
         "withdrawn_at": withdrawn_at,
         "status": status,
     }
@@ -79,7 +92,7 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
 
 _SELECT = (
     "SELECT k.id, k.application_id, a.job_title, a.job_company, k.question, k.context, k.asked_by, "
-    "k.asked_at, k.answer, k.answered_by, k.answered_at, k.withdrawn_at "
+    "k.asked_at, k.answer, k.answered_by, k.answered_at, k.withdrawn_at, k.user_words "
     "FROM application_asks k LEFT JOIN applications a ON a.id = k.application_id AND a.user_id = k.user_id "
 )
 
@@ -186,7 +199,7 @@ async def create_ask(
 
 
 async def answer_ask(
-    db: JobDatabase, user_id: str, ask_id: int, answer: str, answered_by: str
+    db: JobDatabase, user_id: str, ask_id: int, answer: str, answered_by: str, user_words: str = ""
 ) -> dict[str, Any]:
     """Record the user's answer. May be called again to CHANGE it: the row
     holds the latest answer and each answer appends an ``answered`` event
@@ -202,12 +215,15 @@ async def answer_ask(
         raise SpineError(422, "answer must not be empty")
     if len(clean_a) > settings.ASKS_ANSWER_MAX_CHARS:
         raise SpineError(422, f"answer exceeds ASKS_ANSWER_MAX_CHARS ({settings.ASKS_ANSWER_MAX_CHARS} chars)")
+    clean_w = clean_text(user_words)
+    if len(clean_w) > ASKS_USER_WORDS_MAX_CHARS:
+        raise SpineError(422, f"user_words exceeds {ASKS_USER_WORDS_MAX_CHARS} chars")
     now = datetime.now(timezone.utc).isoformat()
     async with db._db.transaction():
         cur = await db._db.execute(
-            "UPDATE application_asks SET answer = ?, answered_by = ?, answered_at = ? "
+            "UPDATE application_asks SET answer = ?, answered_by = ?, answered_at = ?, user_words = ? "
             "WHERE id = ? AND user_id = ? AND withdrawn_at IS NULL",
-            (clean_a, answered_by, now, ask_id, user_id),
+            (clean_a, answered_by, now, clean_w, ask_id, user_id),
         )
         if not cur.rowcount:
             raise SpineError(404, "ask not found")
@@ -215,7 +231,7 @@ async def answer_ask(
             await append_event(
                 db, user_id=user_id, application_id=int(existing["application_id"]), event_type="answered",
                 detail=clean_a[: settings.APPLICATION_EVENT_DETAIL_MAX_CHARS],
-                payload={"ask_id": ask_id, "answer": clean_a},
+                payload={"ask_id": ask_id, "answer": clean_a, **({"user_words": clean_w} if clean_w else {})},
                 occurred_at=now, recorded_by=answered_by,
             )
     # ``ask_id`` is the ``/asks/{ask_id}/…`` path parameter, so CodeQL's
