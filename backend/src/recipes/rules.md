@@ -69,7 +69,7 @@ held_by_other_session (another assistant session read this application's kit
 recently and did not record `hold_released`: `ask`), unknown_site
 (`form_url` is not one plain http(s) address - no user@, % or backslash before
 the path, ASCII host), form_host_mismatch (`form_url` is not the site of your
-latest `form_filled`), email_not_verified (the user has not confirmed their
+latest `form_filled`), form_check_missing (`stop`: a newer application has no `form_checked`: call check_form, record it), email_not_verified (the user has not confirmed their
 email), ask_always_site, job_override_confirm, submit_mode_confirm, cv_not_seen (auto
 mode but the user has not seen the latest CV), practice_run, user_approved
 (the user said yes to this CV: `submit`), auto_when_sure, blocked (you
@@ -363,7 +363,7 @@ they said OK in chat; `submit_approved` {artifact_id, sha256, where:"chat"} -
 ONLY when the user typed yes to submitting THIS application; `submit_declined`
 {where:"chat"} - the user said don't send; `autofill_set` {mode:"deny"} - you
 may only send deny; `form_filled` {form_url, fields_count, fields_skipped?, answers?} - after you filled
-the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `form_swept` {fields_checked, fixed, notes?} - after you re-read every field and fixed what was wrong (check_submit stops until it is newer than the fill); `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
+the form; answers = [{question, answer, source: memory|profile|approved|written|guessed, key?}]; `form_swept` {fields_checked, fixed, notes?, unreadable?: [field names you could not read back]} - after you re-read every field and fixed what was wrong (check_submit stops until it is newer than the fill, while `unreadable` is not empty, or if fields_checked < the latest `form_checked` questions_count); `form_checked` {questions_count, answered, missing, answers?: [{question, source, key?, needs_confirmation?}]} - after check_form and the user's reply, counts and wording only, never values; `hold_released` {reason: done|blocked|stopped|failed}; `site_account` {host}
 - the user has an account there; `account_needed` {host} - you hit a sign-up
 wall (never a password anywhere). A payload that is wrong is refused ONCE (422) with every
 problem listed and one complete valid example for that event; fix them all and

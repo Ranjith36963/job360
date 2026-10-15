@@ -42,6 +42,25 @@ from migrations import runner  # noqa: E402
 from src.models import Job  # noqa: E402
 
 
+@pytest.fixture
+def form_check_gate():
+    """Opt-in marker: a test that requests this keeps the ``form_check_missing`` gate ON."""
+
+
+@pytest.fixture(autouse=True)
+def _form_check_cutoff_off(request, monkeypatch):
+    """Weak spot #1b (c): applications created today fall under the ``form_checked`` rule
+    (``kit.FORM_CHECK_REQUIRED_FROM``). Tests about other submit rules never call check_form, so by
+    default push the cut-off far into the future; a test asks for the real gate with ``form_check_gate``."""
+    if "form_check_gate" in request.fixturenames:
+        return
+    from datetime import datetime, timezone
+
+    from src.services.applications import kit as _kit
+
+    monkeypatch.setattr(_kit, "FORM_CHECK_REQUIRED_FROM", datetime(2999, 1, 1, tzinfo=timezone.utc))
+
+
 @pytest.fixture(autouse=True)
 def _reset_auth_rate_limit():
     """Clear the auth rate-limiter's module-global buckets around every test.

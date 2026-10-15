@@ -75,6 +75,7 @@ export const EVENT_LABEL: Record<string, string> = {
   duplicate_cleared: "Possible duplicate cleared",
   form_filled: "Form filled",
   form_swept: "Form double-checked before sending",
+  form_checked: "Form questions checked against your saved answers",
   hold_released: "Hold on sending lifted",
   site_account: "Account on the employer site noted",
   account_needed: "Employer site needs an account",

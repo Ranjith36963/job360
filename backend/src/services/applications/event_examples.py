@@ -23,6 +23,12 @@ EVENT_EXAMPLES: dict[str, dict[str, Any]] = {
         ],
     },
     "form_swept": {"fields_checked": 12, "fixed": 1, "notes": "fixed the phone number format"},
+    "form_checked": {
+        "questions_count": 12, "answered": 11, "missing": 1,
+        "answers": [
+            {"question": "Salary expectation?", "key": "salary.GB", "source": "memory", "needs_confirmation": True},
+        ],
+    },
     "cv_seen": {"artifact_id": 7, "sha256": "<sha256 from get_application_kit>", "where": "chat"},
     "submit_approved": {"artifact_id": 7, "sha256": "<sha256 from get_application_kit>", "where": "chat"},
     "submit_declined": {"where": "chat"},

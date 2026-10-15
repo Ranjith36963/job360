@@ -1198,13 +1198,13 @@ def build_server(version: str = "") -> MCPServer:
         """Append one event to an application's history (append-only).
 
         `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; the same
-        message_id returns already_existed=true, writes nothing (re-reading an inbox is safe).
+        message_id returns already_existed=true, writes nothing.
 
         Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status, notes
         never; the furthest stage wins (only corrects_event_id moves back). A repeat `applied` (its
-        confirmation email + `source`) becomes the submission confirmation (proof), not a 2nd one. Wrong
-        applied date: `applied` + occurred_at + corrects_event_id=<old id>.
-        `warnings` = fixes. `occurred_at` may be past. `scheduled_at` (ISO-8601 with timezone) only on
+        confirmation email + `source`) becomes the submission proof, not a 2nd one. Wrong
+        date: `applied` + occurred_at + corrects_event_id=<old id>.
+        `warnings` = fixes. `occurred_at` may be past. `scheduled_at` (ISO-8601 + timezone) only on
         interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase; "" clears.
 
         Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`, or
@@ -1212,11 +1212,12 @@ def build_server(version: str = "") -> MCPServer:
 
         Kit events (only these keys, else 422):
         form_filled {form_url, fields_count, fields_skipped?: [blanks],
-        answers?: [{question, answer, source, key?}]}, source = memory | profile |
-        approved | written | guessed (key = the kit key, for memory/profile/approved);
-        cv_seen and submit_approved {artifact_id, sha256, where} ONLY after the user said so in chat (where = chat);
+        answers?: [{question, answer, source, key?}]}, source = memory|profile|
+        approved|written|guessed (key = kit key);
+        form_checked {questions_count, answered, missing, answers?} (no values);
+        cv_seen and submit_approved {artifact_id, sha256, where} ONLY after the user said so (where = chat);
         submit_declined {where};
-        form_swept {fields_checked, fixed, notes} (after a full re-read);
+        form_swept {fields_checked, fixed, notes, unreadable} (after a full re-read; last two optional);
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host}; account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.
         Stuck: blocked {reason: captcha|bot_check|login_needed|site_error|upload_failed|unknown_question|safety_block|
@@ -1586,9 +1587,10 @@ def build_server(version: str = "") -> MCPServer:
         the user yes for this one application; `stop` - do not submit. `reason`
         is a short code and `detail` one plain sentence you can show the user. Reasons:
         paused, already_applied, user_declined (the user said don't send),
-        daily_cap_reached, form_not_recorded (`stop`: no `form_filled` recorded yet -
-        fill the form, record it, call again), form_not_swept (`stop`: no `form_swept`
-        after the latest `form_filled` - re-read every field, fix, record it),
+        daily_cap_reached, form_not_recorded (`stop`: no `form_filled` yet - fill, record it),
+        form_not_swept (`stop`: no `form_swept` after the latest `form_filled` - re-read every field, fix, record it),
+        form_count_mismatch, unreadable_fields (`stop`: re-read, sweep again),
+        form_check_missing (`stop`: call check_form),
         duplicate_job (same job already applied to: `stop`
         in auto mode, else `ask`), held_by_other_session (another assistant
         session read this kit recently and did not record `hold_released`),
@@ -1730,14 +1732,18 @@ def build_server(version: str = "") -> MCPServer:
         """Call right after get_application_kit and BEFORE typing into any form.
         Read the LIVE form first and list EVERY question, including hidden or
         below-the-fold sections and optional ones (`required` false). `questions`
-        = [{question, required (default true), key}]: `key` is the kit key you
+        = [{question, required (default true), key, field_type (text|textarea|select|radio|checkbox|number|
+        file), options, limit, limit_unit (chars|words)}]: `key` is the kit key you
         will answer with (contact.email, logistics.notice_period, salary.GB ...)
         or the saved approved_text question; leave it out and Job360 matches the
         exact wording (case and punctuation ignored) against approved answers.
-        Job360 never reads the form or judges a question. You get `answered`
-        (question, key, value, source, matched_by; confirmed false = inferred,
-        confirm with the user), `missing` (question, required, why) and `counts`.
-        Anything in `missing`: ask the user ONCE, in one message; never guess.
+        Pass options and limit only as the live control shows them. Job360 never
+        reads the form or judges a question. You get `answered` (question, key,
+        value, source, matched_by; `over_limit`; confirmed false = inferred),
+        `missing` (question, required, why; a saved value not among `options` is
+        missing), `counts`, `needs_confirmation` (sensitive: confirm each with the
+        user) and `knockouts` (years, degree, visa, salary: `stop_for_user`, tell
+        the user BEFORE drafting). Anything in `missing`: ask ONCE, in one message; never guess.
         Read-only: it writes nothing, 404 if the application is not yours."""
         try:
             body = models.FormCheckRequest.model_validate({"questions": questions, "form_url": form_url})

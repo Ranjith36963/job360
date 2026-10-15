@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class HealthResponse(BaseModel):
@@ -487,6 +487,18 @@ class FormQuestion(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     required: bool = True
     key: Optional[str] = Field(None, max_length=300)
+    # The control's own facts, read off the live form by the assistant (never guessed here).
+    field_type: Literal["text", "textarea", "select", "radio", "checkbox", "number", "file", "unknown"] = "unknown"
+    options: list[str] = Field(default_factory=list, max_length=50)
+    limit: Optional[int] = Field(None, ge=1, le=100000)
+    limit_unit: Literal["chars", "words"] = "chars"
+
+    @field_validator("options")
+    @classmethod
+    def _options_short(cls, value: list[str]) -> list[str]:
+        if any(len(o) > 200 for o in value):
+            raise ValueError("each option must be at most 200 characters")
+        return value
 
 
 class FormCheckRequest(BaseModel):
@@ -506,12 +518,23 @@ class FormAnsweredOut(BaseModel):
     source: str
     confirmed: Optional[bool] = None
     matched_by: Literal["key", "wording"]
+    field_type: Optional[str] = None
+    over_limit: Optional[bool] = None
+    needs_confirmation: Optional[bool] = None
 
 
 class FormMissingOut(BaseModel):
     question: str
     required: bool
     why: str
+    field_type: Optional[str] = None
+    needs_confirmation: Optional[bool] = None
+
+
+class FormKnockoutOut(BaseModel):
+    question: str
+    key: Optional[str] = None
+    value: Any = None
 
 
 class FormCheckCountsOut(BaseModel):
@@ -530,6 +553,9 @@ class FormCheckOut(BaseModel):
     answered: list[FormAnsweredOut]
     missing: list[FormMissingOut]
     counts: FormCheckCountsOut
+    needs_confirmation: list[str] = Field(default_factory=list)
+    knockouts: list[FormKnockoutOut] = Field(default_factory=list)
+    stop_for_user: Optional[bool] = None
     next: str
 
 
