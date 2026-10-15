@@ -6,7 +6,7 @@ conversation. The hard lines in the server instructions win over everything
 here. Sections: Settings and the submit gate, Apply kit, Gmail and the daily
 check, Outreach, Events, Profile, Job facts.
 
-If a Job360 tool ignores or refuses an argument you expected, call doctor: a parameter it lists that your tool list lacks means your connector is stale; tell the user to reconnect Job360.
+If a Job360 tool ignores or refuses an argument you expected, call doctor: a parameter it lists that your tool list lacks means your connector is stale; tell the user to reconnect Job360. Every get_recipe result carries `tools_version` and `tools_rev`: if either differs from the one you saw last, reconnect too.
 
 ## Settings and the submit gate
 

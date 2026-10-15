@@ -41,6 +41,9 @@ class Recipe(BaseModel):
     name: str
     title: str
     text: str
+    # Stamped per request (mcp_server.tools_stamp), never cached with the file text.
+    tools_version: str = ""
+    tools_rev: int = 0
 
 
 def _log_read(user: CurrentUser, recipe: str, result: str) -> None:
@@ -79,4 +82,6 @@ async def get_recipe(name: str, user: CurrentUser = Depends(require_user)) -> Re
         _log_read(user, name, "not_found")
         raise HTTPException(status_code=404, detail=f"No recipe {name!r}. Recipes: {', '.join(RECIPE_NAMES)}")
     _log_read(user, name, "ok")
-    return load_recipe(name)
+    from src.api.mcp_server import tools_stamp  # noqa: PLC0415 - lazy, rule #16
+
+    return load_recipe(name).model_copy(update=tools_stamp())

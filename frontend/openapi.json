@@ -3269,6 +3269,11 @@
             "title": "Tools",
             "type": "object"
           },
+          "tools_rev": {
+            "default": 0,
+            "title": "Tools Rev",
+            "type": "integer"
+          },
           "tools_stale": {
             "anyOf": [
               {
@@ -7723,6 +7728,16 @@
           },
           "title": {
             "title": "Title",
+            "type": "string"
+          },
+          "tools_rev": {
+            "default": 0,
+            "title": "Tools Rev",
+            "type": "integer"
+          },
+          "tools_version": {
+            "default": "",
+            "title": "Tools Version",
             "type": "string"
           }
         },
@@ -15632,6 +15647,24 @@
               "maxLength": 64,
               "title": "Client Tools Version",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "client_tools_rev",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Client Tools Rev"
             }
           },
           {
