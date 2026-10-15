@@ -2075,7 +2075,11 @@ async def check_application_form(
     key it matches the normalized wording of the question against the user's approved
     answers. No fuzzy matching, no NLP. ``answered`` carries the value and its source
     (``confirmed: false`` = inferred, confirm with the user); ``missing`` is what to ask
-    the user, once. Read-only: no event is written. 404 for an application that is not the
+    the user, once. Each question may also carry the live control's ``field_type``, ``options``,
+    ``limit`` and ``limit_unit``: a saved value outside ``options`` is a gap, one over ``limit``
+    is flagged ``over_limit`` (never cut), sensitive questions are flagged ``needs_confirmation``
+    and knock-out questions are listed in ``knockouts`` with ``stop_for_user``. Read-only: no event is
+    written. 404 for an application that is not the
     caller's. ``Cache-Control: no-store``."""
     response.headers["Cache-Control"] = "no-store"
     try:

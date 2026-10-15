@@ -461,6 +461,11 @@ class SubmitFacts:
     # ``form_swept`` - a ``form_swept`` event is newer than the latest ``form_filled``
     # (the assistant re-read every field right before submit; 2026-10-13).
     form_swept: bool = False
+    # Weak spot #1b: the newest ``form_swept`` read fewer fields than the newest ``form_checked``
+    # listed questions (``form_count_mismatch``), or named fields it could not read back
+    # (``unreadable_fields``). Both default False: an application with no ``form_checked`` never stops here.
+    form_count_short: bool = False
+    unreadable_fields: bool = False
     # The latest saved fit score for this application (``None`` = no fit yet).
     # Compared with the user's score line by :func:`line_side` (rule 5c).
     fit_score: Optional[int] = None
@@ -625,6 +630,8 @@ def may_submit(
         yes does NOT clear it: the record of what was typed is needed either way)
     4c. no ``form_swept`` newer than the latest ``form_filled`` -> stop
         ``form_not_swept`` (the pre-submit re-read; a yes does not clear it)
+    4c2. the newest ``form_swept`` lists ``unreadable`` fields -> stop ``unreadable_fields``; it read
+        fewer fields than the newest ``form_checked`` listed questions -> stop ``form_count_mismatch``
     4d. the account's email is not confirmed -> ask ``email_not_verified`` (a
         yes does NOT clear it; after the stops so a stop is never softened to an ask)
     5. same job already applied to -> ``duplicate_job``: STOP when the mode is
@@ -677,6 +684,18 @@ def may_submit(
             "stop", "form_not_swept",
             "Re-read every field on the page right before submit, fix what is wrong, "
             "then record_event form_swept and call check_submit again.",
+        )
+    if application.unreadable_fields:
+        return SubmitDecision(
+            "stop", "unreadable_fields",
+            "Some fields could not be read back after typing (form_swept unreadable). Re-read them, "
+            "ask the user about any you cannot, record a new form_swept and call check_submit again.",
+        )
+    if application.form_count_short:
+        return SubmitDecision(
+            "stop", "form_count_mismatch",
+            "You swept fewer fields than check_form listed questions. Re-read every field, "
+            "record a new form_swept and call check_submit again.",
         )
     if not application.email_verified:
         return SubmitDecision(

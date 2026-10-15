@@ -51,7 +51,7 @@ if TYPE_CHECKING:  # pragma: no cover - type-only
 SERVER_ONLY_EVENTS = frozenset({"kit_read"})
 KIT_EVENT_TYPES = frozenset({
     "kit_read", "cv_seen", "submit_approved", "submit_declined", "autofill_set", "duplicate_cleared",
-    "form_filled", "form_swept", "hold_released", "site_account", "account_needed",
+    "form_filled", "form_swept", "hold_released", "site_account", "account_needed", "form_checked",
 })
 HOLD_RELEASE_REASONS = frozenset({"done", "blocked", "stopped", "failed"})
 SEEN_WHERE = frozenset({"web", "chat"})
@@ -358,6 +358,24 @@ async def _swept_after_fill(db: JobDatabase, user_id: str, application_id: int) 
     return bool(fills and sweeps and max(sweeps) > max(fills))
 
 
+async def _sweep_shortfalls(db: JobDatabase, user_id: str, application_id: int) -> tuple[bool, bool]:
+    """``(count_short, unreadable)`` from the NEWEST ``form_checked`` / ``form_swept``.
+    ``count_short``: the sweep read fewer fields than the form check listed questions.
+    NOT IN REFERENCE (career-ops apply.md:315-321 asserts each required control holds a value, it never
+    compares an earlier count). No ``form_checked`` on record = no shortfall (older applications)."""
+    events = await _events(db, user_id, application_id, ("form_checked", "form_swept"))
+    checked = next((e for e in events if e["event_type"] == "form_checked"), None)
+    swept = next((e for e in events if e["event_type"] == "form_swept"), None)
+    if swept is None:
+        return False, False
+    unreadable = bool(swept["payload"].get("unreadable"))
+    if checked is None:
+        return False, unreadable
+    want, got = checked["payload"].get("questions_count"), swept["payload"].get("fields_checked")
+    short = isinstance(want, int) and isinstance(got, int) and got < want
+    return short, unreadable
+
+
 async def _newest_form_host(db: JobDatabase, user_id: str, application_id: int) -> Optional[str]:
     """The host stored on the NEWEST ``form_filled`` (``None`` when there is none)."""
     fills = await _events(db, user_id, application_id, ("form_filled",))
@@ -382,6 +400,7 @@ async def gate_facts(
     has_receipt = await cur.fetchone() is not None
     now = datetime.now(timezone.utc)
     state = await controls_state(db, user_id, app_row, now)
+    shortfalls = await _sweep_shortfalls(db, user_id, application_id)
     cv = state["cv"]
     approved = state["cv"]["approved"] is not None if cv else await _approved_without_cv(db, user_id, application_id)
     dup = state["duplicate"]
@@ -396,6 +415,8 @@ async def gate_facts(
         blocked=state["blocked"] is not None,
         form_filled=await _filled_with_latest_cv(db, user_id, application_id),
         form_swept=await _swept_after_fill(db, user_id, application_id),
+        form_count_short=shortfalls[0],
+        unreadable_fields=shortfalls[1],
         # The latest saved fit (the slot save_fit overwrites); None = no fit yet.
         fit_score=int(app_row["fit_score"]) if app_row.get("fit_score") is not None else None,
         form_host=await _newest_form_host(db, user_id, application_id),
@@ -436,7 +457,8 @@ async def submit_verdict(
         # The preview imagines the form filled ON this address, so it never
         # shows a form_host_mismatch for a form that is not filled yet.
         facts = replace(
-            facts, form_filled=True, form_swept=True, form_host=settings_rules.screen_form_url(form_url),
+            facts, form_filled=True, form_swept=True, form_count_short=False, unreadable_fields=False,
+            form_host=settings_rules.screen_form_url(form_url),
         )
     return settings_rules.may_submit(cfg, facts, form_url, counts, now=now)
 
@@ -471,7 +493,7 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "submit_approved": frozenset({"artifact_id", "sha256", "where"}),
     "submit_declined": frozenset({"where"}),
     "autofill_set": frozenset({"mode"}),
-    "form_swept": frozenset({"fields_checked", "fixed", "notes"}),
+    "form_swept": frozenset({"fields_checked", "fixed", "notes", "unreadable"}),
     "hold_released": frozenset({"reason"}),
     "site_account": frozenset({"host"}),
     "account_needed": frozenset({"host"}),
@@ -480,6 +502,11 @@ FORM_FILLED_REQUIRED = frozenset({"form_url", "fields_count"})
 FORM_FILLED_OPTIONAL = frozenset({"answers"})
 FORM_SWEPT_REQUIRED = frozenset({"fields_checked", "fixed"})
 FORM_SWEPT_NOTES_MAX = 300
+FORM_SWEPT_UNREADABLE_MAX = 50
+# ``form_checked`` (weak spot #1b): what check_form found, COUNTS and wording only - never an answer value.
+FORM_CHECKED_REQUIRED = frozenset({"questions_count", "answered", "missing"})
+FORM_CHECKED_OPTIONAL = frozenset({"answers"})
+FORM_CHECKED_ANSWER_KEYS = frozenset({"question", "key", "source", "needs_confirmation"})
 ANSWER_SOURCES = ("memory", "profile", "approved", "written", "guessed")
 ANSWER_QUESTION_MAX = 300
 ANSWER_KEY_MAX = 120
@@ -567,6 +594,54 @@ def _keys_problem(
     return out
 
 
+def _count_problem(name: str, value: Any, problems: list[str]) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= settings.KIT_FORM_FIELDS_MAX:
+        problems.append(f"{name} must be a whole number from 0 to {settings.KIT_FORM_FIELDS_MAX}")
+
+
+def _clean_text(value: Any, name: str, limit: int, problems: list[str]) -> str:
+    if not isinstance(value, str):
+        problems.append(f"{name} must be text")
+        return ""
+    text = " ".join(spine._strip_control_chars(value).split())
+    if len(text) > limit:
+        problems.append(f"{name} must be at most {limit} characters")
+    return text
+
+
+def _checked_answers(raw: Any, problems: list[str]) -> list[dict[str, Any]]:
+    """``form_checked.answers``: closed ``{question, key?, source, needs_confirmation?}`` rows. A key named
+    ``value`` or ``answer`` is refused as unknown, so a saved answer can never be copied into this event."""
+    if not isinstance(raw, list) or len(raw) > settings.KIT_FORM_FIELDS_MAX:
+        problems.append(f"answers must be a list of at most {settings.KIT_FORM_FIELDS_MAX} items")
+        return []
+    out: list[dict[str, Any]] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict) or not {"question", "source"} <= set(item) <= FORM_CHECKED_ANSWER_KEYS:
+            problems.append(f"answers[{i}] needs keys question, source (and key, needs_confirmation) and nothing else")
+            continue
+        row: dict[str, Any] = {
+            "question": _clean_text(item["question"], f"answers[{i}].question", 500, problems),
+            "source": _clean_text(item["source"], f"answers[{i}].source", 40, problems),
+        }
+        if item.get("key") is not None:
+            row["key"] = _clean_text(item["key"], f"answers[{i}].key", 300, problems)
+        if "needs_confirmation" in item:
+            if not isinstance(item["needs_confirmation"], bool):
+                problems.append(f"answers[{i}].needs_confirmation must be true or false")
+            else:
+                row["needs_confirmation"] = item["needs_confirmation"]
+        out.append(row)
+    return out
+
+
+def _unreadable_list(raw: Any, problems: list[str]) -> list[str]:
+    if not isinstance(raw, list) or len(raw) > FORM_SWEPT_UNREADABLE_MAX:
+        problems.append(f"unreadable must be a list of at most {FORM_SWEPT_UNREADABLE_MAX} field names")
+        return []
+    return [t for t in (_clean_text(x, "unreadable item", 200, problems) for x in raw) if t]
+
+
 def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
     """EVERY problem in a kit event's payload that needs no database and no
     caller identity (shape, types, ranges, closed sets) - the same rules the
@@ -627,6 +702,15 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
                 problems.append("notes must be text")
             elif len(" ".join(spine._strip_control_chars(notes).split())) > FORM_SWEPT_NOTES_MAX:
                 problems.append(f"notes must be at most {FORM_SWEPT_NOTES_MAX} characters")
+        if "unreadable" in payload:
+            _unreadable_list(payload["unreadable"], problems)
+    elif event_type == "form_checked":
+        problems += _keys_problem(payload, FORM_CHECKED_REQUIRED, FORM_CHECKED_REQUIRED | FORM_CHECKED_OPTIONAL)
+        for name in ("questions_count", "answered", "missing"):
+            if name in payload:
+                _count_problem(name, payload[name], problems)
+        if "answers" in payload:
+            _checked_answers(payload["answers"], problems)
     return problems
 
 
@@ -754,7 +838,24 @@ async def _check_kit_event(
                 raise SpineError(422, f"notes must be at most {FORM_SWEPT_NOTES_MAX} characters")
             if notes:
                 swept["notes"] = notes
+        if "unreadable" in payload:
+            bad: list[str] = []
+            names = _unreadable_list(payload["unreadable"], bad)
+            if bad:
+                raise SpineError(422, bad[0])
+            if names:
+                swept["unreadable"] = names
         return swept
+    if event_type == "form_checked":
+        # Recorded by the assistant after check_form and the user's answers. Counts + wording only.
+        found = payload_problems(event_type, payload)
+        if found:
+            raise SpineError(422, found[0])
+        stored_checked: dict[str, Any] = {k: payload[k] for k in ("questions_count", "answered", "missing")}
+        if "answers" in payload:
+            stored_checked["answers"] = _checked_answers(payload["answers"], [])
+        stored_checked["by"] = actor
+        return stored_checked
     if event_type == "hold_released":
         _closed_payload(event_type, payload, EVENT_PAYLOAD_KEYS[event_type])
         if payload.get("reason") not in HOLD_RELEASE_REASONS:
@@ -1324,7 +1425,23 @@ FORM_NEXT_ASK = (
     "save reusable answers with update_profile (user_info.answers); never guess."
 )
 FORM_NEXT_FILL = "Every question has a saved answer. Fill the form with these values."
+FORM_NEXT_CONFIRM = " Confirm every `needs_confirmation` answer with the user in that same message."
+FORM_NEXT_KNOCKOUT = " `knockouts` is not empty: tell the user BEFORE drafting or typing anything (`stop_for_user`)."
 _NON_ALNUM_RE = re.compile(r"[\W_]+")  # a run of anything that is not a letter or digit
+# NOT IN REFERENCE (kept small, deterministic): which kit groups / which wording count as sensitive or a knock-out.
+# The wording follows career-ops modes/apply.md:266 (needs_candidate_confirmation) and :65-68 (knock-out areas).
+_SENSITIVE_GROUPS = frozenset({"right_to_work", "salary", "equality"})
+_SENSITIVE_RE = re.compile(
+    r"visa|sponsor|work authori[sz]ation|right to work|eligible to work|relocat|salary|compensation|"
+    r"disabilit|veteran|gender|ethnic|\brace\b|sexual|religio|criminal|convict|background check|"
+    r"self.?identif|demographic"
+)
+_KNOCKOUT_GROUPS = frozenset({"right_to_work", "salary"})
+_KNOCKOUT_RE = re.compile(
+    r"\byears?\b.{0,30}\bexperience|\bexperience\b.{0,30}\byears?\b|\bdegree\b|bachelor|master'?s|"
+    r"sponsor|\bvisa\b|work authori[sz]ation|right to work|salary|compensation expectation"
+)
+_OPTION_FIELDS = frozenset({"select", "radio", "checkbox"})
 
 
 def _norm_question(text: Any) -> str:
@@ -1332,50 +1449,106 @@ def _norm_question(text: Any) -> str:
     return _NON_ALNUM_RE.sub(" ", str(text or "").casefold()).strip()
 
 
+def _is_sensitive(text: str, key: Optional[str]) -> bool:
+    group = (key or "").split(".", 1)[0]
+    return group in _SENSITIVE_GROUPS or bool(_SENSITIVE_RE.search(text.casefold()))
+
+
+def _is_knockout(text: str, key: Optional[str]) -> bool:
+    group = (key or "").split(".", 1)[0]
+    return group in _KNOCKOUT_GROUPS or bool(_KNOCKOUT_RE.search(text.casefold()))
+
+
+def _over_limit(value: Any, limit: Any, unit: str) -> bool:
+    """career-ops apply.md:273 - the limit is the live control's own; Job360 only compares, never cuts."""
+    if not isinstance(limit, int) or not isinstance(value, str):
+        return False
+    return (len(value.split()) if unit == "words" else len(value)) > limit
+
+
 def form_check(answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]]) -> dict[str, Any]:
     """Pure: for each form question, a saved answer from ``answers`` (the output of
     :func:`compute_answers`) or a gap. A question with a ``key`` must name an item that
     really is in the kit (an ``approved_text`` item is also matched by normalized
     question); without a key the normalized wording is matched against the approved
-    answers only. Never logs, never writes, never guesses."""
+    answers only. Also reads the control facts the assistant passed: a saved value that is
+    not one of a select/radio/checkbox's ``options`` is a gap, one longer than the
+    control's ``limit`` is flagged ``over_limit`` (never cut), a sensitive question is
+    flagged ``needs_confirmation`` and a knock-out question is listed in ``knockouts``.
+    Never logs, never writes, never guesses."""
     items = [i for block in answers.values() for i in block]
     by_key = {str(i["key"]): i for i in items}
     approved = {_norm_question(i["key"]): i for i in answers.get("approved_text", [])}
     answered: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
+    knockouts: list[dict[str, Any]] = []
+    confirm: list[str] = []
     for q in questions:
         text = str(q["question"])
         required = bool(q.get("required", True))
         key = (q.get("key") or "").strip() or None
+        ftype = str(q.get("field_type") or "unknown")
+        sensitive = _is_sensitive(text, key)
         item: Optional[dict[str, Any]] = None
         matched_by = "key"
+        why = ""
         if key is not None:
             item = by_key.get(key)
             if item is None:
                 item = approved.get(_norm_question(key)) if _norm_question(key) else None
             if item is None:
-                missing.append({"question": text, "required": required,
-                                "why": f"key '{key}' is not in this application's kit"})
-                continue
+                why = f"key '{key}' is not in this application's kit"
         else:
             item = approved.get(_norm_question(text)) if _norm_question(text) else None
             matched_by = "wording"
             if item is None:
-                missing.append({"question": text, "required": required, "why": "no saved answer for this question"})
-                continue
+                why = "no saved answer for this question"
+        options = [str(o) for o in (q.get("options") or [])]
+        if item is not None and ftype in _OPTION_FIELDS and options and isinstance(item["value"], str) \
+                and item["value"].casefold() not in {o.casefold() for o in options}:
+            why = "saved answer is not one of the form's options"
+            item = None
+        # A knock-out is spotted from the question and key alone - never from a gap in the profile or CV
+        # (career-ops apply.md:72: a missing field is not evidence the candidate lacks the credential).
+        if _is_knockout(text, key):
+            knockouts.append({"question": text, "key": key, **({"value": item["value"]} if item is not None else {})})
+        if item is None:
+            row_m: dict[str, Any] = {"question": text, "required": required, "why": why}
+            if ftype != "unknown":
+                row_m["field_type"] = ftype
+            if sensitive:
+                row_m["needs_confirmation"] = True
+                confirm.append(text)
+            missing.append(row_m)
+            continue
         row: dict[str, Any] = {
             "question": text, "required": required, "key": item["key"], "value": item["value"],
             "source": item["source"], "matched_by": matched_by,
         }
+        if ftype != "unknown":
+            row["field_type"] = ftype
         if item.get("confirmed") is False:
             row["confirmed"] = False
+        if _over_limit(item["value"], q.get("limit"), str(q.get("limit_unit") or "chars")):
+            row["over_limit"] = True
+        if sensitive or item.get("confirmed") is False:
+            row["needs_confirmation"] = True
+            confirm.append(text)
         answered.append(row)
     missing_required = sum(1 for m in missing if m["required"])
-    return {
+    nxt = FORM_NEXT_ASK if missing else FORM_NEXT_FILL
+    if confirm:
+        nxt += FORM_NEXT_CONFIRM
+    if knockouts:
+        nxt += FORM_NEXT_KNOCKOUT
+    out: dict[str, Any] = {
         "questions_count": len(questions), "answered": answered, "missing": missing,
         "counts": {"answered": len(answered), "missing": len(missing), "missing_required": missing_required},
-        "next": FORM_NEXT_ASK if missing else FORM_NEXT_FILL,
+        "needs_confirmation": confirm, "knockouts": knockouts, "next": nxt,
     }
+    if knockouts:
+        out["stop_for_user"] = True
+    return out
 
 
 async def check_form(

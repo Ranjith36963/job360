@@ -10,7 +10,7 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
 2. **Open one form, in ONE foreground tab.** Typing only lands in the foreground tab. One browser action at a time
    (two uploads at once both fail). Close the tab after submit. Greenhouse: use the plain embed URL (table).
    List every question on the form (scroll to the bottom; open collapsed sections) and call `check_form`; ask the
-   user ONCE for its `missing` before typing. **Done when** the form is loaded and in front.
+   user ONCE for its `missing` (and to confirm `needs_confirmation`) before typing; `over_limit` = shorten. **Done when** the form is loaded and in front.
 3. **Upload the CV first.** Some forms parse it and overwrite or wipe fields (Lever, Greenhouse), and a parse can
    freeze the tab. Wait for the parse to finish, then re-read the page. **Done when** the file name shows and the
    page is idle.

@@ -3768,6 +3768,17 @@
             ],
             "title": "Confirmed"
           },
+          "field_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Type"
+          },
           "key": {
             "title": "Key",
             "type": "string"
@@ -3779,6 +3790,28 @@
             ],
             "title": "Matched By",
             "type": "string"
+          },
+          "needs_confirmation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Confirmation"
+          },
+          "over_limit": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Over Limit"
           },
           "question": {
             "title": "Question",
@@ -3847,11 +3880,25 @@
           "counts": {
             "$ref": "#/components/schemas/FormCheckCountsOut"
           },
+          "knockouts": {
+            "items": {
+              "$ref": "#/components/schemas/FormKnockoutOut"
+            },
+            "title": "Knockouts",
+            "type": "array"
+          },
           "missing": {
             "items": {
               "$ref": "#/components/schemas/FormMissingOut"
             },
             "title": "Missing",
+            "type": "array"
+          },
+          "needs_confirmation": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Needs Confirmation",
             "type": "array"
           },
           "next": {
@@ -3861,6 +3908,17 @@
           "questions_count": {
             "title": "Questions Count",
             "type": "integer"
+          },
+          "stop_for_user": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop For User"
           }
         },
         "required": [
@@ -3900,8 +3958,57 @@
         "title": "FormCheckRequest",
         "type": "object"
       },
+      "FormKnockoutOut": {
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "FormKnockoutOut",
+        "type": "object"
+      },
       "FormMissingOut": {
         "properties": {
+          "field_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Type"
+          },
+          "needs_confirmation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Confirmation"
+          },
           "question": {
             "title": "Question",
             "type": "string"
@@ -3927,6 +4034,21 @@
         "additionalProperties": false,
         "description": "One question read off a LIVE application form. ``key`` is the kit key the\nassistant plans to answer it with (``contact.email``, ``logistics.notice_period``,\nor the saved ``approved_text`` question).",
         "properties": {
+          "field_type": {
+            "default": "unknown",
+            "enum": [
+              "text",
+              "textarea",
+              "select",
+              "radio",
+              "checkbox",
+              "number",
+              "file",
+              "unknown"
+            ],
+            "title": "Field Type",
+            "type": "string"
+          },
           "key": {
             "anyOf": [
               {
@@ -3938,6 +4060,36 @@
               }
             ],
             "title": "Key"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "limit_unit": {
+            "default": "chars",
+            "enum": [
+              "chars",
+              "words"
+            ],
+            "title": "Limit Unit",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Options",
+            "type": "array"
           },
           "question": {
             "maxLength": 500,
@@ -11817,7 +11969,7 @@
     },
     "/api/applications/{application_id}/kit/form-check": {
       "post": {
-        "description": "Which questions on the LIVE form already have a saved answer. The assistant reads\nthe form, lists every question (optional ones too, ``required=false``) and, for each,\nthe kit ``key`` it plans to use. Job360 checks that key really exists in THIS\napplication's kit (an ``approved_text`` answer also matches by its question); with no\nkey it matches the normalized wording of the question against the user's approved\nanswers. No fuzzy matching, no NLP. ``answered`` carries the value and its source\n(``confirmed: false`` = inferred, confirm with the user); ``missing`` is what to ask\nthe user, once. Read-only: no event is written. 404 for an application that is not the\ncaller's. ``Cache-Control: no-store``.",
+        "description": "Which questions on the LIVE form already have a saved answer. The assistant reads\nthe form, lists every question (optional ones too, ``required=false``) and, for each,\nthe kit ``key`` it plans to use. Job360 checks that key really exists in THIS\napplication's kit (an ``approved_text`` answer also matches by its question); with no\nkey it matches the normalized wording of the question against the user's approved\nanswers. No fuzzy matching, no NLP. ``answered`` carries the value and its source\n(``confirmed: false`` = inferred, confirm with the user); ``missing`` is what to ask\nthe user, once. Each question may also carry the live control's ``field_type``, ``options``,\n``limit`` and ``limit_unit``: a saved value outside ``options`` is a gap, one over ``limit``\nis flagged ``over_limit`` (never cut), sensitive questions are flagged ``needs_confirmation``\nand knock-out questions are listed in ``knockouts`` with ``stop_for_user``. Read-only: no event is\nwritten. 404 for an application that is not the\ncaller's. ``Cache-Control: no-store``.",
         "operationId": "check_application_form_api_applications__application_id__kit_form_check_post",
         "parameters": [
           {
