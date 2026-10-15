@@ -265,6 +265,12 @@
           "answer": {
             "title": "Answer",
             "type": "string"
+          },
+          "user_words": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "User Words",
+            "type": "string"
           }
         },
         "required": [
@@ -1742,8 +1748,27 @@
             "title": "Question",
             "type": "string"
           },
+          "relayed_from_chat": {
+            "default": false,
+            "title": "Relayed From Chat",
+            "type": "boolean"
+          },
+          "said_by": {
+            "default": "assistant",
+            "enum": [
+              "you",
+              "assistant"
+            ],
+            "title": "Said By",
+            "type": "string"
+          },
           "status": {
             "title": "Status",
+            "type": "string"
+          },
+          "user_words": {
+            "default": "",
+            "title": "User Words",
             "type": "string"
           },
           "withdrawn_at": {

@@ -175,6 +175,8 @@ portal reference; with none yet the application is "claimed, unverified".
 
 An ask can also be answered by the user on the Job360 Needs-you page.
 
+When the user answered in chat, pass `user_words` (their exact words) to `answer_ask`: the answer then shows as theirs, via you.
+
 `answer_ask` keeps the answer on the ask and appends an `answered` event; the
 history is append-only, so the earlier answers stay in the application's
 history and are not a promise you can take back. If the user does not want even
