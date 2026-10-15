@@ -561,6 +561,12 @@ class AskOut(BaseModel):
     # True = the user answered on Job360; False = the assistant recorded
     # the user's chat answer.
     answered_by_user: bool
+    # The user's exact chat words when the assistant relayed them ("" = none).
+    user_words: str = ""
+    # True = an assistant (not the web) recorded an answer AND the user's words.
+    relayed_from_chat: bool = False
+    # "you" = web answer or relayed chat answer; "assistant" = it answered alone.
+    said_by: Literal["you", "assistant"] = "assistant"
     withdrawn_at: Optional[str]
     status: str
 

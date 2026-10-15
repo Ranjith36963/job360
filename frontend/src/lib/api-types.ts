@@ -2690,6 +2690,11 @@ export interface components {
         AnswerAskRequest: {
             /** Answer */
             answer: string;
+            /**
+             * User Words
+             * @default
+             */
+            user_words: string;
         };
         /**
          * ApplicationArtifactOut
@@ -3169,8 +3174,24 @@ export interface components {
             job_title: string | null;
             /** Question */
             question: string;
+            /**
+             * Relayed From Chat
+             * @default false
+             */
+            relayed_from_chat: boolean;
+            /**
+             * Said By
+             * @default assistant
+             * @enum {string}
+             */
+            said_by: "you" | "assistant";
             /** Status */
             status: string;
+            /**
+             * User Words
+             * @default
+             */
+            user_words: string;
             /** Withdrawn At */
             withdrawn_at: string | null;
         };
