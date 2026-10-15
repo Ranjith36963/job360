@@ -594,8 +594,11 @@ async def test_unknown_channel_reply_warns_stored_as_other(authenticated_async_c
         app_id = (await _bring(client, _AD_FR))["application_id"]
         odd = (await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "carrier pigeon"})).json()
         assert odd["channel"] == "other" and odd["channel_given"] == "carrier pigeon"
-        assert len(odd["warnings"]) == 1
-        assert "'carrier pigeon'" in odd["warnings"][0] and "stored as 'other'" in odd["warnings"][0]
-        assert "company_site" in odd["warnings"][0]
+        # The receipt also says (by design) that no cover letter was sent; that is not a channel warning.
+        channel_warnings = [w for w in odd["warnings"] if "channel" in w]
+        assert len(channel_warnings) == 1
+        assert "'carrier pigeon'" in channel_warnings[0] and "stored as 'other'" in channel_warnings[0]
+        assert "company_site" in channel_warnings[0]
         ok = (await client.post(f"/api/applications/{app_id}/receipt", json={"channel": "ats_form"})).json()
-        assert ok["channel"] == "company_site" and ok["channel_given"] == "ats_form" and ok["warnings"] == []
+        assert ok["channel"] == "company_site" and ok["channel_given"] == "ats_form"
+        assert not [w for w in ok["warnings"] if "channel" in w]
