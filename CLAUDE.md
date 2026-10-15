@@ -52,12 +52,7 @@ schema, the application spine, MCP, auth, extraction. They live in
 Read them before editing any of those areas. Full product rules:
 `docs/product/product_design_rules.md`.
 
-## Document your mistakes (owner rule, 2026-10-15)
-
-Every mistake a session makes, and the rule it taught, goes in
-`.claude/skills/session-lessons/SKILL.md` (two or three lines, appended,
-never deleted). Read it before parallel workers, PRs, hand-offs to another
-session, or a real apply/outreach run for the owner.
+**Mistakes:** append each one, with its rule, to `.claude/skills/session-lessons/SKILL.md` (owner rule).
 
 ## Commands
 
