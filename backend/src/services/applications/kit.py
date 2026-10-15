@@ -465,7 +465,7 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "account_needed": frozenset({"host"}),
 }
 FORM_FILLED_REQUIRED = frozenset({"form_url", "fields_count"})
-FORM_FILLED_OPTIONAL = frozenset({"answers"})
+FORM_FILLED_OPTIONAL = frozenset({"answers", "fields_skipped"})
 FORM_SWEPT_REQUIRED = frozenset({"fields_checked", "fixed"})
 FORM_SWEPT_NOTES_MAX = 300
 ANSWER_SOURCES = ("memory", "profile", "approved", "written", "guessed")
@@ -515,6 +515,22 @@ def clean_answers(raw: Any) -> list[dict[str, str]]:
     memory / profile / approved answer. An answer may be blank (the page flags it).
     A receipt's answers take the same ``source`` list and ``key`` (both optional there)."""
     return [_clean_answer(item) for item in _answers_list(raw)]
+
+
+def clean_fields_skipped(raw: Any) -> list[str]:
+    """The field labels the assistant left blank on the form (``form_filled``'s optional
+    ``fields_skipped``): a list of short texts, at most ``KIT_FORM_FIELDS_MAX``. 422 otherwise."""
+    if not isinstance(raw, list) or len(raw) > settings.KIT_FORM_FIELDS_MAX:
+        raise SpineError(422, f"fields_skipped must be a list of at most {settings.KIT_FORM_FIELDS_MAX} field names")
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            raise SpineError(422, "each fields_skipped entry must be text")
+        label = " ".join(spine._strip_control_chars(item).split())
+        if not label or len(label) > ANSWER_QUESTION_MAX:
+            raise SpineError(422, f"each fields_skipped entry must be 1 to {ANSWER_QUESTION_MAX} characters")
+        out.append(label)
+    return out
 
 
 def answer_problems(raw: Any) -> list[str]:
@@ -598,6 +614,8 @@ def payload_problems(event_type: str, payload: dict[str, Any]) -> list[str]:
             problems.append("form_url host could not be read (the full address of the application form)")
         if "answers" in payload:
             problems += answer_problems(payload["answers"])
+        if "fields_skipped" in payload:
+            event_examples.collect(problems, clean_fields_skipped, payload["fields_skipped"])
     elif event_type == "form_swept":
         problems += _keys_problem(payload, FORM_SWEPT_REQUIRED, EVENT_PAYLOAD_KEYS[event_type])
         ints: dict[str, int] = {}
@@ -683,7 +701,9 @@ async def _check_kit_event(
         return {"where": "web", "by": actor}
     if event_type == "form_filled":
         if not FORM_FILLED_REQUIRED <= set(payload) <= FORM_FILLED_REQUIRED | FORM_FILLED_OPTIONAL:
-            raise SpineError(422, "form_filled needs payload keys ['fields_count', 'form_url'] (and 'answers')")
+            raise SpineError(
+                422, "form_filled needs payload keys ['fields_count', 'form_url'] (and 'answers', 'fields_skipped')"
+            )
         count = payload.get("fields_count")
         if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= settings.KIT_FORM_FIELDS_MAX:
             raise SpineError(422, f"fields_count must be a whole number from 0 to {settings.KIT_FORM_FIELDS_MAX}")
@@ -710,6 +730,8 @@ async def _check_kit_event(
         stored: dict[str, Any] = {"host": host, "fields_count": count, "by": actor}
         if "answers" in payload:
             stored["answers"] = clean_answers(payload["answers"])
+        if "fields_skipped" in payload:
+            stored["fields_skipped"] = clean_fields_skipped(payload["fields_skipped"])
         return stored
     if event_type == "form_swept":
         keys = EVENT_PAYLOAD_KEYS[event_type]

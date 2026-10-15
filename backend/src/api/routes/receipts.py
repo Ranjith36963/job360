@@ -63,6 +63,12 @@ class Receipt(BaseModel):
     cover_letter_version_no: int | None = None
     # True iff the receipt names a cover letter artifact; False = no letter was sent.
     cover_letter_sent: bool = False
+    # Read-time facts (spine.receipt_summary_facts); "" / None when no form_filled was recorded.
+    counts_line: str = ""
+    fields_total: int | None = None
+    fields_skipped: int = 0
+    guessed_count: int = 0
+    form_host: str = ""
     recorded_by: str | None = None
     # S3 - '' | same_job | same_company, the kit the assistant filled from. Set
     # at INSERT; a receipt made without a kit reads '' / None / ''.
@@ -92,6 +98,8 @@ class ReceiptSummary(BaseModel):
     has_cv: bool
     has_cover_letter: bool
     cover_letter_sent: bool = False
+    counts_line: str = ""
+    form_host: str = ""
     channel: str
     note: str
     proof: ProofOut = Field(default_factory=ProofOut)
@@ -112,7 +120,8 @@ async def _to_receipt(db: JobDatabase, user_id: str, row: dict[str, Any]) -> Rec
 
 
 def _to_summary(
-    row: dict[str, Any], proof: dict[str, Any] | None = None, letter_sent: bool = False
+    row: dict[str, Any], proof: dict[str, Any] | None = None, letter_sent: bool = False,
+    facts: dict[str, Any] | None = None,
 ) -> ReceiptSummary:
     return ReceiptSummary(
         id=row["id"], job_id=row["job_id"], sent_at=row["sent_at"],
@@ -120,6 +129,7 @@ def _to_summary(
         job_location=row["job_location"], job_apply_url=row["job_apply_url"],
         has_cv=bool(row["has_cv"]), has_cover_letter=bool(row["has_cover_letter"]),
         cover_letter_sent=letter_sent,
+        counts_line=(facts or {}).get("counts_line", ""), form_host=(facts or {}).get("form_host", ""),
         channel=row["channel"], note=row["note"], proof=ProofOut(**(proof or {})),
     )
 
@@ -254,7 +264,10 @@ async def list_receipts(
     sent = await applications_spine.receipt_letter_sent(db, user.id, [int(r["id"]) for r in rows])
     return ReceiptListResponse(
         receipts=[
-            _to_summary(r, proofs.get(int(r.get("application_id") or 0)), sent.get(int(r["id"]), False))
+            _to_summary(
+                r, proofs.get(int(r.get("application_id") or 0)), sent.get(int(r["id"]), False),
+                await applications_spine.receipt_summary_facts(db, user.id, int(r["id"])),
+            )
             for r in rows
         ],
         total=total,

@@ -1095,6 +1095,11 @@
             "title": "Confirmation",
             "type": "string"
           },
+          "counts_line": {
+            "default": "",
+            "title": "Counts Line",
+            "type": "string"
+          },
           "cover_letter_artifact_id": {
             "anyOf": [
               {
@@ -1122,6 +1127,17 @@
             ],
             "title": "Cover Letter Text"
           },
+          "cover_letter_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter Version No"
+          },
           "cv_artifact_id": {
             "anyOf": [
               {
@@ -1144,10 +1160,47 @@
             ],
             "title": "Cv Text"
           },
+          "cv_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Version No"
+          },
           "fields_filled": {
             "additionalProperties": true,
             "title": "Fields Filled",
             "type": "object"
+          },
+          "fields_skipped": {
+            "default": 0,
+            "title": "Fields Skipped",
+            "type": "integer"
+          },
+          "fields_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fields Total"
+          },
+          "form_host": {
+            "default": "",
+            "title": "Form Host",
+            "type": "string"
+          },
+          "guessed_count": {
+            "default": 0,
+            "title": "Guessed Count",
+            "type": "integer"
           },
           "id": {
             "title": "Id",
@@ -1192,6 +1245,11 @@
             "title": "Confirmation",
             "type": "string"
           },
+          "counts_line": {
+            "default": "",
+            "title": "Counts Line",
+            "type": "string"
+          },
           "cover_letter_artifact_id": {
             "anyOf": [
               {
@@ -1208,6 +1266,17 @@
             "title": "Cover Letter Sent",
             "type": "boolean"
           },
+          "cover_letter_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter Version No"
+          },
           "cv_artifact_id": {
             "anyOf": [
               {
@@ -1219,10 +1288,47 @@
             ],
             "title": "Cv Artifact Id"
           },
+          "cv_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cv Version No"
+          },
           "fields_filled": {
             "additionalProperties": true,
             "title": "Fields Filled",
             "type": "object"
+          },
+          "fields_skipped": {
+            "default": 0,
+            "title": "Fields Skipped",
+            "type": "integer"
+          },
+          "fields_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fields Total"
+          },
+          "form_host": {
+            "default": "",
+            "title": "Form Host",
+            "type": "string"
+          },
+          "guessed_count": {
+            "default": 0,
+            "title": "Guessed Count",
+            "type": "integer"
           },
           "id": {
             "title": "Id",
@@ -6502,6 +6608,11 @@
             ],
             "title": "Confirmation"
           },
+          "counts_line": {
+            "default": "",
+            "title": "Counts Line",
+            "type": "string"
+          },
           "cover_letter_origin": {
             "anyOf": [
               {
@@ -6577,6 +6688,32 @@
             "additionalProperties": true,
             "title": "Fields Filled",
             "type": "object"
+          },
+          "fields_skipped": {
+            "default": 0,
+            "title": "Fields Skipped",
+            "type": "integer"
+          },
+          "fields_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fields Total"
+          },
+          "form_host": {
+            "default": "",
+            "title": "Form Host",
+            "type": "string"
+          },
+          "guessed_count": {
+            "default": 0,
+            "title": "Guessed Count",
+            "type": "integer"
           },
           "id": {
             "title": "Id",
@@ -6801,10 +6938,20 @@
             "title": "Channel",
             "type": "string"
           },
+          "counts_line": {
+            "default": "",
+            "title": "Counts Line",
+            "type": "string"
+          },
           "cover_letter_sent": {
             "default": false,
             "title": "Cover Letter Sent",
             "type": "boolean"
+          },
+          "form_host": {
+            "default": "",
+            "title": "Form Host",
+            "type": "string"
           },
           "has_cover_letter": {
             "title": "Has Cover Letter",
@@ -7008,6 +7155,17 @@
             "default": false,
             "title": "Cover Letter Sent",
             "type": "boolean"
+          },
+          "cover_letter_version_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Letter Version No"
           },
           "cv_artifact_id": {
             "anyOf": [

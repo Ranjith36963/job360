@@ -1424,6 +1424,7 @@ async def record_receipt(
         "cv_version_no": cv_artifact["version_no"] if cv_artifact else None,
         "cover_letter_artifact_id": cl_artifact["id"] if cl_artifact else None,
         "cover_letter_sent": cl_artifact is not None,
+        "cover_letter_version_no": cl_artifact["version_no"] if cl_artifact else None,
         "channel": channel or "", "channel_given": channel_given, "warnings": warnings,
         "confirmation": confirmation or "",
         "url": f"/applications/{application_id}", "event_id": event["event_id"],
@@ -1510,6 +1511,13 @@ async def _list_receipts_for_application(
         row["fields_filled"] = _receipt_json(row.get("fields_filled"), dict)
         frozen = bool(row.pop("_letter_frozen", None))
         row["cover_letter_sent"] = frozen or row.get("cover_letter_artifact_id") is not None
+        row.update(await receipt_summary_facts(db, user_id, int(row["id"])))
+        row["cv_version_no"] = await _artifact_version_no(
+            db, user_id, application_id, "cv", row.get("cv_artifact_id")
+        )
+        row["cover_letter_version_no"] = await _artifact_version_no(
+            db, user_id, application_id, "cover_letter", row.get("cover_letter_artifact_id")
+        )
     return rows
 
 
@@ -1544,6 +1552,62 @@ async def _artifact_version_no(
     )
     row = await cur.fetchone()
     return int(row["version_no"]) if row is not None else None
+
+
+async def receipt_summary_facts(db: JobDatabase, user_id: str, receipt_id: int) -> dict[str, Any]:
+    """Read-time facts a receipt shows (nothing stored twice; receipts stay append-only):
+    the counts line ``"N of M fields · S skipped · G guessed"`` and the host the form was on.
+
+    M = ``fields_count`` of the newest ``form_filled`` recorded at or before the receipt was
+    created; no such event means no M and no line (never an invented number). N = fields +
+    answers on the receipt, capped at M. S = the event's own ``fields_skipped`` list when the
+    assistant gave one, else M - N. G = answers whose ``source`` is ``guessed``.
+    ``form_host`` is the host the form was filled on, else the job link's host marked as such.
+    Scoped by ``user_id``; a foreign or unknown id reads as the empty facts."""
+    empty: dict[str, Any] = {
+        "counts_line": "", "fields_total": None, "fields_skipped": 0, "guessed_count": 0, "form_host": "",
+    }
+    cur = await db._db.execute(
+        "SELECT application_id, created_at, job_apply_url, answers, fields_filled "
+        "FROM application_receipts WHERE user_id = ? AND id = ?",
+        (user_id, receipt_id),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return empty
+    r = dict(row)
+    answers = _receipt_answers(r.get("answers"))
+    filled = _receipt_json(r.get("fields_filled"), dict)
+    form: dict[str, Any] = {}
+    if r.get("application_id") is not None:
+        cur = await db._db.execute(
+            "SELECT payload FROM application_events WHERE user_id = ? AND application_id = ? "
+            "AND event_type = 'form_filled' AND recorded_at <= ? ORDER BY recorded_at DESC, id DESC LIMIT 1",
+            (user_id, r["application_id"], r.get("created_at") or ""),
+        )
+        ev = await cur.fetchone()
+        form = _receipt_json(dict(ev)["payload"], dict) if ev is not None else {}
+    out = dict(empty)
+    out["guessed_count"] = sum(1 for a in answers if a.get("source") == "guessed")
+    host = form.get("host")
+    if isinstance(host, str) and host:
+        out["form_host"] = host
+    else:
+        from src.services.profile.assistant_settings import screen_form_url  # noqa: PLC0415
+
+        job_host = screen_form_url(r.get("job_apply_url") or None)
+        out["form_host"] = f"{job_host} (job link)" if job_host else ""
+    total = form.get("fields_count")
+    if isinstance(total, bool) or not isinstance(total, int):
+        return out
+    done = min(len(filled) + len(answers), total)
+    skipped_list = form.get("fields_skipped")
+    skipped = len(skipped_list) if isinstance(skipped_list, list) else max(total - done, 0)
+    out.update(
+        fields_total=total, fields_skipped=skipped,
+        counts_line=f"{done} of {total} fields \u00b7 {skipped} skipped \u00b7 {out['guessed_count']} guessed",
+    )
+    return out
 
 
 async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Optional[dict[str, Any]]:
@@ -1587,6 +1651,7 @@ async def receipt_details(db: JobDatabase, user_id: str, receipt_id: int) -> Opt
             db, user_id, application_id, "cover_letter", r.get("cover_letter_artifact_id")
         ),
         "cover_letter_sent": r.get("cover_letter_artifact_id") is not None or bool(r.get("letter_frozen")),
+        **await receipt_summary_facts(db, user_id, receipt_id),
     }
 
 
