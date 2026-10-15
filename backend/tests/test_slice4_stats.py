@@ -222,8 +222,15 @@ async def test_simulation_is_excluded(authenticated_async_context):
         assert resp.status_code == 201, resp.text
         sim_id = int(resp.json()["event_id"])
         await _event(client, fake, "applied")
-        overall = (await _stats(client)).json()["overall"]
+        add = await client.post(f"/api/applications/{fake}/contacts", json={"name": "Ann", "found_via": "linkedin"})
+        assert add.status_code == 201, add.text
+        cold = await client.post("/api/contacts", json={"name": "Cleo", "found_via": "event"})
+        assert cold.status_code == 201, cold.text
+        body = (await _stats(client)).json()
+        overall = body["overall"]
         assert overall["applied"] == 1 and overall["brought"] == 1 and overall["simulations_excluded"] == 1
+        via = {g["key"]: g["contacts"] for g in body["by_contact_found_via"]}
+        assert via == {"event": 1}, "a test application's contact is not counted; a cold one is"
         await _event(client, fake, "note", corrects_event_id=sim_id, detail="was real")
         overall = (await _stats(client)).json()["overall"]
         assert overall["applied"] == 2 and overall["simulations_excluded"] == 0
