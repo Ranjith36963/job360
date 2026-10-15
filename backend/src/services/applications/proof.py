@@ -304,12 +304,13 @@ async def proof_for(db: JobDatabase, user_id: str, application_ids: list[int]) -
             if seen_at and (p["email_seen_at"] is None or str(seen_at) < p["email_seen_at"]):
                 p["email_seen_at"] = str(seen_at)
     cur = await db._db.execute(  # a receipt that carries a confirmation (ID / portal reference) is text proof
-        "SELECT DISTINCT application_id FROM application_receipts "  # noqa: S608 - placeholders only
+        "SELECT application_id, confirmation FROM application_receipts "  # noqa: S608 - placeholders only
         f"WHERE user_id = ? AND application_id IN ({marks}) AND TRIM(COALESCE(confirmation, '')) <> ''",
         [user_id, *ids],
     )
-    for (app_id,) in await cur.fetchall():
-        out[app_id]["has_text"] = out[app_id]["has_confirmation"] = True
+    for app_id, confirmation in await cur.fetchall():  # old rows may hold a label: only an ID-shaped value counts
+        if looks_like_confirmation_id(confirmation):
+            out[app_id]["has_text"] = out[app_id]["has_confirmation"] = True
     cur = await db._db.execute(
         "SELECT application_id, COUNT(*) FROM application_proof_screenshots "  # noqa: S608 - placeholders only
         f"WHERE user_id = ? AND application_id IN ({marks}) AND deleted_at IS NULL GROUP BY application_id",
@@ -322,6 +323,15 @@ async def proof_for(db: JobDatabase, user_id: str, application_ids: list[int]) -
         p["level"] = "email" if p["has_email"] else "text" if p["has_text"] else weakest
         p["proof_label"] = proof_label(p)
     return out
+
+
+def looks_like_confirmation_id(value: str) -> bool:
+    """True when ``value`` reads like an application ID / portal reference, not a label or prose:
+    3..64 chars, no link, one line, at most 3 words, and at least one digit."""
+    text = (value or "").strip()
+    if not 3 <= len(text) <= 64 or "://" in text or "\n" in text or "\r" in text:
+        return False
+    return len(text.split()) <= 3 and any(ch.isdigit() for ch in text)
 
 
 def proof_label(p: dict[str, Any]) -> str:
