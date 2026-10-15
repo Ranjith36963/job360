@@ -52,6 +52,8 @@ schema, the application spine, MCP, auth, extraction. They live in
 Read them before editing any of those areas. Full product rules:
 `docs/product/product_design_rules.md`.
 
+**Mistakes:** append each one, with its rule, to `.claude/skills/session-lessons/SKILL.md` (owner rule).
+
 ## Commands
 
 ```bash
