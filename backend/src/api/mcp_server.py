@@ -1622,7 +1622,7 @@ def build_server(version: str = "") -> MCPServer:
         Anything in `missing`: ask the user ONCE, in one message; never guess.
         Read-only: it writes nothing, 404 if the application is not yours."""
         try:
-            body = models.FormCheckRequest(questions=questions, form_url=form_url)
+            body = models.FormCheckRequest.model_validate({"questions": questions, "form_url": form_url})
         except ValidationError as exc:
             raise _validation_error(exc, tool="check_form", application_id=application_id) from None
         try:
