@@ -46,7 +46,7 @@ BLOCKED_REASONS: dict[str, str] = {
     "other": "a problem",
 }
 UNBLOCK_RESOLUTIONS = frozenset({"retried", "user_did_it", "skipped"})
-NEVER_RETRIED = frozenset({"captcha", "bot_check"})
+NEVER_RETRIED = frozenset({"captcha", "bot_check", "safety_block"})
 BLOCKED_KEYS = frozenset({"reason", "step", "page_host", "detail"})
 STEP_MAX_CHARS = 120
 DETAIL_MAX_CHARS = 300
@@ -111,6 +111,10 @@ def check_payload(user: CurrentUser, event_type: str, payload: dict[str, Any], d
 _USER_TODO: dict[str, str] = {
     "captcha": "Open the form on {host}, solve the check and press Submit yourself, then mark this resolved.",
     "bot_check": "Open the form on {host}, solve the check and press Submit yourself, then mark this resolved.",
+    "safety_block": (
+        "Your assistant's own tool would not press Submit on {host}. Open the form, check it and press Submit "
+        "yourself, then mark this resolved."
+    ),
     "login_needed": "Sign in on {host} yourself (never share the password), then mark this resolved.",
     "upload_failed": "Attach the CV file on {host} yourself, then mark this resolved.",
     "unknown_question": "Answer the question on {host} (the assistant could not), then mark this resolved.",
@@ -197,7 +201,8 @@ async def before_append(
         if stored["resolution"] == "retried" and events[0]["payload"].get("reason") in NEVER_RETRIED:
             _log(user, application_id, event_type, stored, "refused")
             raise SpineError(
-                422, "a CAPTCHA or bot check is never retried; the user resolves it (user_did_it) or it is skipped"
+                422, "a CAPTCHA, bot check or safety block is never retried by the assistant; "
+                "the user resolves it (user_did_it) or it is skipped"
             )
         return stored
     open_ids = await _open_ask_ids(db, user.id, _ask_ids(events, stored["reason"]))

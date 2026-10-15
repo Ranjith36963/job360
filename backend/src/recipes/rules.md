@@ -154,7 +154,8 @@ is filled.
 `record_application` takes a `channel`: one of `company_site`,
 `linkedin_easy_apply`, `job_board`, `email`, `referral`, `recruiter`, `other`,
 the `cv_artifact_id` and `cover_letter_artifact_id` that were sent, and in
-`confirmation` the application ID or portal reference ONLY. This saves an
+`confirmation` the application ID or portal reference ONLY (it must contain a
+digit; anything else is kept in the note with a warning). This saves an
 immutable receipt. Right after, put the thank-you page text in `record_event`
 `proof_text` {text, page_host}, and a screenshot only if you can. Proof is one
 of: a confirmation email, the thank-you page text, or the application ID /

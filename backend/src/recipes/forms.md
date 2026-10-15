@@ -19,11 +19,17 @@ Never type a password. A CAPTCHA, bot check or login page: `record_event` `block
    that already looks selected can switch it OFF: read first. **Done when** every field has been typed or clicked.
 5. **Read back EVERY value** (text, dropdowns, checkboxes, the CV name). Fix what differs. `record_event`
    `form_filled`, then `form_swept` {fields_checked, fixed}. **Done when** each value matches the kit answer.
-6. **Gate.** Show the user what you entered, including the salary band you chose. Call `check_submit`. Submit only
+6. **Gate.** Get the yes BEFORE the click: best is the user's own click on Job360 (Needs-you Send / Send all, i.e.
+   `POST /api/applications/{id}/send/approve`) or a yes in chat naming this job. Show the user what you entered,
+   including the salary band you chose. Then call `check_submit`. Submit only
    as the apply recipe says. **Done when** it says `submit`, or `ask` plus the user's yes for this one application.
 7. **Press Submit, then check the page changed.** A confirmation or thank-you text means it worked. No change: scan
    for required or invalid fields (`aria-invalid`, red text, below the fold), read ALL the errors, fix exactly those,
-   press Submit ONCE more. Still stuck: `blocked`, STOP. **Done when** the page shows the confirmation, or `blocked`.
+   press Submit ONCE more. Still stuck: `blocked`, STOP. If your own tool, permission prompt or safety classifier
+   refuses the Submit click: do NOT click again, do not try another way (keyboard, script, other tab). `record_event`
+   `blocked` {reason: safety_block, step: "final submit", page_host}, `hold_released` {reason: blocked}, leave the
+   filled tab open and tell the user to press Submit themselves. When they say it went: `unblocked`
+   {resolution: user_did_it}, then `record_application`. **Done when** the page shows the confirmation, or `blocked`.
 8. **Next form.** Go back to step 2 for the next job on the approved list.
 
 Per ATS (only what was seen):
