@@ -310,6 +310,11 @@ it may not be implausibly in the future. A status event (applied/replied/
 interview_*/offer/rejected/withdrawn/ghosted) moves the application's status; a
 note-family event never does.
 
+Wrong applied date: get_application -> timeline, take the `applied` event_id,
+then record_event `applied` with the right `occurred_at` and `corrects_event_id`
+= that id. The old event is kept and marked superseded; never record a second
+plain `applied` (it becomes a confirmation, not a new date).
+
 `source` names the email an event came from (kind/message_id/sender/subject/
 received_at) — the same message_id on the same application is the same event,
 so you get the first one back with already_existed=true and nothing is written;

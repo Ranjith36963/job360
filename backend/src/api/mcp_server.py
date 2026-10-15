@@ -1191,22 +1191,23 @@ def build_server(version: str = "") -> MCPServer:
         `source` ({kind, message_id, sender, subject, received_at}) = the email it came from; the same
         message_id returns already_existed=true and writes nothing, so re-reading an inbox is safe.
 
-        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status, a note
-        never; the furthest stage wins (only corrects_event_id moves it back). A repeat `applied` (e.g. its
-        confirmation email + `source`) becomes the submission confirmation (proof), not a 2nd applied.
-        `warnings` = what to fix. `occurred_at` may be past. `scheduled_at` (ISO-8601 with timezone) only on
-        interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase on any event; ""
+        Status events (applied, replied, interview_*, offer, rejected, withdrawn, ghosted) move the status, notes
+        never; the furthest stage wins (only corrects_event_id moves back). A repeat `applied` (e.g. its
+        confirmation email + `source`) becomes the submission confirmation (proof), not a 2nd applied. Wrong
+        applied date: `applied` + occurred_at + corrects_event_id=<old applied id>.
+        `warnings` = fixes. `occurred_at` may be past. `scheduled_at` (ISO-8601 with timezone) only on
+        interview_requested/interview_scheduled. `follow_up_on` YYYY-MM-DD sets the next chase; ""
         clears it.
 
-        Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`, or the
-        user says it went) or outreach_replied; no application_id for a cold contact; a reply never moves the status.
+        Outreach: `contact_id` + `channel` with outreach_sent (only if Gmail Sent shows it, id as `source`, or
+        the user says so) or outreach_replied; no application_id if cold.
 
         Kit events (only these keys, else 422):
         form_filled {form_url, fields_count, answers?: [{question, answer, source, key?}]}, source = memory | profile |
         approved | written | guessed (key = the kit key, for memory/profile/approved);
         cv_seen and submit_approved {artifact_id, sha256, where} ONLY after the user said so in chat (where = chat);
         submit_declined {where};
-        form_swept {fields_checked, fixed, notes} (notes optional; after re-reading every field);
+        form_swept {fields_checked, fixed, notes} (after re-reading every field);
         autofill_set {mode:"deny"}; hold_released {reason: done|blocked|stopped|failed};
         site_account {host};
         account_needed {host}; submit_mode_set {"submit_mode":"confirm"} only.

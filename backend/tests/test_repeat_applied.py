@@ -309,8 +309,98 @@ async def test_mcp_tool_behaves_like_the_route(authenticated_async_context):
         assert body["warnings"] == [WARNING]
         again = await call(event_type="applied", application_id=app_id, source=EMAIL)
         assert (again["already_existed"], again["event_id"], again["warnings"]) == (True, body["event_id"], [])
+        first_id = next(r["id"] for r in _rows(app_id) if r["event_type"] == "applied")
+        fixed = await call(
+            event_type="applied", application_id=app_id, occurred_at="2026-10-02T10:00:00+00:00",
+            corrects_event_id=first_id,
+        )
+        assert (fixed["event_type"], fixed["warnings"]) == ("applied", [])
 
     rows = _rows(app_id)
-    assert [r["event_type"] for r in rows].count("applied") == 1
-    assert rows[-1]["detail"] == "Submission confirmed: Lever receipt"
-    assert rows[-1]["source_message_id"] == "<confirm-101@hire.lever.co>"
+    assert [r["event_type"] for r in rows].count("applied") == 2, "the receipt's applied + the correction"
+    assert rows[-1]["corrects_event_id"] == first_id
+    assert str(rows[-1]["occurred_at"]).startswith("2026-10-02")
+    assert [r for r in rows if r["event_type"] == "note"][0]["detail"] == "Submission confirmed: Lever receipt"
+    assert [r for r in rows if r["event_type"] == "note"][0]["source_message_id"] == "<confirm-101@hire.lever.co>"
+
+
+async def _timeline(client: AsyncClient, app_id: int) -> list[dict[str, Any]]:
+    resp = await client.get(f"/api/applications/{app_id}")
+    assert resp.status_code == 200, resp.text
+    return resp.json()["events"]
+
+
+@pytest.mark.asyncio
+async def test_date_correction_new_applied_date_wins(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        first = await _event(client, app_id, "applied", occurred_at="2026-10-01T10:00:00+00:00")
+        fixed = await _event(
+            client, app_id, "applied", occurred_at="2026-10-02T10:00:00+00:00",
+            corrects_event_id=first["event_id"],
+        )
+        applied = [e for e in await _timeline(client, app_id) if e["event_type"] == "applied"]
+        live = [e for e in applied if not e["superseded"]]
+        assert len(live) == 1 and live[0]["id"] == fixed["event_id"]
+        assert str(live[0]["occurred_at"]).startswith("2026-10-02")
+        old = next(e for e in applied if e["id"] == first["event_id"])
+        assert old["superseded"] is True
+        assert await _status(client, app_id) == "applied"
+
+
+@pytest.mark.asyncio
+async def test_date_correction_keeps_old_row(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        first = await _event(client, app_id, "applied", occurred_at="2026-10-01T10:00:00+00:00")
+        before = [r for r in _rows(app_id) if r["id"] == first["event_id"]][0]
+        await _event(
+            client, app_id, "applied", occurred_at="2026-10-02T10:00:00+00:00",
+            corrects_event_id=first["event_id"],
+        )
+        rows = _rows(app_id)
+        assert [r["event_type"] for r in rows].count("applied") == 2
+        assert [r for r in rows if r["id"] == first["event_id"]][0] == before
+
+
+@pytest.mark.asyncio
+async def test_repeat_after_correction_still_a_confirmation(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        first = await _event(client, app_id, "applied", occurred_at="2026-10-01T10:00:00+00:00")
+        await _event(
+            client, app_id, "applied", occurred_at="2026-10-02T10:00:00+00:00",
+            corrects_event_id=first["event_id"],
+        )
+        body = await _event(client, app_id, "applied", source=EMAIL)
+        assert body["event_type"] == "note"
+        assert body["warnings"] == [WARNING]
+        assert "to change the applied date use corrects_event_id" in body["warnings"][0]
+        assert json.loads(_rows(app_id)[-1]["payload"])["confirms"] == "applied"
+
+
+@pytest.mark.asyncio
+async def test_correction_of_missing_or_foreign_event_422(authenticated_async_context):
+    async with authenticated_async_context() as client:
+        app_id = await _bring(client)
+        other_id = await _bring(client, _AD_2)
+        await _event(client, app_id, "applied")
+        foreign = await _event(client, other_id, "applied")
+        for bad in (999999, foreign["event_id"]):
+            resp = await client.post(
+                f"/api/applications/{app_id}/events",
+                json={"event_type": "applied", "corrects_event_id": bad},
+            )
+            assert resp.status_code == 422, resp.text
+            assert "does not exist on this application" in resp.text
+
+
+def test_rules_and_daily_document_the_date_correction():
+    from pathlib import Path
+
+    recipes = Path(__file__).resolve().parent.parent / "src" / "recipes"
+    rules = (recipes / "rules.md").read_text(encoding="utf-8")
+    daily = (recipes / "daily.md").read_text(encoding="utf-8")
+    assert "Wrong applied date" in rules and "corrects_event_id" in rules
+    assert 'note "submission confirmed"' not in daily
+    assert "the note \"submission confirmed\"" not in daily
