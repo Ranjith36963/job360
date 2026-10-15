@@ -739,8 +739,9 @@ class RecordEventResponse(BaseModel):
     status: str
     already_existed: bool
     scheduled_at: Optional[str]
-    # Non-fatal notes: a deduped message_id recorded as another type, or (owner
-    # decision 2026-10-14) a reply/interview/offer with no `applied` event yet.
+    # Non-fatal notes: a deduped message_id recorded as another type, (owner
+    # decision 2026-10-14) a reply/interview/offer with no `applied` event yet,
+    # or a repeat `applied` stored as the submission confirmation (weak spot #4).
     warnings: list[str] = Field(default_factory=list)
     # Owner decision, 2026-09-25 — the CURRENT slot value after this call:
     # the new value when this call set/cleared it, the unchanged value when
@@ -2374,6 +2375,9 @@ async def record_event(
             detail=detail, payload=payload, occurred_at=occurred_at, recorded_by=actor_for(user),
             corrects_event_id=body.corrects_event_id, source=source, scheduled_at=scheduled_at,
             follow_up_on=follow_up_on_arg,
+            # Weak spot #4: a repeat `applied` (e.g. the confirmation email) is
+            # stored as the submission-confirmation note, never a second applied.
+            repeat_applied_as_confirmation=True,
         )
         if body.event_type == "replied" and source and source.get("sender"):
             # The sender is a person we sent outreach to on this job: mark them
