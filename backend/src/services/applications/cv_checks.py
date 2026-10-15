@@ -47,7 +47,8 @@ def _drop_emails(text: str) -> str:
 _PHONE_RE = re.compile(r"(?<![\w.])\+?\(?\d[\d\s().-]{7,}\d(?![\w])")
 _MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
 _DATE_RES = (
-    re.compile(rf"\b{_MONTH}\s+(?:\d{{1,2}},?\s+)?(?:19|20)\d{{2}}\b", re.I),
+    re.compile(rf"\b\d{{1,2}}(?:st|nd|rd|th)?\s+{_MONTH}\s+(?:19|20)\d{{2}}\b", re.I),  # "15 October 2026"
+    re.compile(rf"\b{_MONTH}\s+(?:\d{{1,2}}(?:st|nd|rd|th)?,?\s+)?(?:19|20)\d{{2}}\b", re.I),
     re.compile(r"\b\d{1,2}[/.-]\d{1,2}[/.-](?:19|20)?\d{2}\b"),
     re.compile(r"\b\d{1,2}/(?:19|20)\d{2}\b"),
     re.compile(r"\b(?:19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|\d{2})\b"),

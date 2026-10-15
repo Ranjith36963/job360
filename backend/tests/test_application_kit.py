@@ -1596,7 +1596,9 @@ async def test_the_kit_documents_carry_the_saved_checks(authenticated_async_cont
         _seed_profile(fixture_user_id)
         app_id = await _bring(client)
         cv = await _save(client, app_id, "cv", "Here is the revised CV\n" + TINY)
-        letter = await _save(client, app_id, "cover_letter", LETTER_TEXT)
+        # A letter with its letterhead and date (letter_no_header stays quiet) carries no checks.
+        headed = "Jane Doe\n07700 900123 | jane@example.com | London\n15 October 2026\n\n" + LETTER_TEXT
+        letter = await _save(client, app_id, "cover_letter", headed)
         assert cv["checks"], "the save found something to check"
         kit = (await _kit(client, app_id)).json()
         assert kit["cv"]["checks"] == cv["checks"]

@@ -166,3 +166,12 @@ async def test_save_artifact_reply_carries_checks(authenticated_async_context):
         assert "leaked_chatter" in codes and "pdf_space" in codes
         r2 = await client.post(f"/api/applications/{app_id}/artifacts", json={"kind": "answers", "text": text})
         assert r2.status_code == 201 and r2.json()["checks"] == []
+
+
+def test_a_letter_date_is_never_an_unsupported_number():
+    """A cover letter's letterhead date ("15 October 2026", "October 15th, 2026") is a date,
+    not a claim; a real number in the body still counts."""
+    from src.services.applications.cv_checks import number_tokens
+
+    assert number_tokens("15 October 2026\nOctober 15th, 2026") == []
+    assert ("15", "15") in number_tokens("I shipped it in 15 weeks")
