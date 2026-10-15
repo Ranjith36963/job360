@@ -1723,8 +1723,9 @@ def build_server(version: str = "") -> MCPServer:
         below-the-fold sections and optional ones (`required` false). `questions`
         = [{question, required (default true), key}]: `key` is the kit key you
         will answer with (contact.email, logistics.notice_period, salary.GB ...)
-        or the saved approved_text question; leave it out and Job360 matches the
-        exact wording (case and punctuation ignored) against approved answers.
+        or a saved answer's `topic`; leave it out and Job360 matches the wording
+        (case and punctuation ignored) or an alias against approved answers
+        (this company's own first; two that disagree = `missing`, ask).
         Job360 never reads the form or judges a question. You get `answered`
         (question, key, value, source, matched_by; confirmed false = inferred,
         confirm with the user), `missing` (question, required, why) and `counts`.

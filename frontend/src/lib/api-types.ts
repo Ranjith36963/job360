@@ -4110,7 +4110,7 @@ export interface components {
              * Matched By
              * @enum {string}
              */
-            matched_by: "key" | "wording";
+            matched_by: "key" | "wording" | "topic";
             /** Question */
             question: string;
             /** Required */

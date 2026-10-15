@@ -3779,7 +3779,8 @@
           "matched_by": {
             "enum": [
               "key",
-              "wording"
+              "wording",
+              "topic"
             ],
             "title": "Matched By",
             "type": "string"
