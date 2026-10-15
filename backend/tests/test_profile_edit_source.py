@@ -356,3 +356,13 @@ def test_confirmed_items_carry_confirmed_at_and_inferred_do_not():
     assert "confirmed_at" not in email
     # No stored time (profile-sourced item): nothing to say.
     assert all("confirmed_at" not in i for i in answers["equality"])
+
+
+def test_salary_is_sensitive_like_the_reference():
+    """neonwatty answer-memory SKILL.md L131: salary is sensitive - ask before every use."""
+    from src.services.applications import kit  # noqa: PLC0415
+    assert kit._is_sensitive("salary", "salary.IN") is True
+    assert kit._is_sensitive("logistics", "logistics.current_salary") is True
+    assert kit._is_sensitive("logistics", "logistics.notice_period") is False
+    text = " ".join(kit.KIT_INSTRUCTIONS)
+    assert "may I use it on this form, and may I remember it for later" in text

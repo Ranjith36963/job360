@@ -63,8 +63,9 @@ KIT_INSTRUCTIONS: tuple[str, ...] = (
     "Use only the answers in this kit. Anything in `missing`: ask the user ONCE, in one message. Never guess.",
     "An answer with state 'inferred' was worked out by an assistant - confirm it with the user once, "
     "then save it again with source user_said. 'confirmed' answers are the user's: use them. "
-    "A 'sensitive' answer (equality, sanctions, visa / right-to-work status) is shown to the user and "
-    "confirmed on THIS form before it is used; never fill it silently.",
+    "A 'sensitive' answer (salary, equality, sanctions, visa / right-to-work status) is shown to the user "
+    "and confirmed on THIS form before it is used; never fill it silently. Ask two things separately: "
+    "may I use it on this form, and may I remember it for later.",
     "Upload file: desktop or Claude Code - download `file.url` to a local file and upload that. "
     "Chat app - ask the user to attach the PDF once for this job. Otherwise paste `text` if the form allows, "
     "else the user uploads it by hand. An expired link: call the kit again.",
@@ -816,12 +817,16 @@ _SENSITIVE_RTW_SUFFIXES = (".sanctions_country_citizen", ".needs_sponsorship", "
 
 
 def _is_sensitive(block: str, key: str) -> bool:
-    """Equality, sanctions and visa status: shown to the user and confirmed on each form before use.
+    """Salary, equality, sanctions and visa status: shown to the user and confirmed on each form before use.
 
-    Mirrors the job-apply-plugin reference (scripts/job-apply-store.py ANSWER_STATES, answer-memory
-    SKILL.md L125-150): a sensitive answer is re-confirmed before EVERY use, even when remembered.
+    Mirrors neonwatty/job-apply-plugin skills/answer-memory/SKILL.md L126-133 (the state table:
+    "sensitive - Salary, authorization, visa, demographic, disability ... Never; ask before every use")
+    and L142-149 (two separate decisions: use on this form vs remember); states from
+    scripts/job-apply-store.py L26.
     """
-    return block == "equality" or (block == "right_to_work" and key.endswith(_SENSITIVE_RTW_SUFFIXES))
+    if block in ("equality", "salary") or key == "logistics.current_salary":
+        return True
+    return block == "right_to_work" and key.endswith(_SENSITIVE_RTW_SUFFIXES)
 
 
 def answers_summary(answers: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
