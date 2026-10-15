@@ -464,6 +464,8 @@ class ApplicationReceiptOut(BaseModel):
     confirmation: str
     cv_artifact_id: Optional[int]
     cover_letter_artifact_id: Optional[int]
+    # True iff cover_letter_artifact_id is set; False = "Cover letter: not sent".
+    cover_letter_sent: bool = False
     note: str
     # What was actually sent (R8) — stored since 0037, readable since 2026-09-11.
     answers: list[ReceiptAnswerOut] = Field(default_factory=list)
@@ -561,6 +563,12 @@ class AskOut(BaseModel):
     # True = the user answered on Job360; False = the assistant recorded
     # the user's chat answer.
     answered_by_user: bool
+    # The user's exact chat words when the assistant relayed them ("" = none).
+    user_words: str = ""
+    # True = an assistant (not the web) recorded an answer AND the user's words.
+    relayed_from_chat: bool = False
+    # "you" = web answer or relayed chat answer; "assistant" = it answered alone.
+    said_by: Literal["you", "assistant"] = "assistant"
     withdrawn_at: Optional[str]
     status: str
 
@@ -747,6 +755,8 @@ class RecordApplicationReceiptResponse(BaseModel):
     cv_artifact_id: Optional[int]
     cv_version_no: Optional[int]
     cover_letter_artifact_id: Optional[int]
+    # False when no letter was named: the receipt says no cover letter was sent.
+    cover_letter_sent: bool = False
     channel: str
     # What the caller sent, verbatim (trimmed); '' when none.
     channel_given: str = ""
