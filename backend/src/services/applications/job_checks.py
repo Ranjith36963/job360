@@ -33,7 +33,10 @@ _MONEY_RE = re.compile(
     re.IGNORECASE,
 )
 # INR amounts that are pay by nature (a salary unit, not a company figure).
-_PAY_UNIT_RE = re.compile(r"(?:\d[\d,.]{0,12}\s?(?:lpa|lakhs?)\b|₹\s?\d[\d,.]{0,12}\s?(?:l|lac|lakhs?)\b)", re.IGNORECASE)
+_PAY_UNIT_RE = re.compile(
+    r"(?:\d[\d,.]{0,12}\s?(?:lpa|lakhs?)\b|₹\s?\d[\d,.]{0,12}\s?(?:l|lac|lakhs?)\b)",
+    re.IGNORECASE,
+)
 # Pay-context words: a money amount counts as pay only with one of these nearby.
 _PAY_WORD_RE = re.compile(
     r"(?:\b(?:salary|salaries|pay|paid|compensation|ctc|lpa|lakhs?|annum|p\.a|annual|annually|yearly"
