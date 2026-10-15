@@ -1174,7 +1174,7 @@ class RunLog:
             row = {**self.snapshot(), "status": status, **extra}
             line = json.dumps(row, ensure_ascii=False) + "\n"
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+            fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
             try:
                 os.write(fd, line.encode("utf-8"))
             finally:
