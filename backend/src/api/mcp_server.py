@@ -69,6 +69,16 @@ CATEGORY_LINE = (
 DAILY_CHECK_HINT = (
     "Turn on the daily check so the confirmation email gets linked (get_recipe('daily'))"
 )
+# Hand-bumped integer, like career-ops' VERSION file (update-system.mjs:1170-1172): +1 whenever a
+# tool or a parameter is added, removed or renamed. TOOLS_REV_FOR_HASH is the `tools_version` hash it
+# stood for; tests/test_mcp_tools_rev.py fails if the served hash moved without both being updated.
+# The integer itself has NO career-ops counterpart (it uses a semver string) - own design.
+TOOLS_REV = 1
+TOOLS_REV_FOR_HASH = "8700f4e1f0e0"
+TOOLS_LINE = (
+    f"TOOLS: tools_version={TOOLS_REV_FOR_HASH} rev={TOOLS_REV}; a different one in doctor or "
+    "get_recipe = stale tool list: reconnect."
+)
 INSTRUCTIONS = "\n".join(
     (
         CATEGORY_LINE,
@@ -84,8 +94,8 @@ INSTRUCTIONS = "\n".join(
         "verdict, every version, every event and the receipt.",
         "RUN 360: when the user types \"run 360\" (or \"/run 360\"), call get_recipe(\"setup\") and follow it "
         "(it resumes at the first unfinished round). \"run 360 daily\" = get_recipe(\"daily\"); \"run 360 hunt\" = "
-        "get_recipe(\"hunt\"); \"run 360 apply <link>\" = get_recipe(\"apply\") for that link. Other recipes: "
-        "research, reach, prep, review. get_recipe() lists them all.",
+        "get_recipe(\"hunt\"); \"run 360 apply <link>\" = get_recipe(\"apply\") for that link. "
+        "get_recipe() lists the rest.",
         "RULES: before your first apply, outreach, inbox or profile write in a conversation, read "
         "get_recipe(\"rules\") — settings, the apply kit, Gmail modes, outreach, events and profile field "
         "shapes. A recipe is numbered steps: print its checklist, tick each step, stop where it says STOP.",
@@ -94,6 +104,7 @@ INSTRUCTIONS = "\n".join(
         "write structured fields with update_profile.",
         "NEEDS YOU: when you are stuck or would have to guess, call ask_user (and ask in chat); an answered "
         "ask is the user's word.",
+        TOOLS_LINE,
     )
 )
 
@@ -1605,7 +1616,7 @@ def build_server(version: str = "") -> MCPServer:
         return resp
 
     @mcp.tool()
-    async def doctor(client_tools_version: str = "") -> dict[str, Any]:
+    async def doctor(client_tools_version: str = "", client_tools_rev: Optional[int] = None) -> dict[str, Any]:
         """Call first when something seems wrong or at the start of a run; read
         `next_step` (verify_email | upload_cv | setup:<round> | answer_asks |
         confirm_settings | ok). Also: how you are signed in (`auth`), what the
@@ -1616,11 +1627,12 @@ def build_server(version: str = "") -> MCPServer:
         Tool list check: `tools` = every tool and its parameters as served now,
         `tools_version` = their short hash. Pass the `tools_version` you saw last
         time as `client_tools_version`: `tools_stale` true = your client's tool
-        list is old (follow `stale_hint`: tell the user to reconnect Job360). Call
+        list is old (follow `stale_hint`: tell the user to reconnect Job360). `tools_rev`
+        is the same as a plain integer; pass the one you saw as `client_tools_rev`. Call
         doctor too when a tool ignores or refuses an argument you expected."""
         try:
             async with _request_db() as db:
-                resp = await doctor_route.doctor(db, _user(), client_tools_version)
+                resp = await doctor_route.doctor(db, _user(), client_tools_version, client_tools_rev)
         except HTTPException as exc:
             _audit("doctor", "error", http_status=exc.status_code)
             raise _tool_error(exc) from None
@@ -1704,12 +1716,13 @@ def build_server(version: str = "") -> MCPServer:
     async def get_recipe(name: str = "") -> dict[str, Any]:
         """The run 360 playbooks — numbered steps for YOU to follow. No name = the list; a name = its full text. "run
         360" = setup (resumes where the user stopped); "run 360 daily" = daily; "run 360 hunt" = hunt; "run 360
-        apply <link>" = apply. "rules" holds the full rules every recipe relies on."""
+        apply <link>" = apply. "rules" holds the full rules every recipe relies on. Every result carries
+        `tools_version` + `tools_rev`: a change from the last you saw = reconnect Job360."""
         try:
             if not name:
                 rows = await recipes_route.list_recipes(_user())
                 _audit("get_recipe", "ok", recipe="list", actor=actor_for(_user()))
-                return {"recipes": [r.model_dump() for r in rows]}
+                return {"recipes": [r.model_dump() for r in rows], **tools_stamp()}
             recipe = await recipes_route.get_recipe(name, _user())
         except HTTPException as exc:
             _audit("get_recipe", "error", http_status=exc.status_code, actor=actor_for(_user()))
@@ -1847,7 +1860,17 @@ def served_tool_parameters() -> dict[str, list[str]]:
     return {name: list(params) for name, params in _SERVED_TOOL_PARAMS.items()}
 
 
-def tools_report(client_tools_version: str = "") -> dict[str, Any]:
+def tools_stamp() -> dict[str, Any]:
+    """``{"tools_version", "tools_rev"}`` - the two values stamped on every ``get_recipe`` result.
+
+    NOT IN REFERENCE: career-ops tells the agent its version once, at session start (AGENTS.md:76-78
+    ``node update-system.mjs check``); stamping it on every recipe read is Job360's own extension,
+    because a cached client never sees INSTRUCTIONS again.
+    """
+    return {"tools_version": tools_version(served_tool_parameters()), "tools_rev": TOOLS_REV}
+
+
+def tools_report(client_tools_version: str = "", client_tools_rev: Optional[int] = None) -> dict[str, Any]:
     """The doctor's tool-list block: ``tools_version``, ``tools``, ``tools_stale`` and ``stale_hint``.
 
     ``tools_stale`` is null when the caller passed no version, else whether the
@@ -1856,10 +1879,14 @@ def tools_report(client_tools_version: str = "") -> dict[str, Any]:
     tools = served_tool_parameters()
     version = tools_version(tools)
     given = (client_tools_version or "").strip()
+    stale: Optional[bool] = (given.lower() != version) if given else None
+    if client_tools_rev is not None:
+        stale = bool(stale) or client_tools_rev != TOOLS_REV
     return {
         "tools_version": version,
+        "tools_rev": TOOLS_REV,
         "tools": tools,
-        "tools_stale": (given.lower() != version) if given else None,
+        "tools_stale": stale,
         "stale_hint": TOOLS_STALE_HINT,
     }
 
@@ -2014,7 +2041,10 @@ class _AnnounceToolListChanged:
         await ctx.session.send_notification(ToolListChangedNotification(), related_request_id=ctx.request_id)
         logger.info(
             "mcp_tools_list_changed_sent",
-            extra={"event": "mcp_tools_list_changed_sent", "user_id": user.id, "method": ctx.method},
+            extra={
+                "event": "mcp_tools_list_changed_sent", "user_id": user.id, "method": ctx.method,
+                "tools_rev": TOOLS_REV,
+            },
         )
 
 

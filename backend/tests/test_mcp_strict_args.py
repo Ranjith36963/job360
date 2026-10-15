@@ -197,7 +197,7 @@ async def test_doctor_reports_the_served_tools_and_staleness(authenticated_async
     assert re.fullmatch(r"[0-9a-f]{12}", version)
     assert second["tools_version"] == version
     assert "apply_url" in first["tools"]["update_job"]
-    assert first["tools"]["doctor"] == ["client_tools_version"]
+    assert first["tools"]["doctor"] == ["client_tools_version", "client_tools_rev"]
     # The map is exactly what tools/list advertises, and the version is its hash.
     assert first["tools"] == served
     assert version == tools_version(served)

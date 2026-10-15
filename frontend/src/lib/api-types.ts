@@ -3751,6 +3751,11 @@ export interface components {
             tools: {
                 [key: string]: string[];
             };
+            /**
+             * Tools Rev
+             * @default 0
+             */
+            tools_rev: number;
             /** Tools Stale */
             tools_stale?: boolean | null;
             /**
@@ -5283,6 +5288,16 @@ export interface components {
             text: string;
             /** Title */
             title: string;
+            /**
+             * Tools Rev
+             * @default 0
+             */
+            tools_rev: number;
+            /**
+             * Tools Version
+             * @default
+             */
+            tools_version: string;
         };
         /** RecipeSummary */
         RecipeSummary: {
@@ -8614,6 +8629,7 @@ export interface operations {
         parameters: {
             query?: {
                 client_tools_version?: string;
+                client_tools_rev?: number | null;
             };
             header?: {
                 authorization?: string | null;

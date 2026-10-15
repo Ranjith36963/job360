@@ -462,6 +462,7 @@ class DoctorResponse(BaseModel):
     # The MCP tool list as served now: {tool: [parameter names]} and its 12-hex
     # hash. `tools_stale` is null unless the caller passed `client_tools_version`.
     tools_version: str = ""
+    tools_rev: int = 0
     tools: dict[str, list[str]] = {}
     tools_stale: Optional[bool] = None
     stale_hint: str = ""
