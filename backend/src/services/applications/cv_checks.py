@@ -460,7 +460,7 @@ _LETTER_DATE_RES = (
 )
 _LETTER_HEAD_LINES = 8
 _LETTER_HEAD_CHARS = 600
-_SALUTATION_RE = re.compile(r"\s*(?:dear|to whom|hello|hi)\b", re.I)
+_SALUTATION_RE = re.compile(r"(?:dear|to whom|hello|hi)\b", re.I)
 
 
 def letter_no_header(text: str, profile: Any = None) -> Optional[dict[str, str]]:
@@ -470,7 +470,7 @@ def letter_no_header(text: str, profile: Any = None) -> Optional[dict[str, str]]
     phone number; date = a month-name date or a numeric date. Warn only."""
     lines = [ln for ln in text.splitlines() if ln.strip()][:_LETTER_HEAD_LINES]
     # The letterhead sits ABOVE the salutation; a date or number in the body is not one.
-    cut = next((i for i, ln in enumerate(lines) if _SALUTATION_RE.match(ln)), None)
+    cut = next((i for i, ln in enumerate(lines) if _SALUTATION_RE.match(ln.lstrip()[:20])), None)
     # Bounded: a letterhead is short, and the regexes below never see a long run.
     head = "\n".join(lines[:cut] if cut is not None else lines[:4])[:_LETTER_HEAD_CHARS]
     contact = getattr(getattr(profile, "user_info", None), "contact", None)
