@@ -952,6 +952,16 @@
             "title": "Job Url",
             "type": "string"
           },
+          "pay_advertised": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayAdvertisedOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "remote": {
             "anyOf": [
               {
@@ -5951,6 +5961,68 @@
           "email"
         ],
         "title": "PasswordResetRequest",
+        "type": "object"
+      },
+      "PayAdvertisedOut": {
+        "description": "Pay exactly as the ad states it (job_checks.pay_facts). Never annualised:\n``period`` is null when the ad does not say; ``currency`` is \"UNKNOWN\" when\nno ISO code / unambiguous symbol sits beside the amount.",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "equity": {
+            "default": false,
+            "title": "Equity",
+            "type": "boolean"
+          },
+          "evidence": {
+            "title": "Evidence",
+            "type": "string"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          }
+        },
+        "required": [
+          "amount",
+          "evidence",
+          "currency"
+        ],
+        "title": "PayAdvertisedOut",
         "type": "object"
       },
       "PersonFullOut": {

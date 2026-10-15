@@ -1873,6 +1873,7 @@ async def get_application_detail(
             # Owner decision 2026-10-04 — country / remote / found_on, the
             # user's own facts about the job (None when unset, rule #29).
             **_job_facts_for(app_row),
+            "pay_advertised": _pay_advertised_for(app_row),
         },
         "fit": fit,
         "visa": _visa_for(app_row, await _work_countries(db, user_id)),
@@ -1906,6 +1907,17 @@ async def get_application_detail(
     )
     detail["hold"], detail["stage"] = (held[0], held[1]) if held else (None, "")
     return detail
+
+
+def _pay_advertised_for(app_row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """Pay as the stored ad states it (job_checks.pay_facts), or None. Computed on
+    read: nothing is stored, nothing is annualised."""
+    from src.services.applications.job_checks import pay_facts  # noqa: PLC0415
+
+    facts = pay_facts(str(app_row.get("job_description_snapshot") or ""))
+    if not facts:
+        return None
+    return {k: facts[k] for k in ("amount", "evidence", "period", "currency", "min", "max", "equity")}
 
 
 async def _count(db: JobDatabase, table: str, col: str, value: Any) -> int:

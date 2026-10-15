@@ -131,12 +131,12 @@ def test_ad_age_and_repost():
 
 def test_pay_and_sponsorship_presence():
     quiet = _run(desc="We build agents. Python.")
-    assert quiet["pay_stated"]["value"] is False and quiet["sponsorship_mentioned"]["value"] is False
+    assert quiet["pay_advertised"]["value"] is False and quiet["sponsorship_mentioned"]["value"] is False
     for text in ("Salary £60,000 a year", "Salary $120k", "Pay: €70 000 a year", "Base EUR 50000 - 70000",
                  "Compensation 45000 GBP", "90k per year"):
-        assert _run(desc=text)["pay_stated"]["value"] is True, text
+        assert _run(desc=text)["pay_advertised"]["value"] is True, text
     for text in ("Version 3 of 5 users", "Team of 10 people"):
-        assert _run(desc=text)["pay_stated"]["value"] is False, text
+        assert _run(desc=text)["pay_advertised"]["value"] is False, text
     for text in ("We offer visa sponsorship", "No Sponsors accepted", "Visa support available"):
         assert _run(desc=text)["sponsorship_mentioned"]["value"] is True, text
     assert _run(desc="Visa-free travel to the Advisary")["sponsorship_mentioned"]["value"] is True  # word "Visa"
@@ -147,22 +147,22 @@ _RAZORPAY = "Razorpay processes $180+ billion in transactions."
 
 
 def test_pay_needs_pay_context_and_shows_evidence():
-    no = _run(desc=_RAZORPAY)["pay_stated"]
+    no = _run(desc=_RAZORPAY)["pay_advertised"]
     assert no["value"] is False and no["ok"] is False and no["evidence"] == ""
-    yes = _run(desc="Salary: £45,000 - £55,000 per year")["pay_stated"]
+    yes = _run(desc="Salary: £45,000 - £55,000 per year")["pay_advertised"]
     assert yes["value"] is True and "£45,000 - £55,000 per year" in yes["evidence"]
-    assert yes["reason"] == f'The ad states pay: "{yes["evidence"]}"'
-    assert _run(desc="From INR 1,000,000 per year")["pay_stated"]["value"] is True
-    lpa = _run(desc="Role pays ₹12 LPA")["pay_stated"]
+    assert yes["reason"].startswith(f'The ad advertises pay: "{yes["evidence"]}"')
+    assert _run(desc="From INR 1,000,000 per year")["pay_advertised"]["value"] is True
+    lpa = _run(desc="Role pays ₹12 LPA")["pay_advertised"]
     assert lpa["value"] is True and "12 LPA" in lpa["evidence"]
-    assert _run(desc="We offer 15 lakh")["pay_stated"]["value"] is True  # lakh is a pay unit by itself
-    assert _run(desc="CTC ₹10L")["pay_stated"]["value"] is True
-    assert _run(desc="We raised $40M Series B")["pay_stated"]["value"] is False
-    assert _run(desc="Annual revenue $50M, salary is competitive.")["pay_stated"]["value"] is False
-    mixed = _run(desc=_RAZORPAY + " We raised $40M Series B.\nSalary: $120,000 - $140,000 base.\nBenefits too.")["pay_stated"]
+    assert _run(desc="We offer 15 lakh")["pay_advertised"]["value"] is True  # lakh is a pay unit by itself
+    assert _run(desc="CTC ₹10L")["pay_advertised"]["value"] is True
+    assert _run(desc="We raised $40M Series B")["pay_advertised"]["value"] is False
+    assert _run(desc="Annual revenue $50M, salary is competitive.")["pay_advertised"]["value"] is False
+    mixed = _run(desc=_RAZORPAY + " We raised $40M Series B.\nSalary: $120,000 - $140,000 base.\nBenefits too.")["pay_advertised"]
     assert mixed["value"] is True and mixed["evidence"] == "Salary: $120,000 - $140,000 base"
     long_line = "x " * 300 + "Salary $90k per year " + "y " * 300
-    ev = _run(desc=long_line)["pay_stated"]["evidence"]
+    ev = _run(desc=long_line)["pay_advertised"]["evidence"]
     assert len(ev) <= 160 and "$90k" in ev
 
 
@@ -217,11 +217,18 @@ async def test_bring_returns_checks_and_stores_the_two_dates(authenticated_async
         assert checks["description_completeness"]["value"] == "title_only"
         assert checks["apply_host"]["value"] == "official_ats"
         assert checks["reposted"]["value"] is True
-        assert checks["pay_stated"]["value"] is True and checks["sponsorship_mentioned"]["value"] is True
+        assert checks["pay_advertised"]["value"] is True and checks["sponsorship_mentioned"]["value"] is True
 
         detail = await client.get(f"/api/applications/{body['application_id']}")
         job = detail.json()["job"]
         assert (job["ad_posted_at"], job["employer_published_at"]) == ("2026-10-01", "2026-07-01")
+        pay = job["pay_advertised"]  # the card shows this "as advertised"
+        assert (pay["amount"], pay["currency"], pay["min"], pay["period"]) == ("70000 EUR", "EUR", 70000, None)
+        assert pay["evidence"].startswith("Train and ship models") or "70000 EUR" in pay["evidence"]
+        qr = await _bring(client, {**_AD, "title": "Data Engineer", "apply_url": "https://boards.greenhouse.io/quiet/jobs/4509999", "description": "Build agents."})
+        assert qr.status_code == 200, qr.text
+        quiet = qr.json()
+        assert (await client.get(f"/api/applications/{quiet['application_id']}")).json()["job"]["pay_advertised"] is None
 
         # a re-bring that names no date never clears them
         again = (await _bring(client)).json()
@@ -390,3 +397,89 @@ async def test_list_and_detail_and_export_return_the_same_two_ad_dates(authentic
         exported = (await client.get("/api/applications/export")).json()
         (blob,) = exported["applications"]
         assert (blob["ad_posted_at"], blob["employer_published_at"]) == want
+
+
+# ── pay facts: period, currency, amount, min/max next to the evidence ───────
+# Mirrors career-ops salary-gap.mjs: compensationPeriod :239-245, currency :312-317,
+# parseAmount :204-235; never annualised (:593).
+
+
+def _pay(desc: str) -> dict[str, Any]:
+    return _run(desc="About us. " + desc + " Apply now.")["pay_advertised"]
+
+
+def test_pay_period_from_ad():
+    assert _pay("Salary £45,000 per year")["period"] == "annual"
+    assert _pay("Pay £25 per hour")["period"] == "hourly"
+    assert _pay("Pay $4,000/month")["period"] == "monthly"
+    assert _pay("Role pays 12 LPA")["period"] == "annual"
+    assert _pay("Salary £45,000")["period"] is None  # unknown stays None, never guessed
+    # the period beside the amount wins over another period word in the sentence
+    assert _pay("Pay £25 per hour, and a yearly bonus")["period"] == "hourly"
+
+
+def test_pay_currency_value():
+    assert _pay("Salary £45,000")["currency"] == "GBP"
+    assert _pay("Salary EUR 50000")["currency"] == "EUR"
+    assert _pay("Salary 45000 GBP")["currency"] == "GBP"
+    assert _pay("Pay ₹12 LPA")["currency"] == "INR"
+    assert _pay("Salary $90k per year")["currency"] == "UNKNOWN"  # "$" is never mapped (reference :217)
+    assert _pay("Salary $90k per year USD")["currency"] == "USD"
+    assert _pay("Salary 45000 gbp")["currency"] == "UNKNOWN"  # ISO token is case-sensitive (:312)
+
+
+def test_pay_min_max_never_annualised():
+    r = _pay("Salary: £45,000 - £55,000 per year")
+    assert (r["min"], r["max"], r["period"]) == (45000, 55000, "annual")
+    h = _pay("Pay £25 per hour")
+    assert (h["min"], h["max"], h["period"]) == (25, 25, "hourly")  # not x 2080
+    k = _pay("Pay $240–280k + 1.0%")
+    assert (k["min"], k["max"], k["equity"]) == (240000, 280000, True)
+    assert _pay("Pay: €70 000 a year")["min"] == 70000
+    lpa = _pay("Role pays ₹12 LPA")
+    assert lpa["min"] is None and lpa["max"] is None  # lakh is never scaled
+    assert _pay("Salary £45,000")["equity"] is False
+
+
+def test_pay_amount_span_slices_to_amount():
+    desc = "  Intro\n\n\n   text here.   Salary:   £45,000 -   £55,000   per   year.  More text."
+    r = _run(desc=desc)["pay_advertised"]
+    s, e = r["amount_span"]
+    assert desc[s:e] == r["amount"] and r["amount"].startswith("£45,000") and r["amount"].endswith("per   year")
+    assert "  " not in r["evidence"]  # evidence is whitespace-collapsed, the span is in the ORIGINAL text
+    unit = "Compensation talk. We offer 15 lakh to the right person."
+    u = _run(desc=unit)["pay_advertised"]
+    assert unit[u["amount_span"][0]:u["amount_span"][1]] == u["amount"] == "15 lakh"
+
+
+def test_pay_word_must_be_whole_word():
+    for text in ("paypal $50 fee", "We do payments of $5M", "see note $20", "a database costs $20"):
+        assert _pay(text)["value"] is False, text
+    assert _pay("Pay $50k")["value"] is True
+
+
+def test_pay_advertised_code_name_and_shape():
+    checks = _run(desc="Salary £45,000 per year")
+    assert "pay_advertised" in checks and "pay_stated" not in checks
+    yes = checks["pay_advertised"]
+    assert yes["amount"] == "£45,000 per year" and yes["amount_span"] == [7, 23] and yes["currency"] == "GBP"
+    assert yes["period"] == "annual" and yes["min"] == 45000 and yes["equity"] is False
+    no = _run(desc="We build agents. Python.")["pay_advertised"]
+    assert no["evidence"] == "" and no["period"] is None and no["currency"] is None
+    assert no["amount"] is None and no["amount_span"] is None and no["min"] is None
+
+
+def test_pay_advertised_reason_mentions_period():
+    r = _pay("Salary £45,000 per year")["reason"]
+    assert "period: annual" in r and "currency: GBP" in r
+    r2 = _pay("Salary $45,000")["reason"]
+    assert "period: not stated" in r2 and "currency: not stated" in r2
+
+
+def test_pay_facts_stay_linear_with_many_amounts():
+    import time
+    blob = "Revenue was $5 billion. " * 8000 + "Salary $90k per year. "
+    t0 = time.perf_counter()
+    _run(desc="£1 " * 66_000)
+    _run(desc=blob)
+    assert time.perf_counter() - t0 < 1.0
