@@ -44,7 +44,7 @@ export function contactNameOf(e: { payload?: unknown }): string | null {
 
 /** The one-line title for an event: the label, made specific when the payload
  * allows. Never claims more than the payload carries. */
-export function eventTitle(e: { event_type: string; payload?: unknown }): string {
+export function eventTitle(e: { event_type: string; payload?: unknown; recorded_by?: string }): string {
   if (e.event_type === "artifact_saved") return artifactTitle(e) ?? eventLabel(e);
   if (e.event_type === "outreach_sent" || e.event_type === "outreach_replied") {
     const name = contactNameOf(e);

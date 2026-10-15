@@ -85,6 +85,31 @@ delete a lesson; if one stops being true, say so on its line and why.
   when the code no longer guesses (weak spot #2 PR); until then, check the
   receipt after recording it.
 
+## Why mistakes repeated (owner, 2026-10-15)
+
+- "Borrowed from <competitor>" was written into PRs while the workers never
+  opened that competitor's code. The fixes were our own guesses with a
+  competitor's name on them, and needed a second round. **Rule:** a worker
+  implementing a borrowed technique must first open the reference source or
+  REA capture (career-ops: /var/tmp/co-src; Tsenta: /var/tmp/rea-comp/tsenta;
+  others: clone them), cite file:line in the PR, and mirror the mechanism.
+- Fixes were "proven" by unit tests, then a real application broke the same
+  area in a new way. **Rule:** a weak spot is closed only after a real
+  lifecycle run on production exercises it.
+- Known traps were not in the workers' prompts, so each worker rediscovered
+  them. **Rule:** every worker prompt starts with "read session-lessons".
+- 2026-10-15: PR #840 failed CI on one line over 120 chars (ruff E501).
+  **Rule:** run `cd backend && python -m ruff check .` before every push.
+- 2026-10-15: every PR that added a test file bumped the same count in
+  docs/GENERATED.md, so each later PR went stale after a merge. **Rule:**
+  before merging a queued PR, merge origin/main into it and run
+  `python3 scripts/gen_doc_blocks.py --write`.
+
+- 2026-10-15: a one-line `git merge ...; git add -A; git commit` kept going
+  after the merge CONFLICTED and pushed a commit full of conflict markers
+  (caught and fixed one commit later). **Rule:** never chain past a merge.
+  Check its exit code (or `set -e`), resolve, run the tests, then commit.
+
 ## Tooling
 
 - `scripts/gen-api-types.sh` calls plain `python`. **Rule:** run it with the
