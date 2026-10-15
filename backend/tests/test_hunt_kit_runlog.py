@@ -239,3 +239,46 @@ def test_release_never_removes_someone_elses_lock(tmp_path: Path) -> None:
     owner.write_text(json.dumps({"pid": os.getpid(), "token": "someone-else"}))
     mine.release()
     assert Path(mine.dir).exists()
+
+
+def test_two_reclaimers_race_on_a_dead_lock_and_only_one_wins(tmp_path: Path) -> None:
+    import threading
+
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    stream = str(tmp_path / "s")
+    lock_dir = Path(stream + ".lock")
+    lock_dir.mkdir()
+    (lock_dir / "owner.json").write_text(json.dumps({"pid": proc.pid, "token": "dead", "started_at": "t"}))
+    locks = [hk.RunLock(stream) for _ in range(8)]
+    barrier = threading.Barrier(len(locks))
+    results: list[str] = [None] * len(locks)  # type: ignore[list-item]
+
+    def go(i: int) -> None:
+        barrier.wait()
+        results[i] = locks[i].acquire()
+
+    threads = [threading.Thread(target=go, args=(i,)) for i in range(len(locks))]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    winners = [i for i, r in enumerate(results) if r == ""]
+    assert len(winners) == 1  # the others see a live holder; nobody deleted the winner's fresh lock
+    assert json.loads((lock_dir / "owner.json").read_text())["token"] == locks[winners[0]].token
+    assert not Path(stream + ".lock.recover").exists()  # guard always cleaned up
+
+
+def test_an_abandoned_recover_guard_does_not_block_reclaim_forever(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    stream = str(tmp_path / "s")
+    Path(stream + ".lock").mkdir()
+    (Path(stream + ".lock") / "owner.json").write_text(json.dumps({"pid": proc.pid, "token": "d"}))
+    guard = Path(stream + ".lock.recover")
+    guard.mkdir()
+    old = guard.stat().st_mtime - 3600
+    os.utime(guard, (old, old))  # a guard left by a process killed mid-reclaim
+    assert hk.RunLock(stream).acquire() == ""

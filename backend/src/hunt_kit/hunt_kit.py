@@ -975,6 +975,7 @@ def _pid_alive(pid: int) -> bool:
 
 
 OWNERLESS_GRACE_S = 1.0
+RECOVER_GUARD_STALE_S = 30.0
 
 
 class RunLock:
@@ -1008,15 +1009,56 @@ class RunLock:
         except OSError:
             return True  # vanished while we looked: free
 
+    def _reclaim(self) -> bool:
+        """Remove a stale lock, serialized behind ``<lock>.recover`` (pipeline-lock.mjs:500-576).
+
+        Without the guard, two callers that both judge the same lock stale can have the second one's
+        delete remove the first one's freshly created lock, and both would then believe they hold it.
+        Only the caller that wins the guard may decide-then-delete, and it deletes only the very
+        directory it judged (same inode), never a newer lock that replaced it.
+        """
+        guard = self.dir + ".recover"
+        try:
+            os.mkdir(guard)
+        except FileExistsError:
+            # A guard normally lives for milliseconds; one left by a killed process ages out (:518-527).
+            try:
+                if time.time() - os.path.getmtime(guard) > RECOVER_GUARD_STALE_S:
+                    shutil.rmtree(guard, ignore_errors=True)
+            except OSError:
+                pass
+            return False
+        except OSError:
+            return False
+        try:
+            try:
+                judged = os.stat(self.dir)
+            except OSError:
+                return False  # vanished: do not delete on that answer (:532-546)
+            if not self._stale():
+                return False
+            try:
+                now = os.stat(self.dir)
+            except OSError:
+                return False
+            if (judged.st_ino, judged.st_dev) != (now.st_ino, now.st_dev):
+                return False  # replaced under us: leave it alone (:560-565)
+            shutil.rmtree(self.dir, ignore_errors=True)
+            return True
+        finally:
+            shutil.rmtree(guard, ignore_errors=True)
+
     def acquire(self) -> str:
         """Take the lock. Returns '' on success, otherwise a message saying who holds it."""
         os.makedirs(os.path.dirname(os.path.abspath(self.dir)), exist_ok=True)
-        for _attempt in range(2):
+        for _attempt in range(6):
             try:
                 os.mkdir(self.dir)
             except FileExistsError:
                 if self._stale():
-                    shutil.rmtree(self.dir, ignore_errors=True)
+                    if self._reclaim():
+                        continue
+                    time.sleep(0.02)  # someone else is reclaiming: back off, then compete normally
                     continue
                 owner = self._owner() or {}
                 return "another run is writing %s (pid %s, started %s)" % (
