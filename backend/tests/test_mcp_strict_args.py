@@ -230,3 +230,12 @@ def test_recipes_tell_the_assistant_what_a_refused_argument_means():
     recipes = Path(__file__).resolve().parents[1] / "src" / "recipes"
     for name in ("setup.md", "rules.md"):
         assert line in (recipes / name).read_text(encoding="utf-8"), name
+
+
+def test_stale_hint_is_client_specific():
+    from src.api.mcp_server import TOOLS_STALE_HINT, stale_hint_for
+
+    assert stale_hint_for("") == TOOLS_STALE_HINT
+    assert stale_hint_for("cursor") == TOOLS_STALE_HINT
+    assert "quit it fully" in stale_hint_for("claude-ai")
+    assert stale_hint_for("claude-ai").startswith(TOOLS_STALE_HINT)

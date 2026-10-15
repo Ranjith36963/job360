@@ -1911,6 +1911,19 @@ TOOLS_STALE_HINT = (
 )
 
 
+# Client-specific reconnect step. Reference: Gsync/jobsync README (/var/tmp/rea-comp/gh/Gsync_jobsync.md:184)
+# "Save and fully restart Claude Desktop (quit, not just close the window)". Other clients: NOT IN
+# REFERENCE, so they keep the generic hint above.
+_CLAUDE_DESKTOP_HINT = " In Claude Desktop, quit it fully (not just close the window) and reopen it."
+_current_client_name: ContextVar[str] = ContextVar("mcp_client_name", default="")
+
+
+def stale_hint_for(client_name: str) -> str:
+    """``TOOLS_STALE_HINT`` plus the reconnect step for the named MCP client, when one is known."""
+    name = (client_name or "").strip().lower()
+    return TOOLS_STALE_HINT + (_CLAUDE_DESKTOP_HINT if name.startswith("claude") else "")
+
+
 def tools_version(tool_params: Mapping[str, Any]) -> str:
     """12 hex chars of sha256 over the sorted tool names and each tool's sorted parameter names.
 
@@ -1967,7 +1980,7 @@ def tools_report(client_tools_version: str = "", client_tools_rev: Optional[int]
         "tools_rev": TOOLS_REV,
         "tools": tools,
         "tools_stale": stale,
-        "stale_hint": TOOLS_STALE_HINT,
+        "stale_hint": stale_hint_for(_current_client_name.get()),
     }
 
 
@@ -2000,6 +2013,14 @@ def _declare_tools_list_changed(result: HandlerResult) -> HandlerResult:
     return result
 
 
+def _client_name(ctx: Any) -> str:
+    """The MCP ``clientInfo.name`` when this transport still has it (a stateless mount may not), else ''."""
+    try:
+        return str(ctx.session.client_params.client_info.name or "")
+    except AttributeError:
+        return ""
+
+
 class _CaptureFirstToolCall:
     """Fire `first_tool_call` once per user, ever (owner decision, 2026-09-28).
 
@@ -2020,6 +2041,7 @@ class _CaptureFirstToolCall:
 
     async def __call__(self, ctx: ServerRequestContext[Any, Any], call_next: CallNext) -> HandlerResult:
         if ctx.method == "tools/call":
+            _current_client_name.set(_client_name(ctx))
             user = _current_user.get()
             if user is not None:
                 await self._capture_once(user.id)
