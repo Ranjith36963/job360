@@ -4331,6 +4331,8 @@ export interface components {
              * @enum {string}
              */
             source: "memory" | "profile" | "approved_text";
+            /** Topic */
+            topic?: string | null;
             /** Value */
             value: unknown;
         };

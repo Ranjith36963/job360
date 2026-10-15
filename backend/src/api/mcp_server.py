@@ -550,7 +550,7 @@ def build_server(version: str = "") -> MCPServer:
 
         HUNT: `search_brief.rows` = the ONLY places to search, each with its `counts_if` lines;
         `search_brief.gaps` = ask each once, save to the gap's `path`
-        (user_info.answers: {question: ask text, answer: Yes|No, approved: true}), then search.
+        (user_info.answers: {question: ask text, answer: Yes|No, approved: true, topic: the gap's topic}), then search.
 
         No profile yet: `profile_exists` false + `next` (ask for the CV, or update_profile).
         Other keys: job_titles, experience_level, experience_level_inferred, agent_edits, lessons, assistant_hint.
