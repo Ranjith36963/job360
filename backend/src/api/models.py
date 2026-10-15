@@ -517,7 +517,7 @@ class FormAnsweredOut(BaseModel):
     value: Any
     source: str
     confirmed: Optional[bool] = None
-    matched_by: Literal["key", "wording"]
+    matched_by: Literal["key", "wording", "topic"]
     field_type: Optional[str] = None
     over_limit: Optional[bool] = None
     needs_confirmation: Optional[bool] = None

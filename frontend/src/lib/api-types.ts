@@ -4230,7 +4230,7 @@ export interface components {
              * Matched By
              * @enum {string}
              */
-            matched_by: "key" | "wording";
+            matched_by: "key" | "wording" | "topic";
             /** Needs Confirmation */
             needs_confirmation?: boolean | null;
             /** Over Limit */

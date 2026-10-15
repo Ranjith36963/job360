@@ -625,7 +625,22 @@ def _answers(path: str, value: Any) -> list[dict[str, Any]]:
             clean = [_line(f"{where}.aliases[{j}]", x, cap) for j, x in enumerate(aliases)]
             record["aliases"] = [x for x in clean if x]
         out.append(record)
-    return out
+    return _one_per_topic(out)
+
+
+def _one_per_topic(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Upsert, not duplicate (neonwatty job-apply-store.py:475-540, put_answer updates the
+    record under its key): two records with the same ``topic`` and the same ``company`` are
+    one answer, and the LATER one in the write wins. A different company is its own record."""
+    last: dict[tuple[str, str], int] = {}
+    for i, rec in enumerate(records):
+        if rec.get("topic"):
+            last[(rec["topic"], " ".join(str(rec.get("company") or "").lower().split()))] = i
+    return [
+        rec for i, rec in enumerate(records)
+        if not rec.get("topic")
+        or last[(rec["topic"], " ".join(str(rec.get("company") or "").lower().split()))] == i
+    ]
 
 
 def validate_country_list(path: str, value: Any) -> list[str]:

@@ -1481,6 +1481,12 @@ def hold_fact(hold: Optional[dict[str, Any]]) -> Optional[tuple[str, str, str]]:
     return (str(hold["held_by"]), str(hold.get("session") or ""), str(hold["since"]))
 
 
+async def _job_company_key(db: JobDatabase, app_row: dict[str, Any]) -> str:
+    cur = await db._db.execute("SELECT normalized_company FROM jobs WHERE id = ?", (app_row.get("job_id"),))
+    job_row = await cur.fetchone()
+    return str(dict(job_row).get("normalized_company") or "") if job_row is not None else ""
+
+
 async def _application_answers(
     db: JobDatabase, user: CurrentUser, app_row: dict[str, Any]
 ) -> tuple[Any, Optional[str], dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
@@ -1492,9 +1498,7 @@ async def _application_answers(
     loaded, overlay = load_profile_with_overlay(user.id)
     profile = loaded or UserProfile()
     country = (str(app_row.get("job_country") or "").strip().upper()) or None
-    cur = await db._db.execute("SELECT normalized_company FROM jobs WHERE id = ?", (app_row.get("job_id"),))
-    job_row = await cur.fetchone()
-    job_company_key = str(dict(job_row).get("normalized_company") or "") if job_row is not None else ""
+    job_company_key = await _job_company_key(db, app_row)
     answers, missing = compute_answers(profile, overlay, country, job_company_key or None)
     return profile, country, answers, missing
 
@@ -1694,19 +1698,34 @@ def _over_limit(value: Any, limit: Any, unit: str) -> bool:
     return (len(value.split()) if unit == "words" else len(value)) > limit
 
 
-def form_check(answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]]) -> dict[str, Any]:
+def _record_item(rec: dict[str, Any]) -> dict[str, Any]:
+    return {"key": str(rec["question"]), "value": rec["answer"], "source": "approved_text"}
+
+
+def form_check(
+    answers: dict[str, list[dict[str, Any]]], questions: list[dict[str, Any]],
+    records: Any = None, company_key: Optional[str] = None,
+) -> dict[str, Any]:
     """Pure: for each form question, a saved answer from ``answers`` (the output of
     :func:`compute_answers`) or a gap. A question with a ``key`` must name an item that
     really is in the kit (an ``approved_text`` item is also matched by normalized
-    question); without a key the normalized wording is matched against the approved
-    answers only. Also reads the control facts the assistant passed: a saved value that is
+    question); else the key may be a saved ``topic``. Without a key the question is matched
+    against the approved ``records`` (``user_info.answers``) by
+    :func:`answer_match.resolve_answer`: topic, then wording or alias, the company's own answer
+    before the general one; two answers that disagree are a gap (fail closed), never a guess.
+    Also reads the control facts the assistant passed: a saved value that is
     not one of a select/radio/checkbox's ``options`` is a gap, one longer than the
     control's ``limit`` is flagged ``over_limit`` (never cut), a sensitive question is
     flagged ``needs_confirmation`` and a knock-out question is listed in ``knockouts``.
     Never logs, never writes, never guesses."""
+    from src.services.profile.answer_match import NEVER_REUSED_TOPIC_PREFIXES, resolve_answer  # noqa: PLC0415
+
     items = [i for block in answers.values() for i in block]
     by_key = {str(i["key"]): i for i in items}
-    approved = {_norm_question(i["key"]): i for i in answers.get("approved_text", [])}
+    approved = {
+        _norm_question(i["key"]): i for i in answers.get("approved_text", [])
+        if not str(i.get("topic") or "").casefold().startswith(NEVER_REUSED_TOPIC_PREFIXES)
+    }
     answered: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
     knockouts: list[dict[str, Any]] = []
@@ -1725,11 +1744,24 @@ def form_check(answers: dict[str, list[dict[str, Any]]], questions: list[dict[st
             if item is None:
                 item = approved.get(_norm_question(key)) if _norm_question(key) else None
             if item is None:
+                rec, note = resolve_answer(records, topic=key, company_key=company_key)
+                if note:
+                    why = note
+                elif rec is not None:
+                    item = _record_item(rec)
+                    matched_by = "topic"
+            if item is None and not why:
                 why = f"key '{key}' is not in this application's kit"
         else:
-            item = approved.get(_norm_question(text)) if _norm_question(text) else None
+            rec, note = resolve_answer(records, question=text, company_key=company_key)
             matched_by = "wording"
-            if item is None:
+            if note:
+                why = note
+            elif rec is not None:
+                item = _record_item(rec)
+            else:
+                item = approved.get(_norm_question(text)) if _norm_question(text) else None
+            if item is None and not why:
                 why = "no saved answer for this question"
         options = [str(o) for o in (q.get("options") or [])]
         if item is not None and ftype in _OPTION_FIELDS and options and isinstance(item["value"], str) \
@@ -1796,8 +1828,8 @@ async def check_form(
             "result": "refused",
         })
         raise SpineError(404, "application not found")
-    _profile, _country, answers, _missing = await _application_answers(db, user, app_row)
-    out = form_check(answers, questions)
+    profile, _country, answers, _missing = await _application_answers(db, user, app_row)
+    out = form_check(answers, questions, profile.user_info.answers, await _job_company_key(db, app_row) or None)
     log.info("form_check", extra={
         "event": "form_check", "user_id": safe_log_value(user.id), "application_id": application_id,
         "questions_count": out["questions_count"], "answered": out["counts"]["answered"],

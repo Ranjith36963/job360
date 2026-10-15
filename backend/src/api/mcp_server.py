@@ -1735,8 +1735,9 @@ def build_server(version: str = "") -> MCPServer:
         = [{question, required (default true), key, field_type (text|textarea|select|radio|checkbox|number|
         file), options, limit, limit_unit (chars|words)}]: `key` is the kit key you
         will answer with (contact.email, logistics.notice_period, salary.GB ...)
-        or the saved approved_text question; leave it out and Job360 matches the
-        exact wording (case and punctuation ignored) against approved answers.
+        or a saved answer's `topic`; leave it out and Job360 matches the wording
+        (case and punctuation ignored) or an alias against approved answers
+        (this company's own first; two that disagree = `missing`, ask).
         Pass options and limit only as the live control shows them. Job360 never
         reads the form or judges a question. You get `answered` (question, key,
         value, source, matched_by; `over_limit`; confirmed false = inferred),

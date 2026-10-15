@@ -538,7 +538,8 @@ why-this-company, a referral there) gets `company`: that job's company; it is re
 `topic` = a short stable key you choose (letters digits _ . only, 60 chars max, e.g. `work_from.IN`,
 `notice_period_days`): save it with every answer; a gap's own `topic` goes in unchanged. An approved answer
 closes a gap when its topic matches, or its question equals the gap's text ignoring case and punctuation.
-The kit's `approved_text` holds the newest 25 (with `topic` when saved); more: get_profile `fields["user_info.answers"]`.
+`check_form` finds the saved answer for a form question by that topic, wording or alias (this company's answer
+before a general one; disagreeing answers = ask; `consent.`/`certify.` topics are never reused). The kit's `approved_text` holds the newest 25 (with `topic` when saved); more: get_profile `fields["user_info.answers"]`.
 `preferences.salary_by_country` = [{country (ISO2), min, max (numbers > 0, min
 not above max; equal = one figure), currency (3 letters, e.g. EUR), period:
 year | month}], ONE record per country (`min` alone = one figure; never `max`
